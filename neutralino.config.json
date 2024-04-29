@@ -1,0 +1,56 @@
+{
+  "applicationId": "jmz-data-editor",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "documentRoot": "/react-src/build/",
+  "url": "/",
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "tokenSecurity": "one-time",
+  "nativeAllowList": [
+    "filesystem.*",
+    "os.*",
+    "app.exit",
+    "window.*",
+    "computer.*"
+  ],
+  "logging": {
+    "enabled": true,
+    "writeToLogFile": true
+  },
+  "modes": {
+    "window": {
+      "title": "JMZ Data Editor",
+      "width": 1600,
+      "height": 900,
+      "minWidth": 1280,
+      "minHeight": 720,
+      "fullScreen": false,
+      "alwaysOnTop": false,
+      "icon": "/react-src/public/assets/images/vite.png",
+      "enableInspector": false,
+      "borderless": false,
+      "maximize": false,
+      "hidden": false,
+      "resizable": true,
+      "exitProcessOnClose": true,
+      "useSavedState": false,
+      "center": true
+    }
+  },
+  "cli": {
+    "binaryName": "application",
+    "resourcesPath": "/react-src/build/",
+    "extensionsPath": "/extensions/",
+    "binaryVersion": "5.1.0",
+    "clientVersion": "5.1.0",
+    "frontendLibrary": {
+      "patchFile": "/react-src/index.html",
+      "devUrl": "http://localhost:3000",
+      "projectPath": "/react-src/",
+      "initCommand": "npm install",
+      "devCommand": "npm run dev",
+      "buildCommand": "npm run build"
+    }
+  }
+}
