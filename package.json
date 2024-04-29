@@ -1,0 +1,9 @@
+{
+  "name": "jmz-data-editor",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "dev": "neu run -- --window-enable-inspector",
+    "build": "neu build"
+  }
+}
