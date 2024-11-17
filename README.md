@@ -1,37 +1,30 @@
-# Neutralinojs + React + TS + Vite template
+# JMZ Data Editor (OS-agnostic)
 
-With HMR mode and `styled-components`
+This editor contains multiple "boards" that provide a GUI for manipulating the configuration data for the various
+plugins I have developed. 
 
-**If the native API calls don't work, look at the main.tsx file and try to uncomment some lines**.
-Maybe it would be useful in your case.
+## Currently supported plugins
+Only some of the plugins I've authored are supported with this editor as this is a still fairly new project.
 
-## Instructions
+- Skill Proficiency System (complete)
+- Crafting (partial)
 
-### Install template
+## Running the app
+To run the app there are a couple steps involved.
 
-1. `git clone https://github.com/JustPilz/neu-react-ts-vite-template.git`
-2. `npm i -g @neutralinojs/neu` (skip if `neu` is already installed)
-3. `cd react-src && npm install`
-4. `cd ../ && npm run dev`
-
-### Run
-
-```
-npm run dev
+1) Install the packages:
+```bash
+cd /react-src
+npm i
 ```
 
-it's an alias to `neu run -- --window-enable-inspector`
-
-### Build
-
-```
-npm run build
+2) Navigate back to the root and run the app:
+```bash
+cd ..
+npm start
 ```
 
-it's an alias to `neu build`
+3) Set the "project path" at the `/data` directory of your project where all the configuration files are
+derived from, and that is it!
 
-### Build + zip
-
-```
-neu build --release
-```
+> Later, properly OS-agnostic publishing 
