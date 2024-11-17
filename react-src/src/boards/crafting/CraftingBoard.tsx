@@ -1,5 +1,5 @@
-import React, {ChangeEvent, useEffect, useState} from 'react';
-import {filesystem} from "@neutralinojs/lib";
+import React, { ChangeEvent, useEffect, useState } from 'react';
+import { filesystem } from "@neutralinojs/lib";
 import LoadingButton from '@mui/lab/LoadingButton';
 import {
   Checkbox,
@@ -13,17 +13,17 @@ import {
   Paper, Snackbar,
   TextField, Typography
 } from "@mui/material";
-import {Subject, ListAlt, Key, Save} from "@mui/icons-material";
+import { Subject, ListAlt, Key, Save } from "@mui/icons-material";
+import { Alert } from "@mui/lab";
 import styled from "styled-components";
-import {FixedSizeList, ListChildComponentProps} from 'react-window';
+import { FixedSizeList, ListChildComponentProps } from 'react-window';
 
 import Recipe = Crafting.Recipe;
 import Category = Crafting.Category;
 import CraftingConfiguration = Crafting.Configuration;
-import {Alert} from "@mui/lab";
+import { executeSave } from "../../services/DataService.ts";
 
 // ================================================================================================
-
 const EntryText = styled(ListItemText)`
     font-family: monospace;
 `;
@@ -45,26 +45,26 @@ type CraftingBoardProps = {
  */
 export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
 {
-  const [saveSnackOpen, setSaveSnackOpen] = useState<boolean>(false);
+  const [ saveSnackOpen, setSaveSnackOpen ] = useState<boolean>(false);
 
   /**
    * The primary data list for the board.
    */
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [ recipes, setRecipes ] = useState<Recipe[]>([]);
 
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [ categories, setCategories ] = useState<Category[]>([]);
 
   /**
    * The currently selected entry for the board.
    */
-  const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const [ selectedRecipe, setSelectedRecipe ] = useState<Recipe | null>(null);
 
   /**
    * The index of the currently selected entry in the data list.
    */
-  const [selectedRecipeIndex, setSelectedRecipeIndex] = useState<number>(0);
+  const [ selectedRecipeIndex, setSelectedRecipeIndex ] = useState<number>(0);
 
-  const [canSave, setCanSave] = useState<boolean>(false);
+  const [ canSave, setCanSave ] = useState<boolean>(false);
 
   /**
    * Initializes the board with the data from the configuration.
@@ -72,7 +72,7 @@ export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
   useEffect(() =>
   {
     let ignore = false;
-    const {projectPath} = craftingBoardProps;
+    const { projectPath } = craftingBoardProps;
     if (projectPath === null || projectPath === '' || !projectPath.endsWith("/data"))
     {
       console.error(`invalid path provided: ${projectPath}`);
@@ -105,7 +105,7 @@ export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
     {
       ignore = true;
     }
-  }, [craftingBoardProps.projectPath]);
+  }, [ craftingBoardProps.projectPath ]);
 
   /**
    * The handling logic for clicking the entry in the data list.
@@ -157,6 +157,11 @@ export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
     // consider extracting recipe view to single component, and only update whole list when entries change.
   };
 
+  const updateSelectedEntryCheckbox = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+
+  };
+
   /**
    * A mapping function for creating a data list entry in the list.
    */
@@ -196,27 +201,29 @@ export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
 
   const handleSaveData = async () =>
   {
-    console.log('saving...');
-
-    const {projectPath} = craftingBoardProps;
-
+    // reconstruct the data shape to be saved.
     const updatedConfiguration = {
       recipes: recipes,
       categories: categories
     } as CraftingConfiguration;
 
-    await filesystem.writeFile(
-      `${projectPath}/config.crafting.json`,
-      JSON.stringify(updatedConfiguration, null, 2));
+    // prepare the data for writing to disk- indented!
+    const data = JSON.stringify(updatedConfiguration, null, 2);
 
-    console.log('saved!');
+    // execute the save
+    await executeSave(
+      craftingBoardProps.projectPath,
+      "config.crafting.json",
+      data);
+
     setCanSave(true);
     setSaveSnackOpen(true);
   };
 
   const handleCloseSnack = (_: any, reason?: string) =>
   {
-    if (reason === 'clickaway') {
+    if (reason === 'clickaway')
+    {
       return;
     }
 
@@ -246,90 +253,92 @@ export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
           padding: 2
         }} elevation={10}>
           {
-            (  selectedRecipe === null)
+            (selectedRecipe === null)
               ? <>
-          <Typography>
-            Please select a recipe on the left.<br/>
-            If there are no recipes, then consider making one.
-          </Typography>
+                <Typography>
+                  Please select a recipe on the left.<br/>
+                  If there are no recipes, then consider making one.
+                </Typography>
               </>
               : <>
-          <TextField
-            required
-            variant={"outlined"}
-            label={"Key"}
-            value={selectedRecipe.key}
-            onChange={updateSelectedEntryKey}
-            size={"small"}
-            InputProps={{ startAdornment:
-              <InputAdornment position={"start"}>
-                <Key/>
-              </InputAdornment>
-            }}
-          /><br/>
+                <TextField
+                  required
+                  variant={"outlined"}
+                  label={"Key"}
+                  value={selectedRecipe.key}
+                  onChange={updateSelectedEntryKey}
+                  size={"small"}
+                  InputProps={{
+                    startAdornment:
+                      <InputAdornment position={"start"}>
+                        <Key/>
+                      </InputAdornment>
+                  }}
+                /><br/>
 
-          <TextField
-            variant={"outlined"}
-            label={"Name"}
-            value={selectedRecipe.name}
-            onChange={updateSelectedEntryKey}
-            size={"small"}
-          /><br/>
+                <TextField
+                  variant={"outlined"}
+                  label={"Name"}
+                  value={selectedRecipe.name}
+                  onChange={updateSelectedEntryKey}
+                  size={"small"}
+                /><br/>
 
-          <TextField
-            variant={"outlined"}
-            label={"Description"}
-            value={selectedRecipe.description}
-            onChange={updateSelectedEntryKey}
-            size={"small"}
-            multiline
-            rows={4}
-            sx={{
-              width: 600,
-            }}
-          /><br/>
+                <TextField
+                  variant={"outlined"}
+                  label={"Description"}
+                  value={selectedRecipe.description}
+                  onChange={updateSelectedEntryKey}
+                  size={"small"}
+                  multiline
+                  rows={4}
+                  sx={{
+                    width: 600,
+                  }}
+                /><br/>
 
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={selectedRecipe.unlockedByDefault}
-                onChange={updateSelectedEntryKey}
-              />
-            }
-            label="Unlocked By Default"
-            labelPlacement={"end"}
-          /><br/>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={selectedRecipe.unlockedByDefault}
+                      onChange={updateSelectedEntryCheckbox}
+                    />
+                  }
+                  label="Unlocked By Default"
+                  labelPlacement={"end"}
+                /><br/>
 
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={selectedRecipe.maskedUntilCrafted}
-                onChange={updateSelectedEntryKey}
-              />
-            }
-            label="Masked Until Crafted"
-            labelPlacement={"end"}
-          /><br/>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={selectedRecipe.maskedUntilCrafted}
+                      onChange={updateSelectedEntryCheckbox}
+                    />
+                  }
+                  label="Masked Until Crafted"
+                  labelPlacement={"end"}
+                /><br/>
 
-          {/* This is over-arching save button- it will save all recipes to disk. */}
-          <LoadingButton
-            size={"small"}
-            color={"secondary"}
-            onClick={async () => {
-              // set the save flag to false to prevent further clicking.
-              setCanSave(false);
-              await handleSaveData();
-            }}
-            loading={!canSave}
-            loadingPosition={"start"}
-            startIcon={<Save/>}
-            variant="outlined"
-            sx={SaveStyles}
-          >
-            <span>Save</span>
-          </LoadingButton>
-        </>
-        }
+                {/* This is over-arching save button- it will save all recipes to disk. */}
+                <LoadingButton
+                  size={"small"}
+                  color={"secondary"}
+                  onClick={async () =>
+                  {
+                    // set the save flag to false to prevent further clicking.
+                    setCanSave(false);
+                    await handleSaveData();
+                  }}
+                  loading={!canSave}
+                  loadingPosition={"start"}
+                  startIcon={<Save/>}
+                  variant="outlined"
+                  sx={SaveStyles}
+                >
+                  <span>Save</span>
+                </LoadingButton>
+              </>
+          }
 
         </Paper>
       </Grid>

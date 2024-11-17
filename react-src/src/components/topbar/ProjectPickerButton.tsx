@@ -11,7 +11,7 @@ export default function ProjectPickerButton(projectPathSetter: ProjectPickerButt
   {
     const path = await os.showFolderDialog(
       'Choose project data directory',
-      { defaultPath: '/media/exdrive/dev/gaming/ca/chef-adventure' }
+      { defaultPath: '/media/exdrive/dev/gaming/ca/chef-adventure/data' }
     );
 
     if (!!path)

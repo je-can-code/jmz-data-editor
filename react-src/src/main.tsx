@@ -4,15 +4,20 @@ import { app, events, init, window as neuWindow } from '@neutralinojs/lib';
 
 import App from './App';
 
-if (import.meta.env.DEV) {
-  try {
+if (import.meta.env.DEV)
+{
+  try
+  {
     // method 1
     const storedToken = sessionStorage.getItem('NL_TOKEN');
     if (storedToken) window.NL_TOKEN = storedToken;
 
     // method 2
     const authInfo = require('../../.tmp/auth_info.json');
-    const { accessToken, port } = authInfo;
+    const {
+            accessToken,
+            port
+          } = authInfo;
     window.NL_PORT = port;
     window.NL_TOKEN = accessToken;
     window.NL_ARGS = [
@@ -25,7 +30,9 @@ if (import.meta.env.DEV) {
       '--neu-dev-auto-reload',
       '--window-enable-inspector',
     ];
-  } catch {
+  }
+  catch
+  {
     console.error(
       'Auth file not found, native API calls will not work.'
     );
@@ -38,14 +45,15 @@ init();
 createRoot(document.getElementById('root')!)
   .render(
     <React.StrictMode>
-      <App />
+      <App/>
     </React.StrictMode>
   );
 
-async function onWindowClose() {
-  await app.exit();
+function onWindowClose()
+{
+  app.exit().then(r => null);
 }
 
-await events.on('windowClose', onWindowClose);
+events.on('windowClose', onWindowClose).then(r => null);
 
-await neuWindow.focus();
+neuWindow.focus().then(r => null);
