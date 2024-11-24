@@ -31,8 +31,8 @@ declare namespace Crafting
 
   interface Category
   {
-    name: string;
     key: string;
+    name: string;
     iconIndex: number;
     description: string;
     unlockedByDefault: boolean;

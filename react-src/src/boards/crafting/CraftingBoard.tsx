@@ -1,4 +1,4 @@
-import React, { ChangeEvent, useEffect, useState } from 'react';
+import React, { ChangeEvent, MouseEvent, useEffect, useState } from 'react';
 import LoadingButton from '@mui/lab/LoadingButton';
 import {
   Alert,
@@ -6,6 +6,10 @@ import {
   Button,
   Checkbox,
   Chip,
+  Dialog, DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
   FormControlLabel,
   Grid2,
   IconButton,
@@ -16,7 +20,10 @@ import {
   ListItemIcon,
   ListItemText,
   ListSubheader,
+  Menu,
+  MenuItem,
   Paper,
+  Select,
   Snackbar,
   Stack,
   TextField,
@@ -27,13 +34,17 @@ import {
 import {
   Add,
   BusinessCenter,
+  Check,
   Clear,
+  ContentCopy, DonutLarge,
+  DonutSmall,
   Key,
   ListAlt,
   LocalDining,
   Lock,
   LockOpen,
   QuestionMark,
+  Remove,
   Save,
   Shield,
   Subject,
@@ -54,6 +65,8 @@ import { Crafting } from "../../../types/custom/Crafting";
 import CraftingComponentType from "../../../types/custom/CraftingComponentType.ts";
 import { brown, } from "@mui/material/colors";
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../../types/external/MuiSnackbar.ts";
+import CraftingComponentList from "./CraftingComponentList.tsx";
+import CraftingListType from "../../../types/custom/CraftingListType.ts";
 import RPG_Item = Rmmz.Implementations.RPG_Item;
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
 import RPG_Armor = Rmmz.Implementations.RPG_Armor;
@@ -81,39 +94,35 @@ const SaveStyles = {
  */
 export default function CraftingBoard(craftingBoardProps: BoardProps)
 {
+  //region state
   const [ recipes, setRecipes ] = useState<Recipe[]>([]);
   const [ selectedRecipe, setSelectedRecipe ] = useState<Recipe | null>(null);
   const [ selectedRecipeIndex, setSelectedRecipeIndex ] = useState<number>(0);
 
+  const [ applicableCategories, setApplicableCategories ] = useState<string[]>([]);
   const [ currentIngredients, setCurrentIngredients ] = useState<CraftingComponent[]>([]);
-  const [ selectedIngredient, setSelectedIngredient ] = useState<CraftingComponent | null>(null);
-  const [ selectedIngredientType, setSelectedIngredientType ] = useState<CraftingComponentType | null>(null);
-  const [ selectedIngredientIndex, setSelectedIngredientIndex ] = useState<number>(0);
-  const [ pendingIngredient, setPendingIngredient ] = useState<CraftingComponent | null>(null);
-
   const [ currentTools, setCurrentTools ] = useState<CraftingComponent[]>([]);
-  const [ selectedTool, setSelectedTool ] = useState<CraftingComponent | null>(null);
-  const [ selectedToolType, setSelectedToolType ] = useState<CraftingComponentType | null>(null);
-  const [ selectedToolIndex, setSelectedToolIndex ] = useState<number>(0);
-  const [ pendingTool, setPendingTool ] = useState<CraftingComponent | null>(null);
-
   const [ currentOutputs, setCurrentOutputs ] = useState<CraftingComponent[]>([]);
-  const [ selectedOutput, setSelectedOutput ] = useState<CraftingComponent | null>(null);
-  const [ selectedOutputType, setSelectedOutputType ] = useState<CraftingComponentType | null>(null);
-  const [ selectedOutputIndex, setSelectedOutputIndex ] = useState<number>(0);
-  const [ pendingOutput, setPendingOutput ] = useState<CraftingComponent | null>(null);
 
   const [ categories, setCategories ] = useState<Category[]>([]);
-
-  const [ items, setItems ] = useState<RPG_Item[]>([]);
-  const [ weapons, setWeapons ] = useState<RPG_Weapon[]>([]);
-  const [ armors, setArmors ] = useState<RPG_Armor[]>([]);
+  const [ selectedCategory, setSelectedCategory ] = useState<Category | null>(null);
+  const [ selectedCategoryIndex, setSelectedCategoryIndex ] = useState<number>(0);
 
   const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
   const [ snackMessage, setSnackMessage ] = useState<string>("");
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
+
+  const [ recipeListContextMenu, setRecipeListContextMenu ] = useState<{
+    mouseX: number; mouseY: number;
+  } | null>(null);
+  const [ categoryListContextMenu, setCategoryListContextMenu ] = useState<{
+    mouseX: number; mouseY: number;
+  } | null>(null);
+
+  const [ categoryDialogOpen, setCategoryDialogOpen ] = useState<boolean>(false);
+  //endregion state
 
   /**
    * Initializes the board with the data from the configuration.
@@ -141,24 +150,6 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
 
         // update the other data.
         setCategories(craftingData.categories);
-      }
-
-      const itemData = await loadItems(projectPath);
-      if (!ignore && itemData)
-      {
-        setItems(itemData);
-      }
-
-      const weaponData = await loadWeapons(projectPath);
-      if (!ignore && weaponData)
-      {
-        setWeapons(weaponData);
-      }
-
-      const armorData = await loadArmors(projectPath);
-      if (!ignore && armorData)
-      {
-        setArmors(armorData);
       }
 
       // enable saving.
@@ -208,7 +199,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
     setSnackOpen(false);
   };
 
-  const handleRecipeListItemOnClickEvent = (_: any, index: number,) =>
+  const handleRecipeListItemOnClickEvent = (index: number,) =>
   {
     setSelectedRecipeIndex(index);
 
@@ -216,74 +207,61 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
     {
       const recipe = recipes.at(index) as Recipe;
       setSelectedRecipe(recipe);
+      setApplicableCategories(recipe.categoryKeys);
       setCurrentIngredients(recipe.ingredients);
       setCurrentTools(recipe.tools);
       setCurrentOutputs(recipe.outputs);
-
-      // TODO: setup tools and output.
-
-      setSelectedIngredient(null);
-      setSelectedIngredientType(null);
-      setSelectedIngredientIndex(0);
-      setPendingIngredient(null);
-
-      setSelectedTool(null);
-      setSelectedToolType(null);
-      setSelectedToolIndex(0);
-      setPendingTool(null);
-
-      setSelectedOutput(null);
-      setSelectedOutputType(null);
-      setSelectedOutputIndex(0);
-      setPendingOutput(null);
     }
   };
 
-  const handleRecipeIngredientListItemOnClickEvent = (_: any, index: number) =>
+  const handlRecipeListContextMenu = (event: MouseEvent) =>
   {
-    setSelectedIngredientIndex(index);
-    setSelectedIngredient(null);
-    setPendingIngredient(null);
+    event.preventDefault();
 
-    if (currentIngredients?.length > 0)
+    const newContextMenuState = recipeListContextMenu === null
+      ? {
+        mouseX: event.clientX + 2,
+        mouseY: event.clientY - 6,
+      }
+      : null;
+
+    setRecipeListContextMenu(newContextMenuState);
+  };
+
+  const handleRecipeListContextMenuOnCloseEvent = () =>
+  {
+    setRecipeListContextMenu(null);
+  };
+
+  const handleCategoryListItemOnClickEven = (index: number) =>
+  {
+    setSelectedCategoryIndex(index);
+
+    if (categories.length > 0)
     {
-      const thisIngredient = currentIngredients[index];
-      setSelectedIngredient(thisIngredient);
-      setSelectedIngredientType(thisIngredient.type);
-      setPendingIngredient(thisIngredient);
+      const category = categories[index];
+      setSelectedCategory(category);
+      // TODO: update the inputs.
     }
   };
 
-  const handleRecipeToolListItemOnClickEvent = (_: any, index: number) =>
+  const handleCategoryListContextMenu = (event: MouseEvent) =>
   {
-    setSelectedToolIndex(0);
-    setSelectedTool(null);
-    setPendingTool(null);
+    event.preventDefault();
 
-    if (currentTools?.length > 0)
-    {
-      const thisTool = currentTools[index];
-      setSelectedTool(thisTool);
-      setSelectedToolType(thisTool.type);
-      setSelectedToolIndex(index);
-      setPendingTool(thisTool);
-    }
+    const newContextMenuState = categoryListContextMenu === null
+      ? {
+        mouseX: event.clientX + 2,
+        mouseY: event.clientY - 6,
+      }
+      : null;
+
+    setCategoryListContextMenu(newContextMenuState);
   };
 
-  const handleRecipeOutputListItemOnClickEvent = (_: any, index: number) =>
+  const handleCategoryListContextMenuOnCloseEvent = () =>
   {
-    setSelectedOutputIndex(0);
-    setSelectedOutput(null);
-    setPendingOutput(null);
-
-    if (currentOutputs?.length > 0)
-    {
-      const thisComponent = currentOutputs[index];
-      setSelectedOutput(thisComponent);
-      setSelectedOutputType(thisComponent.type);
-      setSelectedOutputIndex(index);
-      setPendingOutput(thisComponent);
-    }
+    setCategoryListContextMenu(null);
   };
   //endregion actions
 
@@ -409,279 +387,251 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
     setRecipes(updatedRecipes);
   };
 
-  //region ingredients
-  const handlePendingIngredientCountOnChangeEvent = (value: number) =>
+  const handleRecipeCategoryKeyToggle = (value: string) =>
+  {
+    const currentIndex = applicableCategories.indexOf(value);
+    const newChecked = [ ...applicableCategories ];
+
+    if (currentIndex === -1)
+    {
+      newChecked.push(value);
+    }
+    else
+    {
+      newChecked.splice(currentIndex, 1);
+    }
+
+    setApplicableCategories(newChecked.sort());
+
+    const updatedRecipe = {
+      ...selectedRecipe,
+      categoryKeys: newChecked
+    } as Recipe;
+    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
+    setRecipes(updatedRecipes);
+  };
+
+  const handleCategoryKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!pendingIngredient) return;
+    if (!selectedCategory) return;
 
-    const updatedValue = value < 1
-      ? 1
-      : value;
+    // grab the updated value from the input.
+    const updatedValue = event.target.value;
 
-    const updatedPendingIngredient = {
-      ...pendingIngredient,
-      count: updatedValue
-    } as CraftingComponent;
-    setPendingIngredient(updatedPendingIngredient);
+    // update the entry.
+    const updatedCategory = {
+      ...selectedCategory,
+      key: updatedValue
+    } as Category;
+    setSelectedCategory(updatedCategory);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
+    setCategories(updatedCategories);
   };
 
-  const handleRelevantIngredientDropdownOnClickEvent = (newComponent: RPG_Item | RPG_Weapon | RPG_Armor) =>
-  {
-    let ingredientType = CraftingComponentType.Item;
-    switch (newComponent.kind)
-    {
-      case 1:
-        ingredientType = CraftingComponentType.Item;
-        break;
-      case 2:
-        ingredientType = CraftingComponentType.Weapon;
-        break;
-      case 3:
-        ingredientType = CraftingComponentType.Armor;
-        break;
-    }
-    const updatedSelectedIngredient = {
-      ...pendingIngredient,
-      id: newComponent.id,
-      type: ingredientType
-    } as CraftingComponent;
-
-    setPendingTool(updatedSelectedIngredient);
-  };
-
-  const handleRecipeIngredientTypeOnChangeEvent = (_: any, newValue: CraftingComponentType) =>
-  {
-    setSelectedIngredientType(newValue);
-  };
-
-  const handleOverrideSelectedWithPendingIngredientOnClickEvent = () =>
-  {
-    if (!pendingIngredient || !selectedIngredient) return;
-
-    const updatedSelectedIngredient = {
-      type: pendingIngredient.type,
-      id: pendingIngredient.id,
-      count: pendingIngredient.count
-    } as CraftingComponent;
-
-    setSelectedIngredient(updatedSelectedIngredient);
-
-    const updatedCurrentIngredients = currentIngredients.with(selectedIngredientIndex, updatedSelectedIngredient);
-    setCurrentIngredients(updatedCurrentIngredients);
-
-    const updatedRecipe = {
-      ...selectedRecipe,
-      ingredients: updatedCurrentIngredients
-    } as Recipe;
-    setSelectedRecipe(updatedRecipe);
-
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
-  };
-
-  const handleDeleteTargetIngredient = (targetIndex: number) =>
-  {
-    if (currentIngredients.length === 1)
-    {
-      handleSnack("Final ingredient cannot be removed. Consider updating it instead.", MuiSnackbarSeverity.Warning);
-      return;
-    }
-
-    const updatedCurrentIngredients = currentIngredients.toSpliced(targetIndex, 1);
-    setCurrentIngredients(updatedCurrentIngredients);
-
-    const updatedRecipe = {
-      ...selectedRecipe,
-      ingredients: updatedCurrentIngredients
-    } as Recipe;
-    setSelectedRecipe(updatedRecipe);
-
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
-
-    handleSnack("Ingredient has been removed.", MuiSnackbarSeverity.Success);
-  };
-  //endregion ingredients
-
-  //region tools
-  const handlePendingToolCountOnChangeEvent = (value: number) =>
+  const handleCategoryNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!pendingTool) return;
+    if (!selectedCategory) return;
 
-    const updatedValue = value < 1
-      ? 1
-      : value;
+    // grab the updated value from the input.
+    const updatedValue = event.target.value;
 
-    const updatedPendingTool = {
-      ...pendingTool,
-      count: updatedValue
-    } as CraftingComponent;
-    setPendingTool(updatedPendingTool);
+    // update the entry.
+    const updatedCategory = {
+      ...selectedCategory,
+      name: updatedValue
+    } as Category;
+    setSelectedCategory(updatedCategory);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
+    setCategories(updatedCategories);
   };
 
-  const handleOverrideSelectedWithPendingToolOnClickEvent = () =>
-  {
-    if (!pendingTool || !selectedTool) return;
-
-    const updatedSelectedTool = {
-      type: pendingTool.type,
-      id: pendingTool.id,
-      count: pendingTool.count
-    } as CraftingComponent;
-
-    setSelectedTool(updatedSelectedTool);
-
-    const updatedCurrentTools = currentTools.with(selectedToolIndex, updatedSelectedTool);
-    setCurrentTools(updatedCurrentTools);
-
-    const updatedRecipe = {
-      ...selectedRecipe,
-      tools: updatedCurrentTools
-    } as Recipe;
-    setSelectedRecipe(updatedRecipe);
-
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
-  };
-
-  const handleRelevantToolDropdownOnClickEvent = (newComponent: RPG_Item | RPG_Weapon | RPG_Armor) =>
-  {
-    let toolType = CraftingComponentType.Item;
-    switch (newComponent.kind)
-    {
-      case 1:
-        toolType = CraftingComponentType.Item;
-        break;
-      case 2:
-        toolType = CraftingComponentType.Weapon;
-        break;
-      case 3:
-        toolType = CraftingComponentType.Armor;
-        break;
-    }
-    const updatedSelectedTool = {
-      ...pendingTool,
-      id: newComponent.id,
-      type: toolType
-    } as CraftingComponent;
-
-    setPendingTool(updatedSelectedTool);
-  };
-
-  const handleRecipeToolTypeOnChangeEvent = (_: any, newValue: CraftingComponentType) =>
-  {
-    setSelectedToolType(newValue);
-  };
-
-  const handleDeleteTargetTool = (targetIndex: number) =>
-  {
-    const updatedCurrentTools = currentTools.toSpliced(targetIndex, 1);
-    setCurrentTools(updatedCurrentTools);
-
-    const updatedRecipe = {
-      ...selectedRecipe,
-      tools: updatedCurrentTools
-    } as Recipe;
-    setSelectedRecipe(updatedRecipe);
-
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
-
-    handleSnack("Tool has been removed.", MuiSnackbarSeverity.Success);
-  };
-  //endregion tools
-
-  //region outputs
-  const handlePendingOutputCountOnChangeEvent = (value: number) =>
+  const handleCategoryIconIndexOnChangeEvent = (value: number) =>
   {
     // if there is no entry, stop processing.
-    if (!pendingOutput) return;
+    if (!selectedCategory) return;
 
-    const updatedValue = value < 1
-      ? 1
+    const updatedValue = value < -1
+      ? -1
       : value;
 
-    const updatedComponent = {
-      ...pendingOutput,
-      count: updatedValue
-    } as CraftingComponent;
-    setPendingOutput(updatedComponent);
+    // update the entry.
+    const updatedCategory = {
+      ...selectedCategory,
+      iconIndex: updatedValue
+    } as Category;
+    setSelectedCategory(updatedCategory);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
+    setCategories(updatedCategories);
   };
 
-  const handleRelevantOutputDropdownOnClickEvent = (newComponent: RPG_Item | RPG_Weapon | RPG_Armor) =>
+  const handleCategoryUnlockedByDefaultOnCheckEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    let componentType = CraftingComponentType.Item;
-    switch (newComponent.kind)
+    // if there is no entry, stop processing.
+    if (!selectedCategory) return;
+
+    // grab the updated value from the input.
+    const updatedValue = event.target.checked;
+
+    // update the entry.
+    const updatedCategory = {
+      ...selectedCategory,
+      unlockedByDefault: updatedValue
+    } as Category;
+    setSelectedCategory(updatedCategory);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
+    setCategories(updatedCategories);
+  };
+
+  const handleCategoryDescriptionOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    // if there is no entry, stop processing.
+    if (!selectedCategory) return;
+
+    // grab the updated value from the input.
+    const updatedValue = event.target.value;
+
+    // update the entry.
+    const updatedCategory = {
+      ...selectedCategory,
+      description: updatedValue
+    } as Category;
+    setSelectedCategory(updatedCategory);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
+    setCategories(updatedCategories);
+  };
+
+  const updateCraftingComponentList = (craftingComponents: CraftingComponent[], craftingListType: CraftingListType) =>
+  {
+    const updatedRecipe = {
+      ...selectedRecipe,
+    } as Recipe;
+
+    switch (craftingListType)
     {
-      case 1:
-        componentType = CraftingComponentType.Item;
+      case CraftingListType.Ingredients:
+        updatedRecipe.ingredients = craftingComponents;
+        setCurrentIngredients(craftingComponents);
         break;
-      case 2:
-        componentType = CraftingComponentType.Weapon;
+      case CraftingListType.Tools:
+        updatedRecipe.tools = craftingComponents;
+        setCurrentTools(craftingComponents);
         break;
-      case 3:
-        componentType = CraftingComponentType.Armor;
+      case CraftingListType.Outputs:
+        updatedRecipe.outputs = craftingComponents;
+        setCurrentOutputs(craftingComponents);
         break;
     }
-    const updatedComponent = {
-      ...pendingTool,
-      id: newComponent.id,
-      type: componentType
-    } as CraftingComponent;
-
-    setPendingOutput(updatedComponent);
-  };
-
-  const handleOverrideSelectedWithPendingOutputOnClickEvent = () =>
-  {
-    if (!pendingOutput || !selectedOutput) return;
-
-    const updatedSelectedComponent = {
-      type: pendingOutput.type,
-      id: pendingOutput.id,
-      count: pendingOutput.count
-    } as CraftingComponent;
-
-    setSelectedOutput(updatedSelectedComponent);
-
-    const updatedCurrentComponents = currentOutputs.with(selectedOutputIndex, updatedSelectedComponent);
-    setCurrentOutputs(updatedCurrentComponents);
-
-    const updatedRecipe = {
-      ...selectedRecipe,
-      outputs: updatedCurrentComponents
-    } as Recipe;
-    setSelectedRecipe(updatedRecipe);
-
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
-  };
-
-  const handleRecipeOutputTypeOnChangeEvent = (_: any, newValue: CraftingComponentType) =>
-  {
-    setSelectedOutputType(newValue);
-  };
-
-  const handleDeleteTargetOutput = (targetIndex: number) =>
-  {
-    const updatedCurrentComponents = currentOutputs.toSpliced(targetIndex, 1);
-    setCurrentOutputs(updatedCurrentComponents);
-
-    const updatedRecipe = {
-      ...selectedRecipe,
-      outputs: updatedCurrentComponents
-    } as Recipe;
-    setSelectedRecipe(updatedRecipe);
 
     const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
     setRecipes(updatedRecipes);
 
-    handleSnack("Output has been removed.", MuiSnackbarSeverity.Success);
+    handleSnack(`${craftingListType} list has been updated.`, MuiSnackbarSeverity.Success);
   };
-  //endregion outputs
 
+  const handleAddNewRecipe = (index: number) =>
+  {
+    const newRecipe = {
+      key: "NEW-RECIPE",
+      name: "",
+      description: "",
+      iconIndex: -1,
+      maskedUntilCrafted: true,
+      unlockedByDefault: false,
+      categoryKeys: [],
+      ingredients: [],
+      tools: [],
+      outputs: []
+    } as Recipe;
+
+    const updatedRecipes = recipes.toSpliced(index, 0, newRecipe);
+    setRecipes(updatedRecipes);
+  };
+
+  const handleCloneRecipe = (index: number) =>
+  {
+    if (selectedRecipe === null) return;
+
+    const clonedKeys = selectedRecipe.categoryKeys.toSpliced(0, 0);
+    const clonedIngredients = selectedRecipe.ingredients.toSpliced(0, 0);
+    const clonedTools = selectedRecipe.tools.toSpliced(0, 0);
+    const clonedOutputs = selectedRecipe.outputs.toSpliced(0, 0);
+
+    const clonedRecipe = {
+      key: `${selectedRecipe.key}-COPY`,
+      name: selectedRecipe.name,
+      description: selectedRecipe.description,
+      iconIndex: selectedRecipe.iconIndex,
+      maskedUntilCrafted: selectedRecipe.maskedUntilCrafted,
+      unlockedByDefault: selectedRecipe.unlockedByDefault,
+      categoryKeys: clonedKeys,
+      ingredients: clonedIngredients,
+      tools: clonedTools,
+      outputs: clonedOutputs
+    } as Recipe;
+
+    const updatedRecipes = recipes.toSpliced(index, 0, clonedRecipe);
+    setRecipes(updatedRecipes);
+  };
+
+  const handleDeleteRecipe = (index: number) =>
+  {
+    if (selectedRecipe === null) return;
+
+    const updatedRecipes = recipes.toSpliced(index, 1);
+    setRecipes(updatedRecipes);
+
+    handleSnack("Recipe has been deleted successfully.", MuiSnackbarSeverity.Success);
+  };
+
+  const handleAddCategory = (index: number) =>
+  {
+    const newCategory = {
+      key: "NEW-CATEGORY",
+      name: "best category",
+      description: "fill in with some description about the category.",
+      iconIndex: -1,
+      unlockedByDefault: false,
+    } as Category;
+
+    const updatedCategories = categories.toSpliced(index, 0, newCategory);
+    setCategories(updatedCategories);
+  };
+
+  const handleCloneCategory = (index: number) =>
+  {
+    if (selectedCategory === null) return;
+
+    const clonedCategory = {
+      key: `${selectedCategory.key}-COPY`,
+      name: selectedCategory.name,
+      description: selectedCategory.description,
+      iconIndex: selectedCategory.iconIndex,
+      unlockedByDefault: selectedCategory.unlockedByDefault,
+    } as Category;
+
+    const updatedCategories = categories.toSpliced(index, 0, clonedCategory);
+    setCategories(updatedCategories);
+  };
+
+  const handleDeleteCategory = (index: number) =>
+  {
+    if (selectedCategory === null) return;
+
+    const updatedCategories = categories.toSpliced(index, 1);
+    setCategories(updatedCategories);
+  };
   //endregion updates
 
   //region render
@@ -701,7 +651,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
         <ListItemButton
           focusRipple={false}
           selected={selectedRecipeIndex === index}
-          onClick={event => handleRecipeListItemOnClickEvent(event, index)}
+          onClick={() => handleRecipeListItemOnClickEvent(index)}
         >
           <ListItemIcon>
             {(selectedRecipeIndex === index)
@@ -719,803 +669,29 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
     </>;
   };
 
-  const renderRecipeIngredient = (craftingComponent: CraftingComponent, index: number) =>
+  const renderCategoryListItem = (category: Category, index: number) =>
   {
-    if (!craftingComponent) return <></>;
-
-    const ingredient = currentIngredients.at(index);
-    if (!ingredient) return <></>;
-
-    let ingredientData = null;
-    let icon = <QuestionMark/>;
-    switch (ingredient.type)
-    {
-      case CraftingComponentType.Item:
-        ingredientData = items.at(ingredient.id);
-        icon = <BusinessCenter color={"success"}/>
-        break;
-      case CraftingComponentType.Weapon:
-        ingredientData = weapons.at(ingredient.id);
-        icon = <LocalDining color={"error"}/>
-        break;
-      case CraftingComponentType.Armor:
-        ingredientData = armors.at(ingredient.id);
-        icon = <Shield color={"info"}/>
-        break;
-      // TODO: implement gold cost as ingredient.
-      default:
-        throw new Error(`unknown ingredient type detected: ${ingredient.type}`)
-    }
-
     return <>
       <ListItem
-        key={`${index}-${ingredient.type}-${ingredient.id}`}
+        key={index}
+        dense
         disableGutters
-        secondaryAction={<>
-          <IconButton
-            edge="end"
-            onClick={() => handleDeleteTargetIngredient(index)}>
-            <Clear/>
-          </IconButton>
-        </>}
       >
         <ListItemButton
-          selected={selectedIngredientIndex === index}
-          onClick={event => handleRecipeIngredientListItemOnClickEvent(event, index)}
+          onClick={() => handleCategoryListItemOnClickEven(index)}
+          selected={selectedCategoryIndex === index}
         >
-          <ListItemIcon sx={{ minWidth: '30px' }}>
-            {icon}
+          <ListItemIcon>
+            {(selectedCategoryIndex === index)
+              ? <DonutSmall color={"secondary"} />
+              : <DonutLarge color={"info"}/>}
           </ListItemIcon>
           <EntryText
-            primary={`${ingredient.id}: ${ingredientData?.name} (${ingredient.count})`}
-            disableTypography
-            sx={{ width: '100%' }}
-          />
+            primary={`${category.key}: ${category.name}`}
+            disableTypography/>
+
         </ListItemButton>
       </ListItem>
-    </>
-  };
-
-  const renderRelevantRecipeIngredientDropdown = () =>
-  {
-    switch (selectedIngredientType)
-    {
-      case CraftingComponentType.Item:
-        return <>
-          <Autocomplete
-            size={"small"}
-            options={[ ...items ].sort((a, b) =>
-            {
-              if (a === null || b === null) return (a as any) - (b as any);
-              return a.id - b.id;
-            })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            isOptionEqualToValue={(option, otherOption) => option.id === otherOption.id}
-            renderOption={(props, option, { index }) =>
-            {
-              if (option === null || option.name === "" || option.name.startsWith("=="))
-              {
-                return <React.Fragment
-                  key={props.key}></React.Fragment>;
-              }
-
-              return (<ListItem
-                key={props.key}
-                sx={{ height: 32 }}
-              >
-                <ListItemButton
-                  sx={{ height: 32 }}
-                  onClick={() => handleRelevantIngredientDropdownOnClickEvent(option)}
-                >
-                  <EntryText
-                    primary={`${option.id}: ${option.name}`}
-                    disableTypography={true}
-                  />
-                </ListItemButton>
-              </ListItem>);
-            }}
-            renderInput={(params) =>
-            {
-              return <TextField
-                {...params}
-                size={"small"}
-                label={"Items"}
-                placeholder="Item name..."
-              />
-            }}
-          />
-        </>;
-      case CraftingComponentType.Weapon:
-        return <>
-          <Autocomplete
-            size={"small"}
-            options={[ ...weapons ].sort((a, b) =>
-            {
-              if (a === null || b === null) return (a as any) - (b as any);
-              return a.id - b.id;
-            })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            renderOption={(props, option, { index }) =>
-            {
-              if (option === null || option.name === "" || option.name.startsWith("=="))
-              {
-                return <React.Fragment
-                  key={index}></React.Fragment>;
-              }
-
-              return (<ListItem
-                key={`${option.id}-${option.name}`}
-                sx={{ height: 32 }}
-              >
-                <ListItemButton
-                  sx={{ height: 32 }}
-                  onClick={() => handleRelevantIngredientDropdownOnClickEvent(option)}
-                >
-                  <EntryText
-                    primary={`${option.id}: ${option.name}`}
-                    disableTypography={true}
-                  />
-                </ListItemButton>
-              </ListItem>);
-            }}
-            renderInput={(params) =>
-            {
-              return (<TextField
-                {...params}
-                size={"small"}
-                label={"Weapons"}
-                placeholder="Weapon name..."/>)
-            }}
-          />
-        </>;
-      case CraftingComponentType.Armor:
-        return <>
-          <Autocomplete
-            size={"small"}
-            options={[ ...armors ].sort((a, b) =>
-            {
-              if (a === null || b === null) return (a as any) - (b as any);
-              return a.id - b.id;
-            })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            renderOption={(props, option, { index }) =>
-            {
-              if (option === null || option.name === "" || option.name.startsWith("=="))
-              {
-                return <React.Fragment
-                  key={index}></React.Fragment>;
-              }
-
-              return (<ListItem
-                key={`${option.id}-${option.name}`}
-                sx={{ height: 32 }}
-              >
-                <ListItemButton
-                  sx={{ height: 32 }}
-                  onClick={() => handleRelevantIngredientDropdownOnClickEvent(option)}
-                >
-                  <EntryText
-                    primary={`${option.id}: ${option.name}`}
-                    disableTypography={true}
-                  />
-                </ListItemButton>
-              </ListItem>);
-            }}
-            renderInput={(params) =>
-            {
-              return (<TextField
-                {...params}
-                size={"small"}
-                label={"Armors"}
-                placeholder="Armor name..."/>)
-            }}
-          />
-        </>;
-    }
-  };
-
-  const renderSelectedIngredientChip = () =>
-  {
-    if (!selectedIngredient) return <></>;
-    if (selectedIngredientIndex < 0) return <></>;
-
-    return buildComponentChip(selectedIngredient);
-  };
-
-  const renderPendingIngredientChip = () =>
-  {
-    if (!pendingIngredient) return <></>;
-
-    return <>
-      <Grid2 container spacing={2}>
-        <Grid2 size={6}>
-          {buildComponentChip(pendingIngredient)}
-        </Grid2>
-        <Grid2 size={4}>
-          <TextField
-            type={"number"}
-            label={"Count"}
-            value={pendingIngredient.count}
-            sx={{ width: '80px' }}
-            onChange={(event) => handlePendingIngredientCountOnChangeEvent(parseInt(event.target.value) ?? 1)}
-          />
-        </Grid2>
-        <Grid2 size={2}>
-          <IconButton
-            color={"secondary"}
-            onClick={() => handleOverrideSelectedWithPendingIngredientOnClickEvent()}
-          >
-            <Sync/>
-          </IconButton>
-        </Grid2>
-      </Grid2>
-    </>;
-  };
-
-  const renderRelevantRecipeToolDropdown = () =>
-  {
-    const renderOption = (props: any, option: any) =>
-    {
-      if (option === null || option.name === "" || option.name.startsWith("=="))
-      {
-        return <React.Fragment
-          key={props.key}></React.Fragment>;
-      }
-
-      return (<ListItem
-        key={props.key}
-        sx={{ height: 32 }}
-      >
-        <ListItemButton
-          sx={{ height: 32 }}
-          onClick={() => handleRelevantToolDropdownOnClickEvent(option)}
-        >
-          <EntryText
-            primary={`${option.id}: ${option.name}`}
-            disableTypography={true}
-          />
-        </ListItemButton>
-      </ListItem>);
-    };
-    switch (selectedToolType)
-    {
-      case CraftingComponentType.Item:
-        return <>
-          <Autocomplete
-            size={"small"}
-            options={[ ...items ].sort((a, b) =>
-            {
-              if (a === null || b === null) return (a as any) - (b as any);
-              return a.id - b.id;
-            })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            isOptionEqualToValue={(option, otherOption) => option.id === otherOption.id}
-            renderOption={(props, option, { index }) =>
-            {
-              if (option === null || option.name === "" || option.name.startsWith("=="))
-              {
-                return <React.Fragment
-                  key={props.key}></React.Fragment>;
-              }
-
-              return (<ListItem
-                key={props.key}
-                sx={{ height: 32 }}
-              >
-                <ListItemButton
-                  sx={{ height: 32 }}
-                  onClick={() => handleRelevantToolDropdownOnClickEvent(option)}
-                >
-                  <EntryText
-                    primary={`${option.id}: ${option.name}`}
-                    disableTypography={true}
-                  />
-                </ListItemButton>
-              </ListItem>);
-            }}
-            renderInput={(params) =>
-            {
-              return <TextField
-                {...params}
-                size={"small"}
-                label={"Items"}
-                placeholder="Item name..."
-              />
-            }}
-          />
-        </>;
-      case CraftingComponentType.Weapon:
-        return <>
-          <Autocomplete
-            size={"small"}
-            options={[ ...weapons ].sort((a, b) =>
-            {
-              if (a === null || b === null) return (a as any) - (b as any);
-              return a.id - b.id;
-            })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            renderOption={(props, option, { index }) =>
-            {
-              if (option === null || option.name === "" || option.name.startsWith("=="))
-              {
-                return <React.Fragment
-                  key={index}></React.Fragment>;
-              }
-
-              return (<ListItem
-                key={`${option.id}-${option.name}`}
-                sx={{ height: 32 }}
-              >
-                <ListItemButton
-                  sx={{ height: 32 }}
-                  onClick={() => handleRelevantToolDropdownOnClickEvent(option)}
-                >
-                  <EntryText
-                    primary={`${option.id}: ${option.name}`}
-                    disableTypography={true}
-                  />
-                </ListItemButton>
-              </ListItem>);
-            }}
-            renderInput={(params) =>
-            {
-              return (<TextField
-                {...params}
-                size={"small"}
-                label={"Weapons"}
-                placeholder="Weapon name..."/>)
-            }}
-          />
-        </>;
-      case CraftingComponentType.Armor:
-        return <>
-          <Autocomplete
-            size={"small"}
-            options={[ ...armors ].sort((a, b) =>
-            {
-              if (a === null || b === null) return (a as any) - (b as any);
-              return a.id - b.id;
-            })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            renderOption={(props, option, { index }) =>
-            {
-              if (option === null || option.name === "" || option.name.startsWith("=="))
-              {
-                return <React.Fragment
-                  key={index}></React.Fragment>;
-              }
-
-              return (<ListItem
-                key={`${option.id}-${option.name}`}
-                sx={{ height: 32 }}
-              >
-                <ListItemButton
-                  sx={{ height: 32 }}
-                  onClick={() => handleRelevantToolDropdownOnClickEvent(option)}
-                >
-                  <EntryText
-                    primary={`${option.id}: ${option.name}`}
-                    disableTypography={true}
-                  />
-                </ListItemButton>
-              </ListItem>);
-            }}
-            renderInput={(params) =>
-            {
-              return (<TextField
-                {...params}
-                size={"small"}
-                label={"Armors"}
-                placeholder="Armor name..."/>)
-            }}
-          />
-        </>;
-    }
-  };
-
-  const renderRecipeTool = (craftingComponent: CraftingComponent, index: number) =>
-  {
-    if (!craftingComponent) return <></>;
-
-    const tool = currentTools.at(index);
-    if (!tool) return <></>;
-
-    let ingredientData = null;
-    let icon = <QuestionMark/>;
-    switch (tool.type)
-    {
-      case CraftingComponentType.Item:
-        ingredientData = items.at(tool.id);
-        icon = <BusinessCenter color={"success"}/>
-        break;
-      case CraftingComponentType.Weapon:
-        ingredientData = weapons.at(tool.id);
-        icon = <LocalDining color={"error"}/>
-        break;
-      case CraftingComponentType.Armor:
-        ingredientData = armors.at(tool.id);
-        icon = <Shield color={"info"}/>
-        break;
-      // TODO: implement gold cost as ingredient.
-      default:
-        throw new Error(`unknown ingredient type detected: ${tool.type}`)
-    }
-
-    return <>
-      <ListItem
-        disableGutters
-        key={`${index}-${tool.type}-${tool.id}`}
-        secondaryAction={<>
-          <IconButton
-            edge="end"
-            onClick={() => handleDeleteTargetTool(index)}>
-            <Clear/>
-          </IconButton>
-        </>}
-      >
-        <ListItemButton
-          selected={selectedIngredientIndex === index}
-          onClick={event => handleRecipeToolListItemOnClickEvent(event, index)}
-        >
-          <ListItemIcon sx={{ minWidth: '30px' }}>
-            {icon}
-          </ListItemIcon>
-          <EntryText
-            primary={`${tool.id}: ${ingredientData?.name} (${tool.count})`}
-            disableTypography
-            sx={{ width: '100%' }}
-          />
-        </ListItemButton>
-      </ListItem>
-    </>
-  };
-
-  const renderSelectedToolChip = () =>
-  {
-    if (!selectedTool) return <></>;
-    if (selectedToolIndex < 0) return <></>;
-
-    return buildComponentChip(selectedTool);
-  };
-
-  const renderPendingToolChip = () =>
-  {
-    if (!pendingTool) return <></>;
-
-    return <>
-      <Grid2 container spacing={2}>
-        <Grid2 size={6}>
-          {buildComponentChip(pendingTool)}
-        </Grid2>
-        <Grid2 size={4}>
-          <TextField
-            type={"number"}
-            label={"Count"}
-            value={pendingTool.count}
-            sx={{ width: '80px' }}
-            onChange={(event) => handlePendingToolCountOnChangeEvent(parseInt(event.target.value) ?? 1)}
-          />
-        </Grid2>
-        <Grid2 size={2}>
-          <IconButton
-            color={"secondary"}
-            onClick={() => handleOverrideSelectedWithPendingToolOnClickEvent()}
-          >
-            <Sync/>
-          </IconButton>
-        </Grid2>
-      </Grid2>
-    </>;
-  };
-
-  const renderRecipeOutput = (craftingComponent: CraftingComponent, index: number) =>
-  {
-    if (!craftingComponent) return <></>;
-
-    const output = currentOutputs.at(index);
-    if (!output) return <></>;
-
-    let data = null;
-    let icon = <QuestionMark/>;
-    switch (output.type)
-    {
-      case CraftingComponentType.Item:
-        data = items.at(output.id);
-        icon = <BusinessCenter color={"success"}/>
-        break;
-      case CraftingComponentType.Weapon:
-        data = weapons.at(output.id);
-        icon = <LocalDining color={"error"}/>
-        break;
-      case CraftingComponentType.Armor:
-        data = armors.at(output.id);
-        icon = <Shield color={"info"}/>
-        break;
-      // TODO: implement gold cost as ingredient.
-      default:
-        throw new Error(`unknown ingredient type detected: ${output.type}`)
-    }
-
-    return <>
-      <ListItem
-        disableGutters
-        key={`${index}-${output.type}-${output.id}`}
-        secondaryAction={<>
-          <IconButton
-            edge="end"
-            onClick={() => handleDeleteTargetOutput(index)}>
-            <Clear/>
-          </IconButton>
-        </>}
-      >
-        <ListItemButton
-          selected={selectedIngredientIndex === index}
-          onClick={event => handleRecipeOutputListItemOnClickEvent(event, index)}
-        >
-          <ListItemIcon sx={{ minWidth: '30px' }}>
-            {icon}
-          </ListItemIcon>
-          <EntryText
-            primary={`${output.id}: ${data?.name} (${output.count})`}
-            disableTypography
-            sx={{ width: '100%' }}
-          />
-        </ListItemButton>
-      </ListItem>
-    </>
-  };
-
-  const renderRelevantRecipeOutputDropdown = () =>
-  {
-    const renderOption = (props: any, option: any) =>
-    {
-      if (option === null || option.name === "" || option.name.startsWith("=="))
-      {
-        return <React.Fragment
-          key={props.key}></React.Fragment>;
-      }
-
-      return (<ListItem
-        key={props.key}
-        sx={{ height: 32 }}
-      >
-        <ListItemButton
-          sx={{ height: 32 }}
-          onClick={() => handleRelevantToolDropdownOnClickEvent(option)}
-        >
-          <EntryText
-            primary={`${option.id}: ${option.name}`}
-            disableTypography={true}
-          />
-        </ListItemButton>
-      </ListItem>);
-    };
-    switch (selectedOutputType)
-    {
-      case CraftingComponentType.Item:
-        return <>
-          <Autocomplete
-            size={"small"}
-            options={[ ...items ].sort((a, b) =>
-            {
-              if (a === null || b === null) return (a as any) - (b as any);
-              return a.id - b.id;
-            })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            isOptionEqualToValue={(option, otherOption) => option.id === otherOption.id}
-            renderOption={(props, option, { index }) =>
-            {
-              if (option === null || option.name === "" || option.name.startsWith("=="))
-              {
-                return <React.Fragment
-                  key={props.key}></React.Fragment>;
-              }
-
-              return (<ListItem
-                key={props.key}
-                sx={{ height: 32 }}
-              >
-                <ListItemButton
-                  sx={{ height: 32 }}
-                  onClick={() => handleRelevantOutputDropdownOnClickEvent(option)}
-                >
-                  <EntryText
-                    primary={`${option.id}: ${option.name}`}
-                    disableTypography={true}
-                  />
-                </ListItemButton>
-              </ListItem>);
-            }}
-            renderInput={(params) =>
-            {
-              return <TextField
-                {...params}
-                size={"small"}
-                label={"Items"}
-                placeholder="Item name..."
-              />
-            }}
-          />
-        </>;
-      case CraftingComponentType.Weapon:
-        return <>
-          <Autocomplete
-            size={"small"}
-            options={[ ...weapons ].sort((a, b) =>
-            {
-              if (a === null || b === null) return (a as any) - (b as any);
-              return a.id - b.id;
-            })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            renderOption={(props, option, { index }) =>
-            {
-              if (option === null || option.name === "" || option.name.startsWith("=="))
-              {
-                return <React.Fragment
-                  key={index}></React.Fragment>;
-              }
-
-              return (<ListItem
-                key={`${option.id}-${option.name}`}
-                sx={{ height: 32 }}
-              >
-                <ListItemButton
-                  sx={{ height: 32 }}
-                  onClick={() => handleRelevantOutputDropdownOnClickEvent(option)}
-                >
-                  <EntryText
-                    primary={`${option.id}: ${option.name}`}
-                    disableTypography={true}
-                  />
-                </ListItemButton>
-              </ListItem>);
-            }}
-            renderInput={(params) =>
-            {
-              return (<TextField
-                {...params}
-                size={"small"}
-                label={"Weapons"}
-                placeholder="Weapon name..."/>)
-            }}
-          />
-        </>;
-      case CraftingComponentType.Armor:
-        return <>
-          <Autocomplete
-            size={"small"}
-            options={[ ...armors ].sort((a, b) =>
-            {
-              if (a === null || b === null) return (a as any) - (b as any);
-              return a.id - b.id;
-            })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            renderOption={(props, option, { index }) =>
-            {
-              if (option === null || option.name === "" || option.name.startsWith("=="))
-              {
-                return <React.Fragment
-                  key={index}></React.Fragment>;
-              }
-
-              return (<ListItem
-                key={`${option.id}-${option.name}`}
-                sx={{ height: 32 }}
-              >
-                <ListItemButton
-                  sx={{ height: 32 }}
-                  onClick={() => handleRelevantOutputDropdownOnClickEvent(option)}
-                >
-                  <EntryText
-                    primary={`${option.id}: ${option.name}`}
-                    disableTypography={true}
-                  />
-                </ListItemButton>
-              </ListItem>);
-            }}
-            renderInput={(params) =>
-            {
-              return (<TextField
-                {...params}
-                size={"small"}
-                label={"Armors"}
-                placeholder="Armor name..."/>)
-            }}
-          />
-        </>;
-    }
-  };
-
-  const renderSelectedOutputChip = () =>
-  {
-    if (!selectedOutput) return <></>;
-    if (selectedOutputIndex < 0) return <></>;
-
-    return buildComponentChip(selectedOutput);
-  };
-
-  const renderPendingOutputChip = () =>
-  {
-    if (!pendingOutput) return <></>;
-
-    return <>
-      <Grid2 container spacing={2}>
-        <Grid2 size={6}>
-          {buildComponentChip(pendingOutput)}
-        </Grid2>
-        <Grid2 size={4}>
-          <TextField
-            type={"number"}
-            label={"Count"}
-            value={pendingOutput.count}
-            sx={{ width: '80px' }}
-            onChange={(event) => handlePendingOutputCountOnChangeEvent(parseInt(event.target.value) ?? 1)}
-          />
-        </Grid2>
-        <Grid2 size={2}>
-          <IconButton
-            color={"secondary"}
-            onClick={() => handleOverrideSelectedWithPendingOutputOnClickEvent()}
-          >
-            <Sync/>
-          </IconButton>
-        </Grid2>
-      </Grid2>
-    </>;
-  };
-
-  const buildComponentChip = (craftingComponent: CraftingComponent) =>
-  {
-    let ingredientData = null;
-    let color: ("primary" | "success" | "error" | "info") = "primary";
-    let icon = <QuestionMark/>;
-    switch (craftingComponent.type)
-    {
-      case CraftingComponentType.Item:
-        ingredientData = items[craftingComponent.id];
-        color = "success";
-        icon = <BusinessCenter color={"success"}/>;
-        break;
-      case CraftingComponentType.Weapon:
-        ingredientData = weapons[craftingComponent.id];
-        color = "error";
-        icon = <LocalDining color={"error"}/>;
-        break;
-      case CraftingComponentType.Armor:
-        ingredientData = armors[craftingComponent.id];
-        color = "info";
-        icon = <Shield color={"info"}/>;
-        break;
-      // TODO: implement gold cost as ingredient.
-      default:
-        throw new Error(`unknown ingredient type detected: ${craftingComponent.type}`)
-    }
-
-    return <>
-      <Chip
-        icon={icon}
-        label={`${ingredientData.name} (${craftingComponent.count})`}
-        variant={"filled"}
-        color={color}
-      />
     </>
   };
   //endregion render
@@ -1524,7 +700,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
     <Grid2 container spacing={2}>
       {/* This is the data list of all entries the user can modify. */}
       <Grid2 size={3}>
-        <div>
+        <div onContextMenu={handlRecipeListContextMenu} style={{ cursor: 'context-menu' }}>
           <FixedSizeList
             height={720}
             width={400}
@@ -1552,240 +728,183 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
               </Typography>
             </Grid2>
 
-            : <Grid2 container rowSpacing={2} columnSpacing={4}>
-              <Grid2 size={4}>
-                <TextField
-                  required
-                  variant={"outlined"}
-                  label={"Key"}
-                  value={selectedRecipe.key}
-                  onChange={handleRecipeKeyOnChangeEvent}
-                  size={"small"}
-                  fullWidth
-                  slotProps={{
-                    input: {
-                      startAdornment: <InputAdornment position={"start"}>
-                        <Key/>
-                      </InputAdornment>
-                    }
-                  }}
-                />
-              </Grid2>
-
-              <Grid2 size={4}>
-                <TextField
-                  variant={"outlined"}
-                  label={"Name"}
-                  value={selectedRecipe.name}
-                  onChange={handleRecipeNameOnChangeEvent}
-                  size={"small"}
-                  fullWidth
-                />
-              </Grid2>
-
-              <Grid2 size={4}>
-                <TextField
-                  type={"number"}
-                  label={"Icon Index"}
-                  value={selectedRecipe.iconIndex ?? -1}
-                  sx={{ width: '100px' }}
-                  onChange={(event) => handleRecipeIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
-                />
-              </Grid2>
-
-              <Grid2 size={8}>
-                <TextField
-                  variant={"outlined"}
-                  label={"Description"}
-                  value={selectedRecipe.description}
-                  onChange={handleRecipeDescriptionOnChangeEvent}
-                  size={"small"}
-                  multiline
-                  fullWidth
-                  rows={4}
-                />
-              </Grid2>
-
-              <Grid2 size={4}>
-                <Stack spacing={2}>
-                  <FormControlLabel
-                    control={<Checkbox
-                      checked={selectedRecipe.unlockedByDefault}
-                      checkedIcon={<LockOpen/>}
-                      icon={<Lock/>}
-                      onChange={handleRecipeUnlockedByDefaultOnCheckEvent}
-                    />}
-                    label="Unlocked By Default"
-                    labelPlacement={"end"}
+            : <>
+              <Grid2 container rowSpacing={2} columnSpacing={4}>
+                {/* Key */}
+                <Grid2 size={4}>
+                  <TextField
+                    required
+                    variant={"outlined"}
+                    label={"Key"}
+                    value={selectedRecipe.key}
+                    onChange={handleRecipeKeyOnChangeEvent}
+                    size={"small"}
+                    fullWidth
+                    slotProps={{
+                      input: {
+                        startAdornment: <InputAdornment position={"start"}>
+                          <Key/>
+                        </InputAdornment>
+                      }
+                    }}
                   />
+                </Grid2>
 
-                  <FormControlLabel
-                    control={<Checkbox
-                      checked={selectedRecipe.maskedUntilCrafted}
-                      checkedIcon={<VisibilityOff/>}
-                      icon={<Visibility/>}
-                      onChange={handleRecipeMaskedUntilCraftedOnCheckEvent}
-                    />}
-                    label="Masked Until Crafted"
-                    labelPlacement={"end"}
+                {/* Name */}
+                <Grid2 size={4}>
+                  <TextField
+                    variant={"outlined"}
+                    label={"Name"}
+                    value={selectedRecipe.name}
+                    onChange={handleRecipeNameOnChangeEvent}
+                    size={"small"}
+                    fullWidth
                   />
-                </Stack>
-              </Grid2>
+                </Grid2>
 
-              {/* Ingredients management */}
-              <Grid2 size={4}>
-                <Stack spacing={1}>
-                  <ToggleButtonGroup
-                    exclusive
-                    color={"primary"}
-                    value={selectedIngredientType}
-                    defaultValue={CraftingComponentType.Item}
-                    onChange={handleRecipeIngredientTypeOnChangeEvent}
+                {/* Icon */}
+                <Grid2 size={1}>
+                  <TextField
+                    type={"number"}
+                    label={"Icon Index"}
+                    value={selectedRecipe.iconIndex ?? -1}
+                    sx={{ width: '80px' }}
+                    onChange={(event) => handleRecipeIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
+                  />
+                </Grid2>
+
+                {/* Initial visibility checkboxes */}
+                <Grid2 size={3}>
+                  <Stack spacing={0}>
+                    <FormControlLabel
+                      control={<Checkbox
+                        checked={selectedRecipe.unlockedByDefault}
+                        checkedIcon={<LockOpen/>}
+                        icon={<Lock/>}
+                        onChange={handleRecipeUnlockedByDefaultOnCheckEvent}
+                      />}
+                      label="Unlocked By Default"
+                      labelPlacement={"end"}
+                    />
+
+                    <FormControlLabel
+                      control={<Checkbox
+                        checked={selectedRecipe.maskedUntilCrafted}
+                        checkedIcon={<VisibilityOff/>}
+                        icon={<Visibility/>}
+                        onChange={handleRecipeMaskedUntilCraftedOnCheckEvent}
+                      />}
+                      label="Masked Until Crafted"
+                      labelPlacement={"end"}
+                    />
+                  </Stack>
+                </Grid2>
+
+                {/* Description */}
+                <Grid2 size={8}>
+                  <TextField
+                    variant={"outlined"}
+                    label={"Description"}
+                    value={selectedRecipe.description}
+                    onChange={handleRecipeDescriptionOnChangeEvent}
+                    size={"small"}
+                    multiline
                     fullWidth
-                  >
-                    <ToggleButton
-                      selected={selectedIngredientType === CraftingComponentType.Item}
-                      value={CraftingComponentType.Item}>
-                      <BusinessCenter sx={{ color: brown[500] }}/>
-                    </ToggleButton>
-                    <ToggleButton
-                      selected={selectedIngredientType === CraftingComponentType.Weapon}
-                      value={CraftingComponentType.Weapon}>
-                      <LocalDining color={"error"}/>
-                    </ToggleButton>
-                    <ToggleButton
-                      selected={selectedIngredientType === CraftingComponentType.Armor}
-                      value={CraftingComponentType.Armor}>
-                      <Shield color={"info"}/>
-                    </ToggleButton>
-                  </ToggleButtonGroup>
+                    rows={4}
+                  />
+                </Grid2>
 
-                  {renderRelevantRecipeIngredientDropdown()}
+                {/* Category key management */}
+                <Grid2 size={4}>
+                  <Stack spacing={2}>
+                    <Button
+                      size={"small"}
+                      fullWidth
+                      variant={"outlined"}
+                      color={"secondary"}
+                      onClick={() => setCategoryDialogOpen(true)}
+                    >
+                      Modify Categories
+                    </Button>
+                    <Autocomplete
+                      size={"small"}
+                      options={[ ...categories ].sort()}
+                      disableCloseOnSelect
+                      groupBy={option => option.key.split("-")[0]}
+                      ListboxProps={{ sx: { maxHeight: '400px' } }}
+                      getOptionKey={(option) => option.key}
+                      getOptionLabel={(option) => option.name}
+                      renderOption={(props, option, { index }) =>
+                      {
+                        if (option === null || option.name === "" || option.name.startsWith("=="))
+                        {
+                          return <React.Fragment
+                            key={props.key}></React.Fragment>;
+                        }
 
-                  {renderPendingIngredientChip()}
+                        return (<ListItem
+                          key={props.key}
+                          sx={{ height: 32 }}
+                        >
+                          <ListItemIcon
+                            sx={{ height: 32 }}
+                          >
+                            <Checkbox
+                              checked={applicableCategories.includes(option.key)}
+                              onChange={() => handleRecipeCategoryKeyToggle(option.key)}/>
+                            <EntryText
+                              primary={`${option.key}: ${option.name}`}
+                              disableTypography={true}
+                            />
+                          </ListItemIcon>
+                        </ListItem>);
+                      }}
+                      renderInput={(params) =>
+                      {
+                        return (<TextField
+                          {...params}
+                          size={"small"}
+                          label={"Choose Categories"}
+                          placeholder="Category key..."/>)
+                      }}
+                    />
+                  </Stack>
+                </Grid2>
 
-                  {renderSelectedIngredientChip()}
-                  <List dense>
-                    <ListSubheader sx={{
-                      height: '30px',
-                      fontWeight: 'bold'
-                    }}>
-                      Ingredients
-                    </ListSubheader>
-                    {currentIngredients.map((ingredient, index) => renderRecipeIngredient(ingredient, index))}
-                  </List>
-                </Stack>
+                {/* Ingredients management */}
+                <Grid2 size={4}>
+                  <CraftingComponentList
+                    projectPath={craftingBoardProps.projectPath}
+                    type={CraftingListType.Ingredients}
+                    updateRecipeFunc={updateCraftingComponentList}
+                    components={currentIngredients}
+                    handleSnack={handleSnack}
+                  />
+                </Grid2>
+
+                {/* Tools management */}
+                <Grid2 size={4}>
+                  <CraftingComponentList
+                    projectPath={craftingBoardProps.projectPath}
+                    type={CraftingListType.Tools}
+                    updateRecipeFunc={updateCraftingComponentList}
+                    components={currentTools}
+                    handleSnack={handleSnack}
+                  />
+                </Grid2>
+
+                {/* Outputs management */}
+                <Grid2 size={4}>
+                  <CraftingComponentList
+                    projectPath={craftingBoardProps.projectPath}
+                    type={CraftingListType.Outputs}
+                    updateRecipeFunc={updateCraftingComponentList}
+                    components={currentOutputs}
+                    handleSnack={handleSnack}
+                  />
+                </Grid2>
               </Grid2>
-
-              {/* Tools management */}
-              <Grid2 size={4}>
-                <Stack spacing={1}>
-                  <ToggleButtonGroup
-                    exclusive
-                    color={"primary"}
-                    value={selectedToolType}
-                    defaultValue={CraftingComponentType.Item}
-                    onChange={handleRecipeToolTypeOnChangeEvent}
-                    fullWidth
-                  >
-                    <ToggleButton
-                      selected={selectedToolType === CraftingComponentType.Item}
-                      value={CraftingComponentType.Item}>
-                      <BusinessCenter sx={{ color: brown[500] }}/>
-                    </ToggleButton>
-                    <ToggleButton
-                      selected={selectedToolType === CraftingComponentType.Weapon}
-                      value={CraftingComponentType.Weapon}>
-                      <LocalDining color={"error"}/>
-                    </ToggleButton>
-                    <ToggleButton
-                      selected={selectedToolType === CraftingComponentType.Armor}
-                      value={CraftingComponentType.Armor}>
-                      <Shield color={"info"}/>
-                    </ToggleButton>
-                  </ToggleButtonGroup>
-
-                  {renderRelevantRecipeToolDropdown()}
-
-                  {renderPendingToolChip()}
-
-                  {renderSelectedToolChip()}
-
-                  <List dense>
-                    <ListSubheader sx={{
-                      height: '30px',
-                      fontWeight: 'bold'
-                    }}>
-                      Tools
-                    </ListSubheader>
-                    {currentTools.length > 0
-                      ? currentTools.map((ingredient, index) => renderRecipeTool(ingredient, index))
-                      : <Button
-                        fullWidth
-                        startIcon={<Add/>}
-                        onClick={() => handleSnack(
-                          "TODO: implement adding something from nothing.",
-                          MuiSnackbarSeverity.Warning)}
-                        variant={"contained"}>Add a Tool</Button>
-                    }
-                  </List>
-                </Stack>
-              </Grid2>
-
-              <Grid2 size={4}>
-                <Stack spacing={1}>
-                  <ToggleButtonGroup
-                    exclusive
-                    color={"primary"}
-                    value={selectedOutputType}
-                    defaultValue={CraftingComponentType.Item}
-                    onChange={handleRecipeOutputTypeOnChangeEvent}
-                    fullWidth
-                  >
-                    <ToggleButton
-                      selected={selectedOutputType === CraftingComponentType.Item}
-                      value={CraftingComponentType.Item}>
-                      <BusinessCenter sx={{ color: brown[500] }}/>
-                    </ToggleButton>
-                    <ToggleButton
-                      selected={selectedOutputType === CraftingComponentType.Weapon}
-                      value={CraftingComponentType.Weapon}>
-                      <LocalDining color={"error"}/>
-                    </ToggleButton>
-                    <ToggleButton
-                      selected={selectedOutputType === CraftingComponentType.Armor}
-                      value={CraftingComponentType.Armor}>
-                      <Shield color={"info"}/>
-                    </ToggleButton>
-                  </ToggleButtonGroup>
-
-                  {renderRelevantRecipeOutputDropdown()}
-
-                  {renderPendingOutputChip()}
-
-                  {renderSelectedOutputChip()}
-
-                  <List dense>
-                    <ListSubheader sx={{
-                      height: '30px',
-                      fontWeight: 'bold'
-                    }}>
-                      Outputs
-                    </ListSubheader>
-                    {currentOutputs.length > 0
-                      ? currentOutputs.map((component, index) => renderRecipeOutput(component, index))
-                      : <Button
-                        fullWidth
-                        startIcon={<Add/>}
-                        onClick={() => handleSnack(
-                          "TODO: implement adding something from nothing.",
-                          MuiSnackbarSeverity.Warning)}
-                        variant={"contained"}>Add an Output</Button>
-                    }
-                  </List>
-                </Stack>
-              </Grid2>
-            </Grid2>}
+            </>}
 
         </Paper>
       </Grid2>
@@ -1809,6 +928,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
       >
         <span>Save</span>
       </LoadingButton>
+
       <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
         <Alert
           onClose={handleSnackClose}
@@ -1819,6 +939,221 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
           {snackMessage}
         </Alert>
       </Snackbar>
+
+      <Menu
+        open={recipeListContextMenu !== null}
+        onClose={handleRecipeListContextMenuOnCloseEvent}
+        anchorReference="anchorPosition"
+        anchorPosition={recipeListContextMenu !== null
+          ? {
+            top: recipeListContextMenu.mouseY,
+            left: recipeListContextMenu.mouseX
+          }
+          : undefined}
+      >
+        <MenuItem onClick={() =>
+        {
+          handleAddNewRecipe(selectedRecipeIndex);
+          handleRecipeListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Add/></ListItemIcon>
+          <Typography>Add new above</Typography>
+        </MenuItem>
+
+        <MenuItem onClick={() =>
+        {
+          handleAddNewRecipe(selectedRecipeIndex + 1);
+          handleRecipeListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Add/></ListItemIcon>
+          <Typography>Add new below</Typography>
+        </MenuItem>
+
+        <Divider/>
+
+        <MenuItem onClick={() =>
+        {
+          handleCloneRecipe(selectedRecipeIndex);
+          handleRecipeListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><ContentCopy/></ListItemIcon>
+          <Typography>Clone above</Typography>
+        </MenuItem>
+
+        <MenuItem onClick={() =>
+        {
+          handleCloneRecipe(selectedRecipeIndex + 1);
+          handleRecipeListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><ContentCopy/></ListItemIcon>
+          <Typography>Clone below</Typography>
+        </MenuItem>
+
+        <MenuItem dense onClick={() =>
+        {
+          handleDeleteRecipe(selectedRecipeIndex);
+          handleRecipeListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Remove/></ListItemIcon>
+          <Typography>Remove Selected</Typography>
+        </MenuItem>
+      </Menu>
+
+      <Dialog
+        open={categoryDialogOpen}
+        onClose={() => setCategoryDialogOpen(false)}
+        maxWidth={"lg"}
+        fullWidth
+      >
+        <DialogTitle>
+          Category Management
+        </DialogTitle>
+        <DialogContent>
+          <Grid2 container rowSpacing={2} columnSpacing={2}>
+            {/* list of categories */}
+            <Grid2 size={4}>
+              <div onContextMenu={handleCategoryListContextMenu} style={{ cursor: 'context-menu' }}>
+                <List>
+                  {categories.map((category, index) => renderCategoryListItem(category, index))}
+                </List>
+              </div>
+            </Grid2>
+
+            {/* category modification */}
+            <Grid2 size={8}>
+              <Stack spacing={2}>
+                {/* Key */}
+                <TextField
+                  required
+                  variant={"outlined"}
+                  label={"Key"}
+                  value={selectedCategory?.key}
+                  onChange={handleCategoryKeyOnChangeEvent}
+                  size={"small"}
+                  slotProps={{
+                    input: {
+                      startAdornment: <InputAdornment position={"start"}>
+                        <Key/>
+                      </InputAdornment>
+                    }
+                  }}
+                />
+
+                {/* Name */}
+                <TextField
+                  variant={"outlined"}
+                  label={"Name"}
+                  value={selectedCategory?.name}
+                  onChange={handleCategoryNameOnChangeEvent}
+                  size={"small"}
+                />
+
+                {/* Icon */}
+                <TextField
+                  type={"number"}
+                  label={"Icon Index"}
+                  value={selectedCategory?.iconIndex ?? -1}
+                  sx={{ width: '80px' }}
+                  onChange={(event) => handleCategoryIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
+                />
+
+                {/* Initial visibility checkboxes */}
+                <FormControlLabel
+                  control={<Checkbox
+                    checked={selectedCategory?.unlockedByDefault}
+                    checkedIcon={<LockOpen/>}
+                    icon={<Lock/>}
+                    onChange={handleCategoryUnlockedByDefaultOnCheckEvent}
+                  />}
+                  label="Unlocked By Default"
+                  labelPlacement={"end"}
+                />
+
+                {/* Description */}
+                <TextField
+                  variant={"outlined"}
+                  label={"Description"}
+                  value={selectedCategory?.description}
+                  onChange={handleCategoryDescriptionOnChangeEvent}
+                  size={"small"}
+                  multiline
+                  fullWidth
+                  rows={4}
+                />
+              </Stack>
+            </Grid2>
+          </Grid2>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            variant={"contained"}
+            startIcon={<Check />}
+            color={"success"}
+            onClick={() => setCategoryDialogOpen(false)}
+          >
+            <Typography>Done Modifying Categories</Typography>
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Menu
+        open={categoryListContextMenu !== null}
+        onClose={handleCategoryListContextMenuOnCloseEvent}
+        anchorReference="anchorPosition"
+        anchorPosition={categoryListContextMenu !== null
+          ? {
+            top: categoryListContextMenu.mouseY,
+            left: categoryListContextMenu.mouseX
+          }
+          : undefined}
+      >
+        <MenuItem onClick={() =>
+        {
+          handleAddCategory(selectedCategoryIndex);
+          handleCategoryListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Add/></ListItemIcon>
+          <Typography>Add new above</Typography>
+        </MenuItem>
+
+        <MenuItem onClick={() =>
+        {
+          handleAddCategory(selectedCategoryIndex + 1);
+          handleCategoryListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Add/></ListItemIcon>
+          <Typography>Add new below</Typography>
+        </MenuItem>
+
+        <Divider/>
+
+        <MenuItem onClick={() =>
+        {
+          handleCloneCategory(selectedCategoryIndex);
+          handleCategoryListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><ContentCopy/></ListItemIcon>
+          <Typography>Clone above</Typography>
+        </MenuItem>
+
+        <MenuItem onClick={() =>
+        {
+          handleCloneCategory(selectedCategoryIndex + 1);
+          handleCategoryListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><ContentCopy/></ListItemIcon>
+          <Typography>Clone below</Typography>
+        </MenuItem>
+
+        <MenuItem dense onClick={() =>
+        {
+          handleDeleteCategory(selectedCategoryIndex);
+          handleCategoryListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Remove/></ListItemIcon>
+          <Typography>Remove Selected</Typography>
+        </MenuItem>
+      </Menu>
       {/*endregion not-grid-related elements */}
     </Grid2>
   </>;
