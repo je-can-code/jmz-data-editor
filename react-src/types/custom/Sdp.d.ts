@@ -1,4 +1,3 @@
-// TODO: add models for the SDP system.
 declare namespace Sdp
 {
   interface PanelParameter
