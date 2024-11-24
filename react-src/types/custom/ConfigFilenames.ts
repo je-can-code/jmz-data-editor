@@ -1,5 +1,6 @@
 enum ConfigFilenames
 {
+  Crafting = "config.crafting.json",
   Proficiency  = "config.proficiency.json",
 }
 

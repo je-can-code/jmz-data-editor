@@ -2,6 +2,9 @@ import { filesystem } from "@neutralinojs/lib";
 import RPG_Actor = Rmmz.Implementations.RPG_Actor;
 import DatabaseFilenames from "../../types/mz/DatabaseFilenames.ts";
 import RPG_Skill = Rmmz.Implementations.RPG_Skill;
+import RPG_Item = Rmmz.Implementations.RPG_Item;
+import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
+import RPG_Armor = Rmmz.Implementations.RPG_Armor;
 
 /**
  * Saves the given data by the given filename at the given projectPath.
@@ -52,4 +55,28 @@ const loadSkills = async (projectPath: string): Promise<RPG_Skill[]> =>
   return await executeLoad<RPG_Skill[]>(projectPath, DatabaseFilenames.Skills);
 };
 
-export { executeSave, executeLoad, loadActors, loadSkills };
+const loadItems = async (projectPath: string): Promise<RPG_Item[]> =>
+{
+  return await executeLoad<RPG_Item[]>(projectPath, DatabaseFilenames.Items);
+
+};
+
+const loadWeapons = async (projectPath: string): Promise<RPG_Weapon[]> =>
+{
+  return await executeLoad<RPG_Weapon[]>(projectPath, DatabaseFilenames.Weapons);
+};
+
+const loadArmors = async (projectPath: string): Promise<RPG_Armor[]> =>
+{
+  return await executeLoad<RPG_Armor[]>(projectPath, DatabaseFilenames.Armors);
+};
+
+export {
+  executeSave,
+  executeLoad,
+  loadActors,
+  loadSkills,
+  loadItems,
+  loadWeapons,
+  loadArmors,
+};
