@@ -1,3 +1,5 @@
+import CraftingComponentType from "./CraftingComponentType.ts";
+
 declare namespace Crafting
 {
   interface Configuration
@@ -8,8 +10,8 @@ declare namespace Crafting
 
   interface Recipe
   {
-    name: string;
     key: string;
+    name: string;
     iconIndex: number;
     description: string;
     unlockedByDefault: boolean;
@@ -23,14 +25,14 @@ declare namespace Crafting
   interface CraftingComponent
   {
     id: number;
-    type: 'i' | 'w' | 'a';
+    type: CraftingComponentType;
     count: number;
   }
 
   interface Category
   {
-    name: string;
     key: string;
+    name: string;
     iconIndex: number;
     description: string;
     unlockedByDefault: boolean;

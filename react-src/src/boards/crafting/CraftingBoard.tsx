@@ -1,29 +1,82 @@
-import React, {ChangeEvent, useEffect, useState} from 'react';
-import {filesystem} from "@neutralinojs/lib";
+import React, { ChangeEvent, MouseEvent, useEffect, useState } from 'react';
 import LoadingButton from '@mui/lab/LoadingButton';
 import {
+  Alert,
+  Autocomplete,
+  Button,
   Checkbox,
+  Chip,
+  Dialog, DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
   FormControlLabel,
-  Grid,
+  Grid2,
+  IconButton,
   InputAdornment,
+  List,
   ListItem,
   ListItemButton,
   ListItemIcon,
   ListItemText,
-  Paper, Snackbar,
-  TextField, Typography
+  ListSubheader,
+  Menu,
+  MenuItem,
+  Paper,
+  Select,
+  Snackbar,
+  Stack,
+  TextField,
+  ToggleButton,
+  ToggleButtonGroup,
+  Typography
 } from "@mui/material";
-import {Subject, ListAlt, Key, Save} from "@mui/icons-material";
+import {
+  Add,
+  BusinessCenter,
+  Check,
+  Clear,
+  ContentCopy, DonutLarge,
+  DonutSmall,
+  Key,
+  ListAlt,
+  LocalDining,
+  Lock,
+  LockOpen,
+  QuestionMark,
+  Remove,
+  Save,
+  Shield,
+  Subject,
+  Sync,
+  Visibility,
+  VisibilityOff
+} from "@mui/icons-material";
 import styled from "styled-components";
-import {FixedSizeList, ListChildComponentProps} from 'react-window';
+import { FixedSizeList } from 'react-window';
 
+import { BoardProps } from "../../../types/local/BoardProps";
+
+import { executeLoad, executeSave, loadArmors, loadItems, loadWeapons } from "../../services/DataService.ts";
+
+import ConfigFilenames from "../../../types/custom/ConfigFilenames.ts";
+
+import { Crafting } from "../../../types/custom/Crafting";
+import CraftingComponentType from "../../../types/custom/CraftingComponentType.ts";
+import { brown, } from "@mui/material/colors";
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../../types/external/MuiSnackbar.ts";
+import CraftingComponentList from "./CraftingComponentList.tsx";
+import CraftingListType from "../../../types/custom/CraftingListType.ts";
+import RPG_Item = Rmmz.Implementations.RPG_Item;
+import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
+import RPG_Armor = Rmmz.Implementations.RPG_Armor;
+import Configuration = Crafting.Configuration;
 import Recipe = Crafting.Recipe;
 import Category = Crafting.Category;
 import CraftingConfiguration = Crafting.Configuration;
-import {Alert} from "@mui/lab";
+import CraftingComponent = Crafting.CraftingComponent;
 
 // ================================================================================================
-
 const EntryText = styled(ListItemText)`
     font-family: monospace;
 `;
@@ -31,40 +84,45 @@ const EntryText = styled(ListItemText)`
 const SaveStyles = {
   fontFamily: "monospace",
   position: "absolute",
-  top: "15%",
+  top: "8%",
   right: "1%",
-};
-
-type CraftingBoardProps = {
-  projectPath: string;
 };
 
 // ================================================================================================
 /**
  * The main board that encapsulates all things related to crafting.
  */
-export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
+export default function CraftingBoard(craftingBoardProps: BoardProps)
 {
-  const [saveSnackOpen, setSaveSnackOpen] = useState<boolean>(false);
+  //region state
+  const [ recipes, setRecipes ] = useState<Recipe[]>([]);
+  const [ selectedRecipe, setSelectedRecipe ] = useState<Recipe | null>(null);
+  const [ selectedRecipeIndex, setSelectedRecipeIndex ] = useState<number>(0);
 
-  /**
-   * The primary data list for the board.
-   */
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [ applicableCategories, setApplicableCategories ] = useState<string[]>([]);
+  const [ currentIngredients, setCurrentIngredients ] = useState<CraftingComponent[]>([]);
+  const [ currentTools, setCurrentTools ] = useState<CraftingComponent[]>([]);
+  const [ currentOutputs, setCurrentOutputs ] = useState<CraftingComponent[]>([]);
 
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [ categories, setCategories ] = useState<Category[]>([]);
+  const [ selectedCategory, setSelectedCategory ] = useState<Category | null>(null);
+  const [ selectedCategoryIndex, setSelectedCategoryIndex ] = useState<number>(0);
 
-  /**
-   * The currently selected entry for the board.
-   */
-  const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
+  const [ canSave, setCanSave ] = useState<boolean>(false);
+  const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
+  const [ snackMessage, setSnackMessage ] = useState<string>("");
+  const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
+  const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
 
-  /**
-   * The index of the currently selected entry in the data list.
-   */
-  const [selectedRecipeIndex, setSelectedRecipeIndex] = useState<number>(0);
+  const [ recipeListContextMenu, setRecipeListContextMenu ] = useState<{
+    mouseX: number; mouseY: number;
+  } | null>(null);
+  const [ categoryListContextMenu, setCategoryListContextMenu ] = useState<{
+    mouseX: number; mouseY: number;
+  } | null>(null);
 
-  const [canSave, setCanSave] = useState<boolean>(false);
+  const [ categoryDialogOpen, setCategoryDialogOpen ] = useState<boolean>(false);
+  //endregion state
 
   /**
    * Initializes the board with the data from the configuration.
@@ -72,7 +130,7 @@ export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
   useEffect(() =>
   {
     let ignore = false;
-    const {projectPath} = craftingBoardProps;
+    const { projectPath } = craftingBoardProps;
     if (projectPath === null || projectPath === '' || !projectPath.endsWith("/data"))
     {
       console.error(`invalid path provided: ${projectPath}`);
@@ -84,19 +142,18 @@ export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
     {
       // TODO: add popup warning in this method and add a reset button?
 
-      const data = await filesystem.readFile(`${projectPath}/config.crafting.json`);
-      const parsedData = JSON.parse(data) as CraftingConfiguration;
-      if (!ignore && parsedData)
+      const craftingData = await executeLoad<Configuration>(projectPath, ConfigFilenames.Crafting);
+      if (!ignore && craftingData)
       {
         // update the data list.
-        setRecipes(parsedData.recipes);
+        setRecipes(craftingData.recipes);
 
         // update the other data.
-        setCategories(parsedData.categories);
-
-        // enable saving.
-        setCanSave(true);
+        setCategories(craftingData.categories);
       }
+
+      // enable saving.
+      setCanSave(true);
     };
 
     initializeState(projectPath)
@@ -105,34 +162,117 @@ export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
     {
       ignore = true;
     }
-  }, [craftingBoardProps.projectPath]);
+  }, [ craftingBoardProps.projectPath ]);
 
-  /**
-   * The handling logic for clicking the entry in the data list.
-   * @param _ The ignored event parameter.
-   * @param index The index of the item in the list.
-   */
-  const handleDataListEntryClick = (_: any, index: number,) =>
+  //region actions
+  const handleSnack = (
+    message: string,
+    severity: MuiSnackbarSeverity = MuiSnackbarSeverity.Info,
+    variant: MuiSnackbarVariant = MuiSnackbarVariant.Filled) =>
+  {
+    setSnackMessage(message);
+    setSnackSeverity(severity);
+    setSnackVariant(variant);
+    setSnackOpen(true);
+  };
+
+  const handleSaveButtonOnClickEvent = async () =>
+  {
+    // reconstruct the data shape to be saved.
+    const updatedConfiguration = {
+      recipes: recipes,
+      categories: categories
+    } as CraftingConfiguration;
+
+    // save the data to disk.
+    await executeSave(craftingBoardProps.projectPath, ConfigFilenames.Crafting, updatedConfiguration);
+
+    setCanSave(true);
+
+    handleSnack("Crafting data has been saved successfully.");
+  };
+
+  const handleSnackClose = (_: any, reason?: string) =>
+  {
+    if (reason === 'clickaway') return;
+
+    setSnackOpen(false);
+  };
+
+  const handleRecipeListItemOnClickEvent = (index: number,) =>
   {
     setSelectedRecipeIndex(index);
+
     if (recipes?.length > 0)
     {
       const recipe = recipes.at(index) as Recipe;
       setSelectedRecipe(recipe);
+      setApplicableCategories(recipe.categoryKeys);
+      setCurrentIngredients(recipe.ingredients);
+      setCurrentTools(recipe.tools);
+      setCurrentOutputs(recipe.outputs);
     }
-  }
+  };
 
-  /**
-   * The update logic for updating the key of the selected entry.
-   * @param event The input event that triggered this update.
-   */
-  const updateSelectedEntryKey = (event: ChangeEvent<HTMLInputElement>) =>
+  const handlRecipeListContextMenu = (event: MouseEvent) =>
   {
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
+    event.preventDefault();
 
+    const newContextMenuState = recipeListContextMenu === null
+      ? {
+        mouseX: event.clientX + 2,
+        mouseY: event.clientY - 6,
+      }
+      : null;
+
+    setRecipeListContextMenu(newContextMenuState);
+  };
+
+  const handleRecipeListContextMenuOnCloseEvent = () =>
+  {
+    setRecipeListContextMenu(null);
+  };
+
+  const handleCategoryListItemOnClickEven = (index: number) =>
+  {
+    setSelectedCategoryIndex(index);
+
+    if (categories.length > 0)
+    {
+      const category = categories[index];
+      setSelectedCategory(category);
+      // TODO: update the inputs.
+    }
+  };
+
+  const handleCategoryListContextMenu = (event: MouseEvent) =>
+  {
+    event.preventDefault();
+
+    const newContextMenuState = categoryListContextMenu === null
+      ? {
+        mouseX: event.clientX + 2,
+        mouseY: event.clientY - 6,
+      }
+      : null;
+
+    setCategoryListContextMenu(newContextMenuState);
+  };
+
+  const handleCategoryListContextMenuOnCloseEvent = () =>
+  {
+    setCategoryListContextMenu(null);
+  };
+  //endregion actions
+
+  //region updates
+  const handleRecipeKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
     // if there is no entry, stop processing.
     if (!selectedRecipe) return;
+
+    // grab the updated value from the input.
+    const updatedValue = event.target.value;
 
     // update the entry.
     const updatedRecipe = {
@@ -142,30 +282,365 @@ export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
     setSelectedRecipe(updatedRecipe);
 
     // rebuild the updated list of entries with the updated entry.
-    const updatedRecipes = recipes.map((recipe, index) =>
-    {
-      if (index === selectedRecipeIndex)
-      {
-        return updatedRecipe;
-      }
-
-      return recipe;
-    });
+    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
     setRecipes(updatedRecipes);
-
-    // TODO: can this update be optimized in some way?
-    // consider extracting recipe view to single component, and only update whole list when entries change.
   };
 
-  /**
-   * A mapping function for creating a data list entry in the list.
-   */
-  const renderDataListRow = (props: ListChildComponentProps) =>
+  const handleRecipeNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    // if there is no entry, stop processing.
+    if (!selectedRecipe) return;
+
+    // grab the updated value from the input.
+    const updatedValue = event.target.value;
+
+    // update the entry.
+    const updatedRecipe = {
+      ...selectedRecipe,
+      name: updatedValue
+    };
+    setSelectedRecipe(updatedRecipe);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
+    setRecipes(updatedRecipes);
+  };
+
+  const handleRecipeIconIndexOnChangeEvent = (value: number) =>
+  {
+    // if there is no entry, stop processing.
+    if (!selectedRecipe) return;
+
+    const updatedValue = value < -1
+      ? -1
+      : value;
+
+    // update the entry.
+    const updatedRecipe = {
+      ...selectedRecipe,
+      iconIndex: updatedValue
+    };
+    setSelectedRecipe(updatedRecipe);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
+    setRecipes(updatedRecipes);
+  };
+
+  const handleRecipeDescriptionOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    // if there is no entry, stop processing.
+    if (!selectedRecipe) return;
+
+    // grab the updated value from the input.
+    const updatedValue = event.target.value;
+
+    // update the entry.
+    const updatedRecipe = {
+      ...selectedRecipe,
+      description: updatedValue
+    };
+    setSelectedRecipe(updatedRecipe);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
+    setRecipes(updatedRecipes);
+  };
+
+  const handleRecipeMaskedUntilCraftedOnCheckEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    // if there is no entry, stop processing.
+    if (!selectedRecipe) return;
+
+    // grab the updated value from the input.
+    const updatedValue = event.target.checked;
+
+    // update the entry.
+    const updatedRecipe = {
+      ...selectedRecipe,
+      maskedUntilCrafted: updatedValue
+    };
+    setSelectedRecipe(updatedRecipe);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
+    setRecipes(updatedRecipes);
+  };
+
+  const handleRecipeUnlockedByDefaultOnCheckEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    // if there is no entry, stop processing.
+    if (!selectedRecipe) return;
+
+    // grab the updated value from the input.
+    const updatedValue = event.target.checked;
+
+    // update the entry.
+    const updatedRecipe = {
+      ...selectedRecipe,
+      unlockedByDefault: updatedValue
+    };
+    setSelectedRecipe(updatedRecipe);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
+    setRecipes(updatedRecipes);
+  };
+
+  const handleRecipeCategoryKeyToggle = (value: string) =>
+  {
+    const currentIndex = applicableCategories.indexOf(value);
+    const newChecked = [ ...applicableCategories ];
+
+    if (currentIndex === -1)
+    {
+      newChecked.push(value);
+    }
+    else
+    {
+      newChecked.splice(currentIndex, 1);
+    }
+
+    setApplicableCategories(newChecked.sort());
+
+    const updatedRecipe = {
+      ...selectedRecipe,
+      categoryKeys: newChecked
+    } as Recipe;
+    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
+    setRecipes(updatedRecipes);
+  };
+
+  const handleCategoryKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    // if there is no entry, stop processing.
+    if (!selectedCategory) return;
+
+    // grab the updated value from the input.
+    const updatedValue = event.target.value;
+
+    // update the entry.
+    const updatedCategory = {
+      ...selectedCategory,
+      key: updatedValue
+    } as Category;
+    setSelectedCategory(updatedCategory);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
+    setCategories(updatedCategories);
+  };
+
+  const handleCategoryNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    // if there is no entry, stop processing.
+    if (!selectedCategory) return;
+
+    // grab the updated value from the input.
+    const updatedValue = event.target.value;
+
+    // update the entry.
+    const updatedCategory = {
+      ...selectedCategory,
+      name: updatedValue
+    } as Category;
+    setSelectedCategory(updatedCategory);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
+    setCategories(updatedCategories);
+  };
+
+  const handleCategoryIconIndexOnChangeEvent = (value: number) =>
+  {
+    // if there is no entry, stop processing.
+    if (!selectedCategory) return;
+
+    const updatedValue = value < -1
+      ? -1
+      : value;
+
+    // update the entry.
+    const updatedCategory = {
+      ...selectedCategory,
+      iconIndex: updatedValue
+    } as Category;
+    setSelectedCategory(updatedCategory);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
+    setCategories(updatedCategories);
+  };
+
+  const handleCategoryUnlockedByDefaultOnCheckEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    // if there is no entry, stop processing.
+    if (!selectedCategory) return;
+
+    // grab the updated value from the input.
+    const updatedValue = event.target.checked;
+
+    // update the entry.
+    const updatedCategory = {
+      ...selectedCategory,
+      unlockedByDefault: updatedValue
+    } as Category;
+    setSelectedCategory(updatedCategory);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
+    setCategories(updatedCategories);
+  };
+
+  const handleCategoryDescriptionOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    // if there is no entry, stop processing.
+    if (!selectedCategory) return;
+
+    // grab the updated value from the input.
+    const updatedValue = event.target.value;
+
+    // update the entry.
+    const updatedCategory = {
+      ...selectedCategory,
+      description: updatedValue
+    } as Category;
+    setSelectedCategory(updatedCategory);
+
+    // rebuild the updated list of entries with the updated entry.
+    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
+    setCategories(updatedCategories);
+  };
+
+  const updateCraftingComponentList = (craftingComponents: CraftingComponent[], craftingListType: CraftingListType) =>
+  {
+    const updatedRecipe = {
+      ...selectedRecipe,
+    } as Recipe;
+
+    switch (craftingListType)
+    {
+      case CraftingListType.Ingredients:
+        updatedRecipe.ingredients = craftingComponents;
+        setCurrentIngredients(craftingComponents);
+        break;
+      case CraftingListType.Tools:
+        updatedRecipe.tools = craftingComponents;
+        setCurrentTools(craftingComponents);
+        break;
+      case CraftingListType.Outputs:
+        updatedRecipe.outputs = craftingComponents;
+        setCurrentOutputs(craftingComponents);
+        break;
+    }
+
+    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
+    setRecipes(updatedRecipes);
+
+    handleSnack(`${craftingListType} list has been updated.`, MuiSnackbarSeverity.Success);
+  };
+
+  const handleAddNewRecipe = (index: number) =>
+  {
+    const newRecipe = {
+      key: "NEW-RECIPE",
+      name: "",
+      description: "",
+      iconIndex: -1,
+      maskedUntilCrafted: true,
+      unlockedByDefault: false,
+      categoryKeys: [],
+      ingredients: [],
+      tools: [],
+      outputs: []
+    } as Recipe;
+
+    const updatedRecipes = recipes.toSpliced(index, 0, newRecipe);
+    setRecipes(updatedRecipes);
+  };
+
+  const handleCloneRecipe = (index: number) =>
+  {
+    if (selectedRecipe === null) return;
+
+    const clonedKeys = selectedRecipe.categoryKeys.toSpliced(0, 0);
+    const clonedIngredients = selectedRecipe.ingredients.toSpliced(0, 0);
+    const clonedTools = selectedRecipe.tools.toSpliced(0, 0);
+    const clonedOutputs = selectedRecipe.outputs.toSpliced(0, 0);
+
+    const clonedRecipe = {
+      key: `${selectedRecipe.key}-COPY`,
+      name: selectedRecipe.name,
+      description: selectedRecipe.description,
+      iconIndex: selectedRecipe.iconIndex,
+      maskedUntilCrafted: selectedRecipe.maskedUntilCrafted,
+      unlockedByDefault: selectedRecipe.unlockedByDefault,
+      categoryKeys: clonedKeys,
+      ingredients: clonedIngredients,
+      tools: clonedTools,
+      outputs: clonedOutputs
+    } as Recipe;
+
+    const updatedRecipes = recipes.toSpliced(index, 0, clonedRecipe);
+    setRecipes(updatedRecipes);
+  };
+
+  const handleDeleteRecipe = (index: number) =>
+  {
+    if (selectedRecipe === null) return;
+
+    const updatedRecipes = recipes.toSpliced(index, 1);
+    setRecipes(updatedRecipes);
+
+    handleSnack("Recipe has been deleted successfully.", MuiSnackbarSeverity.Success);
+  };
+
+  const handleAddCategory = (index: number) =>
+  {
+    const newCategory = {
+      key: "NEW-CATEGORY",
+      name: "best category",
+      description: "fill in with some description about the category.",
+      iconIndex: -1,
+      unlockedByDefault: false,
+    } as Category;
+
+    const updatedCategories = categories.toSpliced(index, 0, newCategory);
+    setCategories(updatedCategories);
+  };
+
+  const handleCloneCategory = (index: number) =>
+  {
+    if (selectedCategory === null) return;
+
+    const clonedCategory = {
+      key: `${selectedCategory.key}-COPY`,
+      name: selectedCategory.name,
+      description: selectedCategory.description,
+      iconIndex: selectedCategory.iconIndex,
+      unlockedByDefault: selectedCategory.unlockedByDefault,
+    } as Category;
+
+    const updatedCategories = categories.toSpliced(index, 0, clonedCategory);
+    setCategories(updatedCategories);
+  };
+
+  const handleDeleteCategory = (index: number) =>
+  {
+    if (selectedCategory === null) return;
+
+    const updatedCategories = categories.toSpliced(index, 1);
+    setCategories(updatedCategories);
+  };
+  //endregion updates
+
+  //region render
+  const renderRecipeListItem = (props: ListChildComponentProps) =>
   {
     const {
-            index,
-            style
-          } = props;
+      index,
+      style
+    } = props;
 
     const recipe = recipes.at(index);
 
@@ -176,173 +651,510 @@ export default function CraftingBoard(craftingBoardProps: CraftingBoardProps)
         <ListItemButton
           focusRipple={false}
           selected={selectedRecipeIndex === index}
-          onClick={event => handleDataListEntryClick(event, index)}
+          onClick={() => handleRecipeListItemOnClickEvent(index)}
         >
           <ListItemIcon>
             {(selectedRecipeIndex === index)
               ? <ListAlt color={"success"}/>
-              : <Subject color={"secondary"}/>
-            }
+              : <Subject color={"secondary"}/>}
           </ListItemIcon>
           <EntryText
-            primary={recipe.key}
-            secondary={recipe.name}
+            primary={recipe.name.length === 0
+              ? recipe.key
+              : recipe.name}
             disableTypography={true}
           />
         </ListItemButton>
       </ListItem>
     </>;
-  }
-
-  const handleSaveData = async () =>
-  {
-    console.log('saving...');
-
-    const {projectPath} = craftingBoardProps;
-
-    const updatedConfiguration = {
-      recipes: recipes,
-      categories: categories
-    } as CraftingConfiguration;
-
-    await filesystem.writeFile(
-      `${projectPath}/config.crafting.json`,
-      JSON.stringify(updatedConfiguration, null, 2));
-
-    console.log('saved!');
-    setCanSave(true);
-    setSaveSnackOpen(true);
   };
 
-  const handleCloseSnack = (_: any, reason?: string) =>
+  const renderCategoryListItem = (category: Category, index: number) =>
   {
-    if (reason === 'clickaway') {
-      return;
-    }
+    return <>
+      <ListItem
+        key={index}
+        dense
+        disableGutters
+      >
+        <ListItemButton
+          onClick={() => handleCategoryListItemOnClickEven(index)}
+          selected={selectedCategoryIndex === index}
+        >
+          <ListItemIcon>
+            {(selectedCategoryIndex === index)
+              ? <DonutSmall color={"secondary"} />
+              : <DonutLarge color={"info"}/>}
+          </ListItemIcon>
+          <EntryText
+            primary={`${category.key}: ${category.name}`}
+            disableTypography/>
 
-    setSaveSnackOpen(false);
+        </ListItemButton>
+      </ListItem>
+    </>
   };
+  //endregion render
 
   return <>
-    <Grid container>
+    <Grid2 container spacing={2}>
       {/* This is the data list of all entries the user can modify. */}
-      <Grid item xs={3}>
-        <FixedSizeList
-          height={720}
-          width={400}
-          itemSize={35}
-          overscanCount={5}
-          itemCount={recipes.length}
-        >
-          {renderDataListRow}
-        </FixedSizeList>
-      </Grid>
+      <Grid2 size={3}>
+        <div onContextMenu={handlRecipeListContextMenu} style={{ cursor: 'context-menu' }}>
+          <FixedSizeList
+            height={720}
+            width={400}
+            itemSize={35}
+            overscanCount={5}
+            itemCount={recipes.length}
+          >
+            {renderRecipeListItem}
+          </FixedSizeList>
+        </div>
+      </Grid2>
 
       {/* This is the form fields for modifying the selected entry. */}
-      <Grid item xs={9}>
+      <Grid2 size={9}>
         <Paper sx={{
           height: '100%',
           width: '100%',
           padding: 2
         }} elevation={10}>
-          {
-            (  selectedRecipe === null)
-              ? <>
-          <Typography>
-            Please select a recipe on the left.<br/>
-            If there are no recipes, then consider making one.
-          </Typography>
-              </>
-              : <>
-          <TextField
-            required
-            variant={"outlined"}
-            label={"Key"}
-            value={selectedRecipe.key}
-            onChange={updateSelectedEntryKey}
-            size={"small"}
-            InputProps={{ startAdornment:
-              <InputAdornment position={"start"}>
-                <Key/>
-              </InputAdornment>
-            }}
-          /><br/>
+          {(selectedRecipe === null)
+            ? <Grid2 container>
+              <Typography>
+                Please select a recipe on the left.<br/>
+                If there are no recipes, then consider making one.
+              </Typography>
+            </Grid2>
 
-          <TextField
-            variant={"outlined"}
-            label={"Name"}
-            value={selectedRecipe.name}
-            onChange={updateSelectedEntryKey}
-            size={"small"}
-          /><br/>
+            : <>
+              <Grid2 container rowSpacing={2} columnSpacing={4}>
+                {/* Key */}
+                <Grid2 size={4}>
+                  <TextField
+                    required
+                    variant={"outlined"}
+                    label={"Key"}
+                    value={selectedRecipe.key}
+                    onChange={handleRecipeKeyOnChangeEvent}
+                    size={"small"}
+                    fullWidth
+                    slotProps={{
+                      input: {
+                        startAdornment: <InputAdornment position={"start"}>
+                          <Key/>
+                        </InputAdornment>
+                      }
+                    }}
+                  />
+                </Grid2>
 
-          <TextField
-            variant={"outlined"}
-            label={"Description"}
-            value={selectedRecipe.description}
-            onChange={updateSelectedEntryKey}
-            size={"small"}
-            multiline
-            rows={4}
-            sx={{
-              width: 600,
-            }}
-          /><br/>
+                {/* Name */}
+                <Grid2 size={4}>
+                  <TextField
+                    variant={"outlined"}
+                    label={"Name"}
+                    value={selectedRecipe.name}
+                    onChange={handleRecipeNameOnChangeEvent}
+                    size={"small"}
+                    fullWidth
+                  />
+                </Grid2>
 
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={selectedRecipe.unlockedByDefault}
-                onChange={updateSelectedEntryKey}
-              />
-            }
-            label="Unlocked By Default"
-            labelPlacement={"end"}
-          /><br/>
+                {/* Icon */}
+                <Grid2 size={1}>
+                  <TextField
+                    type={"number"}
+                    label={"Icon Index"}
+                    value={selectedRecipe.iconIndex ?? -1}
+                    sx={{ width: '80px' }}
+                    onChange={(event) => handleRecipeIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
+                  />
+                </Grid2>
 
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={selectedRecipe.maskedUntilCrafted}
-                onChange={updateSelectedEntryKey}
-              />
-            }
-            label="Masked Until Crafted"
-            labelPlacement={"end"}
-          /><br/>
+                {/* Initial visibility checkboxes */}
+                <Grid2 size={3}>
+                  <Stack spacing={0}>
+                    <FormControlLabel
+                      control={<Checkbox
+                        checked={selectedRecipe.unlockedByDefault}
+                        checkedIcon={<LockOpen/>}
+                        icon={<Lock/>}
+                        onChange={handleRecipeUnlockedByDefaultOnCheckEvent}
+                      />}
+                      label="Unlocked By Default"
+                      labelPlacement={"end"}
+                    />
 
-          {/* This is over-arching save button- it will save all recipes to disk. */}
-          <LoadingButton
-            size={"small"}
-            color={"secondary"}
-            onClick={async () => {
-              // set the save flag to false to prevent further clicking.
-              setCanSave(false);
-              await handleSaveData();
-            }}
-            loading={!canSave}
-            loadingPosition={"start"}
-            startIcon={<Save/>}
-            variant="outlined"
-            sx={SaveStyles}
-          >
-            <span>Save</span>
-          </LoadingButton>
-        </>
-        }
+                    <FormControlLabel
+                      control={<Checkbox
+                        checked={selectedRecipe.maskedUntilCrafted}
+                        checkedIcon={<VisibilityOff/>}
+                        icon={<Visibility/>}
+                        onChange={handleRecipeMaskedUntilCraftedOnCheckEvent}
+                      />}
+                      label="Masked Until Crafted"
+                      labelPlacement={"end"}
+                    />
+                  </Stack>
+                </Grid2>
+
+                {/* Description */}
+                <Grid2 size={8}>
+                  <TextField
+                    variant={"outlined"}
+                    label={"Description"}
+                    value={selectedRecipe.description}
+                    onChange={handleRecipeDescriptionOnChangeEvent}
+                    size={"small"}
+                    multiline
+                    fullWidth
+                    rows={4}
+                  />
+                </Grid2>
+
+                {/* Category key management */}
+                <Grid2 size={4}>
+                  <Stack spacing={2}>
+                    <Button
+                      size={"small"}
+                      fullWidth
+                      variant={"outlined"}
+                      color={"secondary"}
+                      onClick={() => setCategoryDialogOpen(true)}
+                    >
+                      Modify Categories
+                    </Button>
+                    <Autocomplete
+                      size={"small"}
+                      options={[ ...categories ].sort()}
+                      disableCloseOnSelect
+                      groupBy={option => option.key.split("-")[0]}
+                      ListboxProps={{ sx: { maxHeight: '400px' } }}
+                      getOptionKey={(option) => option.key}
+                      getOptionLabel={(option) => option.name}
+                      renderOption={(props, option, { index }) =>
+                      {
+                        if (option === null || option.name === "" || option.name.startsWith("=="))
+                        {
+                          return <React.Fragment
+                            key={props.key}></React.Fragment>;
+                        }
+
+                        return (<ListItem
+                          key={props.key}
+                          sx={{ height: 32 }}
+                        >
+                          <ListItemIcon
+                            sx={{ height: 32 }}
+                          >
+                            <Checkbox
+                              checked={applicableCategories.includes(option.key)}
+                              onChange={() => handleRecipeCategoryKeyToggle(option.key)}/>
+                            <EntryText
+                              primary={`${option.key}: ${option.name}`}
+                              disableTypography={true}
+                            />
+                          </ListItemIcon>
+                        </ListItem>);
+                      }}
+                      renderInput={(params) =>
+                      {
+                        return (<TextField
+                          {...params}
+                          size={"small"}
+                          label={"Choose Categories"}
+                          placeholder="Category key..."/>)
+                      }}
+                    />
+                  </Stack>
+                </Grid2>
+
+                {/* Ingredients management */}
+                <Grid2 size={4}>
+                  <CraftingComponentList
+                    projectPath={craftingBoardProps.projectPath}
+                    type={CraftingListType.Ingredients}
+                    updateRecipeFunc={updateCraftingComponentList}
+                    components={currentIngredients}
+                    handleSnack={handleSnack}
+                  />
+                </Grid2>
+
+                {/* Tools management */}
+                <Grid2 size={4}>
+                  <CraftingComponentList
+                    projectPath={craftingBoardProps.projectPath}
+                    type={CraftingListType.Tools}
+                    updateRecipeFunc={updateCraftingComponentList}
+                    components={currentTools}
+                    handleSnack={handleSnack}
+                  />
+                </Grid2>
+
+                {/* Outputs management */}
+                <Grid2 size={4}>
+                  <CraftingComponentList
+                    projectPath={craftingBoardProps.projectPath}
+                    type={CraftingListType.Outputs}
+                    updateRecipeFunc={updateCraftingComponentList}
+                    components={currentOutputs}
+                    handleSnack={handleSnack}
+                  />
+                </Grid2>
+              </Grid2>
+            </>}
 
         </Paper>
-      </Grid>
-      <Snackbar open={saveSnackOpen} autoHideDuration={2000} onClose={handleCloseSnack}>
+      </Grid2>
+
+      {/*region not-grid-related elements */}
+      {/* This is over-arching save button- it will save all recipes to disk. */}
+      <LoadingButton
+        size={"small"}
+        color={"secondary"}
+        onClick={async () =>
+        {
+          // set the save flag to false to prevent further clicking.
+          setCanSave(false);
+          await handleSaveButtonOnClickEvent();
+        }}
+        loading={!canSave}
+        loadingPosition={"start"}
+        startIcon={<Save/>}
+        variant="contained"
+        sx={SaveStyles}
+      >
+        <span>Save</span>
+      </LoadingButton>
+
+      <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
         <Alert
-          onClose={handleCloseSnack}
-          severity="success"
-          variant="filled"
+          onClose={handleSnackClose}
+          severity={snackSeverity}
+          variant={snackVariant}
           sx={{ width: '100%' }}
         >
-          Your data has been saved successfully.
+          {snackMessage}
         </Alert>
       </Snackbar>
-    </Grid>
+
+      <Menu
+        open={recipeListContextMenu !== null}
+        onClose={handleRecipeListContextMenuOnCloseEvent}
+        anchorReference="anchorPosition"
+        anchorPosition={recipeListContextMenu !== null
+          ? {
+            top: recipeListContextMenu.mouseY,
+            left: recipeListContextMenu.mouseX
+          }
+          : undefined}
+      >
+        <MenuItem onClick={() =>
+        {
+          handleAddNewRecipe(selectedRecipeIndex);
+          handleRecipeListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Add/></ListItemIcon>
+          <Typography>Add new above</Typography>
+        </MenuItem>
+
+        <MenuItem onClick={() =>
+        {
+          handleAddNewRecipe(selectedRecipeIndex + 1);
+          handleRecipeListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Add/></ListItemIcon>
+          <Typography>Add new below</Typography>
+        </MenuItem>
+
+        <Divider/>
+
+        <MenuItem onClick={() =>
+        {
+          handleCloneRecipe(selectedRecipeIndex);
+          handleRecipeListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><ContentCopy/></ListItemIcon>
+          <Typography>Clone above</Typography>
+        </MenuItem>
+
+        <MenuItem onClick={() =>
+        {
+          handleCloneRecipe(selectedRecipeIndex + 1);
+          handleRecipeListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><ContentCopy/></ListItemIcon>
+          <Typography>Clone below</Typography>
+        </MenuItem>
+
+        <MenuItem dense onClick={() =>
+        {
+          handleDeleteRecipe(selectedRecipeIndex);
+          handleRecipeListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Remove/></ListItemIcon>
+          <Typography>Remove Selected</Typography>
+        </MenuItem>
+      </Menu>
+
+      <Dialog
+        open={categoryDialogOpen}
+        onClose={() => setCategoryDialogOpen(false)}
+        maxWidth={"lg"}
+        fullWidth
+      >
+        <DialogTitle>
+          Category Management
+        </DialogTitle>
+        <DialogContent>
+          <Grid2 container rowSpacing={2} columnSpacing={2}>
+            {/* list of categories */}
+            <Grid2 size={4}>
+              <div onContextMenu={handleCategoryListContextMenu} style={{ cursor: 'context-menu' }}>
+                <List>
+                  {categories.map((category, index) => renderCategoryListItem(category, index))}
+                </List>
+              </div>
+            </Grid2>
+
+            {/* category modification */}
+            <Grid2 size={8}>
+              <Stack spacing={2}>
+                {/* Key */}
+                <TextField
+                  required
+                  variant={"outlined"}
+                  label={"Key"}
+                  value={selectedCategory?.key}
+                  onChange={handleCategoryKeyOnChangeEvent}
+                  size={"small"}
+                  slotProps={{
+                    input: {
+                      startAdornment: <InputAdornment position={"start"}>
+                        <Key/>
+                      </InputAdornment>
+                    }
+                  }}
+                />
+
+                {/* Name */}
+                <TextField
+                  variant={"outlined"}
+                  label={"Name"}
+                  value={selectedCategory?.name}
+                  onChange={handleCategoryNameOnChangeEvent}
+                  size={"small"}
+                />
+
+                {/* Icon */}
+                <TextField
+                  type={"number"}
+                  label={"Icon Index"}
+                  value={selectedCategory?.iconIndex ?? -1}
+                  sx={{ width: '80px' }}
+                  onChange={(event) => handleCategoryIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
+                />
+
+                {/* Initial visibility checkboxes */}
+                <FormControlLabel
+                  control={<Checkbox
+                    checked={selectedCategory?.unlockedByDefault}
+                    checkedIcon={<LockOpen/>}
+                    icon={<Lock/>}
+                    onChange={handleCategoryUnlockedByDefaultOnCheckEvent}
+                  />}
+                  label="Unlocked By Default"
+                  labelPlacement={"end"}
+                />
+
+                {/* Description */}
+                <TextField
+                  variant={"outlined"}
+                  label={"Description"}
+                  value={selectedCategory?.description}
+                  onChange={handleCategoryDescriptionOnChangeEvent}
+                  size={"small"}
+                  multiline
+                  fullWidth
+                  rows={4}
+                />
+              </Stack>
+            </Grid2>
+          </Grid2>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            variant={"contained"}
+            startIcon={<Check />}
+            color={"success"}
+            onClick={() => setCategoryDialogOpen(false)}
+          >
+            <Typography>Done Modifying Categories</Typography>
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Menu
+        open={categoryListContextMenu !== null}
+        onClose={handleCategoryListContextMenuOnCloseEvent}
+        anchorReference="anchorPosition"
+        anchorPosition={categoryListContextMenu !== null
+          ? {
+            top: categoryListContextMenu.mouseY,
+            left: categoryListContextMenu.mouseX
+          }
+          : undefined}
+      >
+        <MenuItem onClick={() =>
+        {
+          handleAddCategory(selectedCategoryIndex);
+          handleCategoryListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Add/></ListItemIcon>
+          <Typography>Add new above</Typography>
+        </MenuItem>
+
+        <MenuItem onClick={() =>
+        {
+          handleAddCategory(selectedCategoryIndex + 1);
+          handleCategoryListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Add/></ListItemIcon>
+          <Typography>Add new below</Typography>
+        </MenuItem>
+
+        <Divider/>
+
+        <MenuItem onClick={() =>
+        {
+          handleCloneCategory(selectedCategoryIndex);
+          handleCategoryListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><ContentCopy/></ListItemIcon>
+          <Typography>Clone above</Typography>
+        </MenuItem>
+
+        <MenuItem onClick={() =>
+        {
+          handleCloneCategory(selectedCategoryIndex + 1);
+          handleCategoryListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><ContentCopy/></ListItemIcon>
+          <Typography>Clone below</Typography>
+        </MenuItem>
+
+        <MenuItem dense onClick={() =>
+        {
+          handleDeleteCategory(selectedCategoryIndex);
+          handleCategoryListContextMenuOnCloseEvent();
+        }}>
+          <ListItemIcon><Remove/></ListItemIcon>
+          <Typography>Remove Selected</Typography>
+        </MenuItem>
+      </Menu>
+      {/*endregion not-grid-related elements */}
+    </Grid2>
   </>;
 }

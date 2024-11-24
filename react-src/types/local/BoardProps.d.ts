@@ -1,0 +1,23 @@
+import Panel = Sdp.Panel;
+import PanelParameter = Sdp.PanelParameter;
+
+type BoardProps = {
+  projectPath: string;
+};
+
+type SdpPanelEditorProps = {
+  panel: Panel;
+  updatePanel: (previousPanelKey: string, updatedPanel: Panel) => void;
+}
+
+type SdpParameterEditorProps = {
+  parameter: PanelParameter | null;
+  updateParameter: (updatedParameter: PanelParameter) => void;
+  parameterIdToIconElement: (parameterId: number) => JSX.Element;
+}
+
+export {
+  BoardProps,
+  SdpPanelEditorProps,
+  SdpParameterEditorProps
+};

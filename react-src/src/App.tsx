@@ -1,10 +1,12 @@
 import React, {useState} from "react";
 import {Box, Paper, Tab, Tabs, tabsClasses} from "@mui/material";
-import {Construction, SimCard} from '@mui/icons-material';
+import {Construction, Poll, Adjust} from '@mui/icons-material';
 
 import './styles/index.css';
-import ProjectPathAppBar from "./topbar/ProjectPathAppBar.tsx";
+import ProjectPathAppBar from "./components/topbar/ProjectPathAppBar.tsx";
 import CraftingBoard from "./boards/crafting/CraftingBoard.tsx";
+import SdpBoard from "./boards/sdp/SdpBoard.tsx";
+import ProficiencyBoard from "./boards/proficiency/ProficiencyBoard.tsx";
 
 // ================================================================================================
 const JmzTabStyles = {
@@ -15,7 +17,7 @@ const JmzTabStyles = {
 
 export default function App()
 {
-  const [projectPath, setProjectPath] = useState<string>('');
+  const [projectPath, setProjectPath] = useState<string>('/media/exdrive/dev/gaming/ca/chef-adventure/data');
 
   const [currentTabIndex, setCurrentTabIndex] = useState<number>(0);
 
@@ -40,6 +42,10 @@ export default function App()
     {
       case 0:
         return <CraftingBoard projectPath={projectPath} />;
+      case 1:
+        return <SdpBoard projectPath={projectPath} />;
+      case 2:
+        return <ProficiencyBoard projectPath={projectPath} />
       default:
         return <span>no plugin tab selected.</span>;
     }
@@ -64,8 +70,9 @@ export default function App()
               },
             }}
           >
-            <Tab label={"crafting"} icon={<Construction />} sx={JmzTabStyles} />
-            <Tab label={"SDP"} icon={<SimCard />}/>
+            <Tab label={"Crafting"} icon={<Construction />} sx={JmzTabStyles} />
+            <Tab label={"SDP"} icon={<Poll />} sx={JmzTabStyles} />
+            <Tab label={"Proficiencies"} icon={<Adjust />} sx={JmzTabStyles} />
           </Tabs>
         </Box>
         <Paper>
