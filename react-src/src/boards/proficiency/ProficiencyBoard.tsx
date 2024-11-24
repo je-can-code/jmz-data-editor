@@ -112,13 +112,13 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
    * The actors that are loaded from the DB.
    */
   const [ actors, setActors ] = useState<RPG_Actor[]>([]);
-  const [ actorIdChecked, setActorIdsChecked ] = React.useState<number[]>([]);
+  const [ actorIdChecked, setActorIdsChecked ] = useState<number[]>([]);
 
   /**
    * The skills that are loaded from the DB.
    */
   const [ skills, setSkills ] = useState<RPG_Skill[]>([]);
-  const [ skillIdRewardEarned, setSkillIdRewardEarned ] = React.useState<number[]>([]);
+  const [ skillIdRewardEarned, setSkillIdRewardEarned ] = useState<number[]>([]);
 
   /**
    * The most recently selected skill in the skill search list.
