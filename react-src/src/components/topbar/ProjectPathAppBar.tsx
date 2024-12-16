@@ -10,12 +10,11 @@ type ProjectPathAppBarProps = {
 const ProjectPathAppBar = (projectPathAppBarProps: ProjectPathAppBarProps) =>
 {
   return (
-    <AppBar position="sticky">
-      <Toolbar variant="dense">
-        <IconButton edge="start" color="inherit" aria-label="menu">
-          <MenuIcon />
-        </IconButton>
-        <Typography variant="h6" sx={{ flexGrow: 1 }}>JMZ Data Editor</Typography>
+    <AppBar position={"static"}>
+      <Toolbar variant={"dense"}>
+        <Typography variant="h6" sx={{ flexGrow: 1 }}>
+          JMZ Data Editor
+        </Typography>
         <Typography fontFamily={"monospace"} sx={{ flexGrow: 1 }}>
           {
             projectPathAppBarProps.pathGetter === ''

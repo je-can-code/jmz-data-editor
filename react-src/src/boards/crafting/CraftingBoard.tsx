@@ -1,92 +1,68 @@
 import React, { ChangeEvent, MouseEvent, useEffect, useState } from 'react';
-import LoadingButton from '@mui/lab/LoadingButton';
 import {
   Alert,
   Autocomplete,
   Button,
   Checkbox,
-  Chip,
   Dialog, DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
   FormControlLabel,
   Grid2,
-  IconButton,
   InputAdornment,
   List,
   ListItem,
   ListItemButton,
   ListItemIcon,
   ListItemText,
-  ListSubheader,
   Menu,
   MenuItem,
   Paper,
-  Select,
   Snackbar,
   Stack,
   TextField,
-  ToggleButton,
-  ToggleButtonGroup,
   Typography
 } from "@mui/material";
 import {
   Add,
-  BusinessCenter,
   Check,
-  Clear,
   ContentCopy, DonutLarge,
   DonutSmall,
   Key,
   ListAlt,
-  LocalDining,
   Lock,
   LockOpen,
-  QuestionMark,
   Remove,
   Save,
-  Shield,
   Subject,
-  Sync,
   Visibility,
   VisibilityOff
 } from "@mui/icons-material";
 import styled from "styled-components";
 import { FixedSizeList } from 'react-window';
+import CraftingComponentList from "./CraftingComponentList.tsx";
+
+import { executeLoad, executeSave } from "../../services/DataService.ts";
 
 import { BoardProps } from "../../../types/local/BoardProps";
+import ConfigFilenames from "../../enums/ConfigFilenames.ts";
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../enums/MuiSnackbar.ts";
+import CraftingListType from "../../enums/CraftingListType.ts";
 
-import { executeLoad, executeSave, loadArmors, loadItems, loadWeapons } from "../../services/DataService.ts";
-
-import ConfigFilenames from "../../../types/custom/ConfigFilenames.ts";
-
-import { Crafting } from "../../../types/custom/Crafting";
-import CraftingComponentType from "../../../types/custom/CraftingComponentType.ts";
-import { brown, } from "@mui/material/colors";
-import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../../types/external/MuiSnackbar.ts";
-import CraftingComponentList from "./CraftingComponentList.tsx";
-import CraftingListType from "../../../types/custom/CraftingListType.ts";
-import RPG_Item = Rmmz.Implementations.RPG_Item;
-import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
-import RPG_Armor = Rmmz.Implementations.RPG_Armor;
+import Crafting from "../../../types/custom/Crafting";
 import Configuration = Crafting.Configuration;
 import Recipe = Crafting.Recipe;
 import Category = Crafting.Category;
 import CraftingConfiguration = Crafting.Configuration;
 import CraftingComponent = Crafting.CraftingComponent;
+import SaveButton from "../../components/core/SaveButton.tsx";
+import KeyTextField from "../../components/core/KeyTextField.tsx";
 
 // ================================================================================================
 const EntryText = styled(ListItemText)`
     font-family: monospace;
 `;
-
-const SaveStyles = {
-  fontFamily: "monospace",
-  position: "absolute",
-  top: "8%",
-  right: "1%",
-};
 
 // ================================================================================================
 /**
@@ -115,10 +91,12 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
 
   const [ recipeListContextMenu, setRecipeListContextMenu ] = useState<{
-    mouseX: number; mouseY: number;
+    mouseX: number;
+    mouseY: number;
   } | null>(null);
   const [ categoryListContextMenu, setCategoryListContextMenu ] = useState<{
-    mouseX: number; mouseY: number;
+    mouseX: number;
+    mouseY: number;
   } | null>(null);
 
   const [ categoryDialogOpen, setCategoryDialogOpen ] = useState<boolean>(false);
@@ -266,19 +244,16 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
   //endregion actions
 
   //region updates
-  const handleRecipeKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  const handleRecipeKeyOnChangeEvent = (input: string) =>
   {
     // if there is no entry, stop processing.
     if (!selectedRecipe) return;
 
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
-
     // update the entry.
     const updatedRecipe = {
       ...selectedRecipe,
-      key: updatedValue
-    };
+      key: input
+    } as Recipe;
     setSelectedRecipe(updatedRecipe);
 
     // rebuild the updated list of entries with the updated entry.
@@ -534,10 +509,10 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
         break;
     }
 
+    setSelectedRecipe(updatedRecipe);
+
     const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
     setRecipes(updatedRecipes);
-
-    handleSnack(`${craftingListType} list has been updated.`, MuiSnackbarSeverity.Success);
   };
 
   const handleAddNewRecipe = (index: number) =>
@@ -591,8 +566,6 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
 
     const updatedRecipes = recipes.toSpliced(index, 1);
     setRecipes(updatedRecipes);
-
-    handleSnack("Recipe has been deleted successfully.", MuiSnackbarSeverity.Success);
   };
 
   const handleAddCategory = (index: number) =>
@@ -683,7 +656,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
         >
           <ListItemIcon>
             {(selectedCategoryIndex === index)
-              ? <DonutSmall color={"secondary"} />
+              ? <DonutSmall color={"secondary"}/>
               : <DonutLarge color={"info"}/>}
           </ListItemIcon>
           <EntryText
@@ -702,9 +675,8 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
       <Grid2 size={3}>
         <div onContextMenu={handlRecipeListContextMenu} style={{ cursor: 'context-menu' }}>
           <FixedSizeList
-            height={720}
-            width={400}
-            itemSize={35}
+            height={1030}
+            itemSize={30}
             overscanCount={5}
             itemCount={recipes.length}
           >
@@ -732,21 +704,9 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
               <Grid2 container rowSpacing={2} columnSpacing={4}>
                 {/* Key */}
                 <Grid2 size={4}>
-                  <TextField
-                    required
-                    variant={"outlined"}
-                    label={"Key"}
+                  <KeyTextField
                     value={selectedRecipe.key}
                     onChange={handleRecipeKeyOnChangeEvent}
-                    size={"small"}
-                    fullWidth
-                    slotProps={{
-                      input: {
-                        startAdornment: <InputAdornment position={"start"}>
-                          <Key/>
-                        </InputAdornment>
-                      }
-                    }}
                   />
                 </Grid2>
 
@@ -834,7 +794,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                       ListboxProps={{ sx: { maxHeight: '400px' } }}
                       getOptionKey={(option) => option.key}
                       getOptionLabel={(option) => option.name}
-                      renderOption={(props, option, { index }) =>
+                      renderOption={(props, option) =>
                       {
                         if (option === null || option.name === "" || option.name.startsWith("=="))
                         {
@@ -911,23 +871,15 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
 
       {/*region not-grid-related elements */}
       {/* This is over-arching save button- it will save all recipes to disk. */}
-      <LoadingButton
-        size={"small"}
-        color={"secondary"}
-        onClick={async () =>
+      <SaveButton
+        extraSaveText={"Recipes"}
+        canSave={canSave}
+        handleSave={async () =>
         {
-          // set the save flag to false to prevent further clicking.
           setCanSave(false);
           await handleSaveButtonOnClickEvent();
         }}
-        loading={!canSave}
-        loadingPosition={"start"}
-        startIcon={<Save/>}
-        variant="contained"
-        sx={SaveStyles}
-      >
-        <span>Save</span>
-      </LoadingButton>
+      />
 
       <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
         <Alert
@@ -1087,7 +1039,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
         <DialogActions>
           <Button
             variant={"contained"}
-            startIcon={<Check />}
+            startIcon={<Check/>}
             color={"success"}
             onClick={() => setCategoryDialogOpen(false)}
           >
