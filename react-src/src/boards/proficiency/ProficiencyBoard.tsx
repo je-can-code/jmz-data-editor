@@ -1,8 +1,5 @@
 import React, {
-  ChangeEvent,
-  MouseEvent,
-  useEffect,
-  useState
+  ChangeEvent, MouseEvent, useEffect, useState
 } from "react";
 import { FixedSizeList } from 'react-window';
 import {
@@ -57,22 +54,19 @@ import styled from "styled-components";
 
 import { BoardProps } from "../../../types/local/BoardProps";
 import {
-  executeLoad,
-  executeSave,
-  loadActors,
-  loadSkills
+  executeLoad, executeSave, loadActors, loadSkills
 } from "../../services/DataService.ts";
-import ConfigFilenames from "../../../types/custom/ConfigFilenames.ts";
+import ConfigFilenames from "../../enums/ConfigFilenames.ts";
 import {
-  MuiSnackbarSeverity,
-  MuiSnackbarVariant
-} from "../../../types/external/MuiSnackbar.ts";
+  MuiSnackbarSeverity, MuiSnackbarVariant
+} from "../../enums/MuiSnackbar.ts";
 import RPG_Actor = Rmmz.Implementations.RPG_Actor;
 import RPG_Skill = Rmmz.Implementations.RPG_Skill;
 
 import Configuration = Proficiency.Configuration;
 import Conditional = Proficiency.Conditional;
 import Requirement = Proficiency.Requirement;
+import SaveButton from "../../components/core/SaveButton.tsx";
 
 //region setup
 const EntryText = styled(ListItemText)`
@@ -80,7 +74,10 @@ const EntryText = styled(ListItemText)`
 `;
 
 const SaveStyles = {
-  fontFamily: "monospace", position: "absolute", top: "8%", right: "1%",
+  fontFamily: "monospace",
+  position: "absolute",
+  top: "8%",
+  right: "1%",
 };
 //endregion setup
 
@@ -197,7 +194,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
 
     // update the entry.
     const updatedConditional = {
-      ...selectedConditional, key: updatedValue
+      ...selectedConditional,
+      key: updatedValue
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
@@ -225,7 +223,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     setActorIdsChecked(newChecked.sort());
 
     const updatedConditional = {
-      ...selectedConditional, actorIds: newChecked
+      ...selectedConditional,
+      actorIds: newChecked
     } as Conditional;
     const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
     setCurrentConditionals(updatedConditionals);
@@ -248,7 +247,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     setSkillIdRewardEarned(newChecked.sort());
 
     const updatedConditional = {
-      ...selectedConditional, skillRewards: newChecked
+      ...selectedConditional,
+      skillRewards: newChecked
     } as Conditional;
     const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
     setCurrentConditionals(updatedConditionals);
@@ -271,7 +271,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     setRequirementSecondarySkillIds(newChecked);
 
     const updatedRequirement = {
-      ...selectedRequirement, secondarySkillIds: newChecked,
+      ...selectedRequirement,
+      secondarySkillIds: newChecked,
     } as Requirement;
     setSelectedRequirement(updatedRequirement);
 
@@ -279,7 +280,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     setCurrentRequirements(updatedRequirements);
 
     const updatedConditional = {
-      ...selectedConditional, requirements: updatedRequirements,
+      ...selectedConditional,
+      requirements: updatedRequirements,
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
@@ -290,7 +292,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
   const handleRequirementProficiencyOnChangeEvent = (value: number) =>
   {
     const updatedRequirement = {
-      ...selectedRequirement, proficiency: value,
+      ...selectedRequirement,
+      proficiency: value,
     } as Requirement;
     setSelectedRequirement(updatedRequirement);
 
@@ -298,7 +301,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     setCurrentRequirements(updatedRequirements);
 
     const updatedConditional = {
-      ...selectedConditional, requirements: updatedRequirements,
+      ...selectedConditional,
+      requirements: updatedRequirements,
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
@@ -313,7 +317,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     setRequirementSkill(value);
     setRequirementSkillText(value.name);
     const updatedRequirement = {
-      ...selectedRequirement, skillId: value.id ?? 0,
+      ...selectedRequirement,
+      skillId: value.id ?? 0,
     } as Requirement;
     setSelectedRequirement(updatedRequirement);
 
@@ -321,7 +326,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     setCurrentRequirements(updatedRequirements);
 
     const updatedConditional = {
-      ...selectedConditional, requirements: updatedRequirements,
+      ...selectedConditional,
+      requirements: updatedRequirements,
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
@@ -333,7 +339,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
   {
     const updatedJsRewards = event.target.value;
     const updatedConditional = {
-      ...selectedConditional, jsRewards: updatedJsRewards,
+      ...selectedConditional,
+      jsRewards: updatedJsRewards,
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
@@ -421,7 +428,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
 
     const newConditionalsContextMenuState = conditionalsContextMenu === null
       ? {
-        mouseX: event.clientX + 2, mouseY: event.clientY - 6,
+        mouseX: event.clientX + 2,
+        mouseY: event.clientY - 6,
       }
       : null;
 
@@ -439,7 +447,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
 
     const newConditionalsContextMenuState = requirementsContextMenu === null
       ? {
-        mouseX: event.clientX + 2, mouseY: event.clientY - 6,
+        mouseX: event.clientX + 2,
+        mouseY: event.clientY - 6,
       }
       : null;
 
@@ -454,10 +463,16 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
   const handleAddNewConditional = (index: number) =>
   {
     const initialRequirement = {
-      skillId: 1, proficiency: 10, secondarySkillIds: []
+      skillId: 1,
+      proficiency: 10,
+      secondarySkillIds: []
     } as Requirement;
     const newConditional = {
-      key: "NEW-CONDITIONAL-0", requirements: [ initialRequirement ], skillRewards: [], actorIds: [], jsRewards: ""
+      key: "NEW-CONDITIONAL-0",
+      requirements: [ initialRequirement ],
+      skillRewards: [],
+      actorIds: [],
+      jsRewards: ""
     } as Conditional;
     const updatedConditionals = currentConditionals.toSpliced(index, 0, newConditional);
     setCurrentConditionals(updatedConditionals);
@@ -502,14 +517,17 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
   const handleAddNewRequirement = (index: number) =>
   {
     const newRequirement = {
-      skillId: 1, proficiency: 10, secondarySkillIds: []
+      skillId: 1,
+      proficiency: 10,
+      secondarySkillIds: []
     } as Requirement;
 
     const updatedRequirements = currentRequirements.toSpliced(index, 0, newRequirement);
     setCurrentRequirements(updatedRequirements);
 
     const updatedConditional = {
-      ...selectedConditional, requirements: updatedRequirements,
+      ...selectedConditional,
+      requirements: updatedRequirements,
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
@@ -535,7 +553,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     setCurrentRequirements(updatedRequirements);
 
     const updatedConditional = {
-      ...selectedConditional, requirements: updatedRequirements,
+      ...selectedConditional,
+      requirements: updatedRequirements,
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
@@ -561,7 +580,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     setCurrentRequirements(updatedRequirements);
 
     const updatedConditional = {
-      ...selectedConditional, requirements: updatedRequirements,
+      ...selectedConditional,
+      requirements: updatedRequirements,
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
@@ -576,14 +596,17 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     if (selectedRequirement === null) return;
 
     const secondarySkillIdFreeRequirement = {
-      skillId: selectedRequirement.skillId, proficiency: selectedRequirement.proficiency, secondarySkillIds: []
+      skillId: selectedRequirement.skillId,
+      proficiency: selectedRequirement.proficiency,
+      secondarySkillIds: []
     } as Requirement;
 
     const updatedRequirements = currentRequirements.with(index, secondarySkillIdFreeRequirement);
     setCurrentRequirements(updatedRequirements);
 
     const updatedConditional = {
-      ...selectedConditional, requirements: updatedRequirements,
+      ...selectedConditional,
+      requirements: updatedRequirements,
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
@@ -601,7 +624,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
   const renderConditionalListItem = (props: ListChildComponentProps) =>
   {
     const {
-      index, style
+      index,
+      style
     } = props;
 
     const conditional = currentConditionals.at(index);
@@ -639,7 +663,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
 
     return <>
       <ListItem key={`${index}-${actor.name}`} sx={{
-        paddingTop: 0, paddingBottom: 0
+        paddingTop: 0,
+        paddingBottom: 0
       }}>
         <ListItemButton sx={{ height: 30 }}>
           <ListItemIcon>
@@ -719,9 +744,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
       <Grid2 size={3}>
         <div onContextMenu={handleConditionalContextMenu} style={{ cursor: 'context-menu' }}>
           <FixedSizeList
-            height={720}
-            width={400}
-            itemSize={35}
+            height={1030}
+            itemSize={30}
             overscanCount={5}
             itemCount={currentConditionals.length}
           >
@@ -733,15 +757,15 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
       {/* This is the form fields for modifying the selected entry. */}
       <Grid2 size={9}>
         <Paper sx={{
-          height: '100%', width: '100%', padding: 2
+          height: '100%',
+          width: '100%',
+          padding: 2
         }} elevation={10}>
           {(selectedConditional === null)
-            ? <Grid2 container>
-              <Typography>
-                Please select a conditional on the left.<br/>
-                If there are no conditionals, then consider making one.
-              </Typography>
-            </Grid2>
+            ? <Typography>
+              Please select a conditional on the left.<br/>
+              If there are no conditionals, then consider making one.
+            </Typography>
 
             : <Grid2 container rowSpacing={2} columnSpacing={4}>
               {/* Conditional inputs. */}
@@ -766,10 +790,15 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
 
               <Grid2 size={4}>
                 <List dense sx={{
-                  paddingTop: 0, border: '1px solid', borderRadius: '6px', borderColor: '#bfbfbf'
+                  paddingTop: 0,
+                  border: '1px solid',
+                  borderRadius: '6px',
+                  borderColor: '#bfbfbf'
                 }}>
                   <ListSubheader sx={{
-                    height: '30px', fontWeight: 'bold', marginBottom: '10px'
+                    height: '30px',
+                    fontWeight: 'bold',
+                    marginBottom: '10px'
                   }}>
                     Applicable Actors
                   </ListSubheader>
@@ -851,7 +880,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
                       fontFamily: "monospace",
                     }, // Class for the label of the input field
                     "& .MuiInputLabel-standard": {
-                      color: "#2e2e2e", fontFamily: "monospace",
+                      color: "#2e2e2e",
+                      fontFamily: "monospace",
                     },
                   }}
                 />
@@ -867,7 +897,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
                 <div onContextMenu={handleRequirementsContextMenu} style={{ cursor: 'context-menu' }}>
                   <List dense>
                     <ListSubheader sx={{
-                      height: '30px', fontWeight: 'bold'
+                      height: '30px',
+                      fontWeight: 'bold'
                     }}>
                       Skills Required to Develop Proficiency In
                     </ListSubheader>
@@ -996,7 +1027,9 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
             ariaLabel={"skill-speed-dial"}
             icon={<PriceCheck/>}
             sx={{
-              position: 'absolute', left: 16, bottom: 16
+              position: 'absolute',
+              left: 16,
+              bottom: 16
             }}
           >
             <SpeedDialAction
@@ -1023,23 +1056,15 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
       </Dialog>
 
       {/* This is over-arching save button- it will save all data to disk. */}
-      <LoadingButton
-        size={"small"}
-        color={"secondary"}
-        onClick={async () =>
+      <SaveButton
+        extraSaveText={"Proficiencies"}
+        canSave={canSave}
+        handleSave={async () =>
         {
-          // set the save flag to false to prevent further clicking.
           setCanSave(false);
           await handleSaveButtonOnClickEvent();
         }}
-        loading={!canSave}
-        loadingPosition={"start"}
-        startIcon={<Save/>}
-        variant="contained"
-        sx={SaveStyles}
-      >
-        <span>Save</span>
-      </LoadingButton>
+      />
 
       {/* The snackbar for conveying useful messages. */}
       <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
@@ -1060,7 +1085,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
         anchorReference="anchorPosition"
         anchorPosition={conditionalsContextMenu !== null
           ? {
-            top: conditionalsContextMenu.mouseY, left: conditionalsContextMenu.mouseX
+            top: conditionalsContextMenu.mouseY,
+            left: conditionalsContextMenu.mouseX
           }
           : undefined}
       >
@@ -1116,7 +1142,8 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
         anchorReference="anchorPosition"
         anchorPosition={requirementsContextMenu !== null
           ? {
-            top: requirementsContextMenu.mouseY, left: requirementsContextMenu.mouseX
+            top: requirementsContextMenu.mouseY,
+            left: requirementsContextMenu.mouseX
           }
           : undefined}
       >

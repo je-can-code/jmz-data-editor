@@ -2,6 +2,10 @@ import {
   Autocomplete,
   Button,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   Grid2,
   IconButton,
@@ -18,13 +22,15 @@ import {
   ToggleButtonGroup,
   Typography
 } from "@mui/material";
-import CraftingComponentType from "../../../types/custom/CraftingComponentType.ts";
-import { Add, BusinessCenter, Clear, ContentCopy, LocalDining, QuestionMark, Shield, Sync } from "@mui/icons-material";
+import CraftingComponentType from "../../enums/CraftingComponentType.ts";
+import {
+  Add, BusinessCenter, Clear, Close, ContentCopy, Edit, LocalDining, QuestionMark, Shield, Sync
+} from "@mui/icons-material";
 import { brown } from "@mui/material/colors";
 import React, { MouseEvent, useEffect, useState } from "react";
-import { Crafting } from "../../../types/custom/Crafting";
-import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../../types/external/MuiSnackbar.ts";
-import CraftingListType from "../../../types/custom/CraftingListType.ts";
+import Crafting from "../../../types/custom/Crafting";
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../enums/MuiSnackbar.ts";
+import CraftingListType from "../../enums/CraftingListType.ts";
 import { loadArmors, loadItems, loadWeapons } from "../../services/DataService.ts";
 import CraftingComponent = Crafting.CraftingComponent;
 import RPG_Item = Rmmz.Implementations.RPG_Item;
@@ -55,6 +61,7 @@ export default function CraftingComponentList(props: CraftingListProps)
   const [ componentListContextMenu, setComponentListContextMenu ] = useState<{
     mouseX: number; mouseY: number;
   } | null>(null);
+  const [ componentModifierOpen, setComponentModifierOpen ] = useState(false);
   //endregion state
 
   /**
@@ -107,7 +114,7 @@ export default function CraftingComponentList(props: CraftingListProps)
   }, [ props.projectPath, props.components ]);
 
   //region actions
-  const handleRecipeComponentListItemOnClickEvent = (_: any, index: number) =>
+  const handleRecipeComponentListItemOnClickEvent = (index: number) =>
   {
     setSelectedComponentIndex(index);
     setSelectedComponent(null);
@@ -140,6 +147,16 @@ export default function CraftingComponentList(props: CraftingListProps)
   {
     setComponentListContextMenu(null);
   };
+
+  const handleOpenComponentModifierDialogOnClick = () =>
+  {
+    setComponentModifierOpen(true);
+  };
+
+  const handleCloseComponentModifierDialogOnClick = () =>
+  {
+    setComponentModifierOpen(false);
+  };
   //endregion actions
 
   //region component updates
@@ -161,7 +178,6 @@ export default function CraftingComponentList(props: CraftingListProps)
 
   const handleRelevantComponentDropdownOnClickEvent = (newComponent: RPG_Item | RPG_Weapon | RPG_Armor) =>
   {
-    console.log(newComponent);
     let ingredientType = CraftingComponentType.Item;
     switch (true)
     {
@@ -205,8 +221,6 @@ export default function CraftingComponentList(props: CraftingListProps)
 
     setCurrentComponents(updatedComponents);
     props.updateRecipeFunc(updatedComponents, props.type);
-
-    props.handleSnack(`Added new component to ${props.type}.`);
   };
 
   const handleCloneComponent = (index: number) =>
@@ -227,8 +241,6 @@ export default function CraftingComponentList(props: CraftingListProps)
 
     setCurrentComponents(updatedComponents);
     props.updateRecipeFunc(updatedComponents, props.type);
-
-    props.handleSnack(`Cloned new component to ${props.type}.`);
   };
 
   const handleOverrideSelectedWithPendingComponentOnClickEvent = () =>
@@ -297,6 +309,15 @@ export default function CraftingComponentList(props: CraftingListProps)
         disableGutters
         secondaryAction={<>
           <IconButton
+            edge="start"
+            onClick={() =>
+            {
+              handleRecipeComponentListItemOnClickEvent(index);
+              handleOpenComponentModifierDialogOnClick();
+            }}>
+            <Edit/>
+          </IconButton>
+          <IconButton
             edge="end"
             onClick={() => handleDeleteTargetComponent(index)}>
             <Clear/>
@@ -305,7 +326,7 @@ export default function CraftingComponentList(props: CraftingListProps)
       >
         <ListItemButton
           selected={selectedComponentIndex === index}
-          onClick={event => handleRecipeComponentListItemOnClickEvent(event, index)}
+          onClick={() => handleRecipeComponentListItemOnClickEvent(index)}
         >
           <ListItemIcon sx={{ minWidth: '30px' }}>
             {icon}
@@ -336,7 +357,10 @@ export default function CraftingComponentList(props: CraftingListProps)
       >
         <ListItemButton
           sx={{ height: 32 }}
-          onClick={() => handleRelevantComponentDropdownOnClickEvent(option)}
+          onClick={() =>
+          {
+            handleRelevantComponentDropdownOnClickEvent(option)
+          }}
         >
           <ListItemText
             primary={`${option.id}: ${option.name}`}
@@ -427,7 +451,10 @@ export default function CraftingComponentList(props: CraftingListProps)
     if (!selectedComponent) return <></>;
     if (selectedComponentIndex < 0) return <></>;
 
-    return buildComponentChip(selectedComponent);
+    return <Stack spacing={4}>
+      {"Current Component:"}
+      {buildComponentChip(selectedComponent, "outlined")}
+    </Stack>
   };
 
   const renderPendingComponentChip = () =>
@@ -435,32 +462,33 @@ export default function CraftingComponentList(props: CraftingListProps)
     if (!pendingComponent) return <></>;
 
     return <>
-      <Grid2 container spacing={2}>
-        <Grid2 size={6}>
-          {buildComponentChip(pendingComponent)}
-        </Grid2>
-        <Grid2 size={4}>
-          <TextField
-            type={"number"}
-            label={"Count"}
-            value={pendingComponent.count}
-            sx={{ width: '80px' }}
-            onChange={(event) => handlePendingComponentCountOnChangeEvent(parseInt(event.target.value) ?? 1)}
-          />
-        </Grid2>
-        <Grid2 size={2}>
-          <IconButton
-            color={"secondary"}
-            onClick={() => handleOverrideSelectedWithPendingComponentOnClickEvent()}
-          >
-            <Sync/>
-          </IconButton>
-        </Grid2>
-      </Grid2>
+      <Stack
+        spacing={4}
+        sx={{
+          border: '1px solid',
+          borderRadius: '10px',
+          padding: '10px',
+          borderColor: 'grey'
+        }}
+      >
+
+        {"Pending Component Update:"}
+        {buildComponentChip(pendingComponent)}
+
+        <TextField
+          type={"number"}
+          label={"Count"}
+          value={pendingComponent.count}
+          fullWidth
+          onChange={(event) => handlePendingComponentCountOnChangeEvent(parseInt(event.target.value) ?? 1)}
+        />
+
+
+      </Stack>
     </>;
   };
 
-  const buildComponentChip = (craftingComponent: CraftingComponent) =>
+  const buildComponentChip = (craftingComponent: CraftingComponent, variant: "filled" | "outlined" = "filled") =>
   {
     let componentData = null;
     let color: ("primary" | "success" | "error" | "info") = "primary";
@@ -491,7 +519,7 @@ export default function CraftingComponentList(props: CraftingListProps)
       <Chip
         icon={icon}
         label={`${componentData.name} (${craftingComponent.count})`}
-        variant={"filled"}
+        variant={variant}
         color={color}
       />
     </>
@@ -504,52 +532,19 @@ export default function CraftingComponentList(props: CraftingListProps)
         {props.type}
       </Typography>
       {currentComponents.length > 0 && selectedComponentType !== null
-        ? <>
-          <ToggleButtonGroup
-            exclusive
-            color={"primary"}
-            value={selectedComponentType}
-            defaultValue={CraftingComponentType.Item}
-            onChange={handleRecipeComponentTypeOnChangeEvent}
-            fullWidth
-          >
-            <ToggleButton
-              selected={selectedComponentType === CraftingComponentType.Item}
-              value={CraftingComponentType.Item}>
-              <BusinessCenter sx={{ color: brown[500] }}/>
-            </ToggleButton>
-            <ToggleButton
-              selected={selectedComponentType === CraftingComponentType.Weapon}
-              value={CraftingComponentType.Weapon}>
-              <LocalDining color={"error"}/>
-            </ToggleButton>
-            <ToggleButton
-              selected={selectedComponentType === CraftingComponentType.Armor}
-              value={CraftingComponentType.Armor}>
-              <Shield color={"info"}/>
-            </ToggleButton>
-          </ToggleButtonGroup>
-
-          {renderRelevantRecipeComponentDropdown()}
-
-          {renderPendingComponentChip()}
-
-          {renderSelectedComponentChip()}
-        </>
+        ? <></>
         : <></>}
-
       <div onContextMenu={handleComponentListContextMenu} style={{ cursor: 'context-menu' }}>
         <List dense>
           {currentComponents.length > 0
             ? currentComponents.map((ingredient, index) => renderRecipeComponent(ingredient, index))
-            : <Button
-              fullWidth
-              startIcon={<Add/>}
-              onClick={() =>
-              {
-                handleAddNewComponent(null);
-              }}
-              variant={"contained"}/>}
+            : <>
+              <Button
+                fullWidth
+                startIcon={<Add/>}
+                onClick={() => handleAddNewComponent(null)}
+                variant={"contained"}/>
+            </>}
         </List>
       </div>
     </Stack>
@@ -598,5 +593,86 @@ export default function CraftingComponentList(props: CraftingListProps)
         <Typography>Clone below</Typography>
       </MenuItem>
     </Menu>
+    <Dialog
+      open={componentModifierOpen}
+      onClose={() => handleCloseComponentModifierDialogOnClick()}
+      fullWidth
+      maxWidth={"md"}
+      sx={{
+        '& .MuiDialog-paper': {
+          maxHeight: 450,
+          minHeight: 400
+        }
+      }}
+    >
+      <DialogTitle>
+        <Typography>
+          Modify Component
+        </Typography>
+      </DialogTitle>
+      <DialogContent>
+        <Grid2 container spacing={4}>
+          <Grid2 size={7}>
+            <Stack>
+              <ToggleButtonGroup
+                exclusive
+                color={"primary"}
+                value={selectedComponentType}
+                defaultValue={CraftingComponentType.Item}
+                onChange={handleRecipeComponentTypeOnChangeEvent}
+                fullWidth
+              >
+                <ToggleButton
+                  selected={selectedComponentType === CraftingComponentType.Item}
+                  value={CraftingComponentType.Item}>
+                  <BusinessCenter sx={{ color: brown[500] }}/>
+                </ToggleButton>
+                <ToggleButton
+                  selected={selectedComponentType === CraftingComponentType.Weapon}
+                  value={CraftingComponentType.Weapon}>
+                  <LocalDining color={"error"}/>
+                </ToggleButton>
+                <ToggleButton
+                  selected={selectedComponentType === CraftingComponentType.Armor}
+                  value={CraftingComponentType.Armor}>
+                  <Shield color={"info"}/>
+                </ToggleButton>
+              </ToggleButtonGroup>
+
+              {renderRelevantRecipeComponentDropdown()}
+            </Stack>
+          </Grid2>
+          <Grid2 size={5}>
+            <Stack spacing={2}>
+              {renderSelectedComponentChip()}
+
+              {renderPendingComponentChip()}
+            </Stack>
+          </Grid2>
+        </Grid2>
+      </DialogContent>
+      <DialogActions>
+        <Button
+          variant={"contained"}
+          color={"warning"}
+          startIcon={<Close/>}
+          onClick={() => handleCloseComponentModifierDialogOnClick()}
+        >
+          Nevermind
+        </Button>
+        <Button
+          color={"primary"}
+          variant={"contained"}
+          startIcon={<Sync/>}
+          onClick={() =>
+          {
+            handleOverrideSelectedWithPendingComponentOnClickEvent();
+            handleCloseComponentModifierDialogOnClick();
+          }}
+        >
+          Update Component
+        </Button>
+      </DialogActions>
+    </Dialog>
   </>
 }

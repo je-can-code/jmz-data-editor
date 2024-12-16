@@ -1,4 +1,4 @@
-import CraftingComponentType from "./CraftingComponentType.ts";
+import CraftingComponentType from "../../src/enums/CraftingComponentType.ts";
 
 declare namespace Crafting
 {
@@ -38,3 +38,5 @@ declare namespace Crafting
     unlockedByDefault: boolean;
   }
 }
+
+export default Crafting;

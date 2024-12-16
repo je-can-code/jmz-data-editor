@@ -1,5 +1,5 @@
-import {os} from "@neutralinojs/lib";
-import {Button} from "@mui/material";
+import { os } from "@neutralinojs/lib";
+import { Button } from "@mui/material";
 
 type ProjectPickerButtonProps = {
   projectPathSetter: (value: string) => void;
@@ -11,8 +11,7 @@ export default function ProjectPickerButton(projectPathSetter: ProjectPickerButt
   {
     const path = await os.showFolderDialog(
       'Choose project data directory',
-      { defaultPath: '/media/je/exdrive/dev/gaming/ca/chef-adventure/data' }
-    );
+      { defaultPath: '/media/je/exdrive/dev/gaming/ca/chef-adventure/data' });
 
     if (!!path)
     {
@@ -21,6 +20,12 @@ export default function ProjectPickerButton(projectPathSetter: ProjectPickerButt
   };
 
   return <>
-    <Button color="inherit" onClick={async () => { await folderPicker(); }}>Select Project Root</Button>
+    <Button
+      color={"inherit"}
+      variant={"outlined"}
+      onClick={async () => await folderPicker()}
+    >
+      {"Select Project Root"}
+    </Button>
   </>;
 }
