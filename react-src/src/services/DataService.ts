@@ -10,6 +10,8 @@ import { Questopedia } from "../../types/custom/Quests";
 import Configuration = Questopedia.Configuration;
 import ConfigFilenames from "../enums/ConfigFilenames.ts";
 
+const debug = false;
+
 /**
  * Saves the given data by the given filename at the given projectPath.
  * @param projectPath The basepath to the location where the file should live.
@@ -29,7 +31,12 @@ const executeSave = async (projectPath: string, filename: string, data: any) =>
   // execute the write to disk.
   await filesystem.writeFile(destination, saveData);
 
-  console.log(`saved ${destination}.`);
+  if (debug)
+  {
+    console.log(saveData);
+  }
+
+  console.log(`saved data to ${destination} successfully.`);
 };
 
 /**
@@ -46,7 +53,16 @@ const executeLoad = async <T>(projectPath: string, filename: string): Promise<T>
   const json = await filesystem.readFile(target);
 
   // return the parsed content.
-  return JSON.parse(json) as T;
+  const result = JSON.parse(json) as T;
+
+  console.log(`loaded data successfully.`);
+
+  if (debug)
+  {
+    console.log(result);
+  }
+
+  return result;
 };
 
 const loadActors = async (projectPath: string): Promise<RPG_Actor[]> =>

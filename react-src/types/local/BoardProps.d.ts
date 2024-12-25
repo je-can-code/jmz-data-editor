@@ -5,11 +5,6 @@ type BoardProps = {
   projectPath: string;
 };
 
-type SdpPanelEditorProps = {
-  panel: Panel;
-  updatePanel: (previousPanelKey: string, updatedPanel: Panel) => void;
-}
-
 type SdpParameterEditorProps = {
   parameter: PanelParameter | null;
   updateParameter: (updatedParameter: PanelParameter) => void;
