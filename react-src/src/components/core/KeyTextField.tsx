@@ -25,6 +25,11 @@ export default function KeyTextField({ value, onChange }: KeyTextFieldProps)
           </InputAdornment>
         }
       }}
+      sx={{
+        "& .MuiOutlinedInput-root": {
+          fontFamily: "monospace",
+        },
+      }}
     />
   </>
 }

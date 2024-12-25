@@ -118,8 +118,6 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
     // a helper function for initializing the state of this component based on the configuration file.
     const initializeState = async (projectPath: string) =>
     {
-      // TODO: add popup warning in this method and add a reset button?
-
       const craftingData = await executeLoad<Configuration>(projectPath, ConfigFilenames.Crafting);
       if (!ignore && craftingData)
       {

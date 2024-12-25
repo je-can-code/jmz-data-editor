@@ -1,18 +1,8 @@
 declare namespace Sdp
 {
-  interface PanelParameter
+  interface Configuration
   {
-    parameterId: number;
-    perRank: number;
-    isFlat: boolean;
-    isCore: boolean;
-  }
-
-  interface PanelReward
-  {
-    rewardName: string;
-    rankRequired: number;
-    effect: string;
+    sdps: Panel[];
   }
 
   interface Panel
@@ -30,5 +20,20 @@ declare namespace Sdp
     panelParameters: PanelParameter[];
     panelRewards: PanelReward[];
     rarity: number;
+  }
+
+  interface PanelParameter
+  {
+    parameterId: number;
+    perRank: number;
+    isFlat: boolean;
+    isCore: boolean;
+  }
+
+  interface PanelReward
+  {
+    rewardName: string;
+    rankRequired: number;
+    effect: string;
   }
 }

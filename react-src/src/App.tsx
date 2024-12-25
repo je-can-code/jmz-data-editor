@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Box, Grid2, Paper, Tab, Tabs, tabsClasses } from "@mui/material";
-import { Construction, Poll, Android, Storage, AccountTree, Rule } from '@mui/icons-material';
+import { Construction, Poll, Android, Storage, AccountTree, Rule, Hub } from '@mui/icons-material';
 
 import './styles/index.css';
 import ProjectPathAppBar from "./components/topbar/ProjectPathAppBar.tsx";
@@ -88,9 +88,8 @@ export default function App()
             />
             <Tab
               label={"SDP"}
-              icon={<Poll/>}
+              icon={<Hub/>}
               sx={JmzTabStyles}
-              disabled
             />
             <Tab
               label={"Proficiency"}

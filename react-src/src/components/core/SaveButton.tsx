@@ -10,6 +10,10 @@ const SaveStyles = {
 };
 
 type SaveButtonProps = {
+  /**
+   * The additional text to append to "Save". If you put "Panels" in this value, then the button would reflect "Save
+   * Panels" instead of just "Save".
+   */
   handleSave: () => void;
   canSave: boolean;
   extraSaveText?: string;
