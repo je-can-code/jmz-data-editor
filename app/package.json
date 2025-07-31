@@ -1,0 +1,37 @@
+{
+  "name": "jmz-data-editor",
+  "private": true,
+  "license": "LGPL-3.0-or-later",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bunx --bun vite --host",
+    "build": "tsc && bunx --bun vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.13.5",
+    "@emotion/styled": "^11.13.5",
+    "@mui/icons-material": "^6.1.8",
+    "@mui/lab": "^6.0.0-beta.16",
+    "@mui/material": "^6.1.8",
+    "@neutralinojs/lib": "^5.4.0",
+    "lodash": "^4.17.21",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-window": "^1.8.10",
+    "recharts": "^3.1.0",
+    "styled-components": "^6.1.13"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.0.1",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/lodash": "^4.17.13",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react-swc": "^3.7.1",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  }
+}
