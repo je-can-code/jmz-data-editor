@@ -24,7 +24,7 @@ To run the app there are a couple steps involved.
 
 1) Install the packages:
 ```bash
-cd /react-src
+cd /app
 bun i
 ```
 
