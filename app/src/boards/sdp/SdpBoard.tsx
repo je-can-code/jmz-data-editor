@@ -1,13 +1,35 @@
-import React, { MouseEvent, useEffect, useState } from "react";
+import React, { MouseEvent, useEffect, useRef, useState } from "react";
+import { FixedSizeList, ListChildComponentProps } from "react-window";
 import {
   Alert,
+  Autocomplete, Box,
   Button,
-  Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FilledInput, FormControl,
+  Checkbox,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  FilledInput,
+  FormControl,
   FormControlLabel,
-  Grid2, InputLabel, List,
+  Grid2,
+  InputLabel,
+  List,
   ListItem,
   ListItemButton,
-  ListItemIcon, ListItemText, ListSubheader, Menu, MenuItem, Paper, Select, Snackbar, Stack, TextField, Typography
+  ListItemIcon,
+  ListItemText,
+  ListSubheader,
+  Menu,
+  MenuItem,
+  Paper,
+  Select,
+  Snackbar,
+  Stack,
+  TextField,
+  Tooltip,
+  Typography,
 } from "@mui/material";
 import {
   Add,
@@ -24,6 +46,7 @@ import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../enums/MuiSnackbar
 
 import SaveButton from "../../components/core/SaveButton.tsx";
 import KeyTextField from "../../components/core/KeyTextField.tsx";
+import ReloadButton from "../../components/core/ReloadButton.tsx";
 
 import ConfigFilenames from "../../enums/ConfigFilenames.ts";
 import { executeLoad, executeSave } from "../../services/DataService.ts";
@@ -36,9 +59,14 @@ import PanelParameter = Sdp.PanelParameter;
 import PanelReward = Sdp.PanelReward;
 import Configuration = Sdp.Configuration;
 
-export default function SdpBoard(boardProps: BoardProps)
+export default function SdpBoard({ projectPath }: BoardProps)
 {
   //region state
+  const panelsRef = useRef<Panel[]>([]);
+  const pendingKeyRef = useRef<string | null>(null);
+  const listRef = useRef<FixedSizeList>(null);
+  const [ canReload, setCanReload ] = useState<boolean>(false);
+
   const [ panels, setPanels ] = useState<Panel[]>([]);
   const [ selectedPanel, setSelectedPanel ] = useState<Panel | null>(null);
   const [ selectedPanelIndex, setSelectedPanelIndex ] = useState<number>(0);
@@ -46,6 +74,7 @@ export default function SdpBoard(boardProps: BoardProps)
     mouseX: number;
     mouseY: number;
   } | null>(null);
+  const [ searchTerm, setSearchTerm ] = useState<string>('');
 
   const [ panelParameters, setPanelParameters ] = useState<PanelParameter[]>([]);
   const [ selectedPanelParameter, setSelectedPanelParameter ] = useState<PanelParameter>();
@@ -65,6 +94,10 @@ export default function SdpBoard(boardProps: BoardProps)
 
   const [ rankupCostProjectionDialog, setRankupCostProjectionDialog ] = useState<boolean>(false);
 
+  const [ cloneFromDialogOpen, setCloneFromDialogOpen ] = useState<boolean>(false);
+  const [ cloneFromInsertIndex, setCloneFromInsertIndex ] = useState<number | null>(null);
+  const [ cloneFromSelectedPanel, setCloneFromSelectedPanel ] = useState<Panel | null>(null);
+
   const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
   const [ snackMessage, setSnackMessage ] = useState<string>("");
@@ -79,46 +112,159 @@ export default function SdpBoard(boardProps: BoardProps)
   useEffect(() =>
   {
     let ignore = false;
-    const { projectPath } = boardProps;
-    if (projectPath === null || projectPath === '' || !projectPath.endsWith("/data"))
-    {
-      console.error(`invalid path provided: ${projectPath}`);
-      return;
-    }
 
-    // a helper function for initializing the state of this component based on the configuration file.
     const initializeState = async (projectPath: string) =>
     {
-      const sdpData = await executeLoad<Configuration>(projectPath, ConfigFilenames.Sdps);
-      if (!ignore && sdpData)
+      if (projectPath === null || projectPath === '' || !projectPath.endsWith("/data"))
       {
-        // update the data list.
+        console.error(`invalid path provided: ${projectPath}`);
+        return;
+      }
+
+      const sdpData = await executeLoad<Configuration>(projectPath, ConfigFilenames.Sdps);
+
+      if (!ignore && sdpData?.sdps)
+      {
         setPanels(sdpData.sdps);
+        panelsRef.current = sdpData.sdps;
 
-        const firstPanel = sdpData.sdps.at(1)!;
-        setSelectedPanel(firstPanel);
-        setSelectedPanelIndex(1);
+        if (!selectedPanel && sdpData.sdps.length > 1)
+        {
+          const firstPanel = sdpData.sdps.at(1)!;
+          setSelectedPanel(firstPanel);
+          setSelectedPanelIndex(1);
+          setPanelParameters(firstPanel.panelParameters);
+          setSelectedPanelParameterIndex(0);
+          // setPanelRewards(firstPanel.panelRewards);
+        }
 
-        setPanelParameters(firstPanel.panelParameters);
-        setSelectedPanelParameterIndex(0);
-
-        //setPanelRewards(firstPanel.panelRewards);
-
-        // enable saving.
         setCanSave(true);
+        setCanReload(true);
+
+        setTimeout(() =>
+        {
+          window.dispatchEvent(new CustomEvent('jmz:sdp-ready'));
+        }, 0);
+
+        setTimeout(() =>
+        {
+          if (pendingKeyRef.current)
+          {
+            const key = pendingKeyRef.current;
+            const success = selectByKey(key);
+            if (success)
+            {
+              pendingKeyRef.current = null;
+            }
+          }
+        }, 0);
+      }
+    };
+
+    const onSdpSelectByKey = (event: Event) =>
+    {
+      const custom = event as CustomEvent<{
+        key: string
+      }>;
+      const targetKey = custom.detail?.key ?? '';
+      if (!targetKey) return;
+
+      const havePanels = !!panelsRef.current && panelsRef.current.length > 0;
+      if (!havePanels)
+      {
+        pendingKeyRef.current = targetKey;
+        return;
+      }
+
+      const success = selectByKey(targetKey);
+      if (success)
+      {
+        pendingKeyRef.current = null;
+      }
+      else
+      {
+        pendingKeyRef.current = targetKey;
       }
     };
 
     initializeState(projectPath)
       .catch(console.error);
+
+    window.addEventListener('jmz:sdp-select-by-key' as any, onSdpSelectByKey as EventListener);
+
     return () =>
     {
       ignore = true;
-    }
-  }, [ boardProps.projectPath ]);
+      window.removeEventListener('jmz:sdp-select-by-key' as any, onSdpSelectByKey as EventListener);
+    };
+  }, [ projectPath ]);
+
+  useEffect(() =>
+  {
+    panelsRef.current = panels;
+  }, [ panels ]);
+
+  useEffect(() =>
+  {
+    if (panels.length === 0) return;
+    if (selectedPanelIndex < 0) return;
+
+    scrollListToIndex(selectedPanelIndex, 'smart');
+  }, [ selectedPanelIndex, panels.length ]);
   //endregion setup
 
   //region actions
+  const selectByKey = (targetKey: string) =>
+  {
+    if (!targetKey) return false;
+
+    const currentPanels = panelsRef.current;
+    if (!currentPanels || currentPanels.length === 0) return false;
+
+    const index = currentPanels.findIndex(p => p && p.key === targetKey);
+    if (index === -1) return false;
+
+    setSelectedPanelIndex(index);
+
+    const panel = currentPanels.at(index)!;
+    setSelectedPanel(panel);
+
+    const parameters = panel.panelParameters ?? [];
+    setPanelParameters(parameters);
+    setSelectedPanelParameterIndex(0);
+    if (parameters.length > 0)
+    {
+      setSelectedPanelParameter(parameters.at(0)!);
+    }
+    else
+    {
+      setSelectedPanelParameter(undefined);
+    }
+
+    const rewards = panel.panelRewards ?? [];
+    setPanelRewards(rewards);
+    setSelectedPanelRewardIndex(0);
+    if (rewards.length > 0)
+    {
+      setSelectedPanelReward(rewards.at(0)!);
+    }
+    else
+    {
+      setSelectedPanelReward(undefined);
+    }
+
+    scrollListToIndex(index, 'start');
+
+    setTimeout(() =>
+    {
+      window.dispatchEvent(new CustomEvent('jmz:sdp-selected', {
+        detail: { key: targetKey }
+      }));
+    }, 0);
+
+    return true;
+  };
+
   const handleSdpListItemOnClickEvent = (index: number) =>
   {
     setSelectedPanelIndex(index);
@@ -167,11 +313,67 @@ export default function SdpBoard(boardProps: BoardProps)
     } as Configuration;
 
     // save the data to disk.
-    await executeSave(boardProps.projectPath, ConfigFilenames.Sdps, updatedConfiguration);
+    await executeSave(projectPath, ConfigFilenames.Sdps, updatedConfiguration);
 
     setCanSave(true);
 
     handleSnack("Quest data has been saved successfully.");
+  };
+
+  const handleReloadButtonOnClickEvent = async () =>
+  {
+    try
+    {
+      const sdpData = await executeLoad<Configuration>(projectPath, ConfigFilenames.Sdps);
+      if (!sdpData)
+      {
+        throw new Error("No SDP data found.");
+      }
+
+      // refresh list
+      setPanels(sdpData.sdps);
+
+      // try to restore selection by index if still valid
+      if (selectedPanelIndex > 0 && selectedPanelIndex < sdpData.sdps.length)
+      {
+        const panel = sdpData.sdps[selectedPanelIndex];
+        setSelectedPanel(panel);
+
+        setPanelParameters(panel.panelParameters);
+        setSelectedPanelParameterIndex(0);
+        setSelectedPanelParameter(panel.panelParameters.at(0)!);
+
+        setPanelRewards(panel.panelRewards);
+        setSelectedPanelRewardIndex(0);
+        setSelectedPanelReward(panel.panelRewards.at(0)!);
+      }
+      else
+      {
+        // default to first real entry if not valid
+        const firstPanel = sdpData.sdps.at(0)!;
+        setSelectedPanel(firstPanel);
+        setSelectedPanelIndex(1);
+
+        setPanelParameters(firstPanel.panelParameters);
+        setSelectedPanelParameterIndex(0);
+        setSelectedPanelParameter(firstPanel.panelParameters.at(0)!);
+
+        setPanelRewards(firstPanel.panelRewards);
+        setSelectedPanelRewardIndex(0);
+        setSelectedPanelReward(firstPanel.panelRewards.at(0)!);
+      }
+
+      handleSnack("SDP data has been reloaded successfully.", MuiSnackbarSeverity.Success);
+    }
+    catch (error)
+    {
+      console.error("Failed to reload SDP data:", error);
+      handleSnack("Failed to reload SDP data.", MuiSnackbarSeverity.Error);
+    }
+    finally
+    {
+      setCanReload(true);
+    }
   };
 
   const handleSnackClose = (_: any, reason?: string) =>
@@ -232,6 +434,89 @@ export default function SdpBoard(boardProps: BoardProps)
       : null;
 
     setRewardListContextMenu(newContextMenuState);
+  };
+
+  const openCloneFromDialog = (insertIndex: number) =>
+  {
+    setCloneFromInsertIndex(insertIndex);
+    setCloneFromSelectedPanel(null);
+    setCloneFromDialogOpen(true);
+  };
+
+  const handleConfirmCloneFrom = () =>
+  {
+    if (cloneFromSelectedPanel === null) return setCloneFromDialogOpen(false);
+    if (cloneFromInsertIndex === null) return setCloneFromDialogOpen(false);
+
+    const clonedParameters = cloneFromSelectedPanel.panelParameters.toSpliced(0, 0);
+    const clonedRewards = cloneFromSelectedPanel.panelRewards.toSpliced(0, 0);
+
+    const clonedPanel = {
+      ...cloneFromSelectedPanel,
+      panelParameters: clonedParameters,
+      panelRewards: clonedRewards,
+    } as Panel;
+
+    const updatedPanels = panels.toSpliced(cloneFromInsertIndex, 0, clonedPanel);
+    setPanels(updatedPanels);
+
+    setCloneFromDialogOpen(false);
+  };
+
+  const handleSearchChange = (term: string) =>
+  {
+    setSearchTerm(term);
+
+    if (term.trim() === '') return;
+
+    // find the first non-header panel whose key or name matches
+    const foundIndex = panels.findIndex(panel =>
+    {
+      if (!panel) return false;
+
+      const keyMatches = panel.key.toLowerCase()
+        .includes(term.toLowerCase());
+      const nameMatches = (panel.name ?? '')
+        .toLowerCase()
+        .includes(term.toLowerCase());
+
+      return keyMatches || nameMatches;
+    });
+
+    if (foundIndex !== -1)
+    {
+      // scroll and select the item
+      listRef.current?.scrollToItem(foundIndex, 'start');
+      handleSdpListItemOnClickEvent(foundIndex);
+    }
+  };
+
+  const scrollListToIndex = (index: number, align: 'auto' | 'smart' | 'center' | 'end' | 'start' = 'start') =>
+  {
+    const list = listRef.current;
+    if (!list) return;
+
+    // Try immediately (works when list is already laid out)
+    try
+    {
+      list.scrollToItem(index, align);
+    }
+    catch
+    {
+      // ignore
+    }
+
+    // Try again on the next frame (after layout commit)
+    requestAnimationFrame(() =>
+    {
+      listRef.current?.scrollToItem(index, align);
+    });
+
+    // Final fallback after microtasks
+    setTimeout(() =>
+    {
+      listRef.current?.scrollToItem(index, align);
+    }, 0);
   };
   //endregion actions
 
@@ -611,49 +896,11 @@ export default function SdpBoard(boardProps: BoardProps)
   //endregion updates
 
   //region render
-  const renderSdpListItems = () =>
+  const isHeaderRow = (index: number) =>
   {
-    return panels.map((panel, index) =>
-    {
-      const panelIsDivider = panel.key.endsWith('___');
-
-      const textStyle = {
-        fontFamily: 'monospace',
-        fontWeight: panelIsDivider
-          ? 'bold'
-          : 'normal',
-        color: fromRarityColorIndexToColor(panel.rarity)
-      };
-
-      return <React.Fragment key={index}>
-        <ListSubheader
-          sx={{
-            fontFamily: 'monospace',
-            fontWeight: 900,
-          }}
-        >{panelIsDivider
-          ? panel.name
-          : ""}</ListSubheader>
-        <ListItem>
-          <ListItemButton
-            sx={{ maxHeight: '30px' }}
-            selected={selectedPanelIndex === index}
-            onClick={() => handleSdpListItemOnClickEvent(index)}
-          >
-            <ListItemIcon>
-              {(selectedPanelIndex === index)
-                ? <DoubleArrow color={"success"}/>
-                : <KeyboardArrowRight color={"warning"}/>}
-            </ListItemIcon>
-            <ListItemText
-              primary={`[${panel.key}]: ${panel.name}`}
-              disableTypography
-              sx={textStyle}
-            />
-          </ListItemButton>
-        </ListItem>
-      </React.Fragment>
-    });
+    const sdp = panels.at(index);
+    if (!sdp) return false;
+    return sdp.key.endsWith('___');
   };
 
   const renderSdpListItem = (props: ListChildComponentProps) =>
@@ -666,20 +913,38 @@ export default function SdpBoard(boardProps: BoardProps)
     const sdp = panels.at(index);
     if (!sdp) return <></>;
 
-    const panelIsDivider = sdp.key.endsWith('___');
+    const isHeader = isHeaderRow(index);
 
     const textStyle = {
       fontFamily: 'monospace',
-      fontWeight: panelIsDivider
+      fontWeight: isHeader
         ? 'bold'
         : 'normal',
       color: fromRarityColorIndexToColor(sdp.rarity)
-    };
+    } as const;
+
+    // Determine if a divider should appear below this row (i.e., next row is a header)
+    const next = panels.at(index + 1);
+    const isNextHeader = isHeaderRow(index + 1) ?? false;
+    const nextHeaderColor = isNextHeader
+      ? fromRarityColorIndexToColor(next!.rarity)
+      : undefined;
 
     return <>
-      <ListItem key={index} style={style}>
+      <ListItem key={sdp.key} style={style}>
         <ListItemButton
-          sx={{ maxHeight: '30px' }}
+          sx={{
+            maxHeight: '30px',
+            position: 'relative',
+            // Option A: thick border line
+            ...(isNextHeader && {
+              borderBottom: `4px solid ${nextHeaderColor}`,
+              // keep the border visible under selection styles
+              '&.Mui-selected': {
+                borderBottom: `3px solid ${nextHeaderColor}`,
+              }
+            }),
+          }}
           selected={selectedPanelIndex === index}
           onClick={() => handleSdpListItemOnClickEvent(index)}
         >
@@ -695,7 +960,7 @@ export default function SdpBoard(boardProps: BoardProps)
           />
         </ListItemButton>
       </ListItem>
-    </>
+    </>;
   };
 
   const fromRarityColorIndexToName = (rarityColorIndex: number) =>
@@ -752,21 +1017,21 @@ export default function SdpBoard(boardProps: BoardProps)
     switch (rarityColorIndex)
     {
       case 0:
-        return grey[800];
+        return grey[600];
       case 3:
-        return green[800];
+        return green[600];
       case 23:
-        return blue[800];
+        return blue[600];
       case 31:
-        return purple[800];
+        return purple[500];
       case 20:
-        return orange[800];
+        return orange[600];
       case 25:
-        return yellow[800];
+        return yellow[600];
       default:
         console.warn("if modifying the rarity dropdown options, be sure to fix them here, too.");
         console.warn(`${rarityColorIndex} was not an implemented option.`);
-        return grey[500];
+        return grey[100];
     }
   };
 
@@ -1031,21 +1296,53 @@ export default function SdpBoard(boardProps: BoardProps)
   return <>
     <Grid2 container spacing={2}>
       <Grid2 size={3}>
+        {/* Search bar for SDPs */}
+        <TextField
+          variant={"outlined"}
+          label={"Search SDP"}
+          value={searchTerm}
+          onChange={(event) => handleSearchChange(event.target.value)}
+          size={"small"}
+          fullWidth
+          sx={{
+            marginTop: 1,
+            marginBottom: 1
+          }}
+          slotProps={{
+            input: {
+              endAdornment: searchTerm
+                ? (
+                  <Tooltip title={"Clear search"}>
+                    <Box
+                      component={"span"}
+                      sx={{ cursor: 'pointer' }}
+                      onClick={() => setSearchTerm('')}
+                    >
+                      ✕
+                    </Box>
+                  </Tooltip>
+                )
+                : null
+            }
+          }}
+        />
         <div
           onContextMenu={handlePanelListContextMenu}
           style={{ cursor: 'context-menu' }}
         >
           {panels.length > 0
             ? <>
-              <List
-                dense
-                sx={{
-                  maxHeight: '1030px',
-                  overflow: 'auto',
-                }}
+              {/* @ts-ignore */}
+              <FixedSizeList
+                ref={listRef}
+                height={960}
+                width={"100%"}
+                itemSize={30}
+                overscanCount={5}
+                itemCount={panels.length}
               >
-                {renderSdpListItems()}
-              </List>
+                {renderSdpListItem}
+              </FixedSizeList>
             </>
             : <>
               <Button
@@ -1423,6 +1720,15 @@ export default function SdpBoard(boardProps: BoardProps)
         await handleSaveButtonOnClickEvent();
       }}
     />
+    <ReloadButton
+      handleReload={async () =>
+      {
+        setCanReload(false);
+        await handleReloadButtonOnClickEvent();
+      }}
+      canReload={canReload}
+      extraReloadText={"SDP Data"}
+    />
 
     <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
       <Alert
@@ -1482,6 +1788,26 @@ export default function SdpBoard(boardProps: BoardProps)
       }}>
         <ListItemIcon><ContentCopy/></ListItemIcon>
         <Typography>Clone below</Typography>
+      </MenuItem>
+
+      <Divider/>
+
+      <MenuItem onClick={() =>
+      {
+        openCloneFromDialog(selectedPanelIndex);
+        setPanelListContextMenu(null);
+      }}>
+        <ListItemIcon><ContentCopy/></ListItemIcon>
+        <Typography>Clone above from...</Typography>
+      </MenuItem>
+
+      <MenuItem onClick={() =>
+      {
+        openCloneFromDialog(selectedPanelIndex + 1);
+        setPanelListContextMenu(null);
+      }}>
+        <ListItemIcon><ContentCopy/></ListItemIcon>
+        <Typography>Clone below from...</Typography>
       </MenuItem>
 
       <Divider/>
@@ -1646,6 +1972,71 @@ export default function SdpBoard(boardProps: BoardProps)
         </Button>
       </DialogActions>
 
+    </Dialog>
+
+    <Dialog
+      open={cloneFromDialogOpen}
+      onClose={() => setCloneFromDialogOpen(false)}
+      maxWidth={"sm"}
+      fullWidth
+    >
+      <DialogTitle>
+        Clone Panel From
+      </DialogTitle>
+      <DialogContent
+        sx={{
+          pt: 2
+        }}
+      >
+        <Stack spacing={2}>
+          <Autocomplete
+            size={"small"}
+            options={panels}
+            getOptionKey={(option) => option?.key ?? "no-key"}
+            getOptionLabel={(option) => option?.name ?? ""}
+            isOptionEqualToValue={(a, b) => a.key === b.key}
+            value={cloneFromSelectedPanel}
+            onChange={(_, value) => setCloneFromSelectedPanel(value)}
+            slotProps={{
+              listbox: {
+                sx: { maxHeight: '300px' }
+              }
+            }}
+            renderInput={(params) =>
+            {
+              return <TextField
+                {...params}
+                size={"small"}
+                label={"Panels"}
+                placeholder="Search panel name..."
+                helperText={"Pick the panel to clone and insert at the chosen position."}
+              />
+            }}
+          />
+
+          {cloneFromSelectedPanel &&
+            <Typography variant={"body2"}>
+              {`Selected: ${cloneFromSelectedPanel.key} — ${cloneFromSelectedPanel.name}`}
+            </Typography>}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button
+          variant={"outlined"}
+          onClick={() => setCloneFromDialogOpen(false)}
+        >
+          <Typography>Cancel</Typography>
+        </Button>
+        <Button
+          variant={"contained"}
+          disabled={!cloneFromSelectedPanel}
+          onClick={handleConfirmCloneFrom}
+          startIcon={<Check/>}
+          color={"success"}
+        >
+          <Typography>Clone</Typography>
+        </Button>
+      </DialogActions>
     </Dialog>
 
     {/*endregion not-grid-related elements */}

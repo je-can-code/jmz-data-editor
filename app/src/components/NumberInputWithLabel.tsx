@@ -5,6 +5,7 @@ type NumberInputWithLabelProps = {
   label: string;
   value: number;
   onChangeEventHandler: (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => void;
+  disabled?: boolean;
   endAdornment?: any;
   sx?: SxProps<Theme> | undefined;
 };
@@ -14,6 +15,7 @@ type NumberInputWithLabelProps = {
  * @param label The label at the end of the number input.
  * @param value The controlled value of the number input.
  * @param onChangeEventHandler The controlled event handler function for managing inputs.
+ * @param disabled Whether or not the input should be disabled.
  * @param endAdornment The optional icon; pass a MUI icon if desired.
  * @param sx The optional customization; pass a regular "sx" object with properties.
  * @constructor
@@ -22,6 +24,7 @@ export default function NumberInputWithLabel({
   label,
   value,
   onChangeEventHandler,
+  disabled,
   endAdornment,
   sx,
 }: NumberInputWithLabelProps)
@@ -38,6 +41,7 @@ export default function NumberInputWithLabel({
         <TextField
           type={"number"}
           variant={"standard"}
+          disabled={disabled ?? false}
           slotProps={(endAdornment !== null)
             ? {
               input: {

@@ -36,6 +36,8 @@ export default function App()
   //region state
   const [ projectPath, setProjectPath ] = useState<string>('/media/exdrive/dev/gaming/ca/chef-adventure/data');
   const [ currentTabIndex, setCurrentTabIndex ] = useState<number>(0);
+
+  const [ pendingSdpSelectKey, setPendingSdpSelectKey ] = useState<string | null>(null);
   //endregion state
 
   useEffect(() =>
@@ -44,6 +46,80 @@ export default function App()
       .catch(console.error);
 
   }, [ projectPath ]);
+
+  useEffect(() =>
+  {
+    const onNavigateToTab = (event: Event) =>
+    {
+      const custom = event as CustomEvent<{ tab: string; sdpKey?: string }>;
+      const { tab, sdpKey } = custom.detail ?? {} as any;
+
+      if (tab === 'sdp')
+      {
+        setCurrentTabIndex(1);
+
+        if (sdpKey && sdpKey.length > 0)
+        {
+          setPendingSdpSelectKey(sdpKey);
+
+          // First attempt (works when the board is already warm)
+          setTimeout(() =>
+          {
+            window.dispatchEvent(new CustomEvent('jmz:sdp-select-by-key', {
+              detail: { key: sdpKey }
+            }));
+          }, 0);
+        }
+      }
+    };
+
+    const onSdpReady = () =>
+    {
+      if (pendingSdpSelectKey)
+      {
+        // Re-emit once SdpBoard says its data is ready
+        setTimeout(() =>
+        {
+          window.dispatchEvent(new CustomEvent('jmz:sdp-select-by-key', {
+            detail: { key: pendingSdpSelectKey }
+          }));
+        }, 0);
+      }
+    };
+
+    const onSdpSelected = (event: Event) =>
+    {
+      const custom = event as CustomEvent<{ key: string }>;
+      const key = custom.detail?.key ?? '';
+      if (key && pendingSdpSelectKey === key)
+      {
+        setPendingSdpSelectKey(null);
+      }
+    };
+
+    window.addEventListener('jmz:navigate-to-tab' as any, onNavigateToTab as EventListener);
+    window.addEventListener('jmz:sdp-ready' as any, onSdpReady as EventListener);
+    window.addEventListener('jmz:sdp-selected' as any, onSdpSelected as EventListener);
+    return () =>
+    {
+      window.removeEventListener('jmz:navigate-to-tab' as any, onNavigateToTab as EventListener);
+      window.removeEventListener('jmz:sdp-ready' as any, onSdpReady as EventListener);
+      window.removeEventListener('jmz:sdp-selected' as any, onSdpSelected as EventListener);
+    };
+  }, [ pendingSdpSelectKey ]);
+
+  useEffect(() =>
+  {
+    if (currentTabIndex === 1 && pendingSdpSelectKey)
+    {
+      setTimeout(() =>
+      {
+        window.dispatchEvent(new CustomEvent('jmz:sdp-select-by-key', {
+          detail: { key: pendingSdpSelectKey }
+        }));
+      }, 0);
+    }
+  }, [ currentTabIndex, pendingSdpSelectKey ]);
 
   //region actions
   const handleProjectPathUpdate = async (newProjectPath: string) =>
