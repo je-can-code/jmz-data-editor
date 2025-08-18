@@ -3,12 +3,15 @@ import { KnownParameter } from "../../../services/ParameterIdMapper.ts";
 
 class GrowthParser
 {
-  static #regex = (paramKey: string) => new RegExp(`<${paramKey}BuffPlus:\\[([+\\-*/ ().\\w]+)]>`, 'gi');
+  static #defaultRegexPattern = "BuffPlus";
+  static #regex = (paramKey: string, regexPattern?: string) =>
+    new RegExp(`<${paramKey}${regexPattern || this.#defaultRegexPattern}:\\[([+\\-*/ ().\\w]+)]>`, 'gi');
+  static #validFormulaChars = /^[+\-*/ ().\w]*$/;
 
   static read(growableNote: string, knownParam: KnownParameter): string
   {
     // build the regex from the template.
-    const parameterizedRegex = this.#regex(knownParam.key);
+    const parameterizedRegex = this.#regex(knownParam.key, knownParam.regex);
 
     // grab the value from the note.
     return RPGManager.getStringFromNoteByRegex(growableNote, parameterizedRegex) ?? '';
@@ -16,12 +19,23 @@ class GrowthParser
 
   static write(originalNote: string, knownParam: KnownParameter, newFormula: string): string
   {
+    // Check if the formula contains invalid characters
+    if (newFormula && !this.#validFormulaChars.test(newFormula))
+    {
+      console.error(`Formula contains invalid characters: ${newFormula}`);
+      return originalNote; // Return unchanged note if invalid
+    }
+
     // build the regex from the parameter key.
-    const parameterizedRegex = this.#regex(knownParam.key);
+    const parameterizedRegex = this.#regex(knownParam.key, knownParam.regex);
+    const regexPattern = knownParam.regex || this.#defaultRegexPattern;
+
+    // Format the value using the custom formatter if provided, otherwise use the formula directly
+    const formattedValue = knownParam.formatValue ? knownParam.formatValue(newFormula) : newFormula;
 
     // create the new tag with the formula.
     const newTag = newFormula
-      ? `<${knownParam.key}BuffPlus:[${newFormula}]>`
+      ? `<${knownParam.key}${regexPattern}:[${formattedValue}]>`
       : "";
 
     // replace existing tags or add a new one if needed.
@@ -82,7 +96,8 @@ class GrowthParser
 
     // Add the maxLevel as the final point if it's not already included.
     const lastPoint = dataPoints[dataPoints.length - 1];
-    if (lastPoint.level !== maxLevel) {
+    if (lastPoint.level !== maxLevel)
+    {
       const value = GrowthParser.evaluateFormula(formula, maxLevel);
       dataPoints.push({
         level: maxLevel,

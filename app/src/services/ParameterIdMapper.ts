@@ -370,6 +370,33 @@ const knownSpParams = (): KnownParameter[] =>
   ];
 };
 
+const knownRewardParams = (): KnownParameter[] =>
+{
+  return [
+    {
+      id: 0,
+      name: "Experience",
+      key: 'exp',
+      longParamId: 31,
+      regex: "Plus"
+    },
+    {
+      id: 1,
+      name: "Gold",
+      key: 'gold',
+      longParamId: 32,
+      regex: "Plus"
+    },
+    {
+      id: 2,
+      name: "SDPs",
+      key: 'sdp',
+      longParamId: 33,
+      regex: "Plus"
+    },
+  ]
+};
+
 const knownLongParams = (): KnownParameter[] =>
 {
   return [
@@ -554,18 +581,39 @@ const knownLongParams = (): KnownParameter[] =>
       longParamId: 29
     },
     {
-      id: 2,
+      id: 0,
       name: maxTpName(),
       key: 'mtp',
       longParamId: 30
-    }
+    },
+    {
+      id: 0,
+      name: "Experience",
+      key: 'exp',
+      longParamId: 31,
+      regex: "Plus"
+    },
+    {
+      id: 1,
+      name: "Gold",
+      key: 'gold',
+      longParamId: 32,
+      regex: "Plus"
+    },
+    {
+      id: 2,
+      name: "SDPs",
+      key: 'sdp',
+      longParamId: 33,
+      regex: "Plus"
+    },
   ];
 };
 
 const knownParamByLongId = (longParamId: number): KnownParameter =>
 {
   return knownLongParams()
-    .find(knownParam => knownParam.longParamId === longParamId);
+    .find(knownParam => knownParam.longParamId === longParamId)!;
 };
 
 /**
@@ -577,6 +625,8 @@ interface KnownParameter
   name: string;
   key: string;
   longParamId: number;
+  regex?: string; // Optional regex pattern to use instead of the default "BuffPlus"
+  formatValue?: (formula: string) => string; // Optional function to format the value when writing
 }
 
 export {

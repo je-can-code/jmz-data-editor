@@ -170,7 +170,7 @@ export default function TraitEditor({
 
   const renderTrait = (trait: Game_Trait, index: number) =>
   {
-    return <>
+    return (
       <ListItem
         key={index}
         secondaryAction={<>
@@ -216,8 +216,7 @@ export default function TraitEditor({
             secondary={trait.codeName}
           ></ListItemText>
         </ListItemButton>
-      </ListItem>
-    </>;
+      </ListItem>);
   };
 
   /**

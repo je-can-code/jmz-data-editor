@@ -41,3 +41,42 @@
     * parameter growth management (in the context of enemies)
     * levels for enemies
     * extra enemy drop management
+
+## Code Formatting Style
+* **Braces placement**:
+  * Opening braces `{` should always be on a new line if syntactically possible
+  * Closing braces `}` are on their own line
+  * Example:
+    ```typescript
+    function example()
+    {
+      // code here
+    }
+    ```
+  * Arrow functions follow the same pattern:
+    ```typescript
+    lines.forEach(line =>
+    {
+      // code here
+    });
+    ```
+
+* **Spacing**:
+  * Spaces around operators: `const [ , traitName ] = match;` (not `[,traitName]`)
+  * Spaces after commas in parameter lists
+  * Spaces inside array brackets: `[ , traitName ]` not `[, traitName]`
+  * Spaces before opening braces
+
+* **Method structure**:
+  * Static methods with clear documentation
+  * Private methods/properties with `#` prefix
+
+* **Conditional blocks**:
+  * `if` statements have braces on new lines even for single-line blocks
+  * Example:
+    ```typescript
+    if (condition)
+    {
+      doSomething();
+    }
+    ```

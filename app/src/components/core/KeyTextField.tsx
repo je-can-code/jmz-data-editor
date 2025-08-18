@@ -5,13 +5,15 @@ import React from "react";
 type KeyTextFieldProps = {
   value: string;
   onChange: (value: string) => void;
+  disabled?: boolean;
 };
 
-export default function KeyTextField({ value, onChange }: KeyTextFieldProps)
+export default function KeyTextField({ value, onChange, disabled }: KeyTextFieldProps)
 {
   return <>
     <TextField
       required
+      disabled={disabled ?? false}
       variant={"outlined"}
       label={"Key"}
       value={value}
