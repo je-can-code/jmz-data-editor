@@ -2,17 +2,16 @@
   "applicationId": "jmz-data-editor",
   "version": "1.0.0",
   "defaultMode": "window",
-  "documentRoot": "/react-src/build/",
+  "documentRoot": "/app/build/",
   "url": "/",
   "enableServer": true,
   "enableNativeAPI": true,
   "tokenSecurity": "one-time",
   "nativeAllowList": [
-    "filesystem.*",
-    "os.*",
-    "app.exit",
-    "window.*",
-    "computer.*"
+    "filesystem.readFile",
+    "filesystem.writeFile",
+    "os.showFolderDialog",
+    "app.exit"
   ],
   "logging": {
     "enabled": true,
@@ -27,7 +26,7 @@
       "minHeight": 900,
       "fullScreen": false,
       "alwaysOnTop": false,
-      "icon": "/react-src/public/assets/images/vite.png",
+      "icon": "/app/public/assets/images/vite.png",
       "enableInspector": false,
       "borderless": false,
       "maximize": false,
@@ -40,17 +39,17 @@
   },
   "cli": {
     "binaryName": "application",
-    "resourcesPath": "/react-src/build/",
+    "resourcesPath": "/app/build/",
     "extensionsPath": "/extensions/",
     "binaryVersion": "5.1.0",
     "clientVersion": "5.1.0",
     "frontendLibrary": {
-      "patchFile": "/react-src/index.html",
+      "patchFile": "/app/index.html",
       "devUrl": "http://localhost:3000",
-      "projectPath": "/react-src/",
-      "initCommand": "npm install",
-      "devCommand": "npm run dev",
-      "buildCommand": "npm run build"
+      "projectPath": "/app/",
+      "initCommand": "bun i",
+      "devCommand": "bun run dev",
+      "buildCommand": "bun run build"
     }
   }
 }
