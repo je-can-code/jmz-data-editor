@@ -1,8 +1,17 @@
-import React, { MouseEvent, useEffect, useRef, useState } from "react";
-import { FixedSizeList, ListChildComponentProps } from "react-window";
+import React, {
+  MouseEvent,
+  useEffect,
+  useRef,
+  useState
+} from "react";
+import {
+  FixedSizeList,
+  ListChildComponentProps
+} from "react-window";
 import {
   Alert,
-  Autocomplete, Box,
+  Autocomplete,
+  Box,
   Button,
   Checkbox,
   Dialog,
@@ -13,7 +22,7 @@ import {
   FilledInput,
   FormControl,
   FormControlLabel,
-  Grid2,
+  Grid,
   InputLabel,
   List,
   ListItem,
@@ -33,27 +42,57 @@ import {
 } from "@mui/material";
 import {
   Add,
-  AddReaction, AutoAwesome, AutoGraph, Check, Circle, ContentCopy,
-  DoubleArrow, Insights,
+  AddReaction,
+  AutoAwesome,
+  AutoGraph,
+  Check,
+  Circle,
+  ContentCopy,
+  DoubleArrow,
+  Insights,
   KeyboardArrowRight,
   Lock,
-  LockOpen, Percent, PlayCircleFilled, PlayCircleOutline,
-  Psychology, Quiz, Redeem, Remove, ShowChart, SportsHandball,
-  SportsKabaddi, StackedLineChart, SwitchAccessShortcut, TrendingFlat, WaterfallChart
+  LockOpen,
+  Percent,
+  PlayCircleFilled,
+  PlayCircleOutline,
+  Psychology,
+  Quiz,
+  Redeem,
+  Remove,
+  ShowChart,
+  SportsHandball,
+  SportsKabaddi,
+  StackedLineChart,
+  SwitchAccessShortcut,
+  TrendingFlat,
+  WaterfallChart
 } from "@mui/icons-material";
-import { blue, green, grey, orange, purple, yellow } from "@mui/material/colors";
-import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../enums/MuiSnackbar.ts";
+import {
+  blue,
+  green,
+  grey,
+  orange,
+  purple,
+  yellow
+} from "@mui/material/colors";
+import {
+  MuiSnackbarSeverity,
+  MuiSnackbarVariant
+} from "../../enums/MuiSnackbar.ts";
 
 import SaveButton from "../../components/core/SaveButton.tsx";
 import KeyTextField from "../../components/core/KeyTextField.tsx";
 import ReloadButton from "../../components/core/ReloadButton.tsx";
 
 import ConfigFilenames from "../../enums/ConfigFilenames.ts";
-import { executeLoad, executeSave } from "../../services/DataService.ts";
+import {
+  executeLoad,
+  executeSave
+} from "../../services/DataService.ts";
 import { BoardProps } from "../../types/local/BoardProps";
 
-import { fromLongParameterIdToName } from "../../services/ParameterIdMapper.ts";
-
+import { fromLongParameterIdToName } from "../../mappers/ParameterIdMapper.ts";
 import Panel = Sdp.Panel;
 import PanelParameter = Sdp.PanelParameter;
 import PanelReward = Sdp.PanelReward;
@@ -1294,8 +1333,8 @@ export default function SdpBoard({ projectPath }: BoardProps)
   //endregion render
 
   return <>
-    <Grid2 container spacing={2}>
-      <Grid2 size={3}>
+    <Grid container spacing={2}>
+      <Grid size={3}>
         {/* Search bar for SDPs */}
         <TextField
           variant={"outlined"}
@@ -1352,9 +1391,9 @@ export default function SdpBoard({ projectPath }: BoardProps)
                 variant={"contained"}/>
             </>}
         </div>
-      </Grid2>
+      </Grid>
 
-      <Grid2 size={9}>
+      <Grid size={9}>
         <Paper
           sx={{
             height: '100%',
@@ -1369,18 +1408,18 @@ export default function SdpBoard({ projectPath }: BoardProps)
               If there are no panels then consider making one.
             </Typography>
             : <>
-              <Grid2 container rowSpacing={2} columnSpacing={4}>
+              <Grid container rowSpacing={2} columnSpacing={4}>
                 {/* ROW 1 */}
                 {/* key */}
-                <Grid2 size={2}>
+                <Grid size={2}>
                   <KeyTextField
                     value={selectedPanel.key}
                     onChange={handlePanelKeyChange}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* name */}
-                <Grid2 size={6}>
+                <Grid size={6}>
                   <TextField
                     variant={"standard"}
                     label={"Name"}
@@ -1389,10 +1428,10 @@ export default function SdpBoard({ projectPath }: BoardProps)
                     size={"small"}
                     fullWidth
                   />
-                </Grid2>
+                </Grid>
 
                 {/* icon index */}
-                <Grid2 size={2}>
+                <Grid size={2}>
                   <TextField
                     type={"number"}
                     label={"Icon Index"}
@@ -1401,10 +1440,10 @@ export default function SdpBoard({ projectPath }: BoardProps)
                     onChange={event => handlePanelIconIndexChange(parseInt(event.target.value) ?? -1)}
                     sx={{ width: '100px' }}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* unlocked by default */}
-                <Grid2 size={2}>
+                <Grid size={2}>
                   <FormControlLabel
                     control={<Checkbox
                       checked={selectedPanel.unlockedByDefault}
@@ -1417,11 +1456,11 @@ export default function SdpBoard({ projectPath }: BoardProps)
                       : "Locked by Default"}
                     labelPlacement={"end"}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* ROW 2 */}
                 {/* rarity */}
-                <Grid2 size={3}>
+                <Grid size={3}>
                   <Select
                     value={selectedPanel.rarity}
                     onChange={event => handlePanelRarityChange(parseInt(event.target.value.toString()))}
@@ -1429,10 +1468,10 @@ export default function SdpBoard({ projectPath }: BoardProps)
                   >
                     {renderSdpRarities()}
                   </Select>
-                </Grid2>
+                </Grid>
 
                 {/* top flavor text */}
-                <Grid2 size={9}>
+                <Grid size={9}>
                   <TextField
                     fullWidth
                     size={"small"}
@@ -1441,11 +1480,11 @@ export default function SdpBoard({ projectPath }: BoardProps)
                     value={selectedPanel.topFlavorText}
                     onChange={event => handlePanelTopFlavorTextChange(event.target.value)}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* ROW 3 */}
                 {/* description */}
-                <Grid2 size={12}>
+                <Grid size={12}>
                   <TextField
                     fullWidth
                     size={"small"}
@@ -1456,11 +1495,11 @@ export default function SdpBoard({ projectPath }: BoardProps)
                     value={selectedPanel.description}
                     onChange={event => handlePanelDescriptionChange(event.target.value)}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* ROW 4 */}
                 {/* max rank */}
-                <Grid2 size={1}>
+                <Grid size={1}>
                   <TextField
                     type={"number"}
                     label={"Max Rank"}
@@ -1469,10 +1508,10 @@ export default function SdpBoard({ projectPath }: BoardProps)
                     onChange={event => handlePanelMaxRankChange(parseInt(event.target.value) ?? 1)}
                     sx={{ width: '80px' }}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* base growth */}
-                <Grid2 size={1} sx={{ mr: 5 }}>
+                <Grid size={1} sx={{ mr: 5 }}>
                   <TextField
                     type={"number"}
                     label={"Base Cost"}
@@ -1481,10 +1520,10 @@ export default function SdpBoard({ projectPath }: BoardProps)
                     onChange={event => handlePanelBaseCostChange(parseInt(event.target.value) ?? 0)}
                     sx={{ width: '120px' }}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* flat growth */}
-                <Grid2 size={1} sx={{ mr: 5 }}>
+                <Grid size={1} sx={{ mr: 5 }}>
                   <TextField
                     type={"number"}
                     label={"Flat Growth"}
@@ -1493,10 +1532,10 @@ export default function SdpBoard({ projectPath }: BoardProps)
                     onChange={event => handlePanelFlatGrowthCostChange(parseInt(event.target.value) ?? 0)}
                     sx={{ width: '120px' }}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* growth multiplier */}
-                <Grid2 size={1}>
+                <Grid size={1}>
                   <FormControl>
                     <InputLabel>
                       Multiplier
@@ -1514,21 +1553,21 @@ export default function SdpBoard({ projectPath }: BoardProps)
                       sx={{ width: '80px' }}
                     />
                   </FormControl>
-                </Grid2>
+                </Grid>
 
                 {/* cost to master projection */}
-                <Grid2 size={2}>
+                <Grid size={2}>
                   <Typography variant={"body1"}>
                     Total Cost to Master:<br/> <strong>{projectTotalCost()}</strong>
                   </Typography>
-                </Grid2>
+                </Grid>
 
                 {/* cost per level projections */}
-                <Grid2 size={4}>
+                <Grid size={4}>
                   <Button
                     color={"info"}
                     variant={"outlined"}
-                    startIcon={<><WaterfallChart color={"secondary"}/><Quiz color={"success"}/></>}
+                    startIcon={<span><WaterfallChart color={"secondary"}/><Quiz color={"success"}/></span>}
 
                     onClick={() => setRankupCostProjectionDialog(true)}
                   >
@@ -1536,14 +1575,14 @@ export default function SdpBoard({ projectPath }: BoardProps)
                       Cost Per Level Projections
                     </Typography>
                   </Button>
-                </Grid2>
+                </Grid>
 
                 {/* SPACER */}
-                <Grid2 size={1}/>
+                <Grid size={1}/>
 
                 {/* ROW 5 */}
                 {/* Parameter List */}
-                <Grid2 size={3}>
+                <Grid size={3}>
                   <div
                     onContextMenu={handleParameterListContextMenu}
                     style={{ cursor: 'context-menu' }}
@@ -1560,10 +1599,10 @@ export default function SdpBoard({ projectPath }: BoardProps)
                         </>}
                     </List>
                   </div>
-                </Grid2>
+                </Grid>
 
                 {/* Selected Parameter Data */}
-                <Grid2 size={3}>
+                <Grid size={3}>
                   {(!selectedPanelParameter)
                     ? <></>
                     : <>
@@ -1629,9 +1668,9 @@ export default function SdpBoard({ projectPath }: BoardProps)
                         </Select>
                       </Stack>
                     </>}
-                </Grid2>
+                </Grid>
 
-                <Grid2 size={6}>
+                <Grid size={6}>
                   <Paper
                     sx={{
                       padding: 2
@@ -1702,13 +1741,13 @@ export default function SdpBoard({ projectPath }: BoardProps)
 
                     </Stack>
                   </Paper>
-                </Grid2>
-              </Grid2>
+                </Grid>
+              </Grid>
             </>
           }
         </Paper>
-      </Grid2>
-    </Grid2>
+      </Grid>
+    </Grid>
 
     {/*region not-grid-related elements */}
     <SaveButton

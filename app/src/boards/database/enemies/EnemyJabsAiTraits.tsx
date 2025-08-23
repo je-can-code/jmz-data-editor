@@ -1,8 +1,26 @@
-import { Box, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
-import { useEffect, useState } from "react";
-import { JabsAiTrait, JabsAiTraits, JabsDataParser } from "../services/JabsDataParser.ts";
-import { Bolt, Favorite, Gavel, Group, Shield, Star } from "@mui/icons-material";
-import { amber, blue, green, grey, orange, purple, red } from "@mui/material/colors";
+import {
+  Box,
+  ToggleButton,
+  ToggleButtonGroup,
+  Typography
+} from "@mui/material";
+import {
+  useEffect,
+  useState
+} from "react";
+import {
+  JabsAiTrait,
+  JabsAiTraits,
+  JabsDataParser
+} from "../../../services/parsers/JabsDataParser.ts";
+import {
+  Bolt,
+  Favorite,
+  Gavel,
+  Group,
+  Shield,
+  Star
+} from "@mui/icons-material";
 
 type EnemyJabsDataProps = {
   note: string;

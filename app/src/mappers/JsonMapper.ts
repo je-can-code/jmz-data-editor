@@ -86,8 +86,10 @@ export default class JsonMapper
   static parseString(str: string)
   {
     // check if its actually boolean true.
-    if (str.toLowerCase() === "true") return true;
-    // check if its actually boolean false.
+    if (str.toLowerCase() === "true")
+    {
+      return true;
+    }// check if its actually boolean false.
     else if (str.toLowerCase() === "false") return false;
 
     // check if its actually a number.

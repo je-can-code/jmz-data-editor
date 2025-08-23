@@ -38,4 +38,8 @@ enum EnemyExParam
   TpRegen = 9,
 }
 
-export { EnemyBaseParam, EnemySpParam, EnemyExParam }
+export {
+  EnemyBaseParam,
+  EnemySpParam,
+  EnemyExParam
+}

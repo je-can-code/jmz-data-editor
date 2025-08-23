@@ -637,6 +637,7 @@ export {
   knownBaseParams,
   knownExParams,
   knownSpParams,
+  knownRewardParams,
   knownLongParams,
   knownParamByLongId,
   KnownParameter

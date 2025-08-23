@@ -1,11 +1,10 @@
-import RPGManager from "../../../services/RPGManager.ts";
-import { KnownParameter } from "../../../services/ParameterIdMapper.ts";
+import NoteReader from "../utils/NoteReader.ts";
+import { KnownParameter } from "../../mappers/ParameterIdMapper.ts";
+import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
 
 class GrowthParser
 {
   static #defaultRegexPattern = "BuffPlus";
-  static #regex = (paramKey: string, regexPattern?: string) =>
-    new RegExp(`<${paramKey}${regexPattern || this.#defaultRegexPattern}:\\[([+\\-*/ ().\\w]+)]>`, 'gi');
   static #validFormulaChars = /^[+\-*/ ().\w]*$/;
 
   static read(growableNote: string, knownParam: KnownParameter): string
@@ -14,7 +13,7 @@ class GrowthParser
     const parameterizedRegex = this.#regex(knownParam.key, knownParam.regex);
 
     // grab the value from the note.
-    return RPGManager.getStringFromNoteByRegex(growableNote, parameterizedRegex) ?? '';
+    return NoteReader.getStringFromNoteByRegex(growableNote, parameterizedRegex) ?? '';
   }
 
   static write(originalNote: string, knownParam: KnownParameter, newFormula: string): string
@@ -31,28 +30,30 @@ class GrowthParser
     const regexPattern = knownParam.regex || this.#defaultRegexPattern;
 
     // Format the value using the custom formatter if provided, otherwise use the formula directly
-    const formattedValue = knownParam.formatValue ? knownParam.formatValue(newFormula) : newFormula;
+    const formattedValue = knownParam.formatValue
+      ? knownParam.formatValue(newFormula)
+      : newFormula;
 
     // create the new tag with the formula.
     const newTag = newFormula
       ? `<${knownParam.key}${regexPattern}:[${formattedValue}]>`
       : "";
 
-    // replace existing tags or add a new one if needed.
-    let newNote = originalNote;
-    if (originalNote.match(parameterizedRegex))
+    // handle removal if new formula is empty
+    if (!newFormula)
     {
-      // replace the existing tag with the new one.
-      newNote = originalNote.replace(parameterizedRegex, newTag);
-    }
-    else if (newFormula)
-    {
-      // add the new tag if it doesn't exist and we have a formula.
-      newNote = `${newNote}\n${newTag}`;
+      return NoteNormalizer.removeLinesMatching(originalNote, parameterizedRegex);
     }
 
-    // clean up line endings and return the result.
-    return this.#cleanupLineEndings(newNote);
+    // replace existing tag inline if present
+    if (originalNote.match(parameterizedRegex))
+    {
+      const replaced = originalNote.replace(parameterizedRegex, newTag);
+      return NoteNormalizer.normalize(replaced);
+    }
+
+    // append as a new block if not present
+    return NoteNormalizer.appendBlock(originalNote, newTag);
   }
 
   static evaluateFormula(formula: string, level: number): number
@@ -108,13 +109,8 @@ class GrowthParser
     return dataPoints;
   }
 
-  static #cleanupLineEndings(note: string): string
-  {
-    return note
-      .replace(/\r\r/gmi, '\r')
-      .replace(/\n\n/gmi, '\n')
-      .trim();
-  }
+  static #regex = (paramKey: string, regexPattern?: string) =>
+    new RegExp(`<${paramKey}${regexPattern || this.#defaultRegexPattern}:\\[([+\\-*/ ().\\w]+)]>`, 'gi');
 }
 
 export { GrowthParser }

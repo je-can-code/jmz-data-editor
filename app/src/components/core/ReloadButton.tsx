@@ -1,6 +1,6 @@
-import LoadingButton from "@mui/lab/LoadingButton";
-import { Save, SdCard } from "@mui/icons-material";
 import React from "react";
+import { Button } from '@mui/material'
+import { SdCard } from "@mui/icons-material";
 
 const ReloadStyles = {
   fontFamily: "monospace",
@@ -29,7 +29,7 @@ const ReloadButton = ({
 }: ReloadButtonProps) =>
 {
   return <>
-    <LoadingButton
+    <Button
       size={"small"}
       color={"warning"}
       onClick={async () => handleReload()}
@@ -40,7 +40,7 @@ const ReloadButton = ({
       sx={ReloadStyles}
     >
       <span>{`Reload ${extraReloadText ?? ''}`}</span>
-    </LoadingButton>
+    </Button>
   </>
 };
 

@@ -13,4 +13,7 @@ enum MuiSnackbarVariant
   Outlined = "outlined",
 }
 
-export { MuiSnackbarVariant, MuiSnackbarSeverity };
+export {
+  MuiSnackbarVariant,
+  MuiSnackbarSeverity
+};

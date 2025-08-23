@@ -7,7 +7,7 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  Grid2,
+  Grid,
   IconButton,
   List,
   ListItem,
@@ -24,14 +24,34 @@ import {
 } from "@mui/material";
 import CraftingComponentType from "../../enums/CraftingComponentType.ts";
 import {
-  Add, BusinessCenter, Clear, Close, ContentCopy, Edit, LocalDining, QuestionMark, Shield, Sync
+  Add,
+  BusinessCenter,
+  Clear,
+  Close,
+  ContentCopy,
+  Edit,
+  LocalDining,
+  QuestionMark,
+  Shield,
+  Sync
 } from "@mui/icons-material";
 import { brown } from "@mui/material/colors";
-import React, { MouseEvent, useEffect, useState } from "react";
+import React, {
+  MouseEvent,
+  useEffect,
+  useState
+} from "react";
 import Crafting from "../../types/custom/Crafting";
-import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../enums/MuiSnackbar.ts";
+import {
+  MuiSnackbarSeverity,
+  MuiSnackbarVariant
+} from "../../enums/MuiSnackbar.ts";
 import CraftingListType from "../../enums/CraftingListType.ts";
-import { loadArmors, loadItems, loadWeapons } from "../../services/DataService.ts";
+import {
+  loadArmors,
+  loadItems,
+  loadWeapons
+} from "../../services/DataService.ts";
 import CraftingComponent = Crafting.CraftingComponent;
 import RPG_Item = Rmmz.Implementations.RPG_Item;
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
@@ -59,7 +79,8 @@ export default function CraftingComponentList(props: CraftingListProps)
   const [ armors, setArmors ] = useState<RPG_Armor[]>([]);
 
   const [ componentListContextMenu, setComponentListContextMenu ] = useState<{
-    mouseX: number; mouseY: number;
+    mouseX: number;
+    mouseY: number;
   } | null>(null);
   const [ componentModifierOpen, setComponentModifierOpen ] = useState(false);
   //endregion state
@@ -303,7 +324,7 @@ export default function CraftingComponentList(props: CraftingListProps)
         throw new Error(`unknown ingredient type detected: ${ingredient.type}`)
     }
 
-    return <>
+    return (
       <ListItem
         key={`${index}-${ingredient.type}-${ingredient.id}`}
         disableGutters
@@ -338,7 +359,7 @@ export default function CraftingComponentList(props: CraftingListProps)
           />
         </ListItemButton>
       </ListItem>
-    </>
+    )
   };
 
   const renderRelevantRecipeComponentDropdown = () =>
@@ -347,33 +368,33 @@ export default function CraftingComponentList(props: CraftingListProps)
     {
       if (option === null || option.name === "" || option.name.startsWith("=="))
       {
-        return <React.Fragment
-          key={props.key}></React.Fragment>;
+        return <li {...props} style={{ display: 'none' }}/>;
       }
 
-      return (<ListItem
-        key={props.key}
-        sx={{ height: 32 }}
-      >
-        <ListItemButton
-          sx={{ height: 32 }}
-          onClick={() =>
-          {
-            handleRelevantComponentDropdownOnClickEvent(option)
-          }}
-        >
-          <ListItemText
-            primary={`${option.id}: ${option.name}`}
-            disableTypography={true}
-          />
-        </ListItemButton>
-      </ListItem>);
+      return (
+        <li {...props} key={props.key} style={{ height: 32 }}>
+          <ListItem disableGutters disablePadding sx={{ height: 32 }}>
+            <ListItemButton
+              sx={{ height: 32 }}
+              onClick={() =>
+              {
+                handleRelevantComponentDropdownOnClickEvent(option)
+              }}
+            >
+              <ListItemText
+                primary={`${option.id}: ${option.name}`}
+                disableTypography={true}
+              />
+            </ListItemButton>
+          </ListItem>
+        </li>
+      );
     };
 
     switch (selectedComponentType)
     {
       case CraftingComponentType.Item:
-        return <>
+        return (
           <Autocomplete
             size={"small"}
             options={[ ...items ].sort((a, b) =>
@@ -381,7 +402,11 @@ export default function CraftingComponentList(props: CraftingListProps)
               if (a === null || b === null) return (a as any) - (b as any);
               return a.id - b.id;
             })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
+            slotProps={{
+              listbox: {
+                sx: { maxHeight: '170px' }
+              }
+            }}
             getOptionKey={(option) => option?.id ?? "no-key"}
             getOptionLabel={(option) => option?.name ?? ""}
             isOptionEqualToValue={(option, otherOption) => option.id === otherOption.id}
@@ -395,10 +420,9 @@ export default function CraftingComponentList(props: CraftingListProps)
                 placeholder="Item name..."
               />
             }}
-          />
-        </>;
+          />);
       case CraftingComponentType.Weapon:
-        return <>
+        return (
           <Autocomplete
             size={"small"}
             options={[ ...weapons ].sort((a, b) =>
@@ -406,7 +430,11 @@ export default function CraftingComponentList(props: CraftingListProps)
               if (a === null || b === null) return (a as any) - (b as any);
               return a.id - b.id;
             })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
+            slotProps={{
+              listbox: {
+                sx: { maxHeight: '170px' }
+              }
+            }}
             getOptionKey={(option) => option?.id ?? "no-key"}
             getOptionLabel={(option) => option?.name ?? ""}
             renderOption={renderOption}
@@ -418,10 +446,9 @@ export default function CraftingComponentList(props: CraftingListProps)
                 label={"Weapons"}
                 placeholder="Weapon name..."/>)
             }}
-          />
-        </>;
+          />);
       case CraftingComponentType.Armor:
-        return <>
+        return (
           <Autocomplete
             size={"small"}
             options={[ ...armors ].sort((a, b) =>
@@ -429,7 +456,11 @@ export default function CraftingComponentList(props: CraftingListProps)
               if (a === null || b === null) return (a as any) - (b as any);
               return a.id - b.id;
             })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
+            slotProps={{
+              listbox: {
+                sx: { maxHeight: '170px' }
+              }
+            }}
             getOptionKey={(option) => option?.id ?? "no-key"}
             getOptionLabel={(option) => option?.name ?? ""}
             renderOption={renderOption}
@@ -441,8 +472,7 @@ export default function CraftingComponentList(props: CraftingListProps)
                 label={"Armors"}
                 placeholder="Armor name..."/>)
             }}
-          />
-        </>;
+          />);
     }
   };
 
@@ -461,7 +491,7 @@ export default function CraftingComponentList(props: CraftingListProps)
   {
     if (!pendingComponent) return <></>;
 
-    return <>
+    return (
       <Stack
         spacing={4}
         sx={{
@@ -471,10 +501,8 @@ export default function CraftingComponentList(props: CraftingListProps)
           borderColor: 'grey'
         }}
       >
-
         {"Pending Component Update:"}
         {buildComponentChip(pendingComponent)}
-
         <TextField
           type={"number"}
           label={"Count"}
@@ -482,10 +510,8 @@ export default function CraftingComponentList(props: CraftingListProps)
           fullWidth
           onChange={(event) => handlePendingComponentCountOnChangeEvent(parseInt(event.target.value) ?? 1)}
         />
-
-
       </Stack>
-    </>;
+    );
   };
 
   const buildComponentChip = (craftingComponent: CraftingComponent, variant: "filled" | "outlined" = "filled") =>
@@ -515,14 +541,14 @@ export default function CraftingComponentList(props: CraftingListProps)
         throw new Error(`unknown ingredient type detected: ${craftingComponent.type}`)
     }
 
-    return <>
+    return (
       <Chip
         icon={icon}
         label={`${componentData.name} (${craftingComponent.count})`}
         variant={variant}
         color={color}
       />
-    </>
+    )
   };
   //endregion render
 
@@ -538,13 +564,13 @@ export default function CraftingComponentList(props: CraftingListProps)
         <List dense>
           {currentComponents.length > 0
             ? currentComponents.map((ingredient, index) => renderRecipeComponent(ingredient, index))
-            : <>
+            : (
               <Button
                 fullWidth
                 startIcon={<Add/>}
                 onClick={() => handleAddNewComponent(null)}
                 variant={"contained"}/>
-            </>}
+            )}
         </List>
       </div>
     </Stack>
@@ -611,8 +637,8 @@ export default function CraftingComponentList(props: CraftingListProps)
         </Typography>
       </DialogTitle>
       <DialogContent>
-        <Grid2 container spacing={4}>
-          <Grid2 size={7}>
+        <Grid container spacing={4}>
+          <Grid size={7}>
             <Stack>
               <ToggleButtonGroup
                 exclusive
@@ -641,15 +667,15 @@ export default function CraftingComponentList(props: CraftingListProps)
 
               {renderRelevantRecipeComponentDropdown()}
             </Stack>
-          </Grid2>
-          <Grid2 size={5}>
+          </Grid>
+          <Grid size={5}>
             <Stack spacing={2}>
               {renderSelectedComponentChip()}
 
               {renderPendingComponentChip()}
             </Stack>
-          </Grid2>
-        </Grid2>
+          </Grid>
+        </Grid>
       </DialogContent>
       <DialogActions>
         <Button

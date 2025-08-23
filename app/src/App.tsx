@@ -1,6 +1,23 @@
-import { useEffect, useState } from "react";
-import { Box, Grid2, Paper, Tab, Tabs, tabsClasses } from "@mui/material";
-import { Construction, Poll, Android, Storage, AccountTree, Rule, Hub } from '@mui/icons-material';
+import {
+  useEffect,
+  useState
+} from "react";
+import {
+  Box,
+  Grid,
+  Paper,
+  Tab,
+  Tabs,
+  tabsClasses
+} from "@mui/material";
+import {
+  AccountTree,
+  Android,
+  Construction,
+  Hub,
+  Rule,
+  Storage
+} from '@mui/icons-material';
 
 import './styles/index.css';
 import ProjectPathAppBar from "./components/topbar/ProjectPathAppBar.tsx";
@@ -51,8 +68,14 @@ export default function App()
   {
     const onNavigateToTab = (event: Event) =>
     {
-      const custom = event as CustomEvent<{ tab: string; sdpKey?: string }>;
-      const { tab, sdpKey } = custom.detail ?? {} as any;
+      const custom = event as CustomEvent<{
+        tab: string;
+        sdpKey?: string
+      }>;
+      const {
+        tab,
+        sdpKey
+      } = custom.detail ?? {} as any;
 
       if (tab === 'sdp')
       {
@@ -89,7 +112,9 @@ export default function App()
 
     const onSdpSelected = (event: Event) =>
     {
-      const custom = event as CustomEvent<{ key: string }>;
+      const custom = event as CustomEvent<{
+        key: string
+      }>;
       const key = custom.detail?.key ?? '';
       if (key && pendingSdpSelectKey === key)
       {
@@ -161,8 +186,8 @@ export default function App()
   return <>
     <Box>
       <ProjectPathAppBar pathGetter={projectPath} pathSetter={handleProjectPathUpdate}/>
-      <Grid2 container>
-        <Grid2 size={0.5}>
+      <Grid container>
+        <Grid size={0.5}>
           <Tabs
             value={currentTabIndex}
             onChange={(_, index) =>
@@ -215,17 +240,17 @@ export default function App()
             />
             <Tab
               label={"Enemies"}
-              icon={<><Storage/><Android/></>}
+              icon={<span><Storage/><Android/></span>}
               sx={JmzTabStyles}
             />
           </Tabs>
-        </Grid2>
-        <Grid2 size={11.5}>
+        </Grid>
+        <Grid size={11.5}>
           <Paper>
             {handleCurrentTabDisplay()}
           </Paper>
-        </Grid2>
-      </Grid2>
+        </Grid>
+      </Grid>
     </Box>
   </>;
 };

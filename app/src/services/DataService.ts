@@ -1,16 +1,16 @@
 import { filesystem } from "@neutralinojs/lib";
-import RPG_Actor = Rmmz.Implementations.RPG_Actor;
 import DatabaseFilenames from "../enums/DatabaseFilenames.ts";
+import ConfigFilenames from "../enums/ConfigFilenames.ts";
+import RPG_Actor = Rmmz.Implementations.RPG_Actor;
 import RPG_Skill = Rmmz.Implementations.RPG_Skill;
 import RPG_Item = Rmmz.Implementations.RPG_Item;
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
 import RPG_Armor = Rmmz.Implementations.RPG_Armor;
 import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 import RPG_System = Rmmz.System.RPG_System;
-import { Questopedia } from "../types/custom/Quests";
-import Configuration = Questopedia.Configuration;
-import ConfigFilenames from "../enums/ConfigFilenames.ts";
 import RPG_State = Rmmz.Implementations.RPG_State;
+
+type Configuration = Questopedia.Configuration;
 
 const debug = false;
 
@@ -115,7 +115,7 @@ const loadSystem = async (projectPath: string): Promise<RPG_System> =>
 export {
   executeSave,
   executeLoad,
-  
+
   loadActors,
   loadSkills,
   loadItems,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   Autocomplete,
   Avatar,
@@ -8,30 +8,28 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Grid2,
+  Grid,
   IconButton,
   List,
   ListItem,
   ListItemButton,
   ListItemIcon,
-  ListItemText, Select,
+  ListItemText,
   Stack,
   Step,
   StepButton,
-  Stepper, TextField,
+  Stepper,
+  TextField,
   Typography
 } from "@mui/material";
-import RPG_Trait = Rmmz.Data.RPG_Trait;
 import { Game_Trait } from "./Traits";
 import { TraitManager } from "./TraitManager.ts";
 import { TraitMapper } from "./TraitMapper.tsx";
 import {
   Add,
-  CandlestickChart,
   Clear,
   Close,
   Edit,
-  HeartBroken,
   Percent,
   SportsMma,
   Sync,
@@ -39,8 +37,7 @@ import {
 } from "@mui/icons-material";
 import { SystemService } from "../../../../services/SystemService.ts";
 import NumberInputWithLabel from "../../../../components/NumberInputWithLabel.tsx";
-import { pink } from "@mui/material/colors";
-import { EnemyBaseParam } from "../../../../enums/EnemyParameter.ts";
+import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 type TraitEditorProps = {
   selectedTraits: RPG_Trait[],
@@ -513,14 +510,14 @@ export default function TraitEditor({
         {selectedTrait === null
           ? <></>
           : <>
-            <Grid2 container spacing={2}>
-              <Grid2 size={3}>
+            <Grid container spacing={2}>
+              <Grid size={3}>
                 {renderStepper()}
-              </Grid2>
-              <Grid2 size={9}>
+              </Grid>
+              <Grid size={9}>
                 {renderStepView()}
-              </Grid2>
-            </Grid2>
+              </Grid>
+            </Grid>
 
           </>}
       </DialogContent>

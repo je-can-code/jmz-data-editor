@@ -21,4 +21,8 @@ const PartyAbility = [
   "2x Drop rate"
 ];
 
-export { SpecialFlag, CollapseEffect, PartyAbility }
+export {
+  SpecialFlag,
+  CollapseEffect,
+  PartyAbility
+}

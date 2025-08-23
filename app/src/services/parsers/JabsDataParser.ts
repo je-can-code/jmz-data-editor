@@ -1,11 +1,9 @@
+import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
+
 class JabsDataParser
 {
-  static #aiTraitKey = (trait: JabsAiTrait) => `<aiTrait:${trait}>`;
-  static #configKey = (config: JabsConfig) => `<jabsConfig:${config}>`;
-
   static #aiTraitRegex = /<aiTrait: ?(careful|executor|reckless|healer|leader|follower)>/i;
   static #configRegex = /<jabsConfig: ?(noIdle|canIdle|noHpBar|showHpBar|inanimate|notInanimate|invincible|notInvincible|noName|showName)>/i;
-
   static #sightRegex = /<sight: ?(\d+)>/i;
   static #pursuitRegex = /<pursuit: ?(\d+)>/i;
   static #prepareSpeedRegex = /<prepare: ?(\d+)>/i;
@@ -26,7 +24,8 @@ class JabsDataParser
     } as JabsAiTraits;
 
     // Get all lines from the note
-    const lines = originalNote.split(/[\r\n]+/);
+    const lines = NoteNormalizer.normalize(originalNote)
+      .split('\n');
 
     // Check each line for AI traits
     lines.forEach(line =>
@@ -54,24 +53,11 @@ class JabsDataParser
 
   static writeAiTraits(originalNote: string, traits: JabsAiTraits): string
   {
-    // Get all lines from the note
-    const lines = originalNote.split(/[\r\n]+/);
+    // Remove any existing aiTrait lines and normalize the base.
+    const base = NoteNormalizer.removeLinesMatching(originalNote, this.#aiTraitRegex);
 
-    // Reset the regex before using it
-    this.#aiTraitRegex.lastIndex = 0;
-
-    // Filter out any existing AI trait lines
-    const filteredLines = lines.filter(line =>
-    {
-      this.#aiTraitRegex.lastIndex = 0; // Reset for each line
-
-      return !this.#aiTraitRegex.test(line);
-    });
-
-    // Create new lines for each active trait
+    // Build trait lines in deterministic order.
     const traitLines: string[] = [];
-
-    // Add lines for each active trait
     if (traits.careful) traitLines.push(this.#aiTraitKey(JabsAiTrait.Careful));
     if (traits.executor) traitLines.push(this.#aiTraitKey(JabsAiTrait.Executor));
     if (traits.reckless) traitLines.push(this.#aiTraitKey(JabsAiTrait.Reckless));
@@ -79,11 +65,15 @@ class JabsDataParser
     if (traits.leader) traitLines.push(this.#aiTraitKey(JabsAiTrait.Leader));
     if (traits.follower) traitLines.push(this.#aiTraitKey(JabsAiTrait.Follower));
 
-    // Combine the filtered lines with the new trait lines
-    const updatedLines = [ ...filteredLines, ...traitLines ];
+    // If none enabled, return the cleaned base as-is.
+    if (traitLines.length === 0)
+    {
+      return base;
+    }
 
-    // Join the lines back into a single note string
-    return updatedLines.join('\n');
+    // Append trait lines as a single block with normalized joining.
+    const block = traitLines.join('\n');
+    return NoteNormalizer.appendBlock(base, block);
   }
 
   static readBattlerData(originalNote: string): JabsBattlerData
@@ -99,7 +89,8 @@ class JabsDataParser
     } as JabsBattlerData;
 
     // Get all lines from the note
-    const lines = originalNote.split(/[\r\n]+/);
+    const lines = NoteNormalizer.normalize(originalNote)
+      .split('\n');
 
     // Check each line for battler data
     lines.forEach(line =>
@@ -158,33 +149,14 @@ class JabsDataParser
 
   static writeBattlerData(originalNote: string, jabsBattlerData: JabsBattlerData): string
   {
-    // Get all lines from the note
-    const lines = originalNote.split(/[\r\n]+/);
+    // Match any battler-data line.
+    const battlerLineRegex = /<(sight|pursuit|prepare|alertDuration|alertedSightBoost|alertedPursuitBoost): ?\d+>/i;
 
-    // Filter out any existing battler data lines
-    const filteredLines = lines.filter(line =>
-    {
-      this.#sightRegex.lastIndex = 0;
-      this.#pursuitRegex.lastIndex = 0;
-      this.#prepareSpeedRegex.lastIndex = 0;
-      this.#alertDurationRegex.lastIndex = 0;
-      this.#alertSightBoostRegex.lastIndex = 0;
-      this.#alertPursuitBoostRegex.lastIndex = 0;
+    // Remove existing battler lines and normalize.
+    const base = NoteNormalizer.removeLinesMatching(originalNote, battlerLineRegex);
 
-      return !(
-        this.#sightRegex.test(line) ||
-        this.#pursuitRegex.test(line) ||
-        this.#prepareSpeedRegex.test(line) ||
-        this.#alertDurationRegex.test(line) ||
-        this.#alertSightBoostRegex.test(line) ||
-        this.#alertPursuitBoostRegex.test(line)
-      );
-    });
-
-    // Create new lines for battler data
+    // Build new lines in deterministic order (only if > 0).
     const battlerDataLines: string[] = [];
-
-    // Add lines for each battler data property (only if value is greater than 0)
     if (jabsBattlerData.sight > 0) battlerDataLines.push(`<sight:${jabsBattlerData.sight}>`);
     if (jabsBattlerData.pursuit > 0) battlerDataLines.push(`<pursuit:${jabsBattlerData.pursuit}>`);
     if (jabsBattlerData.prepareSpeed > 0) battlerDataLines.push(`<prepare:${jabsBattlerData.prepareSpeed}>`);
@@ -192,11 +164,15 @@ class JabsDataParser
     if (jabsBattlerData.alertSightBoost > 0) battlerDataLines.push(`<alertedSightBoost:${jabsBattlerData.alertSightBoost}>`);
     if (jabsBattlerData.alertPursuitBoost > 0) battlerDataLines.push(`<alertedPursuitBoost:${jabsBattlerData.alertPursuitBoost}>`);
 
-    // Combine the filtered lines with the new battler data lines
-    const updatedLines = [ ...filteredLines, ...battlerDataLines ];
+    if (battlerDataLines.length === 0)
+    {
+      // Nothing to write; return the cleaned base.
+      return base;
+    }
 
-    // Join the lines back into a single note string
-    return updatedLines.join('\n');
+    // Append as a normalized block (LF-only, no extra gaps).
+    const block = battlerDataLines.join('\n');
+    return NoteNormalizer.appendBlock(base, block);
   }
 
   static readConfigs(originalNote: string): JabsConfigs
@@ -215,26 +191,41 @@ class JabsDataParser
       showName: false
     } as JabsConfigs;
 
-    // Get all lines from the note
-    const lines = originalNote.split(/[\r\n]+/);
+    // Map lowercased capture → actual camelCase key
+    const keyMap: Record<string, keyof JabsConfigs> = {
+      noidle: 'noIdle',
+      canidle: 'canIdle',
+      nohpbar: 'noHpBar',
+      showhpbar: 'showHpBar',
+      inanimate: 'inanimate',
+      notinanimate: 'notInanimate',
+      invincible: 'invincible',
+      notinvincible: 'notInvincible',
+      noname: 'noName',
+      showname: 'showName',
+    };
+
+    // Normalize newlines to LF then split
+    const lines = NoteNormalizer.normalize(originalNote)
+      .split('\n');
 
     // Check each line for configs
     lines.forEach(line =>
     {
-      // Reset the regex index for reuse
       this.#configRegex.lastIndex = 0;
 
-      // Check if this line matches the config regex
       const match = this.#configRegex.exec(line);
       if (match)
       {
-        // Extract the config name from the match
         const [ , configName ] = match;
-
-        // Set the corresponding config to true if it exists in our configs object
-        if (configName && configName.toLowerCase() in configs)
+        if (configName)
         {
-          configs[configName.toLowerCase() as keyof JabsConfigs] = true;
+          const lc = configName.toLowerCase();
+          const mapped = keyMap[lc];
+          if (mapped)
+          {
+            configs[mapped] = true;
+          }
         }
       }
     });
@@ -244,24 +235,11 @@ class JabsDataParser
 
   static writeConfigs(originalNote: string, configs: JabsConfigs): string
   {
-    // Get all lines from the note
-    const lines = originalNote.split(/[\r\n]+/);
+    // Remove all existing config lines and get a normalized base
+    const base = NoteNormalizer.removeLinesMatching(originalNote, this.#configRegex);
 
-    // Reset the regex before using it
-    this.#configRegex.lastIndex = 0;
-
-    // Filter out any existing config lines
-    const filteredLines = lines.filter(line =>
-    {
-      this.#configRegex.lastIndex = 0; // Reset for each line
-
-      return !this.#configRegex.test(line);
-    });
-
-    // Create new lines for each active config
+    // Build new config lines in deterministic order
     const configLines: string[] = [];
-
-    // Add lines for each active config
     if (configs.noIdle) configLines.push(this.#configKey(JabsConfig.NoIdle));
     if (configs.canIdle) configLines.push(this.#configKey(JabsConfig.CanIdle));
     if (configs.noHpBar) configLines.push(this.#configKey(JabsConfig.NoHpBar));
@@ -273,12 +251,17 @@ class JabsDataParser
     if (configs.noName) configLines.push(this.#configKey(JabsConfig.NoName));
     if (configs.showName) configLines.push(this.#configKey(JabsConfig.ShowName));
 
-    // Combine the filtered lines with the new config lines
-    const updatedLines = [ ...filteredLines, ...configLines ];
+    if (configLines.length === 0)
+    {
+      return base; // nothing to add
+    }
 
-    // Join the lines back into a single note string
-    return updatedLines.join('\n');
+    return NoteNormalizer.appendBlock(base, configLines.join('\n'));
   }
+
+  static #aiTraitKey = (trait: JabsAiTrait) => `<aiTrait:${trait}>`;
+
+  static #configKey = (config: JabsConfig) => `<jabsConfig:${config}>`;
 }
 
 interface JabsBattlerData
@@ -339,4 +322,11 @@ interface JabsAiTraits
   follower: boolean;
 }
 
-export { JabsDataParser, JabsBattlerData, JabsConfigs, JabsAiTraits, JabsConfig, JabsAiTrait }
+export {
+  JabsDataParser,
+  JabsBattlerData,
+  JabsConfigs,
+  JabsAiTraits,
+  JabsConfig,
+  JabsAiTrait
+}

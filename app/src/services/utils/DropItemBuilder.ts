@@ -36,7 +36,9 @@ export default class DropItemBuilder
   {
     // create an anonymous object representing the drop data.
     const dropItem = {
-      kind: this.#type, dataId: this.#id, denominator: this.#chance,
+      kind: this.#type,
+      dataId: this.#id,
+      denominator: this.#chance,
     };
 
     // check to make sure the clear needs execution.
@@ -48,16 +50,6 @@ export default class DropItemBuilder
 
     // return the built drop item.
     return dropItem as RPG_DropItem;
-  }
-
-  /**
-   * Clears all data currently in the builder.
-   */
-  #clear()
-  {
-    this.setId(0);
-    this.setType(0);
-    this.setChance(0);
   }
 
   //region builders
@@ -134,6 +126,16 @@ export default class DropItemBuilder
     this.setId(databaseId);
     this.setChance(percentChance);
     return this.build();
+  }
+
+  /**
+   * Clears all data currently in the builder.
+   */
+  #clear()
+  {
+    this.setId(0);
+    this.setType(0);
+    this.setChance(0);
   }
 
   //endregion builders

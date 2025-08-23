@@ -2,9 +2,9 @@ declare namespace Difficulty
 {
   interface BattlerEffects
   {
-    bparams: [number, number, number, number, number, number, number, number];
-    xparams: [number, number, number, number, number, number, number, number, number, number];
-    sparams: [number, number, number, number, number, number, number, number, number, number];
+    bparams: [ number, number, number, number, number, number, number, number ];
+    xparams: [ number, number, number, number, number, number, number, number, number, number ];
+    sparams: [ number, number, number, number, number, number, number, number, number, number ];
     cparams: number[];
   }
 

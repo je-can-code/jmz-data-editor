@@ -1,5 +1,4 @@
-import { OmniObjectiveType } from "../../enums/OmniObjectiveType.ts";
-
+// IMPORTANT: No top-level import/export to keep this ambient
 declare namespace Questopedia
 {
   interface Configuration
@@ -25,7 +24,8 @@ declare namespace Questopedia
   interface OmniObjective
   {
     id: number;
-    type: OmniObjectiveType;
+    // Inline import type – this does NOT make the file a module
+    type: import('../../enums/OmniObjectiveType.ts').OmniObjectiveType;
     description: string;
     logs: OmniObjectiveLogs;
     fulfillment: OmniFulfillmentData;
@@ -83,6 +83,7 @@ declare namespace Questopedia
   {
     keys: string[];
   }
+
   //endregion fulfillment data
   //endregion quests
 
@@ -93,6 +94,7 @@ declare namespace Questopedia
     name: string;
     iconIndex: number;
   }
+
   //endregion tags
 
   //region categories
@@ -102,5 +104,6 @@ declare namespace Questopedia
     name: string;
     iconIndex: number;
   }
+
   //endregion categories
 }

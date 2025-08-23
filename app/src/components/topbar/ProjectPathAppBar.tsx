@@ -1,5 +1,8 @@
-import {AppBar, IconButton, Toolbar, Typography} from "@mui/material";
-import MenuIcon from "@mui/icons-material/Menu";
+import {
+  AppBar,
+  Toolbar,
+  Typography
+} from "@mui/material";
 import ProjectPickerButton from "./ProjectPickerButton.tsx";
 
 type ProjectPathAppBarProps = {
@@ -22,7 +25,7 @@ const ProjectPathAppBar = (projectPathAppBarProps: ProjectPathAppBarProps) =>
               : projectPathAppBarProps.pathGetter
           }
         </Typography>
-        <ProjectPickerButton projectPathSetter={projectPathAppBarProps.pathSetter} />
+        <ProjectPickerButton projectPathSetter={projectPathAppBarProps.pathSetter}/>
       </Toolbar>
     </AppBar>
   );

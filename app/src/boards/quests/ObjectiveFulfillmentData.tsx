@@ -1,13 +1,21 @@
 import React, { useState } from 'react';
-import { Button, Chip, FormControl, InputLabel, MenuItem, Select, Stack, TextField } from "@mui/material";
+import {
+  Button,
+  Chip,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Stack,
+  TextField
+} from "@mui/material";
 
 import { OmniObjectiveType } from "../../enums/OmniObjectiveType.ts";
-import { Questopedia } from "../../types/custom/Quests";
+import OmniObjectiveFetchType from "./OmniObjectiveFetchType.ts";
 import OmniFulfillmentData = Questopedia.OmniFulfillmentData;
 import IndiscriminateData = Questopedia.IndiscriminateData;
 import DestinationData = Questopedia.DestinationData;
 import FetchData = Questopedia.FetchData;
-import OmniObjectiveFetchType from "./OmniObjectiveFetchType.ts";
 import SlayData = Questopedia.SlayData;
 import QuestData = Questopedia.QuestData;
 

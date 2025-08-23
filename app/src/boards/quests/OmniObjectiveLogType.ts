@@ -1,4 +1,5 @@
-enum OmniObjectiveLogType {
+enum OmniObjectiveLogType
+{
   Inactive = 'inactive',
   Active = 'active',
   Completed = 'completed',

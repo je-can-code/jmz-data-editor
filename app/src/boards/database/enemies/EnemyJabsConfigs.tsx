@@ -1,12 +1,38 @@
-import { Box, Checkbox, FormControlLabel, Stack, Typography } from "@mui/material";
-import { useEffect, useState } from "react";
-import { JabsConfig, JabsConfigs, JabsDataParser } from "../services/JabsDataParser.ts";
 import {
-  Visibility, VisibilityOff, DirectionsRun,
-  Favorite, HeartBroken, Security, NoEncryption,
-  Badge, BadgeSharp
+  Box,
+  Checkbox,
+  FormControlLabel,
+  Stack,
+  Typography
+} from "@mui/material";
+import {
+  useEffect,
+  useState
+} from "react";
+import {
+  JabsConfig,
+  JabsConfigs,
+  JabsDataParser
+} from "../../../services/parsers/JabsDataParser.ts";
+import {
+  Badge,
+  BadgeSharp,
+  DirectionsRun,
+  Favorite,
+  HeartBroken,
+  NoEncryption,
+  Security,
+  Visibility,
+  VisibilityOff
 } from "@mui/icons-material";
-import { blue, green, grey, orange, purple, red } from "@mui/material/colors";
+import {
+  blue,
+  green,
+  grey,
+  orange,
+  purple,
+  red
+} from "@mui/material/colors";
 
 type EnemyJabsConfigsProps = {
   note: string;
@@ -16,7 +42,7 @@ type EnemyJabsConfigsProps = {
 /*
 TODO:
  this component was written by AI but there are severe sync issues despite it being modeled
- directly after the fully funcitonal EnemyJabsAiTraits component.
+ directly after the fully functional EnemyJabsAiTraits component.
  */
 
 const EnemyJabsConfigs = ({

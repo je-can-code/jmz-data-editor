@@ -14,4 +14,8 @@ neutralino.js
 node_modules
 build
 
+# IDEs
 .idea
+
+# Test coverage
+**/.coverage
