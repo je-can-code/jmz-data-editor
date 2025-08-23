@@ -197,7 +197,7 @@ const EnemyJabsAiTraits = ({
       align={"center"}
       sx={{ paddingTop: 2 }}
     >
-      AI Traits
+      JABS AI Traits
     </Typography>
 
     {/* Main container for vertical layout */}
