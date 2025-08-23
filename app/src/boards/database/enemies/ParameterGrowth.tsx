@@ -4,17 +4,32 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle, FormControl,
-  Grid2, InputAdornment, InputLabel, MenuItem, Select,
+  DialogTitle,
+  Grid,
+  InputAdornment,
   Stack,
-  TextField, Typography
+  TextField,
+  Typography
 } from "@mui/material";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Close, ContentCopy, ShowChart, Sync } from "@mui/icons-material";
-import { knownLongParams, KnownParameter } from '../../../services/ParameterIdMapper.ts';
-import { GrowthParser } from "../services/GrowthParser.ts";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState
+} from "react";
+import {
+  Check,
+  Close,
+  ContentCopy,
+  Sync
+} from "@mui/icons-material";
+import {
+  knownLongParams,
+  KnownParameter
+} from '../../../mappers/ParameterIdMapper.ts';
+import { GrowthParser } from "../../../services/parsers/GrowthParser.ts";
 import FormulaVisualizer from "../components/FormulaVisualizer.tsx";
-import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 import RPG_Base = Rmmz.Base.RPG_Base;
 
 type ParameterGrowthProps = {
@@ -152,7 +167,7 @@ function ParameterGrowth({
           .filter(Boolean);
 
         return (
-          <Grid2 size={3} key={category}>
+          <Grid size={3} key={category}>
             <Typography variant="subtitle2" sx={{
               fontWeight: 'bold',
               mb: 1
@@ -166,7 +181,7 @@ function ParameterGrowth({
                 </div>
               )}
             </Stack>
-          </Grid2>
+          </Grid>
         );
       });
   }, [ localNote ]);

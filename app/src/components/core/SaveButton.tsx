@@ -1,6 +1,6 @@
-import LoadingButton from "@mui/lab/LoadingButton";
-import { Save } from "@mui/icons-material";
 import React from "react";
+import { Button } from "@mui/material";
+import { Save } from "@mui/icons-material";
 
 const SaveStyles = {
   fontFamily: "monospace",
@@ -33,7 +33,7 @@ export default function SaveButton({
 }: SaveButtonProps)
 {
   return <>
-    <LoadingButton
+    <Button
       size={"small"}
       color={"secondary"}
       onClick={async () => handleSave()}
@@ -44,6 +44,6 @@ export default function SaveButton({
       sx={SaveStyles}
     >
       <span>{`Save ${extraSaveText ?? ''}`}</span>
-    </LoadingButton>
+    </Button>
   </>
 }

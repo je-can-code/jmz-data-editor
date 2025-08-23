@@ -1,13 +1,25 @@
-import React, { ChangeEvent, MouseEvent, useEffect, useState } from "react";
+import React, {
+  ChangeEvent,
+  MouseEvent,
+  useEffect,
+  useState
+} from "react";
 import { FixedSizeList } from "react-window";
 import {
   Alert,
-  Autocomplete, Button,
-  Checkbox, Dialog, DialogActions, DialogContent, DialogTitle,
+  Autocomplete,
+  Button,
+  Checkbox,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   FormControl,
   FormControlLabel,
-  Grid2, IconButton, InputAdornment,
+  Grid,
+  IconButton,
+  InputAdornment,
   InputLabel,
   List,
   ListItem,
@@ -17,30 +29,43 @@ import {
   Menu,
   MenuItem,
   Paper,
-  Select, Snackbar, Stack,
-  TextField, Tooltip,
+  Select,
+  Snackbar,
+  Stack,
+  TextField,
+  Tooltip,
   Typography
 } from "@mui/material";
 import {
   Add,
-  AddTask, AppRegistration,
-  Block, Category, Check,
+  AddTask,
+  Block,
+  Category,
+  Check,
   ContentCopy,
-  DoubleArrow, Edit, Key,
-  KeyboardArrowRight, Lock, LockOpen,
-  Remove, Style,
+  DoubleArrow,
+  Edit,
+  Key,
+  KeyboardArrowRight,
+  Remove,
+  Style,
   Visibility,
   VisibilityOff
 } from "@mui/icons-material";
-import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../enums/MuiSnackbar.ts";
+import {
+  MuiSnackbarSeverity,
+  MuiSnackbarVariant
+} from "../../enums/MuiSnackbar.ts";
 
 import SaveButton from "../../components/core/SaveButton.tsx";
 
 import { BoardProps } from "../../types/local/BoardProps";
 import ConfigFilenames from "../../enums/ConfigFilenames.ts";
-import { executeSave, loadQuests } from "../../services/DataService.ts";
+import {
+  executeSave,
+  loadQuests
+} from "../../services/DataService.ts";
 
-import { Questopedia } from "../../types/custom/Quests";
 import KeyTextField from "../../components/core/KeyTextField.tsx";
 import { OmniObjectiveType } from "../../enums/OmniObjectiveType.ts";
 import ObjectiveLogs from "./ObjectiveLogs.tsx";
@@ -1040,12 +1065,13 @@ export default function QuestBoard(props: BoardProps)
   //endregion render
 
   return <>
-    <Grid2 container spacing={2}>
-      <Grid2 size={4}>
+    <Grid container spacing={2}>
+      <Grid size={4}>
         <div
           onContextMenu={handleQuestListContextMenu}
           style={{ cursor: 'context-menu' }}
         >
+          {/* @ts-ignore */}
           <FixedSizeList
             height={1030}
             itemSize={30}
@@ -1055,9 +1081,9 @@ export default function QuestBoard(props: BoardProps)
             {renderQuestListItem}
           </FixedSizeList>
         </div>
-      </Grid2>
+      </Grid>
 
-      <Grid2 size={8}>
+      <Grid size={8}>
         <Paper
           sx={{
             height: '100%',
@@ -1072,18 +1098,18 @@ export default function QuestBoard(props: BoardProps)
               If there are no quests, then consider making one.
             </Typography>
             : <>
-              <Grid2 container rowSpacing={3} columnSpacing={4}>
+              <Grid container rowSpacing={3} columnSpacing={4}>
                 {/* ROW 1 */}
                 {/* key */}
-                <Grid2 size={2}>
+                <Grid size={2}>
                   <KeyTextField
                     value={selectedQuest.key}
                     onChange={handleQuestKeyOnChangeEvent}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* name */}
-                <Grid2 size={6}>
+                <Grid size={6}>
                   <TextField
                     variant={"filled"}
                     label={"Name"}
@@ -1092,10 +1118,10 @@ export default function QuestBoard(props: BoardProps)
                     size={"small"}
                     fullWidth
                   />
-                </Grid2>
+                </Grid>
 
                 {/* category */}
-                <Grid2 size={3}>
+                <Grid size={3}>
                   <FormControl fullWidth>
                     <InputLabel>Quest Category</InputLabel>
                     <Select
@@ -1106,10 +1132,10 @@ export default function QuestBoard(props: BoardProps)
                       {categories.map((category, index) => renderCategoryListItem(category, index))}
                     </Select>
                   </FormControl>
-                </Grid2>
+                </Grid>
 
                 {/* category editor */}
-                <Grid2 size={1}>
+                <Grid size={1}>
                   <IconButton
                     color={"success"}
                     onClick={() =>
@@ -1123,11 +1149,11 @@ export default function QuestBoard(props: BoardProps)
                     <Edit/>
                     <Category/>
                   </IconButton>
-                </Grid2>
+                </Grid>
 
                 {/* ROW 2 */}
                 {/* recommended level */}
-                <Grid2 size={2}>
+                <Grid size={2}>
                   <TextField
                     type={"number"}
                     label={"Level"}
@@ -1136,44 +1162,46 @@ export default function QuestBoard(props: BoardProps)
                     onChange={(event) => handleQuestRecommendedLevelOnChangeEvent(parseInt(event.target.value) ?? -1)}
                     sx={{ width: '80px' }}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* horizontal spacer */}
-                <Grid2 size={6}></Grid2>
+                <Grid size={6}></Grid>
 
                 {/* tags */}
-                <Grid2 size={3}>
+                <Grid size={3}>
                   <Autocomplete
                     size={"small"}
                     options={[ ...tags ]}
                     disableCloseOnSelect
-                    ListboxProps={{ sx: { maxHeight: '170px' } }}
+                    slotProps={{
+                      listbox: {
+                        sx: { maxHeight: '170px' }
+                      }
+                    }}
                     getOptionKey={(option) => option?.key ?? "no-key"}
                     getOptionLabel={(option) => option?.name ?? ""}
                     renderOption={(props, option, { index }) =>
                     {
                       if (option === null || option.name === "" || option.name.startsWith("=="))
                       {
-                        return <React.Fragment
-                          key={index}></React.Fragment>;
+                        return <li {...props} style={{ display: 'none' }}/>;
                       }
 
-                      return (<ListItem
-                        key={option.key}
-                        sx={{ height: 32 }}
-                      >
-                        <ListItemIcon
-                          sx={{ height: 32 }}
-                        >
-                          <Checkbox
-                            checked={applicableTags.includes(option.key)}
-                            onChange={() => handleQuestTagToggle(option.key)}/>
-                          <ListItemText
-                            primary={`${option.key}: ${option.name}`}
-                            disableTypography
-                          />
-                        </ListItemIcon>
-                      </ListItem>);
+                      return (
+                        <li {...props} key={props.key ?? option.key} style={{ height: 32 }}>
+                          <ListItem disableGutters disablePadding sx={{ height: 32 }}>
+                            <ListItemIcon sx={{ height: 32 }}>
+                              <Checkbox
+                                checked={applicableTags.includes(option.key)}
+                                onChange={() => handleQuestTagToggle(option.key)}/>
+                              <ListItemText
+                                primary={`${option.key}: ${option.name}`}
+                                disableTypography
+                              />
+                            </ListItemIcon>
+                          </ListItem>
+                        </li>
+                      );
                     }}
                     renderInput={(params) =>
                     {
@@ -1184,10 +1212,10 @@ export default function QuestBoard(props: BoardProps)
                         placeholder="Tags..."/>)
                     }}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* tag editor */}
-                <Grid2 size={1}>
+                <Grid size={1}>
                   <IconButton
                     color={"secondary"}
                     onClick={() =>
@@ -1201,11 +1229,11 @@ export default function QuestBoard(props: BoardProps)
                     <Edit/>
                     <Style/>
                   </IconButton>
-                </Grid2>
+                </Grid>
 
                 {/* ROW 3 */}
                 {/* unknown hint */}
-                <Grid2 size={12}>
+                <Grid size={12}>
                   <TextField
                     variant={"standard"}
                     label={"Unknown Hint"}
@@ -1214,11 +1242,11 @@ export default function QuestBoard(props: BoardProps)
                     size={"small"}
                     fullWidth
                   />
-                </Grid2>
+                </Grid>
 
                 {/* ROW 4 */}
                 {/* description */}
-                <Grid2 size={12}>
+                <Grid size={12}>
                   <TextField
                     variant={"outlined"}
                     label={"Overview"}
@@ -1229,11 +1257,11 @@ export default function QuestBoard(props: BoardProps)
                     fullWidth
                     rows={8}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* ROW 5 */}
                 {/* objective id list */}
-                <Grid2 size={2}>
+                <Grid size={2}>
                   <div
                     onContextMenu={handleObjectiveListContextMenu}
                     style={{ cursor: 'context-menu' }}
@@ -1242,13 +1270,13 @@ export default function QuestBoard(props: BoardProps)
                       {objectives.map(renderObjectiveListItem)}
                     </List>
                   </div>
-                </Grid2>
+                </Grid>
 
                 {/* selected objective data */}
-                <Grid2 size={10}>
-                  <Grid2 container spacing={2}>
+                <Grid size={10}>
+                  <Grid container spacing={2}>
                     {/* objective type */}
-                    <Grid2 size={4}>
+                    <Grid size={4}>
                       <FormControl fullWidth>
                         <InputLabel>Objective Type</InputLabel>
                         <Select
@@ -1260,10 +1288,10 @@ export default function QuestBoard(props: BoardProps)
                             .map(renderObjectiveType)}
                         </Select>
                       </FormControl>
-                    </Grid2>
+                    </Grid>
 
                     {/* objective toggles */}
-                    <Grid2 size={8}>
+                    <Grid size={8}>
                       <FormControlLabel
                         control={<Checkbox
                           checked={selectedObjective?.hiddenByDefault}
@@ -1289,9 +1317,9 @@ export default function QuestBoard(props: BoardProps)
                           : "Is Required"}
                         labelPlacement={"end"}
                       />
-                    </Grid2>
+                    </Grid>
 
-                    <Grid2 size={12}>
+                    <Grid size={12}>
                       <TextField
                         variant={"filled"}
                         label={"Description"}
@@ -1300,20 +1328,20 @@ export default function QuestBoard(props: BoardProps)
                         value={selectedObjective?.description}
                         onChange={event => handleObjectiveDescriptionOnChangeEvent(event.target.value)}
                       />
-                    </Grid2>
+                    </Grid>
 
                     {/* objective logs */}
-                    <Grid2 size={12}>
+                    <Grid size={12}>
                       <ObjectiveLogs
                         logs={selectedObjective?.logs}
                         updateObjectiveLogsFunc={handleObjectiveLogsOnChangeEvent}
                       />
-                    </Grid2>
-                  </Grid2>
-                </Grid2>
+                    </Grid>
+                  </Grid>
+                </Grid>
 
                 {/* selected objective fulfillment */}
-                <Grid2 size={10}>
+                <Grid size={10}>
                   <ObjectiveFulfillmentData
                     fulfillmentData={selectedObjective?.fulfillment}
                     fulfillmentType={selectedObjective?.type}
@@ -1323,13 +1351,13 @@ export default function QuestBoard(props: BoardProps)
                     updateSlayFunc={handleObjectiveFulfillmentSlayOnChangeEvent}
                     updateQuestFunc={handleObjectiveFulfillmentQuestOnChangeEvent}
                   />
-                </Grid2>
+                </Grid>
 
-              </Grid2>
+              </Grid>
             </>}
         </Paper>
-      </Grid2>
-    </Grid2>
+      </Grid>
+    </Grid>
 
     {/*region not-grid-related elements */}
     <SaveButton
@@ -1485,18 +1513,18 @@ export default function QuestBoard(props: BoardProps)
         Category Management
       </DialogTitle>
       <DialogContent>
-        <Grid2 container rowSpacing={2} columnSpacing={2}>
+        <Grid container rowSpacing={2} columnSpacing={2}>
           {/* list of categories */}
-          <Grid2 size={4}>
+          <Grid size={4}>
             <div onContextMenu={handleCategoryListContextMenu} style={{ cursor: 'context-menu' }}>
               <List>
                 {categories.map((category, index) => renderCategoryDialogListItem(category, index))}
               </List>
             </div>
-          </Grid2>
+          </Grid>
 
           {/* category modification */}
-          <Grid2 size={8}>
+          <Grid size={8}>
             <Stack spacing={4}>
               {/* Key */}
               <Tooltip title={"Modifying the key will require updating quests associated with this category."}>
@@ -1536,8 +1564,8 @@ export default function QuestBoard(props: BoardProps)
                 onChange={(event) => handleCategoryIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
               />
             </Stack>
-          </Grid2>
-        </Grid2>
+          </Grid>
+        </Grid>
       </DialogContent>
       <DialogActions>
         <Button
@@ -1622,18 +1650,18 @@ export default function QuestBoard(props: BoardProps)
         Tag Management
       </DialogTitle>
       <DialogContent>
-        <Grid2 container rowSpacing={2} columnSpacing={2}>
+        <Grid container rowSpacing={2} columnSpacing={2}>
           {/* list of tags */}
-          <Grid2 size={4}>
+          <Grid size={4}>
             <div onContextMenu={handleTagListContextMenu} style={{ cursor: 'context-menu' }}>
               <List>
                 {tags.map((tag, index) => renderTagListItem(tag, index))}
               </List>
             </div>
-          </Grid2>
+          </Grid>
 
           {/* tag modification */}
-          <Grid2 size={8}>
+          <Grid size={8}>
             <Stack spacing={4}>
               {/* Key */}
               <Tooltip title={"Modifying the key will require updating quests associated with this category."}>
@@ -1672,8 +1700,8 @@ export default function QuestBoard(props: BoardProps)
                 onChange={(event) => handleTagIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
               />
             </Stack>
-          </Grid2>
-        </Grid2>
+          </Grid>
+        </Grid>
       </DialogContent>
       <DialogActions>
         <Button

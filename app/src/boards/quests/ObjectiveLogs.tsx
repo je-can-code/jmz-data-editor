@@ -1,10 +1,17 @@
 import OmniObjectiveLogType from "./OmniObjectiveLogType.ts";
-import { Questopedia } from "../../types/custom/Quests";
-import OmniObjectiveLogs = Questopedia.OmniObjectiveLogs;
-import { Box, TextField } from "@mui/material";
-import { AccountCircle, Announcement, Bedtime, Block, CancelPresentation, Verified } from "@mui/icons-material";
-import styled from "styled-components";
+import {
+  Box,
+  TextField
+} from "@mui/material";
+import {
+  Announcement,
+  Bedtime,
+  Block,
+  CancelPresentation,
+  Verified
+} from "@mui/icons-material";
 import { yellow } from "@mui/material/colors";
+import OmniObjectiveLogs = Questopedia.OmniObjectiveLogs;
 
 const BoxStyles = {
   display: 'flex',
@@ -61,7 +68,7 @@ export default function ObjectiveLogs(
         sx={{
           ...AdornmentStyles,
           color: yellow[800]
-      }}
+        }}
       />
       <TextField
         variant={"standard"}

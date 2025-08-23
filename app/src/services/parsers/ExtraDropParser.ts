@@ -1,8 +1,8 @@
-import RPGManager from "../../../services/RPGManager.ts";
+import NoteReader from "../utils/NoteReader.ts";
+import RPG_DropHelper from "../utils/DropHelper.ts";
+import DropItemBuilder from "../utils/DropItemBuilder.ts";
+import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
-import RPG_DropHelper from "./DropHelper.ts";
-import DropItemBuilder from "./DropItemBuilder.ts";
-import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 
 type RPG_ExtraDropChance = [ dropType: 'i' | 'w' | 'a', dropId: number, chance: number ];
 
@@ -20,7 +20,7 @@ class ExtraDropManager
   static read(note: string): RPG_DropItem[]
   {
     // get the drops found on the note.
-    const moreDrops = RPGManager.getArraysFromNotesByRegex(note, this.#regex, true) ?? [];
+    const moreDrops = NoteReader.getArraysFromNotesByRegex(note, this.#regex, true) ?? [];
 
     // if there are no more drops, then skip processing.
     if (moreDrops.length === 0) return [];
@@ -51,48 +51,25 @@ class ExtraDropManager
    */
   static write(originalNote: string, extraDrops: RPG_DropItem[]): string
   {
-    // remove all original extra drops.
-    let newNote = originalNote
-      .replace(this.#regex, "")
-      .replace(/\r\r/gmi, '\r')
-      .replace(/\n\n/gmi, '\n');
+    // remove all original extra drops lines
+    const base = NoteNormalizer.removeLinesMatching(originalNote, this.#regex);
 
-    while (newNote.endsWith('\r') || newNote.endsWith('\n'))
+    // build new tags as a block
+    const newBlock = extraDrops.map(extraDrop =>
+      {
+        const letter = RPG_DropHelper.LetterFromType(extraDrop.kind);
+        return `<drops:[${letter},${extraDrop.dataId},${extraDrop.denominator}]>`;
+      })
+      .join('\n');
+
+    // if no new drops, return the cleaned base
+    if (!newBlock)
     {
-      newNote = newNote.slice(0, newNote.length - 1);
+      return base;
     }
 
-    // build the new tags.
-    let newTags = "";
-    extraDrops
-      .forEach((extraDrop, index) =>
-      {
-        // build the new tag with the data points from the drop.
-        const letterDropTypeKind = RPG_DropHelper.LetterFromType(extraDrop.kind);
-        let tag = `<drops:[${letterDropTypeKind},${extraDrop.dataId},${extraDrop.denominator}]>`;
-
-        // add the tag.
-        newTags += `${tag}`;
-
-        // check if we're still going through the list.
-        if (index !== extraDrops.length - 1)
-        {
-          // add a new line at the end.
-          newTags += "\n";
-        }
-      });
-
-    const combinedNote = this.#cleanupLineEndings(`${newNote}\n${newTags}`);
-
-    // return the new note plus all the extra drops.
-    return combinedNote;
-  }
-
-  static #cleanupLineEndings(note: string): string
-  {
-    return note
-      .replace(/\r\r/gmi, '\r')
-      .replace(/\n\n/gmi, '\n')
+    // append the block in a normalized way
+    return NoteNormalizer.appendBlock(base, newBlock);
   }
 }
 

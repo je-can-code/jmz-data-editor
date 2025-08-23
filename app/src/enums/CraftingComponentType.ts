@@ -1,7 +1,7 @@
 enum CraftingComponentType
 {
   Item = "i",
-  Weapon  = "w",
+  Weapon = "w",
   Armor = "a",
 }
 

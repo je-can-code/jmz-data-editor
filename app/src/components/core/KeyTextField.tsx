@@ -1,4 +1,7 @@
-import { InputAdornment, TextField } from "@mui/material";
+import {
+  InputAdornment,
+  TextField
+} from "@mui/material";
 import { Key } from "@mui/icons-material";
 import React from "react";
 
@@ -8,7 +11,11 @@ type KeyTextFieldProps = {
   disabled?: boolean;
 };
 
-export default function KeyTextField({ value, onChange, disabled }: KeyTextFieldProps)
+export default function KeyTextField({
+  value,
+  onChange,
+  disabled
+}: KeyTextFieldProps)
 {
   return <>
     <TextField

@@ -1,18 +1,22 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Button } from "@mui/material";
-import { OpenInNew } from "@mui/icons-material";
-import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
-import { SdpParser } from "../services/SdpParser.ts";
+import React, {
+  useEffect,
+  useMemo,
+  useState
+} from "react";
 import {
   Autocomplete,
+  Button,
   Checkbox,
   FormControlLabel,
   TextField
 } from "@mui/material";
-import Panel = Sdp.Panel;
+import { OpenInNew } from "@mui/icons-material";
+import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
+import { SdpParser } from "../../../services/parsers/SdpParser.ts";
 import { executeLoad } from "../../../services/DataService.ts";
-import Configuration = Sdp.Configuration;
 import ConfigFilenames from "../../../enums/ConfigFilenames.ts";
+import Panel = Sdp.Panel;
+import Configuration = Sdp.Configuration;
 
 type EnemySdpDropProps = {
   note: string;

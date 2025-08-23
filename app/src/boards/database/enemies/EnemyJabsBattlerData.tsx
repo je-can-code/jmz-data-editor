@@ -1,8 +1,24 @@
-import React, { ChangeEvent, useEffect, useState } from "react";
-import { JabsBattlerData, JabsDataParser } from "../services/JabsDataParser.ts";
+import React, {
+  useEffect,
+  useState
+} from "react";
+import {
+  JabsBattlerData,
+  JabsDataParser
+} from "../../../services/parsers/JabsDataParser.ts";
 import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
-import { Box, Divider, Stack, Typography } from "@mui/material";
-import { AccessAlarm, DirectionsRun, Speed, TrendingUp, Visibility } from "@mui/icons-material";
+import {
+  Divider,
+  Stack,
+  Typography
+} from "@mui/material";
+import {
+  AccessAlarm,
+  DirectionsRun,
+  Speed,
+  TrendingUp,
+  Visibility
+} from "@mui/icons-material";
 
 type EnemyJabsBattlerDataProps = {
   note: string;
@@ -147,13 +163,13 @@ const EnemyJabsBattlerData = ({
           label="Sight Range"
           value={sight}
           onChangeEventHandler={(event) => handleSightChange(Number(event.target.value))}
-          endAdornment={<Visibility color={"info"} />} // Blue color for vision/sight
+          endAdornment={<Visibility color={"info"}/>} // Blue color for vision/sight
         />
         <NumberInputWithLabel
           label="Pursuit Range"
           value={pursuit}
           onChangeEventHandler={(event) => handlePursuitChange(Number(event.target.value))}
-          endAdornment={<DirectionsRun color={"success"} />} // Green color for movement/action
+          endAdornment={<DirectionsRun color={"success"}/>} // Green color for movement/action
         />
         {/*<NumberInputWithLabel*/}
         {/*  label="Prepare Speed"*/}
@@ -162,7 +178,7 @@ const EnemyJabsBattlerData = ({
         {/*/>*/}
       </Stack>
 
-      <Divider />
+      <Divider/>
 
       {/* Alert-related data section */}
       <Stack spacing={1}>
@@ -171,19 +187,19 @@ const EnemyJabsBattlerData = ({
           label="Alert Duration"
           value={alertDuration}
           onChangeEventHandler={(event) => handleAlertDurationChange(Number(event.target.value))}
-          endAdornment={<AccessAlarm color={"warning"} />} // Orange/yellow for caution/alert
+          endAdornment={<AccessAlarm color={"warning"}/>} // Orange/yellow for caution/alert
         />
         <NumberInputWithLabel
           label="Alert Sight Boost"
           value={alertSightBoost}
           onChangeEventHandler={(event) => handleAlertSightBoostChange(Number(event.target.value))}
-          endAdornment={<TrendingUp color={"secondary"} />} // Purple for enhancement
+          endAdornment={<TrendingUp color={"secondary"}/>} // Purple for enhancement
         />
         <NumberInputWithLabel
           label="Alert Pursuit Boost"
           value={alertPursuitBoost}
           onChangeEventHandler={(event) => handleAlertPursuitBoostChange(Number(event.target.value))}
-          endAdornment={<Speed color={"error"} />} // Red for speed/intensity
+          endAdornment={<Speed color={"error"}/>} // Red for speed/intensity
         />
       </Stack>
     </Stack>

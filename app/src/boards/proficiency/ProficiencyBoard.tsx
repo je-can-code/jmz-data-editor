@@ -1,5 +1,8 @@
 import React, {
-  ChangeEvent, MouseEvent, useEffect, useState
+  ChangeEvent,
+  MouseEvent,
+  useEffect,
+  useState
 } from "react";
 import { FixedSizeList } from 'react-window';
 import {
@@ -16,7 +19,7 @@ import {
   DialogContentText,
   DialogTitle,
   Divider,
-  Grid2,
+  Grid,
   InputAdornment,
   List,
   ListItem,
@@ -35,7 +38,6 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { LoadingButton } from "@mui/lab";
 import {
   Add,
   ContentCopy,
@@ -47,38 +49,34 @@ import {
   PriceCheck,
   RadioButtonUnchecked,
   Remove,
-  Save,
   TaskAlt
 } from "@mui/icons-material";
 import styled from "styled-components";
 
 import { BoardProps } from "../../types/local/BoardProps";
 import {
-  executeLoad, executeSave, loadActors, loadSkills
+  executeLoad,
+  executeSave,
+  loadActors,
+  loadSkills
 } from "../../services/DataService.ts";
 import ConfigFilenames from "../../enums/ConfigFilenames.ts";
 import {
-  MuiSnackbarSeverity, MuiSnackbarVariant
+  MuiSnackbarSeverity,
+  MuiSnackbarVariant
 } from "../../enums/MuiSnackbar.ts";
+import SaveButton from "../../components/core/SaveButton.tsx";
 import RPG_Actor = Rmmz.Implementations.RPG_Actor;
 import RPG_Skill = Rmmz.Implementations.RPG_Skill;
 
 import Configuration = Proficiency.Configuration;
 import Conditional = Proficiency.Conditional;
 import Requirement = Proficiency.Requirement;
-import SaveButton from "../../components/core/SaveButton.tsx";
 
 //region setup
 const EntryText = styled(ListItemText)`
     font-family: monospace;
 `;
-
-const SaveStyles = {
-  fontFamily: "monospace",
-  position: "absolute",
-  top: "8%",
-  right: "1%",
-};
 //endregion setup
 
 export default function ProficiencyBoard(proficiencyProps: BoardProps)
@@ -739,9 +737,9 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
   //endregion render
 
   return <>
-    <Grid2 container spacing={2}>
+    <Grid container spacing={2}>
       {/* This is the data list of all entries the user can modify. */}
-      <Grid2 size={3}>
+      <Grid size={3}>
         <div onContextMenu={handleConditionalContextMenu} style={{ cursor: 'context-menu' }}>
           {/* @ts-ignore */}
           <FixedSizeList
@@ -753,10 +751,10 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
             {renderConditionalListItem}
           </FixedSizeList>
         </div>
-      </Grid2>
+      </Grid>
 
       {/* This is the form fields for modifying the selected entry. */}
-      <Grid2 size={9}>
+      <Grid size={9}>
         <Paper sx={{
           height: '100%',
           width: '100%',
@@ -768,9 +766,9 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
               If there are no conditionals, then consider making one.
             </Typography>
 
-            : <Grid2 container rowSpacing={2} columnSpacing={4}>
+            : <Grid container rowSpacing={2} columnSpacing={4}>
               {/* Conditional inputs. */}
-              <Grid2 size={4}>
+              <Grid size={4}>
                 <TextField
                   required
                   variant={"outlined"}
@@ -787,9 +785,9 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
                     }
                   }}
                 />
-              </Grid2>
+              </Grid>
 
-              <Grid2 size={4}>
+              <Grid size={4}>
                 <List dense sx={{
                   paddingTop: 0,
                   border: '1px solid',
@@ -805,9 +803,9 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
                   </ListSubheader>
                   {actors.map(renderActorListItem)}
                 </List>
-              </Grid2>
+              </Grid>
 
-              <Grid2 size={4}>
+              <Grid size={4}>
                 <Autocomplete
                   size={"small"}
                   options={[ ...skills ].sort((a, b) =>
@@ -839,26 +837,24 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
                   {
                     if (option === null || option.name === "" || option.name.startsWith("=="))
                     {
-                      return <React.Fragment
-                        key={index}></React.Fragment>;
+                      return <li {...props} style={{ display: 'none' }}/>;
                     }
 
-                    return (<ListItem
-                      key={option.id}
-                      sx={{ height: 32 }}
-                    >
-                      <ListItemIcon
-                        sx={{ height: 32 }}
-                      >
-                        <Checkbox
-                          checked={skillIdRewardEarned.includes(option.id)}
-                          onChange={() => handleConditionalSkillIdRewardToggle(option.id)}/>
-                        <EntryText
-                          primary={`${option.id}: ${option.name}`}
-                          disableTypography={true}
-                        />
-                      </ListItemIcon>
-                    </ListItem>);
+                    return (
+                      <li {...props} key={props.key ?? option.id} style={{ height: 32 }}>
+                        <ListItem disableGutters disablePadding sx={{ height: 32 }}>
+                          <ListItemIcon sx={{ height: 32 }}>
+                            <Checkbox
+                              checked={skillIdRewardEarned.includes(option.id)}
+                              onChange={() => handleConditionalSkillIdRewardToggle(option.id)}/>
+                            <EntryText
+                              primary={`${option.id}: ${option.name}`}
+                              disableTypography={true}
+                            />
+                          </ListItemIcon>
+                        </ListItem>
+                      </li>
+                    );
                   }}
                   renderInput={(params) =>
                   {
@@ -869,9 +865,9 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
                       placeholder="Skill name..."/>)
                   }}
                 />
-              </Grid2>
+              </Grid>
 
-              <Grid2 size={8}>
+              <Grid size={8}>
                 <TextField
                   label={"Javascript-based Rewards"}
                   placeholder={"Raw javascript to be executed upon completing this conditional..."}
@@ -892,15 +888,15 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
                     },
                   }}
                 />
-              </Grid2>
+              </Grid>
 
-              <Grid2 size={4}>
+              <Grid size={4}>
                 <Box>
                   {skillIdRewardEarned.map(renderSkillIdRewards)}
                 </Box>
-              </Grid2>
+              </Grid>
 
-              <Grid2 size={4}>
+              <Grid size={4}>
                 <div onContextMenu={handleRequirementsContextMenu} style={{ cursor: 'context-menu' }}>
                   <List dense>
                     <ListSubheader sx={{
@@ -912,9 +908,9 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
                     {currentRequirements.map((requirement, index) => renderConditionalRequirement(requirement, index))}
                   </List>
                 </div>
-              </Grid2>
+              </Grid>
 
-              <Grid2 size={4}>
+              <Grid size={4}>
                 <Stack spacing={2}>
                   <TextField
                     type={"number"}
@@ -943,21 +939,23 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
                     {
                       if (option === null || option.name === "" || option.name.startsWith("=="))
                       {
-                        return <React.Fragment
-                          key={index}></React.Fragment>;
+                        return <li {...props} style={{ display: 'none' }}/>;
                       }
 
-                      return (<ListItem key={`${option.id}-${option.name}`} sx={{ height: 32 }}>
-                        <ListItemButton onClick={() => handleRequirementPrimarySkillOnChangeEvent(option)}>
-                          <ListItemIcon sx={{ height: 32 }}>
-                            <EntryText
-                              primary={`${option.id}: ${option.name}`}
-                              disableTypography
-                            />
-                          </ListItemIcon>
-                        </ListItemButton>
-
-                      </ListItem>);
+                      return (
+                        <li {...props} key={props.key ?? `${option.id}-${option.name}`} style={{ height: 32 }}>
+                          <ListItem disableGutters disablePadding sx={{ height: 32 }}>
+                            <ListItemButton onClick={() => handleRequirementPrimarySkillOnChangeEvent(option)}>
+                              <ListItemIcon sx={{ height: 32 }}>
+                                <EntryText
+                                  primary={`${option.id}: ${option.name}`}
+                                  disableTypography
+                                />
+                              </ListItemIcon>
+                            </ListItemButton>
+                          </ListItem>
+                        </li>
+                      );
                     }}
                     renderInput={(params) =>
                     {
@@ -972,33 +970,35 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
                     size={"small"}
                     options={skills}
                     disableCloseOnSelect
-                    ListboxProps={{ sx: { maxHeight: '170px' } }}
+                    slotProps={{
+                      listbox: {
+                        sx: { maxHeight: '170px' }
+                      }
+                    }}
                     getOptionKey={(option) => option?.id ?? "no-key"}
                     getOptionLabel={(option) => option?.name ?? ""}
                     renderOption={(props, option, { index }) =>
                     {
                       if (option === null || option.name === "" || option.name.startsWith("=="))
                       {
-                        return <React.Fragment
-                          key={index}></React.Fragment>;
+                        return <li {...props} style={{ display: 'none' }}/>;
                       }
 
-                      return (<ListItem
-                        key={option.id}
-                        sx={{ height: 32 }}
-                      >
-                        <ListItemIcon
-                          sx={{ height: 32 }}
-                        >
-                          <Checkbox
-                            checked={requirementSecondarySkillIds.includes(option.id)}
-                            onChange={() => handleRequirementSecondarySkillIdToggle(option.id)}/>
-                          <EntryText
-                            primary={`${option.id}: ${option.name}`}
-                            disableTypography
-                          />
-                        </ListItemIcon>
-                      </ListItem>);
+                      return (
+                        <li {...props} key={props.key ?? option.id} style={{ height: 32 }}>
+                          <ListItem disableGutters disablePadding sx={{ height: 32 }}>
+                            <ListItemIcon sx={{ height: 32 }}>
+                              <Checkbox
+                                checked={requirementSecondarySkillIds.includes(option.id)}
+                                onChange={() => handleRequirementSecondarySkillIdToggle(option.id)}/>
+                              <EntryText
+                                primary={`${option.id}: ${option.name}`}
+                                disableTypography
+                              />
+                            </ListItemIcon>
+                          </ListItem>
+                        </li>
+                      );
                     }}
                     renderInput={(params) =>
                     {
@@ -1010,10 +1010,10 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
                     }}
                   />
                 </Stack>
-              </Grid2>
-            </Grid2>}
+              </Grid>
+            </Grid>}
         </Paper>
-      </Grid2>
+      </Grid>
 
       {/*region not-grid-related elements */}
       {/* This dialog contains skill detail for the user to understand more about their skill rewards. */}
@@ -1206,6 +1206,6 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
         </MenuItem>
       </Menu>
       {/*endregion not-grid-related elements */}
-    </Grid2>
+    </Grid>
   </>
 }

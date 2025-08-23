@@ -1,10 +1,22 @@
-import React, { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
-import { FixedSizeList, ListChildComponentProps } from "react-window";
+import React, {
+  ChangeEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import {
-  Accordion, AccordionDetails, AccordionSummary,
+  FixedSizeList,
+  ListChildComponentProps
+} from "react-window";
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
-  Grid2,
+  Grid,
+  IconButton,
   ListItem,
   ListItemButton,
   ListItemIcon,
@@ -12,45 +24,66 @@ import {
   Paper,
   Snackbar,
   Stack,
-  TextField, Tooltip,
-  Typography,
-  IconButton
+  TextField,
+  Tooltip,
+  Typography
 } from "@mui/material";
 import {
-  Addchart, DoubleArrow, ExpandMore, KeyboardArrowRight, MonetizationOn, ScatterPlot, SdCard, Timeline,
-  KeyboardArrowLeft
+  Addchart,
+  DoubleArrow,
+  ExpandMore,
+  KeyboardArrowLeft,
+  KeyboardArrowRight,
+  MonetizationOn,
+  SdCard,
+  Timeline
 } from "@mui/icons-material";
 import { throttle } from "lodash";
 
-import { executeSave, loadEnemies } from "../../../services/DataService.ts";
-import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../../enums/MuiSnackbar.ts";
+import {
+  executeSave,
+  loadEnemies
+} from "../../../services/DataService.ts";
+import {
+  MuiSnackbarSeverity,
+  MuiSnackbarVariant
+} from "../../../enums/MuiSnackbar.ts";
 import { BoardProps } from "../../../types/local/BoardProps";
 import DatabaseFilenames from "../../../enums/DatabaseFilenames.ts";
 
-import { ExtraDropManager } from "../services/ExtraDropParser.ts";
-import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
-import RPG_DropItem = Rmmz.Data.RPG_DropItem;
+import { ExtraDropManager } from "../../../services/parsers/ExtraDropParser.ts";
 
 import EnemyBaseParameters from "./EnemyBaseParameters.tsx";
 import EnemiesExtraDrops from "./EnemiesExtraDrops.tsx";
 import SaveButton from "../../../components/core/SaveButton.tsx";
 import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
 import {
-  blue, orange, purple, yellow, green, red,
-  teal, indigo, pink, cyan, amber, brown
+  amber,
+  blue,
+  brown,
+  cyan,
+  green,
+  indigo,
+  orange,
+  pink,
+  purple,
+  red,
+  teal,
+  yellow
 } from "@mui/material/colors";
-import { LevelParser } from "../services/LevelParser.ts";
+import { LevelParser } from "../../../services/parsers/LevelParser.ts";
 import TraitEditor from "../components/traits/TraitEditor.tsx";
-import RPG_Trait = Rmmz.Data.RPG_Trait;
 import ParameterGrowth from "./ParameterGrowth.tsx";
-import { knownLongParams } from "../../../services/ParameterIdMapper.ts";
-import { GrowthParser } from "../services/GrowthParser.ts";
+import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
+import { GrowthParser } from "../../../services/parsers/GrowthParser.ts";
 import EnemySdpDrop from "./EnemySdpDrop.tsx";
-import { SdpParser } from "../services/SdpParser.ts";
+import { SdpParser } from "../../../services/parsers/SdpParser.ts";
 import ReloadButton from "../../../components/core/ReloadButton.tsx";
 import { EnemyJabsAiTraits } from "./EnemyJabsAiTraits.tsx";
 import { EnemyJabsBattlerData } from "./EnemyJabsBattlerData.tsx";
-import { EnemyJabsConfigs } from "./EnemyJabsConfigs.tsx";
+import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
+import RPG_DropItem = Rmmz.Data.RPG_DropItem;
+import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 const EnemiesBoard = (props: BoardProps) =>
 {
@@ -660,8 +693,8 @@ const EnemiesBoard = (props: BoardProps) =>
   // totalEnemyCount();
 
   return <>
-    <Grid2 container spacing={2}>
-      <Grid2 size={2}>
+    <Grid container spacing={2}>
+      <Grid size={2}>
         <Stack direction={"row"} spacing={1} alignItems={"center"} sx={{ marginTop: 1 }}>
           <Tooltip title={"Previous match"}>
     <span>
@@ -740,9 +773,9 @@ const EnemiesBoard = (props: BoardProps) =>
             {renderEnemyListItem}
           </FixedSizeList>
         </div>
-      </Grid2>
+      </Grid>
 
-      <Grid2 size={10}>
+      <Grid size={10}>
         <Paper sx={{
           height: '100%',
           width: '100%',
@@ -756,8 +789,8 @@ const EnemiesBoard = (props: BoardProps) =>
               </Typography>
             </>
             : <>
-              <Grid2 container spacing={2}>
-                <Grid2 size={4}>
+              <Grid container spacing={2}>
+                <Grid size={4}>
                   <Stack spacing={1}>
                     <TextField
                       variant={"outlined"}
@@ -781,9 +814,9 @@ const EnemiesBoard = (props: BoardProps) =>
                     />
 
                     {/* rewards */}
-                    <Grid2 container spacing={1}>
+                    <Grid container spacing={1}>
                       {/* Experience */}
-                      <Grid2 size={6}>
+                      <Grid size={6}>
                         <NumberInputWithLabel
                           label={"Exp"}
                           value={selectedEnemy.exp}
@@ -794,8 +827,8 @@ const EnemiesBoard = (props: BoardProps) =>
                             handleEnemyExpOnChangeEvent(updatedValue);
                           }}
                         />
-                      </Grid2>
-                      <Grid2 size={6}>
+                      </Grid>
+                      <Grid size={6}>
                         <Box sx={{
                           display: 'flex',
                           alignItems: 'center',
@@ -836,10 +869,10 @@ const EnemiesBoard = (props: BoardProps) =>
                               : null;
                           })()}
                         </Box>
-                      </Grid2>
+                      </Grid>
 
                       {/* Gold */}
-                      <Grid2 size={6}>
+                      <Grid size={6}>
                         <NumberInputWithLabel
                           label={"Gold"}
                           value={selectedEnemy.gold}
@@ -850,8 +883,8 @@ const EnemiesBoard = (props: BoardProps) =>
                             handleEnemyGoldOnChangeEvent(updatedValue);
                           }}
                         />
-                      </Grid2>
-                      <Grid2 size={6}>
+                      </Grid>
+                      <Grid size={6}>
                         <Box sx={{
                           display: 'flex',
                           alignItems: 'center',
@@ -892,10 +925,10 @@ const EnemiesBoard = (props: BoardProps) =>
                               : null;
                           })()}
                         </Box>
-                      </Grid2>
+                      </Grid>
 
                       {/* SDPs */}
-                      <Grid2 size={6}>
+                      <Grid size={6}>
                         <NumberInputWithLabel
                           label={"SDPs"}
                           endAdornment={<SdCard sx={{ color: purple[100] }}/>}
@@ -906,8 +939,8 @@ const EnemiesBoard = (props: BoardProps) =>
                             updateEnemySdpPoints(updatedValue);
                           }}
                         />
-                      </Grid2>
-                      <Grid2 size={6}>
+                      </Grid>
+                      <Grid size={6}>
                         <Box sx={{
                           display: 'flex',
                           alignItems: 'center',
@@ -948,8 +981,8 @@ const EnemiesBoard = (props: BoardProps) =>
                               : null;
                           })()}
                         </Box>
-                      </Grid2>
-                    </Grid2>
+                      </Grid>
+                    </Grid>
 
                     <EnemyBaseParameters
                       selectedEnemy={selectedEnemy}
@@ -970,8 +1003,8 @@ const EnemiesBoard = (props: BoardProps) =>
                     />
 
                   </Stack>
-                </Grid2>
-                <Grid2 size={4}>
+                </Grid>
+                <Grid size={4}>
                   <Stack spacing={1}>
                     <Accordion>
                       <AccordionSummary
@@ -999,8 +1032,8 @@ const EnemiesBoard = (props: BoardProps) =>
                     {/*  updateNote={updateEnemyNote}*/}
                     {/*/>*/}
                   </Stack>
-                </Grid2>
-                <Grid2 size={4}>
+                </Grid>
+                <Grid size={4}>
                   <Stack spacing={1}>
                     <EnemySdpDrop
                       note={selectedEnemy.note}
@@ -1015,12 +1048,12 @@ const EnemiesBoard = (props: BoardProps) =>
                     />
                   </Stack>
 
-                </Grid2>
-              </Grid2>
+                </Grid>
+              </Grid>
             </>}
         </Paper>
-      </Grid2>
-    </Grid2>
+      </Grid>
+    </Grid>
 
     {/*region not-grid-related elements */}
     <Box sx={{

@@ -1,16 +1,25 @@
 import { Game_Trait } from "./Traits";
-import RPG_Trait = Rmmz.Data.RPG_Trait;
 import { SystemService } from "../../../../services/SystemService.ts";
-import { fromBParamIdToName, fromSParamIdToName, fromXParamIdToName } from "../../../../services/ParameterIdMapper.ts";
-import { CollapseEffect, PartyAbility, SpecialFlag } from "../../../../enums/TraitValues.ts";
+import {
+  fromBParamIdToName,
+  fromSParamIdToName,
+  fromXParamIdToName
+} from "../../../../mappers/ParameterIdMapper.ts";
+import {
+  CollapseEffect,
+  PartyAbility,
+  SpecialFlag
+} from "../../../../enums/TraitValues.ts";
 import {
   Accessibility,
   BookmarkAdd,
-  CandlestickChart, Diversity2,
+  CandlestickChart,
+  Diversity2,
   QuestionMark,
   SportsMma,
   StackedBarChart
 } from "@mui/icons-material";
+import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 class TraitMapper
 {

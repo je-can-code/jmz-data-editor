@@ -1,16 +1,43 @@
 // FormulaVisualizer.tsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState
+} from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
 } from 'recharts';
 import {
-  Button, Dialog, DialogActions, DialogContent,
-  DialogTitle, FormControl, InputLabel, MenuItem, Select,
-  Stack, TextField, Box, Typography, Divider, ButtonGroup
+  Box,
+  Button,
+  ButtonGroup,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Stack,
+  TextField,
+  Typography
 } from '@mui/material';
-import { GrowthParser } from "../services/GrowthParser.ts";
-import { ShowChart, Update, Functions } from "@mui/icons-material";
+import { GrowthParser } from "../../../services/parsers/GrowthParser.ts";
+import {
+  Functions,
+  ShowChart,
+  Update
+} from "@mui/icons-material";
 import { debounce } from 'lodash';
 
 type FormulaVisualizerProps = {
@@ -85,7 +112,8 @@ export default function FormulaVisualizer({
   );
 
   // Handle preset formula selection
-  const handlePresetSelect = (preset: string) => {
+  const handlePresetSelect = (preset: string) =>
+  {
     setDisplayFormula(preset);
     debouncedUpdateFormula(preset);
   };
@@ -158,14 +186,20 @@ export default function FormulaVisualizer({
             {/* Preset Formula Buttons Section */}
             <Box>
               <Typography variant="subtitle2" gutterBottom>
-                <Functions fontSize="small" sx={{ verticalAlign: 'middle', mr: 1 }} />
+                <Functions fontSize="small" sx={{
+                  verticalAlign: 'middle',
+                  mr: 1
+                }}/>
                 Preset Formulas
               </Typography>
-              <Divider sx={{ mb: 1 }} />
+              <Divider sx={{ mb: 1 }}/>
 
               <Stack spacing={1}>
                 {/* Linear Growth Presets */}
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Box sx={{
+                  display: 'flex',
+                  alignItems: 'center'
+                }}>
                   <Typography variant="caption" sx={{
                     fontWeight: 'bold',
                     width: '100px', // Fixed width for all labels
@@ -181,7 +215,10 @@ export default function FormulaVisualizer({
                 </Box>
 
                 {/* Quadratic Growth Presets */}
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Box sx={{
+                  display: 'flex',
+                  alignItems: 'center'
+                }}>
                   <Typography variant="caption" sx={{
                     fontWeight: 'bold',
                     width: '100px', // Fixed width for all labels
@@ -197,7 +234,10 @@ export default function FormulaVisualizer({
                 </Box>
 
                 {/* Exponential Growth Presets */}
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Box sx={{
+                  display: 'flex',
+                  alignItems: 'center'
+                }}>
                   <Typography variant="caption" sx={{
                     fontWeight: 'bold',
                     width: '100px', // Fixed width for all labels
@@ -286,7 +326,8 @@ export default function FormulaVisualizer({
               variant="contained"
               color="info"
               startIcon={<Update/>}
-              onClick={() => {
+              onClick={() =>
+              {
                 onUpdateFormula(displayFormula);
                 setOpen(false);
               }}

@@ -1,4 +1,3 @@
-import Panel = Sdp.Panel;
 import PanelParameter = Sdp.PanelParameter;
 
 type BoardProps = {

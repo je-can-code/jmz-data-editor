@@ -1,3 +1,5 @@
+import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
+
 type SdpDropData = {
   key: string;
   dropChance: number;
@@ -6,7 +8,7 @@ type SdpDropData = {
 class SdpParser
 {
   static #dropRegex = /<sdpDropData: ?(\[[-\w]+, ?\d+])>/i;
-  static #pointsRegex = /<sdpPoints: ?-?([\d+]+)>/i
+  static #pointsRegex = /<sdpPoints:\s*(-?\d+)>/i;
 
   /**
    * Reads the SDP drop data from a note.
@@ -20,60 +22,40 @@ class SdpParser
     {
       // Extract the array content without brackets
       const arrayContent = match[1].replace(/^\[|]$/g, '');
-      const parts = arrayContent.split(',').map(part => part.trim());
+      const parts = arrayContent.split(',')
+        .map(part => part.trim());
 
       const key = parts[0];
       const dropChance = parseInt(parts[1]);
 
       // Extract the key, itemId, and dropChance
-        return {
-          key,
-          dropChance,
-        };
+      return {
+        key,
+        dropChance,
+      };
     }
 
     return null;
   }
-  /**
-   * Writes SDP drop data to a note.
-   * @param originalNote The original note to update.
-   * @param sdpData The SDP drop data to write.
-   * @returns The updated note.
-   */
+
   static writeDrop(originalNote: string, sdpData: SdpDropData): string
   {
-    // Skip updating if key is empty
+    // empty key => remove any existing drop lines and normalize
     if (!sdpData.key.trim())
     {
-      // If there's an existing tag, remove it
-      if (originalNote.match(this.#dropRegex))
-      {
-        return originalNote.replace(this.#dropRegex, "");
-      }
-
-      return originalNote;
+      return NoteNormalizer.removeLinesMatching(originalNote, this.#dropRegex);
     }
 
     const newTag = `<sdpDropData: [${sdpData.key},${sdpData.dropChance}]>`;
 
-    let newNote = originalNote;
-    if (originalNote.match(this.#dropRegex))
-    {
-      // Replace existing tag
-      newNote = originalNote.replace(this.#dropRegex, newTag);
-    }
-    else
-    {
-      // Add new tag
-      newNote = `${newNote}\n${newTag}`;
-    }
-
-    return this.#cleanupLineEndings(newNote);
+    // ensure only one tag remains by removing then appending
+    const base = NoteNormalizer.removeLinesMatching(originalNote, this.#dropRegex);
+    return NoteNormalizer.appendBlock(base, newTag);
   }
 
   static deleteDrop(originalNote: string): string
   {
-    return originalNote.replace(this.#dropRegex, "");
+    return NoteNormalizer.removeLinesMatching(originalNote, this.#dropRegex);
   }
 
   /**
@@ -102,27 +84,9 @@ class SdpParser
   {
     const newTag = `<sdpPoints: ${points}>`;
 
-    let newNote = originalNote;
-    if (originalNote.match(this.#pointsRegex))
-    {
-      // Replace existing tag
-      newNote = originalNote.replace(this.#pointsRegex, newTag);
-    }
-    else
-    {
-      // Add new tag
-      newNote = `${newNote}\n${newTag}`;
-    }
-
-    return this.#cleanupLineEndings(newNote);
-  }
-
-  static #cleanupLineEndings(note: string): string
-  {
-    return note
-      .replace(/\r\r/gmi, '\r')
-      .replace(/\n\n/gmi, '\n')
-      .trim();
+    // ensure only one points tag by removing then appending
+    const base = NoteNormalizer.removeLinesMatching(originalNote, this.#pointsRegex);
+    return NoteNormalizer.appendBlock(base, newTag);
   }
 }
 

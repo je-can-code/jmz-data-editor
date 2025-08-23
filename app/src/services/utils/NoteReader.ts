@@ -1,11 +1,11 @@
-//region RPGManager
-import JsonMapper from "./JsonMapper.ts";
+import JsonMapper from "../../mappers/JsonMapper.ts";
+import { NoteNormalizer } from "./NoteNormalizer.ts";
 import RPG_Base = Rmmz.Base.RPG_Base;
 
 /**
  * A utility class for handling common database-related translations.
  */
-export default class RPGManager
+export default class NoteReader
 {
   /**
    * Gets the last instance of a string matching the regex from the given database object.
@@ -32,7 +32,8 @@ export default class RPGManager
     let val = '';
 
     // get the note data from this skill.
-    const lines = databaseNote.split(/[\r\n]+/);
+    const lines = NoteNormalizer.normalize(databaseNote)
+      .split('\n');
 
     // validate the notes to ensure there even are any.
     if (lines.length === 0)
@@ -212,5 +213,3 @@ export default class RPGManager
     return val;
   }
 }
-
-//endregion RPGManager

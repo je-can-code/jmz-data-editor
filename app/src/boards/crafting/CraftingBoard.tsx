@@ -1,15 +1,21 @@
-import React, { ChangeEvent, MouseEvent, useEffect, useState } from 'react';
+import React, {
+  ChangeEvent,
+  MouseEvent,
+  useEffect,
+  useState
+} from 'react';
 import {
   Alert,
   Autocomplete,
   Button,
   Checkbox,
-  Dialog, DialogActions,
+  Dialog,
+  DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
   FormControlLabel,
-  Grid2,
+  Grid,
   InputAdornment,
   List,
   ListItem,
@@ -27,14 +33,14 @@ import {
 import {
   Add,
   Check,
-  ContentCopy, DonutLarge,
+  ContentCopy,
+  DonutLarge,
   DonutSmall,
   Key,
   ListAlt,
   Lock,
   LockOpen,
   Remove,
-  Save,
   Subject,
   Visibility,
   VisibilityOff
@@ -43,21 +49,27 @@ import styled from "styled-components";
 import { FixedSizeList } from 'react-window';
 import CraftingComponentList from "./CraftingComponentList.tsx";
 
-import { executeLoad, executeSave } from "../../services/DataService.ts";
+import {
+  executeLoad,
+  executeSave
+} from "../../services/DataService.ts";
 
 import { BoardProps } from "../../types/local/BoardProps";
 import ConfigFilenames from "../../enums/ConfigFilenames.ts";
-import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../enums/MuiSnackbar.ts";
+import {
+  MuiSnackbarSeverity,
+  MuiSnackbarVariant
+} from "../../enums/MuiSnackbar.ts";
 import CraftingListType from "../../enums/CraftingListType.ts";
 
 import Crafting from "../../types/custom/Crafting";
+import SaveButton from "../../components/core/SaveButton.tsx";
+import KeyTextField from "../../components/core/KeyTextField.tsx";
 import Configuration = Crafting.Configuration;
 import Recipe = Crafting.Recipe;
 import Category = Crafting.Category;
 import CraftingConfiguration = Crafting.Configuration;
 import CraftingComponent = Crafting.CraftingComponent;
-import SaveButton from "../../components/core/SaveButton.tsx";
-import KeyTextField from "../../components/core/KeyTextField.tsx";
 
 // ================================================================================================
 const EntryText = styled(ListItemText)`
@@ -668,9 +680,9 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
   //endregion render
 
   return <>
-    <Grid2 container spacing={2}>
+    <Grid container spacing={2}>
       {/* This is the data list of all entries the user can modify. */}
-      <Grid2 size={3}>
+      <Grid size={3}>
         <div onContextMenu={handlRecipeListContextMenu} style={{ cursor: 'context-menu' }}>
           {/* @ts-ignore */}
           <FixedSizeList
@@ -682,35 +694,35 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
             {renderRecipeListItem}
           </FixedSizeList>
         </div>
-      </Grid2>
+      </Grid>
 
       {/* This is the form fields for modifying the selected entry. */}
-      <Grid2 size={9}>
+      <Grid size={9}>
         <Paper sx={{
           height: '100%',
           width: '100%',
           padding: 2
         }} elevation={10}>
           {(selectedRecipe === null)
-            ? <Grid2 container>
+            ? <Grid container>
               <Typography>
                 Please select a recipe on the left.<br/>
                 If there are no recipes, then consider making one.
               </Typography>
-            </Grid2>
+            </Grid>
 
             : <>
-              <Grid2 container rowSpacing={2} columnSpacing={4}>
+              <Grid container rowSpacing={2} columnSpacing={4}>
                 {/* Key */}
-                <Grid2 size={4}>
+                <Grid size={4}>
                   <KeyTextField
                     value={selectedRecipe.key}
                     onChange={handleRecipeKeyOnChangeEvent}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* Name */}
-                <Grid2 size={4}>
+                <Grid size={4}>
                   <TextField
                     variant={"outlined"}
                     label={"Name"}
@@ -719,10 +731,10 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                     size={"small"}
                     fullWidth
                   />
-                </Grid2>
+                </Grid>
 
                 {/* Icon */}
-                <Grid2 size={1}>
+                <Grid size={1}>
                   <TextField
                     type={"number"}
                     label={"Icon Index"}
@@ -730,10 +742,10 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                     sx={{ width: '80px' }}
                     onChange={(event) => handleRecipeIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* Initial visibility checkboxes */}
-                <Grid2 size={3}>
+                <Grid size={3}>
                   <Stack spacing={0}>
                     <FormControlLabel
                       control={<Checkbox
@@ -757,10 +769,10 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                       labelPlacement={"end"}
                     />
                   </Stack>
-                </Grid2>
+                </Grid>
 
                 {/* Description */}
-                <Grid2 size={8}>
+                <Grid size={8}>
                   <TextField
                     variant={"outlined"}
                     label={"Description"}
@@ -771,10 +783,10 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                     fullWidth
                     rows={4}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* Category key management */}
-                <Grid2 size={4}>
+                <Grid size={4}>
                   <Stack spacing={2}>
                     <Button
                       size={"small"}
@@ -790,33 +802,35 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                       options={[ ...categories ].sort()}
                       disableCloseOnSelect
                       groupBy={option => option.key.split("-")[0]}
-                      ListboxProps={{ sx: { maxHeight: '400px' } }}
+                      slotProps={{
+                        listbox: {
+                          sx: { maxHeight: '400px' }
+                        }
+                      }}
                       getOptionKey={(option) => option.key}
                       getOptionLabel={(option) => option.name}
                       renderOption={(props, option) =>
                       {
                         if (option === null || option.name === "" || option.name.startsWith("=="))
                         {
-                          return <React.Fragment
-                            key={props.key}></React.Fragment>;
+                          return <li {...props} style={{ display: 'none' }}/>;
                         }
 
-                        return (<ListItem
-                          key={props.key}
-                          sx={{ height: 32 }}
-                        >
-                          <ListItemIcon
-                            sx={{ height: 32 }}
-                          >
-                            <Checkbox
-                              checked={applicableCategories.includes(option.key)}
-                              onChange={() => handleRecipeCategoryKeyToggle(option.key)}/>
-                            <EntryText
-                              primary={`${option.key}: ${option.name}`}
-                              disableTypography={true}
-                            />
-                          </ListItemIcon>
-                        </ListItem>);
+                        return (
+                          <li {...props} key={props.key} style={{ height: 32 }}>
+                            <ListItem disableGutters disablePadding sx={{ height: 32 }}>
+                              <ListItemIcon sx={{ height: 32 }}>
+                                <Checkbox
+                                  checked={applicableCategories.includes(option.key)}
+                                  onChange={() => handleRecipeCategoryKeyToggle(option.key)}/>
+                                <EntryText
+                                  primary={`${option.key}: ${option.name}`}
+                                  disableTypography={true}
+                                />
+                              </ListItemIcon>
+                            </ListItem>
+                          </li>
+                        );
                       }}
                       renderInput={(params) =>
                       {
@@ -828,10 +842,10 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                       }}
                     />
                   </Stack>
-                </Grid2>
+                </Grid>
 
                 {/* Ingredients management */}
-                <Grid2 size={4}>
+                <Grid size={4}>
                   <CraftingComponentList
                     projectPath={craftingBoardProps.projectPath}
                     type={CraftingListType.Ingredients}
@@ -839,10 +853,10 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                     components={currentIngredients}
                     handleSnack={handleSnack}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* Tools management */}
-                <Grid2 size={4}>
+                <Grid size={4}>
                   <CraftingComponentList
                     projectPath={craftingBoardProps.projectPath}
                     type={CraftingListType.Tools}
@@ -850,10 +864,10 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                     components={currentTools}
                     handleSnack={handleSnack}
                   />
-                </Grid2>
+                </Grid>
 
                 {/* Outputs management */}
-                <Grid2 size={4}>
+                <Grid size={4}>
                   <CraftingComponentList
                     projectPath={craftingBoardProps.projectPath}
                     type={CraftingListType.Outputs}
@@ -861,12 +875,12 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                     components={currentOutputs}
                     handleSnack={handleSnack}
                   />
-                </Grid2>
-              </Grid2>
+                </Grid>
+              </Grid>
             </>}
 
         </Paper>
-      </Grid2>
+      </Grid>
 
       {/*region not-grid-related elements */}
       {/* This is over-arching save button- it will save all recipes to disk. */}
@@ -960,18 +974,18 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
           Category Management
         </DialogTitle>
         <DialogContent>
-          <Grid2 container rowSpacing={2} columnSpacing={2}>
+          <Grid container rowSpacing={2} columnSpacing={2}>
             {/* list of categories */}
-            <Grid2 size={4}>
+            <Grid size={4}>
               <div onContextMenu={handleCategoryListContextMenu} style={{ cursor: 'context-menu' }}>
                 <List>
                   {categories.map((category, index) => renderCategoryListItem(category, index))}
                 </List>
               </div>
-            </Grid2>
+            </Grid>
 
             {/* category modification */}
-            <Grid2 size={8}>
+            <Grid size={8}>
               <Stack spacing={2}>
                 {/* Key */}
                 <TextField
@@ -1032,8 +1046,8 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                   rows={4}
                 />
               </Stack>
-            </Grid2>
-          </Grid2>
+            </Grid>
+          </Grid>
         </DialogContent>
         <DialogActions>
           <Button
@@ -1106,6 +1120,6 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
         </MenuItem>
       </Menu>
       {/*endregion not-grid-related elements */}
-    </Grid2>
+    </Grid>
   </>;
 }

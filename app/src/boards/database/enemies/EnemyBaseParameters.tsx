@@ -1,14 +1,31 @@
 import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
-import { Box, Grid2, Stack, Tooltip, Typography } from "@mui/material";
 import {
-  AutoFixHigh, Casino, DirectionsRun, FitnessCenter, HeartBroken, MonitorHeart, PhotoFilter, Shield, ShowChart
+  Box,
+  Grid,
+  Stack,
+  Tooltip,
+  Typography
+} from "@mui/material";
+import {
+  AutoFixHigh,
+  Casino,
+  DirectionsRun,
+  FitnessCenter,
+  HeartBroken,
+  MonitorHeart,
+  PhotoFilter,
+  Shield,
+  ShowChart
 } from "@mui/icons-material";
-import { blue, pink } from "@mui/material/colors";
+import {
+  blue,
+  pink
+} from "@mui/material/colors";
 import { EnemyBaseParam } from "../../../enums/EnemyParameter.ts";
 import React from "react";
 import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
-import { GrowthParser } from "../services/GrowthParser.ts";
-import { knownLongParams } from "../../../services/ParameterIdMapper.ts";
+import { GrowthParser } from "../../../services/parsers/GrowthParser.ts";
+import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
 
 type EnemyBaseParametersProps = {
   selectedEnemy: RPG_Enemy;
@@ -24,21 +41,64 @@ export default function EnemyBaseParameters({
   const allParams = knownLongParams();
 
   // Function to get growth formula for a parameter
-  const getGrowthFormula = (longParamId: number): string => {
+  const getGrowthFormula = (longParamId: number): string =>
+  {
     const paramData = allParams.find(param => param.longParamId === longParamId);
-    return paramData ? GrowthParser.read(selectedEnemy.note, paramData) : '';
+    return paramData
+      ? GrowthParser.read(selectedEnemy.note, paramData)
+      : '';
   };
 
   // Create parameter data array for rendering
   const parameterData = [
-    { label: "Max HP", paramId: EnemyBaseParam.MaxHp, icon: <HeartBroken sx={{ color: pink[200] }}/>, longParamId: 0 },
-    { label: "Max MP", paramId: EnemyBaseParam.MaxMp, icon: <MonitorHeart sx={{ color: blue[200] }}/>, longParamId: 1 },
-    { label: "Power", paramId: EnemyBaseParam.Attack, icon: <FitnessCenter color={"error"}/>, longParamId: 2 },
-    { label: "Endurance", paramId: EnemyBaseParam.Defense, icon: <Shield color={"info"}/>, longParamId: 3 },
-    { label: "Force", paramId: EnemyBaseParam.MAttack, icon: <AutoFixHigh color={"success"}/>, longParamId: 4 },
-    { label: "Resist", paramId: EnemyBaseParam.MDefense, icon: <PhotoFilter color={"secondary"}/>, longParamId: 5 },
-    { label: "Speed", paramId: EnemyBaseParam.Speed, icon: <DirectionsRun color={"warning"}/>, longParamId: 6 },
-    { label: "Luck", paramId: EnemyBaseParam.Luck, icon: <Casino/>, longParamId: 7 }
+    {
+      label: "Max HP",
+      paramId: EnemyBaseParam.MaxHp,
+      icon: <HeartBroken sx={{ color: pink[200] }}/>,
+      longParamId: 0
+    },
+    {
+      label: "Max MP",
+      paramId: EnemyBaseParam.MaxMp,
+      icon: <MonitorHeart sx={{ color: blue[200] }}/>,
+      longParamId: 1
+    },
+    {
+      label: "Power",
+      paramId: EnemyBaseParam.Attack,
+      icon: <FitnessCenter color={"error"}/>,
+      longParamId: 2
+    },
+    {
+      label: "Endurance",
+      paramId: EnemyBaseParam.Defense,
+      icon: <Shield color={"info"}/>,
+      longParamId: 3
+    },
+    {
+      label: "Force",
+      paramId: EnemyBaseParam.MAttack,
+      icon: <AutoFixHigh color={"success"}/>,
+      longParamId: 4
+    },
+    {
+      label: "Resist",
+      paramId: EnemyBaseParam.MDefense,
+      icon: <PhotoFilter color={"secondary"}/>,
+      longParamId: 5
+    },
+    {
+      label: "Speed",
+      paramId: EnemyBaseParam.Speed,
+      icon: <DirectionsRun color={"warning"}/>,
+      longParamId: 6
+    },
+    {
+      label: "Luck",
+      paramId: EnemyBaseParam.Luck,
+      icon: <Casino/>,
+      longParamId: 7
+    }
   ];
 
   return <>
@@ -51,26 +111,28 @@ export default function EnemyBaseParameters({
         Base Parameters
       </Typography>
 
-      <Grid2 container spacing={1}>
-        {parameterData.map(param => {
+      <Grid container spacing={1}>
+        {parameterData.map(param =>
+        {
           const formula = getGrowthFormula(param.longParamId);
           return (
             <React.Fragment key={param.paramId}>
               {/* Parameter Input - Left Column */}
-              <Grid2 size={6}>
+              <Grid size={6}>
                 <NumberInputWithLabel
                   label={param.label}
                   endAdornment={param.icon}
                   value={selectedEnemy.params[param.paramId]}
-                  onChangeEventHandler={(event) => {
+                  onChangeEventHandler={(event) =>
+                  {
                     const updatedValue = parseInt(event.target.value) ?? 1;
                     updateEnemyWithNewParam(param.paramId, updatedValue);
                   }}
                 />
-              </Grid2>
+              </Grid>
 
               {/* Growth Formula - Right Column */}
-              <Grid2 size={6}>
+              <Grid size={6}>
                 <Box sx={{
                   display: 'flex',
                   alignItems: 'center',
@@ -82,7 +144,12 @@ export default function EnemyBaseParameters({
                       alignItems: 'center',
                       width: '100%'
                     }}>
-                      <ShowChart sx={{ color: 'text.secondary', mr: 0.5, fontSize: '0.875rem', flexShrink: 0 }} />
+                      <ShowChart sx={{
+                        color: 'text.secondary',
+                        mr: 0.5,
+                        fontSize: '0.875rem',
+                        flexShrink: 0
+                      }}/>
                       <Tooltip title={formula}>
                         <Typography
                           variant="caption"
@@ -102,11 +169,11 @@ export default function EnemyBaseParameters({
                     </Box>
                   )}
                 </Box>
-              </Grid2>
+              </Grid>
             </React.Fragment>
           );
         })}
-      </Grid2>
+      </Grid>
     </Stack>
   </>
 }

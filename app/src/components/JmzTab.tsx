@@ -1,4 +1,8 @@
-import { SxProps, Tab, Theme } from "@mui/material";
+import {
+  SxProps,
+  Tab,
+  Theme
+} from "@mui/material";
 
 type TabProps = {
   label: string;

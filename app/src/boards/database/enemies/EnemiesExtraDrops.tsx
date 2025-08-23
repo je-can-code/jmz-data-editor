@@ -5,32 +5,55 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
-  DialogTitle, Divider,
-  Grid2,
+  DialogTitle,
+  Divider,
+  Grid,
   IconButton,
   List,
   ListItem,
   ListItemButton,
   ListItemIcon,
-  ListItemText, Menu, MenuItem,
+  ListItemText,
+  Menu,
+  MenuItem,
   Stack,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
   Typography
 } from "@mui/material";
-import React, { useEffect, useState } from "react";
+import React, {
+  useEffect,
+  useState
+} from "react";
 import {
-  Add, AutoAwesome, BusinessCenter, Clear, Close, ContentCopy, Edit, LocalDining, QuestionMark, Shield, Sync
+  Add,
+  AutoAwesome,
+  BusinessCenter,
+  Clear,
+  Close,
+  ContentCopy,
+  Edit,
+  LocalDining,
+  QuestionMark,
+  Shield,
+  Sync
 } from "@mui/icons-material";
+import {
+  loadArmors,
+  loadItems,
+  loadWeapons
+} from "../../../services/DataService.ts";
+import DropItemType from "../../../enums/DropItemType.ts";
+import {
+  MuiSnackbarSeverity,
+  MuiSnackbarVariant
+} from "../../../enums/MuiSnackbar.ts";
+import { brown } from "@mui/material/colors";
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Armor = Rmmz.Implementations.RPG_Armor;
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
 import RPG_Item = Rmmz.Implementations.RPG_Item;
-import { loadArmors, loadItems, loadWeapons } from "../../../services/DataService.ts";
-import DropItemType from "../../../enums/DropItemType.ts";
-import { MuiSnackbarSeverity, MuiSnackbarVariant } from "../../../enums/MuiSnackbar.ts";
-import { brown } from "@mui/material/colors";
 
 type EnemiesExtraDropProps = {
   projectPath: string;
@@ -355,26 +378,27 @@ export default function EnemiesExtraDrops({
     {
       if (option === null || option.name === "" || option.name.startsWith("=="))
       {
-        return <></>;
+        return <li {...props} style={{ display: 'none' }}/>;
       }
 
-      return (<ListItem
-        key={props.key}
-        sx={{ height: 32 }}
-      >
-        <ListItemButton
-          sx={{ height: 32 }}
-          onClick={() =>
-          {
-            handleRelevantDropItemDropdownOnClickEvent(option)
-          }}
-        >
-          <ListItemText
-            primary={`${option.id}: ${option.name}`}
-            disableTypography={true}
-          />
-        </ListItemButton>
-      </ListItem>);
+      return (
+        <li {...props} key={props.key} style={{ height: 32 }}>
+          <ListItem disableGutters disablePadding sx={{ height: 32 }}>
+            <ListItemButton
+              sx={{ height: 32 }}
+              onClick={() =>
+              {
+                handleRelevantDropItemDropdownOnClickEvent(option)
+              }}
+            >
+              <ListItemText
+                primary={`${option.id}: ${option.name}`}
+                disableTypography={true}
+              />
+            </ListItemButton>
+          </ListItem>
+        </li>
+      );
     };
 
     switch (selectedDropItemType)
@@ -417,7 +441,11 @@ export default function EnemiesExtraDrops({
               if (a === null || b === null) return (a as any) - (b as any);
               return a.id - b.id;
             })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
+            slotProps={{
+              listbox: {
+                sx: { maxHeight: '170px' }
+              }
+            }}
             getOptionKey={(option) => option?.id ?? "no-key"}
             getOptionLabel={(option) => option?.name ?? ""}
             renderOption={renderOption}
@@ -440,7 +468,11 @@ export default function EnemiesExtraDrops({
               if (a === null || b === null) return (a as any) - (b as any);
               return a.id - b.id;
             })}
-            ListboxProps={{ sx: { maxHeight: '170px' } }}
+            slotProps={{
+              listbox: {
+                sx: { maxHeight: '170px' }
+              }
+            }}
             getOptionKey={(option) => option?.id ?? "no-key"}
             getOptionLabel={(option) => option?.name ?? ""}
             renderOption={renderOption}
@@ -580,8 +612,8 @@ export default function EnemiesExtraDrops({
         </Typography>
       </DialogTitle>
       <DialogContent>
-        <Grid2 container spacing={4}>
-          <Grid2 size={7}>
+        <Grid container spacing={4}>
+          <Grid size={7}>
             <Stack>
               <ToggleButtonGroup
                 exclusive
@@ -610,15 +642,15 @@ export default function EnemiesExtraDrops({
 
               {renderRelevantDropItemDropdown()}
             </Stack>
-          </Grid2>
-          <Grid2 size={5}>
+          </Grid>
+          <Grid size={5}>
             <Stack spacing={2}>
               {renderSelectedDropItemChip()}
 
               {renderPendingDropItemChip()}
             </Stack>
-          </Grid2>
-        </Grid2>
+          </Grid>
+        </Grid>
       </DialogContent>
       <DialogActions>
         <Button

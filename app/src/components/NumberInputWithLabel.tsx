@@ -1,4 +1,10 @@
-import { FormControlLabel, InputAdornment, SxProps, TextField, Theme } from "@mui/material";
+import {
+  FormControlLabel,
+  InputAdornment,
+  SxProps,
+  TextField,
+  Theme
+} from "@mui/material";
 import React, { ChangeEvent } from "react";
 
 type NumberInputWithLabelProps = {
@@ -29,7 +35,7 @@ export default function NumberInputWithLabel({
   sx,
 }: NumberInputWithLabelProps)
 {
-  return <>
+  return (
     <FormControlLabel
       label={label}
       disableTypography
@@ -37,7 +43,7 @@ export default function NumberInputWithLabel({
         fontFamily: "monospace",
         fontSize: 16
       }}
-      control={<>
+      control={
         <TextField
           type={"number"}
           variant={"standard"}
@@ -45,11 +51,11 @@ export default function NumberInputWithLabel({
           slotProps={(endAdornment !== null)
             ? {
               input: {
-                endAdornment: <>
+                endAdornment: (
                   <InputAdornment position={"end"}>
                     {endAdornment}
                   </InputAdornment>
-                </>
+                )
               },
             }
             : undefined}
@@ -61,8 +67,6 @@ export default function NumberInputWithLabel({
           }}
           value={value}
           onChange={onChangeEventHandler}
-        />
-      </>}
-    />
-  </>
+        />}
+    />)
 }

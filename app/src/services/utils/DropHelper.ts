@@ -31,15 +31,15 @@ export default class RPG_DropHelper
     switch (true)
     {
       // "i" for "item".
-      case ['i', 'item'].includes(letter.toLowerCase()):
+      case [ 'i', 'item' ].includes(letter.toLowerCase()):
         return this.Types.Item;
 
       // "w" for "weapon".
-      case ['w', 'weapon'].includes(letter.toLowerCase()):
+      case [ 'w', 'weapon' ].includes(letter.toLowerCase()):
         return this.Types.Weapon;
 
       // "a" for "armor".
-      case ['a', 'armor'].includes(letter.toLowerCase()):
+      case [ 'a', 'armor' ].includes(letter.toLowerCase()):
         return this.Types.Armor;
 
       // don't use this with invalid item types.

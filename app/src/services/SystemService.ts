@@ -1,7 +1,11 @@
 import RPG_System = Rmmz.System.RPG_System;
-import { loadSkills, loadStates, loadSystem } from "./DataService.ts";
 import RPG_State = Rmmz.Implementations.RPG_State;
 import RPG_Skill = Rmmz.Implementations.RPG_Skill;
+import {
+  loadSkills,
+  loadStates,
+  loadSystem
+} from "./DataService.ts";
 
 /**
  * A static service used for accessing various system data.
