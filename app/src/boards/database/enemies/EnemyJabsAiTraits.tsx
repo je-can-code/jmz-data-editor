@@ -133,7 +133,6 @@ const EnemyJabsAiTraits = ({
 
     // Use the directly created object instead of relying on state
     const updatedNote = JabsDataParser.writeAiTraits(note, updatedAiTraits);
-    console.log(updatedNote);
     updateNote(updatedNote);
   };
 
@@ -214,7 +213,6 @@ const EnemyJabsAiTraits = ({
         value={stringTraits}
         onChange={(_, newValues) =>
         {
-          console.log(newValues);
           handleJabsAiTraitsUpdate(newValues);
         }}
         sx={(theme) =>
@@ -322,7 +320,6 @@ const EnemyJabsAiTraits = ({
             value={stringTraits}
             onChange={(_, newValues) =>
             {
-              console.log(newValues);
               handleJabsAiTraitsUpdate(newValues);
             }}
             sx={(theme) => ({

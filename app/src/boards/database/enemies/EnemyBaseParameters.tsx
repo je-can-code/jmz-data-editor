@@ -8,6 +8,7 @@ import {
 } from "@mui/material";
 import {
   AutoFixHigh,
+  Battery6Bar,
   Casino,
   DirectionsRun,
   FitnessCenter,
@@ -15,26 +16,33 @@ import {
   MonitorHeart,
   PhotoFilter,
   Shield,
-  ShowChart
+  ShowChart,
 } from "@mui/icons-material";
 import {
   blue,
-  pink
+  green,
+  lightBlue,
+  lightGreen,
+  pink,
+  red
 } from "@mui/material/colors";
 import { EnemyBaseParam } from "../../../enums/EnemyParameter.ts";
 import React from "react";
 import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
 import { GrowthParser } from "../../../services/parsers/GrowthParser.ts";
 import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
+import { MaxTpParser } from "../../../services/parsers/MaxTpParser.ts";
 
 type EnemyBaseParametersProps = {
   selectedEnemy: RPG_Enemy;
   updateEnemyWithNewParam: (parameterId: number, updatedValue: number) => void;
+  updateNote: (updatedNote: string) => void;
 };
 
 export default function EnemyBaseParameters({
   selectedEnemy,
-  updateEnemyWithNewParam
+  updateEnemyWithNewParam,
+  updateNote,
 }: EnemyBaseParametersProps)
 {
   // Get all parameter definitions
@@ -60,31 +68,37 @@ export default function EnemyBaseParameters({
     {
       label: "Max MP",
       paramId: EnemyBaseParam.MaxMp,
-      icon: <MonitorHeart sx={{ color: blue[200] }}/>,
+      icon: <MonitorHeart sx={{ color: lightBlue[400] }}/>,
       longParamId: 1
+    },
+    {
+      label: "Max TP",
+      paramId: -1, // display-only; no base param index exists for TP
+      icon: <Battery6Bar sx={{ color: lightGreen[400] }}/>,
+      longParamId: 30
     },
     {
       label: "Power",
       paramId: EnemyBaseParam.Attack,
-      icon: <FitnessCenter color={"error"}/>,
+      icon: <FitnessCenter sx={{ color: red[900] }}/>,
       longParamId: 2
     },
     {
       label: "Endurance",
       paramId: EnemyBaseParam.Defense,
-      icon: <Shield color={"info"}/>,
+      icon: <Shield sx={{ color: blue[700] }}/>,
       longParamId: 3
     },
     {
       label: "Force",
       paramId: EnemyBaseParam.MAttack,
-      icon: <AutoFixHigh color={"success"}/>,
+      icon: <AutoFixHigh sx={{ color: green[500] }}/>,
       longParamId: 4
     },
     {
       label: "Resist",
       paramId: EnemyBaseParam.MDefense,
-      icon: <PhotoFilter color={"secondary"}/>,
+      icon: <PhotoFilter sx={{ color: pink[400] }}/>,
       longParamId: 5
     },
     {
@@ -115,20 +129,39 @@ export default function EnemyBaseParameters({
         {parameterData.map(param =>
         {
           const formula = getGrowthFormula(param.longParamId);
+          const isMaxTp = (param.longParamId === 30);
+          const maxTpValue = isMaxTp ? MaxTpParser.read(selectedEnemy.note) : 0;
+
           return (
             <React.Fragment key={param.paramId}>
               {/* Parameter Input - Left Column */}
               <Grid size={6}>
-                <NumberInputWithLabel
-                  label={param.label}
-                  endAdornment={param.icon}
-                  value={selectedEnemy.params[param.paramId]}
-                  onChangeEventHandler={(event) =>
-                  {
-                    const updatedValue = parseInt(event.target.value) ?? 1;
-                    updateEnemyWithNewParam(param.paramId, updatedValue);
-                  }}
-                />
+                {isMaxTp
+                  ? (
+                    <NumberInputWithLabel
+                      label={param.label}
+                      endAdornment={param.icon}
+                      value={maxTpValue}
+                      onChangeEventHandler={(event) =>
+                      {
+                        const updatedValue = parseInt(event.target.value) ?? 0;
+                        const updatedNote = MaxTpParser.write(selectedEnemy.note, updatedValue);
+                        updateNote(updatedNote);
+                      }}
+                    />
+                  )
+                  : (
+                    <NumberInputWithLabel
+                      label={param.label}
+                      endAdornment={param.icon}
+                      value={selectedEnemy.params[param.paramId]}
+                      onChangeEventHandler={(event) =>
+                      {
+                        const updatedValue = parseInt(event.target.value) ?? 1;
+                        updateEnemyWithNewParam(param.paramId, updatedValue);
+                      }}
+                    />
+                  )}
               </Grid>
 
               {/* Growth Formula - Right Column */}

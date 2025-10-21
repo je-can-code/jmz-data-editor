@@ -51,7 +51,7 @@ const JmzTabsStyles = {
 export default function App()
 {
   //region state
-  const [ projectPath, setProjectPath ] = useState<string>('/media/exdrive/dev/gaming/ca/chef-adventure/data');
+  const [ projectPath, setProjectPath ] = useState<string>('/run/media/system/exdrive/dev/gaming/ca/chef-adventure/data');
   const [ currentTabIndex, setCurrentTabIndex ] = useState<number>(0);
 
   const [ pendingSdpSelectKey, setPendingSdpSelectKey ] = useState<string | null>(null);
