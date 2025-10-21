@@ -987,6 +987,7 @@ const EnemiesBoard = (props: BoardProps) =>
                     <EnemyBaseParameters
                       selectedEnemy={selectedEnemy}
                       updateEnemyWithNewParam={updateEnemyWithNewParam}
+                      updateNote={updateEnemyNote}
                     />
                     <br/>
 

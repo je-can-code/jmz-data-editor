@@ -4,7 +4,6 @@
 * The purpose of the app is to act as a replacement front end for RPG Maker MZ's database editor.
   * Additionally, to grant ease of manipulation of various notes on objects throughout the database with GUI elements.
 * All code responses should use the same coding style and formatting as exists across the codebase.
-* There are zero automated tests in this codebase, not for lack of want but low priority.
 
 ## Development Environment
 * The project uses Bun as the package manager and runtime environment instead of npm/Node.js

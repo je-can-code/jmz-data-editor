@@ -376,13 +376,13 @@ export default function EnemiesExtraDrops({
   {
     const renderOption = (props: any, option: any) =>
     {
-      if (option === null || option.name === "" || option.name.startsWith("=="))
+      if (!option || option.name === "" || option.name?.startsWith("=="))
       {
         return <li {...props} style={{ display: 'none' }}/>;
       }
 
       return (
-        <li {...props} key={props.key} style={{ height: 32 }}>
+        <li key={props.key} {...props} style={{ height: 32 }}>
           <ListItem disableGutters disablePadding sx={{ height: 32 }}>
             <ListItemButton
               sx={{ height: 32 }}
@@ -419,7 +419,15 @@ export default function EnemiesExtraDrops({
             }}
             getOptionKey={(option) => option?.id ?? "no-key"}
             getOptionLabel={(option) => option?.name ?? ""}
-            isOptionEqualToValue={(option, otherOption) => option.id === otherOption.id}
+            isOptionEqualToValue={(option, value) =>
+            {
+              if (value === null)
+              {
+                return false;
+              }
+
+              return option.id === value.id;
+            }}
             renderOption={renderOption}
             renderInput={(params) =>
             {
@@ -448,6 +456,15 @@ export default function EnemiesExtraDrops({
             }}
             getOptionKey={(option) => option?.id ?? "no-key"}
             getOptionLabel={(option) => option?.name ?? ""}
+            isOptionEqualToValue={(option, value) =>
+            {
+              if (value === null)
+              {
+                return false;
+              }
+
+              return option.id === value.id;
+            }}
             renderOption={renderOption}
             renderInput={(params) =>
             {
@@ -475,6 +492,15 @@ export default function EnemiesExtraDrops({
             }}
             getOptionKey={(option) => option?.id ?? "no-key"}
             getOptionLabel={(option) => option?.name ?? ""}
+            isOptionEqualToValue={(option, value) =>
+            {
+              if (value === null)
+              {
+                return false;
+              }
+
+              return option.id === value.id;
+            }}
             renderOption={renderOption}
             renderInput={(params) =>
             {
