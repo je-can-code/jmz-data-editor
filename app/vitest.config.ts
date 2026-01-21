@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import * as path from "node:path";
 
 export default defineConfig({
   test: {
@@ -8,9 +9,12 @@ export default defineConfig({
     include: [ 'test/**/*.{test,spec}.ts?(x)' ],
     exclude: [ 'node_modules', 'build', 'dist' ],
     coverage: {
+      enabled: true,
       provider: 'v8',
       reportsDirectory: './.coverage',
-      reporter: [ 'text', 'html', 'lcov' ],
+      reporter: [
+        'text', 'html', 'lcov',
+      ],
       include: [ 'src/**/*.{ts,tsx}' ],
       exclude: [
         '**/node_modules/**',

@@ -14,7 +14,7 @@ import { OpenInNew } from "@mui/icons-material";
 import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
 import { SdpParser } from "../../../services/parsers/SdpParser.ts";
 import { executeLoad } from "../../../services/DataService.ts";
-import ConfigFilenames from "../../../enums/ConfigFilenames.ts";
+import ConfigFilenames from "../../../core/enums/ConfigFilenames.ts";
 import Panel = Sdp.Panel;
 import Configuration = Sdp.Configuration;
 

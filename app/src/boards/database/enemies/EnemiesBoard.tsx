@@ -43,15 +43,15 @@ import { throttle } from "lodash";
 import {
   executeSave,
   loadEnemies
-} from "../../../services/DataService.ts";
+} from "@services/DataService.ts";
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../../enums/MuiSnackbar.ts";
+} from "@core/enums/MuiSnackbar.ts";
 import { BoardProps } from "../../../types/local/BoardProps";
-import DatabaseFilenames from "../../../enums/DatabaseFilenames.ts";
+import DatabaseFilenames from "../../../core/enums/DatabaseFilenames.ts";
 
-import { ExtraDropManager } from "../../../services/parsers/ExtraDropParser.ts";
+import { ExtraDropManager } from "@services/parsers/ExtraDropParser.ts";
 
 import EnemyBaseParameters from "./EnemyBaseParameters.tsx";
 import EnemiesExtraDrops from "./EnemiesExtraDrops.tsx";
@@ -71,23 +71,25 @@ import {
   teal,
   yellow
 } from "@mui/material/colors";
-import { LevelParser } from "../../../services/parsers/LevelParser.ts";
+import { LevelParser } from "@services/parsers/LevelParser.ts";
 import TraitEditor from "../components/traits/TraitEditor.tsx";
 import ParameterGrowth from "./ParameterGrowth.tsx";
 import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
-import { GrowthParser } from "../../../services/parsers/GrowthParser.ts";
+import { GrowthParser } from "@services/parsers/GrowthParser.ts";
 import EnemySdpDrop from "./EnemySdpDrop.tsx";
-import { SdpParser } from "../../../services/parsers/SdpParser.ts";
+import { SdpParser } from "@services/parsers/SdpParser.ts";
 import ReloadButton from "../../../components/core/ReloadButton.tsx";
 import { EnemyJabsAiTraits } from "./EnemyJabsAiTraits.tsx";
 import { EnemyJabsBattlerData } from "./EnemyJabsBattlerData.tsx";
 import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Trait = Rmmz.Data.RPG_Trait;
+import { useProjectPath } from "../../../presentation/context/project-path.context.tsx";
 
-const EnemiesBoard = (props: BoardProps) =>
+const EnemiesBoard = () =>
 {
   //region state
+  const { projectPath } = useProjectPath();
   const [ enemies, setEnemies ] = useState<RPG_Enemy[]>([]);
   const [ selectedEnemy, setSelectedEnemy ] = useState<RPG_Enemy | null>(null)
   const [ selectedEnemyIndex, setSelectedEnemyIndex ] = useState<number>(0);
@@ -114,12 +116,13 @@ const EnemiesBoard = (props: BoardProps) =>
   useEffect(() =>
   {
     let ignore = false;
-    const { projectPath } = props;
-    if (projectPath === null || projectPath === '' || !projectPath.endsWith("/data"))
+    if (!projectPath || !projectPath.endsWith("/data"))
     {
       console.error(`invalid path provided: ${projectPath}`);
       return;
     }
+
+    console.log(projectPath);
 
     // a helper function for initializing the state of this component based on the configuration file.
     const initializeState = async (projectPath: string) =>
@@ -145,13 +148,14 @@ const EnemiesBoard = (props: BoardProps) =>
     {
       ignore = true;
     }
-  }, [ props.projectPath ]);
+  }, [ projectPath ]);
 
   //region actions
   const handleSnack = (
     message: string,
     severity: MuiSnackbarSeverity = MuiSnackbarSeverity.Info,
-    variant: MuiSnackbarVariant = MuiSnackbarVariant.Filled) =>
+    variant: MuiSnackbarVariant = MuiSnackbarVariant.Filled
+  ) =>
   {
     setSnackMessage(message);
     setSnackSeverity(severity);
@@ -162,14 +166,14 @@ const EnemiesBoard = (props: BoardProps) =>
   const handleSaveButtonOnClickEvent = async () =>
   {
     // save the data to disk.
-    await executeSave(props.projectPath, DatabaseFilenames.Enemies, enemies);
+    await executeSave(projectPath, DatabaseFilenames.Enemies, enemies);
 
     setCanSave(true);
 
     handleSnack("Enemies data has been saved successfully.");
   };
 
-// After
+  // After
   const handleEnemyListItemOnClickEvent = (index: number, keepListFocus: boolean = true) =>
   {
     setSelectedEnemyIndex(index);
@@ -223,7 +227,7 @@ const EnemiesBoard = (props: BoardProps) =>
     listWrapperRef.current?.focus();
   }, []);
 
-// And in handleSearchChange, call with keepListFocus = false
+  // And in handleSearchChange, call with keepListFocus = false
   const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) =>
   {
     const term = event.target.value.toLowerCase();
@@ -259,7 +263,11 @@ const EnemiesBoard = (props: BoardProps) =>
 
     for (let step = 1; step < length; step++)
     {
-      const idx = (startIndex + (direction * step) + length) % length;
+      const idx = (
+        startIndex + (
+          direction * step
+        ) + length
+      ) % length;
       const enemy = enemies[idx];
       if (!enemy) continue;
       if (!enemy.name || enemy.name.length === 0) continue;
@@ -308,7 +316,7 @@ const EnemiesBoard = (props: BoardProps) =>
     try
     {
       // Load fresh enemy data from disk
-      const enemyData = await loadEnemies(props.projectPath);
+      const enemyData = await loadEnemies(projectPath);
 
       // Update the state with the fresh data
       setEnemies(enemyData);
@@ -354,7 +362,11 @@ const EnemiesBoard = (props: BoardProps) =>
 
     for (let step = 1; step < length; step++)
     {
-      const idx = (startIndex + (direction * step) + length) % length;
+      const idx = (
+        startIndex + (
+          direction * step
+        ) + length
+      ) % length;
       if (isValidEnemy(enemies[idx]))
       {
         return idx;
@@ -454,7 +466,8 @@ const EnemiesBoard = (props: BoardProps) =>
       const updatedEnemies = enemies.with(selectedEnemyIndex, updatedEnemy);
       setEnemies(updatedEnemies);
     },
-    [ selectedEnemyIndex, enemies ]);
+    [ selectedEnemyIndex, enemies ]
+  );
 
   const updateEnemyTraits = (updatedTraits: RPG_Trait[]) =>
   {
@@ -587,7 +600,9 @@ const EnemiesBoard = (props: BoardProps) =>
           <ListItemIcon
             sx={{ minWidth: '24px' }}
           >
-            {(selectedEnemyIndex === index)
+            {(
+              selectedEnemyIndex === index
+            )
               ? <DoubleArrow color={"success"} fontSize={"small"}/>
               : <KeyboardArrowRight color={"warning"} fontSize={"small"}/>}
           </ListItemIcon>
@@ -654,7 +669,9 @@ const EnemiesBoard = (props: BoardProps) =>
     const adjustedIndex = Math.max(0, index - 1);
 
     // Calculate the subgroup index within the family
-    const subgroupIndex = Math.floor((adjustedIndex % 50) / 10);
+    const subgroupIndex = Math.floor((
+      adjustedIndex % 50
+    ) / 10);
 
     // Return a slightly darker shade for the subgroup
     switch (subgroupIndex)
@@ -781,7 +798,9 @@ const EnemiesBoard = (props: BoardProps) =>
           width: '100%',
           padding: 2
         }} elevation={10}>
-          {(selectedEnemy === null)
+          {(
+            selectedEnemy === null
+          )
             ? <>
               <Typography>
                 Please select an enemy on the left.<br/>
@@ -834,40 +853,42 @@ const EnemiesBoard = (props: BoardProps) =>
                           alignItems: 'center',
                           height: '30px',
                         }}>
-                          {(() =>
-                          {
-                            const expParam = knownLongParams()
-                              .find(param => param.key === 'exp');
-                            const formula = expParam
-                              ? GrowthParser.read(selectedEnemy.note, expParam)
-                              : '';
-                            return formula
-                              ? (
-                                <Box sx={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  width: '100%'
-                                }}>
-                                  <Tooltip title={formula}>
-                                    <Typography
-                                      variant="caption"
-                                      sx={{
-                                        fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
-                                        whiteSpace: 'nowrap',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        width: '100%',
-                                        display: 'inline-block',
-                                        color: 'text.secondary'
-                                      }}
-                                    >
-                                      {formula}
-                                    </Typography>
-                                  </Tooltip>
-                                </Box>
-                              )
-                              : null;
-                          })()}
+                          {(
+                            () =>
+                            {
+                              const expParam = knownLongParams()
+                                .find(param => param.key === 'exp');
+                              const formula = expParam
+                                ? GrowthParser.read(selectedEnemy.note, expParam)
+                                : '';
+                              return formula
+                                ? (
+                                  <Box sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    width: '100%'
+                                  }}>
+                                    <Tooltip title={formula}>
+                                      <Typography
+                                        variant="caption"
+                                        sx={{
+                                          fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+                                          whiteSpace: 'nowrap',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          width: '100%',
+                                          display: 'inline-block',
+                                          color: 'text.secondary'
+                                        }}
+                                      >
+                                        {formula}
+                                      </Typography>
+                                    </Tooltip>
+                                  </Box>
+                                )
+                                : null;
+                            }
+                          )()}
                         </Box>
                       </Grid>
 
@@ -890,40 +911,42 @@ const EnemiesBoard = (props: BoardProps) =>
                           alignItems: 'center',
                           height: '30px',
                         }}>
-                          {(() =>
-                          {
-                            const goldParam = knownLongParams()
-                              .find(param => param.key === 'gold');
-                            const formula = goldParam
-                              ? GrowthParser.read(selectedEnemy.note, goldParam)
-                              : '';
-                            return formula
-                              ? (
-                                <Box sx={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  width: '100%'
-                                }}>
-                                  <Tooltip title={formula}>
-                                    <Typography
-                                      variant="caption"
-                                      sx={{
-                                        fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
-                                        whiteSpace: 'nowrap',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        width: '100%',
-                                        display: 'inline-block',
-                                        color: 'text.secondary'
-                                      }}
-                                    >
-                                      {formula}
-                                    </Typography>
-                                  </Tooltip>
-                                </Box>
-                              )
-                              : null;
-                          })()}
+                          {(
+                            () =>
+                            {
+                              const goldParam = knownLongParams()
+                                .find(param => param.key === 'gold');
+                              const formula = goldParam
+                                ? GrowthParser.read(selectedEnemy.note, goldParam)
+                                : '';
+                              return formula
+                                ? (
+                                  <Box sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    width: '100%'
+                                  }}>
+                                    <Tooltip title={formula}>
+                                      <Typography
+                                        variant="caption"
+                                        sx={{
+                                          fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+                                          whiteSpace: 'nowrap',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          width: '100%',
+                                          display: 'inline-block',
+                                          color: 'text.secondary'
+                                        }}
+                                      >
+                                        {formula}
+                                      </Typography>
+                                    </Tooltip>
+                                  </Box>
+                                )
+                                : null;
+                            }
+                          )()}
                         </Box>
                       </Grid>
 
@@ -946,40 +969,42 @@ const EnemiesBoard = (props: BoardProps) =>
                           alignItems: 'center',
                           height: '30px',
                         }}>
-                          {(() =>
-                          {
-                            const sdpParam = knownLongParams()
-                              .find(param => param.key === 'sdp');
-                            const formula = sdpParam
-                              ? GrowthParser.read(selectedEnemy.note, sdpParam)
-                              : '';
-                            return formula
-                              ? (
-                                <Box sx={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  width: '100%'
-                                }}>
-                                  <Tooltip title={formula}>
-                                    <Typography
-                                      variant="caption"
-                                      sx={{
-                                        fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
-                                        whiteSpace: 'nowrap',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        width: '100%',
-                                        display: 'inline-block',
-                                        color: 'text.secondary'
-                                      }}
-                                    >
-                                      {formula}
-                                    </Typography>
-                                  </Tooltip>
-                                </Box>
-                              )
-                              : null;
-                          })()}
+                          {(
+                            () =>
+                            {
+                              const sdpParam = knownLongParams()
+                                .find(param => param.key === 'sdp');
+                              const formula = sdpParam
+                                ? GrowthParser.read(selectedEnemy.note, sdpParam)
+                                : '';
+                              return formula
+                                ? (
+                                  <Box sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    width: '100%'
+                                  }}>
+                                    <Tooltip title={formula}>
+                                      <Typography
+                                        variant="caption"
+                                        sx={{
+                                          fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+                                          whiteSpace: 'nowrap',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          width: '100%',
+                                          display: 'inline-block',
+                                          color: 'text.secondary'
+                                        }}
+                                      >
+                                        {formula}
+                                      </Typography>
+                                    </Tooltip>
+                                  </Box>
+                                )
+                                : null;
+                            }
+                          )()}
                         </Box>
                       </Grid>
                     </Grid>
@@ -996,6 +1021,7 @@ const EnemiesBoard = (props: BoardProps) =>
                       growableName={selectedEnemy.name}
                       updateNote={updateEnemyNote}
                       otherSubjects={enemies}
+                      suggestedLevel={LevelParser.read(selectedEnemy)}
                     />
 
                     <EnemyJabsAiTraits
@@ -1039,10 +1065,10 @@ const EnemiesBoard = (props: BoardProps) =>
                     <EnemySdpDrop
                       note={selectedEnemy.note}
                       updateNote={updateEnemyNote}
-                      projectPath={props.projectPath}
+                      projectPath={projectPath}
                     />
                     <EnemiesExtraDrops
-                      projectPath={props.projectPath}
+                      projectPath={projectPath}
                       selectedEnemyDropItems={selectedEnemyDropItems}
                       updateEnemyWithNewDropItems={updateEnemyWithNewDropItems}
                       handleSnack={handleSnack}

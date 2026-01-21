@@ -10,7 +10,7 @@ import {
   TextField
 } from "@mui/material";
 
-import { OmniObjectiveType } from "../../enums/OmniObjectiveType.ts";
+import { OmniObjectiveType } from "../../core/enums/OmniObjectiveType.ts";
 import OmniObjectiveFetchType from "./OmniObjectiveFetchType.ts";
 import OmniFulfillmentData = Questopedia.OmniFulfillmentData;
 import IndiscriminateData = Questopedia.IndiscriminateData;

@@ -55,19 +55,19 @@ import {
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../enums/MuiSnackbar.ts";
+} from "../../core/enums/MuiSnackbar.ts";
 
 import SaveButton from "../../components/core/SaveButton.tsx";
 
 import { BoardProps } from "../../types/local/BoardProps";
-import ConfigFilenames from "../../enums/ConfigFilenames.ts";
+import ConfigFilenames from "../../core/enums/ConfigFilenames.ts";
 import {
   executeSave,
   loadQuests
 } from "../../services/DataService.ts";
 
 import KeyTextField from "../../components/core/KeyTextField.tsx";
-import { OmniObjectiveType } from "../../enums/OmniObjectiveType.ts";
+import { OmniObjectiveType } from "../../core/enums/OmniObjectiveType.ts";
 import ObjectiveLogs from "./ObjectiveLogs.tsx";
 import ObjectiveFulfillmentData from "./ObjectiveFulfillmentData.tsx";
 import OmniObjectiveFetchType from "./OmniObjectiveFetchType.ts";

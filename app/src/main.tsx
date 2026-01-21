@@ -13,6 +13,11 @@ import {
   CssBaseline,
   ThemeProvider
 } from "@mui/material";
+import { NeutralinoJsonStore } from "./core/infrastructure/fs/neutralino/NeutralinoJsonStore.ts";
+import { setJsonStore } from "./services/DataService.ts";
+import { HashRouter } from 'react-router-dom';
+import { AppRouter } from "./presentation/routing/app.router.tsx";
+import { AppProviders } from "./presentation/shell/app.providers.tsx";
 
 // Create a dark theme
 const darkTheme = createTheme({
@@ -31,6 +36,9 @@ const darkTheme = createTheme({
   },
 });
 
+// configure the data layer adapter once at startup.
+setJsonStore(new NeutralinoJsonStore());
+
 function tryLoadDevAuth()
 {
   if (!import.meta.env.DEV)
@@ -47,12 +55,16 @@ function tryLoadDevAuth()
     if (storedToken)
     {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).NL_TOKEN = storedToken;
+      (
+        window as any
+      ).NL_TOKEN = storedToken;
     }
     if (storedPort)
     {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).NL_PORT = Number(storedPort);
+      (
+        window as any
+      ).NL_PORT = Number(storedPort);
     }
 
     // Non-blocking fetch: if your Vite server doesn’t serve .tmp, this simply no-ops.
@@ -70,11 +82,17 @@ function tryLoadDevAuth()
         if (accessToken && port)
         {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (window as any).NL_TOKEN = accessToken;
+          (
+            window as any
+          ).NL_TOKEN = accessToken;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (window as any).NL_PORT = port;
+          (
+            window as any
+          ).NL_PORT = port;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (window as any).NL_ARGS = [
+          (
+            window as any
+          ).NL_ARGS = [
             'bin\\neutralino-linux_x64',
             '',
             '--load-dir-res',
@@ -147,7 +165,12 @@ createRoot(document.getElementById('root')!)
     <React.StrictMode>
       <ThemeProvider theme={darkTheme}>
         <CssBaseline/>
-        <App/>
+        <HashRouter>
+          <AppProviders>
+            <AppRouter/>
+          </AppProviders>
+        </HashRouter>
+        {/*<App/>*/}
       </ThemeProvider>
     </React.StrictMode>
   );

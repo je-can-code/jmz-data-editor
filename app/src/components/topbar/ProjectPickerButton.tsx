@@ -1,5 +1,6 @@
 import { os } from "@neutralinojs/lib";
 import { Button } from "@mui/material";
+import {defaultDataPath} from "../../constants/PathConstants.ts";
 
 type ProjectPickerButtonProps = {
   projectPathSetter: (value: string) => void;
@@ -11,7 +12,7 @@ export default function ProjectPickerButton(projectPathSetter: ProjectPickerButt
   {
     const path = await os.showFolderDialog(
       'Choose project data directory',
-      { defaultPath: '/run/media/system/exdrive/dev/gaming/ca/chef-adventure/data' });
+      { defaultPath: defaultDataPath });
 
     if (!!path)
     {

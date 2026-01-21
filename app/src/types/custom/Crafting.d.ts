@@ -1,4 +1,4 @@
-import CraftingComponentType from "../../enums/CraftingComponentType.ts";
+import CraftingComponentType from "../../core/enums/CraftingComponentType.ts";
 
 declare namespace Crafting
 {
