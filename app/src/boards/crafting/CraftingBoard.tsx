@@ -55,12 +55,12 @@ import {
 } from "../../services/DataService.ts";
 
 import { BoardProps } from "../../types/local/BoardProps";
-import ConfigFilenames from "../../enums/ConfigFilenames.ts";
+import ConfigFilenames from "../../core/enums/ConfigFilenames.ts";
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../enums/MuiSnackbar.ts";
-import CraftingListType from "../../enums/CraftingListType.ts";
+} from "../../core/enums/MuiSnackbar.ts";
+import CraftingListType from "../../core/enums/CraftingListType.ts";
 
 import Crafting from "../../types/custom/Crafting";
 import SaveButton from "../../components/core/SaveButton.tsx";

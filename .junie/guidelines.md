@@ -79,3 +79,31 @@
       doSomething();
     }
     ```
+
+JMz Style Capsule
+- Braces: Allman (opening brace on its own line) for functions, classes, and blocks.
+- Semicolons: required.
+- Quotes: prefer double quotes for strings and imports.
+- Trailing commas: keep on multiline objects/arrays.
+- Inline comments: short imperative sentence, end with a period.
+- JSDoc: include a short description and @param tags for function inputs; include types in the JSDoc tags.
+- Exports: group named exports at the bottom of the file.
+- Types: preserve ambient RMMZ style `import X = Rmmz.*` usage.
+
+an example of a documented and well-written function:
+
+```ts
+/**
+* Joins a base project path and filename using a forward slash.
+* @param {string} projectPath The basepath to the location where the file should live.
+* @param {string} filename The filename itself, including the extension.
+* @returns {string} The combined path representing the target file.
+  */
+  const joinPath = (projectPath: string, filename: string): string =>
+  {
+    // build the destination filepath to write the data to.
+    return `${projectPath}/${filename}`;
+  };
+
+export { joinPath };
+```

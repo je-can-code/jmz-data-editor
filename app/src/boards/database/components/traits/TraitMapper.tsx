@@ -9,7 +9,7 @@ import {
   CollapseEffect,
   PartyAbility,
   SpecialFlag
-} from "../../../../enums/TraitValues.ts";
+} from "../../../../core/enums/TraitValues.ts";
 import {
   Accessibility,
   BookmarkAdd,

@@ -44,6 +44,7 @@ type FormulaVisualizerProps = {
   formula: string;
   paramName: string;
   onUpdateFormula?: (updatedFormula: string) => void;
+  suggestedLevel?: number;
 };
 
 const presetFormulas = {
@@ -64,34 +65,59 @@ const presetFormulas = {
   }
 };
 
+const levelOptions = [ 10, 20, 35, 55, 75, 100, 120, 150, 200, 255 ];
+
+function pickNextHighestLevel(target: number): number
+{
+  for (let i = 0; i < levelOptions.length; i++)
+  {
+    const option = levelOptions[i];
+    if (option >= target)
+    {
+      return option;
+    }
+  }
+  return levelOptions[levelOptions.length - 1];
+}
+
 export default function FormulaVisualizer({
   formula,
   paramName,
-  onUpdateFormula
+  onUpdateFormula,
+  suggestedLevel
 }: FormulaVisualizerProps)
 {
   const [ open, setOpen ] = useState(false);
-  const [ maxLevel, setMaxLevel ] = useState(35);
+  const [ maxLevel, setMaxLevel ] = useState<number>(
+    suggestedLevel
+      ? pickNextHighestLevel(suggestedLevel)
+      : 35
+  );
   const [ localFormula, setLocalFormula ] = useState(formula);
   const [ displayFormula, setDisplayFormula ] = useState(formula);
 
-  // Update local formula when prop changes
   useEffect(() =>
   {
     setLocalFormula(formula);
     setDisplayFormula(formula);
   }, [ formula ]);
 
-  // Create debounced update function for chart data only
+  useEffect(() =>
+  {
+    if (open && suggestedLevel)
+    {
+      setMaxLevel(pickNextHighestLevel(suggestedLevel));
+    }
+  }, [ open, suggestedLevel ]);
+
   const debouncedUpdateFormula = useCallback(
     debounce((value: string) =>
     {
       setLocalFormula(value);
-    }, 300), // 300ms delay
+    }, 300),
     []
   );
 
-  // Clean up debounced function on unmount
   useEffect(() =>
   {
     return () =>
@@ -103,90 +129,77 @@ export default function FormulaVisualizer({
   const chartData = useMemo(
     () =>
     {
-      // Only generate data points when the dialog is open.
       if (!open) return [];
-
       return GrowthParser.generateDataPoints(localFormula, maxLevel, 1);
     },
     [ localFormula, maxLevel, open ]
   );
 
-  // Handle preset formula selection
-  const handlePresetSelect = (preset: string) =>
+  const handlePresetSelect = (value: string) =>
   {
-    setDisplayFormula(preset);
-    debouncedUpdateFormula(preset);
+    setDisplayFormula(value);
+    debouncedUpdateFormula(value);
   };
 
-  if (!formula) return null;
+  return <>
+    <Button
+      color={"inherit"}
+      variant={"outlined"}
+      startIcon={<ShowChart/>}
+      onClick={() => setOpen(true)}
+      size={"small"}
+    >
+      Visualize
+    </Button>
 
-  return (
-    <>
-      <Button
-        size="small"
-        variant="outlined"
-        onClick={() => setOpen(true)}
-        sx={{ mt: 1 }}
-      >
-        <ShowChart/>
-      </Button>
+    <Dialog
+      open={open}
+      maxWidth={"lg"}
+      fullWidth={true}
+      onClose={() => setOpen(false)}
+    >
+      <DialogTitle>
+        {paramName} Growth Visualizer
+      </DialogTitle>
 
-      <Dialog
-        open={open}
-        onClose={() => setOpen(false)}
-        maxWidth={"lg"}
-        fullWidth
-        sx={{
-          '& .MuiDialog-paper': {
-            position: 'absolute',
-            right: 32, // Position from right edge
-            top: 32,   // Position from top edge
-            margin: 0  // Remove default margin
-          },
-          '& .MuiBackdrop-root': {
-            backgroundColor: 'rgba(0, 0, 0, 0.5)' // Semi-transparent backdrop
-          }
-        }}
-      >
-        <DialogTitle>
-          {paramName} Growth Visualization
-        </DialogTitle>
+      <DialogContent>
+        <Stack spacing={2}>
+          <TextField
+            label={"Formula"}
+            variant={"outlined"}
+            fullWidth={true}
+            size={"small"}
+            value={displayFormula}
+            onChange={(e) =>
+            {
+              const value = e.target.value;
+              setDisplayFormula(value);
+              debouncedUpdateFormula(value);
+            }}
+            sx={{
+              fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+              '& .MuiInputBase-input': {
+                fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace"
+              }
+            }}
+          />
 
-        <DialogContent>
-          <Stack spacing={2}>
+          <Box sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}>
             <Box sx={{
-              paddingTop: 1,
-              display: 'flex',
-              gap: 1,
-              alignItems: 'center'
+              flex: 1,
+              mr: 2
             }}>
-              <TextField
-                label="Formula"
-                variant="outlined"
-                fullWidth
-                size="small"
-                value={displayFormula}
-                onChange={(event) =>
-                {
-                  const newValue = event.target.value;
-                  // Update display immediately
-                  setDisplayFormula(newValue);
-                  // Debounce the chart update
-                  debouncedUpdateFormula(newValue);
-                }}
-                sx={{
-                  fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
-                  '& .MuiInputBase-input': {
-                    fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace"
-                  }
-                }}
-              />
-            </Box>
-
-            {/* Preset Formula Buttons Section */}
-            <Box>
-              <Typography variant="subtitle2" gutterBottom>
-                <Functions fontSize="small" sx={{
+              <Typography variant="subtitle2" sx={{
+                display: 'flex',
+                alignItems: 'center',
+                color: 'text.secondary'
+              }}>
+                <Functions sx={{
+                  fontSize: 18,
                   verticalAlign: 'middle',
                   mr: 1
                 }}/>
@@ -202,7 +215,7 @@ export default function FormulaVisualizer({
                 }}>
                   <Typography variant="caption" sx={{
                     fontWeight: 'bold',
-                    width: '100px', // Fixed width for all labels
+                    width: '100px',
                     display: 'inline-block'
                   }}>
                     Linear:
@@ -221,7 +234,7 @@ export default function FormulaVisualizer({
                 }}>
                   <Typography variant="caption" sx={{
                     fontWeight: 'bold',
-                    width: '100px', // Fixed width for all labels
+                    width: '100px',
                     display: 'inline-block'
                   }}>
                     Quadratic:
@@ -240,7 +253,7 @@ export default function FormulaVisualizer({
                 }}>
                   <Typography variant="caption" sx={{
                     fontWeight: 'bold',
-                    width: '100px', // Fixed width for all labels
+                    width: '100px',
                     display: 'inline-block'
                   }}>
                     Exponential:
@@ -264,83 +277,70 @@ export default function FormulaVisualizer({
                 label="Max Level"
                 onChange={(e) => setMaxLevel(Number(e.target.value))}
               >
-                <MenuItem value={10}>10</MenuItem>
-                <MenuItem value={20}>20</MenuItem>
-                <MenuItem value={35}>35</MenuItem>
-                <MenuItem value={55}>55</MenuItem>
-                <MenuItem value={75}>75</MenuItem>
-                <MenuItem value={100}>100</MenuItem>
-                <MenuItem value={120}>120</MenuItem>
-                <MenuItem value={150}>150</MenuItem>
-                <MenuItem value={200}>200</MenuItem>
-                <MenuItem value={255}>255</MenuItem>
+                {levelOptions.map(option => (
+                  <MenuItem key={option} value={option}>{option}</MenuItem>
+                ))}
               </Select>
             </FormControl>
+          </Box>
 
-            <ResponsiveContainer width="100%" height={400}>
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3"/>
-                <XAxis
-                  dataKey="level"
-                  label={{
-                    value: 'Level',
-                    position: 'insideBottomRight',
-                    offset: -5
-                  }}
-                />
-                <YAxis
-                  label={{
-                    value: paramName,
-                    angle: -90,
-                    position: 'insideLeft'
-                  }}
-                />
-                <Tooltip
-                  formatter={(value) => Math.round(Number(value))}
-                  labelFormatter={(label) => `Level ${label}`}
-                />
-                <Legend/>
-                <Line
-                  type="monotone"
-                  dataKey="value"
-                  name={paramName}
-                  stroke="#8884d8"
-                  activeDot={{ r: 8 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </Stack>
-        </DialogContent>
+          <ResponsiveContainer width="100%" height={400}>
+            <LineChart data={chartData}>
+              <CartesianGrid strokeDasharray="3 3"/>
+              <XAxis
+                dataKey="level"
+                label={{
+                  value: 'Level',
+                  position: 'insideBottomRight',
+                  offset: -5
+                }}
+              />
+              <YAxis
+                label={{
+                  value: paramName,
+                  angle: -90,
+                  position: 'insideLeft'
+                }}
+              />
+              <Tooltip
+                formatter={(value) => Math.round(Number(value))}
+                labelFormatter={(label) => `Level ${label}`}
+              />
+              <Legend/>
+              <Line
+                type="monotone"
+                dataKey="value"
+                name={paramName}
+                stroke="#8884d8"
+                activeDot={{ r: 8 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </Stack>
+      </DialogContent>
 
-        <DialogActions>
+      <DialogActions>
+        <Button
+          color={"inherit"}
+          onClick={() => setOpen(false)}
+        >
+          Close
+        </Button>
+        {onUpdateFormula && (
           <Button
-            variant={"outlined"}
-            color={"warning"}
-            onClick={() => setOpen(false)}
+            color={"primary"}
+            variant={"contained"}
+            startIcon={<Update/>}
+            onClick={() =>
+            {
+              onUpdateFormula(displayFormula);
+              setOpen(false);
+            }}
           >
-            Close
+            Update Formula
           </Button>
-
-          {onUpdateFormula && (
-            <Button
-              variant="contained"
-              color="info"
-              startIcon={<Update/>}
-              onClick={() =>
-              {
-                onUpdateFormula(displayFormula);
-                setOpen(false);
-              }}
-              sx={{
-                minWidth: 'auto',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              Update Formula
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
-    </>
-  );
+        )}
+      </DialogActions>
+    </Dialog>
+  </>;
 }

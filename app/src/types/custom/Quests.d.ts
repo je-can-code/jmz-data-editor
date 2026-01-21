@@ -25,7 +25,7 @@ declare namespace Questopedia
   {
     id: number;
     // Inline import type – this does NOT make the file a module
-    type: import('../../enums/OmniObjectiveType.ts').OmniObjectiveType;
+    type: import('../../core/enums/OmniObjectiveType.ts').OmniObjectiveType;
     description: string;
     logs: OmniObjectiveLogs;
     fulfillment: OmniFulfillmentData;

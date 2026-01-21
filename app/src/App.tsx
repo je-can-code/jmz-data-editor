@@ -27,6 +27,7 @@ import ProficiencyBoard from "./boards/proficiency/ProficiencyBoard.tsx";
 import EnemiesBoard from "./boards/database/enemies/EnemiesBoard.tsx";
 import QuestBoard from "./boards/quests/QuestBoard.tsx";
 import { SystemService } from "./services/SystemService.ts";
+import {defaultDataPath} from "./constants/PathConstants.ts";
 
 // ================================================================================================
 const JmzTabStyles = {
@@ -51,7 +52,7 @@ const JmzTabsStyles = {
 export default function App()
 {
   //region state
-  const [ projectPath, setProjectPath ] = useState<string>('/run/media/system/exdrive/dev/gaming/ca/chef-adventure/data');
+  const [ projectPath, setProjectPath ] = useState<string>(defaultDataPath);
   const [ currentTabIndex, setCurrentTabIndex ] = useState<number>(0);
 
   const [ pendingSdpSelectKey, setPendingSdpSelectKey ] = useState<string | null>(null);
@@ -185,7 +186,7 @@ export default function App()
 
   return <>
     <Box>
-      <ProjectPathAppBar pathGetter={projectPath} pathSetter={handleProjectPathUpdate}/>
+      <ProjectPathAppBar projectPath={projectPath} onProjectPathChange={handleProjectPathUpdate}/>
       <Grid container>
         <Grid size={0.5}>
           <Tabs

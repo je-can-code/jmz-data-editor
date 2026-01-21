@@ -7,8 +7,8 @@ type SdpDropData = {
 
 class SdpParser
 {
-  static #dropRegex = /<sdpDropData: ?(\[[-\w]+, ?\d+])>/i;
-  static #pointsRegex = /<sdpPoints:\s*(-?\d+)>/i;
+  static #dropRegex = /<sdpDropData: ?(\[[-\w]+, ?\d+])>/gi;
+  static #pointsRegex = /<sdpPoints:\s*(-?\d+)>/gi;
 
   /**
    * Reads the SDP drop data from a note.

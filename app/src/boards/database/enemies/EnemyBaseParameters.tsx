@@ -26,7 +26,7 @@ import {
   pink,
   red
 } from "@mui/material/colors";
-import { EnemyBaseParam } from "../../../enums/EnemyParameter.ts";
+import { EnemyBaseParam } from "../../../core/enums/EnemyParameter.ts";
 import React from "react";
 import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
 import { GrowthParser } from "../../../services/parsers/GrowthParser.ts";

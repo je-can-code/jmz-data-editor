@@ -44,11 +44,11 @@ import {
   loadItems,
   loadWeapons
 } from "../../../services/DataService.ts";
-import DropItemType from "../../../enums/DropItemType.ts";
+import DropItemType from "../../../core/enums/DropItemType.ts";
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../../enums/MuiSnackbar.ts";
+} from "../../../core/enums/MuiSnackbar.ts";
 import { brown } from "@mui/material/colors";
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Armor = Rmmz.Implementations.RPG_Armor;

@@ -42,7 +42,7 @@ import {
   fromSParamIdToName,
   fromXParamIdToName
 } from "../../../../mappers/ParameterIdMapper.ts";
-import { CollapseEffect, PartyAbility, SpecialFlag } from "../../../../enums/TraitValues.ts";
+import { CollapseEffect, PartyAbility, SpecialFlag } from "../../../../core/enums/TraitValues.ts";
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 

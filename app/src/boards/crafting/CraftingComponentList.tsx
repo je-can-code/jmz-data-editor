@@ -22,7 +22,7 @@ import {
   ToggleButtonGroup,
   Typography
 } from "@mui/material";
-import CraftingComponentType from "../../enums/CraftingComponentType.ts";
+import CraftingComponentType from "../../core/enums/CraftingComponentType.ts";
 import {
   Add,
   BusinessCenter,
@@ -45,8 +45,8 @@ import Crafting from "../../types/custom/Crafting";
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../enums/MuiSnackbar.ts";
-import CraftingListType from "../../enums/CraftingListType.ts";
+} from "../../core/enums/MuiSnackbar.ts";
+import CraftingListType from "../../core/enums/CraftingListType.ts";
 import {
   loadArmors,
   loadItems,

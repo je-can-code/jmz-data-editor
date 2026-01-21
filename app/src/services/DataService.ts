@@ -1,6 +1,6 @@
-import { filesystem } from "@neutralinojs/lib";
-import DatabaseFilenames from "../enums/DatabaseFilenames.ts";
-import ConfigFilenames from "../enums/ConfigFilenames.ts";
+import DatabaseFilenames from "../core/enums/DatabaseFilenames.ts";
+import ConfigFilenames from "../core/enums/ConfigFilenames.ts";
+import { JsonStore } from "../core/infrastructure/fs/JsonStore.ts";
 import RPG_Actor = Rmmz.Implementations.RPG_Actor;
 import RPG_Skill = Rmmz.Implementations.RPG_Skill;
 import RPG_Item = Rmmz.Implementations.RPG_Item;
@@ -14,6 +14,19 @@ type Configuration = Questopedia.Configuration;
 
 const debug = false;
 
+// the active json store implementation; set at app startup.
+let jsonStore: JsonStore | null = null;
+
+/**
+ * Sets the underlying JsonStore implementation for data operations.
+ * Call this once during app initialization.
+ * @param {JsonStore} store The JsonStore to use for IO.
+ */
+const setJsonStore = (store: JsonStore): void =>
+{
+  jsonStore = store;
+};
+
 /**
  * Saves the given data by the given filename at the given projectPath.
  * @param projectPath The basepath to the location where the file should live.
@@ -22,20 +35,23 @@ const debug = false;
  */
 const executeSave = async (projectPath: string, filename: string, data: any) =>
 {
-  console.log('saving...');
+  // guard against missing store configuration.
+  if (!jsonStore)
+  {
+    throw new Error("JsonStore not configured");
+  }
+
+  console.log("saving...");
 
   // build the destination filepath to write the data to.
   const destination = `${projectPath}/${filename}`;
 
-  // stringify the incoming data.
-  const saveData = JSON.stringify(data, null, 2);
-
-  // execute the write to disk.
-  await filesystem.writeFile(destination, saveData);
+  // execute the write to the backing store.
+  await jsonStore.writeJson(destination, data);
 
   if (debug)
   {
-    console.log(saveData);
+    console.log(data);
   }
 
   console.log(`saved data to ${destination} successfully.`);
@@ -48,14 +64,17 @@ const executeSave = async (projectPath: string, filename: string, data: any) =>
  */
 const executeLoad = async <T>(projectPath: string, filename: string): Promise<T> =>
 {
-  // build the destination filepath to write the data to.
+  // guard against missing store configuration.
+  if (!jsonStore)
+  {
+    throw new Error("JsonStore not configured");
+  }
+
+  // build the target filepath to read the data from.
   const target = `${projectPath}/${filename}`;
 
-  // read the data from the file as JSON.
-  const json = await filesystem.readFile(target);
-
-  // return the parsed content.
-  const result = JSON.parse(json) as T;
+  // read and return the parsed content from the store.
+  const result = await jsonStore.readJson<T>(target);
 
   console.log(`[ ${filename} ] data loaded successfully.`);
 
@@ -113,6 +132,7 @@ const loadSystem = async (projectPath: string): Promise<RPG_System> =>
 };
 
 export {
+  setJsonStore,
   executeSave,
   executeLoad,
 

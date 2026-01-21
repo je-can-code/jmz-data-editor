@@ -60,11 +60,11 @@ import {
   loadActors,
   loadSkills
 } from "../../services/DataService.ts";
-import ConfigFilenames from "../../enums/ConfigFilenames.ts";
+import ConfigFilenames from "../../core/enums/ConfigFilenames.ts";
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../enums/MuiSnackbar.ts";
+} from "../../core/enums/MuiSnackbar.ts";
 import SaveButton from "../../components/core/SaveButton.tsx";
 import RPG_Actor = Rmmz.Implementations.RPG_Actor;
 import RPG_Skill = Rmmz.Implementations.RPG_Skill;

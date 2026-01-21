@@ -79,13 +79,13 @@ import {
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../enums/MuiSnackbar.ts";
+} from "../../core/enums/MuiSnackbar.ts";
 
 import SaveButton from "../../components/core/SaveButton.tsx";
 import KeyTextField from "../../components/core/KeyTextField.tsx";
 import ReloadButton from "../../components/core/ReloadButton.tsx";
 
-import ConfigFilenames from "../../enums/ConfigFilenames.ts";
+import ConfigFilenames from "../../core/enums/ConfigFilenames.ts";
 import {
   executeLoad,
   executeSave
@@ -356,7 +356,7 @@ export default function SdpBoard({ projectPath }: BoardProps)
 
     setCanSave(true);
 
-    handleSnack("Quest data has been saved successfully.");
+    handleSnack("SDP data has been saved successfully.");
   };
 
   const handleReloadButtonOnClickEvent = async () =>

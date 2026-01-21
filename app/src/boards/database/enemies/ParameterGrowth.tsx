@@ -37,6 +37,7 @@ type ParameterGrowthProps = {
   growableName: string;
   updateNote: (updatedNote: string) => void;
   otherSubjects?: RPG_Base[];
+  suggestedLevel?: number;
 };
 
 // Define parameter categories
@@ -53,10 +54,10 @@ function ParameterGrowth({
   growableNote,
   growableName,
   updateNote,
-  otherSubjects = []
+  otherSubjects = [],
+  suggestedLevel,
 }: ParameterGrowthProps)
 {
-
   //region state
   const [ localNote, setLocalNote ] = useState<string>(growableNote);
   const [ dialogOpen, setDialogOpen ] = useState(false);
@@ -67,14 +68,11 @@ function ParameterGrowth({
   //endregion state
 
   //region update
-  const updateLocalNote = useCallback(
-    (value: string, paramData: KnownParameter) =>
-    {
-      const updatedNote = GrowthParser.write(localNote, paramData, value);
-      setLocalNote(updatedNote);
-    },
-    [ localNote ]
-  );
+  const updateLocalNote = useCallback((value: string, paramData: KnownParameter) =>
+  {
+    const updatedNote = GrowthParser.write(localNote, paramData, value);
+    setLocalNote(updatedNote);
+  }, [ localNote ]);
   //endregion update
 
   //region setup
@@ -133,7 +131,6 @@ function ParameterGrowth({
           }}
           slotProps={{
             input: {
-              // Only show the adornment when there's content in the field
               endAdornment: data
                 ? (
                   <InputAdornment position={"end"}>
@@ -149,6 +146,7 @@ function ParameterGrowth({
             formula={data}
             paramName={paramData.name}
             onUpdateFormula={(updatedFormula) => updateLocalNote(updatedFormula, paramData)}
+            suggestedLevel={suggestedLevel}
           />
         )}
       </div>
@@ -178,8 +176,7 @@ function ParameterGrowth({
               {categoryParams.map(param =>
                 <div key={param!.key}>
                   {renderGrowth(param!)}
-                </div>
-              )}
+                </div>)}
             </Stack>
           </Grid>
         );
@@ -211,9 +208,9 @@ function ParameterGrowth({
           maxHeight: 950,
           minHeight: 900,
           position: 'absolute',
-          right: 32, // Position from right edge
-          top: 32,   // Position from top edge
-          margin: 0  // Remove default margin
+          right: 32,
+          top: 32,
+          margin: 0
         }
       }}
     >
@@ -281,11 +278,10 @@ function ParameterGrowth({
       <DialogContent>
         <Autocomplete
           sx={{ mt: 2 }}
-          options={otherSubjects.filter(subject =>
-            subject &&
-            subject.id !== 0 &&
-            subject.name &&
-            !subject.name.startsWith('===')
+          options={otherSubjects.filter(subject => subject
+            && subject.id !== 0
+            && subject.name
+            && !subject.name.startsWith('===')
           )}
           getOptionLabel={(option) => option.name}
           renderInput={(params) => (
@@ -338,7 +334,7 @@ function ParameterGrowth({
       </DialogActions>
     </Dialog>
     {/*endregion not-grid-related elements */}
-  </>
+  </>;
 }
 
 export default memo(ParameterGrowth);
