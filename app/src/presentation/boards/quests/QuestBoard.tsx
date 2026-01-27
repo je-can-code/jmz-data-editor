@@ -55,19 +55,18 @@ import {
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../core/enums/MuiSnackbar.ts";
+} from "@core/enums/MuiSnackbar.ts";
 
-import SaveButton from "../../components/core/SaveButton.tsx";
+import SaveButton from "../../../components/core/SaveButton.tsx";
 
-import { BoardProps } from "../../types/local/BoardProps";
-import ConfigFilenames from "../../core/enums/ConfigFilenames.ts";
+import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
 import {
   executeSave,
   loadQuests
-} from "../../services/DataService.ts";
+} from "@services/DataService.ts";
 
-import KeyTextField from "../../components/core/KeyTextField.tsx";
-import { OmniObjectiveType } from "../../core/enums/OmniObjectiveType.ts";
+import KeyTextField from "../../../components/core/KeyTextField.tsx";
+import { OmniObjectiveType } from "@core/enums/OmniObjectiveType.ts";
 import ObjectiveLogs from "./ObjectiveLogs.tsx";
 import ObjectiveFulfillmentData from "./ObjectiveFulfillmentData.tsx";
 import OmniObjectiveFetchType from "./OmniObjectiveFetchType.ts";
@@ -83,9 +82,12 @@ import FetchData = Questopedia.FetchData;
 import SlayData = Questopedia.SlayData;
 import QuestData = Questopedia.QuestData;
 import OmniFulfillmentData = Questopedia.OmniFulfillmentData;
+import { useProjectPath } from "../../context/project-path.context.tsx";
 
-export default function QuestBoard(props: BoardProps)
+export default function QuestBoard()
 {
+  const { projectPath } = useProjectPath();
+
   //region state
   const [ quests, setQuests ] = useState<OmniQuest[]>([]);
   const [ selectedQuest, setSelectedQuest ] = useState<OmniQuest | null>(null);
@@ -134,8 +136,7 @@ export default function QuestBoard(props: BoardProps)
   useEffect(() =>
   {
     let ignore = false;
-    const { projectPath } = props;
-    if (projectPath === null || projectPath === '' || !projectPath.endsWith("/data"))
+    if (!projectPath || !projectPath.endsWith("/data"))
     {
       console.error(`invalid path provided: ${projectPath}`);
       return;
@@ -173,7 +174,7 @@ export default function QuestBoard(props: BoardProps)
     {
       ignore = true;
     }
-  }, [ props.projectPath ]);
+  }, [ projectPath ]);
   //endregion setup
 
   //region actions
@@ -233,7 +234,7 @@ export default function QuestBoard(props: BoardProps)
     } as Configuration;
 
     // save the data to disk.
-    await executeSave(props.projectPath, ConfigFilenames.Quests, updatedQuestData);
+    await executeSave(projectPath, ConfigFilenames.Quests, updatedQuestData);
 
     setCanSave(true);
 

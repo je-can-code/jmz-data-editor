@@ -22,7 +22,7 @@ import {
   ToggleButtonGroup,
   Typography
 } from "@mui/material";
-import CraftingComponentType from "../../core/enums/CraftingComponentType.ts";
+import CraftingComponentType from "@core/enums/CraftingComponentType.ts";
 import {
   Add,
   BusinessCenter,
@@ -41,17 +41,17 @@ import React, {
   useEffect,
   useState
 } from "react";
-import Crafting from "../../types/custom/Crafting";
+import Crafting from "@types/custom/Crafting";
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../core/enums/MuiSnackbar.ts";
-import CraftingListType from "../../core/enums/CraftingListType.ts";
+} from "@core/enums/MuiSnackbar.ts";
+import CraftingListType from "@core/enums/CraftingListType.ts";
 import {
   loadArmors,
   loadItems,
   loadWeapons
-} from "../../services/DataService.ts";
+} from "@services/DataService.ts";
 import CraftingComponent = Crafting.CraftingComponent;
 import RPG_Item = Rmmz.Implementations.RPG_Item;
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;

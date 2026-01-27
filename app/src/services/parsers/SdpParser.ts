@@ -1,4 +1,5 @@
 import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
+import NoteReader from "@services/utils/NoteReader.ts";
 
 type SdpDropData = {
   key: string;
@@ -17,23 +18,17 @@ class SdpParser
    */
   static readDrop(note: string): SdpDropData | null
   {
-    const match = note.match(this.#dropRegex);
-    if (match)
+    const result = NoteReader.getArraysFromNotesByRegex(note, this.#dropRegex, true);
+
+    if (result && result.length > 0)
     {
-      // Extract the array content without brackets
-      const arrayContent = match[1].replace(/^\[|]$/g, '');
-      const parts = arrayContent.split(',')
-        .map(part => part.trim());
-
-      const key = parts[0];
-      const dropChance = parseInt(parts[1]);
-
-      // Extract the key, itemId, and dropChance
+      const [ key, dropChance ] = result[0];
       return {
-        key,
-        dropChance,
+        key: String(key),
+        dropChance: Number(dropChance) || 0
       };
     }
+    return null;
 
     return null;
   }

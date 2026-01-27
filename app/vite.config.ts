@@ -1,4 +1,4 @@
-// noinspection HtmlUnknownTarget,JSUnresolvedLibraryURL
+// noinspection HtmlUnknownTaret,JSUnresolvedLibraryURL
 
 import type {
   Plugin,
@@ -70,8 +70,8 @@ export default defineConfig({
       '@core': path.resolve(_dirname, 'src/core'),
       '@infrastructure': path.resolve(_dirname, 'src/infrastructure'),
 
-      // TODO: update this after we move boards over to the presentation/boards directory.
-      '@presentation': path.resolve(_dirname, 'src/boards'),
+      '@presentation': path.resolve(_dirname, 'src/presentation'),
+      '@boards': path.resolve(_dirname, 'src/presentation/boards'),
 
       '@platform': path.resolve(_dirname, 'src/platform'),
       '@services': path.resolve(_dirname, 'src/services'),

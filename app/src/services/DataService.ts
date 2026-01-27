@@ -76,7 +76,7 @@ const executeLoad = async <T>(projectPath: string, filename: string): Promise<T>
   // read and return the parsed content from the store.
   const result = await jsonStore.readJson<T>(target);
 
-  console.log(`[ ${filename} ] data loaded successfully.`);
+  // console.log(`[ ${filename} ] data loaded successfully.`);
 
   if (debug)
   {

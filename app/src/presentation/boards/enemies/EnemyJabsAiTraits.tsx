@@ -12,7 +12,7 @@ import {
   JabsAiTrait,
   JabsAiTraits,
   JabsDataParser
-} from "../../../services/parsers/JabsDataParser.ts";
+} from "@services/parsers/JabsDataParser.ts";
 import {
   Bolt,
   Favorite,

@@ -35,14 +35,14 @@ import {
   Sync,
   Whatshot
 } from "@mui/icons-material";
-import { SystemService } from "../../../../services/SystemService.ts";
-import NumberInputWithLabel from "../../../../components/NumberInputWithLabel.tsx";
+import { SystemService } from "@services/SystemService.ts";
+import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
 import {
   fromBParamIdToName,
   fromSParamIdToName,
   fromXParamIdToName
-} from "../../../../mappers/ParameterIdMapper.ts";
-import { CollapseEffect, PartyAbility, SpecialFlag } from "../../../../core/enums/TraitValues.ts";
+} from "../../../mappers/ParameterIdMapper.ts";
+import { CollapseEffect, PartyAbility, SpecialFlag } from "@core/enums/TraitValues.ts";
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 

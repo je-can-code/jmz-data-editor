@@ -48,8 +48,7 @@ import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
 } from "@core/enums/MuiSnackbar.ts";
-import { BoardProps } from "../../../types/local/BoardProps";
-import DatabaseFilenames from "../../../core/enums/DatabaseFilenames.ts";
+import DatabaseFilenames from "@core/enums/DatabaseFilenames.ts";
 
 import { ExtraDropManager } from "@services/parsers/ExtraDropParser.ts";
 
@@ -72,7 +71,7 @@ import {
   yellow
 } from "@mui/material/colors";
 import { LevelParser } from "@services/parsers/LevelParser.ts";
-import TraitEditor from "../components/traits/TraitEditor.tsx";
+import TraitEditor from "../../components/traits/TraitEditor.tsx";
 import ParameterGrowth from "./ParameterGrowth.tsx";
 import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
 import { GrowthParser } from "@services/parsers/GrowthParser.ts";
@@ -84,13 +83,20 @@ import { EnemyJabsBattlerData } from "./EnemyJabsBattlerData.tsx";
 import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Trait = Rmmz.Data.RPG_Trait;
-import { useProjectPath } from "../../../presentation/context/project-path.context.tsx";
+import { useProjectPath } from "../../context/project-path.context.tsx";
+import { useEnemies } from "@presentation/context/resources/enemies.context.tsx";
 
 const EnemiesBoard = () =>
 {
-  //region state
   const { projectPath } = useProjectPath();
-  const [ enemies, setEnemies ] = useState<RPG_Enemy[]>([]);
+
+  //region state
+  const {
+    enemies,
+    setEnemies,
+    save,
+    loading
+  } = useEnemies();
   const [ selectedEnemy, setSelectedEnemy ] = useState<RPG_Enemy | null>(null)
   const [ selectedEnemyIndex, setSelectedEnemyIndex ] = useState<number>(0);
   const [ searchTerm, setSearchTerm ] = useState<string>('');
@@ -101,6 +107,7 @@ const EnemiesBoard = () =>
 
   const [ selectedEnemyDropItems, setSelectedEnemyDropItems ] = useState<RPG_DropItem[]>([]);
 
+  const [ isSaving, setIsSaving ] = useState<boolean>(false);
   const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ canReload, setCanReload ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
@@ -109,46 +116,6 @@ const EnemiesBoard = () =>
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
 
   //endregion state
-
-  /**
-   * Initializes the board with the data from the configuration.
-   */
-  useEffect(() =>
-  {
-    let ignore = false;
-    if (!projectPath || !projectPath.endsWith("/data"))
-    {
-      console.error(`invalid path provided: ${projectPath}`);
-      return;
-    }
-
-    console.log(projectPath);
-
-    // a helper function for initializing the state of this component based on the configuration file.
-    const initializeState = async (projectPath: string) =>
-    {
-
-      const enemyData = await loadEnemies(projectPath);
-      if (!ignore && enemyData)
-      {
-        // update the data list.
-        setEnemies(enemyData);
-        setSelectedEnemy(enemyData.at(1)!);
-        setSelectedEnemyIndex(1);
-      }
-
-      // enable saving.
-      setCanSave(true);
-      setCanReload(true);
-    };
-
-    initializeState(projectPath)
-      .catch(console.error);
-    return () =>
-    {
-      ignore = true;
-    }
-  }, [ projectPath ]);
 
   //region actions
   const handleSnack = (
@@ -167,8 +134,6 @@ const EnemiesBoard = () =>
   {
     // save the data to disk.
     await executeSave(projectPath, DatabaseFilenames.Enemies, enemies);
-
-    setCanSave(true);
 
     handleSnack("Enemies data has been saved successfully.");
   };
@@ -462,32 +427,32 @@ const EnemiesBoard = () =>
     (updatedEnemy: RPG_Enemy) =>
     {
       setSelectedEnemy(updatedEnemy);
+      setCanSave(true); // <--- Restores the "Save" button functionality
 
-      const updatedEnemies = enemies.with(selectedEnemyIndex, updatedEnemy);
-      setEnemies(updatedEnemies);
+      setEnemies((prevEnemies) =>
+      {
+        if (!prevEnemies || selectedEnemyIndex < 0) return prevEnemies;
+        return prevEnemies.with(selectedEnemyIndex, updatedEnemy);
+      });
     },
-    [ selectedEnemyIndex, enemies ]
+    [ selectedEnemyIndex, setEnemies ]
   );
 
   const updateEnemyTraits = (updatedTraits: RPG_Trait[]) =>
   {
-    const updatedSelectedEnemy = {
-      ...selectedEnemy,
+    updateEnemy({
+      ...selectedEnemy!,
       traits: updatedTraits,
-    } as RPG_Enemy;
-    updateEnemy(updatedSelectedEnemy);
+    });
   };
 
+  // And updateEnemyNote does the same
   const updateEnemyNote = (updatedEnemyNote: string) =>
   {
-    const updatedSelectedEnemy = {
-      ...selectedEnemy,
+    updateEnemy({
+      ...selectedEnemy!,
       note: updatedEnemyNote,
-    } as RPG_Enemy;
-    setSelectedEnemy(updatedSelectedEnemy);
-
-    const updatedEnemies = enemies.with(selectedEnemyIndex, updatedSelectedEnemy);
-    setEnemies(updatedEnemies);
+    });
   };
 
   const updateEnemyWithNewDropItems = (updatedDropItems: RPG_DropItem[]) =>
@@ -1090,10 +1055,16 @@ const EnemiesBoard = () =>
       <SaveButton
         extraSaveText={"Enemy Data"}
         canSave={canSave}
+        isSaving={isSaving}
         handleSave={async () =>
         {
-          setCanSave(false);
-          await handleSaveButtonOnClickEvent();
+          setIsSaving(true);
+          try {
+            await handleSaveButtonOnClickEvent();
+            setCanSave(false);
+          } finally {
+            setIsSaving(false);
+          }
         }}
       />
 

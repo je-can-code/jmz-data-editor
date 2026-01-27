@@ -79,27 +79,29 @@ import {
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../core/enums/MuiSnackbar.ts";
+} from "@core/enums/MuiSnackbar.ts";
 
-import SaveButton from "../../components/core/SaveButton.tsx";
-import KeyTextField from "../../components/core/KeyTextField.tsx";
-import ReloadButton from "../../components/core/ReloadButton.tsx";
+import SaveButton from "../../../components/core/SaveButton.tsx";
+import KeyTextField from "../../../components/core/KeyTextField.tsx";
+import ReloadButton from "../../../components/core/ReloadButton.tsx";
 
-import ConfigFilenames from "../../core/enums/ConfigFilenames.ts";
+import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
 import {
   executeLoad,
   executeSave
-} from "../../services/DataService.ts";
-import { BoardProps } from "../../types/local/BoardProps";
+} from "@services/DataService.ts";
 
-import { fromLongParameterIdToName } from "../../mappers/ParameterIdMapper.ts";
+import { fromLongParameterIdToName } from "../../../mappers/ParameterIdMapper.ts";
 import Panel = Sdp.Panel;
 import PanelParameter = Sdp.PanelParameter;
 import PanelReward = Sdp.PanelReward;
 import Configuration = Sdp.Configuration;
+import { useProjectPath } from "../../context/project-path.context.tsx";
 
-export default function SdpBoard({ projectPath }: BoardProps)
+export default function SdpBoard()
 {
+  const { projectPath } = useProjectPath();
+
   //region state
   const panelsRef = useRef<Panel[]>([]);
   const pendingKeyRef = useRef<string | null>(null);

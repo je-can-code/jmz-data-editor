@@ -1,15 +1,15 @@
 import { Game_Trait } from "./Traits";
-import { SystemService } from "../../../../services/SystemService.ts";
+import { SystemService } from "@services/SystemService.ts";
 import {
   fromBParamIdToName,
   fromSParamIdToName,
   fromXParamIdToName
-} from "../../../../mappers/ParameterIdMapper.ts";
+} from "../../../mappers/ParameterIdMapper.ts";
 import {
   CollapseEffect,
   PartyAbility,
   SpecialFlag
-} from "../../../../core/enums/TraitValues.ts";
+} from "@core/enums/TraitValues.ts";
 import {
   Accessibility,
   BookmarkAdd,

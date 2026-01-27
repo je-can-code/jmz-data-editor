@@ -43,12 +43,12 @@ import {
   loadArmors,
   loadItems,
   loadWeapons
-} from "../../../services/DataService.ts";
-import DropItemType from "../../../core/enums/DropItemType.ts";
+} from "@services/DataService.ts";
+import DropItemType from "@core/enums/DropItemType.ts";
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../../core/enums/MuiSnackbar.ts";
+} from "@core/enums/MuiSnackbar.ts";
 import { brown } from "@mui/material/colors";
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Armor = Rmmz.Implementations.RPG_Armor;
@@ -62,12 +62,12 @@ type EnemiesExtraDropProps = {
   handleSnack: (message: string, severity?: MuiSnackbarSeverity, variant?: MuiSnackbarVariant) => void;
 };
 
-export default function EnemiesExtraDrops({
+const EnemiesExtraDrops = ({
   projectPath,
   selectedEnemyDropItems,
   updateEnemyWithNewDropItems,
   handleSnack,
-}: EnemiesExtraDropProps)
+}: EnemiesExtraDropProps) =>
 {
   //region state
   const [ items, setItems ] = useState<RPG_Item[]>([]);
@@ -208,7 +208,9 @@ export default function EnemiesExtraDrops({
       denominator: 100
     } as RPG_DropItem;
 
-    const updatedDropItems = (index === null)
+    const updatedDropItems = (
+      index === null
+    )
       ? [ newDropItem ]
       : selectedEnemyDropItems.toSpliced(index, 0, newDropItem);
     updateEnemyWithNewDropItems(updatedDropItems);
@@ -409,7 +411,14 @@ export default function EnemiesExtraDrops({
             size={"small"}
             options={[ ...items ].sort((a, b) =>
             {
-              if (a === null || b === null) return (a as any) - (b as any);
+              if (a === null || b === null)
+              {
+                return (
+                  a as any
+                ) - (
+                  b as any
+                );
+              }
               return a.id - b.id;
             })}
             slotProps={{
@@ -446,7 +455,14 @@ export default function EnemiesExtraDrops({
             size={"small"}
             options={[ ...weapons ].sort((a, b) =>
             {
-              if (a === null || b === null) return (a as any) - (b as any);
+              if (a === null || b === null)
+              {
+                return (
+                  a as any
+                ) - (
+                  b as any
+                );
+              }
               return a.id - b.id;
             })}
             slotProps={{
@@ -468,11 +484,13 @@ export default function EnemiesExtraDrops({
             renderOption={renderOption}
             renderInput={(params) =>
             {
-              return (<TextField
-                {...params}
-                size={"small"}
-                label={"Weapons"}
-                placeholder="Weapon name..."/>)
+              return (
+                <TextField
+                  {...params}
+                  size={"small"}
+                  label={"Weapons"}
+                  placeholder="Weapon name..."/>
+              )
             }}
           />
         </>;
@@ -482,7 +500,14 @@ export default function EnemiesExtraDrops({
             size={"small"}
             options={[ ...armors ].sort((a, b) =>
             {
-              if (a === null || b === null) return (a as any) - (b as any);
+              if (a === null || b === null)
+              {
+                return (
+                  a as any
+                ) - (
+                  b as any
+                );
+              }
               return a.id - b.id;
             })}
             slotProps={{
@@ -504,11 +529,13 @@ export default function EnemiesExtraDrops({
             renderOption={renderOption}
             renderInput={(params) =>
             {
-              return (<TextField
-                {...params}
-                size={"small"}
-                label={"Armors"}
-                placeholder="Armor name..."/>)
+              return (
+                <TextField
+                  {...params}
+                  size={"small"}
+                  label={"Armors"}
+                  placeholder="Armor name..."/>
+              )
             }}
           />
         </>;
@@ -591,6 +618,11 @@ export default function EnemiesExtraDrops({
     </>
   };
   //endregion render
+
+  if (items.length === 0 || weapons.length === 0 || armors.length === 0)
+  {
+    return <Typography>Loading drop data...</Typography>;
+  }
 
   return <>
     <Stack spacing={2}>
@@ -750,3 +782,5 @@ export default function EnemiesExtraDrops({
     {/*endregion not-grid-related elements */}
   </>
 }
+
+export default EnemiesExtraDrops;
