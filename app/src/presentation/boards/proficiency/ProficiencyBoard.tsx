@@ -53,25 +53,25 @@ import {
 } from "@mui/icons-material";
 import styled from "styled-components";
 
-import { BoardProps } from "../../types/local/BoardProps";
 import {
   executeLoad,
   executeSave,
   loadActors,
   loadSkills
-} from "../../services/DataService.ts";
-import ConfigFilenames from "../../core/enums/ConfigFilenames.ts";
+} from "@services/DataService.ts";
+import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../core/enums/MuiSnackbar.ts";
-import SaveButton from "../../components/core/SaveButton.tsx";
+} from "@core/enums/MuiSnackbar.ts";
+import SaveButton from "../../../components/core/SaveButton.tsx";
 import RPG_Actor = Rmmz.Implementations.RPG_Actor;
 import RPG_Skill = Rmmz.Implementations.RPG_Skill;
 
 import Configuration = Proficiency.Configuration;
 import Conditional = Proficiency.Conditional;
 import Requirement = Proficiency.Requirement;
+import { useProjectPath } from "../../context/project-path.context.tsx";
 
 //region setup
 const EntryText = styled(ListItemText)`
@@ -79,12 +79,11 @@ const EntryText = styled(ListItemText)`
 `;
 //endregion setup
 
-export default function ProficiencyBoard(proficiencyProps: BoardProps)
+export default function ProficiencyBoard()
 {
+  const { projectPath } = useProjectPath();
+
   //region state
-  /**
-   * The primary data list for the board.
-   */
   const [ currentConditionals, setCurrentConditionals ] = useState<Conditional[]>([]);
   const [ selectedConditional, setSelectedConditional ] = useState<Conditional | null>(null);
   const [ selectedConditionalIndex, setSelectedConditionalIndex ] = useState<number>(0);
@@ -105,21 +104,12 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
   const [ requirementSkillText, setRequirementSkillText ] = useState<string | undefined>(undefined);
   const [ requirementSecondarySkillIds, setRequirementSecondarySkillIds ] = useState<number[]>([]);
 
-  /**
-   * The actors that are loaded from the DB.
-   */
   const [ actors, setActors ] = useState<RPG_Actor[]>([]);
   const [ actorIdChecked, setActorIdsChecked ] = useState<number[]>([]);
 
-  /**
-   * The skills that are loaded from the DB.
-   */
   const [ skills, setSkills ] = useState<RPG_Skill[]>([]);
   const [ skillIdRewardEarned, setSkillIdRewardEarned ] = useState<number[]>([]);
 
-  /**
-   * The most recently selected skill in the skill search list.
-   */
   const [ clickedSkill, setClickedSkill ] = useState<number>(0);
   const [ isSkillDialogOpen, setIsSkillDialogOpen ] = useState<boolean>(false);
 
@@ -136,7 +126,6 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
   useEffect(() =>
   {
     let ignore = false;
-    const { projectPath } = proficiencyProps;
     if (projectPath === null || projectPath === '' || !projectPath.endsWith("/data"))
     {
       console.error(`invalid path provided: ${projectPath}`);
@@ -177,7 +166,7 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     {
       ignore = true;
     }
-  }, [ proficiencyProps.projectPath ]);
+  }, [ projectPath ]);
 
   //region updates
   /**
@@ -408,7 +397,7 @@ export default function ProficiencyBoard(proficiencyProps: BoardProps)
     } as Configuration;
 
     // save the data to disk.
-    await executeSave(proficiencyProps.projectPath, ConfigFilenames.Proficiency, updatedConfiguration);
+    await executeSave(projectPath, ConfigFilenames.Proficiency, updatedConfiguration);
 
     setCanSave(true);
 

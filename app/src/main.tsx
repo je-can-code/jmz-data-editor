@@ -7,7 +7,6 @@ import {
   window as neuWindow
 } from '@neutralinojs/lib';
 
-import App from './App';
 import {
   createTheme,
   CssBaseline,
@@ -170,7 +169,6 @@ createRoot(document.getElementById('root')!)
             <AppRouter/>
           </AppProviders>
         </HashRouter>
-        {/*<App/>*/}
       </ThemeProvider>
     </React.StrictMode>
   );

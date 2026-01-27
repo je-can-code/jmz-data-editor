@@ -1,27 +1,32 @@
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { registry } from '@platform/compositionRoot/bootstrap';
-import { LazyWrap } from './lazywrap.tsx';
+import { Navigate } from 'react-router-dom';
+import { useRoutes } from "react-router";
 import AppLayout from '../shell/app.layout.tsx';
+import { APP_ROUTES } from "@platform/compositionRoot/routing.config.tsx";
 
-export function AppRouter() {
-  const boards = registry.all();
-  const firstPath = boards[0]?.path ?? '/';
-
-  return (
-    <Routes>
-      {/* Parent layout route */}
-      <Route element={<AppLayout />}>
-        {boards.map(b => (
-          <Route
-            key={b.id}
-            path={b.path}
-            element={<LazyWrap loader={b.lazyComponent} />}
-          />
-        ))}
-        {/* default route inside the layout */}
-        <Route path="*" element={<Navigate to={firstPath} replace />} />
-      </Route>
-    </Routes>
-  );
-}
+export const AppRouter = () =>
+{
+  return useRoutes([
+    {
+      // The parent route anchors the layout at the root
+      path: "/",
+      element: <AppLayout/>,
+      children: [
+        ...APP_ROUTES.map(route => (
+          {
+            path: route.path.replace(/^\//, ''),
+            element: <route.component/>
+          }
+        )),
+        {
+          index: true,
+          element: <Navigate to="/enemies" replace/>
+        },
+        {
+          path: "*",
+          element: <Navigate to="/enemies" replace/>
+        }
+      ]
+    }
+  ]);
+};

@@ -52,24 +52,24 @@ import CraftingComponentList from "./CraftingComponentList.tsx";
 import {
   executeLoad,
   executeSave
-} from "../../services/DataService.ts";
+} from "@services/DataService.ts";
 
-import { BoardProps } from "../../types/local/BoardProps";
-import ConfigFilenames from "../../core/enums/ConfigFilenames.ts";
+import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "../../core/enums/MuiSnackbar.ts";
-import CraftingListType from "../../core/enums/CraftingListType.ts";
+} from "@core/enums/MuiSnackbar.ts";
+import CraftingListType from "@core/enums/CraftingListType.ts";
 
-import Crafting from "../../types/custom/Crafting";
-import SaveButton from "../../components/core/SaveButton.tsx";
-import KeyTextField from "../../components/core/KeyTextField.tsx";
+import Crafting from "@types/custom/Crafting";
+import SaveButton from "../../../components/core/SaveButton.tsx";
+import KeyTextField from "../../../components/core/KeyTextField.tsx";
 import Configuration = Crafting.Configuration;
 import Recipe = Crafting.Recipe;
 import Category = Crafting.Category;
 import CraftingConfiguration = Crafting.Configuration;
 import CraftingComponent = Crafting.CraftingComponent;
+import { useProjectPath } from "../../context/project-path.context.tsx";
 
 // ================================================================================================
 const EntryText = styled(ListItemText)`
@@ -80,8 +80,10 @@ const EntryText = styled(ListItemText)`
 /**
  * The main board that encapsulates all things related to crafting.
  */
-export default function CraftingBoard(craftingBoardProps: BoardProps)
+export default function CraftingBoard()
 {
+  const { projectPath } = useProjectPath();
+
   //region state
   const [ recipes, setRecipes ] = useState<Recipe[]>([]);
   const [ selectedRecipe, setSelectedRecipe ] = useState<Recipe | null>(null);
@@ -120,8 +122,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
   useEffect(() =>
   {
     let ignore = false;
-    const { projectPath } = craftingBoardProps;
-    if (projectPath === null || projectPath === '' || !projectPath.endsWith("/data"))
+    if (!projectPath || !projectPath.endsWith("/data"))
     {
       console.error(`invalid path provided: ${projectPath}`);
       return;
@@ -150,7 +151,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
     {
       ignore = true;
     }
-  }, [ craftingBoardProps.projectPath ]);
+  }, [ projectPath ]);
 
   //region actions
   const handleSnack = (
@@ -173,7 +174,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
     } as CraftingConfiguration;
 
     // save the data to disk.
-    await executeSave(craftingBoardProps.projectPath, ConfigFilenames.Crafting, updatedConfiguration);
+    await executeSave(projectPath, ConfigFilenames.Crafting, updatedConfiguration);
 
     setCanSave(true);
 
@@ -847,7 +848,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                 {/* Ingredients management */}
                 <Grid size={4}>
                   <CraftingComponentList
-                    projectPath={craftingBoardProps.projectPath}
+                    projectPath={projectPath}
                     type={CraftingListType.Ingredients}
                     updateRecipeFunc={updateCraftingComponentList}
                     components={currentIngredients}
@@ -858,7 +859,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                 {/* Tools management */}
                 <Grid size={4}>
                   <CraftingComponentList
-                    projectPath={craftingBoardProps.projectPath}
+                    projectPath={projectPath}
                     type={CraftingListType.Tools}
                     updateRecipeFunc={updateCraftingComponentList}
                     components={currentTools}
@@ -869,7 +870,7 @@ export default function CraftingBoard(craftingBoardProps: BoardProps)
                 {/* Outputs management */}
                 <Grid size={4}>
                   <CraftingComponentList
-                    projectPath={craftingBoardProps.projectPath}
+                    projectPath={projectPath}
                     type={CraftingListType.Outputs}
                     updateRecipeFunc={updateCraftingComponentList}
                     components={currentOutputs}

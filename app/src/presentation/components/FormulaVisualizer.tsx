@@ -32,7 +32,7 @@ import {
   TextField,
   Typography
 } from '@mui/material';
-import { GrowthParser } from "../../../services/parsers/GrowthParser.ts";
+import { GrowthParser } from "@services/parsers/GrowthParser.ts";
 import {
   Functions,
   ShowChart,

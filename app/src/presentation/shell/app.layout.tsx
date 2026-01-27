@@ -12,33 +12,16 @@ import {
   tabsClasses
 } from '@mui/material';
 import {
-  Link,
   Outlet,
   useLocation,
   useNavigate
 } from 'react-router-dom';
-import {
-  AccountTree,
-  Android,
-  Construction,
-  Hub,
-  Rule,
-  Storage,
-} from '@mui/icons-material';
 
 import ProjectPathAppBar from '../../components/topbar/ProjectPathAppBar.tsx';
 import { SystemService } from '@services/SystemService';
 import { defaultDataPath } from '../../constants/PathConstants';
-import { registry } from '@platform/compositionRoot/bootstrap';
-
-const JmzTabStyles = {
-  color: 'grey',
-  height: '100%',
-  width: '80px',
-  minWidth: '80px',
-  padding: '6px',
-  fontSize: '0.6rem',
-};
+import { APP_ROUTES } from "@platform/compositionRoot/routing.config.tsx";
+import { ErrorBoundary } from "../routing/error.boundary.tsx";
 
 const JmzTabsStyles = {
   [`& .${tabsClasses.indicator}`]: {
@@ -46,15 +29,6 @@ const JmzTabsStyles = {
     borderRadius: '12px',
     backgroundColor: 'rgba(255, 255, 255, .1)',
   },
-};
-
-const IconMap: Record<string, React.ReactNode> = {
-  enemies: <Android fontSize="small"/>, // adjust as you like
-  sdp: <Rule fontSize="small"/>,
-  quests: <AccountTree fontSize="small"/>,
-  crafting: <Construction fontSize="small"/>,
-  proficiency: <Hub fontSize="small"/>,
-  database: <Storage fontSize="small"/>,
 };
 
 export default function AppLayout()
@@ -71,11 +45,13 @@ export default function AppLayout()
       .catch(console.error);
   }, [ projectPath ]);
 
-  // Registry-driven board list
-  const boards = useMemo(() => registry.all(), []);
-
-  // Tabs are URL-driven: active value = pathname
-  const activePath = location.pathname;
+  const activePath = useMemo(() =>
+  {
+    const current = location.pathname;
+    return APP_ROUTES.find(r =>
+      current === r.path || current.startsWith(r.path + "/")
+    )?.path ?? APP_ROUTES[0].path;
+  }, [ location.pathname ]);
 
   // Handle legacy navigate-to-tab events by routing instead of setting indexes
   useEffect(() =>
@@ -91,7 +67,7 @@ export default function AppLayout()
       );
 
       // Find a board by id matching the requested tab (e.g. 'sdp')
-      const dest = boards.find((b) => b.id === tab);
+      const dest = APP_ROUTES.find((b) => b.id === tab);
       if (dest)
       {
         const search = sdpKey
@@ -115,57 +91,54 @@ export default function AppLayout()
       }
     };
 
-    window.addEventListener('jmz:navigateToTab' as any, onNavigateToTab);
+    window.addEventListener('jmz:navigate-to-tab' as any, onNavigateToTab);
     window.addEventListener('jmz:sdp-ready' as any, onSdpReady);
     return () =>
     {
-      window.removeEventListener('jmz:navigateToTab' as any, onNavigateToTab);
+      window.removeEventListener('jmz:navigate-to-tab' as any, onNavigateToTab);
       window.removeEventListener('jmz:sdp-ready' as any, onSdpReady);
     };
-  }, [ boards, navigate, pendingSdpSelectKey ]);
+  }, [ navigate, pendingSdpSelectKey ]);
 
+  // @ts-ignore
+  // @ts-ignore
   return (
     <Box sx={{
       height: '100vh',
       display: 'flex',
       flexDirection: 'column'
     }}>
-      {/* Top app bar (unchanged) */}
+      {/* Top app bar */}
       <ProjectPathAppBar projectPath={projectPath} onProjectPathChange={setProjectPath}/>
 
       {/* Content area: left nav + routed content */}
       <Grid container sx={{
         flex: 1,
-        overflow: 'hidden'
+        overflow: 'hidden',
+        display: 'flex',
       }}>
         {/* Side nav */}
-        <Grid item>
-          <Paper
-            elevation={0}
-            sx={{
-              height: '100%',
-              width: 80,
-              borderRadius: 0,
-              display: 'flex',
-              alignItems: 'stretch'
-            }}
-          >
+        <Grid sx={{
+          width: 80,
+          height: '100%'
+        }}>
+          <Paper elevation={0} sx={{
+            height: '100%',
+            borderRadius: 0
+          }}>
             <Tabs
               orientation="vertical"
               value={activePath}
+              onChange={(_, newValue) => navigate(newValue)}
               sx={JmzTabsStyles}
-              // When a tab is clicked, React Router handles navigation via Link, so onChange is optional
             >
-              {boards.map((b) => (
+              {APP_ROUTES.map((route) => (
                 <Tab
-                  key={b.id}
-                  value={b.path}
-                  icon={b.icon ?? IconMap[b.id] ?? <Storage fontSize="small"/>}
-                  label={b.title}
-                  wrapped
-                  sx={JmzTabStyles}
-                  component={Link as any}
-                  to={b.path}
+                  key={route.id}
+                  value={route.path}
+                  // @ts-ignore
+                  icon={route.icon}
+                  label={route.title}
                 />
               ))}
             </Tabs>
@@ -173,11 +146,15 @@ export default function AppLayout()
         </Grid>
 
         {/* Routed board content */}
-        <Grid item xs sx={{
+        <Grid sx={{
+          flex: 1,
           height: '100%',
-          overflow: 'auto'
+          overflow: 'auto',
+          minWidth: 0
         }}>
-          <Outlet/>
+          <ErrorBoundary>
+            <Outlet/>
+          </ErrorBoundary>
         </Grid>
       </Grid>
     </Box>

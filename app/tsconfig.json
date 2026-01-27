@@ -14,8 +14,8 @@
       "@core/*": ["core/*"],
       "@infrastructure/*": ["infrastructure/*"],
 
-      // TODO: update this after we move boards over to the presentation/boards directory.
-      "@presentation/*": ["boards/*"],
+      "@presentation/*": ["presentation/*"],
+      "@boards/*": ["presentation/boards/*"],
 
       "@platform/*": ["platform/*"],
       "@services/*": ["services/*"],

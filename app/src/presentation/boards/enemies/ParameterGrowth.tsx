@@ -28,8 +28,8 @@ import {
   knownLongParams,
   KnownParameter
 } from '../../../mappers/ParameterIdMapper.ts';
-import { GrowthParser } from "../../../services/parsers/GrowthParser.ts";
-import FormulaVisualizer from "../components/FormulaVisualizer.tsx";
+import { GrowthParser } from "@services/parsers/GrowthParser.ts";
+import FormulaVisualizer from "../../components/FormulaVisualizer.tsx";
 import RPG_Base = Rmmz.Base.RPG_Base;
 
 type ParameterGrowthProps = {

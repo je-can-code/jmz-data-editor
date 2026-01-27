@@ -13,7 +13,7 @@ import {
   JabsConfig,
   JabsConfigs,
   JabsDataParser
-} from "../../../services/parsers/JabsDataParser.ts";
+} from "@services/parsers/JabsDataParser.ts";
 import {
   Badge,
   BadgeSharp,
