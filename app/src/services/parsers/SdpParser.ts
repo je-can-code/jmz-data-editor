@@ -1,10 +1,6 @@
+import { SdpDropData } from "@core/domain/valueObjects/sdp-drop.ts";
 import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
 import NoteReader from "@services/utils/NoteReader.ts";
-
-type SdpDropData = {
-  key: string;
-  dropChance: number;
-};
 
 class SdpParser
 {
@@ -28,8 +24,6 @@ class SdpParser
         dropChance: Number(dropChance) || 0
       };
     }
-    return null;
-
     return null;
   }
 
@@ -60,13 +54,8 @@ class SdpParser
    */
   static readPoints(note: string): number | null
   {
-    const match = note.match(this.#pointsRegex);
-    if (match)
-    {
-      return parseInt(match[1]);
-    }
-
-    return null;
+    const dummy = { note } as any;
+    return NoteReader.getNumberFromNoteByRegex(dummy, this.#pointsRegex, true);
   }
 
   /**
@@ -86,3 +75,4 @@ class SdpParser
 }
 
 export { SdpParser };
+export type { SdpDropData };

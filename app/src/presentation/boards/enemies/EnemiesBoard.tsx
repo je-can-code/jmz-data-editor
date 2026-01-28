@@ -41,14 +41,9 @@ import {
 import { throttle } from "lodash";
 
 import {
-  executeSave,
-  loadEnemies
-} from "@services/DataService.ts";
-import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
 } from "@core/enums/MuiSnackbar.ts";
-import DatabaseFilenames from "@core/enums/DatabaseFilenames.ts";
 
 import { ExtraDropManager } from "@services/parsers/ExtraDropParser.ts";
 
@@ -70,34 +65,30 @@ import {
   teal,
   yellow
 } from "@mui/material/colors";
-import { LevelParser } from "@services/parsers/LevelParser.ts";
 import TraitEditor from "../../components/traits/TraitEditor.tsx";
 import ParameterGrowth from "./ParameterGrowth.tsx";
 import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
 import { GrowthParser } from "@services/parsers/GrowthParser.ts";
 import EnemySdpDrop from "./EnemySdpDrop.tsx";
-import { SdpParser } from "@services/parsers/SdpParser.ts";
 import ReloadButton from "../../../components/core/ReloadButton.tsx";
 import { EnemyJabsAiTraits } from "./EnemyJabsAiTraits.tsx";
 import { EnemyJabsBattlerData } from "./EnemyJabsBattlerData.tsx";
-import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
-import RPG_DropItem = Rmmz.Data.RPG_DropItem;
-import RPG_Trait = Rmmz.Data.RPG_Trait;
 import { useProjectPath } from "../../context/project-path.context.tsx";
 import { useEnemies } from "@presentation/context/resources/enemies.context.tsx";
+import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
+import RPG_DropItem = Rmmz.Data.RPG_DropItem;
+import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 const EnemiesBoard = () =>
 {
-  const { projectPath } = useProjectPath();
-
   //region state
   const {
     enemies,
     setEnemies,
     save,
-    loading
+    reload,
   } = useEnemies();
-  const [ selectedEnemy, setSelectedEnemy ] = useState<RPG_Enemy | null>(null)
+  const [ selectedEnemy, setSelectedEnemy ] = useState<EnemyDomainModel | null>(null)
   const [ selectedEnemyIndex, setSelectedEnemyIndex ] = useState<number>(0);
   const [ searchTerm, setSearchTerm ] = useState<string>('');
 
@@ -133,7 +124,7 @@ const EnemiesBoard = () =>
   const handleSaveButtonOnClickEvent = async () =>
   {
     // save the data to disk.
-    await executeSave(projectPath, DatabaseFilenames.Enemies, enemies);
+    await save(enemies);
 
     handleSnack("Enemies data has been saved successfully.");
   };
@@ -276,43 +267,19 @@ const EnemiesBoard = () =>
     }
   };
 
-  const handleReloadButtonOnClickEvent = async () =>
-  {
-    try
-    {
-      // Load fresh enemy data from disk
-      const enemyData = await loadEnemies(projectPath);
-
-      // Update the state with the fresh data
-      setEnemies(enemyData);
-
-      // If there was a selected enemy, try to find and select it again by index
-      if (selectedEnemyIndex > 0 && selectedEnemyIndex < enemyData.length)
-      {
-        setSelectedEnemy(enemyData[selectedEnemyIndex]);
-      }
-      else
-      {
-        // Default to the first real enemy if the previous selection is no longer valid
-        setSelectedEnemy(enemyData.at(1)!);
-        setSelectedEnemyIndex(1);
-      }
-
-      // Show success message
+  const handleReloadButtonOnClickEvent = async () => {
+    try {
+      await reload(); // Use the context's reload which handles mapping
       handleSnack("Enemy data has been reloaded successfully.", MuiSnackbarSeverity.Success);
-    }
-    catch (error)
-    {
+    } catch (error) {
       console.error("Failed to reload enemy data:", error);
       handleSnack("Failed to reload enemy data.", MuiSnackbarSeverity.Error);
-    }
-    finally
-    {
+    } finally {
       setCanReload(true);
     }
   };
 
-  const isValidEnemy = (enemy?: RPG_Enemy | null) =>
+  const isValidEnemy = (enemy?: EnemyDomainModel | null) =>
   {
     if (!enemy) return false;
     if (!enemy.name || enemy.name.length === 0) return false;
@@ -386,15 +353,9 @@ const EnemiesBoard = () =>
     // if there is no entry, stop processing.
     if (!selectedEnemy) return;
 
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
-
     // update the entry.
-    const updatedSelectedEnemy = {
-      ...selectedEnemy,
-      name: updatedValue
-    } as RPG_Enemy;
-    updateEnemy(updatedSelectedEnemy);
+    selectedEnemy!.name = event.target.value;
+    updateEnemy(selectedEnemy!);
   };
 
   const handleEnemyExpOnChangeEvent = (updatedValue: number) =>
@@ -403,11 +364,8 @@ const EnemiesBoard = () =>
     if (!selectedEnemy) return;
 
     // update the entry.
-    const updatedSelectedEnemy = {
-      ...selectedEnemy,
-      exp: updatedValue
-    } as RPG_Enemy;
-    updateEnemy(updatedSelectedEnemy);
+    selectedEnemy!.exp = updatedValue;
+    updateEnemy(selectedEnemy!);
   };
 
   const handleEnemyGoldOnChangeEvent = (updatedValue: number) =>
@@ -416,23 +374,25 @@ const EnemiesBoard = () =>
     if (!selectedEnemy) return;
 
     // update the entry.
-    const updatedSelectedEnemy = {
-      ...selectedEnemy,
-      gold: updatedValue
-    } as RPG_Enemy;
-    updateEnemy(updatedSelectedEnemy);
+    selectedEnemy!.gold = updatedValue;
+    updateEnemy(selectedEnemy!);
   };
 
   const updateEnemy = useCallback(
-    (updatedEnemy: RPG_Enemy) =>
+    (updatedEnemy: EnemyDomainModel) =>
     {
-      setSelectedEnemy(updatedEnemy);
-      setCanSave(true); // <--- Restores the "Save" button functionality
+      const clonedEnemy = Object.assign(
+        Object.create(Object.getPrototypeOf(updatedEnemy)),
+        updatedEnemy
+      );
+
+      setSelectedEnemy(clonedEnemy);
+      setCanSave(true);
 
       setEnemies((prevEnemies) =>
       {
         if (!prevEnemies || selectedEnemyIndex < 0) return prevEnemies;
-        return prevEnemies.with(selectedEnemyIndex, updatedEnemy);
+        return prevEnemies.with(selectedEnemyIndex, clonedEnemy);
       });
     },
     [ selectedEnemyIndex, setEnemies ]
@@ -440,50 +400,27 @@ const EnemiesBoard = () =>
 
   const updateEnemyTraits = (updatedTraits: RPG_Trait[]) =>
   {
-    updateEnemy({
-      ...selectedEnemy!,
-      traits: updatedTraits,
-    });
+    selectedEnemy!.traits = updatedTraits;
+    updateEnemy(selectedEnemy!);
   };
 
-  // And updateEnemyNote does the same
   const updateEnemyNote = (updatedEnemyNote: string) =>
   {
-    updateEnemy({
-      ...selectedEnemy!,
-      note: updatedEnemyNote,
-    });
-  };
-
-  const updateEnemyWithNewDropItems = (updatedDropItems: RPG_DropItem[]) =>
-  {
-    setSelectedEnemyDropItems(updatedDropItems);
-
-    const updatedEnemyNote = ExtraDropManager.write(selectedEnemy!.note, updatedDropItems);
-    updateEnemyNote(updatedEnemyNote);
+    selectedEnemy!.note = updatedEnemyNote;
+    updateEnemy(selectedEnemy!);
   };
 
   const updateEnemyLevel = (updatedLevel: number) =>
   {
-    const updatedEnemyNote = LevelParser.write(selectedEnemy!.note, updatedLevel);
-    updateEnemyNote(updatedEnemyNote);
+    selectedEnemy!.level = updatedLevel;
+    updateEnemy(selectedEnemy!);
   }
-
-  const updateEnemySdpPoints = (updatedSdpPoints: number) =>
-  {
-    const updatedEnemyNote = SdpParser.writePoints(selectedEnemy!.note, updatedSdpPoints);
-    updateEnemyNote(updatedEnemyNote);
-  };
 
   //region parameters
   const updateEnemyWithNewParam = (baseParamId: number, updatedValue: number) =>
   {
-    const updatedEnemyParameters = selectedEnemy!.params.with(baseParamId, updatedValue);
-    const updatedSelectedEnemy = {
-      ...selectedEnemy,
-      params: updatedEnemyParameters
-    } as RPG_Enemy;
-    updateEnemy(updatedSelectedEnemy);
+    selectedEnemy!.params = selectedEnemy!.params.with(baseParamId, updatedValue);
+    updateEnemy(selectedEnemy!);
   };
   //endregion update parameters
   //endregion updates
@@ -573,7 +510,7 @@ const EnemiesBoard = () =>
           </ListItemIcon>
           <ListItemText
             disableTypography
-            primary={`${index}: ${enemy.name}`}
+            primary={`${enemy.id}: ${enemy.name}`}
             sx={{
               fontSize: 16,
               fontWeight: enemyNameFontWeight,
@@ -590,11 +527,8 @@ const EnemiesBoard = () =>
   //region color mappings
   const getFamilyColor = (index: number) =>
   {
-    // Adjust index to account for the placeholder at index 0
-    const adjustedIndex = Math.max(0, index - 1);
-
     // Calculate the family index based on the adjusted index
-    const familyIndex = Math.floor(adjustedIndex / 50);
+    const familyIndex = Math.floor(index / 50);
 
     // Return a color based on the family index
     switch (familyIndex)
@@ -630,12 +564,9 @@ const EnemiesBoard = () =>
 
   const getSubgroupColor = (index: number) =>
   {
-    // Adjust index to account for the placeholder at index 0
-    const adjustedIndex = Math.max(0, index - 1);
-
     // Calculate the subgroup index within the family
     const subgroupIndex = Math.floor((
-      adjustedIndex % 50
+      index % 50
     ) / 10);
 
     // Return a slightly darker shade for the subgroup
@@ -656,23 +587,6 @@ const EnemiesBoard = () =>
     }
   };
   //endregion color mappings
-
-  const totalEnemyCount = () =>
-  {
-    let totalEnemyCount = 0;
-    enemies.forEach(enemy =>
-    {
-      if (enemy === null) return;
-
-      if (enemy.name.startsWith('===')) return;
-
-      totalEnemyCount++;
-    })
-
-    console.log(totalEnemyCount);
-  };
-
-  // totalEnemyCount();
 
   return <>
     <Grid container spacing={2}>
@@ -789,7 +703,7 @@ const EnemiesBoard = () =>
                     <NumberInputWithLabel
                       label={"Default Level"}
                       endAdornment={<Timeline sx={{ color: yellow[600] }}/>}
-                      value={LevelParser.read(selectedEnemy)}
+                      value={selectedEnemy.level}
                       onChangeEventHandler={(event) =>
                       {
                         const updatedValue = parseInt(event.target.value) ?? 0;
@@ -879,11 +793,8 @@ const EnemiesBoard = () =>
                           {(
                             () =>
                             {
-                              const goldParam = knownLongParams()
-                                .find(param => param.key === 'gold');
-                              const formula = goldParam
-                                ? GrowthParser.read(selectedEnemy.note, goldParam)
-                                : '';
+                              // 32 = Gold
+                              const formula = selectedEnemy.growths.get(32) ?? '';
                               return formula
                                 ? (
                                   <Box sx={{
@@ -920,11 +831,11 @@ const EnemiesBoard = () =>
                         <NumberInputWithLabel
                           label={"SDPs"}
                           endAdornment={<SdCard sx={{ color: purple[100] }}/>}
-                          value={SdpParser.readPoints(selectedEnemy.note) ?? 0}
+                          value={selectedEnemy.sdpPoints}
                           onChangeEventHandler={(event) =>
                           {
-                            const updatedValue = parseInt(event.target.value) ?? 0;
-                            updateEnemySdpPoints(updatedValue);
+                            selectedEnemy.sdpPoints = parseInt(event.target.value) ?? 0;
+                            updateEnemy(selectedEnemy);
                           }}
                         />
                       </Grid>
@@ -937,11 +848,8 @@ const EnemiesBoard = () =>
                           {(
                             () =>
                             {
-                              const sdpParam = knownLongParams()
-                                .find(param => param.key === 'sdp');
-                              const formula = sdpParam
-                                ? GrowthParser.read(selectedEnemy.note, sdpParam)
-                                : '';
+                              // 33 = SDP
+                              const formula = selectedEnemy.growths.get(33) ?? '';
                               return formula
                                 ? (
                                   <Box sx={{
@@ -977,21 +885,21 @@ const EnemiesBoard = () =>
                     <EnemyBaseParameters
                       selectedEnemy={selectedEnemy}
                       updateEnemyWithNewParam={updateEnemyWithNewParam}
-                      updateNote={updateEnemyNote}
+                      updateEnemy={updateEnemy}
                     />
                     <br/>
 
                     <ParameterGrowth
-                      growableNote={selectedEnemy.note}
+                      selectedEnemy={selectedEnemy}
                       growableName={selectedEnemy.name}
-                      updateNote={updateEnemyNote}
+                      updateEnemy={updateEnemy}
                       otherSubjects={enemies}
-                      suggestedLevel={LevelParser.read(selectedEnemy)}
+                      suggestedLevel={selectedEnemy.level}
                     />
 
                     <EnemyJabsAiTraits
-                      note={selectedEnemy.note}
-                      updateNote={updateEnemyNote}
+                      selectedEnemy={selectedEnemy}
+                      updateEnemy={updateEnemy}
                     />
 
                   </Stack>
@@ -1015,8 +923,8 @@ const EnemiesBoard = () =>
                     </Accordion>
 
                     <EnemyJabsBattlerData
-                      note={selectedEnemy.note}
-                      updateNote={updateEnemyNote}
+                      selectedEnemy={selectedEnemy}
+                      updateEnemy={updateEnemy}
                     />
 
                     {/*<EnemyJabsConfigs*/}
@@ -1028,14 +936,12 @@ const EnemiesBoard = () =>
                 <Grid size={4}>
                   <Stack spacing={1}>
                     <EnemySdpDrop
-                      note={selectedEnemy.note}
-                      updateNote={updateEnemyNote}
-                      projectPath={projectPath}
+                      selectedEnemy={selectedEnemy}
+                      updateEnemy={updateEnemy}
                     />
                     <EnemiesExtraDrops
-                      projectPath={projectPath}
-                      selectedEnemyDropItems={selectedEnemyDropItems}
-                      updateEnemyWithNewDropItems={updateEnemyWithNewDropItems}
+                      selectedEnemy={selectedEnemy}
+                      updateEnemy={updateEnemy}
                       handleSnack={handleSnack}
                     />
                   </Stack>

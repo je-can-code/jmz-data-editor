@@ -1,0 +1,126 @@
+import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
+import RPG_Trait = Rmmz.Data.RPG_Trait;
+import RPG_DropItem = Rmmz.Data.RPG_DropItem;
+import { LevelParser } from "@services/parsers/LevelParser.ts";
+import {
+  SdpDropData,
+  SdpParser
+} from "@services/parsers/SdpParser.ts";
+import { ExtraDropManager } from "@services/parsers/ExtraDropParser.ts";
+import {
+  JabsDataParser,
+  JabsAiTraits,
+  JabsBattlerData
+} from "@services/parsers/JabsDataParser.ts";
+import { MaxTpParser } from "@services/parsers/MaxTpParser.ts";
+import { NoteNormalizer } from "@services/utils/NoteNormalizer.ts";
+import EnemySdpDrop from "@boards/enemies/EnemySdpDrop.tsx";
+import { EnemySdpDropModel } from "@core/domain/valueObjects/sdp-drop.ts";
+import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
+import { GrowthParser } from "@services/parsers/GrowthParser.ts";
+
+export class EnemyDomainModel
+{
+  // Capture the original object to ensure no fields are lost during re-serialization
+  private readonly _originalRmmz: RPG_Enemy;
+
+  // Explicitly tracked Core properties
+  public readonly id: number;
+  public name: string;
+  public exp: number;
+  public gold: number;
+  public params: number[];
+  public traits: RPG_Trait[];
+  public note: string;
+
+  // Derived/Parsed properties from Note tags
+  public level: number;
+  public sdpPoints: number;
+  public extraDrops: RPG_DropItem[];
+  public jabsAiTraits: JabsAiTraits;
+  public jabsBattlerData: JabsBattlerData;
+  public maxTp: number;
+  public sdpDrop: EnemySdpDropModel;
+  public growths: Map<number, string> = new Map();
+
+  constructor(rmmz: RPG_Enemy)
+  {
+    this._originalRmmz = rmmz;
+
+    this.id = rmmz.id;
+    this.name = rmmz.name;
+    this.exp = rmmz.exp;
+    this.gold = rmmz.gold;
+    this.params = [ ...rmmz.params ];
+    this.traits = [ ...rmmz.traits ];
+    this.note = rmmz.note;
+
+    this.note = NoteNormalizer.normalize(rmmz.note);
+
+    // Parse note-based data upfront
+    this.level = LevelParser.read({
+      ...rmmz,
+      note: this.note
+    });
+    this.sdpPoints = SdpParser.readPoints(this.note) ?? 0;
+    const parsedDrop = SdpParser.readDrop(this.note);
+    this.sdpDrop = new EnemySdpDropModel(
+      parsedDrop?.key ?? '',
+      parsedDrop?.dropChance ?? 0,
+      parsedDrop !== null
+    );
+    this.extraDrops = ExtraDropManager.read(this.note);
+    this.jabsAiTraits = JabsDataParser.readAiTraits(this.note);
+    this.jabsBattlerData = JabsDataParser.readBattlerData(this.note);
+    this.maxTp = MaxTpParser.read(this.note);
+
+    knownLongParams()
+      .forEach(param =>
+      {
+        const formula = GrowthParser.read(this.note, param);
+        this.growths.set(param.longParamId, formula);
+      });
+  }
+
+  /**
+   * Converts the domain model back into the Rmmz format for saving.
+   * Leverages the original object to fill in fields not explicitly handled by the editor.
+   */
+  public toRmmz(): RPG_Enemy
+  {
+    let updatedNote = this.note;
+
+    // Synchronize all parsed data back into the note string
+    updatedNote = LevelParser.write(updatedNote, this.level);
+    updatedNote = SdpParser.writePoints(updatedNote, this.sdpPoints);
+
+    if (this.sdpDrop.key.trim() !== '')
+    {
+      updatedNote = SdpParser.writeDrop(updatedNote, this.sdpDrop);
+    }
+
+    updatedNote = ExtraDropManager.write(updatedNote, this.extraDrops);
+    updatedNote = JabsDataParser.writeAiTraits(updatedNote, this.jabsAiTraits);
+    updatedNote = JabsDataParser.writeBattlerData(updatedNote, this.jabsBattlerData);
+    updatedNote = MaxTpParser.write(updatedNote, this.maxTp);
+
+    knownLongParams()
+      .forEach(param =>
+      {
+        const formula = this.growths.get(param.longParamId) ?? '';
+        updatedNote = GrowthParser.write(updatedNote, param, formula);
+      });
+
+    // Return a full RMMZ object, overlaying updated properties onto the original structure
+    return {
+      ...this._originalRmmz,
+      id: this.id,
+      name: this.name,
+      exp: this.exp,
+      gold: this.gold,
+      params: [ ...this.params ],
+      traits: [ ...this.traits ],
+      note: updatedNote,
+    };
+  }
+}

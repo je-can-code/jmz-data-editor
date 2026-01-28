@@ -1,10 +1,6 @@
-import React, {
-  useEffect,
-  useState
-} from "react";
+import React from "react";
 import {
   JabsBattlerData,
-  JabsDataParser
 } from "@services/parsers/JabsDataParser.ts";
 import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
 import {
@@ -19,125 +15,52 @@ import {
   TrendingUp,
   Visibility
 } from "@mui/icons-material";
+import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
 
 type EnemyJabsBattlerDataProps = {
-  note: string;
-  updateNote: (value: string) => void;
+  selectedEnemy: EnemyDomainModel;
+  updateEnemy: (value: EnemyDomainModel) => void;
 };
 
 const EnemyJabsBattlerData = ({
-  note,
-  updateNote,
+  selectedEnemy,
+  updateEnemy,
 }: EnemyJabsBattlerDataProps) =>
 {
-  //region state
-  const [ sight, setSight ] = useState<number>(0);
-  const [ pursuit, setPursuit ] = useState<number>(0);
-  const [ prepareSpeed, setPrepareSpeed ] = useState<number>(0);
-
-  const [ alertDuration, setAlertDuration ] = useState<number>(0);
-  const [ alertSightBoost, setAlertSightBoost ] = useState<number>(0);
-  const [ alertPursuitBoost, setAlertPursuitBoost ] = useState<number>(0);
-  //endregion state
-
-  useEffect(() =>
-  {
-    refreshBattlerDataFromNote();
-  }, [ note ]);
-
-  const refreshBattlerDataFromNote = () =>
-  {
-    const battlerData = JabsDataParser.readBattlerData(note);
-    setSight(battlerData.sight);
-    setPursuit(battlerData.pursuit);
-    setPrepareSpeed(battlerData.prepareSpeed);
-    setAlertDuration(battlerData.alertDuration);
-    setAlertSightBoost(battlerData.alertSightBoost);
-    setAlertPursuitBoost(battlerData.alertPursuitBoost);
-  };
-
-  const handleBattlerDataUpdate = (updatedData: JabsBattlerData) =>
-  {
-    const updatedNote = JabsDataParser.writeBattlerData(note, updatedData);
-    updateNote(updatedNote);
-  };
-
   const handleSightChange = (newValue: number) =>
   {
-    setSight(newValue);
-    handleBattlerDataUpdate({
-      sight: newValue,
-      pursuit,
-      prepareSpeed,
-      alertDuration,
-      alertSightBoost,
-      alertPursuitBoost
-    });
+    selectedEnemy.jabsBattlerData.sight = newValue;
+    updateEnemy(selectedEnemy);
   };
 
   const handlePursuitChange = (newValue: number) =>
   {
-    setPursuit(newValue);
-    handleBattlerDataUpdate({
-      sight,
-      pursuit: newValue,
-      prepareSpeed,
-      alertDuration,
-      alertSightBoost,
-      alertPursuitBoost
-    });
+    selectedEnemy.jabsBattlerData.pursuit = newValue;
+    updateEnemy(selectedEnemy);
   };
 
   const handlePrepareSpeedChange = (newValue: number) =>
   {
-    setPrepareSpeed(newValue);
-    handleBattlerDataUpdate({
-      sight,
-      pursuit,
-      prepareSpeed: newValue,
-      alertDuration,
-      alertSightBoost,
-      alertPursuitBoost
-    });
+    selectedEnemy.jabsBattlerData.prepareSpeed = newValue;
+    updateEnemy(selectedEnemy);
   };
 
   const handleAlertDurationChange = (newValue: number) =>
   {
-    setAlertDuration(newValue);
-    handleBattlerDataUpdate({
-      sight,
-      pursuit,
-      prepareSpeed,
-      alertDuration: newValue,
-      alertSightBoost,
-      alertPursuitBoost
-    });
+    selectedEnemy.jabsBattlerData.alertDuration = newValue;
+    updateEnemy(selectedEnemy);
   };
 
   const handleAlertSightBoostChange = (newValue: number) =>
   {
-    setAlertSightBoost(newValue);
-    handleBattlerDataUpdate({
-      sight,
-      pursuit,
-      prepareSpeed,
-      alertDuration,
-      alertSightBoost: newValue,
-      alertPursuitBoost
-    });
+    selectedEnemy.jabsBattlerData.alertSightBoost = newValue;
+    updateEnemy(selectedEnemy);
   };
 
   const handleAlertPursuitBoostChange = (newValue: number) =>
   {
-    setAlertPursuitBoost(newValue);
-    handleBattlerDataUpdate({
-      sight,
-      pursuit,
-      prepareSpeed,
-      alertDuration,
-      alertSightBoost,
-      alertPursuitBoost: newValue
-    });
+    selectedEnemy.jabsBattlerData.alertPursuitBoost = newValue;
+    updateEnemy(selectedEnemy);
   };
 
   return <>
@@ -161,21 +84,21 @@ const EnemyJabsBattlerData = ({
         <Typography variant="subtitle1" color="primary">Basic Parameters</Typography>
         <NumberInputWithLabel
           label="Sight Range"
-          value={sight}
+          value={selectedEnemy.jabsBattlerData.sight}
           onChangeEventHandler={(event) => handleSightChange(Number(event.target.value))}
-          endAdornment={<Visibility color={"info"}/>} // Blue color for vision/sight
+          endAdornment={<Visibility color={"info"}/>}
         />
         <NumberInputWithLabel
           label="Pursuit Range"
-          value={pursuit}
+          value={selectedEnemy.jabsBattlerData.pursuit}
           onChangeEventHandler={(event) => handlePursuitChange(Number(event.target.value))}
-          endAdornment={<DirectionsRun color={"success"}/>} // Green color for movement/action
+          endAdornment={<DirectionsRun color={"success"}/>}
         />
-        {/*<NumberInputWithLabel*/}
-        {/*  label="Prepare Speed"*/}
-        {/*  value={prepareSpeed}*/}
-        {/*  onChangeEventHandler={(event) => handlePrepareSpeedChange(Number(event.target.value))}*/}
-        {/*/>*/}
+        <NumberInputWithLabel
+          label="Prepare Speed"
+          value={selectedEnemy.jabsBattlerData.prepareSpeed}
+          onChangeEventHandler={(event) => handlePrepareSpeedChange(Number(event.target.value))}
+        />
       </Stack>
 
       <Divider/>
@@ -185,19 +108,19 @@ const EnemyJabsBattlerData = ({
         <Typography variant="subtitle1" color="primary">Alert Parameters</Typography>
         <NumberInputWithLabel
           label="Alert Duration"
-          value={alertDuration}
+          value={selectedEnemy.jabsBattlerData.alertDuration}
           onChangeEventHandler={(event) => handleAlertDurationChange(Number(event.target.value))}
           endAdornment={<AccessAlarm color={"warning"}/>} // Orange/yellow for caution/alert
         />
         <NumberInputWithLabel
           label="Alert Sight Boost"
-          value={alertSightBoost}
+          value={selectedEnemy.jabsBattlerData.alertSightBoost}
           onChangeEventHandler={(event) => handleAlertSightBoostChange(Number(event.target.value))}
           endAdornment={<TrendingUp color={"secondary"}/>} // Purple for enhancement
         />
         <NumberInputWithLabel
           label="Alert Pursuit Boost"
-          value={alertPursuitBoost}
+          value={selectedEnemy.jabsBattlerData.alertPursuitBoost}
           onChangeEventHandler={(event) => handleAlertPursuitBoostChange(Number(event.target.value))}
           endAdornment={<Speed color={"error"}/>} // Red for speed/intensity
         />

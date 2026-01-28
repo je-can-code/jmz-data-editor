@@ -1,5 +1,6 @@
 import {
   Autocomplete,
+  Box,
   Button,
   Dialog,
   DialogActions,
@@ -31,98 +32,75 @@ import {
 import { GrowthParser } from "@services/parsers/GrowthParser.ts";
 import FormulaVisualizer from "../../components/FormulaVisualizer.tsx";
 import RPG_Base = Rmmz.Base.RPG_Base;
+import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
 
 type ParameterGrowthProps = {
-  growableNote: string;
+  selectedEnemy: EnemyDomainModel;
   growableName: string;
-  updateNote: (updatedNote: string) => void;
-  otherSubjects?: RPG_Base[];
+  updateEnemy: (enemy: EnemyDomainModel) => void;
+  otherSubjects?: EnemyDomainModel[];
   suggestedLevel?: number;
 };
 
-// Define parameter categories
 const parameterCategories = {
-  "Rewards": [ 31, 32, 33 ], // exp, gold, sdps
-  "Core Stats": [ 0, 1, 30, 2, 3, 4, 5, 6, 7 ], // mhp, mmp, mtp, atk, def, mat, mdf, agi, luk
-  "Hit/Evasion": [ 8, 9, 12, 13, 14 ], // hit, eva, mev, mrf, cnt
-  "Recovery": [ 15, 16, 17, 20, 21 ], // hrg, mrg, trg, rec, pha
-  "Damage/Defense": [ 18, 19, 22, 23, 24, 25, 26, 27 ], // tgr, grd, mcr, tcr, pdr, mdr, fdr, exr
-  "Critical": [ 10, 11, 28, 29, ] //  cri, cev, cdm, cdr
+  "Rewards": [ 31, 32, 33 ],
+  "Core Stats": [ 0, 1, 30, 2, 3, 4, 5, 6, 7 ],
+  "Hit/Evasion": [ 8, 9, 12, 13, 14 ],
+  "Recovery": [ 15, 16, 17, 20, 21 ],
+  "Damage/Defense": [ 18, 19, 22, 23, 24, 25, 26, 27 ],
+  "Critical": [ 10, 11, 28, 29, ]
 };
 
 function ParameterGrowth({
-  growableNote,
+  selectedEnemy,
   growableName,
-  updateNote,
+  updateEnemy,
   otherSubjects = [],
   suggestedLevel,
 }: ParameterGrowthProps)
 {
-  //region state
-  const [ localNote, setLocalNote ] = useState<string>(growableNote);
   const [ dialogOpen, setDialogOpen ] = useState(false);
-
   const [ copyDialogOpen, setCopyDialogOpen ] = useState(false);
-  const [ copySourceId, setCopySourceId ] = useState<number>(0);
-  const [ selectedSource, setSelectedSource ] = useState<RPG_Base | null>(null);
-  //endregion state
+  const [ selectedSource, setSelectedSource ] = useState<EnemyDomainModel | null>(null);
+  const [ workingGrowths, setWorkingGrowths ] = useState<Map<number, string>>(new Map());
 
-  //region update
-  const updateLocalNote = useCallback((value: string, paramData: KnownParameter) =>
+  const handleOpenDialog = () => {
+    setWorkingGrowths(new Map(selectedEnemy.growths));
+    setDialogOpen(true);
+  };
+
+  const updateWorkingGrowth = (formula: string, paramData: KnownParameter) =>
   {
-    const updatedNote = GrowthParser.write(localNote, paramData, value);
-    setLocalNote(updatedNote);
-  }, [ localNote ]);
-  //endregion update
+    const newGrowths = new Map(workingGrowths);
+    newGrowths.set(paramData.longParamId, formula);
+    setWorkingGrowths(newGrowths);
+  };
 
-  //region setup
-  // Sync with parent when prop changes
-  useEffect(() =>
+  const commitGrowths = () => {
+    selectedEnemy.growths = workingGrowths;
+    updateEnemy(selectedEnemy);
+    setDialogOpen(false);
+  };
+
+  const copyGrowthsFromSubject = (sourceEnemy: EnemyDomainModel) =>
   {
-    setLocalNote(growableNote);
-  }, [ growableNote ]);
-  //endregion setup
-
-  //region actions
-  const copyGrowthsFromSubject = (sourceEnemy: RPG_Base) =>
-  {
-    let updatedNote = localNote;
-
-    // Get all parameter definitions
-    const allParams = [ ...knownLongParams() ];
-
-    // For each parameter, read from source and write to target
-    allParams.forEach(param =>
-    {
-      const formula = GrowthParser.read(sourceEnemy.note, param);
-      if (formula)
-      {
-        updatedNote = GrowthParser.write(updatedNote, param, formula);
-      }
-    });
-
-    setLocalNote(updatedNote);
+    // Directly copy the growths map from the source model
+    setWorkingGrowths(new Map(sourceEnemy.growths));
     setCopyDialogOpen(false);
   };
-  //endregion actions
 
-  //region render
   const renderGrowth = (paramData: KnownParameter) =>
   {
-    const data = GrowthParser.read(localNote, paramData);
-    return <>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px'
-      }}>
+    const formula = workingGrowths.get(paramData.longParamId) ?? '';
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <TextField
           label={paramData.name}
-          variant={"outlined"}
-          fullWidth={true}
-          size={"small"}
-          value={data}
-          onChange={(event) => updateLocalNote(event.target.value, paramData)}
+          variant="outlined"
+          fullWidth
+          size="small"
+          value={formula}
+          onChange={(event) => updateWorkingGrowth(event.target.value, paramData)}
           sx={{
             fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
             '& .MuiInputBase-input': {
@@ -131,210 +109,138 @@ function ParameterGrowth({
           }}
           slotProps={{
             input: {
-              endAdornment: data
-                ? (
-                  <InputAdornment position={"end"}>
-                    <Check color={"success"}/>
-                  </InputAdornment>
-                )
-                : undefined
+              endAdornment: formula ? (
+                <InputAdornment position="end">
+                  <Check color="success"/>
+                </InputAdornment>
+              ) : undefined
             }
           }}
         />
-        {data && (
+        {formula && (
           <FormulaVisualizer
-            formula={data}
+            formula={formula}
             paramName={paramData.name}
-            onUpdateFormula={(updatedFormula) => updateLocalNote(updatedFormula, paramData)}
+            onUpdateFormula={(updatedFormula) => updateWorkingGrowth(updatedFormula, paramData)}
             suggestedLevel={suggestedLevel}
           />
         )}
       </div>
-    </>;
+    );
   };
 
-  const renderParametersByCategory = useMemo(() =>
-  {
-    const allParams = [ ...knownLongParams() ];
+  const renderParametersByCategory = useMemo(() => {
+    const allParams = knownLongParams();
 
-    return Object.entries(parameterCategories)
-      .map(([ category, paramIds ]) =>
-      {
-        const categoryParams = paramIds
-          .map(id => allParams.find(param => param.longParamId === id))
-          .filter(Boolean);
+    // Return a single array of category blocks
+    return Object.entries(parameterCategories).map(([category, paramIds]) => {
+      const categoryParams = paramIds
+        .map(id => allParams.find(param => param.longParamId === id))
+        .filter(Boolean);
 
-        return (
-          <Grid size={3} key={category}>
-            <Typography variant="subtitle2" sx={{
+      return (
+        <Box key={category} sx={{ mb: 4 }}>
+          {/* Category Header */}
+          <Typography
+            variant="h6"
+            color="primary"
+            sx={{
               fontWeight: 'bold',
-              mb: 1
-            }}>
-              {category}
-            </Typography>
-            <Stack spacing={2} direction="column">
-              {categoryParams.map(param =>
-                <div key={param!.key}>
-                  {renderGrowth(param!)}
-                </div>)}
-            </Stack>
-          </Grid>
-        );
-      });
-  }, [ localNote ]);
-  //endregion render
-
-  return <>
-    <Button
-      variant={"contained"}
-      color={"success"}
-      onClick={() =>
-      {
-        setLocalNote(growableNote);
-        setDialogOpen(true);
-      }}
-    >
-      Manage Growths
-    </Button>
-
-    {/*region not-grid-related elements */}
-    <Dialog
-      open={dialogOpen}
-      fullWidth={true}
-      maxWidth={"md"}
-      onClose={() => setDialogOpen(false)}
-      sx={{
-        '& .MuiDialog-paper': {
-          maxHeight: 950,
-          minHeight: 900,
-          position: 'absolute',
-          right: 32,
-          top: 32,
-          margin: 0
-        }
-      }}
-    >
-      <DialogTitle>
-        Parameter Growth for {growableName}
-      </DialogTitle>
-
-      <DialogContent>
-        <Stack spacing={3} direction={"column"}>
-          {renderParametersByCategory}
-        </Stack>
-      </DialogContent>
-
-      <DialogActions sx={{ justifyContent: 'space-between' }}>
-        {/* Left side */}
-        <div>
-          <Button
-            color={"inherit"}
-            variant={"text"}
-            startIcon={<Close/>}
-            onClick={() =>
-            {
-              setLocalNote(growableNote);
-              setDialogOpen(false);
+              mb: 2,
+              borderBottom: '1px solid',
+              borderColor: 'divider'
             }}
           >
+            {category}
+          </Typography>
+
+          {/* Single Column Stack for Parameters */}
+          <Stack spacing={2} direction="column">
+            {categoryParams.map(param => (
+              <div key={param!.key}>
+                {renderGrowth(param!)}
+              </div>
+            ))}
+          </Stack>
+        </Box>
+      );
+    });
+  }, [workingGrowths]);
+
+  return (
+    <>
+      <Button variant="contained" color="success" onClick={handleOpenDialog}>
+        Manage Growths
+      </Button>
+
+      <Dialog
+        open={dialogOpen}
+        fullWidth
+        maxWidth="sm"
+        onClose={() => setDialogOpen(false)}
+        sx={{
+          '& .MuiDialog-paper': {
+            maxHeight: 950,
+            minHeight: 900,
+            position: 'absolute',
+            right: 32,
+            top: 32,
+            margin: 0
+          }
+        }}
+      >
+        <DialogTitle>Parameter Growth for {growableName}</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={1} direction="column">
+            {renderParametersByCategory}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'space-between' }}>
+          <Button color="inherit" startIcon={<Close/>} onClick={() => setDialogOpen(false)}>
             Nevermind
           </Button>
-        </div>
+          <div>
+            <Button
+              color="info"
+              variant="contained"
+              startIcon={<ContentCopy/>}
+              onClick={() => setCopyDialogOpen(true)}
+              sx={{ mr: 1 }}
+            >
+              Copy From...
+            </Button>
+            <Button color="success" variant="contained" startIcon={<Sync/>} onClick={commitGrowths}>
+              Update Growth
+            </Button>
+          </div>
+        </DialogActions>
+      </Dialog>
 
-        {/* Right side */}
-        <div>
+      {/* Copy Dialog remains largely the same, calling copyGrowthsFromSubject */}
+      <Dialog open={copyDialogOpen} onClose={() => setCopyDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Copy Parameter Growths</DialogTitle>
+        <DialogContent>
+          <Autocomplete
+            sx={{ mt: 2 }}
+            options={otherSubjects.filter(s => s && s.id !== 0 && s.name && !s.name.startsWith('==='))}
+            getOptionLabel={(option) => option.name}
+            renderInput={(params) => <TextField {...params} label="Search Source" />}
+            value={selectedSource}
+            onChange={(_, newValue) => setSelectedSource(newValue)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCopyDialogOpen(false)}>Cancel</Button>
           <Button
-            color={"info"}
-            variant={"contained"}
-            startIcon={<ContentCopy/>}
-            onClick={() => setCopyDialogOpen(true)}
-            sx={{ mr: 1 }}
+            disabled={!selectedSource}
+            onClick={() => selectedSource && copyGrowthsFromSubject(selectedSource)}
           >
-            Copy Growths From...
+            Copy
           </Button>
-          <Button
-            color={"success"}
-            variant={"contained"}
-            startIcon={<Sync/>}
-            onClick={() =>
-            {
-              updateNote(localNote);
-              setDialogOpen(false);
-            }}
-          >
-            Update Growth
-          </Button>
-        </div>
-      </DialogActions>
-    </Dialog>
-
-    <Dialog
-      open={copyDialogOpen}
-      onClose={() => setCopyDialogOpen(false)}
-      maxWidth={"xs"}
-      fullWidth
-    >
-      <DialogTitle>Copy Parameter Growths</DialogTitle>
-      <DialogContent>
-        <Autocomplete
-          sx={{ mt: 2 }}
-          options={otherSubjects.filter(subject => subject
-            && subject.id !== 0
-            && subject.name
-            && !subject.name.startsWith('===')
-          )}
-          getOptionLabel={(option) => option.name}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Search Source"
-              variant="outlined"
-              fullWidth
-            />
-          )}
-          value={selectedSource}
-          onChange={(_, newValue) =>
-          {
-            setSelectedSource(newValue);
-            if (newValue)
-            {
-              setCopySourceId(newValue.id);
-            }
-            else
-            {
-              setCopySourceId(0);
-            }
-          }}
-          isOptionEqualToValue={(option, value) => option.id === value.id}
-        />
-      </DialogContent>
-      <DialogActions>
-        <Button
-          onClick={() => setCopyDialogOpen(false)}
-          startIcon={<Close/>}
-        >
-          Cancel
-        </Button>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={() =>
-          {
-            const sourceSubject = otherSubjects.find(subject => subject && subject.id === copySourceId);
-            if (sourceSubject)
-            {
-              copyGrowthsFromSubject(sourceSubject);
-            }
-          }}
-          startIcon={<ContentCopy/>}
-          disabled={!copySourceId}
-        >
-          Copy Growths
-        </Button>
-      </DialogActions>
-    </Dialog>
-    {/*endregion not-grid-related elements */}
-  </>;
+        </DialogActions>
+      </Dialog>
+    </>
+  );
 }
 
 export default memo(ParameterGrowth);
