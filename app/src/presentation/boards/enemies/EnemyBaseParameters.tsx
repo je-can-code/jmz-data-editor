@@ -30,12 +30,12 @@ import React from "react";
 import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
 import { GrowthParser } from "@services/parsers/GrowthParser.ts";
 import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
-import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
+import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
 
 type EnemyBaseParametersProps = {
-  selectedEnemy: EnemyDomainModel;
+  selectedEnemy: RPG_EnemyDomainModel;
   updateEnemyWithNewParam: (parameterId: number, updatedValue: number) => void;
-  updateEnemy: (updatedEnemy: EnemyDomainModel) => void;
+  updateEnemy: (updatedEnemy: RPG_EnemyDomainModel) => void;
 };
 
 export default function EnemyBaseParameters({

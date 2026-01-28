@@ -15,11 +15,11 @@ import {
   TrendingUp,
   Visibility
 } from "@mui/icons-material";
-import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
+import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
 
 type EnemyJabsBattlerDataProps = {
-  selectedEnemy: EnemyDomainModel;
-  updateEnemy: (value: EnemyDomainModel) => void;
+  selectedEnemy: RPG_EnemyDomainModel;
+  updateEnemy: (value: RPG_EnemyDomainModel) => void;
 };
 
 const EnemyJabsBattlerData = ({

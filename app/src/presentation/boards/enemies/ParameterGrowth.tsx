@@ -32,13 +32,13 @@ import {
 import { GrowthParser } from "@services/parsers/GrowthParser.ts";
 import FormulaVisualizer from "../../components/FormulaVisualizer.tsx";
 import RPG_Base = Rmmz.Base.RPG_Base;
-import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
+import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
 
 type ParameterGrowthProps = {
-  selectedEnemy: EnemyDomainModel;
+  selectedEnemy: RPG_EnemyDomainModel;
   growableName: string;
-  updateEnemy: (enemy: EnemyDomainModel) => void;
-  otherSubjects?: EnemyDomainModel[];
+  updateEnemy: (enemy: RPG_EnemyDomainModel) => void;
+  otherSubjects?: RPG_EnemyDomainModel[];
   suggestedLevel?: number;
 };
 
@@ -61,7 +61,7 @@ function ParameterGrowth({
 {
   const [ dialogOpen, setDialogOpen ] = useState(false);
   const [ copyDialogOpen, setCopyDialogOpen ] = useState(false);
-  const [ selectedSource, setSelectedSource ] = useState<EnemyDomainModel | null>(null);
+  const [ selectedSource, setSelectedSource ] = useState<RPG_EnemyDomainModel | null>(null);
   const [ workingGrowths, setWorkingGrowths ] = useState<Map<number, string>>(new Map());
 
   const handleOpenDialog = () => {
@@ -82,7 +82,7 @@ function ParameterGrowth({
     setDialogOpen(false);
   };
 
-  const copyGrowthsFromSubject = (sourceEnemy: EnemyDomainModel) =>
+  const copyGrowthsFromSubject = (sourceEnemy: RPG_EnemyDomainModel) =>
   {
     // Directly copy the growths map from the source model
     setWorkingGrowths(new Map(sourceEnemy.growths));

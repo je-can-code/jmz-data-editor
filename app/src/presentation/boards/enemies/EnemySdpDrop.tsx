@@ -17,12 +17,12 @@ import { executeLoad } from "@services/DataService.ts";
 import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
 import Panel = Sdp.Panel;
 import Configuration = Sdp.Configuration;
-import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
+import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
 import { useProjectPath } from "@presentation/context/project-path.context.tsx";
 
 type EnemySdpDropProps = {
-  selectedEnemy: EnemyDomainModel;
-  updateEnemy: (value: EnemyDomainModel) => void;
+  selectedEnemy: RPG_EnemyDomainModel;
+  updateEnemy: (value: RPG_EnemyDomainModel) => void;
 };
 
 const EnemySdpDrop = ({

@@ -2,24 +2,21 @@ import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import { LevelParser } from "@services/parsers/LevelParser.ts";
-import {
-  SdpDropData,
-  SdpParser
-} from "@services/parsers/SdpParser.ts";
+import { SdpParser } from "@services/parsers/SdpParser.ts";
 import { ExtraDropManager } from "@services/parsers/ExtraDropParser.ts";
-import {
-  JabsDataParser,
-  JabsAiTraits,
-  JabsBattlerData
-} from "@services/parsers/JabsDataParser.ts";
+import { JabsDataParser } from "@services/parsers/JabsDataParser.ts";
 import { MaxTpParser } from "@services/parsers/MaxTpParser.ts";
 import { NoteNormalizer } from "@services/utils/NoteNormalizer.ts";
-import EnemySdpDrop from "@boards/enemies/EnemySdpDrop.tsx";
 import { EnemySdpDropModel } from "@core/domain/valueObjects/sdp-drop.ts";
 import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
 import { GrowthParser } from "@services/parsers/GrowthParser.ts";
+import { JabsAiTraits } from "@core/domain/valueObjects/jabs-ai-traits.ts";
+import { JabsBattlerData } from "@core/domain/valueObjects/jabs-battler-data.ts";
+import { JabsConfigs } from "@core/domain/valueObjects/jabs-configs.ts";
+import { RPG_BaseDomainModel } from "@core/domain/entities/RPG_BaseDomainModel.ts";
 
-export class EnemyDomainModel
+export class RPG_EnemyDomainModel
+  extends RPG_BaseDomainModel<RPG_Enemy>
 {
   // Capture the original object to ensure no fields are lost during re-serialization
   private readonly _originalRmmz: RPG_Enemy;
@@ -35,16 +32,19 @@ export class EnemyDomainModel
 
   // Derived/Parsed properties from Note tags
   public level: number;
+  public maxTp: number;
   public sdpPoints: number;
   public extraDrops: RPG_DropItem[];
   public jabsAiTraits: JabsAiTraits;
   public jabsBattlerData: JabsBattlerData;
-  public maxTp: number;
+  public jabsConfigs: JabsConfigs;
   public sdpDrop: EnemySdpDropModel;
   public growths: Map<number, string> = new Map();
 
   constructor(rmmz: RPG_Enemy)
   {
+    super(rmmz);
+
     this._originalRmmz = rmmz;
 
     this.id = rmmz.id;
@@ -62,7 +62,9 @@ export class EnemyDomainModel
       ...rmmz,
       note: this.note
     });
+    this.maxTp = MaxTpParser.read(this.note);
     this.sdpPoints = SdpParser.readPoints(this.note) ?? 0;
+
     const parsedDrop = SdpParser.readDrop(this.note);
     this.sdpDrop = new EnemySdpDropModel(
       parsedDrop?.key ?? '',
@@ -72,7 +74,7 @@ export class EnemyDomainModel
     this.extraDrops = ExtraDropManager.read(this.note);
     this.jabsAiTraits = JabsDataParser.readAiTraits(this.note);
     this.jabsBattlerData = JabsDataParser.readBattlerData(this.note);
-    this.maxTp = MaxTpParser.read(this.note);
+    this.jabsConfigs = JabsDataParser.readConfigs(this.note);
 
     knownLongParams()
       .forEach(param =>
@@ -82,16 +84,13 @@ export class EnemyDomainModel
       });
   }
 
-  /**
-   * Converts the domain model back into the Rmmz format for saving.
-   * Leverages the original object to fill in fields not explicitly handled by the editor.
-   */
-  public toRmmz(): RPG_Enemy
+  protected syncNote(): string
   {
-    let updatedNote = this.note;
+    let updatedNote = this.note; // Start with the normalized note
 
-    // Synchronize all parsed data back into the note string
+    // Pass the note through each specialized parser to update its tags
     updatedNote = LevelParser.write(updatedNote, this.level);
+    updatedNote = MaxTpParser.write(updatedNote, this.maxTp);
     updatedNote = SdpParser.writePoints(updatedNote, this.sdpPoints);
 
     if (this.sdpDrop.key.trim() !== '')
@@ -102,8 +101,9 @@ export class EnemyDomainModel
     updatedNote = ExtraDropManager.write(updatedNote, this.extraDrops);
     updatedNote = JabsDataParser.writeAiTraits(updatedNote, this.jabsAiTraits);
     updatedNote = JabsDataParser.writeBattlerData(updatedNote, this.jabsBattlerData);
-    updatedNote = MaxTpParser.write(updatedNote, this.maxTp);
+    updatedNote = JabsDataParser.writeConfigs(updatedNote, this.jabsConfigs);
 
+    // Sync formulas for each parameter
     knownLongParams()
       .forEach(param =>
       {
@@ -111,7 +111,15 @@ export class EnemyDomainModel
         updatedNote = GrowthParser.write(updatedNote, param, formula);
       });
 
-    // Return a full RMMZ object, overlaying updated properties onto the original structure
+    return updatedNote;
+  }
+
+  /**
+   * Converts the domain model back into the Rmmz format for saving.
+   * Leverages the original object to fill in fields not explicitly handled by the editor.
+   */
+  public toRmmz(): RPG_Enemy
+  {
     return {
       ...this._originalRmmz,
       id: this.id,
@@ -120,7 +128,7 @@ export class EnemyDomainModel
       gold: this.gold,
       params: [ ...this.params ],
       traits: [ ...this.traits ],
-      note: updatedNote,
+      note: this.syncNote(),
     };
   }
 }

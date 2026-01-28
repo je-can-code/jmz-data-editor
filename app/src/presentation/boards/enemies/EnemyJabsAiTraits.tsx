@@ -9,11 +9,6 @@ import {
   useState
 } from "react";
 import {
-  JabsAiTrait,
-  JabsAiTraits,
-  JabsDataParser
-} from "@services/parsers/JabsDataParser.ts";
-import {
   Bolt,
   Favorite,
   Gavel,
@@ -21,11 +16,15 @@ import {
   Shield,
   Star
 } from "@mui/icons-material";
-import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
+import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
+import {
+  JabsAiTrait,
+  JabsAiTraitsData
+} from "@core/domain/valueObjects/jabs-ai-traits.ts";
 
 type EnemyJabsDataProps = {
-  selectedEnemy: EnemyDomainModel;
-  updateEnemy: (updatedEnemy: EnemyDomainModel) => void;
+  selectedEnemy: RPG_EnemyDomainModel;
+  updateEnemy: (updatedEnemy: RPG_EnemyDomainModel) => void;
 };
 
 const EnemyJabsAiTraits = ({
@@ -59,75 +58,15 @@ const EnemyJabsAiTraits = ({
 
   const handleJabsAiTraitsUpdate = (newTraits: string[]) =>
   {
-    // 1. Apply mutual exclusivity logic
-    const exclusiveTraits = ensureLeaderFollowerMutualExclusivity(stringTraits, newTraits);
+    // Delegate the logic to the domain object
+    selectedEnemy.jabsAiTraits.updateFromStrings(newTraits, stringTraits);
 
-    // 2. Update the UI state
-    setStringTraits(exclusiveTraits);
+    // Sync the UI representation (string array for ToggleButtonGroup)
+    const activeStrings = Object.values(JabsAiTrait)
+      .filter(t => selectedEnemy.jabsAiTraits[t as keyof JabsAiTraitsData])
 
-    // 3. Synchronize ALL properties on the domain model
-    // Use .includes() to determine the true/false state for every trait
-    selectedEnemy.jabsAiTraits.careful = exclusiveTraits.includes(JabsAiTrait.Careful);
-    selectedEnemy.jabsAiTraits.executor = exclusiveTraits.includes(JabsAiTrait.Executor);
-    selectedEnemy.jabsAiTraits.reckless = exclusiveTraits.includes(JabsAiTrait.Reckless);
-    selectedEnemy.jabsAiTraits.healer = exclusiveTraits.includes(JabsAiTrait.Healer);
-    selectedEnemy.jabsAiTraits.leader = exclusiveTraits.includes(JabsAiTrait.Leader);
-    selectedEnemy.jabsAiTraits.follower = exclusiveTraits.includes(JabsAiTrait.Follower);
-
-    // 4. Notify the parent/provider of the change
+    setStringTraits(activeStrings);
     updateEnemy(selectedEnemy);
-  };
-
-  /**
-   * Ensures that Leader and Follower traits are mutually exclusive.
-   * If both are present in the new traits array, keeps only the newly added one.
-   * @param currentTraits The current traits array before the update
-   * @param newTraits The new traits array after the update
-   * @returns A modified traits array where Leader and Follower are mutually exclusive
-   */
-  const ensureLeaderFollowerMutualExclusivity = (currentTraits: string[], newTraits: string[]): string[] =>
-  {
-    // Check if both Leader and Follower are in the newTraits array
-    const hasLeader = newTraits.includes(JabsAiTrait.Leader);
-    const hasFollower = newTraits.includes(JabsAiTrait.Follower);
-
-    // If both are selected, determine which one was newly added
-    if (hasLeader && hasFollower)
-    {
-      const wasLeaderAlreadySelected = currentTraits.includes(JabsAiTrait.Leader);
-      const wasFollowerAlreadySelected = currentTraits.includes(JabsAiTrait.Follower);
-
-      // If Leader was just added, remove Follower
-      if (!wasLeaderAlreadySelected)
-      {
-        return newTraits.filter(trait => trait !== JabsAiTrait.Follower);
-      }
-      // If Follower was just added, remove Leader
-      else if (!wasFollowerAlreadySelected)
-      {
-        return newTraits.filter(trait => trait !== JabsAiTrait.Leader);
-      }
-      // If both were already selected (shouldn't happen normally), keep the new one and remove the old one
-      else
-      {
-        // Find the index of the last clicked trait (the one that triggered this update)
-        const lastClickedIndex = newTraits.findIndex(trait =>
-          trait === JabsAiTrait.Leader || trait === JabsAiTrait.Follower);
-
-        // If it's Leader, remove Follower; if it's Follower, remove Leader
-        if (newTraits[lastClickedIndex] === JabsAiTrait.Leader)
-        {
-          return newTraits.filter(trait => trait !== JabsAiTrait.Follower);
-        }
-        else
-        {
-          return newTraits.filter(trait => trait !== JabsAiTrait.Leader);
-        }
-      }
-    }
-
-    // If not both are selected, return the original array
-    return newTraits;
   };
 
   return <>
@@ -158,28 +97,34 @@ const EnemyJabsAiTraits = ({
           handleJabsAiTraitsUpdate(newValues);
         }}
         sx={(theme) =>
-          ({
-            border: `1px solid ${theme.palette.divider}`,
-            borderRadius: '4px',
-            backgroundColor: theme.palette.background.paper
-          })}
+          (
+            {
+              border: `1px solid ${theme.palette.divider}`,
+              borderRadius: '4px',
+              backgroundColor: theme.palette.background.paper
+            }
+          )}
       >
         <ToggleButton
           value={JabsAiTrait.Careful}
           selected={selectedEnemy.jabsAiTraits.careful}
           sx={(theme) =>
-            ({
-              "&.Mui-selected":
-                {
-                  borderColor: theme.palette.info.main,
-                }
-            })}
+            (
+              {
+                "&.Mui-selected":
+                  {
+                    borderColor: theme.palette.info.main,
+                  }
+              }
+            )}
         >
           <Shield sx={(theme) =>
-            ({
-              color: theme.palette.info.main,
-              mr: 1
-            })}/>
+            (
+              {
+                color: theme.palette.info.main,
+                mr: 1
+              }
+            )}/>
           Careful
         </ToggleButton>
 
@@ -187,18 +132,22 @@ const EnemyJabsAiTraits = ({
           value={JabsAiTrait.Executor}
           selected={selectedEnemy.jabsAiTraits.executor}
           sx={(theme) =>
-            ({
-              "&.Mui-selected":
-                {
-                  borderColor: theme.palette.error.main,
-                }
-            })}
+            (
+              {
+                "&.Mui-selected":
+                  {
+                    borderColor: theme.palette.error.main,
+                  }
+              }
+            )}
         >
           <Gavel sx={(theme) =>
-            ({
-              color: theme.palette.error.main,
-              mr: 1
-            })}/>
+            (
+              {
+                color: theme.palette.error.main,
+                mr: 1
+              }
+            )}/>
           Executor
         </ToggleButton>
 
@@ -206,18 +155,22 @@ const EnemyJabsAiTraits = ({
           value={JabsAiTrait.Reckless}
           selected={selectedEnemy.jabsAiTraits.reckless}
           sx={(theme) =>
-            ({
-              "&.Mui-selected":
-                {
-                  borderColor: theme.palette.warning.main,
-                }
-            })}
+            (
+              {
+                "&.Mui-selected":
+                  {
+                    borderColor: theme.palette.warning.main,
+                  }
+              }
+            )}
         >
           <Bolt sx={(theme) =>
-            ({
-              color: theme.palette.warning.main,
-              mr: 1
-            })}/>
+            (
+              {
+                color: theme.palette.warning.main,
+                mr: 1
+              }
+            )}/>
           Reckless
         </ToggleButton>
 
@@ -225,18 +178,22 @@ const EnemyJabsAiTraits = ({
           value={JabsAiTrait.Healer}
           selected={selectedEnemy.jabsAiTraits.healer}
           sx={(theme) =>
-            ({
-              "&.Mui-selected":
-                {
-                  borderColor: theme.palette.success.main,
-                }
-            })}
+            (
+              {
+                "&.Mui-selected":
+                  {
+                    borderColor: theme.palette.success.main,
+                  }
+              }
+            )}
         >
           <Favorite sx={(theme) =>
-            ({
-              color: theme.palette.success.main,
-              mr: 1
-            })}/>
+            (
+              {
+                color: theme.palette.success.main,
+                mr: 1
+              }
+            )}/>
           Healer
         </ToggleButton>
       </ToggleButtonGroup>
@@ -264,42 +221,52 @@ const EnemyJabsAiTraits = ({
             {
               handleJabsAiTraitsUpdate(newValues);
             }}
-            sx={(theme) => ({
-              border: `1px solid ${theme.palette.divider}`,
-              borderRadius: '4px',
-              backgroundColor: theme.palette.background.paper
-            })}
+            sx={(theme) => (
+              {
+                border: `1px solid ${theme.palette.divider}`,
+                borderRadius: '4px',
+                backgroundColor: theme.palette.background.paper
+              }
+            )}
           >
             <ToggleButton
               value={JabsAiTrait.Leader}
               selected={selectedEnemy.jabsAiTraits.leader}
-              sx={(theme) => ({
-                "&.Mui-selected":
-                  {
-                    borderColor: theme.palette.warning.main,
-                  }
-              })}
+              sx={(theme) => (
+                {
+                  "&.Mui-selected":
+                    {
+                      borderColor: theme.palette.warning.main,
+                    }
+                }
+              )}
             >
-              <Star sx={(theme) => ({
-                color: theme.palette.warning.main,
-                mr: 1
-              })}/>
+              <Star sx={(theme) => (
+                {
+                  color: theme.palette.warning.main,
+                  mr: 1
+                }
+              )}/>
               Leader
             </ToggleButton>
             <ToggleButton
               value={JabsAiTrait.Follower}
               selected={selectedEnemy.jabsAiTraits.follower}
-              sx={(theme) => ({
-                "&.Mui-selected":
-                  {
-                    borderColor: theme.palette.secondary.main,
-                  }
-              })}
+              sx={(theme) => (
+                {
+                  "&.Mui-selected":
+                    {
+                      borderColor: theme.palette.secondary.main,
+                    }
+                }
+              )}
             >
-              <Group sx={(theme) => ({
-                color: theme.palette.secondary.main,
-                mr: 1
-              })}/>
+              <Group sx={(theme) => (
+                {
+                  color: theme.palette.secondary.main,
+                  mr: 1
+                }
+              )}/>
               Follower
             </ToggleButton>
           </ToggleButtonGroup>

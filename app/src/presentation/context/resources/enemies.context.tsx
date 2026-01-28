@@ -11,12 +11,12 @@ import { useProjectPath } from '../project-path.context.tsx';
 import { loadEnemies, executeSave } from '@services/DataService.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
-import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
+import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
 
 type EnemiesContextValue = {
-  enemies: EnemyDomainModel[];
-  setEnemies: React.Dispatch<React.SetStateAction<EnemyDomainModel[]>>;
-  save: (updatedList: EnemyDomainModel[]) => Promise<void>;
+  enemies: RPG_EnemyDomainModel[];
+  setEnemies: React.Dispatch<React.SetStateAction<RPG_EnemyDomainModel[]>>;
+  save: (updatedList: RPG_EnemyDomainModel[]) => Promise<void>;
   reload: () => Promise<void>;
   loading: boolean;
 };
@@ -25,7 +25,7 @@ const EnemiesContext = createContext<EnemiesContextValue | null>(null);
 
 export function EnemiesProvider({ children }: { children: ReactNode }) {
   const { projectPath } = useProjectPath();
-  const [enemies, setEnemies] = useState<EnemyDomainModel[]>([]);
+  const [enemies, setEnemies] = useState<RPG_EnemyDomainModel[]>([]);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
@@ -37,7 +37,7 @@ export function EnemiesProvider({ children }: { children: ReactNode }) {
       // Filter out the null at index 0 so the domain array is clean
       const validModels = data
         .filter((rmmz): rmmz is RPG_Enemy => rmmz !== null)
-        .map(rmmz => new EnemyDomainModel(rmmz));
+        .map(rmmz => new RPG_EnemyDomainModel(rmmz));
 
       setEnemies(validModels);
     } catch (error) {
@@ -47,7 +47,7 @@ export function EnemiesProvider({ children }: { children: ReactNode }) {
     }
   }, [projectPath]);
 
-  const save = useCallback(async (updatedList: EnemyDomainModel[]) => {
+  const save = useCallback(async (updatedList: RPG_EnemyDomainModel[]) => {
     if (!projectPath) return;
     try {
       const rmmzData = updatedList.map(e => e.toRmmz());
