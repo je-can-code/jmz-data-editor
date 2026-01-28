@@ -11,11 +11,12 @@ import { useProjectPath } from '../project-path.context.tsx';
 import { loadEnemies, executeSave } from '@services/DataService.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
+import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
 
 type EnemiesContextValue = {
-  enemies: RPG_Enemy[];
-  setEnemies: React.Dispatch<React.SetStateAction<RPG_Enemy[]>>;
-  save: (updatedList: RPG_Enemy[]) => Promise<void>;
+  enemies: EnemyDomainModel[];
+  setEnemies: React.Dispatch<React.SetStateAction<EnemyDomainModel[]>>;
+  save: (updatedList: EnemyDomainModel[]) => Promise<void>;
   reload: () => Promise<void>;
   loading: boolean;
 };
@@ -24,7 +25,7 @@ const EnemiesContext = createContext<EnemiesContextValue | null>(null);
 
 export function EnemiesProvider({ children }: { children: ReactNode }) {
   const { projectPath } = useProjectPath();
-  const [enemies, setEnemies] = useState<RPG_Enemy[]>([]);
+  const [enemies, setEnemies] = useState<EnemyDomainModel[]>([]);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
@@ -32,7 +33,13 @@ export function EnemiesProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       const data = await loadEnemies(projectPath);
-      setEnemies(data);
+
+      // Filter out the null at index 0 so the domain array is clean
+      const validModels = data
+        .filter((rmmz): rmmz is RPG_Enemy => rmmz !== null)
+        .map(rmmz => new EnemyDomainModel(rmmz));
+
+      setEnemies(validModels);
     } catch (error) {
       console.error("Failed to load enemies:", error);
     } finally {
@@ -40,10 +47,15 @@ export function EnemiesProvider({ children }: { children: ReactNode }) {
     }
   }, [projectPath]);
 
-  const save = useCallback(async (updatedList: RPG_Enemy[]) => {
+  const save = useCallback(async (updatedList: EnemyDomainModel[]) => {
     if (!projectPath) return;
     try {
-      await executeSave(projectPath, DatabaseFilenames.Enemies, updatedList);
+      const rmmzData = updatedList.map(e => e.toRmmz());
+
+      // Prepend null to satisfy RPG Maker's 1-indexed requirement
+      const finalData = [null, ...rmmzData];
+
+      await executeSave(projectPath, DatabaseFilenames.Enemies, finalData);
       setEnemies(updatedList);
     } catch (error) {
       console.error("Failed to save enemies:", error);

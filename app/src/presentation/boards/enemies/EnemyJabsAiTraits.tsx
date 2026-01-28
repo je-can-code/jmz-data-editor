@@ -21,64 +21,37 @@ import {
   Shield,
   Star
 } from "@mui/icons-material";
+import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
 
 type EnemyJabsDataProps = {
-  note: string;
-  updateNote: (value: string) => void;
+  selectedEnemy: EnemyDomainModel;
+  updateEnemy: (updatedEnemy: EnemyDomainModel) => void;
 };
 
 const EnemyJabsAiTraits = ({
-  note,
-  updateNote,
+  selectedEnemy,
+  updateEnemy,
 }: EnemyJabsDataProps) =>
 {
   //region state
-  const [ careful, setCareful ] = useState<boolean>(false);
-  const [ executor, setExecutor ] = useState<boolean>(false);
-  const [ reckless, setReckless ] = useState<boolean>(false);
-  const [ healer, setHealer ] = useState<boolean>(false);
-  const [ leader, setLeader ] = useState<boolean>(false);
-  const [ follower, setFollower ] = useState<boolean>(false);
-
   const [ stringTraits, setStringTraits ] = useState<string[]>([]);
   //endregion state
 
   useEffect(() =>
   {
     refreshAiTraitsFromNote();
-  }, [ note ]);
-
-  const resetAiTraits = () =>
-  {
-    // reset all the traits.
-    setCareful(false);
-    setExecutor(false);
-    setReckless(false);
-    setHealer(false);
-    setLeader(false);
-    setFollower(false);
-  };
+  }, [ selectedEnemy ]);
 
   const refreshAiTraitsFromNote = () =>
   {
-    resetAiTraits();
-
-    const currentTraits = JabsDataParser.readAiTraits(note);
-    setCareful(currentTraits.careful);
-    setExecutor(currentTraits.executor);
-    setReckless(currentTraits.reckless);
-    setHealer(currentTraits.healer);
-    setLeader(currentTraits.leader);
-    setFollower(currentTraits.follower);
-
     // Create an array of active trait strings to update the ToggleButtonGroup
     const activeTraits = [];
-    if (currentTraits.careful) activeTraits.push(JabsAiTrait.Careful);
-    if (currentTraits.executor) activeTraits.push(JabsAiTrait.Executor);
-    if (currentTraits.reckless) activeTraits.push(JabsAiTrait.Reckless);
-    if (currentTraits.healer) activeTraits.push(JabsAiTrait.Healer);
-    if (currentTraits.leader) activeTraits.push(JabsAiTrait.Leader);
-    if (currentTraits.follower) activeTraits.push(JabsAiTrait.Follower);
+    if (selectedEnemy.jabsAiTraits.careful) activeTraits.push(JabsAiTrait.Careful);
+    if (selectedEnemy.jabsAiTraits.executor) activeTraits.push(JabsAiTrait.Executor);
+    if (selectedEnemy.jabsAiTraits.reckless) activeTraits.push(JabsAiTrait.Reckless);
+    if (selectedEnemy.jabsAiTraits.healer) activeTraits.push(JabsAiTrait.Healer);
+    if (selectedEnemy.jabsAiTraits.leader) activeTraits.push(JabsAiTrait.Leader);
+    if (selectedEnemy.jabsAiTraits.follower) activeTraits.push(JabsAiTrait.Follower);
 
     // Update the stringTraits state to match the current traits
     setStringTraits(activeTraits);
@@ -86,54 +59,23 @@ const EnemyJabsAiTraits = ({
 
   const handleJabsAiTraitsUpdate = (newTraits: string[]) =>
   {
-    // Apply mutual exclusivity logic for Leader and Follower traits
-    newTraits = ensureLeaderFollowerMutualExclusivity(stringTraits, newTraits);
+    // 1. Apply mutual exclusivity logic
+    const exclusiveTraits = ensureLeaderFollowerMutualExclusivity(stringTraits, newTraits);
 
-    // start with a fresh slate.
-    resetAiTraits();
+    // 2. Update the UI state
+    setStringTraits(exclusiveTraits);
 
-    // update the tracker for the traits currently selected for the toggle button group.
-    setStringTraits(newTraits);
+    // 3. Synchronize ALL properties on the domain model
+    // Use .includes() to determine the true/false state for every trait
+    selectedEnemy.jabsAiTraits.careful = exclusiveTraits.includes(JabsAiTrait.Careful);
+    selectedEnemy.jabsAiTraits.executor = exclusiveTraits.includes(JabsAiTrait.Executor);
+    selectedEnemy.jabsAiTraits.reckless = exclusiveTraits.includes(JabsAiTrait.Reckless);
+    selectedEnemy.jabsAiTraits.healer = exclusiveTraits.includes(JabsAiTrait.Healer);
+    selectedEnemy.jabsAiTraits.leader = exclusiveTraits.includes(JabsAiTrait.Leader);
+    selectedEnemy.jabsAiTraits.follower = exclusiveTraits.includes(JabsAiTrait.Follower);
 
-    // Create a new traits object based on the newTraits array
-    const updatedAiTraits = {
-      careful: newTraits.includes(JabsAiTrait.Careful),
-      executor: newTraits.includes(JabsAiTrait.Executor),
-      reckless: newTraits.includes(JabsAiTrait.Reckless),
-      healer: newTraits.includes(JabsAiTrait.Healer),
-      leader: newTraits.includes(JabsAiTrait.Leader),
-      follower: newTraits.includes(JabsAiTrait.Follower),
-    } as JabsAiTraits;
-
-    // flag all the traits as active that are actually active.
-    newTraits.forEach(trait =>
-    {
-      switch (trait)
-      {
-        case JabsAiTrait.Careful:
-          setCareful(true);
-          break;
-        case JabsAiTrait.Executor:
-          setExecutor(true);
-          break;
-        case JabsAiTrait.Reckless:
-          setReckless(true);
-          break;
-        case JabsAiTrait.Healer:
-          setHealer(true);
-          break;
-        case JabsAiTrait.Leader:
-          setLeader(true);
-          break;
-        case JabsAiTrait.Follower:
-          setFollower(true);
-          break;
-      }
-    });
-
-    // Use the directly created object instead of relying on state
-    const updatedNote = JabsDataParser.writeAiTraits(note, updatedAiTraits);
-    updateNote(updatedNote);
+    // 4. Notify the parent/provider of the change
+    updateEnemy(selectedEnemy);
   };
 
   /**
@@ -224,7 +166,7 @@ const EnemyJabsAiTraits = ({
       >
         <ToggleButton
           value={JabsAiTrait.Careful}
-          selected={careful}
+          selected={selectedEnemy.jabsAiTraits.careful}
           sx={(theme) =>
             ({
               "&.Mui-selected":
@@ -243,7 +185,7 @@ const EnemyJabsAiTraits = ({
 
         <ToggleButton
           value={JabsAiTrait.Executor}
-          selected={executor}
+          selected={selectedEnemy.jabsAiTraits.executor}
           sx={(theme) =>
             ({
               "&.Mui-selected":
@@ -262,7 +204,7 @@ const EnemyJabsAiTraits = ({
 
         <ToggleButton
           value={JabsAiTrait.Reckless}
-          selected={reckless}
+          selected={selectedEnemy.jabsAiTraits.reckless}
           sx={(theme) =>
             ({
               "&.Mui-selected":
@@ -281,7 +223,7 @@ const EnemyJabsAiTraits = ({
 
         <ToggleButton
           value={JabsAiTrait.Healer}
-          selected={healer}
+          selected={selectedEnemy.jabsAiTraits.healer}
           sx={(theme) =>
             ({
               "&.Mui-selected":
@@ -330,7 +272,7 @@ const EnemyJabsAiTraits = ({
           >
             <ToggleButton
               value={JabsAiTrait.Leader}
-              selected={leader}
+              selected={selectedEnemy.jabsAiTraits.leader}
               sx={(theme) => ({
                 "&.Mui-selected":
                   {
@@ -346,7 +288,7 @@ const EnemyJabsAiTraits = ({
             </ToggleButton>
             <ToggleButton
               value={JabsAiTrait.Follower}
-              selected={follower}
+              selected={selectedEnemy.jabsAiTraits.follower}
               sx={(theme) => ({
                 "&.Mui-selected":
                   {

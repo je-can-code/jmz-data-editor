@@ -1,4 +1,3 @@
-import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 import {
   Box,
   Grid,
@@ -31,18 +30,18 @@ import React from "react";
 import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
 import { GrowthParser } from "@services/parsers/GrowthParser.ts";
 import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
-import { MaxTpParser } from "@services/parsers/MaxTpParser.ts";
+import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
 
 type EnemyBaseParametersProps = {
-  selectedEnemy: RPG_Enemy;
+  selectedEnemy: EnemyDomainModel;
   updateEnemyWithNewParam: (parameterId: number, updatedValue: number) => void;
-  updateNote: (updatedNote: string) => void;
+  updateEnemy: (updatedEnemy: EnemyDomainModel) => void;
 };
 
 export default function EnemyBaseParameters({
   selectedEnemy,
   updateEnemyWithNewParam,
-  updateNote,
+  updateEnemy,
 }: EnemyBaseParametersProps)
 {
   // Get all parameter definitions
@@ -130,7 +129,7 @@ export default function EnemyBaseParameters({
         {
           const formula = getGrowthFormula(param.longParamId);
           const isMaxTp = (param.longParamId === 30);
-          const maxTpValue = isMaxTp ? MaxTpParser.read(selectedEnemy.note) : 0;
+          const maxTpValue = isMaxTp ? selectedEnemy.maxTp : 0;
 
           return (
             <React.Fragment key={param.paramId}>
@@ -144,9 +143,8 @@ export default function EnemyBaseParameters({
                       value={maxTpValue}
                       onChangeEventHandler={(event) =>
                       {
-                        const updatedValue = parseInt(event.target.value) ?? 0;
-                        const updatedNote = MaxTpParser.write(selectedEnemy.note, updatedValue);
-                        updateNote(updatedNote);
+                        selectedEnemy.maxTp = parseInt(event.target.value) ?? 0;
+                        updateEnemy(selectedEnemy);
                       }}
                     />
                   )

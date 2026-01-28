@@ -54,21 +54,22 @@ import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Armor = Rmmz.Implementations.RPG_Armor;
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
 import RPG_Item = Rmmz.Implementations.RPG_Item;
+import { useProjectPath } from "@presentation/context/project-path.context.tsx";
+import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
 
 type EnemiesExtraDropProps = {
-  projectPath: string;
-  selectedEnemyDropItems: RPG_DropItem[];
-  updateEnemyWithNewDropItems: (updatedDropItems: RPG_DropItem[]) => void;
+  selectedEnemy: EnemyDomainModel;
+  updateEnemy: (enemy: EnemyDomainModel) => void; // Changed from updateEnemyWithNewDropItems
   handleSnack: (message: string, severity?: MuiSnackbarSeverity, variant?: MuiSnackbarVariant) => void;
 };
 
 const EnemiesExtraDrops = ({
-  projectPath,
-  selectedEnemyDropItems,
-  updateEnemyWithNewDropItems,
+  selectedEnemy,
+  updateEnemy,
   handleSnack,
 }: EnemiesExtraDropProps) =>
 {
+  const { projectPath } = useProjectPath();
   //region state
   const [ items, setItems ] = useState<RPG_Item[]>([]);
   const [ weapons, setWeapons ] = useState<RPG_Weapon[]>([]);
@@ -135,11 +136,11 @@ const EnemiesExtraDrops = ({
   //region actions
   const handleEnemyDropItemListItemOnClickEvent = (index: number) =>
   {
-    if (!selectedEnemyDropItems.length) return;
+    if (!selectedEnemy.extraDrops.length) return;
 
     setSelectedDropItemIndex(index);
 
-    const thisDropItem = selectedEnemyDropItems.at(index)!;
+    const thisDropItem = selectedEnemy.extraDrops.at(index)!;
     setSelectedDropItem(thisDropItem);
     setSelectedDropItemType(thisDropItem.kind);
     setPendingDropItem(thisDropItem);
@@ -208,12 +209,12 @@ const EnemiesExtraDrops = ({
       denominator: 100
     } as RPG_DropItem;
 
-    const updatedDropItems = (
-      index === null
-    )
-      ? [ newDropItem ]
-      : selectedEnemyDropItems.toSpliced(index, 0, newDropItem);
-    updateEnemyWithNewDropItems(updatedDropItems);
+    // Update the array on the model
+    selectedEnemy.extraDrops = (index === null)
+      ? [newDropItem]
+      : selectedEnemy.extraDrops.toSpliced(index, 0, newDropItem);
+
+    updateEnemy(selectedEnemy);
   };
 
   const handleCloneDropItemOnClick = (index: number) =>
@@ -230,14 +231,14 @@ const EnemiesExtraDrops = ({
       denominator: selectedDropItem.denominator,
     } as RPG_DropItem;
 
-    const updatedDropItems = selectedEnemyDropItems.toSpliced(index, 0, clonedDropItem);
-    updateEnemyWithNewDropItems(updatedDropItems);
+    selectedEnemy.extraDrops = selectedEnemy.extraDrops.toSpliced(index, 0, clonedDropItem);
+    updateEnemy(selectedEnemy);
   };
 
   const handleDeleteDropItemOnClick = (index: number) =>
   {
-    const updatedDropItems = selectedEnemyDropItems.toSpliced(index, 1);
-    updateEnemyWithNewDropItems(updatedDropItems);
+    selectedEnemy.extraDrops = selectedEnemy.extraDrops.toSpliced(index, 1);
+    updateEnemy(selectedEnemy);
   };
 
   const handleDropItemTypeOnChangeEvent = (_: any, newValue: DropItemType) =>
@@ -273,17 +274,17 @@ const EnemiesExtraDrops = ({
 
     setSelectedDropItem(updatedSelectedDropItem);
 
-    const updatedDropItems = selectedEnemyDropItems.with(selectedDropItemIndex, updatedSelectedDropItem);
-    updateEnemyWithNewDropItems(updatedDropItems);
+    selectedEnemy.extraDrops = selectedEnemy.extraDrops.with(selectedDropItemIndex, updatedSelectedDropItem);
+    updateEnemy(selectedEnemy);
   };
   //endregion update
 
   //region render
   const renderExtraDropItems = () =>
   {
-    if (selectedEnemyDropItems.length === 0) return <></>;
+    if (selectedEnemy.extraDrops.length === 0) return <></>;
 
-    return selectedEnemyDropItems.map(renderExtraDropItem);
+    return selectedEnemy.extraDrops.map(renderExtraDropItem);
   };
 
   const renderExtraDropItem = (dropItem: RPG_DropItem, index: number) =>
@@ -637,7 +638,7 @@ const EnemiesExtraDrops = ({
 
       <div onContextMenu={handleDropItemContextMenu} style={{ cursor: 'context-menu' }}>
         <List dense>
-          {selectedEnemyDropItems.length > 0
+          {selectedEnemy.extraDrops.length > 0
             ? renderExtraDropItems()
             : <>
               <Button
