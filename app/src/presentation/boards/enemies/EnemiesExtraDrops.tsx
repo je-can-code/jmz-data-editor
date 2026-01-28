@@ -55,11 +55,11 @@ import RPG_Armor = Rmmz.Implementations.RPG_Armor;
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
 import RPG_Item = Rmmz.Implementations.RPG_Item;
 import { useProjectPath } from "@presentation/context/project-path.context.tsx";
-import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
+import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
 
 type EnemiesExtraDropProps = {
-  selectedEnemy: EnemyDomainModel;
-  updateEnemy: (enemy: EnemyDomainModel) => void; // Changed from updateEnemyWithNewDropItems
+  selectedEnemy: RPG_EnemyDomainModel;
+  updateEnemy: (enemy: RPG_EnemyDomainModel) => void; // Changed from updateEnemyWithNewDropItems
   handleSnack: (message: string, severity?: MuiSnackbarSeverity, variant?: MuiSnackbarVariant) => void;
 };
 

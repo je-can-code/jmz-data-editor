@@ -75,9 +75,10 @@ import { EnemyJabsAiTraits } from "./EnemyJabsAiTraits.tsx";
 import { EnemyJabsBattlerData } from "./EnemyJabsBattlerData.tsx";
 import { useProjectPath } from "../../context/project-path.context.tsx";
 import { useEnemies } from "@presentation/context/resources/enemies.context.tsx";
-import { EnemyDomainModel } from "@core/domain/entities/EnemyDomainEntity.ts";
+import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Trait = Rmmz.Data.RPG_Trait;
+import { EnemyJabsConfigs } from "@boards/enemies/EnemyJabsConfigs.tsx";
 
 const EnemiesBoard = () =>
 {
@@ -88,7 +89,7 @@ const EnemiesBoard = () =>
     save,
     reload,
   } = useEnemies();
-  const [ selectedEnemy, setSelectedEnemy ] = useState<EnemyDomainModel | null>(null)
+  const [ selectedEnemy, setSelectedEnemy ] = useState<RPG_EnemyDomainModel | null>(null)
   const [ selectedEnemyIndex, setSelectedEnemyIndex ] = useState<number>(0);
   const [ searchTerm, setSearchTerm ] = useState<string>('');
 
@@ -279,7 +280,7 @@ const EnemiesBoard = () =>
     }
   };
 
-  const isValidEnemy = (enemy?: EnemyDomainModel | null) =>
+  const isValidEnemy = (enemy?: RPG_EnemyDomainModel | null) =>
   {
     if (!enemy) return false;
     if (!enemy.name || enemy.name.length === 0) return false;
@@ -379,7 +380,7 @@ const EnemiesBoard = () =>
   };
 
   const updateEnemy = useCallback(
-    (updatedEnemy: EnemyDomainModel) =>
+    (updatedEnemy: RPG_EnemyDomainModel) =>
     {
       const clonedEnemy = Object.assign(
         Object.create(Object.getPrototypeOf(updatedEnemy)),
@@ -927,10 +928,10 @@ const EnemiesBoard = () =>
                       updateEnemy={updateEnemy}
                     />
 
-                    {/*<EnemyJabsConfigs*/}
-                    {/*  note={selectedEnemy.note}*/}
-                    {/*  updateNote={updateEnemyNote}*/}
-                    {/*/>*/}
+                    <EnemyJabsConfigs
+                      selectedEnemy={selectedEnemy}
+                      updateEnemy={updateEnemy}
+                    />
                   </Stack>
                 </Grid>
                 <Grid size={4}>

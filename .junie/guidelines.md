@@ -1,5 +1,8 @@
 # Project Guidelines
 
+* **NEVER** use terminal commands like `cat`, `sed`, `grep`, `awk`, `head`, or `tail` to read or search file contents.
+* To read or examine file contents, you **MUST** use the provided internal tools (like `open`, `open_entire_file`, `get_file_structure`, or `search_project`) to bring the file data directly into your context.
+* You should NEVER write to the filesystem, ever. I will choose what files to add and what to add to them.
 * This codebase is a neutralinojs app, using react as a front end.
 * The purpose of the app is to act as a replacement front end for RPG Maker MZ's database editor.
   * Additionally, to grant ease of manipulation of various notes on objects throughout the database with GUI elements.
