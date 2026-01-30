@@ -15,7 +15,7 @@ abstract class RPG_BaseDomainModel<T extends RPG_Base>
   public name: string;
   public note: string;
 
-  constructor(data: T)
+  protected constructor(data: T)
   {
     this._original = data;
     this.id = data.id;

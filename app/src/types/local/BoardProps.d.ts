@@ -1,4 +1,4 @@
-import PanelParameter = Sdp.PanelParameter;
+import PanelParameter = Sdp.SdpParameter;
 
 type BoardProps = {
   projectPath: string;

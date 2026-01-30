@@ -92,9 +92,9 @@ import {
 } from "@services/DataService.ts";
 
 import { fromLongParameterIdToName } from "../../../mappers/ParameterIdMapper.ts";
-import Panel = Sdp.Panel;
-import PanelParameter = Sdp.PanelParameter;
-import PanelReward = Sdp.PanelReward;
+import Panel = Sdp.StatDistributionPanel;
+import PanelParameter = Sdp.SdpParameter;
+import PanelReward = Sdp.SdpReward;
 import Configuration = Sdp.Configuration;
 import { useProjectPath } from "../../context/project-path.context.tsx";
 

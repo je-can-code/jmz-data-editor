@@ -35,7 +35,7 @@ class SdpParser
       return NoteNormalizer.removeLinesMatching(originalNote, this.#dropRegex);
     }
 
-    const newTag = `<sdpDropData: [${sdpData.key},${sdpData.dropChance}]>`;
+    const newTag = `<sdpDropData:[${sdpData.key},${sdpData.dropChance}]>`;
 
     // ensure only one tag remains by removing then appending
     const base = NoteNormalizer.removeLinesMatching(originalNote, this.#dropRegex);
@@ -66,13 +66,22 @@ class SdpParser
    */
   static writePoints(originalNote: string, points: number): string
   {
-    const newTag = `<sdpPoints: ${points}>`;
+    const newTag = `<sdpPoints:${points}>`;
 
     // ensure only one points tag by removing then appending
     const base = NoteNormalizer.removeLinesMatching(originalNote, this.#pointsRegex);
     return NoteNormalizer.appendBlock(base, newTag);
   }
+
+  /**
+   * Deletes the SDP points tag from the note.
+   * @param note The note to cleanup.
+   * @returns The cleaned up note.
+   */
+  static deletePoints(note: string): string
+  {
+    return NoteNormalizer.removeLinesMatching(note, this.#pointsRegex);
+  }
 }
 
 export { SdpParser };
-export type { SdpDropData };

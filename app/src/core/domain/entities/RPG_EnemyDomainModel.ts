@@ -91,7 +91,15 @@ export class RPG_EnemyDomainModel
     // Pass the note through each specialized parser to update its tags
     updatedNote = LevelParser.write(updatedNote, this.level);
     updatedNote = MaxTpParser.write(updatedNote, this.maxTp);
-    updatedNote = SdpParser.writePoints(updatedNote, this.sdpPoints);
+
+    if (this.sdpPoints > 0)
+    {
+      updatedNote = SdpParser.writePoints(updatedNote, this.sdpPoints);
+    }
+    else
+    {
+      updatedNote = SdpParser.deletePoints(updatedNote);
+    }
 
     if (this.sdpDrop.key.trim() !== '')
     {
