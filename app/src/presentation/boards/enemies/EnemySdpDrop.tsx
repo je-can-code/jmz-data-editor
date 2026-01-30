@@ -15,7 +15,7 @@ import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
 import { SdpParser } from "@services/parsers/SdpParser.ts";
 import { executeLoad } from "@services/DataService.ts";
 import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
-import Panel = Sdp.Panel;
+import Panel = Sdp.StatDistributionPanel;
 import Configuration = Sdp.Configuration;
 import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
 import { useProjectPath } from "@presentation/context/project-path.context.tsx";

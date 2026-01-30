@@ -57,9 +57,9 @@ describe('SdpParser.writeDrop', () =>
   {
     const original = [
       '<a:one>\r\n',
-      '<sdpDropData: [old,10]>\n',
+      '<sdpDropData:[old,10]>\n',
       '\n',
-      '<sdpDropData: [duplicate,99]>\r\r',
+      '<sdpDropData:[duplicate,99]>\r\r',
       '<b:two>\n',
     ].join('');
 
@@ -72,7 +72,7 @@ describe('SdpParser.writeDrop', () =>
     const expected = [
       '<a:one>',
       '<b:two>',
-      '<sdpDropData: [new_key,35]>',
+      '<sdpDropData:[new_key,35]>',
     ].join('\n');
 
     expect(result)
@@ -183,7 +183,7 @@ describe('SdpParser.writePoints', () =>
     const expected = [
       '<a:one>',
       '<b:two>',
-      '<sdpPoints: 42>',
+      '<sdpPoints:42>',
     ].join('\n');
 
     expect(result)
@@ -202,7 +202,7 @@ describe('SdpParser.writePoints', () =>
     const expected = [
       '<x:alpha>',
       '<y:beta>',
-      '<sdpPoints: -7>',
+      '<sdpPoints:-7>',
     ].join('\n');
 
     expect(result)

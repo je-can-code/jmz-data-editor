@@ -8,7 +8,10 @@ import React, {
   useMemo
 } from 'react';
 import { useProjectPath } from '../project-path.context.tsx';
-import { loadEnemies, executeSave } from '@services/DataService.ts';
+import {
+  loadEnemies,
+  executeSave
+} from '@services/DataService.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
@@ -23,15 +26,18 @@ type EnemiesContextValue = {
 
 const EnemiesContext = createContext<EnemiesContextValue | null>(null);
 
-export function EnemiesProvider({ children }: { children: ReactNode }) {
+export function EnemiesProvider({ children }: { children: ReactNode })
+{
   const { projectPath } = useProjectPath();
-  const [enemies, setEnemies] = useState<RPG_EnemyDomainModel[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [ enemies, setEnemies ] = useState<RPG_EnemyDomainModel[]>([]);
+  const [ loading, setLoading ] = useState(true);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async () =>
+  {
     if (!projectPath || !projectPath.endsWith("/data")) return;
     setLoading(true);
-    try {
+    try
+    {
       const data = await loadEnemies(projectPath);
 
       // Filter out the null at index 0 so the domain array is clean
@@ -40,40 +46,51 @@ export function EnemiesProvider({ children }: { children: ReactNode }) {
         .map(rmmz => new RPG_EnemyDomainModel(rmmz));
 
       setEnemies(validModels);
-    } catch (error) {
+    }
+    catch (error)
+    {
       console.error("Failed to load enemies:", error);
-    } finally {
+    }
+    finally
+    {
       setLoading(false);
     }
-  }, [projectPath]);
+  }, [ projectPath ]);
 
-  const save = useCallback(async (updatedList: RPG_EnemyDomainModel[]) => {
+  const save = useCallback(async (updatedList: RPG_EnemyDomainModel[]) =>
+  {
     if (!projectPath) return;
-    try {
+    try
+    {
       const rmmzData = updatedList.map(e => e.toRmmz());
 
       // Prepend null to satisfy RPG Maker's 1-indexed requirement
-      const finalData = [null, ...rmmzData];
+      const finalData = [ null, ...rmmzData ];
 
       await executeSave(projectPath, DatabaseFilenames.Enemies, finalData);
       setEnemies(updatedList);
-    } catch (error) {
+    }
+    catch (error)
+    {
       console.error("Failed to save enemies:", error);
       throw error;
     }
-  }, [projectPath]);
+  }, [ projectPath ]);
 
-  useEffect(() => {
+  useEffect(() =>
+  {
     reload();
-  }, [reload]);
+  }, [ reload ]);
 
-  const value = useMemo(() => ({
-    enemies,
-    setEnemies,
-    save,
-    reload,
-    loading
-  }), [enemies, save, reload, loading]);
+  const value = useMemo(() => (
+    {
+      enemies,
+      setEnemies,
+      save,
+      reload,
+      loading
+    }
+  ), [ enemies, save, reload, loading ]);
 
   return (
     <EnemiesContext.Provider value={value}>
@@ -82,10 +99,16 @@ export function EnemiesProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useEnemies() {
+/**
+ * A re-usable hook for accessing and modifying RMMZ enemy data.
+ */
+export function useEnemies()
+{
   const context = useContext(EnemiesContext);
-  if (!context) {
+  if (!context)
+  {
     throw new Error('useEnemies must be used within an EnemiesProvider');
   }
+
   return context;
 }

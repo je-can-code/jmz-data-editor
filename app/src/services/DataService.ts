@@ -10,7 +10,8 @@ import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 import RPG_System = Rmmz.System.RPG_System;
 import RPG_State = Rmmz.Implementations.RPG_State;
 
-type Configuration = Questopedia.Configuration;
+type QuestConfiguration = Questopedia.Configuration;
+type SdpConfiguration = Sdp.Configuration;
 
 const debug = false;
 
@@ -121,9 +122,14 @@ const loadEnemies = async (projectPath: string): Promise<RPG_Enemy[]> =>
   return await executeLoad<RPG_Enemy[]>(projectPath, DatabaseFilenames.Enemies);
 };
 
-const loadQuests = async (projectPath: string): Promise<Configuration> =>
+const loadQuests = async (projectPath: string): Promise<QuestConfiguration> =>
 {
-  return await executeLoad<Configuration>(projectPath, ConfigFilenames.Quests);
+  return await executeLoad<QuestConfiguration>(projectPath, ConfigFilenames.Quests);
+};
+
+const loadSdps = async (projectPath: string): Promise<SdpConfiguration> =>
+{
+  return await executeLoad<SdpConfiguration>(projectPath, ConfigFilenames.Sdps);
 };
 
 const loadSystem = async (projectPath: string): Promise<RPG_System> =>
@@ -147,4 +153,5 @@ export {
   loadSystem,
 
   loadQuests,
+  loadSdps,
 };
