@@ -8,7 +8,6 @@ export const AppRouter = () =>
 {
   return useRoutes([
     {
-      // The parent route anchors the layout at the root
       path: "/",
       element: <AppLayout/>,
       children: [
@@ -19,12 +18,9 @@ export const AppRouter = () =>
           }
         )),
         {
-          index: true,
-          element: <Navigate to="/enemies" replace/>
-        },
-        {
           path: "*",
-          element: <Navigate to="/enemies" replace/>
+          index: true,
+          element: <Navigate to="/" replace/>
         }
       ]
     }

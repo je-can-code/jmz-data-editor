@@ -12,6 +12,17 @@ import {
   Hub,
   Rule,
 } from '@mui/icons-material';
+import IndexBoard from "@boards/_index/IndexBoard.tsx";
+
+const indexBoard: BoardDefinition = {
+  id: "root",
+  title: "index",
+  path: "/",
+  component: IndexBoard,
+  guard: () => true,
+  icon: <Hub />,
+  featureFlag: "root"
+};
 
 const enemyBoard: BoardDefinition = {
   id: "enemies",
@@ -64,6 +75,7 @@ const proficiencyBoard: BoardDefinition = {
 };
 
 const APP_ROUTES: BoardDefinition[] = [
+  indexBoard,
   enemyBoard,
   sdpBoard,
   questBoard,

@@ -1,11 +1,8 @@
 import React from 'react';
-import {
-  BoardId
-} from "./board.types.ts";
 
 export interface BoardDefinition
 {
-  id: BoardId;
+  id: string;
   title: string;
   path: string;
   component: React.ComponentType<any>;
