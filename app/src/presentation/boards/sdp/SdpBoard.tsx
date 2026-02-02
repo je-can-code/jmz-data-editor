@@ -97,10 +97,18 @@ import PanelParameter = Sdp.SdpParameter;
 import PanelReward = Sdp.SdpReward;
 import Configuration = Sdp.Configuration;
 import { useProjectPath } from "../../context/project-path.context.tsx";
+import { useSdps } from "@presentation/context/resources/sdps.context.tsx";
 
 export default function SdpBoard()
 {
   const { projectPath } = useProjectPath();
+  const {
+    sdps,
+    setSdps,
+    loading,
+    save,
+    reload
+  } = useSdps();
 
   //region state
   const panelsRef = useRef<Panel[]>([]);
@@ -427,7 +435,8 @@ export default function SdpBoard()
   const handleSnack = (
     message: string,
     severity: MuiSnackbarSeverity = MuiSnackbarSeverity.Info,
-    variant: MuiSnackbarVariant = MuiSnackbarVariant.Filled) =>
+    variant: MuiSnackbarVariant = MuiSnackbarVariant.Filled
+  ) =>
   {
     setSnackMessage(message);
     setSnackSeverity(severity);
@@ -517,7 +526,9 @@ export default function SdpBoard()
 
       const keyMatches = panel.key.toLowerCase()
         .includes(term.toLowerCase());
-      const nameMatches = (panel.name ?? '')
+      const nameMatches = (
+        panel.name ?? ''
+      )
         .toLowerCase()
         .includes(term.toLowerCase());
 
@@ -800,7 +811,9 @@ export default function SdpBoard()
       rarity: 0,
     } as Panel;
 
-    const updatedPanels = (index === null)
+    const updatedPanels = (
+      index === null
+    )
       ? [ newPanel ]
       : panels.toSpliced(index, 0, newPanel);
     setPanels(updatedPanels);
@@ -839,7 +852,9 @@ export default function SdpBoard()
       perRank: 3,
     } as PanelParameter;
 
-    const updatedParameters = (index === null)
+    const updatedParameters = (
+      index === null
+    )
       ? [ newParameter ]
       : panelParameters.toSpliced(index, 0, newParameter);
     setPanelParameters(updatedParameters);
@@ -891,7 +906,9 @@ export default function SdpBoard()
       effect: ''
     } as PanelReward;
 
-    const updatedRewards = (index === null)
+    const updatedRewards = (
+      index === null
+    )
       ? [ newReward ]
       : panelRewards.toSpliced(index, 0, newReward);
     setPanelRewards(updatedRewards);
@@ -978,19 +995,23 @@ export default function SdpBoard()
             maxHeight: '30px',
             position: 'relative',
             // Option A: thick border line
-            ...(isNextHeader && {
-              borderBottom: `4px solid ${nextHeaderColor}`,
-              // keep the border visible under selection styles
-              '&.Mui-selected': {
-                borderBottom: `3px solid ${nextHeaderColor}`,
+            ...(
+              isNextHeader && {
+                borderBottom: `4px solid ${nextHeaderColor}`,
+                // keep the border visible under selection styles
+                '&.Mui-selected': {
+                  borderBottom: `3px solid ${nextHeaderColor}`,
+                }
               }
-            }),
+            ),
           }}
           selected={selectedPanelIndex === index}
           onClick={() => handleSdpListItemOnClickEvent(index)}
         >
           <ListItemIcon>
-            {(selectedPanelIndex === index)
+            {(
+              selectedPanelIndex === index
+            )
               ? <DoubleArrow color={"success"}/>
               : <KeyboardArrowRight color={"warning"}/>}
           </ListItemIcon>
@@ -1079,13 +1100,15 @@ export default function SdpBoard()
   const renderSdpRarities = () =>
   {
     const rarities = [ 0, 3, 23, 31, 20, 25 ];
-    return rarities.map((rarityColorIndex =>
-      <MenuItem
-        key={rarityColorIndex}
-        value={rarityColorIndex}
-      >
-        {fromRarityColorIndexToIcon(rarityColorIndex)} {fromRarityColorIndexToName(rarityColorIndex)}
-      </MenuItem>))
+    return rarities.map((
+      rarityColorIndex =>
+        <MenuItem
+          key={rarityColorIndex}
+          value={rarityColorIndex}
+        >
+          {fromRarityColorIndexToIcon(rarityColorIndex)} {fromRarityColorIndexToName(rarityColorIndex)}
+        </MenuItem>
+    ))
   };
 
   const fromParameterIdToIconElement = (parameterId: number, selected: boolean) =>
@@ -1128,7 +1151,9 @@ export default function SdpBoard()
 
   const renderSdpParameterListItem = (parameter: PanelParameter, index: number) =>
   {
-    const selected = (selectedPanelParameterIndex === index);
+    const selected = (
+      selectedPanelParameterIndex === index
+    );
     const icon = selected
       ? <DoubleArrow color={"primary"}/>
       : <KeyboardArrowRight color={"inherit"}/>;
@@ -1249,7 +1274,9 @@ export default function SdpBoard()
         break;
     }
 
-    const selected = (selectedPanelRewardIndex === index);
+    const selected = (
+      selectedPanelRewardIndex === index
+    );
     const icon = selected
       ? <Redeem color={"primary"}/>
       : <KeyboardArrowRight color={"inherit"}/>;
@@ -1287,7 +1314,11 @@ export default function SdpBoard()
 
     for (let rank = 1; rank <= maxRank; rank++)
     {
-      const nextLevelCost = Math.ceil(baseCost + (multGrowthCost * (flatGrowthCost * rank)));
+      const nextLevelCost = Math.ceil(baseCost + (
+        multGrowthCost * (
+          flatGrowthCost * rank
+        )
+      ));
 
       accumulatedCost += nextLevelCost;
 
@@ -1327,7 +1358,11 @@ export default function SdpBoard()
 
     for (let rank = 1; rank <= maxRank; rank++)
     {
-      accumulatedCost += Math.ceil(baseCost + (multGrowthCost * (flatGrowthCost * rank)));
+      accumulatedCost += Math.ceil(baseCost + (
+        multGrowthCost * (
+          flatGrowthCost * rank
+        )
+      ));
     }
 
     return accumulatedCost;
@@ -1404,7 +1439,9 @@ export default function SdpBoard()
           }}
           elevation={10}
         >
-          {(selectedPanel === null)
+          {(
+            selectedPanel === null
+          )
             ? <Typography>
               Please select a panel on the left.<br/>
               If there are no panels then consider making one.
@@ -1605,7 +1642,9 @@ export default function SdpBoard()
 
                 {/* Selected Parameter Data */}
                 <Grid size={3}>
-                  {(!selectedPanelParameter)
+                  {(
+                    !selectedPanelParameter
+                  )
                     ? <></>
                     : <>
                       <Stack spacing={8}>
@@ -1648,7 +1687,8 @@ export default function SdpBoard()
                           <FilledInput
                             type={"number"}
                             value={selectedPanelParameter?.perRank}
-                            onChange={event => handleUpdatePanelParameterPerRankChange(parseFloat(event.target.value) ?? 0.01)}
+                            onChange={event => handleUpdatePanelParameterPerRankChange(parseFloat(event.target.value)
+                              ?? 0.01)}
                             slotProps={{
                               input: {
                                 step: "0.1",
@@ -1703,7 +1743,9 @@ export default function SdpBoard()
                         </List>
                       </div>
 
-                      {(!selectedPanelReward)
+                      {(
+                        !selectedPanelReward
+                      )
                         ? <></>
                         : <>
                           <TextField
