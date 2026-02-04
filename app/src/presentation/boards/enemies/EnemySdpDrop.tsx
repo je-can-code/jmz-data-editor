@@ -1,24 +1,16 @@
-import React, {
-  useEffect,
-  useMemo,
-  useState
-} from "react";
+import React, { useMemo, } from 'react';
 import {
   Autocomplete,
   Button,
   Checkbox,
   FormControlLabel,
   TextField
-} from "@mui/material";
-import { OpenInNew } from "@mui/icons-material";
-import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
-import { SdpParser } from "@services/parsers/SdpParser.ts";
-import { executeLoad } from "@services/DataService.ts";
-import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
-import Panel = Sdp.StatDistributionPanel;
-import Configuration = Sdp.Configuration;
-import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
-import { useProjectPath } from "@presentation/context/project-path.context.tsx";
+} from '@mui/material';
+import { OpenInNew } from '@mui/icons-material';
+import NumberInputWithLabel from '../../../components/NumberInputWithLabel.tsx';
+import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
+import { useNavigate } from 'react-router-dom';
+import { useSdps } from '@presentation/context/resources/sdps.context.tsx';
 
 type EnemySdpDropProps = {
   selectedEnemy: RPG_EnemyDomainModel;
@@ -30,44 +22,29 @@ const EnemySdpDrop = ({
   updateEnemy,
 }: EnemySdpDropProps) =>
 {
-  const { projectPath } = useProjectPath();
+  const { sdps } = useSdps();
 
-  const [ panels, setPanels ] = useState<Panel[]>([]);
-
-  useEffect(() =>
-  {
-    let ignore = false;
-    const initializeSdps = async () =>
-    {
-      if (!projectPath || !projectPath.endsWith('/data')) return;
-      const sdpData = await executeLoad<Configuration>(projectPath, ConfigFilenames.Sdps);
-      if (!ignore && sdpData?.sdps) setPanels(sdpData.sdps);
-    };
-    initializeSdps()
-      .catch(console.error);
-    return () =>
-    {
-      ignore = true;
-    };
-  }, [ projectPath ]);
+  const navigate = useNavigate();
 
   const currentSdpDrop = selectedEnemy.sdpDrop;
   const isEnabled = selectedEnemy.sdpDrop.key !== '' || selectedEnemy.sdpDrop.isForcedOpen;
 
   const selectedPanel = useMemo(() =>
   {
-    return panels.find(p => p.key === currentSdpDrop?.key) ?? null;
-  }, [ panels, currentSdpDrop?.key ]);
+    return sdps.find(p => p.key === currentSdpDrop?.key) ?? null;
+  }, [ sdps, currentSdpDrop?.key ]);
 
-  const canOpenInSdp = isEnabled && currentSdpDrop.key !== '' && panels.length > 0;
+  const canOpenInSdp = isEnabled && currentSdpDrop.key !== '' && sdps.length > 0;
 
-  const handleToggleFields = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleToggleFields = (event: React.ChangeEvent<HTMLInputElement>) =>
+  {
     const checked = event.target.checked;
 
     // Track state directly on the model
     selectedEnemy.sdpDrop.isForcedOpen = checked;
 
-    if (!checked) {
+    if (!checked)
+    {
       selectedEnemy.sdpDrop.key = '';
       selectedEnemy.sdpDrop.dropChance = 0;
     }
@@ -75,10 +52,14 @@ const EnemySdpDrop = ({
     updateEnemy(selectedEnemy);
   };
 
-  const handleUpdateKey = (updatedKey: string) => {
+  const handleUpdateKey = (updatedKey: string) =>
+  {
     selectedEnemy.sdpDrop.key = updatedKey;
 
-    if (updatedKey !== '') selectedEnemy.sdpDrop.isForcedOpen = false;
+    if (updatedKey !== '')
+    {
+      selectedEnemy.sdpDrop.isForcedOpen = false;
+    }
     updateEnemy(selectedEnemy);
   };
 
@@ -90,13 +71,11 @@ const EnemySdpDrop = ({
 
   const handleOpenInSdp = () =>
   {
-    if (!canOpenInSdp) return;
-    window.dispatchEvent(new CustomEvent('jmz:navigate-to-tab', {
-      detail: {
-        tab: 'sdp',
-        sdpKey: currentSdpDrop.key
-      }
-    }));
+    if (!canOpenInSdp)
+    {
+      return;
+    }
+    navigate(`/sdp?sdpKey=${encodeURIComponent(currentSdpDrop.key)}`);
   };
 
   return (
@@ -109,16 +88,25 @@ const EnemySdpDrop = ({
 
       <Autocomplete
         size="small"
-        options={panels}
+        options={sdps}
         value={selectedPanel}
         disabled={!isEnabled}
-        isOptionEqualToValue={(opt, val) => opt.key === val.key}
+        isOptionEqualToValue={(
+          opt,
+          val
+        ) => opt.key === val.key}
         getOptionLabel={(option) => option
           ? `[${option.key}] ${option.name}`
-          : ""}
-        onChange={(_, newValue) => handleUpdateKey(newValue?.key ?? '')}
+          : ''}
+        onChange={(
+          _,
+          newValue
+        ) => handleUpdateKey(newValue?.key ?? '')}
         renderInput={(params) => <TextField {...params} size="small" label="SDP"/>}
-        renderOption={(props, option) => (
+        renderOption={(
+          props,
+          option
+        ) => (
           <li {...props} key={option.key} style={{ height: 32 }}>
             {`[${option.key}] ${option.name}`}
           </li>

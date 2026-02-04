@@ -4,11 +4,11 @@ import React, {
   useEffect,
   useRef,
   useState
-} from "react";
+} from 'react';
 import {
   FixedSizeList,
   ListChildComponentProps
-} from "react-window";
+} from 'react-window';
 import {
   Accordion,
   AccordionDetails,
@@ -27,7 +27,7 @@ import {
   TextField,
   Tooltip,
   Typography
-} from "@mui/material";
+} from '@mui/material';
 import {
   Addchart,
   DoubleArrow,
@@ -37,20 +37,20 @@ import {
   MonetizationOn,
   SdCard,
   Timeline
-} from "@mui/icons-material";
-import { throttle } from "lodash";
+} from '@mui/icons-material';
+import { throttle } from 'lodash';
 
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "@core/enums/MuiSnackbar.ts";
+} from '@core/enums/MuiSnackbar.ts';
 
-import { ExtraDropManager } from "@services/parsers/ExtraDropParser.ts";
+import { ExtraDropManager } from '@services/parsers/ExtraDropParser.ts';
 
-import EnemyBaseParameters from "./EnemyBaseParameters.tsx";
-import EnemiesExtraDrops from "./EnemiesExtraDrops.tsx";
-import SaveButton from "../../../components/core/SaveButton.tsx";
-import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
+import EnemyBaseParameters from './EnemyBaseParameters.tsx';
+import EnemiesExtraDrops from './EnemiesExtraDrops.tsx';
+import SaveButton from '../../../components/core/SaveButton.tsx';
+import NumberInputWithLabel from '../../../components/NumberInputWithLabel.tsx';
 import {
   amber,
   blue,
@@ -64,21 +64,21 @@ import {
   red,
   teal,
   yellow
-} from "@mui/material/colors";
-import TraitEditor from "../../components/traits/TraitEditor.tsx";
-import ParameterGrowth from "./ParameterGrowth.tsx";
-import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
-import { GrowthParser } from "@services/parsers/GrowthParser.ts";
-import EnemySdpDrop from "./EnemySdpDrop.tsx";
-import ReloadButton from "../../../components/core/ReloadButton.tsx";
-import { EnemyJabsAiTraits } from "./EnemyJabsAiTraits.tsx";
-import { EnemyJabsBattlerData } from "./EnemyJabsBattlerData.tsx";
-import { useProjectPath } from "../../context/project-path.context.tsx";
-import { useEnemies } from "@presentation/context/resources/enemies.context.tsx";
-import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
+} from '@mui/material/colors';
+import TraitEditor from '../../components/traits/TraitEditor.tsx';
+import ParameterGrowth from './ParameterGrowth.tsx';
+import { knownLongParams } from '../../../mappers/ParameterIdMapper.ts';
+import { GrowthParser } from '@services/parsers/GrowthParser.ts';
+import EnemySdpDrop from './EnemySdpDrop.tsx';
+import ReloadButton from '../../../components/core/ReloadButton.tsx';
+import { EnemyJabsAiTraits } from './EnemyJabsAiTraits.tsx';
+import { EnemyJabsBattlerData } from './EnemyJabsBattlerData.tsx';
+import { useEnemies } from '@presentation/context/resources/enemies.context.tsx';
+import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Trait = Rmmz.Data.RPG_Trait;
-import { EnemyJabsConfigs } from "@boards/enemies/EnemyJabsConfigs.tsx";
+import { EnemyJabsConfigs } from '@boards/enemies/EnemyJabsConfigs.tsx';
+import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 
 const EnemiesBoard = () =>
 {
@@ -86,10 +86,11 @@ const EnemiesBoard = () =>
   const {
     enemies,
     setEnemies,
+    loading,
     save,
     reload,
   } = useEnemies();
-  const [ selectedEnemy, setSelectedEnemy ] = useState<RPG_EnemyDomainModel | null>(null)
+  const [ selectedEnemy, setSelectedEnemy ] = useState<RPG_EnemyDomainModel | null>(null);
   const [ selectedEnemyIndex, setSelectedEnemyIndex ] = useState<number>(0);
   const [ searchTerm, setSearchTerm ] = useState<string>('');
 
@@ -101,9 +102,8 @@ const EnemiesBoard = () =>
 
   const [ isSaving, setIsSaving ] = useState<boolean>(false);
   const [ canSave, setCanSave ] = useState<boolean>(false);
-  const [ canReload, setCanReload ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
-  const [ snackMessage, setSnackMessage ] = useState<string>("");
+  const [ snackMessage, setSnackMessage ] = useState<string>('');
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
 
@@ -127,11 +127,13 @@ const EnemiesBoard = () =>
     // save the data to disk.
     await save(enemies);
 
-    handleSnack("Enemies data has been saved successfully.");
+    handleSnack('Enemies data has been saved successfully.');
   };
 
-  // After
-  const handleEnemyListItemOnClickEvent = (index: number, keepListFocus: boolean = true) =>
+  const handleEnemyListItemOnClickEvent = (
+    index: number,
+    keepListFocus: boolean = true
+  ) =>
   {
     setSelectedEnemyIndex(index);
 
@@ -139,6 +141,7 @@ const EnemiesBoard = () =>
     {
       const enemy = enemies.at(index)!;
       setSelectedEnemy(enemy);
+      updateUrl(enemy);
 
       const extraDropItems = ExtraDropManager.read(enemy.note);
       setSelectedEnemyDropItems(extraDropItems);
@@ -150,6 +153,15 @@ const EnemiesBoard = () =>
       setTimeout(() => listWrapperRef.current?.focus(), 0);
     }
   };
+
+  const { updateUrl } = useUrlSelection(
+    "enemyId",
+    enemies,
+    (e) => e.id,
+    selectedEnemyIndex,
+    (index) => handleEnemyListItemOnClickEvent(index, false),
+    (index) => listRef.current?.scrollToItem(index, "smart")
+  );
 
   const throttledListScroll = useCallback(
     throttle(({ scrollOffset }: {
@@ -190,14 +202,23 @@ const EnemiesBoard = () =>
     const term = event.target.value.toLowerCase();
     setSearchTerm(term);
 
-    if (term.trim() === '') return;
+    if (term.trim() === '')
+    {
+      return;
+    }
 
     const foundIndex = enemies.findIndex(enemy =>
     {
-      if (enemy === null) return false;
-      if (enemy.name.length === 0) return false;
+      if (enemy === null)
+      {
+        return false;
+      }
+      if (enemy.name.length === 0)
+      {
+        return false;
+      }
       return enemy.name.toLowerCase()
-        .includes(term)
+        .includes(term);
     });
 
     if (foundIndex !== -1)
@@ -209,14 +230,24 @@ const EnemiesBoard = () =>
     }
   };
 
-  const findNextMatchIndex = (startIndex: number, term: string, direction: 1 | -1) =>
+  const findNextMatchIndex = (
+    startIndex: number,
+    term: string,
+    direction: 1 | -1
+  ) =>
   {
     const query = term.trim()
       .toLowerCase();
-    if (query === '') return -1;
+    if (query === '')
+    {
+      return -1;
+    }
 
     const length = enemies.length;
-    if (length === 0) return -1;
+    if (length === 0)
+    {
+      return -1;
+    }
 
     for (let step = 1; step < length; step++)
     {
@@ -225,10 +256,19 @@ const EnemiesBoard = () =>
           direction * step
         ) + length
       ) % length;
-      const enemy = enemies[idx];
-      if (!enemy) continue;
-      if (!enemy.name || enemy.name.length === 0) continue;
-      if (enemy.name.startsWith('===')) continue;
+      const enemy = enemies[ idx ];
+      if (!enemy)
+      {
+        continue;
+      }
+      if (!enemy.name || enemy.name.length === 0)
+      {
+        continue;
+      }
+      if (enemy.name.startsWith('==='))
+      {
+        continue;
+      }
 
       if (enemy.name.toLowerCase()
         .includes(query))
@@ -243,7 +283,10 @@ const EnemiesBoard = () =>
   const handleSearchNextClick = () =>
   {
     const query = searchTerm.trim();
-    if (query === '') return;
+    if (query === '')
+    {
+      return;
+    }
 
     const start = selectedEnemyIndex ?? 0;
     const nextIndex = findNextMatchIndex(start, query, 1);
@@ -257,7 +300,10 @@ const EnemiesBoard = () =>
   const handleSearchPrevClick = () =>
   {
     const query = searchTerm.trim();
-    if (query === '') return;
+    if (query === '')
+    {
+      return;
+    }
 
     const start = selectedEnemyIndex ?? 0;
     const prevIndex = findNextMatchIndex(start, query, -1);
@@ -268,30 +314,47 @@ const EnemiesBoard = () =>
     }
   };
 
-  const handleReloadButtonOnClickEvent = async () => {
-    try {
+  const handleReloadButtonOnClickEvent = async () =>
+  {
+    try
+    {
       await reload(); // Use the context's reload which handles mapping
-      handleSnack("Enemy data has been reloaded successfully.", MuiSnackbarSeverity.Success);
-    } catch (error) {
-      console.error("Failed to reload enemy data:", error);
-      handleSnack("Failed to reload enemy data.", MuiSnackbarSeverity.Error);
-    } finally {
-      setCanReload(true);
+      handleSnack('Enemy data has been reloaded successfully.', MuiSnackbarSeverity.Success);
+    }
+    catch (error)
+    {
+      console.error('Failed to reload enemy data:', error);
+      handleSnack('Failed to reload enemy data.', MuiSnackbarSeverity.Error);
     }
   };
 
   const isValidEnemy = (enemy?: RPG_EnemyDomainModel | null) =>
   {
-    if (!enemy) return false;
-    if (!enemy.name || enemy.name.length === 0) return false;
-    if (enemy.name.startsWith('===')) return false;
+    if (!enemy)
+    {
+      return false;
+    }
+    if (!enemy.name || enemy.name.length === 0)
+    {
+      return false;
+    }
+    if (enemy.name.startsWith('==='))
+    {
+      return false;
+    }
     return true;
   };
 
-  const findNextValidIndex = (startIndex: number, direction: 1 | -1) =>
+  const findNextValidIndex = (
+    startIndex: number,
+    direction: 1 | -1
+  ) =>
   {
     const length = enemies.length;
-    if (length === 0) return startIndex;
+    if (length === 0)
+    {
+      return startIndex;
+    }
 
     for (let step = 1; step < length; step++)
     {
@@ -300,7 +363,7 @@ const EnemiesBoard = () =>
           direction * step
         ) + length
       ) % length;
-      if (isValidEnemy(enemies[idx]))
+      if (isValidEnemy(enemies[ idx ]))
       {
         return idx;
       }
@@ -352,7 +415,10 @@ const EnemiesBoard = () =>
   const handleEnemyNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedEnemy) return;
+    if (!selectedEnemy)
+    {
+      return;
+    }
 
     // update the entry.
     selectedEnemy!.name = event.target.value;
@@ -362,7 +428,10 @@ const EnemiesBoard = () =>
   const handleEnemyExpOnChangeEvent = (updatedValue: number) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedEnemy) return;
+    if (!selectedEnemy)
+    {
+      return;
+    }
 
     // update the entry.
     selectedEnemy!.exp = updatedValue;
@@ -372,7 +441,10 @@ const EnemiesBoard = () =>
   const handleEnemyGoldOnChangeEvent = (updatedValue: number) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedEnemy) return;
+    if (!selectedEnemy)
+    {
+      return;
+    }
 
     // update the entry.
     selectedEnemy!.gold = updatedValue;
@@ -392,7 +464,10 @@ const EnemiesBoard = () =>
 
       setEnemies((prevEnemies) =>
       {
-        if (!prevEnemies || selectedEnemyIndex < 0) return prevEnemies;
+        if (!prevEnemies || selectedEnemyIndex < 0)
+        {
+          return prevEnemies;
+        }
         return prevEnemies.with(selectedEnemyIndex, clonedEnemy);
       });
     },
@@ -415,10 +490,13 @@ const EnemiesBoard = () =>
   {
     selectedEnemy!.level = updatedLevel;
     updateEnemy(selectedEnemy!);
-  }
+  };
 
   //region parameters
-  const updateEnemyWithNewParam = (baseParamId: number, updatedValue: number) =>
+  const updateEnemyWithNewParam = (
+    baseParamId: number,
+    updatedValue: number
+  ) =>
   {
     selectedEnemy!.params = selectedEnemy!.params.with(baseParamId, updatedValue);
     updateEnemy(selectedEnemy!);
@@ -436,9 +514,15 @@ const EnemiesBoard = () =>
 
     const enemy = enemies.at(index);
 
-    if (!enemy) return <></>;
+    if (!enemy)
+    {
+      return <></>;
+    }
 
-    if (enemy.name.startsWith('===')) return <></>;
+    if (enemy.name.startsWith('==='))
+    {
+      return <></>;
+    }
 
     const enemyNameFontWeight = enemy.name.startsWith('!')
       ? 'bolder'
@@ -506,8 +590,8 @@ const EnemiesBoard = () =>
             {(
               selectedEnemyIndex === index
             )
-              ? <DoubleArrow color={"success"} fontSize={"small"}/>
-              : <KeyboardArrowRight color={"warning"} fontSize={"small"}/>}
+              ? <DoubleArrow color={'success'} fontSize={'small'}/>
+              : <KeyboardArrowRight color={'warning'} fontSize={'small'}/>}
           </ListItemIcon>
           <ListItemText
             disableTypography
@@ -521,7 +605,7 @@ const EnemiesBoard = () =>
             }}/>
         </ListItemButton>
       </ListItem>
-    )
+    );
   };
   //endregion render
 
@@ -535,31 +619,31 @@ const EnemiesBoard = () =>
     switch (familyIndex)
     {
       case 0:
-        return blue[800];     // Changed from blue[100]
+        return blue[ 800 ];     // Changed from blue[100]
       case 1:
-        return purple[800];   // Changed from purple[100]
+        return purple[ 800 ];   // Changed from purple[100]
       case 2:
-        return green[800];    // Changed from green[100]
+        return green[ 800 ];    // Changed from green[100]
       case 3:
-        return red[800];      // Changed from red[100]
+        return red[ 800 ];      // Changed from red[100]
       case 4:
-        return teal[800];     // Changed from teal[100]
+        return teal[ 800 ];     // Changed from teal[100]
       case 5:
-        return indigo[800];   // Changed from indigo[100]
+        return indigo[ 800 ];   // Changed from indigo[100]
       case 6:
-        return pink[800];     // Changed from pink[100]
+        return pink[ 800 ];     // Changed from pink[100]
       case 7:
-        return cyan[800];     // Changed from cyan[100]
+        return cyan[ 800 ];     // Changed from cyan[100]
       case 8:
-        return amber[800];    // Changed from amber[100]
+        return amber[ 800 ];    // Changed from amber[100]
       case 9:
-        return orange[800];   // Changed from orange[100]
+        return orange[ 800 ];   // Changed from orange[100]
       case 10:
-        return yellow[800];   // Changed from yellow[100]
+        return yellow[ 800 ];   // Changed from yellow[100]
       case 11:
-        return brown[800];    // Changed from brown[100]
+        return brown[ 800 ];    // Changed from brown[100]
       default:
-        return blue[800];     // Default color (changed from blue[100])
+        return blue[ 800 ];     // Default color (changed from blue[100])
     }
   };
 
@@ -592,11 +676,11 @@ const EnemiesBoard = () =>
   return <>
     <Grid container spacing={2}>
       <Grid size={2}>
-        <Stack direction={"row"} spacing={1} alignItems={"center"} sx={{ marginTop: 1 }}>
-          <Tooltip title={"Previous match"}>
+        <Stack direction={'row'} spacing={1} alignItems={'center'} sx={{ marginTop: 1 }}>
+          <Tooltip title={'Previous match'}>
     <span>
       <IconButton
-        size={"small"}
+        size={'small'}
         onClick={handleSearchPrevClick}
         disabled={searchTerm.trim() === ''}
       >
@@ -631,10 +715,10 @@ const EnemiesBoard = () =>
             }}
           />
 
-          <Tooltip title={"Next match"}>
+          <Tooltip title={'Next match'}>
     <span>
       <IconButton
-        size={"small"}
+        size={'small'}
         onClick={handleSearchNextClick}
         disabled={searchTerm.trim() === ''}
       >
@@ -646,7 +730,7 @@ const EnemiesBoard = () =>
         <div
           ref={listWrapperRef}
           tabIndex={0}
-          role={"listbox"}
+          role={'listbox'}
           onKeyDown={handleListKeyDown}
           onContextMenu={() =>
           {
@@ -692,18 +776,18 @@ const EnemiesBoard = () =>
                 <Grid size={4}>
                   <Stack spacing={1}>
                     <TextField
-                      variant={"outlined"}
-                      label={"Name"}
+                      variant={'outlined'}
+                      label={'Name'}
                       value={selectedEnemy.name}
                       onChange={handleEnemyNameOnChangeEvent}
-                      size={"small"}
+                      size={'small'}
                       sx={{ paddingBottom: 2 }}
                       fullWidth
                     />
 
                     <NumberInputWithLabel
-                      label={"Default Level"}
-                      endAdornment={<Timeline sx={{ color: yellow[600] }}/>}
+                      label={'Default Level'}
+                      endAdornment={<Timeline sx={{ color: yellow[ 600 ] }}/>}
                       value={selectedEnemy.level}
                       onChangeEventHandler={(event) =>
                       {
@@ -717,9 +801,9 @@ const EnemiesBoard = () =>
                       {/* Experience */}
                       <Grid size={6}>
                         <NumberInputWithLabel
-                          label={"Exp"}
+                          label={'Exp'}
                           value={selectedEnemy.exp}
-                          endAdornment={<Addchart sx={{ color: purple[600] }}/>}
+                          endAdornment={<Addchart sx={{ color: purple[ 600 ] }}/>}
                           onChangeEventHandler={(event) =>
                           {
                             const updatedValue = parseInt(event.target.value) ?? 0;
@@ -752,7 +836,7 @@ const EnemiesBoard = () =>
                                       <Typography
                                         variant="caption"
                                         sx={{
-                                          fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+                                          fontFamily: '\'Consolas\', \'Monaco\', \'Courier New\', monospace',
                                           whiteSpace: 'nowrap',
                                           overflow: 'hidden',
                                           textOverflow: 'ellipsis',
@@ -775,9 +859,9 @@ const EnemiesBoard = () =>
                       {/* Gold */}
                       <Grid size={6}>
                         <NumberInputWithLabel
-                          label={"Gold"}
+                          label={'Gold'}
                           value={selectedEnemy.gold}
-                          endAdornment={<MonetizationOn sx={{ color: yellow[800] }}/>}
+                          endAdornment={<MonetizationOn sx={{ color: yellow[ 800 ] }}/>}
                           onChangeEventHandler={(event) =>
                           {
                             const updatedValue = parseInt(event.target.value) ?? 0;
@@ -807,7 +891,7 @@ const EnemiesBoard = () =>
                                       <Typography
                                         variant="caption"
                                         sx={{
-                                          fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+                                          fontFamily: '\'Consolas\', \'Monaco\', \'Courier New\', monospace',
                                           whiteSpace: 'nowrap',
                                           overflow: 'hidden',
                                           textOverflow: 'ellipsis',
@@ -830,8 +914,8 @@ const EnemiesBoard = () =>
                       {/* SDPs */}
                       <Grid size={6}>
                         <NumberInputWithLabel
-                          label={"SDPs"}
-                          endAdornment={<SdCard sx={{ color: purple[100] }}/>}
+                          label={'SDPs'}
+                          endAdornment={<SdCard sx={{ color: purple[ 100 ] }}/>}
                           value={selectedEnemy.sdpPoints}
                           onChangeEventHandler={(event) =>
                           {
@@ -862,7 +946,7 @@ const EnemiesBoard = () =>
                                       <Typography
                                         variant="caption"
                                         sx={{
-                                          fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+                                          fontFamily: '\'Consolas\', \'Monaco\', \'Courier New\', monospace',
                                           whiteSpace: 'nowrap',
                                           overflow: 'hidden',
                                           textOverflow: 'ellipsis',
@@ -960,16 +1044,19 @@ const EnemiesBoard = () =>
       gap: 2
     }}>
       <SaveButton
-        extraSaveText={"Enemy Data"}
+        extraSaveText={'Enemy Data'}
         canSave={canSave}
         isSaving={isSaving}
         handleSave={async () =>
         {
           setIsSaving(true);
-          try {
+          try
+          {
             await handleSaveButtonOnClickEvent();
             setCanSave(false);
-          } finally {
+          }
+          finally
+          {
             setIsSaving(false);
           }
         }}
@@ -979,11 +1066,10 @@ const EnemiesBoard = () =>
       <ReloadButton
         handleReload={async () =>
         {
-          setCanReload(false);
           await handleReloadButtonOnClickEvent();
         }}
-        canReload={true}
-        extraReloadText={"Enemy Data"}
+        canReload={!loading}
+        extraReloadText={'Enemy Data'}
       />
     </Box>
 
@@ -994,9 +1080,15 @@ const EnemiesBoard = () =>
         vertical: 'top',
         horizontal: 'center'
       }}
-      onClose={(_, reason) =>
+      onClose={(
+        _,
+        reason
+      ) =>
       {
-        if (reason === 'clickaway') return;
+        if (reason === 'clickaway')
+        {
+          return;
+        }
         setSnackOpen(false);
       }}>
       <Alert
