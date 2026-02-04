@@ -4,7 +4,7 @@ import {
   ReactNode,
   useMemo,
   useCallback,
-  useContext
+  useContext, useEffect
 } from 'react';
 import StatDistributionPanel = Sdp.StatDistributionPanel;
 import { useProjectPath } from "@presentation/context/project-path.context.tsx";
@@ -34,9 +34,12 @@ export function SdpsProvider({ children }: { children: ReactNode })
   const [ sdps, setSdps ] = useState<StatDistributionPanel[]>([]);
   const [ loading, setLoading ] = useState(true);
 
-  const reload = useCallback(async () =>
+  const reload = useCallback(async() =>
   {
-    if (!projectPath || !projectPath.endsWith("/data")) return;
+    if (!projectPath || !projectPath.endsWith("/data"))
+    {
+      return;
+    }
     setLoading(true);
     try
     {
@@ -53,9 +56,12 @@ export function SdpsProvider({ children }: { children: ReactNode })
     }
   }, [ projectPath ]);
 
-  const save = useCallback(async (updatedList: StatDistributionPanel[]) =>
+  const save = useCallback(async(updatedList: StatDistributionPanel[]) =>
   {
-    if (!projectPath) return;
+    if (!projectPath)
+    {
+      return;
+    }
     try
     {
       const updatedConfiguration = {
@@ -71,6 +77,15 @@ export function SdpsProvider({ children }: { children: ReactNode })
       throw error;
     }
   }, [ projectPath ]);
+
+  /**
+   * Automatically load the SDP data when the provider is initialized
+   * or when the project path changes.
+   */
+  useEffect(() =>
+  {
+    reload();
+  }, [ reload ]);
 
   const value = useMemo(() => (
     {
