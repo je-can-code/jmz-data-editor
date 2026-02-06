@@ -15,12 +15,9 @@ import { JabsBattlerData } from "@core/domain/valueObjects/jabs-battler-data.ts"
 import { JabsConfigs } from "@core/domain/valueObjects/jabs-configs.ts";
 import { RPG_BaseDomainModel } from "@core/domain/entities/RPG_BaseDomainModel.ts";
 
-export class RPG_EnemyDomainModel
+class RPG_EnemyDomainModel
   extends RPG_BaseDomainModel<RPG_Enemy>
 {
-  // Capture the original object to ensure no fields are lost during re-serialization
-  private readonly _originalRmmz: RPG_Enemy;
-
   // Explicitly tracked Core properties
   public readonly id: number;
   public name: string;
@@ -44,8 +41,6 @@ export class RPG_EnemyDomainModel
   constructor(rmmz: RPG_Enemy)
   {
     super(rmmz);
-
-    this._originalRmmz = rmmz;
 
     this.id = rmmz.id;
     this.name = rmmz.name;
@@ -129,7 +124,7 @@ export class RPG_EnemyDomainModel
   public toRmmz(): RPG_Enemy
   {
     return {
-      ...this._originalRmmz,
+      ...this._original,
       id: this.id,
       name: this.name,
       exp: this.exp,
@@ -140,3 +135,5 @@ export class RPG_EnemyDomainModel
     };
   }
 }
+
+export { RPG_EnemyDomainModel };

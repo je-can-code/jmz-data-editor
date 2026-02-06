@@ -1,9 +1,8 @@
 import React, {
   ChangeEvent,
   MouseEvent,
-  useEffect,
   useState
-} from "react";
+} from 'react';
 import { FixedSizeList } from 'react-window';
 import {
   Alert,
@@ -37,7 +36,7 @@ import {
   Switch,
   TextField,
   Typography
-} from "@mui/material";
+} from '@mui/material';
 import {
   Add,
   ContentCopy,
@@ -50,41 +49,50 @@ import {
   RadioButtonUnchecked,
   Remove,
   TaskAlt
-} from "@mui/icons-material";
-import styled from "styled-components";
+} from '@mui/icons-material';
+import styled from 'styled-components';
 
-import {
-  executeLoad,
-  executeSave,
-  loadActors,
-  loadSkills
-} from "@services/DataService.ts";
-import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "@core/enums/MuiSnackbar.ts";
-import SaveButton from "../../../components/core/SaveButton.tsx";
-import RPG_Actor = Rmmz.Implementations.RPG_Actor;
-import RPG_Skill = Rmmz.Implementations.RPG_Skill;
+} from '@core/enums/MuiSnackbar.ts';
+import SaveButton from '../../../components/core/SaveButton.tsx';
 
-import Configuration = Proficiency.Configuration;
 import Conditional = Proficiency.Conditional;
 import Requirement = Proficiency.Requirement;
-import { useProjectPath } from "../../context/project-path.context.tsx";
+import { useActors } from '@presentation/context/resources/actors.context.tsx';
+import { useSkills } from '@presentation/context/resources/skills.context.tsx';
+import { RPG_SkillDomainModel } from '@core/domain/entities/RPG_SkillDomainModel.ts';
+import { RPG_ActorDomainModel } from '@core/domain/entities/RPG_ActorDomainModel.ts';
+import { useProficiency } from '@presentation/context/resources/proficiency.context.tsx';
 
 //region setup
 const EntryText = styled(ListItemText)`
-    font-family: monospace;
+  font-family: monospace;
 `;
 //endregion setup
 
-export default function ProficiencyBoard()
+const ProficiencyBoard = () =>
 {
-  const { projectPath } = useProjectPath();
+  // Consume global contexts with aliasing
+  const {
+    conditionals,
+    setConditionals,
+    save,
+    loading: proficiencyLoading
+  } = useProficiency();
+
+  const {
+    data: actors,
+    loading: actorsLoading
+  } = useActors();
+
+  const {
+    data: skills,
+    loading: skillsLoading
+  } = useSkills();
 
   //region state
-  const [ currentConditionals, setCurrentConditionals ] = useState<Conditional[]>([]);
   const [ selectedConditional, setSelectedConditional ] = useState<Conditional | null>(null);
   const [ selectedConditionalIndex, setSelectedConditionalIndex ] = useState<number>(0);
   const [ conditionalsContextMenu, setConditionalsContextMenu ] = useState<{
@@ -100,14 +108,11 @@ export default function ProficiencyBoard()
     mouseY: number;
   } | null>(null);
 
-  const [ requirementSkill, setRequirementSkill ] = useState<RPG_Skill | null>(null);
+  const [ requirementSkill, setRequirementSkill ] = useState<RPG_SkillDomainModel | null>(null);
   const [ requirementSkillText, setRequirementSkillText ] = useState<string | undefined>(undefined);
   const [ requirementSecondarySkillIds, setRequirementSecondarySkillIds ] = useState<number[]>([]);
 
-  const [ actors, setActors ] = useState<RPG_Actor[]>([]);
   const [ actorIdChecked, setActorIdsChecked ] = useState<number[]>([]);
-
-  const [ skills, setSkills ] = useState<RPG_Skill[]>([]);
   const [ skillIdRewardEarned, setSkillIdRewardEarned ] = useState<number[]>([]);
 
   const [ clickedSkill, setClickedSkill ] = useState<number>(0);
@@ -115,58 +120,44 @@ export default function ProficiencyBoard()
 
   const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
-  const [ snackMessage, setSnackMessage ] = useState<string>("");
+  const [ snackMessage, setSnackMessage ] = useState<string>('');
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
   //endregion state
 
-  /**
-   * Initializes the board with the data from the configuration.
-   */
-  useEffect(() =>
+  const applyConditionals = (updatedConditionals: Conditional[]) =>
   {
-    let ignore = false;
-    if (projectPath === null || projectPath === '' || !projectPath.endsWith("/data"))
-    {
-      console.error(`invalid path provided: ${projectPath}`);
-      return;
-    }
+    setConditionals(updatedConditionals);
+    setCanSave(true);
+  };
 
-    // a helper function for initializing the state of this component based on the configuration file.
-    const initializeState = async (projectPath: string) =>
-    {
-      // TODO: add popup warning in this method and add a reset button?
+  const syncSelectionWithConditional = (conditional: Conditional | null) =>
+  {
+    setSelectedConditional(conditional);
+    setActorIdsChecked(conditional?.actorIds ?? []);
+    setSkillIdRewardEarned(conditional?.skillRewards ?? []);
+    setCurrentRequirements(conditional?.requirements ?? []);
 
-      const proficiencyData = await executeLoad<Configuration>(projectPath, ConfigFilenames.Proficiency);
-      if (!ignore && proficiencyData)
-      {
-        // update the data list.
-        setCurrentConditionals(proficiencyData.conditionals);
-      }
+    // Also sync the first requirement of the newly selected conditional.
+    const firstReq = conditional?.requirements?.at(0) ?? null;
+    syncSelectionWithRequirement(firstReq, 0);
+  };
 
-      const actorData = await loadActors(projectPath);
-      if (!ignore && actorData)
-      {
-        setActors(actorData);
-      }
+  const syncSelectionWithRequirement = (requirement: Requirement | null, index: number) =>
+  {
+    setSelectedRequirementIndex(index);
+    setSelectedRequirement(requirement);
+    setRequirementSecondarySkillIds(requirement?.secondarySkillIds ?? []);
 
-      const skillData = await loadSkills(projectPath);
-      if (!ignore && skillData)
-      {
-        setSkills(skillData);
-      }
+    // Lookup the skill domain model for the requirement's primary skill.
+    const skillId = requirement?.skillId ?? 0;
+    const skillModel = skillId > 0
+      ? skills.find(s => s.id === skillId) ?? null
+      : null;
 
-      // enable saving.
-      setCanSave(true);
-    };
-
-    initializeState(projectPath)
-      .catch(console.error);
-    return () =>
-    {
-      ignore = true;
-    }
-  }, [ projectPath ]);
+    setRequirementSkill(skillModel);
+    setRequirementSkillText(skillModel?.name ?? "");
+  };
 
   //region updates
   /**
@@ -175,21 +166,20 @@ export default function ProficiencyBoard()
    */
   const handleConditionalKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    // grab the updated value from the input.
     const updatedValue = event.target.value;
+    if (!selectedConditional)
+    {
+      return;
+    }
 
-    // if there is no entry, stop processing.
-    if (!selectedConditional) return;
-
-    // update the entry.
     const updatedConditional = {
       ...selectedConditional,
       key: updatedValue
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
-    const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
+    applyConditionals(updatedConditionals);
 
     // TODO: can this update be optimized in some way?
     // consider extracting recipe view to single component, and only update whole list when entries change.
@@ -215,8 +205,8 @@ export default function ProficiencyBoard()
       ...selectedConditional,
       actorIds: newChecked
     } as Conditional;
-    const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
+    applyConditionals(updatedConditionals);
   };
 
   const handleConditionalSkillIdRewardToggle = (value: number) =>
@@ -239,8 +229,8 @@ export default function ProficiencyBoard()
       ...selectedConditional,
       skillRewards: newChecked
     } as Conditional;
-    const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
+    applyConditionals(updatedConditionals);
   };
 
   const handleRequirementSecondarySkillIdToggle = (value: number) =>
@@ -274,8 +264,8 @@ export default function ProficiencyBoard()
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
-    const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
+    applyConditionals(updatedConditionals);
   };
 
   const handleRequirementProficiencyOnChangeEvent = (value: number) =>
@@ -295,13 +285,16 @@ export default function ProficiencyBoard()
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
-    const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
+    applyConditionals(updatedConditionals);
   };
 
-  const handleRequirementPrimarySkillOnChangeEvent = (value: RPG_Skill | null) =>
+  const handleRequirementPrimarySkillOnChangeEvent = (value: RPG_SkillDomainModel | null) =>
   {
-    if (value === null) return;
+    if (value === null)
+    {
+      return;
+    }
 
     setRequirementSkill(value);
     setRequirementSkillText(value.name);
@@ -320,8 +313,8 @@ export default function ProficiencyBoard()
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
-    const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
+    applyConditionals(updatedConditionals);
   };
 
   const handleConditionalJsRewardsOnChangeEvent = (event: any) =>
@@ -333,14 +326,15 @@ export default function ProficiencyBoard()
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
-    const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
+    applyConditionals(updatedConditionals);
   };
 
   const handleSnack = (
     message: string,
     severity: MuiSnackbarSeverity = MuiSnackbarSeverity.Info,
-    variant: MuiSnackbarVariant = MuiSnackbarVariant.Filled) =>
+    variant: MuiSnackbarVariant = MuiSnackbarVariant.Filled
+  ) =>
   {
     setSnackMessage(message);
     setSnackSeverity(severity);
@@ -350,63 +344,34 @@ export default function ProficiencyBoard()
   //endregion updates
 
   //region selections
-  const handleRequirementListItemOnClickEvent = (_: any, index: number) =>
+  const handleRequirementListItemOnClickEvent = (
+    _: any,
+    index: number
+  ) =>
   {
-    setSelectedRequirementIndex(index);
-    setSelectedRequirement(null);
-    if (currentRequirements?.length > 0)
-    {
-      const selectedRequirement = currentRequirements[index];
-      setSelectedRequirement(selectedRequirement);
-      setRequirementSecondarySkillIds(selectedRequirement.secondarySkillIds);
-
-      const requirementSkill = skills[selectedRequirement.skillId];
-      setRequirementSkill(requirementSkill);
-      setRequirementSkillText(requirementSkill.name);
-    }
+    const requirement = currentRequirements.at(index) ?? null;
+    syncSelectionWithRequirement(requirement, index);
   };
 
-  const handleConditionalListItemOnClickEvent = (_: any, index: number,) =>
+  const handleConditionalListItemOnClickEvent = (
+    _: any,
+    index: number,
+  ) =>
   {
     setSelectedConditionalIndex(index);
-    if (currentConditionals?.length > 0)
+    const conditional = conditionals.at(index) ?? null;
+    syncSelectionWithConditional(conditional);
+  };
+
+  const handleSnackClose = (
+    _: any,
+    reason?: string
+  ) =>
+  {
+    if (reason === 'clickaway')
     {
-      const conditional = currentConditionals.at(index) as Conditional;
-      setSelectedConditional(conditional);
-      setActorIdsChecked(conditional.actorIds);
-      setSkillIdRewardEarned(conditional.skillRewards);
-
-      setCurrentRequirements(conditional.requirements);
-      setSelectedRequirementIndex(0);
-
-      const firstRequirement = conditional.requirements.at(0) ?? null;
-      setSelectedRequirement(firstRequirement);
-
-      const firstRequirementSkill = skills.at(firstRequirement?.skillId ?? 0) ?? null;
-      setRequirementSkill(firstRequirementSkill);
-      setRequirementSkillText(firstRequirementSkill?.name ?? "");
-      setRequirementSecondarySkillIds(firstRequirement?.secondarySkillIds ?? []);
+      return;
     }
-  };
-
-  const handleSaveButtonOnClickEvent = async () =>
-  {
-    // reconstruct the data shape to be saved.
-    const updatedConfiguration = {
-      conditionals: currentConditionals,
-    } as Configuration;
-
-    // save the data to disk.
-    await executeSave(projectPath, ConfigFilenames.Proficiency, updatedConfiguration);
-
-    setCanSave(true);
-
-    handleSnack("Proficiency data has been saved successfully.");
-  };
-
-  const handleSnackClose = (_: any, reason?: string) =>
-  {
-    if (reason === 'clickaway') return;
 
     setSnackOpen(false);
   };
@@ -457,22 +422,25 @@ export default function ProficiencyBoard()
       secondarySkillIds: []
     } as Requirement;
     const newConditional = {
-      key: "NEW-CONDITIONAL-0",
+      key: 'NEW-CONDITIONAL-0',
       requirements: [ initialRequirement ],
       skillRewards: [],
       actorIds: [],
-      jsRewards: ""
+      jsRewards: ''
     } as Conditional;
-    const updatedConditionals = currentConditionals.toSpliced(index, 0, newConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.toSpliced(index, 0, newConditional);
+    applyConditionals(updatedConditionals);
 
-    handleSnack("Conditional has been added successfully.", MuiSnackbarSeverity.Success);
+    handleSnack('Conditional has been added successfully.', MuiSnackbarSeverity.Success);
   };
 
   const handleCloneConditional = (index: number) =>
   {
     // TODO: error snack for unable to clone without selecting a conditional to be cloned.
-    if (selectedConditional === null) return;
+    if (selectedConditional === null)
+    {
+      return;
+    }
 
     const clonedRequirements = selectedConditional.requirements.toSpliced(0, 0);
     const clonedSkillIdRewards = selectedConditional.skillRewards.toSpliced(0, 0);
@@ -485,22 +453,25 @@ export default function ProficiencyBoard()
       jsRewards: selectedConditional.jsRewards
     } as Conditional;
 
-    const updatedConditionals = currentConditionals.toSpliced(index, 0, clonedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.toSpliced(index, 0, clonedConditional);
+    applyConditionals(updatedConditionals);
 
-    handleSnack("Conditional has been cloned successfully.", MuiSnackbarSeverity.Success);
+    handleSnack('Conditional has been cloned successfully.', MuiSnackbarSeverity.Success);
   };
 
   const handleDeleteConditional = (index: number) =>
   {
     // TODO: error snack for unable to delete without selecting a conditional to be deleted.
-    if (selectedConditional === null) return;
+    if (selectedConditional === null)
+    {
+      return;
+    }
 
     // TODO: "are you sure?" popup dialog maybe?
-    const updatedConditionals = currentConditionals.toSpliced(index, 1);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.toSpliced(index, 1);
+    applyConditionals(updatedConditionals);
 
-    handleSnack("Conditional has been deleted successfully.", MuiSnackbarSeverity.Success);
+    handleSnack('Conditional has been deleted successfully.', MuiSnackbarSeverity.Success);
   };
 
   const handleAddNewRequirement = (index: number) =>
@@ -520,16 +491,19 @@ export default function ProficiencyBoard()
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
-    const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
+    applyConditionals(updatedConditionals);
 
-    handleSnack("Requirement has been added successfully.", MuiSnackbarSeverity.Success);
+    handleSnack('Requirement has been added successfully.', MuiSnackbarSeverity.Success);
   };
 
   const handleCloneRequirement = (index: number) =>
   {
     // TODO: error snack for unable to clone without selecting a requirement to be cloned.
-    if (selectedRequirement === null) return;
+    if (selectedRequirement === null)
+    {
+      return;
+    }
 
     const clonedSecondarySkillIds = selectedRequirement.secondarySkillIds.toSpliced(0, 0);
     const clonedRequirement = {
@@ -547,20 +521,23 @@ export default function ProficiencyBoard()
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
-    const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
+    applyConditionals(updatedConditionals);
 
-    handleSnack("Requirement has been cloned successfully.", MuiSnackbarSeverity.Success);
+    handleSnack('Requirement has been cloned successfully.', MuiSnackbarSeverity.Success);
   };
 
   const handleDeleteRequirement = (index: number) =>
   {
     // TODO: error snack for unable to delete without selecting a conditional to be deleted.
-    if (selectedRequirement === null) return;
+    if (selectedRequirement === null)
+    {
+      return;
+    }
 
     if (currentRequirements.length === 1)
     {
-      handleSnack("Cannot delete last skill requirement; consider updating it instead.", MuiSnackbarSeverity.Error);
+      handleSnack('Cannot delete last skill requirement; consider updating it instead.', MuiSnackbarSeverity.Error);
       return;
     }
 
@@ -574,15 +551,18 @@ export default function ProficiencyBoard()
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
-    const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
+    applyConditionals(updatedConditionals);
 
-    handleSnack("Requirement has been deleted successfully.", MuiSnackbarSeverity.Success);
+    handleSnack('Requirement has been deleted successfully.', MuiSnackbarSeverity.Success);
   };
 
   const handleClearSecondarySkillIdsForRequirement = (index: number) =>
   {
-    if (selectedRequirement === null) return;
+    if (selectedRequirement === null)
+    {
+      return;
+    }
 
     const secondarySkillIdFreeRequirement = {
       skillId: selectedRequirement.skillId,
@@ -599,10 +579,10 @@ export default function ProficiencyBoard()
     } as Conditional;
     setSelectedConditional(updatedConditional);
 
-    const updatedConditionals = currentConditionals.with(selectedConditionalIndex, updatedConditional);
-    setCurrentConditionals(updatedConditionals);
+    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
+    applyConditionals(updatedConditionals);
 
-    handleSnack("Requirement's secondary skill ids have been purged successfully.");
+    handleSnack('Requirement\'s secondary skill ids have been purged successfully.');
   };
   //endregion selections
 
@@ -617,9 +597,12 @@ export default function ProficiencyBoard()
       style
     } = props;
 
-    const conditional = currentConditionals.at(index);
+    const conditional = conditionals.at(index);
 
-    if (!conditional) return <React.Fragment key={index}></React.Fragment>;
+    if (!conditional)
+    {
+      return <React.Fragment key={index}></React.Fragment>;
+    }
 
     return (
       <ListItem key={conditional.key} style={style}>
@@ -629,8 +612,8 @@ export default function ProficiencyBoard()
         >
           <ListItemIcon>
             {(selectedConditionalIndex === index)
-              ? <ExitToApp color={"success"}/>
-              : <NavigateNext color={"secondary"}/>}
+              ? <ExitToApp color={'success'}/>
+              : <NavigateNext color={'secondary'}/>}
           </ListItemIcon>
           <EntryText
             primary={conditional.key}
@@ -644,14 +627,19 @@ export default function ProficiencyBoard()
   /**
    * A mapping function for creating an entry in the actor list.
    */
-  const renderActorListItem = (actor: RPG_Actor, index: number) =>
+  const renderActorListItem = (
+    actor: RPG_ActorDomainModel,
+    index: number
+  ) =>
   {
-    if (index === 0) return <React.Fragment key={index}></React.Fragment>;
-
-    if (actor === null) return <React.Fragment key={index}></React.Fragment>;
+    if (!actor || actor.name === '' || actor.name.startsWith('=='))
+    {
+      // Hide placeholders/invalids, but DO render id=1 (index 0) if valid.
+      return <React.Fragment key={`${index}-hidden`}></React.Fragment>;
+    }
 
     return (
-      <ListItem key={`${index}-${actor.name}`} sx={{
+      <ListItem key={`${actor.id}-${actor.name}`} sx={{
         paddingTop: 0,
         paddingBottom: 0
       }}>
@@ -659,30 +647,31 @@ export default function ProficiencyBoard()
           <ListItemIcon>
             <Person/>
           </ListItemIcon>
-          <ListItemText
-            primary={actor.name}
-          />
+          <ListItemText primary={actor.name}/>
           <Switch
             edge="end"
-            onChange={() => handleConditionalApplicableActorIdToggle(index)}
-            checked={actorIdChecked.includes(index)}
+            onChange={() => handleConditionalApplicableActorIdToggle(actor.id)}
+            checked={actorIdChecked.includes(actor.id)}
           />
         </ListItemButton>
       </ListItem>
-    )
+    );
   };
 
   const renderSkillIdRewards = (skillId: number) =>
   {
     const skill = skills.at(skillId);
-    if (!skill) return <React.Fragment key={skillId}></React.Fragment>;
+    if (!skill)
+    {
+      return <React.Fragment key={skillId}></React.Fragment>;
+    }
 
     return (
       <Chip
         key={`${skillId}-${skill.name}`}
         avatar={<Avatar>{skill.id}</Avatar>}
         label={skill.name}
-        variant={"outlined"}
+        variant={'outlined'}
         onClick={() =>
         {
           setClickedSkill(skill.id);
@@ -690,15 +679,24 @@ export default function ProficiencyBoard()
         }}
         onDelete={() => handleConditionalSkillIdRewardToggle(skill.id)}
       />
-    )
+    );
   };
 
-  const renderConditionalRequirement = (requirement: Requirement, index: number) =>
+  const renderConditionalRequirement = (
+    requirement: Requirement,
+    index: number
+  ) =>
   {
-    if (!requirement) return <React.Fragment key={index}></React.Fragment>;
+    if (!requirement)
+    {
+      return <React.Fragment key={index}></React.Fragment>;
+    }
 
     const skill = skills.at(requirement.skillId);
-    if (!skill) return <React.Fragment key={index}></React.Fragment>;
+    if (!skill)
+    {
+      return <React.Fragment key={index}></React.Fragment>;
+    }
 
     return (
       <ListItem key={`${index}-${skill.id}`}>
@@ -708,22 +706,27 @@ export default function ProficiencyBoard()
         >
           <ListItemIcon>
             {(selectedRequirementIndex === index)
-              ? <TaskAlt color={"success"}/>
-              : <RadioButtonUnchecked color={"info"}/>}
+              ? <TaskAlt color={'success'}/>
+              : <RadioButtonUnchecked color={'info'}/>}
           </ListItemIcon>
           <EntryText
             primary={`${skill.id}: ${skill.name}`}
-            secondary={currentRequirements[index].secondarySkillIds
+            secondary={currentRequirements[ index ].secondarySkillIds
               .sort()
-              .map(skillId => `${skills[skillId].name}(${skillId})`)
+              .map(skillId => `${skills[ skillId ].name}(${skillId})`)
               .join(', ')}
           />
         </ListItemButton>
 
       </ListItem>
-    )
+    );
   };
   //endregion render
+
+  if (actorsLoading || skillsLoading || proficiencyLoading)
+  {
+    return <Typography>Loading database and proficiency resources...</Typography>;
+  }
 
   return <>
     <Grid container spacing={2}>
@@ -735,7 +738,7 @@ export default function ProficiencyBoard()
             height={1030}
             itemSize={30}
             overscanCount={5}
-            itemCount={currentConditionals.length}
+            itemCount={conditionals.length}
           >
             {renderConditionalListItem}
           </FixedSizeList>
@@ -760,15 +763,15 @@ export default function ProficiencyBoard()
               <Grid size={4}>
                 <TextField
                   required
-                  variant={"outlined"}
-                  label={"Key"}
+                  variant={'outlined'}
+                  label={'Key'}
                   value={selectedConditional.key}
                   onChange={handleConditionalKeyOnChangeEvent}
-                  size={"small"}
+                  size={'small'}
                   fullWidth
                   slotProps={{
                     input: {
-                      startAdornment: <InputAdornment position={"start"}>
+                      startAdornment: <InputAdornment position={'start'}>
                         <Key/>
                       </InputAdornment>
                     }
@@ -796,10 +799,16 @@ export default function ProficiencyBoard()
 
               <Grid size={4}>
                 <Autocomplete
-                  size={"small"}
-                  options={[ ...skills ].sort((a, b) =>
+                  size={'small'}
+                  options={[ ...skills ].sort((
+                    a,
+                    b
+                  ) =>
                   {
-                    if (a === null || b === null) return (a as any) - (b as any);
+                    if (a === null || b === null)
+                    {
+                      return (a as any) - (b as any);
+                    }
 
                     // Display the selected labels first.
                     let ai = skillIdRewardEarned.indexOf(a.id);
@@ -820,11 +829,15 @@ export default function ProficiencyBoard()
                       }
                     }
                   }}
-                  getOptionKey={(option) => option?.id ?? "no-key"}
-                  getOptionLabel={(option) => option?.name ?? ""}
-                  renderOption={(props, option, { index }) =>
+                  getOptionKey={(option) => option?.id ?? 'no-key'}
+                  getOptionLabel={(option) => option?.name ?? ''}
+                  renderOption={(
+                    props,
+                    option,
+                    { index }
+                  ) =>
                   {
-                    if (option === null || option.name === "" || option.name.startsWith("=="))
+                    if (option === null || option.name === '' || option.name.startsWith('=='))
                     {
                       return <li {...props} style={{ display: 'none' }}/>;
                     }
@@ -849,31 +862,31 @@ export default function ProficiencyBoard()
                   {
                     return (<TextField
                       {...params}
-                      size={"small"}
-                      label={"Choose Skill Rewards"}
-                      placeholder="Skill name..."/>)
+                      size={'small'}
+                      label={'Choose Skill Rewards'}
+                      placeholder="Skill name..."/>);
                   }}
                 />
               </Grid>
 
               <Grid size={8}>
                 <TextField
-                  label={"Javascript-based Rewards"}
-                  placeholder={"Raw javascript to be executed upon completing this conditional..."}
+                  label={'Javascript-based Rewards'}
+                  placeholder={'Raw javascript to be executed upon completing this conditional...'}
                   value={selectedConditional.jsRewards}
                   onChange={handleConditionalJsRewardsOnChangeEvent}
                   multiline
                   fullWidth
                   rows={6}
-                  variant={"standard"}
+                  variant={'standard'}
                   sx={{
                     // Root class for the input field
-                    "& .MuiInput-root": {
-                      fontFamily: "monospace",
+                    '& .MuiInput-root': {
+                      fontFamily: 'monospace',
                     }, // Class for the label of the input field
-                    "& .MuiInputLabel-standard": {
-                      color: "#2e2e2e",
-                      fontFamily: "monospace",
+                    '& .MuiInputLabel-standard': {
+                      color: '#2e2e2e',
+                      fontFamily: 'monospace',
                     },
                   }}
                 />
@@ -894,7 +907,10 @@ export default function ProficiencyBoard()
                     }}>
                       Skills Required to Develop Proficiency In
                     </ListSubheader>
-                    {currentRequirements.map((requirement, index) => renderConditionalRequirement(requirement, index))}
+                    {currentRequirements.map((
+                      requirement,
+                      index
+                    ) => renderConditionalRequirement(requirement, index))}
                   </List>
                 </div>
               </Grid>
@@ -902,31 +918,41 @@ export default function ProficiencyBoard()
               <Grid size={4}>
                 <Stack spacing={2}>
                   <TextField
-                    type={"number"}
-                    label={"Proficiency Required"}
+                    type={'number'}
+                    label={'Proficiency Required'}
                     value={selectedRequirement?.proficiency ?? 0}
                     sx={{ width: '100px' }}
                     onChange={(event) => handleRequirementProficiencyOnChangeEvent(parseInt(event.target.value) ?? 0)}
                   />
                   <Autocomplete
-                    size={"small"}
+                    size={'small'}
                     options={skills}
                     value={requirementSkill}
-                    onChange={(event, newValue: RPG_Skill | null) =>
+                    onChange={(
+                      event,
+                      newValue: RPG_SkillDomainModel | null
+                    ) =>
                     {
                       handleRequirementPrimarySkillOnChangeEvent(newValue);
                     }}
                     inputValue={requirementSkillText}
-                    onInputChange={(event, newInputValue: string | undefined) =>
+                    onInputChange={(
+                      event,
+                      newInputValue: string | undefined
+                    ) =>
                     {
                       console.log(newInputValue);
                       setRequirementSkillText(newInputValue);
                     }}
-                    getOptionLabel={(option) => option?.name ?? ""}
-                    getOptionKey={(option) => option?.id ?? "no-key"}
-                    renderOption={(props, option, { index }) =>
+                    getOptionLabel={(option) => option?.name ?? ''}
+                    getOptionKey={(option) => option?.id ?? 'no-key'}
+                    renderOption={(
+                      props,
+                      option,
+                      { index }
+                    ) =>
                     {
-                      if (option === null || option.name === "" || option.name.startsWith("=="))
+                      if (option === null || option.name === '' || option.name.startsWith('=='))
                       {
                         return <li {...props} style={{ display: 'none' }}/>;
                       }
@@ -950,13 +976,13 @@ export default function ProficiencyBoard()
                     {
                       return (<TextField
                         {...params}
-                        size={"small"}
-                        label={"Requirement Skill"}
-                        placeholder="Skill name..."/>)
+                        size={'small'}
+                        label={'Requirement Skill'}
+                        placeholder="Skill name..."/>);
                     }}
                   />
                   <Autocomplete
-                    size={"small"}
+                    size={'small'}
                     options={skills}
                     disableCloseOnSelect
                     slotProps={{
@@ -964,11 +990,15 @@ export default function ProficiencyBoard()
                         sx: { maxHeight: '170px' }
                       }
                     }}
-                    getOptionKey={(option) => option?.id ?? "no-key"}
-                    getOptionLabel={(option) => option?.name ?? ""}
-                    renderOption={(props, option, { index }) =>
+                    getOptionKey={(option) => option?.id ?? 'no-key'}
+                    getOptionLabel={(option) => option?.name ?? ''}
+                    renderOption={(
+                      props,
+                      option,
+                      { index }
+                    ) =>
                     {
-                      if (option === null || option.name === "" || option.name.startsWith("=="))
+                      if (option === null || option.name === '' || option.name.startsWith('=='))
                       {
                         return <li {...props} style={{ display: 'none' }}/>;
                       }
@@ -993,9 +1023,9 @@ export default function ProficiencyBoard()
                     {
                       return (<TextField
                         {...params}
-                        size={"small"}
-                        label={"Secondary Skills"}
-                        placeholder="Skill name..."/>)
+                        size={'small'}
+                        label={'Secondary Skills'}
+                        placeholder="Skill name..."/>);
                     }}
                   />
                 </Stack>
@@ -1020,7 +1050,7 @@ export default function ProficiencyBoard()
             {skills.at(clickedSkill)?.description}
           </DialogContentText>
           <SpeedDial
-            ariaLabel={"skill-speed-dial"}
+            ariaLabel={'skill-speed-dial'}
             icon={<PriceCheck/>}
             sx={{
               position: 'absolute',
@@ -1029,19 +1059,19 @@ export default function ProficiencyBoard()
             }}
           >
             <SpeedDialAction
-              key={"mp-cost"}
-              icon={"MP"}
+              key={'mp-cost'}
+              icon={'MP'}
               sx={{ color: 'pink' }}
               tooltipTitle={skills.at(clickedSkill)?.mpCost}
               tooltipOpen
-              tooltipPlacement={"right"}
+              tooltipPlacement={'right'}
             />
             <SpeedDialAction
-              key={"tp-cost"}
-              icon={"TP"}
+              key={'tp-cost'}
+              icon={'TP'}
               tooltipTitle={skills.at(clickedSkill)?.tpCost}
               tooltipOpen
-              tooltipPlacement={"right"}
+              tooltipPlacement={'right'}
             />
           </SpeedDial>
 
@@ -1053,12 +1083,13 @@ export default function ProficiencyBoard()
 
       {/* This is over-arching save button- it will save all data to disk. */}
       <SaveButton
-        extraSaveText={"Proficiencies"}
-        canSave={canSave}
+        extraSaveText={'Proficiencies'}
+        canSave={canSave && !proficiencyLoading}
         handleSave={async () =>
         {
           setCanSave(false);
-          await handleSaveButtonOnClickEvent();
+          await save(conditionals);
+          handleSnack('Proficiency data saved successfully!', MuiSnackbarSeverity.Success);
         }}
       />
 
@@ -1196,5 +1227,7 @@ export default function ProficiencyBoard()
       </Menu>
       {/*endregion not-grid-related elements */}
     </Grid>
-  </>
-}
+  </>;
+};
+
+export default ProficiencyBoard;

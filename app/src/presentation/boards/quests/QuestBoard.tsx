@@ -3,8 +3,8 @@ import React, {
   MouseEvent,
   useEffect,
   useState
-} from "react";
-import { FixedSizeList } from "react-window";
+} from 'react';
+import { FixedSizeList } from 'react-window';
 import {
   Alert,
   Autocomplete,
@@ -35,7 +35,7 @@ import {
   TextField,
   Tooltip,
   Typography
-} from "@mui/material";
+} from '@mui/material';
 import {
   Add,
   AddTask,
@@ -51,25 +51,19 @@ import {
   Style,
   Visibility,
   VisibilityOff
-} from "@mui/icons-material";
+} from '@mui/icons-material';
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "@core/enums/MuiSnackbar.ts";
+} from '@core/enums/MuiSnackbar.ts';
 
-import SaveButton from "../../../components/core/SaveButton.tsx";
+import SaveButton from '../../../components/core/SaveButton.tsx';
+import KeyTextField from '../../../components/core/KeyTextField.tsx';
+import { OmniObjectiveType } from '@core/enums/OmniObjectiveType.ts';
+import ObjectiveLogs from './ObjectiveLogs.tsx';
+import ObjectiveFulfillmentData from './ObjectiveFulfillmentData.tsx';
+import OmniObjectiveFetchType from './OmniObjectiveFetchType.ts';
 
-import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
-import {
-  executeSave,
-  loadQuests
-} from "@services/DataService.ts";
-
-import KeyTextField from "../../../components/core/KeyTextField.tsx";
-import { OmniObjectiveType } from "@core/enums/OmniObjectiveType.ts";
-import ObjectiveLogs from "./ObjectiveLogs.tsx";
-import ObjectiveFulfillmentData from "./ObjectiveFulfillmentData.tsx";
-import OmniObjectiveFetchType from "./OmniObjectiveFetchType.ts";
 import Configuration = Questopedia.Configuration;
 import OmniQuest = Questopedia.OmniQuest;
 import OmniTag = Questopedia.OmniTag;
@@ -82,14 +76,23 @@ import FetchData = Questopedia.FetchData;
 import SlayData = Questopedia.SlayData;
 import QuestData = Questopedia.QuestData;
 import OmniFulfillmentData = Questopedia.OmniFulfillmentData;
-import { useProjectPath } from "../../context/project-path.context.tsx";
 
-export default function QuestBoard()
+import { useQuests } from '@presentation/context/resources/quests.context.tsx';
+
+const QuestBoard = () =>
 {
-  const { projectPath } = useProjectPath();
+  const {
+    quests,
+    tags,
+    categories,
+    setQuests,
+    setTags,
+    setCategories,
+    save,
+    loading,
+  } = useQuests();
 
   //region state
-  const [ quests, setQuests ] = useState<OmniQuest[]>([]);
   const [ selectedQuest, setSelectedQuest ] = useState<OmniQuest | null>(null);
   const [ selectedQuestIndex, setSelectedQuestIndex ] = useState<number>(0);
   const [ questListContextMenu, setQuestListContextMenu ] = useState<{
@@ -105,7 +108,6 @@ export default function QuestBoard()
     mouseY: number;
   } | null>(null);
 
-  const [ categories, setCategories ] = useState<OmniCategory[]>([]);
   const [ selectedCategory, setSelectedCategory ] = useState<OmniCategory | null>(null);
   const [ selectedCategoryIndex, setSelectedCategoryIndex ] = useState<number>(0);
   const [ categoryDialogOpen, setCategoryDialogOpen ] = useState<boolean>(false);
@@ -114,7 +116,6 @@ export default function QuestBoard()
     mouseY: number;
   } | null>(null);
 
-  const [ tags, setTags ] = useState<OmniTag[]>([]);
   const [ applicableTags, setApplicableTags ] = useState<string[]>([]);
   const [ selectedTag, setSelectedTag ] = useState<OmniTag | null>(null);
   const [ selectedTagIndex, setSelectedTagIndex ] = useState<number>(0);
@@ -124,58 +125,12 @@ export default function QuestBoard()
     mouseY: number;
   } | null>(null);
 
-  const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
-  const [ snackMessage, setSnackMessage ] = useState<string>("");
+  const [ snackMessage, setSnackMessage ] = useState<string>('');
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
 
   //endregion state
-
-  //region setup
-  useEffect(() =>
-  {
-    let ignore = false;
-    if (!projectPath || !projectPath.endsWith("/data"))
-    {
-      console.error(`invalid path provided: ${projectPath}`);
-      return;
-    }
-
-    // a helper function for initializing the state of this component based on the configuration file.
-    const initializeState = async (projectPath: string) =>
-    {
-      const questConfiguration = await loadQuests(projectPath);
-      if (!ignore && questConfiguration)
-      {
-        const {
-          quests,
-          tags,
-          categories
-        } = questConfiguration;
-
-        // update the data list.
-        setQuests(quests);
-        setSelectedQuestIndex(0);
-
-        setTags(tags);
-
-        setCategories(categories);
-        setSelectedCategoryIndex(0);
-      }
-
-      // enable saving.
-      setCanSave(true);
-    };
-
-    initializeState(projectPath)
-      .catch(console.error);
-    return () =>
-    {
-      ignore = true;
-    }
-  }, [ projectPath ]);
-  //endregion setup
 
   //region actions
   const handleQuestListItemOnClickEvent = (index: number) =>
@@ -225,25 +180,15 @@ export default function QuestBoard()
     }
   };
 
-  const handleSaveButtonOnClickEvent = async () =>
+  const handleSnackClose = (
+    _: any,
+    reason?: string
+  ) =>
   {
-    const updatedQuestData = {
-      quests: quests,
-      categories: categories,
-      tags: tags
-    } as Configuration;
-
-    // save the data to disk.
-    await executeSave(projectPath, ConfigFilenames.Quests, updatedQuestData);
-
-    setCanSave(true);
-
-    handleSnack("Quest data has been saved successfully.");
-  };
-
-  const handleSnackClose = (_: any, reason?: string) =>
-  {
-    if (reason === 'clickaway') return;
+    if (reason === 'clickaway')
+    {
+      return;
+    }
 
     setSnackOpen(false);
   };
@@ -251,7 +196,8 @@ export default function QuestBoard()
   const handleSnack = (
     message: string,
     severity: MuiSnackbarSeverity = MuiSnackbarSeverity.Info,
-    variant: MuiSnackbarVariant = MuiSnackbarVariant.Filled) =>
+    variant: MuiSnackbarVariant = MuiSnackbarVariant.Filled
+  ) =>
   {
     setSnackMessage(message);
     setSnackSeverity(severity);
@@ -320,7 +266,10 @@ export default function QuestBoard()
   const handleQuestKeyOnChangeEvent = (input: string) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedQuest) return;
+    if (!selectedQuest)
+    {
+      return;
+    }
 
     // update the entry.
     const updatedQuest = {
@@ -333,7 +282,10 @@ export default function QuestBoard()
   const handleQuestNameOnChangeEvent = (input: string) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedQuest) return;
+    if (!selectedQuest)
+    {
+      return;
+    }
 
     // update the entry.
     const updatedQuest = {
@@ -346,7 +298,10 @@ export default function QuestBoard()
   const handleQuestRecommendedLevelOnChangeEvent = (input: number) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedQuest) return;
+    if (!selectedQuest)
+    {
+      return;
+    }
 
     const updatedRecommendedLevel = input < 0
       ? 0
@@ -363,7 +318,10 @@ export default function QuestBoard()
   const handleQuestUnknownHintOnChangeEvent = (input: string) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedQuest) return;
+    if (!selectedQuest)
+    {
+      return;
+    }
 
     // update the entry.
     const updatedQuest = {
@@ -376,7 +334,10 @@ export default function QuestBoard()
   const handleQuestOverviewOnChangeEvent = (input: string) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedQuest) return;
+    if (!selectedQuest)
+    {
+      return;
+    }
 
     // update the entry.
     const updatedQuest = {
@@ -389,7 +350,10 @@ export default function QuestBoard()
   const handleQuestCategoryOnChangeEvent = (input: string) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedQuest) return;
+    if (!selectedQuest)
+    {
+      return;
+    }
 
     // update the entry.
     const updatedQuest = {
@@ -425,7 +389,10 @@ export default function QuestBoard()
   const handleObjectiveTypeOnChangeEvent = (input: string) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedObjective) return;
+    if (!selectedObjective)
+    {
+      return;
+    }
 
     const updatedObjective = {
       ...selectedObjective,
@@ -438,7 +405,10 @@ export default function QuestBoard()
   const handleObjectiveHiddenByDefaultOnChangeEvent = (newState: boolean) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedObjective) return;
+    if (!selectedObjective)
+    {
+      return;
+    }
 
     const updatedObjective = {
       ...selectedObjective,
@@ -451,7 +421,10 @@ export default function QuestBoard()
   const handleObjectiveIsOptionalOnChangeEvent = (newState: boolean) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedObjective) return;
+    if (!selectedObjective)
+    {
+      return;
+    }
 
     const updatedObjective = {
       ...selectedObjective,
@@ -463,7 +436,10 @@ export default function QuestBoard()
 
   const handleObjectiveDescriptionOnChangeEvent = (input: string) =>
   {
-    if (!selectedObjective) return;
+    if (!selectedObjective)
+    {
+      return;
+    }
 
     const updatedObjective = {
       ...selectedObjective,
@@ -475,7 +451,10 @@ export default function QuestBoard()
 
   const handleObjectiveLogsOnChangeEvent = (updatedObjectiveLogs: OmniObjectiveLogs) =>
   {
-    if (!selectedObjective) return;
+    if (!selectedObjective)
+    {
+      return;
+    }
 
     const updatedObjective = {
       ...selectedObjective,
@@ -487,7 +466,10 @@ export default function QuestBoard()
 
   const handleObjectiveFulfillmentIndiscriminateOnChangeEvent = (updatedData: IndiscriminateData) =>
   {
-    if (!selectedObjective) return;
+    if (!selectedObjective)
+    {
+      return;
+    }
 
     const updatedObjective = {
       ...selectedObjective
@@ -499,7 +481,10 @@ export default function QuestBoard()
 
   const handleObjectiveFulfillmentDestinationOnChangeEvent = (updatedData: DestinationData) =>
   {
-    if (!selectedObjective) return;
+    if (!selectedObjective)
+    {
+      return;
+    }
 
     const updatedObjective = {
       ...selectedObjective
@@ -511,7 +496,10 @@ export default function QuestBoard()
 
   const handleObjectiveFulfillmentFetchOnChangeEvent = (updatedData: FetchData) =>
   {
-    if (!selectedObjective) return;
+    if (!selectedObjective)
+    {
+      return;
+    }
 
     const updatedObjective = {
       ...selectedObjective
@@ -523,7 +511,10 @@ export default function QuestBoard()
 
   const handleObjectiveFulfillmentSlayOnChangeEvent = (updatedData: SlayData) =>
   {
-    if (!selectedObjective) return;
+    if (!selectedObjective)
+    {
+      return;
+    }
 
     const updatedObjective = {
       ...selectedObjective
@@ -535,7 +526,10 @@ export default function QuestBoard()
 
   const handleObjectiveFulfillmentQuestOnChangeEvent = (updatedData: QuestData) =>
   {
-    if (!selectedObjective) return;
+    if (!selectedObjective)
+    {
+      return;
+    }
 
     const updatedObjective = {
       ...selectedObjective
@@ -548,7 +542,10 @@ export default function QuestBoard()
   const handleCategoryKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedCategory) return;
+    if (!selectedCategory)
+    {
+      return;
+    }
 
     // grab the updated value from the input.
     const updatedValue = event.target.value;
@@ -568,7 +565,10 @@ export default function QuestBoard()
   const handleCategoryNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedCategory) return;
+    if (!selectedCategory)
+    {
+      return;
+    }
 
     // grab the updated value from the input.
     const updatedValue = event.target.value;
@@ -588,7 +588,10 @@ export default function QuestBoard()
   const handleCategoryIconIndexOnChangeEvent = (value: number) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedCategory) return;
+    if (!selectedCategory)
+    {
+      return;
+    }
 
     const updatedValue = value < -1
       ? -1
@@ -609,7 +612,10 @@ export default function QuestBoard()
   const handleTagKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedTag) return;
+    if (!selectedTag)
+    {
+      return;
+    }
 
     // grab the updated value from the input.
     const updatedValue = event.target.value;
@@ -629,7 +635,10 @@ export default function QuestBoard()
   const handleTagNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedTag) return;
+    if (!selectedTag)
+    {
+      return;
+    }
 
     // grab the updated value from the input.
     const updatedValue = event.target.value;
@@ -649,7 +658,10 @@ export default function QuestBoard()
   const handleTagIconIndexOnChangeEvent = (value: number) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedTag) return;
+    if (!selectedTag)
+    {
+      return;
+    }
 
     const updatedValue = value < -1
       ? -1
@@ -667,7 +679,10 @@ export default function QuestBoard()
     setTags(updatedTags);
   };
 
-  const updateObjective = (updatedObjective: OmniObjective, objectiveIndex: number) =>
+  const updateObjective = (
+    updatedObjective: OmniObjective,
+    objectiveIndex: number
+  ) =>
   {
     setSelectedObjective(updatedObjective);
 
@@ -682,7 +697,10 @@ export default function QuestBoard()
     updateQuest(updatedQuest, selectedQuestIndex);
   };
 
-  const updateQuest = (updatedQuest: OmniQuest, questIndex: number) =>
+  const updateQuest = (
+    updatedQuest: OmniQuest,
+    questIndex: number
+  ) =>
   {
     setSelectedQuest(updatedQuest);
 
@@ -694,7 +712,7 @@ export default function QuestBoard()
   {
     const newFulfillmentData = {
       indiscriminate: {
-        hint: "",
+        hint: '',
       } as IndiscriminateData,
       destination: {
         mapId: -1,
@@ -717,16 +735,16 @@ export default function QuestBoard()
       } as QuestData,
     } as OmniFulfillmentData;
     const newLogs = {
-      inactive: "",
-      active: "",
-      completed: "",
-      failed: "",
-      missed: ""
+      inactive: '',
+      active: '',
+      completed: '',
+      failed: '',
+      missed: ''
     } as OmniObjectiveLogs;
     return {
       id: id,
       type: OmniObjectiveType.Indiscriminate,
-      description: "Do the needful.",
+      description: 'Do the needful.',
       logs: newLogs,
       fulfillment: newFulfillmentData,
       hiddenByDefault: true,
@@ -738,20 +756,23 @@ export default function QuestBoard()
   {
     const newObjective = buildNewObjective(0);
     return {
-      key: "neo-9999",
-      name: "The New Quest!",
-      overview: "Its a new quest to do new things.",
+      key: 'neo-9999',
+      name: 'The New Quest!',
+      overview: 'Its a new quest to do new things.',
       tagKeys: [],
-      categoryKey: categories.at(0)?.key ?? "",
+      categoryKey: categories.at(0)?.key ?? '',
       recommendedLevel: 0,
-      unknownHint: "",
+      unknownHint: '',
       objectives: [ newObjective ],
     } as OmniQuest;
   };
 
   const handleAddNewQuest = (index: number) =>
   {
-    if (!selectedQuest) return;
+    if (!selectedQuest)
+    {
+      return;
+    }
 
     const newQuest = buildNewQuest();
 
@@ -761,7 +782,10 @@ export default function QuestBoard()
 
   const handleCloneQuest = (index: number) =>
   {
-    if (!selectedQuest) return;
+    if (!selectedQuest)
+    {
+      return;
+    }
 
     const clonedObjectives = selectedQuest.objectives.toSpliced(0, 0);
     const newQuest = {
@@ -775,7 +799,10 @@ export default function QuestBoard()
 
   const handleDeleteQuest = (index: number) =>
   {
-    if (!selectedQuest) return;
+    if (!selectedQuest)
+    {
+      return;
+    }
 
     const updatedQuests = quests.toSpliced(index, 1);
     setQuests(updatedQuests);
@@ -783,7 +810,10 @@ export default function QuestBoard()
 
   const handleAddNewObjective = (index: number) =>
   {
-    if (!selectedQuest || !selectedObjective) return;
+    if (!selectedQuest || !selectedObjective)
+    {
+      return;
+    }
 
     const targetId = selectedObjectiveIndex === index
       // if "add new above"
@@ -806,7 +836,10 @@ export default function QuestBoard()
 
   const handleCloneObjective = (index: number) =>
   {
-    if (!selectedQuest || !selectedObjective) return;
+    if (!selectedQuest || !selectedObjective)
+    {
+      return;
+    }
 
     const targetId = selectedObjectiveIndex === index
       // if "add new above"
@@ -833,11 +866,14 @@ export default function QuestBoard()
 
   const handleDeleteObjective = (index: number) =>
   {
-    if (!selectedQuest || !selectedObjective) return;
+    if (!selectedQuest || !selectedObjective)
+    {
+      return;
+    }
 
     if (objectives.length <= 1)
     {
-      handleSnack("Cannot delete last objective, consider modifying it instead.", MuiSnackbarSeverity.Error);
+      handleSnack('Cannot delete last objective, consider modifying it instead.', MuiSnackbarSeverity.Error);
       return;
     }
 
@@ -854,11 +890,14 @@ export default function QuestBoard()
 
   const handleAddNewCategory = (index: number) =>
   {
-    if (!selectedCategory) return;
+    if (!selectedCategory)
+    {
+      return;
+    }
 
     const newCategory = {
       key: `new-category-${categories.length}`,
-      name: "NEW",
+      name: 'NEW',
       iconIndex: -1,
     } as OmniCategory;
 
@@ -868,7 +907,10 @@ export default function QuestBoard()
 
   const handleCloneCategory = (index: number) =>
   {
-    if (!selectedCategory) return;
+    if (!selectedCategory)
+    {
+      return;
+    }
 
     const clonedCategory = {
       key: `${selectedCategory.key}-COPY`,
@@ -882,7 +924,10 @@ export default function QuestBoard()
 
   const handleDeleteCategory = (index: number) =>
   {
-    if (!selectedCategory) return;
+    if (!selectedCategory)
+    {
+      return;
+    }
 
     if (categories.length === 1)
     {
@@ -904,11 +949,14 @@ export default function QuestBoard()
 
   const handleAddNewTag = (index: number) =>
   {
-    if (!selectedTag) return;
+    if (!selectedTag)
+    {
+      return;
+    }
 
     const newTag = {
       key: `new-tag-${tags.length}`,
-      name: "NEW",
+      name: 'NEW',
       iconIndex: -1,
     } as OmniTag;
 
@@ -918,7 +966,10 @@ export default function QuestBoard()
 
   const handleCloneTag = (index: number) =>
   {
-    if (!selectedTag) return;
+    if (!selectedTag)
+    {
+      return;
+    }
 
     const clonedTag = {
       key: `${selectedTag.key}-COPY`,
@@ -932,7 +983,10 @@ export default function QuestBoard()
 
   const handleDeleteTag = (index: number) =>
   {
-    if (!selectedTag) return;
+    if (!selectedTag)
+    {
+      return;
+    }
 
     const affectedQuests = quests.filter(quest => quest.tagKeys.includes(selectedTag.key));
     if (affectedQuests.length > 0)
@@ -957,7 +1011,10 @@ export default function QuestBoard()
 
     const omniQuest = quests.at(index);
 
-    if (!omniQuest) return <></>;
+    if (!omniQuest)
+    {
+      return <></>;
+    }
 
     return <>
       <ListItem key={index} style={style}>
@@ -968,8 +1025,8 @@ export default function QuestBoard()
         >
           <ListItemIcon>
             {(selectedQuestIndex === index)
-              ? <DoubleArrow color={"success"}/>
-              : <KeyboardArrowRight color={"warning"}/>}
+              ? <DoubleArrow color={'success'}/>
+              : <KeyboardArrowRight color={'warning'}/>}
           </ListItemIcon>
           <ListItemText
             primary={`[${omniQuest.key}]: ${omniQuest.name}`}
@@ -978,25 +1035,31 @@ export default function QuestBoard()
           />
         </ListItemButton>
       </ListItem>
-    </>
+    </>;
   };
 
-  const renderCategoryListItem = (category: OmniCategory, index: number) =>
+  const renderCategoryListItem = (
+    category: OmniCategory,
+    index: number
+  ) =>
   {
     return <MenuItem
       key={`${category.key}-${index}`}
       value={category.key}
     >
       {`[${category.key}]: ${category.name}`}
-    </MenuItem>
+    </MenuItem>;
   };
 
-  const renderCategoryDialogListItem = (category: OmniCategory, index: number) =>
+  const renderCategoryDialogListItem = (
+    category: OmniCategory,
+    index: number
+  ) =>
   {
     const isSelected = selectedCategoryIndex === index;
     const icon = isSelected
-      ? <DoubleArrow color={"success"}/>
-      : <KeyboardArrowRight color={"warning"}/>;
+      ? <DoubleArrow color={'success'}/>
+      : <KeyboardArrowRight color={'warning'}/>;
 
     return <ListItem key={`${category.key}-${index}`}>
       <ListItemButton
@@ -1009,15 +1072,18 @@ export default function QuestBoard()
           secondary={category.key}
         />
       </ListItemButton>
-    </ListItem>
+    </ListItem>;
   };
 
-  const renderTagListItem = (tag: OmniTag, index: number) =>
+  const renderTagListItem = (
+    tag: OmniTag,
+    index: number
+  ) =>
   {
     const isSelected = selectedTagIndex === index;
     const icon = isSelected
-      ? <DoubleArrow color={"success"}/>
-      : <KeyboardArrowRight color={"warning"}/>;
+      ? <DoubleArrow color={'success'}/>
+      : <KeyboardArrowRight color={'warning'}/>;
 
     return <ListItem key={`${tag.key}-${index}`}>
       <ListItemButton
@@ -1030,14 +1096,17 @@ export default function QuestBoard()
           secondary={tag.key}
         />
       </ListItemButton>
-    </ListItem>
+    </ListItem>;
   };
 
-  const renderObjectiveListItem = (objective: OmniObjective, index: number) =>
+  const renderObjectiveListItem = (
+    objective: OmniObjective,
+    index: number
+  ) =>
   {
     const icon = (selectedObjectiveIndex === index)
-      ? <DoubleArrow color={"success"}/>
-      : <KeyboardArrowRight color={"warning"}/>;
+      ? <DoubleArrow color={'success'}/>
+      : <KeyboardArrowRight color={'warning'}/>;
 
     return <ListItem key={`${objective.id}-${objective.description}-${index}`}>
       <ListItemButton
@@ -1051,19 +1120,27 @@ export default function QuestBoard()
           disableTypography
         />
       </ListItemButton>
-    </ListItem>
+    </ListItem>;
   };
 
-  const renderObjectiveType = (objectiveTypeKey: string, index: number) =>
+  const renderObjectiveType = (
+    objectiveTypeKey: string,
+    index: number
+  ) =>
   {
     return <MenuItem
       key={`${objectiveTypeKey}-${index}`}
       value={objectiveTypeKey}
     >
       {objectiveTypeKey}
-    </MenuItem>
+    </MenuItem>;
   };
   //endregion render
+
+  if (loading)
+  {
+    return <Typography>Loading quests configuration…</Typography>;
+  }
 
   return <>
     <Grid container spacing={2}>
@@ -1112,11 +1189,11 @@ export default function QuestBoard()
                 {/* name */}
                 <Grid size={6}>
                   <TextField
-                    variant={"filled"}
-                    label={"Name"}
+                    variant={'filled'}
+                    label={'Name'}
                     value={selectedQuest.name}
                     onChange={event => handleQuestNameOnChangeEvent(event.target.value)}
-                    size={"small"}
+                    size={'small'}
                     fullWidth
                   />
                 </Grid>
@@ -1130,7 +1207,10 @@ export default function QuestBoard()
                       label="Quest Category"
                       onChange={event => handleQuestCategoryOnChangeEvent(event.target.value)}
                     >
-                      {categories.map((category, index) => renderCategoryListItem(category, index))}
+                      {categories.map((
+                        category,
+                        index
+                      ) => renderCategoryListItem(category, index))}
                     </Select>
                   </FormControl>
                 </Grid>
@@ -1138,7 +1218,7 @@ export default function QuestBoard()
                 {/* category editor */}
                 <Grid size={1}>
                   <IconButton
-                    color={"success"}
+                    color={'success'}
                     onClick={() =>
                     {
                       const firstCategory = categories.at(0)!;
@@ -1156,9 +1236,9 @@ export default function QuestBoard()
                 {/* recommended level */}
                 <Grid size={2}>
                   <TextField
-                    type={"number"}
-                    label={"Level"}
-                    variant={"outlined"}
+                    type={'number'}
+                    label={'Level'}
+                    variant={'outlined'}
                     value={selectedQuest.recommendedLevel ?? -1}
                     onChange={(event) => handleQuestRecommendedLevelOnChangeEvent(parseInt(event.target.value) ?? -1)}
                     sx={{ width: '80px' }}
@@ -1171,7 +1251,7 @@ export default function QuestBoard()
                 {/* tags */}
                 <Grid size={3}>
                   <Autocomplete
-                    size={"small"}
+                    size={'small'}
                     options={[ ...tags ]}
                     disableCloseOnSelect
                     slotProps={{
@@ -1179,11 +1259,15 @@ export default function QuestBoard()
                         sx: { maxHeight: '170px' }
                       }
                     }}
-                    getOptionKey={(option) => option?.key ?? "no-key"}
-                    getOptionLabel={(option) => option?.name ?? ""}
-                    renderOption={(props, option, { index }) =>
+                    getOptionKey={(option) => option?.key ?? 'no-key'}
+                    getOptionLabel={(option) => option?.name ?? ''}
+                    renderOption={(
+                      props,
+                      option,
+                      { index }
+                    ) =>
                     {
-                      if (option === null || option.name === "" || option.name.startsWith("=="))
+                      if (option === null || option.name === '' || option.name.startsWith('=='))
                       {
                         return <li {...props} style={{ display: 'none' }}/>;
                       }
@@ -1208,9 +1292,9 @@ export default function QuestBoard()
                     {
                       return (<TextField
                         {...params}
-                        size={"small"}
-                        label={"Choose Applicable Tags"}
-                        placeholder="Tags..."/>)
+                        size={'small'}
+                        label={'Choose Applicable Tags'}
+                        placeholder="Tags..."/>);
                     }}
                   />
                 </Grid>
@@ -1218,7 +1302,7 @@ export default function QuestBoard()
                 {/* tag editor */}
                 <Grid size={1}>
                   <IconButton
-                    color={"secondary"}
+                    color={'secondary'}
                     onClick={() =>
                     {
                       const firstTag = tags.at(0)!;
@@ -1236,11 +1320,11 @@ export default function QuestBoard()
                 {/* unknown hint */}
                 <Grid size={12}>
                   <TextField
-                    variant={"standard"}
-                    label={"Unknown Hint"}
+                    variant={'standard'}
+                    label={'Unknown Hint'}
                     value={selectedQuest.unknownHint}
                     onChange={event => handleQuestUnknownHintOnChangeEvent(event.target.value)}
-                    size={"small"}
+                    size={'small'}
                     fullWidth
                   />
                 </Grid>
@@ -1249,11 +1333,11 @@ export default function QuestBoard()
                 {/* description */}
                 <Grid size={12}>
                   <TextField
-                    variant={"outlined"}
-                    label={"Overview"}
+                    variant={'outlined'}
+                    label={'Overview'}
                     value={selectedQuest.overview}
                     onChange={event => handleQuestOverviewOnChangeEvent(event.target.value)}
-                    size={"small"}
+                    size={'small'}
                     multiline
                     fullWidth
                     rows={8}
@@ -1296,35 +1380,35 @@ export default function QuestBoard()
                       <FormControlLabel
                         control={<Checkbox
                           checked={selectedObjective?.hiddenByDefault}
-                          checkedIcon={<VisibilityOff color={"error"}/>}
-                          icon={<Visibility color={"primary"}/>}
+                          checkedIcon={<VisibilityOff color={'error'}/>}
+                          icon={<Visibility color={'primary'}/>}
                           onChange={event => handleObjectiveHiddenByDefaultOnChangeEvent(event.target.checked)}
                         />}
                         label={selectedObjective?.hiddenByDefault
-                          ? "Hidden By Default"
-                          : "Visible by Default"}
-                        labelPlacement={"end"}
+                          ? 'Hidden By Default'
+                          : 'Visible by Default'}
+                        labelPlacement={'end'}
                       />
 
                       <FormControlLabel
                         control={<Checkbox
                           checked={selectedObjective?.isOptional}
-                          checkedIcon={<AddTask color={"success"}/>}
-                          icon={<Block color={"error"}/>}
+                          checkedIcon={<AddTask color={'success'}/>}
+                          icon={<Block color={'error'}/>}
                           onChange={event => handleObjectiveIsOptionalOnChangeEvent(event.target.checked)}
                         />}
                         label={selectedObjective?.isOptional
-                          ? "Is Optional"
-                          : "Is Required"}
-                        labelPlacement={"end"}
+                          ? 'Is Optional'
+                          : 'Is Required'}
+                        labelPlacement={'end'}
                       />
                     </Grid>
 
                     <Grid size={12}>
                       <TextField
-                        variant={"filled"}
-                        label={"Description"}
-                        size={"small"}
+                        variant={'filled'}
+                        label={'Description'}
+                        size={'small'}
                         fullWidth
                         value={selectedObjective?.description}
                         onChange={event => handleObjectiveDescriptionOnChangeEvent(event.target.value)}
@@ -1363,11 +1447,14 @@ export default function QuestBoard()
     {/*region not-grid-related elements */}
     <SaveButton
       extraSaveText={"Quests"}
-      canSave={canSave}
+      canSave={!loading}
       handleSave={async () =>
       {
-        setCanSave(false);
-        await handleSaveButtonOnClickEvent();
+        await save({
+          quests,
+          tags,
+          categories,
+        } as Configuration);
       }}
     />
 
@@ -1507,7 +1594,7 @@ export default function QuestBoard()
     <Dialog
       open={categoryDialogOpen}
       onClose={() => setCategoryDialogOpen(false)}
-      maxWidth={"md"}
+      maxWidth={'md'}
       fullWidth
     >
       <DialogTitle>
@@ -1519,7 +1606,10 @@ export default function QuestBoard()
           <Grid size={4}>
             <div onContextMenu={handleCategoryListContextMenu} style={{ cursor: 'context-menu' }}>
               <List>
-                {categories.map((category, index) => renderCategoryDialogListItem(category, index))}
+                {categories.map((
+                  category,
+                  index
+                ) => renderCategoryDialogListItem(category, index))}
               </List>
             </div>
           </Grid>
@@ -1528,17 +1618,17 @@ export default function QuestBoard()
           <Grid size={8}>
             <Stack spacing={4}>
               {/* Key */}
-              <Tooltip title={"Modifying the key will require updating quests associated with this category."}>
+              <Tooltip title={'Modifying the key will require updating quests associated with this category.'}>
                 <TextField
                   required
-                  variant={"filled"}
-                  label={"Key"}
+                  variant={'filled'}
+                  label={'Key'}
                   value={selectedCategory?.key}
                   onChange={handleCategoryKeyOnChangeEvent}
-                  size={"small"}
+                  size={'small'}
                   slotProps={{
                     input: {
-                      startAdornment: <InputAdornment position={"start"}>
+                      startAdornment: <InputAdornment position={'start'}>
                         <Key/>
                       </InputAdornment>
                     }
@@ -1549,17 +1639,17 @@ export default function QuestBoard()
 
               {/* Name */}
               <TextField
-                variant={"filled"}
-                label={"Name"}
+                variant={'filled'}
+                label={'Name'}
                 value={selectedCategory?.name}
                 onChange={handleCategoryNameOnChangeEvent}
-                size={"small"}
+                size={'small'}
               />
 
               {/* Icon */}
               <TextField
-                type={"number"}
-                label={"Icon Index"}
+                type={'number'}
+                label={'Icon Index'}
                 value={selectedCategory?.iconIndex ?? -1}
                 sx={{ width: '100px' }}
                 onChange={(event) => handleCategoryIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
@@ -1570,9 +1660,9 @@ export default function QuestBoard()
       </DialogContent>
       <DialogActions>
         <Button
-          variant={"contained"}
+          variant={'contained'}
           startIcon={<Check/>}
-          color={"success"}
+          color={'success'}
           onClick={() => setCategoryDialogOpen(false)}
         >
           <Typography>Done Modifying Categories</Typography>
@@ -1644,7 +1734,7 @@ export default function QuestBoard()
     <Dialog
       open={tagDialogOpen}
       onClose={() => setTagDialogOpen(false)}
-      maxWidth={"md"}
+      maxWidth={'md'}
       fullWidth
     >
       <DialogTitle>
@@ -1656,7 +1746,10 @@ export default function QuestBoard()
           <Grid size={4}>
             <div onContextMenu={handleTagListContextMenu} style={{ cursor: 'context-menu' }}>
               <List>
-                {tags.map((tag, index) => renderTagListItem(tag, index))}
+                {tags.map((
+                  tag,
+                  index
+                ) => renderTagListItem(tag, index))}
               </List>
             </div>
           </Grid>
@@ -1665,17 +1758,17 @@ export default function QuestBoard()
           <Grid size={8}>
             <Stack spacing={4}>
               {/* Key */}
-              <Tooltip title={"Modifying the key will require updating quests associated with this category."}>
+              <Tooltip title={'Modifying the key will require updating quests associated with this category.'}>
                 <TextField
                   required
-                  variant={"filled"}
-                  label={"Key"}
+                  variant={'filled'}
+                  label={'Key'}
                   value={selectedTag?.key}
                   onChange={handleTagKeyOnChangeEvent}
-                  size={"small"}
+                  size={'small'}
                   slotProps={{
                     input: {
-                      startAdornment: <InputAdornment position={"start"}>
+                      startAdornment: <InputAdornment position={'start'}>
                         <Key/>
                       </InputAdornment>
                     }
@@ -1685,17 +1778,17 @@ export default function QuestBoard()
 
               {/* Name */}
               <TextField
-                variant={"filled"}
-                label={"Name"}
+                variant={'filled'}
+                label={'Name'}
                 value={selectedTag?.name}
                 onChange={handleTagNameOnChangeEvent}
-                size={"small"}
+                size={'small'}
               />
 
               {/* Icon */}
               <TextField
-                type={"number"}
-                label={"Icon Index"}
+                type={'number'}
+                label={'Icon Index'}
                 value={selectedTag?.iconIndex ?? -1}
                 sx={{ width: '100px' }}
                 onChange={(event) => handleTagIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
@@ -1706,9 +1799,9 @@ export default function QuestBoard()
       </DialogContent>
       <DialogActions>
         <Button
-          variant={"contained"}
+          variant={'contained'}
           startIcon={<Check/>}
-          color={"success"}
+          color={'success'}
           onClick={() => setTagDialogOpen(false)}
         >
           <Typography>Done Modifying Tags</Typography>
@@ -1780,3 +1873,5 @@ export default function QuestBoard()
     {/*endregion not-grid-related elements */}
   </>
 }
+
+export default QuestBoard;

@@ -1,12 +1,12 @@
 import DatabaseFilenames from "@core/enums/DatabaseFilenames.ts";
+import { RPG_ActorDomainModel } from "@core/domain/entities/RPG_ActorDomainModel.ts";
 import { createResourceContext } from '@presentation/context/resources/factories/context.factory.tsx';
-import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
 
 export const {
-  Provider: EnemiesProvider,
-  useResource: useEnemies
+  Provider: ActorsProvider,
+  useResource: useActors
 } = createResourceContext(
-  DatabaseFilenames.Enemies,
-  RPG_EnemyDomainModel,
-  "Enemies"
+  DatabaseFilenames.Actors,
+  RPG_ActorDomainModel,
+  "Actors"
 );

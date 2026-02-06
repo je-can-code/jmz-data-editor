@@ -96,6 +96,7 @@ const SdpBoard = () =>
 {
   const {
     sdps,
+    setData: setSdps,
     loading,
     save,
     reload
@@ -104,7 +105,6 @@ const SdpBoard = () =>
   //region state
   const listRef = useRef<FixedSizeList>(null);
 
-  const [ panels, setPanels ] = useState<Panel[]>([]);
   const [ selectedPanel, setSelectedPanel ] = useState<Panel | null>(null);
   const [ selectedPanelIndex, setSelectedPanelIndex ] = useState<number>(0);
   const [ panelListContextMenu, setPanelListContextMenu ] = useState<{
@@ -113,22 +113,17 @@ const SdpBoard = () =>
   } | null>(null);
   const [ searchTerm, setSearchTerm ] = useState<string>('');
 
-  const [ panelParameters, setPanelParameters ] = useState<PanelParameter[]>([]);
-  const [ selectedPanelParameter, setSelectedPanelParameter ] = useState<PanelParameter>();
+  const [ selectedPanelParameter, setSelectedPanelParameter ] = useState<PanelParameter | null>(null);
   const [ selectedPanelParameterIndex, setSelectedPanelParameterIndex ] = useState<number>(0);
   const [ parameterListContextMenu, setParameterListContextMenu ] = useState<{
     mouseX: number;
     mouseY: number;
   } | null>(null);
 
-  const isDirty = useMemo(() =>
-  {
-    return JSON.stringify(panels) !== JSON.stringify(sdps);
-  }, [ panels, sdps ]);
+  const [ canSave, setCanSave ] = useState<boolean>(false);
 
-  const [ panelRewards, setPanelRewards ] = useState<PanelReward[]>([]);
-  const [ selectedPanelReward, setSelectedPanelReward ] = useState<PanelReward>();
-  const [ selectedPanelRewardIndex, setSelectedPanelRewardIndex ] = useState(0);
+  const [ selectedPanelReward, setSelectedPanelReward ] = useState<PanelReward | null>(null);
+  const [ selectedPanelRewardIndex, setSelectedPanelRewardIndex ] = useState<number>(0);
   const [ rewardListContextMenu, setRewardListContextMenu ] = useState<{
     mouseX: number;
     mouseY: number;
@@ -148,111 +143,82 @@ const SdpBoard = () =>
 
   //region setup
   /**
-   * Initializes the board with the data from the configuration.
+   * Initializes the board selection when data is loaded.
    */
   useEffect(() =>
   {
-    if (sdps.length > 0)
+    if (sdps.length > 0 && !selectedPanel)
     {
-      setPanels(sdps);
-
-      // Maintain selection if possible, or select first panel.
-      if (!selectedPanel && sdps.length > 0)
-      {
-        const firstPanel = sdps.at(0)!; // Note: Original code used .at(1), ensure correct index
-        setSelectedPanel(firstPanel);
-        setSelectedPanelIndex(0);
-        setPanelParameters(firstPanel.panelParameters);
-      }
+      const firstPanel = sdps.at(0)!;
+      syncSelectionWithPanel(firstPanel, 0);
     }
-  }, [ sdps ]);
+  }, [ sdps, selectedPanel ]);
 
   useEffect(() =>
   {
-    if (panels.length === 0)
-    {
-      return;
-    }
-    if (selectedPanelIndex < 0)
+    if (sdps.length === 0 || selectedPanelIndex < 0)
     {
       return;
     }
 
     scrollListToIndex(selectedPanelIndex, 'smart');
-  }, [ selectedPanelIndex, panels.length ]);
+  }, [ selectedPanelIndex, sdps.length ]);
+
+  /**
+   * Syncs the entire board state when a new panel is selected.
+   * @param {Panel | null} panel The panel to select.
+   * @param {number} index The index of the panel in the master list.
+   */
+  const syncSelectionWithPanel = (
+    panel: Panel | null,
+    index: number
+  ) =>
+  {
+    setSelectedPanelIndex(index);
+    setSelectedPanel(panel);
+
+    // Automatically select the first parameter of the panel.
+    const firstParam = panel?.panelParameters?.at(0) ?? null;
+    setSelectedPanelParameter(firstParam);
+    setSelectedPanelParameterIndex(0);
+
+    // Automatically select the first reward of the panel.
+    const firstReward = panel?.panelRewards?.at(0) ?? null;
+    setSelectedPanelReward(firstReward);
+    setSelectedPanelRewardIndex(0);
+  };
   //endregion setup
 
   //region actions
   const handleSdpListItemOnClickEvent = (index: number) =>
   {
-    if (panels.length === 0)
+    const panel = sdps.at(index) ?? null;
+    syncSelectionWithPanel(panel, index);
+    if (panel)
     {
-      return;
+      updateUrl(panel);
     }
-
-    const panel = panels.at(index);
-    if (!panel) return;
-
-    setSelectedPanelIndex(index);
-    setSelectedPanel(panel);
-
-    // Sync parameters
-    const parameters = panel.panelParameters ?? [];
-    setPanelParameters(parameters);
-    setSelectedPanelParameterIndex(0);
-    setSelectedPanelParameter(parameters.at(0));
-
-    // Sync rewards
-    const rewards = panel.panelRewards ?? [];
-    setPanelRewards(rewards);
-    setSelectedPanelRewardIndex(0);
-    setSelectedPanelReward(rewards.at(0));
-
-    updateUrl(panel);
   };
 
   const { updateUrl } = useUrlSelection(
-    "sdpKey",
-    panels,
+    'sdpKey',
+    sdps,
     (p) => p.key,
     selectedPanelIndex,
     handleSdpListItemOnClickEvent,
-    (index) => scrollListToIndex(index, "smart")
+    (index) => scrollListToIndex(index, 'smart')
   );
 
   const handleSdpPanelParameterListItemOnClickEvent = (index: number) =>
   {
     setSelectedPanelParameterIndex(index);
-
-    if (panelParameters.length > 0)
-    {
-      const panelParameter = panelParameters.at(index)!;
-      setSelectedPanelParameter(panelParameter);
-    }
+    setSelectedPanelParameter(selectedPanel?.panelParameters.at(index) ?? null);
   };
 
   const handleSdpPanelRewardListItemOnClickEvent = (index: number) =>
   {
     setSelectedPanelRewardIndex(index);
-
-    if (panelParameters.length > 0)
-    {
-      const panelReward = panelRewards.at(index)!;
-      setSelectedPanelReward(panelReward);
-    }
-  };
-
-  const handleSaveButtonOnClickEvent = async () =>
-  {
-    try
-    {
-      await save(panels);
-      handleSnack('SDP data has been saved successfully.', MuiSnackbarSeverity.Success);
-    }
-    catch (error)
-    {
-      handleSnack('Failed to save SDP data.', MuiSnackbarSeverity.Error);
-    }
+    setSelectedPanelReward(selectedPanel?.panelRewards.at(index) ?? null);
   };
 
   const handleReloadButtonOnClickEvent = async () =>
@@ -355,8 +321,8 @@ const SdpBoard = () =>
       panelRewards: clonedRewards,
     } as Panel;
 
-    const updatedPanels = panels.toSpliced(cloneFromInsertIndex, 0, clonedPanel);
-    setPanels(updatedPanels);
+    const updatedsdps = sdps.toSpliced(cloneFromInsertIndex, 0, clonedPanel);
+    setSdps(updatedsdps);
 
     setCloneFromDialogOpen(false);
   };
@@ -371,7 +337,7 @@ const SdpBoard = () =>
     }
 
     // find the first non-header panel whose key or name matches
-    const foundIndex = panels.findIndex(panel =>
+    const foundIndex = sdps.findIndex(panel =>
     {
       if (!panel)
       {
@@ -433,6 +399,16 @@ const SdpBoard = () =>
   //endregion actions
 
   //region updates
+  /**
+   * Centralized helper to apply updated panels to the context and enable saving.
+   * @param {Panel[]} updatedPanels The updated list of SDP panels.
+   */
+  const applyPanels = (updatedPanels: Panel[]) =>
+  {
+    setSdps(updatedPanels);
+    setCanSave(true);
+  };
+
   const handlePanelKeyChange = (input: string) =>
   {
     const updatedPanel = {
@@ -619,54 +595,73 @@ const SdpBoard = () =>
     updatePanelRewards(updatedPanelReward, selectedPanelRewardIndex);
   };
 
+  /**
+   * Updates a specific parameter within the currently selected panel.
+   * @param {PanelParameter} updatedParam The updated parameter data.
+   * @param {number} index The index of the parameter in the panel's list.
+   */
   const updatePanelParameters = (
-    updatedPanelParameter: PanelParameter,
+    updatedParam: PanelParameter,
     index: number
   ) =>
   {
-    const updatedPanelParameters = panelParameters.with(index, updatedPanelParameter);
-    setPanelParameters(updatedPanelParameters);
+    if (!selectedPanel)
+    {
+      return;
+    }
 
-    const updatedPanel = {
+    const updatedParams = selectedPanel.panelParameters.with(index, updatedParam);
+    setSelectedPanelParameter(updatedParam);
+
+    updatePanel({
       ...selectedPanel,
-      panelParameters: updatedPanelParameters,
-    } as Panel;
-
-    updatePanel(updatedPanel, selectedPanelIndex);
+      panelParameters: updatedParams,
+    }, selectedPanelIndex);
   };
 
+  /**
+   * Updates a specific reward within the currently selected panel.
+   * @param {PanelReward} updatedReward The updated reward data.
+   * @param {number} index The index of the reward in the panel's list.
+   */
   const updatePanelRewards = (
-    updatedPanelReward: PanelReward,
+    updatedReward: PanelReward,
     index: number
   ) =>
   {
-    const updatedPanelRewards = panelRewards.with(index, updatedPanelReward);
-    setPanelRewards(updatedPanelRewards);
+    if (!selectedPanel)
+    {
+      return;
+    }
 
-    const updatedPanel = {
+    const updatedRewards = selectedPanel.panelRewards.with(index, updatedReward);
+    setSelectedPanelReward(updatedReward);
+
+    updatePanel({
       ...selectedPanel,
-      panelRewards: updatedPanelRewards,
-    } as Panel;
-
-    updatePanel(updatedPanel, selectedPanelIndex);
+      panelRewards: updatedRewards,
+    }, selectedPanelIndex);
   };
 
+  /**
+   * Updates the global SDP list and syncs local selection.
+   * @param {Panel} updatedPanel The updated panel data.
+   * @param {number} index The index of the panel in the master list.
+   */
   const updatePanel = (
     updatedPanel: Panel,
     index: number
   ) =>
   {
     setSelectedPanel(updatedPanel);
-
-    const updatedPanels = panels.with(index, updatedPanel);
-    setPanels(updatedPanels);
+    applyPanels(sdps.with(index, updatedPanel));
   };
 
   const handleAddNewPanel = (index: number | null) =>
   {
     const newPanel = {
-      key: `NEO-${panels.length}`,
-      name: `New Panel # ${panels.length}`,
+      key: `NEO-${sdps.length}`,
+      name: `New Panel # ${sdps.length}`,
       iconIndex: -1,
       unlockedByDefault: false,
       description: 'The best panel ever, hands down. You only need to acquire it somehow!',
@@ -680,12 +675,11 @@ const SdpBoard = () =>
       rarity: 0,
     } as Panel;
 
-    const updatedPanels = (
-      index === null
-    )
+    const updatedsdps = (index === null)
       ? [ newPanel ]
-      : panels.toSpliced(index, 0, newPanel);
-    setPanels(updatedPanels);
+      : sdps.toSpliced(index, 0, newPanel);
+
+    applyPanels(updatedsdps);
   };
 
   const handleClonePanel = (index: number) =>
@@ -703,8 +697,8 @@ const SdpBoard = () =>
       panelRewards: clonedRewards,
     } as Panel;
 
-    const updatedPanels = panels.toSpliced(index, 0, clonedPanel);
-    setPanels(updatedPanels);
+    const updatedsdps = sdps.toSpliced(index, 0, clonedPanel);
+    applyPanels(updatedsdps);
   };
 
   const handleDeletePanel = (index: number) =>
@@ -714,12 +708,21 @@ const SdpBoard = () =>
       return;
     }
 
-    const updatedPanels = panels.toSpliced(index, 1);
-    setPanels(updatedPanels);
+    const updatedsdps = sdps.toSpliced(index, 1);
+    applyPanels(updatedsdps);
   };
 
+  /**
+   * Adds a new parameter to the currently selected panel.
+   * @param {number | null} index The index to insert at, or null to start a new list.
+   */
   const handleAddNewPanelParameter = (index: number | null) =>
   {
+    if (!selectedPanel)
+    {
+      return;
+    }
+
     const newParameter = {
       parameterId: 0,
       isCore: false,
@@ -727,23 +730,23 @@ const SdpBoard = () =>
       perRank: 3,
     } as PanelParameter;
 
-    const updatedParameters = (
-      index === null
-    )
+    const updatedParameters = (index === null)
       ? [ newParameter ]
-      : panelParameters.toSpliced(index, 0, newParameter);
-    setPanelParameters(updatedParameters);
+      : selectedPanel.panelParameters.toSpliced(index, 0, newParameter);
 
-    const updatedPanel = {
+    updatePanel({
       ...selectedPanel,
       panelParameters: updatedParameters,
-    } as Panel;
-    updatePanel(updatedPanel, selectedPanelIndex);
+    }, selectedPanelIndex);
   };
 
+  /**
+   * Clones an existing parameter within the selected panel.
+   * @param {number} index The index of the parameter to clone.
+   */
   const handleClonePanelParameter = (index: number) =>
   {
-    if (!selectedPanelParameter)
+    if (!selectedPanel || !selectedPanelParameter)
     {
       return;
     }
@@ -752,58 +755,67 @@ const SdpBoard = () =>
       ...selectedPanelParameter,
     } as PanelParameter;
 
-    const updatedParameters = panelParameters.toSpliced(index, 0, clonedParameter);
-    setPanelParameters(updatedParameters);
+    const updatedParameters = selectedPanel.panelParameters.toSpliced(index, 0, clonedParameter);
 
-    const updatedPanel = {
+    updatePanel({
       ...selectedPanel,
       panelParameters: updatedParameters,
-    } as Panel;
-    updatePanel(updatedPanel, selectedPanelIndex);
+    }, selectedPanelIndex);
   };
 
+  /**
+   * Deletes a parameter from the selected panel.
+   * @param {number} index The index of the parameter to remove.
+   */
   const handleDeletePanelParameter = (index: number) =>
   {
-    if (!selectedPanelParameter)
+    if (!selectedPanel)
     {
       return;
     }
 
-    const updatedParameters = panelParameters.toSpliced(index, 1);
-    setPanelParameters(updatedParameters);
+    const updatedParameters = selectedPanel.panelParameters.toSpliced(index, 1);
 
-    const updatedPanel = {
+    updatePanel({
       ...selectedPanel,
       panelParameters: updatedParameters,
-    } as Panel;
-    updatePanel(updatedPanel, selectedPanelIndex);
+    }, selectedPanelIndex);
   };
 
+  /**
+   * Adds a new reward to the currently selected panel.
+   * @param {number | null} index The index to insert at, or null to start a new list.
+   */
   const handleAddNewPanelReward = (index: number | null) =>
   {
+    if (!selectedPanel)
+    {
+      return;
+    }
+
     const newReward = {
-      rewardName: `REWARD # ${panelRewards.length}`,
+      rewardName: `REWARD # ${selectedPanel.panelRewards.length}`,
       rankRequired: 0,
       effect: ''
     } as PanelReward;
 
-    const updatedRewards = (
-      index === null
-    )
+    const updatedRewards = (index === null)
       ? [ newReward ]
-      : panelRewards.toSpliced(index, 0, newReward);
-    setPanelRewards(updatedRewards);
+      : selectedPanel.panelRewards.toSpliced(index, 0, newReward);
 
-    const updatedPanel = {
+    updatePanel({
       ...selectedPanel,
       panelRewards: updatedRewards,
-    } as Panel;
-    updatePanel(updatedPanel, selectedPanelIndex);
+    }, selectedPanelIndex);
   };
 
+  /**
+   * Clones an existing reward within the selected panel.
+   * @param {number} index The index of the reward to clone.
+   */
   const handleClonePanelReward = (index: number) =>
   {
-    if (!selectedPanelReward)
+    if (!selectedPanel || !selectedPanelReward)
     {
       return;
     }
@@ -812,38 +824,38 @@ const SdpBoard = () =>
       ...selectedPanelReward
     } as PanelReward;
 
-    const updatedRewards = panelRewards.toSpliced(index, 0, clonedReward);
-    setPanelRewards(updatedRewards);
+    const updatedRewards = selectedPanel.panelRewards.toSpliced(index, 0, clonedReward);
 
-    const updatedPanel = {
+    updatePanel({
       ...selectedPanel,
       panelRewards: updatedRewards,
-    } as Panel;
-    updatePanel(updatedPanel, selectedPanelIndex);
+    }, selectedPanelIndex);
   };
 
+  /**
+   * Deletes a reward from the selected panel.
+   * @param {number} index The index of the reward to remove.
+   */
   const handleDeletePanelReward = (index: number) =>
   {
-    if (!selectedPanelReward)
+    if (!selectedPanel)
     {
       return;
     }
 
-    const updatedRewards = panelRewards.toSpliced(index, 1);
-    setPanelRewards(updatedRewards);
+    const updatedRewards = selectedPanel.panelRewards.toSpliced(index, 1);
 
-    const updatedPanel = {
+    updatePanel({
       ...selectedPanel,
       panelRewards: updatedRewards,
-    } as Panel;
-    updatePanel(updatedPanel, selectedPanelIndex);
+    }, selectedPanelIndex);
   };
   //endregion updates
 
   //region render
   const isHeaderRow = (index: number) =>
   {
-    const sdp = panels.at(index);
+    const sdp = sdps.at(index);
     if (!sdp)
     {
       return false;
@@ -858,7 +870,7 @@ const SdpBoard = () =>
       style
     } = props;
 
-    const sdp = panels.at(index);
+    const sdp = sdps.at(index);
     if (!sdp)
     {
       return <></>;
@@ -875,7 +887,7 @@ const SdpBoard = () =>
     } as const;
 
     // Determine if a divider should appear below this row (i.e., next row is a header)
-    const next = panels.at(index + 1);
+    const next = sdps.at(index + 1);
     const isNextHeader = isHeaderRow(index + 1) ?? false;
     const nextHeaderColor = isNextHeader
       ? fromRarityColorIndexToColor(next!.rarity)
@@ -1291,7 +1303,7 @@ const SdpBoard = () =>
 
   if (loading)
   {
-    return <CircularProgress/>;
+    return <Typography>Loading SDP configuration...</Typography>;
   }
 
   return <>
@@ -1331,7 +1343,7 @@ const SdpBoard = () =>
           onContextMenu={handlePanelListContextMenu}
           style={{ cursor: 'context-menu' }}
         >
-          {panels.length > 0
+          {sdps.length > 0
             ? <>
               {/* @ts-ignore */}
               <FixedSizeList
@@ -1340,7 +1352,7 @@ const SdpBoard = () =>
                 width={'100%'}
                 itemSize={30}
                 overscanCount={5}
-                itemCount={panels.length}
+                itemCount={sdps.length}
               >
                 {renderSdpListItem}
               </FixedSizeList>
@@ -1369,7 +1381,7 @@ const SdpBoard = () =>
           )
             ? <Typography>
               Please select a panel on the left.<br/>
-              If there are no panels then consider making one.
+              If there are no sdps then consider making one.
             </Typography>
             : <>
               <Grid container rowSpacing={2} columnSpacing={4}>
@@ -1546,14 +1558,15 @@ const SdpBoard = () =>
 
                 {/* ROW 5 */}
                 {/* Parameter List */}
+                {/* Parameter List */}
                 <Grid size={3}>
                   <div
                     onContextMenu={handleParameterListContextMenu}
                     style={{ cursor: 'context-menu' }}
                   >
                     <List dense>
-                      {panelParameters.length > 0
-                        ? panelParameters.map(renderSdpParameterListItem)
+                      {(selectedPanel?.panelParameters?.length ?? 0) > 0
+                        ? selectedPanel!.panelParameters.map(renderSdpParameterListItem)
                         : <>
                           <Button
                             fullWidth
@@ -1656,8 +1669,8 @@ const SdpBoard = () =>
                         style={{ cursor: 'context-menu' }}
                       >
                         <List dense>
-                          {panelRewards.length > 0
-                            ? panelRewards.map(renderPanelRewardListItem)
+                          {(selectedPanel?.panelRewards?.length ?? 0) > 0
+                            ? selectedPanel!.panelRewards.map(renderPanelRewardListItem)
                             : <>
                               <Button
                                 fullWidth
@@ -1720,9 +1733,14 @@ const SdpBoard = () =>
 
     {/*region not-grid-related elements */}
     <SaveButton
-      extraSaveText={'Panels'}
-      canSave={isDirty}
-      handleSave={handleSaveButtonOnClickEvent}
+      extraSaveText={'sdps'}
+      canSave={canSave && !loading}
+      handleSave={async () =>
+      {
+        setCanSave(false);
+        await save(sdps);
+        handleSnack('SDP data has been saved successfully.', MuiSnackbarSeverity.Success);
+      }}
     />
     <ReloadButton
       handleReload={handleReloadButtonOnClickEvent}
@@ -1991,7 +2009,7 @@ const SdpBoard = () =>
         <Stack spacing={2}>
           <Autocomplete
             size={'small'}
-            options={panels}
+            options={sdps}
             getOptionKey={(option) => option?.key ?? 'no-key'}
             getOptionLabel={(option) => option?.name ?? ''}
             isOptionEqualToValue={(
@@ -2013,7 +2031,7 @@ const SdpBoard = () =>
               return <TextField
                 {...params}
                 size={'small'}
-                label={'Panels'}
+                label={'sdps'}
                 placeholder="Search panel name..."
                 helperText={'Pick the panel to clone and insert at the chosen position.'}
               />;
