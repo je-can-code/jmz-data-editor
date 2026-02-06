@@ -84,11 +84,11 @@ const EnemiesBoard = () =>
 {
   //region state
   const {
-    enemies,
-    setEnemies,
+    data: enemies,
+    setData: setEnemies,
     loading,
     save,
-    reload,
+    reload
   } = useEnemies();
   const [ selectedEnemy, setSelectedEnemy ] = useState<RPG_EnemyDomainModel | null>(null);
   const [ selectedEnemyIndex, setSelectedEnemyIndex ] = useState<number>(0);

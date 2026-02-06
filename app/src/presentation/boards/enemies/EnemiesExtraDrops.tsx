@@ -21,11 +21,11 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Typography
-} from "@mui/material";
+} from '@mui/material';
 import React, {
   useEffect,
   useState
-} from "react";
+} from 'react';
 import {
   Add,
   AutoAwesome,
@@ -38,29 +38,33 @@ import {
   QuestionMark,
   Shield,
   Sync
-} from "@mui/icons-material";
-import {
-  loadArmors,
-  loadItems,
-  loadWeapons
-} from "@services/DataService.ts";
-import DropItemType from "@core/enums/DropItemType.ts";
+} from '@mui/icons-material';
+import DropItemType from '@core/enums/DropItemType.ts';
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "@core/enums/MuiSnackbar.ts";
-import { brown } from "@mui/material/colors";
+} from '@core/enums/MuiSnackbar.ts';
+import { brown } from '@mui/material/colors';
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Armor = Rmmz.Implementations.RPG_Armor;
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
 import RPG_Item = Rmmz.Implementations.RPG_Item;
-import { useProjectPath } from "@presentation/context/project-path.context.tsx";
-import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
+import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
+import { useItems } from '@presentation/context/resources/items.context.tsx';
+import { useWeapons } from '@presentation/context/resources/weapons.context.tsx';
+import { useArmors } from '@presentation/context/resources/armors.context.tsx';
+import { RPG_ItemDomainModel } from '@core/domain/entities/RPG_ItemDomainModel.ts';
+import { RPG_WeaponDomainModel } from '@core/domain/entities/RPG_WeaponDomainModel.ts';
+import { RPG_ArmorDomainModel } from '@core/domain/entities/RPG_ArmorDomainModel.ts';
 
 type EnemiesExtraDropProps = {
   selectedEnemy: RPG_EnemyDomainModel;
-  updateEnemy: (enemy: RPG_EnemyDomainModel) => void; // Changed from updateEnemyWithNewDropItems
-  handleSnack: (message: string, severity?: MuiSnackbarSeverity, variant?: MuiSnackbarVariant) => void;
+  updateEnemy: (enemy: RPG_EnemyDomainModel) => void;
+  handleSnack: (
+    message: string,
+    severity?: MuiSnackbarSeverity,
+    variant?: MuiSnackbarVariant
+  ) => void;
 };
 
 const EnemiesExtraDrops = ({
@@ -69,11 +73,19 @@ const EnemiesExtraDrops = ({
   handleSnack,
 }: EnemiesExtraDropProps) =>
 {
-  const { projectPath } = useProjectPath();
   //region state
-  const [ items, setItems ] = useState<RPG_Item[]>([]);
-  const [ weapons, setWeapons ] = useState<RPG_Weapon[]>([]);
-  const [ armors, setArmors ] = useState<RPG_Armor[]>([]);
+  const {
+    data: items,
+    loading: itemsLoading
+  } = useItems();
+  const {
+    data: weapons,
+    loading: weaponsLoading
+  } = useWeapons();
+  const {
+    data: armors,
+    loading: armorsLoading
+  } = useArmors();
 
   const [ selectedDropItem, setSelectedDropItem ] = useState<RPG_DropItem | null>(null);
   const [ selectedDropItemIndex, setSelectedDropItemIndex ] = useState<number>(0);
@@ -85,58 +97,27 @@ const EnemiesExtraDrops = ({
     mouseY: number;
   } | null>(null);
   const [ dropItemModifier, setDropItemModifier ] = useState(false);
-
   //endregion state
 
   //region setup
+  /**
+   * When an enemy changes, reset the selected drop item and pending drop item.
+   */
   useEffect(() =>
   {
-    let ignore = false;
-    if (projectPath === null || projectPath === '' || !projectPath.endsWith("/data"))
-    {
-      console.error(`invalid path provided: ${projectPath}`);
-      return;
-    }
-
-    // a helper function for initializing the state of this component based on the configuration file.
-    const initializeState = async (projectPath: string) =>
-    {
-      // TODO: add popup warning in this method and add a reset button?
-
-      setSelectedDropItemType(null);
-
-      const itemData = await loadItems(projectPath);
-      if (!ignore && itemData)
-      {
-        setItems(itemData);
-      }
-
-      const weaponData = await loadWeapons(projectPath);
-      if (!ignore && weaponData)
-      {
-        setWeapons(weaponData);
-      }
-
-      const armorData = await loadArmors(projectPath);
-      if (!ignore && armorData)
-      {
-        setArmors(armorData);
-      }
-    };
-
-    initializeState(projectPath)
-      .catch(console.error);
-    return () =>
-    {
-      ignore = true;
-    }
-  }, [ projectPath ]);
+    setSelectedDropItemType(null);
+    setSelectedDropItem(null);
+    setPendingDropItem(null);
+  }, [ selectedEnemy.id ]);
   //endregion setup
 
   //region actions
   const handleEnemyDropItemListItemOnClickEvent = (index: number) =>
   {
-    if (!selectedEnemy.extraDrops.length) return;
+    if (!selectedEnemy.extraDrops.length)
+    {
+      return;
+    }
 
     setSelectedDropItemIndex(index);
 
@@ -175,13 +156,13 @@ const EnemiesExtraDrops = ({
     let dropItemType = DropItemType.Item;
     switch (true)
     {
-      case Object.hasOwn(clickedDropItem, "itypeId"):
+      case Object.hasOwn(clickedDropItem, 'itypeId'):
         dropItemType = DropItemType.Item;
         break;
-      case Object.hasOwn(clickedDropItem, "wtypeId"):
+      case Object.hasOwn(clickedDropItem, 'wtypeId'):
         dropItemType = DropItemType.Weapon;
         break;
-      case Object.hasOwn(clickedDropItem, "atypeId"):
+      case Object.hasOwn(clickedDropItem, 'atypeId'):
         dropItemType = DropItemType.Armor;
         break;
     }
@@ -211,7 +192,7 @@ const EnemiesExtraDrops = ({
 
     // Update the array on the model
     selectedEnemy.extraDrops = (index === null)
-      ? [newDropItem]
+      ? [ newDropItem ]
       : selectedEnemy.extraDrops.toSpliced(index, 0, newDropItem);
 
     updateEnemy(selectedEnemy);
@@ -221,7 +202,7 @@ const EnemiesExtraDrops = ({
   {
     if (selectedDropItem === null)
     {
-      handleSnack("Must select a drop to clone.", MuiSnackbarSeverity.Error);
+      handleSnack('Must select a drop to clone.', MuiSnackbarSeverity.Error);
       return;
     }
 
@@ -241,7 +222,10 @@ const EnemiesExtraDrops = ({
     updateEnemy(selectedEnemy);
   };
 
-  const handleDropItemTypeOnChangeEvent = (_: any, newValue: DropItemType) =>
+  const handleDropItemTypeOnChangeEvent = (
+    _: any,
+    newValue: DropItemType
+  ) =>
   {
     setSelectedDropItemType(newValue);
   };
@@ -249,7 +233,10 @@ const EnemiesExtraDrops = ({
   const handlePendingDropItemChanceOnChangeEvent = (value: number) =>
   {
     // if there is no entry, stop processing.
-    if (!pendingDropItem) return;
+    if (!pendingDropItem)
+    {
+      return;
+    }
 
     const updatedValue = value < 1
       ? 1
@@ -264,7 +251,10 @@ const EnemiesExtraDrops = ({
 
   const handleOverrideSelectedWithPendingDropItemOnClickEvent = () =>
   {
-    if (!pendingDropItem || !selectedDropItem) return;
+    if (!pendingDropItem || !selectedDropItem)
+    {
+      return;
+    }
 
     const updatedSelectedDropItem = {
       kind: pendingDropItem.kind,
@@ -282,34 +272,40 @@ const EnemiesExtraDrops = ({
   //region render
   const renderExtraDropItems = () =>
   {
-    if (selectedEnemy.extraDrops.length === 0) return <></>;
+    if (selectedEnemy.extraDrops.length === 0)
+    {
+      return <></>;
+    }
 
     return selectedEnemy.extraDrops.map(renderExtraDropItem);
   };
 
-  const renderExtraDropItem = (dropItem: RPG_DropItem, index: number) =>
+  const renderExtraDropItem = (
+    dropItem: RPG_DropItem,
+    index: number
+  ) =>
   {
     let icon = <></>;
-    let drop: RPG_Item | RPG_Weapon | RPG_Armor | null = null;
+    let drop: RPG_ItemDomainModel | RPG_WeaponDomainModel | RPG_ArmorDomainModel | null = null;
     switch (dropItem.kind)
     {
       case 1:
-        icon = <BusinessCenter color={"success"}/>;
+        icon = <BusinessCenter color={'success'}/>;
         drop = items.at(dropItem.dataId)!;
         break;
       case 2:
-        icon = <LocalDining color={"error"}/>;
+        icon = <LocalDining color={'error'}/>;
         drop = weapons.at(dropItem.dataId)!;
         break;
       case 3:
         // arbitrary use case for CA since all armors beyond 300 are monster drops.
         if (dropItem.dataId > 300)
         {
-          icon = <AutoAwesome color={"info"}/>
+          icon = <AutoAwesome color={'info'}/>;
         }
         else
         {
-          icon = <Shield color={"info"}/>;
+          icon = <Shield color={'info'}/>;
         }
 
         drop = armors.at(dropItem.dataId)!;
@@ -372,14 +368,17 @@ const EnemiesExtraDrops = ({
           </ListItemText>
         </ListItemButton>
       </ListItem>
-    )
+    );
   };
 
   const renderRelevantDropItemDropdown = () =>
   {
-    const renderOption = (props: any, option: any) =>
+    const renderOption = (
+      props: any,
+      option: any
+    ) =>
     {
-      if (!option || option.name === "" || option.name?.startsWith("=="))
+      if (!option || option.name === '' || option.name?.startsWith('=='))
       {
         return <li {...props} style={{ display: 'none' }}/>;
       }
@@ -391,7 +390,7 @@ const EnemiesExtraDrops = ({
               sx={{ height: 32 }}
               onClick={() =>
               {
-                handleRelevantDropItemDropdownOnClickEvent(option)
+                handleRelevantDropItemDropdownOnClickEvent(option);
               }}
             >
               <ListItemText
@@ -409,8 +408,11 @@ const EnemiesExtraDrops = ({
       case DropItemType.Item:
         return <>
           <Autocomplete
-            size={"small"}
-            options={[ ...items ].sort((a, b) =>
+            size={'small'}
+            options={[ ...items ].sort((
+              a,
+              b
+            ) =>
             {
               if (a === null || b === null)
               {
@@ -427,9 +429,12 @@ const EnemiesExtraDrops = ({
                 sx: { maxHeight: '170px' }
               }
             }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            isOptionEqualToValue={(option, value) =>
+            getOptionKey={(option) => option?.id ?? 'no-key'}
+            getOptionLabel={(option) => option?.name ?? ''}
+            isOptionEqualToValue={(
+              option,
+              value
+            ) =>
             {
               if (value === null)
               {
@@ -443,18 +448,21 @@ const EnemiesExtraDrops = ({
             {
               return <TextField
                 {...params}
-                size={"small"}
-                label={"Items"}
+                size={'small'}
+                label={'Items'}
                 placeholder="Item name..."
-              />
+              />;
             }}
           />
         </>;
       case DropItemType.Weapon:
         return <>
           <Autocomplete
-            size={"small"}
-            options={[ ...weapons ].sort((a, b) =>
+            size={'small'}
+            options={[ ...weapons ].sort((
+              a,
+              b
+            ) =>
             {
               if (a === null || b === null)
               {
@@ -471,9 +479,12 @@ const EnemiesExtraDrops = ({
                 sx: { maxHeight: '170px' }
               }
             }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            isOptionEqualToValue={(option, value) =>
+            getOptionKey={(option) => option?.id ?? 'no-key'}
+            getOptionLabel={(option) => option?.name ?? ''}
+            isOptionEqualToValue={(
+              option,
+              value
+            ) =>
             {
               if (value === null)
               {
@@ -488,18 +499,21 @@ const EnemiesExtraDrops = ({
               return (
                 <TextField
                   {...params}
-                  size={"small"}
-                  label={"Weapons"}
+                  size={'small'}
+                  label={'Weapons'}
                   placeholder="Weapon name..."/>
-              )
+              );
             }}
           />
         </>;
       case DropItemType.Armor:
         return <>
           <Autocomplete
-            size={"small"}
-            options={[ ...armors ].sort((a, b) =>
+            size={'small'}
+            options={[ ...armors ].sort((
+              a,
+              b
+            ) =>
             {
               if (a === null || b === null)
               {
@@ -516,9 +530,12 @@ const EnemiesExtraDrops = ({
                 sx: { maxHeight: '170px' }
               }
             }}
-            getOptionKey={(option) => option?.id ?? "no-key"}
-            getOptionLabel={(option) => option?.name ?? ""}
-            isOptionEqualToValue={(option, value) =>
+            getOptionKey={(option) => option?.id ?? 'no-key'}
+            getOptionLabel={(option) => option?.name ?? ''}
+            isOptionEqualToValue={(
+              option,
+              value
+            ) =>
             {
               if (value === null)
               {
@@ -533,10 +550,10 @@ const EnemiesExtraDrops = ({
               return (
                 <TextField
                   {...params}
-                  size={"small"}
-                  label={"Armors"}
+                  size={'small'}
+                  label={'Armors'}
                   placeholder="Armor name..."/>
-              )
+              );
             }}
           />
         </>;
@@ -545,18 +562,27 @@ const EnemiesExtraDrops = ({
 
   const renderSelectedDropItemChip = () =>
   {
-    if (!selectedDropItem) return <></>;
-    if (selectedDropItemIndex < 0) return <></>;
+    if (!selectedDropItem)
+    {
+      return <></>;
+    }
+    if (selectedDropItemIndex < 0)
+    {
+      return <></>;
+    }
 
     return <Stack spacing={4}>
-      {"Current Drop Item:"}
-      {buildDropItemChip(selectedDropItem, "outlined")}
-    </Stack>
+      {'Current Drop Item:'}
+      {buildDropItemChip(selectedDropItem, 'outlined')}
+    </Stack>;
   };
 
   const renderPendingDropItemChip = () =>
   {
-    if (!pendingDropItem) return <></>;
+    if (!pendingDropItem)
+    {
+      return <></>;
+    }
 
     return <>
       <Stack
@@ -569,12 +595,12 @@ const EnemiesExtraDrops = ({
         }}
       >
 
-        {"Pending Drop Item Update:"}
+        {'Pending Drop Item Update:'}
         {buildDropItemChip(pendingDropItem)}
 
         <TextField
-          type={"number"}
-          label={"Drop Chance %"}
+          type={'number'}
+          label={'Drop Chance %'}
           value={pendingDropItem.denominator}
           fullWidth
           onChange={(event) => handlePendingDropItemChanceOnChangeEvent(parseInt(event.target.value) ?? 1)}
@@ -583,30 +609,33 @@ const EnemiesExtraDrops = ({
     </>;
   };
 
-  const buildDropItemChip = (dropItem: RPG_DropItem, variant: "filled" | "outlined" = "filled") =>
+  const buildDropItemChip = (
+    dropItem: RPG_DropItem,
+    variant: 'filled' | 'outlined' = 'filled'
+  ) =>
   {
-    let dropItemData: RPG_Item | RPG_Weapon | RPG_Armor = null!;
-    let color: ("primary" | "success" | "error" | "info") = "primary";
+    let dropItemData: RPG_ItemDomainModel | RPG_WeaponDomainModel | RPG_ArmorDomainModel | null = null;
+    let color: ('primary' | 'success' | 'error' | 'info') = 'primary';
     let icon = <QuestionMark/>;
     switch (dropItem.kind)
     {
       case DropItemType.Item:
-        dropItemData = items[dropItem.dataId];
-        color = "success";
-        icon = <BusinessCenter color={"success"}/>;
+        dropItemData = items[ dropItem.dataId ];
+        color = 'success';
+        icon = <BusinessCenter color={'success'}/>;
         break;
       case DropItemType.Weapon:
-        dropItemData = weapons[dropItem.dataId];
-        color = "error";
-        icon = <LocalDining color={"error"}/>;
+        dropItemData = weapons[ dropItem.dataId ];
+        color = 'error';
+        icon = <LocalDining color={'error'}/>;
         break;
       case DropItemType.Armor:
-        dropItemData = armors[dropItem.dataId];
-        color = "info";
-        icon = <Shield color={"info"}/>;
+        dropItemData = armors[ dropItem.dataId ];
+        color = 'info';
+        icon = <Shield color={'info'}/>;
         break;
       default:
-        throw new Error(`unknown ingredient type detected: ${dropItem.kind}`)
+        throw new Error(`unknown ingredient type detected: ${dropItem.kind}`);
     }
 
     return <>
@@ -616,11 +645,11 @@ const EnemiesExtraDrops = ({
         variant={variant}
         color={color}
       />
-    </>
+    </>;
   };
   //endregion render
 
-  if (items.length === 0 || weapons.length === 0 || armors.length === 0)
+  if (itemsLoading || weaponsLoading || armorsLoading)
   {
     return <Typography>Loading drop data...</Typography>;
   }
@@ -628,9 +657,9 @@ const EnemiesExtraDrops = ({
   return <>
     <Stack spacing={2}>
       <Typography
-        variant={"h4"}
-        align={"center"}
-        color={"primary"}
+        variant={'h4'}
+        align={'center'}
+        color={'primary'}
         sx={{ paddingTop: 2 }}
       >
         Extra Drops
@@ -645,7 +674,7 @@ const EnemiesExtraDrops = ({
                 fullWidth
                 startIcon={<Add/>}
                 onClick={() => handleAddNewDropItemOnClick(null)}
-                variant={"contained"}
+                variant={'contained'}
               />
             </>}
         </List>
@@ -657,7 +686,7 @@ const EnemiesExtraDrops = ({
       open={dropItemModifier}
       onClose={() => handleCloseDropItemModifierDialogOnClick()}
       fullWidth
-      maxWidth={"md"}
+      maxWidth={'md'}
       sx={{
         '& .MuiDialog-paper': {
           maxHeight: 450,
@@ -676,7 +705,7 @@ const EnemiesExtraDrops = ({
             <Stack>
               <ToggleButtonGroup
                 exclusive
-                color={"primary"}
+                color={'primary'}
                 value={selectedDropItemType}
                 defaultValue={DropItemType.Item}
                 onChange={handleDropItemTypeOnChangeEvent}
@@ -685,17 +714,17 @@ const EnemiesExtraDrops = ({
                 <ToggleButton
                   selected={selectedDropItemType === DropItemType.Item}
                   value={DropItemType.Item}>
-                  <BusinessCenter sx={{ color: brown[500] }}/>
+                  <BusinessCenter sx={{ color: brown[ 500 ] }}/>
                 </ToggleButton>
                 <ToggleButton
                   selected={selectedDropItemType === DropItemType.Weapon}
                   value={DropItemType.Weapon}>
-                  <LocalDining color={"error"}/>
+                  <LocalDining color={'error'}/>
                 </ToggleButton>
                 <ToggleButton
                   selected={selectedDropItemType === DropItemType.Armor}
                   value={DropItemType.Armor}>
-                  <Shield color={"info"}/>
+                  <Shield color={'info'}/>
                 </ToggleButton>
               </ToggleButtonGroup>
 
@@ -713,16 +742,16 @@ const EnemiesExtraDrops = ({
       </DialogContent>
       <DialogActions>
         <Button
-          variant={"contained"}
-          color={"warning"}
+          variant={'contained'}
+          color={'warning'}
           startIcon={<Close/>}
           onClick={() => handleCloseDropItemModifierDialogOnClick()}
         >
           Nevermind
         </Button>
         <Button
-          color={"primary"}
-          variant={"contained"}
+          color={'primary'}
+          variant={'contained'}
           startIcon={<Sync/>}
           onClick={() =>
           {
@@ -781,7 +810,7 @@ const EnemiesExtraDrops = ({
       </MenuItem>
     </Menu>
     {/*endregion not-grid-related elements */}
-  </>
-}
+  </>;
+};
 
 export default EnemiesExtraDrops;

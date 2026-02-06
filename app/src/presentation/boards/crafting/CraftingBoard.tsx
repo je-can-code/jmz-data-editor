@@ -1,7 +1,6 @@
 import React, {
   ChangeEvent,
   MouseEvent,
-  useEffect,
   useState
 } from 'react';
 import {
@@ -29,7 +28,7 @@ import {
   Stack,
   TextField,
   Typography
-} from "@mui/material";
+} from '@mui/material';
 import {
   Add,
   Check,
@@ -44,48 +43,44 @@ import {
   Subject,
   Visibility,
   VisibilityOff
-} from "@mui/icons-material";
-import styled from "styled-components";
+} from '@mui/icons-material';
+import styled from 'styled-components';
 import { FixedSizeList } from 'react-window';
-import CraftingComponentList from "./CraftingComponentList.tsx";
+import CraftingComponentList from './CraftingComponentList.tsx';
 
-import {
-  executeLoad,
-  executeSave
-} from "@services/DataService.ts";
-
-import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
 import {
   MuiSnackbarSeverity,
   MuiSnackbarVariant
-} from "@core/enums/MuiSnackbar.ts";
-import CraftingListType from "@core/enums/CraftingListType.ts";
+} from '@core/enums/MuiSnackbar.ts';
+import CraftingListType from '@core/enums/CraftingListType.ts';
 
-import Crafting from "@types/custom/Crafting";
-import SaveButton from "../../../components/core/SaveButton.tsx";
-import KeyTextField from "../../../components/core/KeyTextField.tsx";
+import SaveButton from '../../../components/core/SaveButton.tsx';
+import KeyTextField from '../../../components/core/KeyTextField.tsx';
 import Configuration = Crafting.Configuration;
 import Recipe = Crafting.Recipe;
 import Category = Crafting.Category;
-import CraftingConfiguration = Crafting.Configuration;
 import CraftingComponent = Crafting.CraftingComponent;
-import { useProjectPath } from "../../context/project-path.context.tsx";
+import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 
-// ================================================================================================
 const EntryText = styled(ListItemText)`
-    font-family: monospace;
+  font-family: monospace;
 `;
 
-// ================================================================================================
 /**
  * The main board that encapsulates all things related to crafting.
  */
-export default function CraftingBoard()
+const CraftingBoard = () =>
 {
-  const { projectPath } = useProjectPath();
+  const {
+    recipes,
+    categories,
+    setRecipes,
+    setCategories,
+    save,
+    loading
+  } = useCrafting();
 
   //region state
-  const [ recipes, setRecipes ] = useState<Recipe[]>([]);
   const [ selectedRecipe, setSelectedRecipe ] = useState<Recipe | null>(null);
   const [ selectedRecipeIndex, setSelectedRecipeIndex ] = useState<number>(0);
 
@@ -94,13 +89,12 @@ export default function CraftingBoard()
   const [ currentTools, setCurrentTools ] = useState<CraftingComponent[]>([]);
   const [ currentOutputs, setCurrentOutputs ] = useState<CraftingComponent[]>([]);
 
-  const [ categories, setCategories ] = useState<Category[]>([]);
   const [ selectedCategory, setSelectedCategory ] = useState<Category | null>(null);
   const [ selectedCategoryIndex, setSelectedCategoryIndex ] = useState<number>(0);
 
   const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
-  const [ snackMessage, setSnackMessage ] = useState<string>("");
+  const [ snackMessage, setSnackMessage ] = useState<string>('');
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
 
@@ -116,48 +110,12 @@ export default function CraftingBoard()
   const [ categoryDialogOpen, setCategoryDialogOpen ] = useState<boolean>(false);
   //endregion state
 
-  /**
-   * Initializes the board with the data from the configuration.
-   */
-  useEffect(() =>
-  {
-    let ignore = false;
-    if (!projectPath || !projectPath.endsWith("/data"))
-    {
-      console.error(`invalid path provided: ${projectPath}`);
-      return;
-    }
-
-    // a helper function for initializing the state of this component based on the configuration file.
-    const initializeState = async (projectPath: string) =>
-    {
-      const craftingData = await executeLoad<Configuration>(projectPath, ConfigFilenames.Crafting);
-      if (!ignore && craftingData)
-      {
-        // update the data list.
-        setRecipes(craftingData.recipes);
-
-        // update the other data.
-        setCategories(craftingData.categories);
-      }
-
-      // enable saving.
-      setCanSave(true);
-    };
-
-    initializeState(projectPath)
-      .catch(console.error);
-    return () =>
-    {
-      ignore = true;
-    }
-  }, [ projectPath ]);
-
   //region actions
   const handleSnack = (
     message: string,
     severity: MuiSnackbarSeverity = MuiSnackbarSeverity.Info,
-    variant: MuiSnackbarVariant = MuiSnackbarVariant.Filled) =>
+    variant: MuiSnackbarVariant = MuiSnackbarVariant.Filled
+  ) =>
   {
     setSnackMessage(message);
     setSnackSeverity(severity);
@@ -165,25 +123,15 @@ export default function CraftingBoard()
     setSnackOpen(true);
   };
 
-  const handleSaveButtonOnClickEvent = async () =>
+  const handleSnackClose = (
+    _: any,
+    reason?: string
+  ) =>
   {
-    // reconstruct the data shape to be saved.
-    const updatedConfiguration = {
-      recipes: recipes,
-      categories: categories
-    } as CraftingConfiguration;
-
-    // save the data to disk.
-    await executeSave(projectPath, ConfigFilenames.Crafting, updatedConfiguration);
-
-    setCanSave(true);
-
-    handleSnack("Crafting data has been saved successfully.");
-  };
-
-  const handleSnackClose = (_: any, reason?: string) =>
-  {
-    if (reason === 'clickaway') return;
+    if (reason === 'clickaway')
+    {
+      return;
+    }
 
     setSnackOpen(false);
   };
@@ -228,7 +176,7 @@ export default function CraftingBoard()
 
     if (categories.length > 0)
     {
-      const category = categories[index];
+      const category = categories[ index ];
       setSelectedCategory(category);
       // TODO: update the inputs.
     }
@@ -255,47 +203,59 @@ export default function CraftingBoard()
   //endregion actions
 
   //region updates
+  const applyRecipes = (updatedRecipes: Recipe[]) =>
+  {
+    setRecipes(updatedRecipes);
+    setCanSave(true);
+  };
+
+  const applyCategories = (updatedCategories: Category[]) =>
+  {
+    setCategories(updatedCategories);
+    setCanSave(true);
+  };
+
   const handleRecipeKeyOnChangeEvent = (input: string) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedRecipe) return;
+    if (!selectedRecipe)
+    {
+      return;
+    }
 
     // update the entry.
     const updatedRecipe = {
       ...selectedRecipe,
       key: input
     } as Recipe;
-    setSelectedRecipe(updatedRecipe);
 
-    // rebuild the updated list of entries with the updated entry.
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
+    setSelectedRecipe(updatedRecipe);
+    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
   };
 
   const handleRecipeNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    // if there is no entry, stop processing.
-    if (!selectedRecipe) return;
+    if (!selectedRecipe)
+    {
+      return;
+    }
 
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
-
-    // update the entry.
     const updatedRecipe = {
       ...selectedRecipe,
-      name: updatedValue
-    };
-    setSelectedRecipe(updatedRecipe);
+      name: event.target.value
+    } as Recipe;
 
-    // rebuild the updated list of entries with the updated entry.
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
+    setSelectedRecipe(updatedRecipe);
+    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
   };
 
   const handleRecipeIconIndexOnChangeEvent = (value: number) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedRecipe) return;
+    if (!selectedRecipe)
+    {
+      return;
+    }
 
     const updatedValue = value < -1
       ? -1
@@ -306,17 +266,18 @@ export default function CraftingBoard()
       ...selectedRecipe,
       iconIndex: updatedValue
     };
-    setSelectedRecipe(updatedRecipe);
 
-    // rebuild the updated list of entries with the updated entry.
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
+    setSelectedRecipe(updatedRecipe);
+    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
   };
 
   const handleRecipeDescriptionOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedRecipe) return;
+    if (!selectedRecipe)
+    {
+      return;
+    }
 
     // grab the updated value from the input.
     const updatedValue = event.target.value;
@@ -326,17 +287,18 @@ export default function CraftingBoard()
       ...selectedRecipe,
       description: updatedValue
     };
-    setSelectedRecipe(updatedRecipe);
 
-    // rebuild the updated list of entries with the updated entry.
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
+    setSelectedRecipe(updatedRecipe);
+    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
   };
 
   const handleRecipeMaskedUntilCraftedOnCheckEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedRecipe) return;
+    if (!selectedRecipe)
+    {
+      return;
+    }
 
     // grab the updated value from the input.
     const updatedValue = event.target.checked;
@@ -346,17 +308,18 @@ export default function CraftingBoard()
       ...selectedRecipe,
       maskedUntilCrafted: updatedValue
     };
-    setSelectedRecipe(updatedRecipe);
 
-    // rebuild the updated list of entries with the updated entry.
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
+    setSelectedRecipe(updatedRecipe);
+    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
   };
 
   const handleRecipeUnlockedByDefaultOnCheckEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedRecipe) return;
+    if (!selectedRecipe)
+    {
+      return;
+    }
 
     // grab the updated value from the input.
     const updatedValue = event.target.checked;
@@ -366,11 +329,9 @@ export default function CraftingBoard()
       ...selectedRecipe,
       unlockedByDefault: updatedValue
     };
-    setSelectedRecipe(updatedRecipe);
 
-    // rebuild the updated list of entries with the updated entry.
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
+    setSelectedRecipe(updatedRecipe);
+    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
   };
 
   const handleRecipeCategoryKeyToggle = (value: string) =>
@@ -393,14 +354,18 @@ export default function CraftingBoard()
       ...selectedRecipe,
       categoryKeys: newChecked
     } as Recipe;
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
+
+    setSelectedRecipe(updatedRecipe);
+    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
   };
 
   const handleCategoryKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedCategory) return;
+    if (!selectedCategory)
+    {
+      return;
+    }
 
     // grab the updated value from the input.
     const updatedValue = event.target.value;
@@ -410,17 +375,18 @@ export default function CraftingBoard()
       ...selectedCategory,
       key: updatedValue
     } as Category;
-    setSelectedCategory(updatedCategory);
 
-    // rebuild the updated list of entries with the updated entry.
-    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
-    setCategories(updatedCategories);
+    setSelectedCategory(updatedCategory);
+    applyCategories(categories.with(selectedCategoryIndex, updatedCategory));
   };
 
   const handleCategoryNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedCategory) return;
+    if (!selectedCategory)
+    {
+      return;
+    }
 
     // grab the updated value from the input.
     const updatedValue = event.target.value;
@@ -430,17 +396,18 @@ export default function CraftingBoard()
       ...selectedCategory,
       name: updatedValue
     } as Category;
-    setSelectedCategory(updatedCategory);
 
-    // rebuild the updated list of entries with the updated entry.
-    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
-    setCategories(updatedCategories);
+    setSelectedCategory(updatedCategory);
+    applyCategories(categories.with(selectedCategoryIndex, updatedCategory));
   };
 
   const handleCategoryIconIndexOnChangeEvent = (value: number) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedCategory) return;
+    if (!selectedCategory)
+    {
+      return;
+    }
 
     const updatedValue = value < -1
       ? -1
@@ -451,17 +418,18 @@ export default function CraftingBoard()
       ...selectedCategory,
       iconIndex: updatedValue
     } as Category;
-    setSelectedCategory(updatedCategory);
 
-    // rebuild the updated list of entries with the updated entry.
-    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
-    setCategories(updatedCategories);
+    setSelectedCategory(updatedCategory);
+    applyCategories(categories.with(selectedCategoryIndex, updatedCategory));
   };
 
   const handleCategoryUnlockedByDefaultOnCheckEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedCategory) return;
+    if (!selectedCategory)
+    {
+      return;
+    }
 
     // grab the updated value from the input.
     const updatedValue = event.target.checked;
@@ -471,17 +439,18 @@ export default function CraftingBoard()
       ...selectedCategory,
       unlockedByDefault: updatedValue
     } as Category;
-    setSelectedCategory(updatedCategory);
 
-    // rebuild the updated list of entries with the updated entry.
-    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
-    setCategories(updatedCategories);
+    setSelectedCategory(updatedCategory);
+    applyCategories(categories.with(selectedCategoryIndex, updatedCategory));
   };
 
   const handleCategoryDescriptionOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     // if there is no entry, stop processing.
-    if (!selectedCategory) return;
+    if (!selectedCategory)
+    {
+      return;
+    }
 
     // grab the updated value from the input.
     const updatedValue = event.target.value;
@@ -491,14 +460,15 @@ export default function CraftingBoard()
       ...selectedCategory,
       description: updatedValue
     } as Category;
-    setSelectedCategory(updatedCategory);
 
-    // rebuild the updated list of entries with the updated entry.
-    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
-    setCategories(updatedCategories);
+    setSelectedCategory(updatedCategory);
+    applyCategories(categories.with(selectedCategoryIndex, updatedCategory));
   };
 
-  const updateCraftingComponentList = (craftingComponents: CraftingComponent[], craftingListType: CraftingListType) =>
+  const updateCraftingComponentList = (
+    craftingComponents: CraftingComponent[],
+    craftingListType: CraftingListType
+  ) =>
   {
     const updatedRecipe = {
       ...selectedRecipe,
@@ -521,17 +491,15 @@ export default function CraftingBoard()
     }
 
     setSelectedRecipe(updatedRecipe);
-
-    const updatedRecipes = recipes.with(selectedRecipeIndex, updatedRecipe);
-    setRecipes(updatedRecipes);
+    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
   };
 
   const handleAddNewRecipe = (index: number) =>
   {
     const newRecipe = {
-      key: "NEW-RECIPE",
-      name: "",
-      description: "",
+      key: 'NEW-RECIPE',
+      name: '',
+      description: '',
       iconIndex: -1,
       maskedUntilCrafted: true,
       unlockedByDefault: false,
@@ -541,13 +509,15 @@ export default function CraftingBoard()
       outputs: []
     } as Recipe;
 
-    const updatedRecipes = recipes.toSpliced(index, 0, newRecipe);
-    setRecipes(updatedRecipes);
+    applyRecipes(recipes.toSpliced(index, 0, newRecipe));
   };
 
   const handleCloneRecipe = (index: number) =>
   {
-    if (selectedRecipe === null) return;
+    if (selectedRecipe === null)
+    {
+      return;
+    }
 
     const clonedKeys = selectedRecipe.categoryKeys.toSpliced(0, 0);
     const clonedIngredients = selectedRecipe.ingredients.toSpliced(0, 0);
@@ -567,35 +537,38 @@ export default function CraftingBoard()
       outputs: clonedOutputs
     } as Recipe;
 
-    const updatedRecipes = recipes.toSpliced(index, 0, clonedRecipe);
-    setRecipes(updatedRecipes);
+    applyRecipes(recipes.toSpliced(index, 0, clonedRecipe));
   };
 
   const handleDeleteRecipe = (index: number) =>
   {
-    if (selectedRecipe === null) return;
+    if (selectedRecipe === null)
+    {
+      return;
+    }
 
-    const updatedRecipes = recipes.toSpliced(index, 1);
-    setRecipes(updatedRecipes);
+    applyRecipes(recipes.toSpliced(index, 1));
   };
 
   const handleAddCategory = (index: number) =>
   {
     const newCategory = {
-      key: "NEW-CATEGORY",
-      name: "best category",
-      description: "fill in with some description about the category.",
+      key: 'NEW-CATEGORY',
+      name: 'best category',
+      description: 'fill in with some description about the category.',
       iconIndex: -1,
       unlockedByDefault: false,
     } as Category;
 
-    const updatedCategories = categories.toSpliced(index, 0, newCategory);
-    setCategories(updatedCategories);
+    applyCategories(categories.toSpliced(index, 0, newCategory));
   };
 
   const handleCloneCategory = (index: number) =>
   {
-    if (selectedCategory === null) return;
+    if (selectedCategory === null)
+    {
+      return;
+    }
 
     const clonedCategory = {
       key: `${selectedCategory.key}-COPY`,
@@ -605,16 +578,17 @@ export default function CraftingBoard()
       unlockedByDefault: selectedCategory.unlockedByDefault,
     } as Category;
 
-    const updatedCategories = categories.toSpliced(index, 0, clonedCategory);
-    setCategories(updatedCategories);
+    applyCategories(categories.toSpliced(index, 0, clonedCategory));
   };
 
   const handleDeleteCategory = (index: number) =>
   {
-    if (selectedCategory === null) return;
+    if (selectedCategory === null)
+    {
+      return;
+    }
 
-    const updatedCategories = categories.toSpliced(index, 1);
-    setCategories(updatedCategories);
+    applyCategories(categories.toSpliced(index, 1));
   };
   //endregion updates
 
@@ -628,7 +602,10 @@ export default function CraftingBoard()
 
     const recipe = recipes.at(index);
 
-    if (!recipe) return <></>;
+    if (!recipe)
+    {
+      return <></>;
+    }
 
     return (
       <ListItem key={index} style={style}>
@@ -639,8 +616,8 @@ export default function CraftingBoard()
         >
           <ListItemIcon>
             {(selectedRecipeIndex === index)
-              ? <ListAlt color={"success"}/>
-              : <Subject color={"secondary"}/>}
+              ? <ListAlt color={'success'}/>
+              : <Subject color={'secondary'}/>}
           </ListItemIcon>
           <EntryText
             primary={recipe.name.length === 0
@@ -653,7 +630,10 @@ export default function CraftingBoard()
     );
   };
 
-  const renderCategoryListItem = (category: Category, index: number) =>
+  const renderCategoryListItem = (
+    category: Category,
+    index: number
+  ) =>
   {
     return (
       <ListItem
@@ -667,8 +647,8 @@ export default function CraftingBoard()
         >
           <ListItemIcon>
             {(selectedCategoryIndex === index)
-              ? <DonutSmall color={"secondary"}/>
-              : <DonutLarge color={"info"}/>}
+              ? <DonutSmall color={'secondary'}/>
+              : <DonutLarge color={'info'}/>}
           </ListItemIcon>
           <EntryText
             primary={`${category.key}: ${category.name}`}
@@ -676,9 +656,14 @@ export default function CraftingBoard()
 
         </ListItemButton>
       </ListItem>
-    )
+    );
   };
   //endregion render
+
+  if (loading)
+  {
+    return <Typography>Loading crafting configuration...</Typography>;
+  }
 
   return <>
     <Grid container spacing={2}>
@@ -725,11 +710,11 @@ export default function CraftingBoard()
                 {/* Name */}
                 <Grid size={4}>
                   <TextField
-                    variant={"outlined"}
-                    label={"Name"}
+                    variant={'outlined'}
+                    label={'Name'}
                     value={selectedRecipe.name}
                     onChange={handleRecipeNameOnChangeEvent}
-                    size={"small"}
+                    size={'small'}
                     fullWidth
                   />
                 </Grid>
@@ -737,8 +722,8 @@ export default function CraftingBoard()
                 {/* Icon */}
                 <Grid size={1}>
                   <TextField
-                    type={"number"}
-                    label={"Icon Index"}
+                    type={'number'}
+                    label={'Icon Index'}
                     value={selectedRecipe.iconIndex ?? -1}
                     sx={{ width: '80px' }}
                     onChange={(event) => handleRecipeIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
@@ -756,7 +741,7 @@ export default function CraftingBoard()
                         onChange={handleRecipeUnlockedByDefaultOnCheckEvent}
                       />}
                       label="Unlocked By Default"
-                      labelPlacement={"end"}
+                      labelPlacement={'end'}
                     />
 
                     <FormControlLabel
@@ -767,7 +752,7 @@ export default function CraftingBoard()
                         onChange={handleRecipeMaskedUntilCraftedOnCheckEvent}
                       />}
                       label="Masked Until Crafted"
-                      labelPlacement={"end"}
+                      labelPlacement={'end'}
                     />
                   </Stack>
                 </Grid>
@@ -775,11 +760,11 @@ export default function CraftingBoard()
                 {/* Description */}
                 <Grid size={8}>
                   <TextField
-                    variant={"outlined"}
-                    label={"Description"}
+                    variant={'outlined'}
+                    label={'Description'}
                     value={selectedRecipe.description}
                     onChange={handleRecipeDescriptionOnChangeEvent}
-                    size={"small"}
+                    size={'small'}
                     multiline
                     fullWidth
                     rows={4}
@@ -790,19 +775,19 @@ export default function CraftingBoard()
                 <Grid size={4}>
                   <Stack spacing={2}>
                     <Button
-                      size={"small"}
+                      size={'small'}
                       fullWidth
-                      variant={"outlined"}
-                      color={"secondary"}
+                      variant={'outlined'}
+                      color={'secondary'}
                       onClick={() => setCategoryDialogOpen(true)}
                     >
                       Modify Categories
                     </Button>
                     <Autocomplete
-                      size={"small"}
+                      size={'small'}
                       options={[ ...categories ].sort()}
                       disableCloseOnSelect
-                      groupBy={option => option.key.split("-")[0]}
+                      groupBy={option => option.key.split('-')[ 0 ]}
                       slotProps={{
                         listbox: {
                           sx: { maxHeight: '400px' }
@@ -810,9 +795,12 @@ export default function CraftingBoard()
                       }}
                       getOptionKey={(option) => option.key}
                       getOptionLabel={(option) => option.name}
-                      renderOption={(props, option) =>
+                      renderOption={(
+                        props,
+                        option
+                      ) =>
                       {
-                        if (option === null || option.name === "" || option.name.startsWith("=="))
+                        if (option === null || option.name === '' || option.name.startsWith('=='))
                         {
                           return <li {...props} style={{ display: 'none' }}/>;
                         }
@@ -837,9 +825,9 @@ export default function CraftingBoard()
                       {
                         return (<TextField
                           {...params}
-                          size={"small"}
-                          label={"Choose Categories"}
-                          placeholder="Category key..."/>)
+                          size={'small'}
+                          label={'Choose Categories'}
+                          placeholder="Category key..."/>);
                       }}
                     />
                   </Stack>
@@ -848,7 +836,6 @@ export default function CraftingBoard()
                 {/* Ingredients management */}
                 <Grid size={4}>
                   <CraftingComponentList
-                    projectPath={projectPath}
                     type={CraftingListType.Ingredients}
                     updateRecipeFunc={updateCraftingComponentList}
                     components={currentIngredients}
@@ -859,7 +846,6 @@ export default function CraftingBoard()
                 {/* Tools management */}
                 <Grid size={4}>
                   <CraftingComponentList
-                    projectPath={projectPath}
                     type={CraftingListType.Tools}
                     updateRecipeFunc={updateCraftingComponentList}
                     components={currentTools}
@@ -870,7 +856,6 @@ export default function CraftingBoard()
                 {/* Outputs management */}
                 <Grid size={4}>
                   <CraftingComponentList
-                    projectPath={projectPath}
                     type={CraftingListType.Outputs}
                     updateRecipeFunc={updateCraftingComponentList}
                     components={currentOutputs}
@@ -886,12 +871,16 @@ export default function CraftingBoard()
       {/*region not-grid-related elements */}
       {/* This is over-arching save button- it will save all recipes to disk. */}
       <SaveButton
-        extraSaveText={"Recipes"}
+        extraSaveText={'Recipes'}
         canSave={canSave}
         handleSave={async () =>
         {
           setCanSave(false);
-          await handleSaveButtonOnClickEvent();
+          await save({
+            recipes,
+            categories
+          } as Configuration);
+          handleSnack('Crafting data has been saved successfully.');
         }}
       />
 
@@ -968,7 +957,7 @@ export default function CraftingBoard()
       <Dialog
         open={categoryDialogOpen}
         onClose={() => setCategoryDialogOpen(false)}
-        maxWidth={"lg"}
+        maxWidth={'lg'}
         fullWidth
       >
         <DialogTitle>
@@ -980,7 +969,10 @@ export default function CraftingBoard()
             <Grid size={4}>
               <div onContextMenu={handleCategoryListContextMenu} style={{ cursor: 'context-menu' }}>
                 <List>
-                  {categories.map((category, index) => renderCategoryListItem(category, index))}
+                  {categories.map((
+                    category,
+                    index
+                  ) => renderCategoryListItem(category, index))}
                 </List>
               </div>
             </Grid>
@@ -991,14 +983,14 @@ export default function CraftingBoard()
                 {/* Key */}
                 <TextField
                   required
-                  variant={"outlined"}
-                  label={"Key"}
+                  variant={'outlined'}
+                  label={'Key'}
                   value={selectedCategory?.key}
                   onChange={handleCategoryKeyOnChangeEvent}
-                  size={"small"}
+                  size={'small'}
                   slotProps={{
                     input: {
-                      startAdornment: <InputAdornment position={"start"}>
+                      startAdornment: <InputAdornment position={'start'}>
                         <Key/>
                       </InputAdornment>
                     }
@@ -1007,17 +999,17 @@ export default function CraftingBoard()
 
                 {/* Name */}
                 <TextField
-                  variant={"outlined"}
-                  label={"Name"}
+                  variant={'outlined'}
+                  label={'Name'}
                   value={selectedCategory?.name}
                   onChange={handleCategoryNameOnChangeEvent}
-                  size={"small"}
+                  size={'small'}
                 />
 
                 {/* Icon */}
                 <TextField
-                  type={"number"}
-                  label={"Icon Index"}
+                  type={'number'}
+                  label={'Icon Index'}
                   value={selectedCategory?.iconIndex ?? -1}
                   sx={{ width: '80px' }}
                   onChange={(event) => handleCategoryIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
@@ -1032,16 +1024,16 @@ export default function CraftingBoard()
                     onChange={handleCategoryUnlockedByDefaultOnCheckEvent}
                   />}
                   label="Unlocked By Default"
-                  labelPlacement={"end"}
+                  labelPlacement={'end'}
                 />
 
                 {/* Description */}
                 <TextField
-                  variant={"outlined"}
-                  label={"Description"}
+                  variant={'outlined'}
+                  label={'Description'}
                   value={selectedCategory?.description}
                   onChange={handleCategoryDescriptionOnChangeEvent}
-                  size={"small"}
+                  size={'small'}
                   multiline
                   fullWidth
                   rows={4}
@@ -1052,9 +1044,9 @@ export default function CraftingBoard()
         </DialogContent>
         <DialogActions>
           <Button
-            variant={"contained"}
+            variant={'contained'}
             startIcon={<Check/>}
-            color={"success"}
+            color={'success'}
             onClick={() => setCategoryDialogOpen(false)}
           >
             <Typography>Done Modifying Categories</Typography>
@@ -1123,4 +1115,6 @@ export default function CraftingBoard()
       {/*endregion not-grid-related elements */}
     </Grid>
   </>;
-}
+};
+
+export default CraftingBoard;
