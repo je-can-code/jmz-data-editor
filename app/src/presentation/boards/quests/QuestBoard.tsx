@@ -1,8 +1,8 @@
 import React, {
   ChangeEvent,
   MouseEvent,
-  useEffect,
-  useState
+  useRef,
+  useState,
 } from 'react';
 import { FixedSizeList } from 'react-window';
 import {
@@ -78,9 +78,13 @@ import QuestData = Questopedia.QuestData;
 import OmniFulfillmentData = Questopedia.OmniFulfillmentData;
 
 import { useQuests } from '@presentation/context/resources/quests.context.tsx';
+import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 const QuestBoard = () =>
 {
+  const navigate = useNavigate(); // Get navigate from its own hook
+  const location = useLocation(); // Get location object for path information
   const {
     quests,
     tags,
@@ -93,6 +97,8 @@ const QuestBoard = () =>
   } = useQuests();
 
   //region state
+  const listRef = useRef<FixedSizeList>(null);
+
   const [ selectedQuest, setSelectedQuest ] = useState<OmniQuest | null>(null);
   const [ selectedQuestIndex, setSelectedQuestIndex ] = useState<number>(0);
   const [ questListContextMenu, setQuestListContextMenu ] = useState<{
@@ -143,9 +149,12 @@ const QuestBoard = () =>
       setSelectedQuest(quest);
       setApplicableTags(quest.tagKeys);
 
-      setObjectives(quest.objectives);
-      setSelectedObjective(quest.objectives.at(0)!);
+      const questObjectives = quest.objectives;
+      setObjectives(questObjectives);
+      setSelectedObjective(questObjectives.at(0)!);
       setSelectedObjectiveIndex(0);
+
+      updateUrl(quest);
     }
   };
 
@@ -1137,6 +1146,15 @@ const QuestBoard = () =>
   };
   //endregion render
 
+  const { updateUrl } = useUrlSelection(
+    'questKey',
+    quests,
+    (q) => q.key,
+    selectedQuestIndex,
+    (index) => handleQuestListItemOnClickEvent(index),
+    (index) => listRef.current?.scrollToItem(index, 'smart')
+  );
+
   if (loading)
   {
     return <Typography>Loading quests configuration…</Typography>;
@@ -1151,6 +1169,7 @@ const QuestBoard = () =>
         >
           {/* @ts-ignore */}
           <FixedSizeList
+            ref={listRef}
             height={1030}
             itemSize={30}
             overscanCount={5}
@@ -1446,7 +1465,7 @@ const QuestBoard = () =>
 
     {/*region not-grid-related elements */}
     <SaveButton
-      extraSaveText={"Quests"}
+      extraSaveText={'Quests'}
       canSave={!loading}
       handleSave={async () =>
       {
@@ -1871,7 +1890,7 @@ const QuestBoard = () =>
     </Menu>
 
     {/*endregion not-grid-related elements */}
-  </>
-}
+  </>;
+};
 
 export default QuestBoard;
