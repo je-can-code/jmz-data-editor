@@ -48,7 +48,7 @@ export function useUrlSelection<T>(
   const updateUrl = (item: T) =>
   {
     const id = idAccessor(item);
-    const params = new URLSearchParams(location.search);
+    const params = new URLSearchParams(window.location.search);
     params.set(paramKey, String(id));
 
     navigate(`${location.pathname}?${params.toString()}`, { replace: true });

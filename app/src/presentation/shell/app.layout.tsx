@@ -22,6 +22,7 @@ import { SystemService } from '@services/SystemService';
 import { defaultDataPath } from '../../constants/PathConstants';
 import { APP_ROUTES } from '@platform/compositionRoot/routing.config.tsx';
 import { ErrorBoundary } from '../routing/error.boundary.tsx';
+import GlobalBottomBar from '../../components/bottombar/bottom-bar.global.tsx';
 
 const JmzTabsStyles = {
   [ `& .${tabsClasses.indicator}` ]: {
@@ -113,6 +114,9 @@ const AppLayout = () =>
           </ErrorBoundary>
         </Grid>
       </Grid>
+
+      {/* Bottom Bar */}
+      <GlobalBottomBar />
     </Box>
   </>;
 };

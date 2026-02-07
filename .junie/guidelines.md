@@ -87,7 +87,7 @@
     }
     ```
 
-JMz Style Capsule
+JMZ Style Capsule
 - Braces: Allman (opening brace on its own line) for functions, classes, and blocks.
 - Semicolons: required.
 - Quotes: prefer double quotes for strings and imports.
