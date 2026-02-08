@@ -4,8 +4,8 @@ import {
   SxProps,
   TextField,
   Theme
-} from "@mui/material";
-import React, { ChangeEvent } from "react";
+} from '@mui/material';
+import React, { ChangeEvent } from 'react';
 
 type NumberInputWithLabelProps = {
   label: string;
@@ -40,22 +40,22 @@ export default function NumberInputWithLabel({
       label={label}
       disableTypography
       sx={{
-        fontFamily: "monospace",
+        fontFamily: 'monospace',
         fontSize: 16
       }}
       control={
         <TextField
-          type={"number"}
-          variant={"standard"}
+          type={'number'}
+          variant={'standard'}
           disabled={disabled ?? false}
-          slotProps={(endAdornment !== null)
+          slotProps={(endAdornment != null)
             ? {
               input: {
                 endAdornment: (
-                  <InputAdornment position={"end"}>
+                  <InputAdornment position={'end'}>
                     {endAdornment}
                   </InputAdornment>
-                )
+                ),
               },
             }
             : undefined}
@@ -68,5 +68,5 @@ export default function NumberInputWithLabel({
           value={value}
           onChange={onChangeEventHandler}
         />}
-    />)
+    />);
 }

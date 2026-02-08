@@ -2,7 +2,7 @@ import React from "react";
 import {
   JabsBattlerData,
 } from "@services/parsers/JabsDataParser.ts";
-import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
+import NumberInputWithLabel from "../../../components/core/NumberInputWithLabel.tsx";
 import {
   Divider,
   Stack,

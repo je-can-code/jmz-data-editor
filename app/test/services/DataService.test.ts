@@ -5,7 +5,7 @@ import {
   expect,
   it,
   vi,
-} from "vitest";
+} from 'vitest';
 
 import {
   executeLoad,
@@ -14,21 +14,17 @@ import {
   loadArmors,
   loadEnemies,
   loadItems,
-  loadQuests,
+  loadQuests, loadSdps,
   loadSkills,
   loadStates,
   loadSystem,
   loadWeapons,
   setJsonStore,
-} from "../../src/services/DataService";
+} from '@services/DataService.ts';
 
-import { MemoryJsonStore } from "../../src/core/infrastructure/fs/memory/MemoryJsonStore";
+import { MemoryJsonStore } from '@core/infrastructure/fs/memory/MemoryJsonStore.ts';
 
-const projectPath = "/my-game/data";
-
-// -----------------------------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------------------------
+const projectPath = '/my-game/data';
 
 /**
  * Seeds the in-memory JSON store with a set of filePath -> data pairs.
@@ -47,11 +43,7 @@ function inProjectRoot(filename: string): string
   return `${projectPath}/${filename}`;
 }
 
-// -----------------------------------------------------------------------------------------------
-// Core read/write tests
-// -----------------------------------------------------------------------------------------------
-
-describe("DataService.executeSave/executeLoad", () =>
+describe('DataService.executeSave/executeLoad', () =>
 {
   beforeEach(() =>
   {
@@ -60,7 +52,10 @@ describe("DataService.executeSave/executeLoad", () =>
     vi.clearAllMocks();
 
     // quiet console during tests.
-    vi.spyOn(console, "log").mockImplementation(() => { /* no-op */ });
+    vi.spyOn(console, 'log')
+      .mockImplementation(() =>
+      { /* no-op */
+      });
 
     // configure a fresh memory store before each test.
     setJsonStore(new MemoryJsonStore());
@@ -71,54 +66,55 @@ describe("DataService.executeSave/executeLoad", () =>
     vi.restoreAllMocks();
   });
 
-  it("executeSave writes pretty-printed JSON to the correct path", async () =>
+  it('executeSave writes pretty-printed JSON to the correct path', async () =>
   {
     const payload = {
       id: 1,
-      name: "Potion",
+      name: 'Potion',
       price: 50,
     };
 
-    const filename = "Items.json";
+    const filename = 'Items.json';
 
     // act: save the payload.
     await executeSave(projectPath, filename, payload);
 
     // assert: round-trip by loading back.
     const roundTrip = await executeLoad<typeof payload>(projectPath, filename);
-    expect(roundTrip).toEqual(payload);
+    expect(roundTrip)
+      .toEqual(payload);
   });
 
-  it("executeLoad reads JSON from the correct path and parses it", async () =>
+  it('executeLoad reads JSON from the correct path and parses it', async () =>
   {
-    const filename = "Enemies.json";
+    const filename = 'Enemies.json';
 
     const enemyData = [
       {
         id: 3,
-        name: "Slime",
+        name: 'Slime',
       },
     ];
 
     // seed the memory store with the file contents.
-    seedStore({ [inProjectRoot(filename)]: enemyData });
+    seedStore({ [ inProjectRoot(filename) ]: enemyData });
 
     const result = await executeLoad<typeof enemyData>(projectPath, filename);
-    expect(result).toEqual(enemyData);
+    expect(result)
+      .toEqual(enemyData);
   });
 });
 
-// -----------------------------------------------------------------------------------------------
-// Loader-specific tests
-// -----------------------------------------------------------------------------------------------
-
-describe("DataService loaders return parsed JSON of the expected shape", () =>
+describe('DataService loaders return parsed JSON of the expected shape', () =>
 {
   beforeEach(() =>
   {
     vi.restoreAllMocks();
     vi.clearAllMocks();
-    vi.spyOn(console, "log").mockImplementation(() => { /* no-op */ });
+    vi.spyOn(console, 'log')
+      .mockImplementation(() =>
+      { /* no-op */
+      });
   });
 
   afterEach(() =>
@@ -126,113 +122,210 @@ describe("DataService loaders return parsed JSON of the expected shape", () =>
     vi.restoreAllMocks();
   });
 
-  it("loadActors returns an array of RPG_Actor", async () =>
+  it('loadActors returns an array of RPG_Actor', async () =>
   {
     const fake = [
-      { id: 1, name: "Harold", note: "" },
-      { id: 2, name: "Therese", note: "" },
+      {
+        id: 1,
+        name: 'Harold',
+        note: ''
+      },
+      {
+        id: 2,
+        name: 'Therese',
+        note: ''
+      },
     ];
 
-    seedStore({ [inProjectRoot("Actors.json")]: fake });
+    seedStore({ [ inProjectRoot('Actors.json') ]: fake });
 
     const result = await loadActors(projectPath);
 
-    expect(Array.isArray(result)).toBe(true);
-    expect(result).toEqual(fake);
-    expect(result[0].name).toBe("Harold");
+    expect(Array.isArray(result))
+      .toBe(true);
+    expect(result)
+      .toEqual(fake);
+    expect(result[ 0 ].name)
+      .toBe('Harold');
   });
 
-  it("loadSkills returns an array of RPG_Skill", async () =>
+  it('loadSkills returns an array of RPG_Skill', async () =>
   {
     const fake = [
-      { id: 10, name: "Fire", note: "" },
-      { id: 11, name: "Ice", note: "" },
+      {
+        id: 10,
+        name: 'Fire',
+        note: ''
+      },
+      {
+        id: 11,
+        name: 'Ice',
+        note: ''
+      },
     ];
 
-    seedStore({ [inProjectRoot("Skills.json")]: fake });
+    seedStore({ [ inProjectRoot('Skills.json') ]: fake });
 
     const result = await loadSkills(projectPath);
 
-    expect(result).toEqual(fake);
-    expect(result[1].name).toBe("Ice");
+    expect(result)
+      .toEqual(fake);
+    expect(result[ 1 ].name)
+      .toBe('Ice');
   });
 
-  it("loadStates returns an array of RPG_State", async () =>
+  it('loadStates returns an array of RPG_State', async () =>
   {
     const fake = [
-      { id: 3, name: "Poison", note: "" },
-      { id: 4, name: "Paralyze", note: "" },
+      {
+        id: 3,
+        name: 'Poison',
+        note: ''
+      },
+      {
+        id: 4,
+        name: 'Paralyze',
+        note: ''
+      },
     ];
 
-    seedStore({ [inProjectRoot("States.json")]: fake });
+    seedStore({ [ inProjectRoot('States.json') ]: fake });
 
     const result = await loadStates(projectPath);
 
-    expect(result).toEqual(fake);
-    expect(result[0].name).toBe("Poison");
+    expect(result)
+      .toEqual(fake);
+    expect(result[ 0 ].name)
+      .toBe('Poison');
   });
 
-  it("loadItems returns an array of RPG_Item", async () =>
+  it('loadItems returns an array of RPG_Item', async () =>
   {
     const fake = [
-      { id: 1, name: "Potion", note: "" },
-      { id: 2, name: "Hi-Potion", note: "" },
+      {
+        id: 1,
+        name: 'Potion',
+        note: ''
+      },
+      {
+        id: 2,
+        name: 'Hi-Potion',
+        note: ''
+      },
     ];
 
-    seedStore({ [inProjectRoot("Items.json")]: fake });
+    seedStore({ [ inProjectRoot('Items.json') ]: fake });
 
     const result = await loadItems(projectPath);
 
-    expect(result).toEqual(fake);
-    expect(result[0].name).toBe("Potion");
+    expect(result)
+      .toEqual(fake);
+    expect(result[ 0 ].name)
+      .toBe('Potion');
   });
 
-  it("loadWeapons returns an array of RPG_Weapon", async () =>
+  it('loadWeapons returns an array of RPG_Weapon', async () =>
   {
     const fake = [
-      { id: 1, name: "Bronze Sword", note: "" },
-      { id: 2, name: "Iron Sword", note: "" },
+      {
+        id: 1,
+        name: 'Bronze Sword',
+        note: ''
+      },
+      {
+        id: 2,
+        name: 'Iron Sword',
+        note: ''
+      },
     ];
 
-    seedStore({ [inProjectRoot("Weapons.json")]: fake });
+    seedStore({ [ inProjectRoot('Weapons.json') ]: fake });
 
     const result = await loadWeapons(projectPath);
 
-    expect(result).toEqual(fake);
-    expect(result[1].name).toBe("Iron Sword");
+    expect(result)
+      .toEqual(fake);
+    expect(result[ 1 ].name)
+      .toBe('Iron Sword');
   });
 
-  it("loadArmors returns an array of RPG_Armor", async () =>
+  it('loadArmors returns an array of RPG_Armor', async () =>
   {
     const fake = [
-      { id: 1, name: "Leather Armor", note: "" },
-      { id: 2, name: "Chainmail", note: "" },
+      {
+        id: 1,
+        name: 'Leather Armor',
+        note: ''
+      },
+      {
+        id: 2,
+        name: 'Chainmail',
+        note: ''
+      },
     ];
 
-    seedStore({ [inProjectRoot("Armors.json")]: fake });
+    seedStore({ [ inProjectRoot('Armors.json') ]: fake });
 
     const result = await loadArmors(projectPath);
 
-    expect(result).toEqual(fake);
-    expect(result[0].name).toBe("Leather Armor");
+    expect(result)
+      .toEqual(fake);
+    expect(result[ 0 ].name)
+      .toBe('Leather Armor');
   });
 
-  it("loadEnemies returns an array of RPG_Enemy", async () =>
+  it('loadEnemies returns an array of RPG_Enemy', async () =>
   {
     const fake = [
-      { id: 3, name: "Slime", note: "" },
-      { id: 4, name: "Orc", note: "" },
+      {
+        id: 3,
+        name: 'Slime',
+        note: ''
+      },
+      {
+        id: 4,
+        name: 'Orc',
+        note: ''
+      },
     ];
 
-    seedStore({ [inProjectRoot("Enemies.json")]: fake });
+    seedStore({ [ inProjectRoot('Enemies.json') ]: fake });
 
     const result = await loadEnemies(projectPath);
 
-    expect(result).toEqual(fake);
-    expect(result[1].name).toBe("Orc");
+    expect(result)
+      .toEqual(fake);
+    expect(result[ 1 ].name)
+      .toBe('Orc');
   });
 
-  it("loadQuests returns a Configuration-like object", async () =>
+  it('loadSystem returns an RPG_System-like object', async () =>
+  {
+    const fake = {
+      elements: [ 'None', 'Fire', 'Ice' ],
+      skillTypes: [ 'Magic', 'Special' ],
+      weaponTypes: [ 'Sword', 'Axe' ],
+      armorTypes: [ 'Light', 'Heavy' ],
+      equipTypes: [ 'Weapon', 'Shield', 'Head', 'Body', 'Accessory' ],
+    };
+
+    seedStore({ [ inProjectRoot('System.json') ]: fake });
+
+    const result = await loadSystem(projectPath);
+
+    expect(result.elements[ 1 ])
+      .toBe('Fire');
+    expect(result.skillTypes.length)
+      .toBeGreaterThan(0);
+    expect(Array.isArray(result.weaponTypes))
+      .toBe(true);
+    expect(Array.isArray(result.armorTypes))
+      .toBe(true);
+    expect(result.equipTypes.includes('Weapon'))
+      .toBe(true);
+  });
+
+  it('loadQuests returns a Quest.Configuration object', async () =>
   {
     const fake = {
       // populate minimally; shape is opaque to the loader.
@@ -240,32 +333,54 @@ describe("DataService loaders return parsed JSON of the expected shape", () =>
       quests: [],
     } as unknown; // leave as unknown to match generic typing in tests.
 
-    seedStore({ [inProjectRoot("config.quest.json")]: fake });
+    seedStore({ [ inProjectRoot('config.quest.json') ]: fake });
 
     const result = await loadQuests(projectPath);
 
-    expect(typeof result).toBe("object");
-    expect(result).toEqual(fake);
+    expect(typeof result)
+      .toBe('object');
+    expect(result)
+      .toEqual(fake);
   });
 
-  it("loadSystem returns an RPG_System-like object", async () =>
+  it('loadSdps returns the Sdp.Configuration object', async () =>
   {
     const fake = {
-      elements: ["None", "Fire", "Ice"],
-      skillTypes: ["Magic", "Special"],
-      weaponTypes: ["Sword", "Axe"],
-      armorTypes: ["Light", "Heavy"],
-      equipTypes: ["Weapon", "Shield", "Head", "Body", "Accessory"],
-    };
+      version: 1,
+      panels: [],
+      rewards: []
+    } as unknown;
+    setJsonStore(new MemoryJsonStore({ [ inProjectRoot('config.sdp.json') ]: fake }));
 
-    seedStore({ [inProjectRoot("System.json")]: fake });
+    const result = await loadSdps(projectPath);
 
-    const result = await loadSystem(projectPath);
+    expect(result)
+      .toEqual(fake);
+  });
+});
 
-    expect(result.elements[1]).toBe("Fire");
-    expect(result.skillTypes.length).toBeGreaterThan(0);
-    expect(Array.isArray(result.weaponTypes)).toBe(true);
-    expect(Array.isArray(result.armorTypes)).toBe(true);
-    expect(result.equipTypes.includes("Weapon")).toBe(true);
+describe('DataService guard rails when JsonStore is not configured', () =>
+{
+  it('executeSave throws when jsonStore is missing', async () =>
+  {
+    // ensure store is unset (module-level var) – call setJsonStore with null-like via cast
+    // or rely on fresh module state in this test file; here we force-reset by reassigning.
+    // @ts-expect-error – testing guard
+    setJsonStore(undefined);
+
+    // noinspection ES6RedundantAwait
+    await expect(executeSave(projectPath, 'Items.json', { a: 1 }))
+      .rejects
+      .toThrow('JsonStore not configured');
+  });
+
+  it('executeLoad throws when jsonStore is missing', async () =>
+  {
+    // @ts-expect-error – testing guard
+    setJsonStore(undefined);
+
+    await expect(executeLoad(projectPath, 'System.json'))
+      .rejects
+      .toThrow('JsonStore not configured');
   });
 });

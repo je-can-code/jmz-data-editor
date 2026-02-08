@@ -34,7 +34,7 @@ import {
   Whatshot
 } from '@mui/icons-material';
 import { SystemService } from '@services/SystemService.ts';
-import NumberInputWithLabel from '../../../components/NumberInputWithLabel.tsx';
+import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 import {
   fromBParamIdToName,
   fromSParamIdToName,
