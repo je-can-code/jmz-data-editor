@@ -1,5 +1,3 @@
-import CraftingComponentType from "../../enums/CraftingComponentType.ts";
-
 declare namespace Crafting
 {
   interface Configuration
@@ -25,7 +23,8 @@ declare namespace Crafting
   interface CraftingComponent
   {
     id: number;
-    type: CraftingComponentType;
+    // Inline import type – this does NOT make the file a module
+    type: import('../../core/enums/CraftingComponentType.ts').CraftingComponentType;
     count: number;
   }
 
@@ -38,5 +37,3 @@ declare namespace Crafting
     unlockedByDefault: boolean;
   }
 }
-
-export default Crafting;

@@ -1,4 +1,4 @@
-// noinspection HtmlUnknownTarget,JSUnresolvedLibraryURL
+// noinspection HtmlUnknownTaret,JSUnresolvedLibraryURL
 
 import type {
   Plugin,
@@ -64,6 +64,20 @@ const neutralino = (): Plugin =>
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [ react(), neutralino() ],
+  resolve: {
+    alias: {
+      // keep these in sync with tsconfig.json
+      '@core': path.resolve(_dirname, 'src/core'),
+      '@infrastructure': path.resolve(_dirname, 'src/infrastructure'),
+
+      '@presentation': path.resolve(_dirname, 'src/presentation'),
+      '@boards': path.resolve(_dirname, 'src/presentation/boards'),
+
+      '@platform': path.resolve(_dirname, 'src/platform'),
+      '@services': path.resolve(_dirname, 'src/services'),
+      '@types': path.resolve(_dirname, 'src/types'),
+    },
+  },
   server: {
     port: 3000,
     strictPort: true,

@@ -3,10 +3,10 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "start": "neu run -- --window-enable-inspector",
-    "dev": "neu run -- --window-enable-inspector",
-    "build": "neu build",
-    "publish": "neu build --release"
+    "start": "distrobox enter ex -- neu run -- --window-enable-inspector",
+    "dev": "distrobox enter ex -- neu run -- --window-enable-inspector",
+    "build": "distrobox enter ex -- neu build",
+    "publish": "distrobox enter ex -- neu build --release"
   },
   "devDependencies": {
     "@types/node": "^22.9.3"

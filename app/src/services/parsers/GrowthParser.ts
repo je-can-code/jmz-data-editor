@@ -65,7 +65,6 @@ class GrowthParser
       // Create a mock battler object with level
       const a = { level };
 
-      // Use Function constructor to safely evaluate the formula
       // This creates a function with 'a' as a parameter
       const evaluator = new Function('a', `return ${formula}`);
 

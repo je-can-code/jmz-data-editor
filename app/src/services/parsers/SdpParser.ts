@@ -1,14 +1,11 @@
+import { SdpDropData } from "@core/domain/valueObjects/sdp-drop.ts";
 import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
-
-type SdpDropData = {
-  key: string;
-  dropChance: number;
-};
+import NoteReader from "@services/utils/NoteReader.ts";
 
 class SdpParser
 {
-  static #dropRegex = /<sdpDropData: ?(\[[-\w]+, ?\d+])>/i;
-  static #pointsRegex = /<sdpPoints:\s*(-?\d+)>/i;
+  static #dropRegex = /<sdpDropData: ?(\[[-\w]+, ?\d+])>/gi;
+  static #pointsRegex = /<sdpPoints:\s*(-?\d+)>/gi;
 
   /**
    * Reads the SDP drop data from a note.
@@ -17,24 +14,16 @@ class SdpParser
    */
   static readDrop(note: string): SdpDropData | null
   {
-    const match = note.match(this.#dropRegex);
-    if (match)
+    const result = NoteReader.getArraysFromNotesByRegex(note, this.#dropRegex, true);
+
+    if (result && result.length > 0)
     {
-      // Extract the array content without brackets
-      const arrayContent = match[1].replace(/^\[|]$/g, '');
-      const parts = arrayContent.split(',')
-        .map(part => part.trim());
-
-      const key = parts[0];
-      const dropChance = parseInt(parts[1]);
-
-      // Extract the key, itemId, and dropChance
+      const [ key, dropChance ] = result[0];
       return {
-        key,
-        dropChance,
+        key: String(key),
+        dropChance: Number(dropChance) || 0
       };
     }
-
     return null;
   }
 
@@ -46,7 +35,7 @@ class SdpParser
       return NoteNormalizer.removeLinesMatching(originalNote, this.#dropRegex);
     }
 
-    const newTag = `<sdpDropData: [${sdpData.key},${sdpData.dropChance}]>`;
+    const newTag = `<sdpDropData:[${sdpData.key},${sdpData.dropChance}]>`;
 
     // ensure only one tag remains by removing then appending
     const base = NoteNormalizer.removeLinesMatching(originalNote, this.#dropRegex);
@@ -65,13 +54,8 @@ class SdpParser
    */
   static readPoints(note: string): number | null
   {
-    const match = note.match(this.#pointsRegex);
-    if (match)
-    {
-      return parseInt(match[1]);
-    }
-
-    return null;
+    const dummy = { note } as any;
+    return NoteReader.getNumberFromNoteByRegex(dummy, this.#pointsRegex, true);
   }
 
   /**
@@ -82,11 +66,21 @@ class SdpParser
    */
   static writePoints(originalNote: string, points: number): string
   {
-    const newTag = `<sdpPoints: ${points}>`;
+    const newTag = `<sdpPoints:${points}>`;
 
     // ensure only one points tag by removing then appending
     const base = NoteNormalizer.removeLinesMatching(originalNote, this.#pointsRegex);
     return NoteNormalizer.appendBlock(base, newTag);
+  }
+
+  /**
+   * Deletes the SDP points tag from the note.
+   * @param note The note to cleanup.
+   * @returns The cleaned up note.
+   */
+  static deletePoints(note: string): string
+  {
+    return NoteNormalizer.removeLinesMatching(note, this.#pointsRegex);
   }
 }
 

@@ -1,11 +1,5 @@
 import RPG_System = Rmmz.System.RPG_System;
-import RPG_State = Rmmz.Implementations.RPG_State;
-import RPG_Skill = Rmmz.Implementations.RPG_Skill;
-import {
-  loadSkills,
-  loadStates,
-  loadSystem
-} from "./DataService.ts";
+import { loadSystem } from './DataService.ts';
 
 /**
  * A static service used for accessing various system data.
@@ -13,8 +7,6 @@ import {
 class SystemService
 {
   static systemData: RPG_System;
-  static stateData: RPG_State[];
-  static skillData: RPG_Skill[];
 
   static elements: string[];
   static skillTypes: string[];
@@ -34,10 +26,7 @@ class SystemService
     this.weaponTypes = this.systemData.weaponTypes;
     this.armorTypes = this.systemData.armorTypes;
     this.equipTypes = this.systemData.equipTypes;
-
-    this.stateData = await loadStates(projectPath);
-    this.skillData = await loadSkills(projectPath);
   }
 }
 
-export { SystemService }
+export { SystemService };

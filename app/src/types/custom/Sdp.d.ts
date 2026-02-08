@@ -2,10 +2,10 @@ declare namespace Sdp
 {
   interface Configuration
   {
-    sdps: Panel[];
+    sdps: StatDistributionPanel[];
   }
 
-  interface Panel
+  interface StatDistributionPanel
   {
     name: string;
     key: string;
@@ -17,12 +17,12 @@ declare namespace Sdp
     baseCost: number;
     flatGrowthCost: number;
     multGrowthCost: number;
-    panelParameters: PanelParameter[];
-    panelRewards: PanelReward[];
+    panelParameters: SdpParameter[];
+    panelRewards: SdpReward[];
     rarity: number;
   }
 
-  interface PanelParameter
+  interface SdpParameter
   {
     parameterId: number;
     perRank: number;
@@ -30,7 +30,7 @@ declare namespace Sdp
     isCore: boolean;
   }
 
-  interface PanelReward
+  interface SdpReward
   {
     rewardName: string;
     rankRequired: number;

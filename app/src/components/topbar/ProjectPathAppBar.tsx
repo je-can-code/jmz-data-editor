@@ -6,8 +6,8 @@ import {
 import ProjectPickerButton from "./ProjectPickerButton.tsx";
 
 type ProjectPathAppBarProps = {
-  pathSetter: (value: string) => void;
-  pathGetter: string;
+  onProjectPathChange: (value: string) => void;
+  projectPath: string;
 };
 
 const ProjectPathAppBar = (projectPathAppBarProps: ProjectPathAppBarProps) =>
@@ -20,12 +20,12 @@ const ProjectPathAppBar = (projectPathAppBarProps: ProjectPathAppBarProps) =>
         </Typography>
         <Typography fontFamily={"monospace"} sx={{ flexGrow: 1 }}>
           {
-            projectPathAppBarProps.pathGetter === ''
+            projectPathAppBarProps.projectPath === ''
               ? 'project path unset.'
-              : projectPathAppBarProps.pathGetter
+              : projectPathAppBarProps.projectPath
           }
         </Typography>
-        <ProjectPickerButton projectPathSetter={projectPathAppBarProps.pathSetter}/>
+        <ProjectPickerButton projectPathSetter={projectPathAppBarProps.onProjectPathChange}/>
       </Toolbar>
     </AppBar>
   );

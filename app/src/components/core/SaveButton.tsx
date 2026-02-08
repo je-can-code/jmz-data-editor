@@ -10,25 +10,24 @@ const SaveStyles = {
 };
 
 type SaveButtonProps = {
-  /**
-   * The additional text to append to "Save". If you put "Panels" in this value, then the button would reflect "Save
-   * Panels" instead of just "Save".
-   */
   handleSave: () => void;
   canSave: boolean;
+  isSaving?: boolean;
   extraSaveText?: string;
 };
 
 /**
  * A normalized button dedicated to being used to represent a "save data to disk".
  * @param handleSave The async function to execute upon clicking.
- * @param canSave The reverse conditional as to whether or not the button should be available.
+ * @param canSave The reverse conditional whether the button should be available.
+ * @param isSaving Whether or not the button is currently saving data.
  * @param extraSaveText Additional text to append after "Save" on the button.
  * @constructor
  */
 export default function SaveButton({
   handleSave,
   canSave,
+  isSaving = false,
   extraSaveText,
 }: SaveButtonProps)
 {
@@ -37,7 +36,8 @@ export default function SaveButton({
       size={"small"}
       color={"secondary"}
       onClick={async () => handleSave()}
-      loading={!canSave}
+      disabled={!canSave || isSaving}
+      loading={isSaving}
       loadingPosition={"start"}
       startIcon={<Save/>}
       variant="contained"
