@@ -1,0 +1,33 @@
+# .editorconfig
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+
+[*.{ts,tsx}]
+# Force spacing inside brackets for the [ , item ] style
+ij_javascript_spaces_within_brackets = true
+ij_typescript_spaces_within_brackets = true
+
+# Ensure it applies to the block level specifically
+ij_javascript_if_brace_force = always
+ij_typescript_array_initializer_wrap = on_every_item
+ij_typescript_spaces_within_array_initializer_brackets = true
+ij_typescript_spaces_within_imports = true
+ij_typescript_spaces_within_object_literal_braces = true
+ij_typescript_space_before_method_parentheses = false
+ij_typescript_use_semicolon_after_statement = true
+
+# Spacing: [ , traitName ]
+ij_typescript_space_after_comma = true
+
+# Blocks
+ij_typescript_if_brace_force = always
+ij_typescript_for_brace_force = always
+ij_typescript_while_brace_force = always
+ij_typescript_do_while_brace_force = always

@@ -9,6 +9,18 @@
       "DOM",
       "DOM.Iterable"
     ],
+    "baseUrl": "./src",
+    "paths": {
+      "@core/*": ["core/*"],
+      "@infrastructure/*": ["infrastructure/*"],
+
+      "@presentation/*": ["presentation/*"],
+      "@boards/*": ["presentation/boards/*"],
+
+      "@platform/*": ["platform/*"],
+      "@services/*": ["services/*"],
+      "@types/*": ["types/*"]
+    },
     "target": "ESNext",
     "module": "ESNext",
     "moduleDetection": "force",

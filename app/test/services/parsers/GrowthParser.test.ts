@@ -6,7 +6,7 @@ import {
   it,
   vi
 } from 'vitest';
-import { GrowthParser } from '../../../src/services/parsers/GrowthParser.ts';
+import { GrowthParser } from '@services/parsers/GrowthParser.ts';
 
 // Helper: minimal KnownParameter-like objects without importing the type
 const makeKnownParam = (overrides?: Partial<{
