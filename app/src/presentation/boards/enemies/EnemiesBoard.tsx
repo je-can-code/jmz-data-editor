@@ -50,7 +50,7 @@ import { ExtraDropManager } from '@services/parsers/ExtraDropParser.ts';
 import EnemyBaseParameters from './EnemyBaseParameters.tsx';
 import EnemiesExtraDrops from './EnemiesExtraDrops.tsx';
 import SaveButton from '../../../components/core/SaveButton.tsx';
-import NumberInputWithLabel from '../../../components/NumberInputWithLabel.tsx';
+import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 import {
   amber,
   blue,

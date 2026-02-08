@@ -27,7 +27,7 @@ import {
 } from "@mui/material/colors";
 import { EnemyBaseParam } from "@core/enums/EnemyParameter.ts";
 import React from "react";
-import NumberInputWithLabel from "../../../components/NumberInputWithLabel.tsx";
+import NumberInputWithLabel from "../../../components/core/NumberInputWithLabel.tsx";
 import { GrowthParser } from "@services/parsers/GrowthParser.ts";
 import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
 import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";

@@ -3,7 +3,7 @@ import {
   expect,
   it
 } from 'vitest';
-import { ExtraDropManager } from "../../../src/services/parsers/ExtraDropParser.ts";
+import { ExtraDropManager } from '@services/parsers/ExtraDropParser.ts';
 
 // RPG_DropItem is a simple shape: { kind: number, dataId: number, denominator: number }
 // We will construct these as plain objects and cast as any for the tests where needed.

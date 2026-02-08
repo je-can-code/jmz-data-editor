@@ -7,7 +7,7 @@ import {
   TextField
 } from '@mui/material';
 import { OpenInNew } from '@mui/icons-material';
-import NumberInputWithLabel from '../../../components/NumberInputWithLabel.tsx';
+import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
 import { useNavigate } from 'react-router-dom';
 import { useSdps } from '@presentation/context/resources/sdps.context.tsx';
