@@ -153,23 +153,11 @@ const EnemiesExtraDrops = ({
 
   const handleRelevantDropItemDropdownOnClickEvent = (clickedDropItem: RPG_Item | RPG_Weapon | RPG_Armor) =>
   {
-    let dropItemType = DropItemType.Item;
-    switch (true)
-    {
-      case Object.hasOwn(clickedDropItem, 'itypeId'):
-        dropItemType = DropItemType.Item;
-        break;
-      case Object.hasOwn(clickedDropItem, 'wtypeId'):
-        dropItemType = DropItemType.Weapon;
-        break;
-      case Object.hasOwn(clickedDropItem, 'atypeId'):
-        dropItemType = DropItemType.Armor;
-        break;
-    }
     const updatedPendingDropItem = {
-      ...pendingDropItem,
+      // Preserve denominator if already set; otherwise provide a sensible default.
+      denominator: pendingDropItem?.denominator ?? selectedDropItem?.denominator ?? 100,
       dataId: clickedDropItem.id,
-      kind: dropItemType
+      kind: selectedDropItemType,
     } as RPG_DropItem;
 
     setPendingDropItem(updatedPendingDropItem);
@@ -291,11 +279,11 @@ const EnemiesExtraDrops = ({
     {
       case 1:
         icon = <BusinessCenter color={'success'}/>;
-        drop = items.at(dropItem.dataId)!;
+        drop = items.find(i => i?.id === dropItem.dataId) ?? null;
         break;
       case 2:
         icon = <LocalDining color={'error'}/>;
-        drop = weapons.at(dropItem.dataId)!;
+        drop = weapons.find(w => w?.id === dropItem.dataId) ?? null;
         break;
       case 3:
         // arbitrary use case for CA since all armors beyond 300 are monster drops.
@@ -308,10 +296,19 @@ const EnemiesExtraDrops = ({
           icon = <Shield color={'info'}/>;
         }
 
-        drop = armors.at(dropItem.dataId)!;
+        drop = armors.find(a => a?.id === dropItem.dataId) ?? null;
         break;
       default:
         throw new Error(`Unknown item kind: ${dropItem.kind}`);
+    }
+
+    if (!drop)
+    {
+      return (
+        <ListItem key={index}>
+          <ListItemText primary={`Unknown (id: ${dropItem.dataId})`}/>
+        </ListItem>
+      );
     }
 
     return (
@@ -378,14 +375,16 @@ const EnemiesExtraDrops = ({
       option: any
     ) =>
     {
+      const { key: optionKey, ...liProps } = props;
+
       if (!option || option.name === '' || option.name?.startsWith('=='))
       {
-        return <li {...props} style={{ display: 'none' }}/>;
+        return <li key={optionKey} {...liProps} style={{ display: "none" }} />;
       }
 
       return (
-        <li key={props.key} {...props} style={{ height: 32 }}>
-          <ListItem disableGutters disablePadding sx={{ height: 32 }}>
+        <li key={optionKey} {...liProps} style={{ height: 32 }}>
+          <ListItem component="div" disableGutters disablePadding sx={{ height: 32 }}>
             <ListItemButton
               sx={{ height: 32 }}
               onClick={() =>
@@ -620,17 +619,17 @@ const EnemiesExtraDrops = ({
     switch (dropItem.kind)
     {
       case DropItemType.Item:
-        dropItemData = items[ dropItem.dataId ];
+        dropItemData = items.find(i => i?.id === dropItem.dataId) ?? null;
         color = 'success';
         icon = <BusinessCenter color={'success'}/>;
         break;
       case DropItemType.Weapon:
-        dropItemData = weapons[ dropItem.dataId ];
+        dropItemData = weapons.find(w => w?.id === dropItem.dataId) ?? null;
         color = 'error';
         icon = <LocalDining color={'error'}/>;
         break;
       case DropItemType.Armor:
-        dropItemData = armors[ dropItem.dataId ];
+        dropItemData = armors.find(a => a?.id === dropItem.dataId) ?? null;
         color = 'info';
         icon = <Shield color={'info'}/>;
         break;
@@ -638,14 +637,12 @@ const EnemiesExtraDrops = ({
         throw new Error(`unknown ingredient type detected: ${dropItem.kind}`);
     }
 
-    return <>
-      <Chip
-        icon={icon}
-        label={`${dropItemData.name} (${dropItem.denominator}%)`}
-        variant={variant}
-        color={color}
-      />
-    </>;
+    return <Chip
+      icon={icon}
+      label={`${dropItemData?.name ?? "Unknown"} (${dropItem.denominator}%)`}
+      variant={variant}
+      color={color}
+    />;
   };
   //endregion render
 
