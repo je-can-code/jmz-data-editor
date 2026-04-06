@@ -9,6 +9,7 @@
   "tokenSecurity": "one-time",
   "nativeAllowList": [
     "filesystem.readFile",
+    "filesystem.readBinaryFile",
     "filesystem.writeFile",
     "os.showFolderDialog",
     "app.exit"

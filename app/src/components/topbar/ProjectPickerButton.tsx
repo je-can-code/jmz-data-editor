@@ -11,7 +11,7 @@ export default function ProjectPickerButton(projectPathSetter: ProjectPickerButt
   const folderPicker = async () =>
   {
     const path = await os.showFolderDialog(
-      'Choose project data directory',
+      "Choose your RMMZ data folder (contains Actors.json, Skills.json, …)",
       { defaultPath: defaultDataPath });
 
     if (!!path)
@@ -26,7 +26,7 @@ export default function ProjectPickerButton(projectPathSetter: ProjectPickerButt
       variant={"outlined"}
       onClick={async () => await folderPicker()}
     >
-      {"Select Project Root"}
+      {"Select data folder"}
     </Button>
   </>;
 }

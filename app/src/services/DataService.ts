@@ -9,6 +9,8 @@ import RPG_Armor = Rmmz.Implementations.RPG_Armor;
 import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 import RPG_System = Rmmz.System.RPG_System;
 import RPG_State = Rmmz.Implementations.RPG_State;
+import RPG_Animation = Rmmz.Implementations.RPG_Animation;
+import RPG_CommonEvent = Rmmz.Implementations.RPG_CommonEvent;
 
 type QuestConfiguration = Questopedia.Configuration;
 type SdpConfiguration = Sdp.Configuration;
@@ -137,6 +139,16 @@ const loadSystem = async (projectPath: string): Promise<RPG_System> =>
   return await executeLoad<RPG_System>(projectPath, ConfigFilenames.System);
 };
 
+const loadAnimations = async (projectPath: string): Promise<(RPG_Animation | null)[]> =>
+{
+  return await executeLoad<(RPG_Animation | null)[]>(projectPath, DatabaseFilenames.Animations);
+};
+
+const loadCommonEvents = async (projectPath: string): Promise<(RPG_CommonEvent | null)[]> =>
+{
+  return await executeLoad<(RPG_CommonEvent | null)[]>(projectPath, DatabaseFilenames.CommonEvents);
+};
+
 export {
   setJsonStore,
   executeSave,
@@ -151,6 +163,8 @@ export {
 
   loadStates,
   loadSystem,
+  loadAnimations,
+  loadCommonEvents,
 
   loadQuests,
   loadSdps,

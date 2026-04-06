@@ -88,7 +88,7 @@ const ProficiencyBoard = () =>
   } = useActors();
 
   const {
-    data: skills,
+    skills,
     loading: skillsLoading
   } = useSkills();
 

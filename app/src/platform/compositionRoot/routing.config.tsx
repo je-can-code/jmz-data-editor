@@ -11,8 +11,10 @@ import {
   Construction,
   Hub,
   Rule,
+  School,
 } from '@mui/icons-material';
 import IndexBoard from "@boards/_index/IndexBoard.tsx";
+import SkillsBoard from "@boards/skills/SkillsBoard.tsx";
 
 const indexBoard: BoardDefinition = {
   id: "root",
@@ -32,6 +34,16 @@ const enemyBoard: BoardDefinition = {
   guard: () => true,
   icon: <Android fontSize={"small"}/>,
   featureFlag: "db.enemies",
+};
+
+const skillsBoard: BoardDefinition = {
+  id: "skills",
+  title: "Skills",
+  path: "/skills",
+  component: SkillsBoard,
+  guard: () => true,
+  icon: <School fontSize={"small"}/>,
+  featureFlag: "db.skills",
 };
 
 const sdpBoard: BoardDefinition = {
@@ -77,6 +89,7 @@ const proficiencyBoard: BoardDefinition = {
 const APP_ROUTES: BoardDefinition[] = [
   indexBoard,
   enemyBoard,
+  skillsBoard,
   sdpBoard,
   questBoard,
   craftingBoard,

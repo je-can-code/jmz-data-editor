@@ -24,7 +24,10 @@ vi.mock('../../../../../src/services/DataService.ts', () => ({
 
 // Mock ProjectPath context to simulate a valid project environment.
 vi.mock('../../../../../src/presentation/context/project-path.context.tsx', () => ({
-  useProjectPath: () => ({ projectPath: '/test/project/data' }),
+  useProjectPath: () => ({
+    projectPath: '/test/project/data',
+    systemDataGeneration: 0,
+  }),
 }));
 
 /**
