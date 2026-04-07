@@ -10,7 +10,7 @@ import {
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useProjectPath } from "@presentation/context/project-path.context.tsx";
-import { JMZ_EDITOR_CONFIG_YAML_RELATIVE_HINT } from "@platform/neutralino/readJmzEditorYamlConfig.ts";
+import { JmzEditorYamlConfigReader } from "@platform/neutralino/readJmzEditorYamlConfig.ts";
 
 const ProjectPathAppBar = () =>
 {
@@ -68,7 +68,7 @@ const ProjectPathAppBar = () =>
           >
             {
               projectRoot === ""
-                ? `project root unset — add ${JMZ_EDITOR_CONFIG_YAML_RELATIVE_HINT} (see config.example.yaml)`
+                ? `project root unset — add ${JmzEditorYamlConfigReader.CONFIG_YAML_RELATIVE_HINT} (see config.example.yaml)`
                 : projectRoot
             }
           </Typography>

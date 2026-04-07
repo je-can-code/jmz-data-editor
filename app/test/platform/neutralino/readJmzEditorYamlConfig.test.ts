@@ -8,9 +8,9 @@ import {
   expect,
   it
 } from "vitest";
-import { candidateJmzEditorConfigYamlAbsolutePaths } from "../../../src/platform/neutralino/readJmzEditorYamlConfig";
+import { JmzEditorYamlConfigReader } from "../../../src/platform/neutralino/readJmzEditorYamlConfig";
 
-describe("candidateJmzEditorConfigYamlAbsolutePaths", () =>
+describe("JmzEditorYamlConfigReader.candidateAbsolutePaths", () =>
 {
   const original = typeof window !== "undefined"
     ? window.NL_PATH
@@ -35,21 +35,21 @@ describe("candidateJmzEditorConfigYamlAbsolutePaths", () =>
   it("returns an empty list when NL_PATH is unset", () =>
   {
     delete window.NL_PATH;
-    expect(candidateJmzEditorConfigYamlAbsolutePaths())
+    expect(JmzEditorYamlConfigReader.candidateAbsolutePaths())
       .toEqual([]);
   });
 
   it("joins .config/config.yaml under NL_PATH", () =>
   {
     window.NL_PATH = "/repo";
-    expect(candidateJmzEditorConfigYamlAbsolutePaths())
+    expect(JmzEditorYamlConfigReader.candidateAbsolutePaths())
       .toEqual([ "/repo/.config/config.yaml" ]);
   });
 
   it("tries the parent directory when NL_PATH ends with app", () =>
   {
     window.NL_PATH = "/repo/app";
-    expect(candidateJmzEditorConfigYamlAbsolutePaths())
+    expect(JmzEditorYamlConfigReader.candidateAbsolutePaths())
       .toEqual([
         "/repo/app/.config/config.yaml",
         "/repo/.config/config.yaml",
@@ -59,7 +59,7 @@ describe("candidateJmzEditorConfigYamlAbsolutePaths", () =>
   it("uses backslashes when NL_PATH contains them", () =>
   {
     window.NL_PATH = "C:\\games\\jmz-data-editor\\app";
-    expect(candidateJmzEditorConfigYamlAbsolutePaths())
+    expect(JmzEditorYamlConfigReader.candidateAbsolutePaths())
       .toEqual([
         "C:\\games\\jmz-data-editor\\app\\.config\\config.yaml",
         "C:\\games\\jmz-data-editor\\.config\\config.yaml",
