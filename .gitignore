@@ -10,6 +10,9 @@ neutralino.js
 .storage
 *.log
 
+# Local app settings (copy from config.example.yaml)
+.config/
+
 # Node and React ignores
 node_modules
 build

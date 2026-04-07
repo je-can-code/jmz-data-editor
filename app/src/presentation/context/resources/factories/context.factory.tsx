@@ -40,13 +40,13 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
 
   function ResourceProvider({ children }: { children: ReactNode })
   {
-    const { projectPath } = useProjectPath();
+    const { rmmzDataPath, projectReloadGeneration } = useProjectPath();
     const [ data, setData ] = useState<TModel[]>([]);
     const [ loading, setLoading ] = useState(true);
 
     const reload = useCallback(async () =>
     {
-      if (!projectPath || !projectPath.endsWith('/data'))
+      if (!rmmzDataPath || rmmzDataPath.trim() === "")
       {
         return;
       }
@@ -54,7 +54,7 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
       setLoading(true);
       try
       {
-        const rawData = await executeLoad<TDto[]>(projectPath, filename);
+        const rawData = await executeLoad<TDto[]>(rmmzDataPath, filename);
 
         // Filter out the null at index 0 and map to domain models.
         const validModels = rawData
@@ -71,11 +71,11 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
       {
         setLoading(false);
       }
-    }, [ projectPath ]);
+    }, [ rmmzDataPath ]);
 
     const save = useCallback(async (updatedList: TModel[]) =>
     {
-      if (!projectPath)
+      if (!rmmzDataPath || rmmzDataPath.trim() === "")
       {
         return;
       }
@@ -85,7 +85,7 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
         const rmmzData = updatedList.map(item => item.toRmmz());
         const finalData = [ null, ...rmmzData ];
 
-        await executeSave(projectPath, filename, finalData);
+        await executeSave(rmmzDataPath, filename, finalData);
         setData(updatedList);
       }
       catch (error)
@@ -93,12 +93,12 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
         console.error(`Failed to save ${displayName}:`, error);
         throw error;
       }
-    }, [ projectPath ]);
+    }, [ rmmzDataPath ]);
 
     useEffect(() =>
     {
       reload();
-    }, [ reload ]);
+    }, [ reload, projectReloadGeneration ]);
 
     const value = useMemo(() => (
       {

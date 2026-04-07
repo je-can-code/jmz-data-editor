@@ -11,8 +11,8 @@ function pathSegments(pathStr: string): string[]
 }
 
 /**
- * Normalizes the path the app stores as {@code projectPath} (the RMMZ {@code data} directory) for native filesystem calls.
- * @param projectDataPath Raw value from {@link useProjectPath} or the folder dialog.
+ * Normalizes a project-related path for native filesystem calls (RMMZ project root or {@code data/}; see {@link resolveGameProjectRootFromDataPath}).
+ * @param projectDataPath Raw path from config, localStorage, or a folder dialog.
  */
 function normalizeProjectDataPathForFilesystem(projectDataPath: string): string
 {
@@ -39,9 +39,8 @@ function normalizeProjectDataPathForFilesystem(projectDataPath: string): string
 }
 
 /**
- * The GUI stores {@code projectPath} as the RMMZ {@code data} directory (same base path as {@code Skills.json}). Asset paths
- * use the game project root: parent of that folder when its name is {@code data} (any casing), otherwise the path as given.
- * @param projectDataPath Path to the project's {@code data} folder (or project root if JSON paths were configured that way).
+ * Resolves the game project root for asset paths. If the last path segment is {@code data} (any casing), returns its parent; otherwise returns the path as given (project root).
+ * @param projectDataPath RMMZ project root or {@code data/} directory.
  * @returns Path to the game project root for resolving {@code img/} etc.
  */
 function resolveGameProjectRootFromDataPath(projectDataPath: string): string
@@ -85,7 +84,7 @@ function resolveGameProjectRootFromDataPath(projectDataPath: string): string
 
 /**
  * Absolute path to {@code img/system/IconSet.png} for the project that owns {@code projectDataPath}.
- * @param projectDataPath Path to the project's {@code data} directory (same as {@link useProjectPath}).
+ * @param projectDataPath RMMZ project root or {@code data/} directory (same convention as {@link useProjectPath} {@code projectRoot}).
  */
 function resolveIconSetPngPath(projectDataPath: string): string
 {
@@ -101,7 +100,7 @@ function resolveIconSetPngPath(projectDataPath: string): string
 
 /**
  * Loads {@code IconSet.png} bytes via Neutralino (same filesystem access as JSON database files).
- * @param projectDataPath Path to the project's {@code data} directory.
+ * @param projectDataPath RMMZ project root or {@code data/} directory.
  * @returns Raw PNG bytes.
  */
 async function loadIconSetPng(projectDataPath: string): Promise<ArrayBuffer>

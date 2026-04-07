@@ -11,7 +11,7 @@
     "filesystem.readFile",
     "filesystem.readBinaryFile",
     "filesystem.writeFile",
-    "os.showFolderDialog",
+    "os.getEnv",
     "app.exit"
   ],
   "logging": {

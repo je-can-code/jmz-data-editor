@@ -71,11 +71,11 @@ async function decodePngDimensions(buf: ArrayBuffer): Promise<{ w: number; h: nu
 }
 
 /**
- * Loads {@code IconSet.png} once per {@link useProjectPath} path so icon pickers do not re-read the file on each board mount.
+ * Loads {@code IconSet.png} once per {@link useProjectPath} project root so icon pickers do not re-read the file on each board mount.
  */
 function IconSetAtlasProvider({ children }: { children: React.ReactNode })
 {
-  const { projectPath } = useProjectPath();
+  const { projectRoot, projectReloadGeneration } = useProjectPath();
 
   const [ atlasUrl, setAtlasUrl ] = useState<string | null>(null);
   const [ imgWidth, setImgWidth ] = useState(0);
@@ -86,12 +86,12 @@ function IconSetAtlasProvider({ children }: { children: React.ReactNode })
 
   const resolvedPath = useMemo(() =>
   {
-    if (projectPath.trim() === "")
+    if (projectRoot.trim() === "")
     {
       return "";
     }
-    return resolveIconSetPngPath(projectPath);
-  }, [ projectPath ]);
+    return resolveIconSetPngPath(projectRoot);
+  }, [ projectRoot ]);
 
   useEffect(() =>
   {
@@ -105,9 +105,9 @@ function IconSetAtlasProvider({ children }: { children: React.ReactNode })
     setImgHeight(0);
     setLoadError(null);
 
-    if (projectPath.trim() === "")
+    if (projectRoot.trim() === "")
     {
-      setLoadError("No project path.");
+      setLoadError("No project root.");
       return;
     }
 
@@ -117,7 +117,7 @@ function IconSetAtlasProvider({ children }: { children: React.ReactNode })
     {
       try
       {
-        const normalized = normalizeProjectDataPathForFilesystem(projectPath);
+        const normalized = normalizeProjectDataPathForFilesystem(projectRoot);
         const buf = await loadIconSetPng(normalized);
         if (cancelled)
         {
@@ -158,7 +158,7 @@ function IconSetAtlasProvider({ children }: { children: React.ReactNode })
         objectUrlRef.current = null;
       }
     };
-  }, [ projectPath ]);
+  }, [ projectRoot, projectReloadGeneration ]);
 
   const value = useMemo((): IconSetAtlasValue => (
     {

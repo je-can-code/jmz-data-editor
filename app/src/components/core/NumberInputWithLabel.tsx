@@ -75,11 +75,25 @@ export default function NumberInputWithLabel({
     px: '10px',
   };
 
-  const textFieldSx: SxProps<Theme> = sx ?? (
-    variant === 'standard'
-      ? defaultStandardSx
-      : {}
-  );
+  const textFieldSx: SxProps<Theme> = (() =>
+  {
+    if (variant !== 'standard')
+    {
+      return sx ?? {};
+    }
+    if (typeof sx === 'object' && sx !== null && !Array.isArray(sx))
+    {
+      return {
+        ...defaultStandardSx,
+        ...sx,
+      };
+    }
+    if (sx === undefined || sx === null)
+    {
+      return defaultStandardSx;
+    }
+    return sx;
+  })();
 
   const slotProps: Record<string, unknown> = {};
   if (endAdornment != null)
@@ -96,6 +110,22 @@ export default function NumberInputWithLabel({
   {
     slotProps.htmlInput = htmlInput;
   }
+
+  const endPlacementFieldSx: SxProps<Theme> = (() =>
+  {
+    if (typeof textFieldSx === 'object' && textFieldSx !== null && !Array.isArray(textFieldSx))
+    {
+      if (fullWidth === true)
+      {
+        return textFieldSx;
+      }
+      return {
+        ...textFieldSx,
+        flexShrink: 0,
+      };
+    }
+    return textFieldSx;
+  })();
 
   const textField = (
     <TextField
@@ -120,7 +150,7 @@ export default function NumberInputWithLabel({
           flex: 1,
           minWidth: 0,
         }
-        : textFieldSx}
+        : endPlacementFieldSx}
       value={value}
       onChange={onChangeEventHandler}
     />
@@ -169,6 +199,18 @@ export default function NumberInputWithLabel({
       sx={{
         fontFamily: 'monospace',
         fontSize: 16,
+        marginLeft: 0,
+        marginRight: 0,
+        display: 'flex',
+        flexDirection: 'row',
+        flexWrap: 'nowrap',
+        alignItems: 'center',
+        columnGap: 1,
+        ...(fullWidth === true
+          ? {
+            width: '100%',
+          }
+          : {}),
       }}
       control={textField}
     />

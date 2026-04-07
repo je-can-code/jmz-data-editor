@@ -1,7 +1,5 @@
 import React, {
-  useEffect,
-  useMemo,
-  useState
+  useMemo
 } from 'react';
 import {
   Box,
@@ -18,8 +16,6 @@ import {
 } from 'react-router-dom';
 
 import ProjectPathAppBar from '../../components/topbar/ProjectPathAppBar.tsx';
-import { SystemService } from '@services/SystemService';
-import { defaultDataPath } from '../../constants/PathConstants';
 import { APP_ROUTES } from '@platform/compositionRoot/routing.config.tsx';
 import { ErrorBoundary } from '../routing/error.boundary.tsx';
 import GlobalBottomBar from '../../components/bottombar/bottom-bar.global.tsx';
@@ -34,16 +30,8 @@ const JmzTabsStyles = {
 
 const AppLayout = () =>
 {
-  const [ projectPath, setProjectPath ] = useState<string>(defaultDataPath);
-
   const location = useLocation();
   const navigate = useNavigate();
-
-  useEffect(() =>
-  {
-    SystemService.loadSystemData(projectPath)
-      .catch(console.error);
-  }, [ projectPath ]);
 
   const activePath = useMemo(() =>
   {
@@ -60,7 +48,7 @@ const AppLayout = () =>
       flexDirection: 'column'
     }}>
       {/* Top app bar */}
-      <ProjectPathAppBar projectPath={projectPath} onProjectPathChange={setProjectPath}/>
+      <ProjectPathAppBar/>
 
       {/* Content area: left nav + routed content */}
       <Grid container sx={{
