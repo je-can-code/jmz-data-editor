@@ -1,5 +1,6 @@
 import React, {
   ChangeEvent,
+  type SyntheticEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -18,6 +19,7 @@ import {
   Autocomplete,
   Box,
   Button,
+  Chip,
   Divider,
   FormControlLabel,
   Grid,
@@ -53,6 +55,7 @@ import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { useStates } from '@presentation/context/resources/states.context.tsx';
 import { RPG_SkillDomainModel } from '@core/domain/entities/RPG_SkillDomainModel.ts';
+import { SkillJabsExtension } from '@core/domain/entities/jabs/SkillJabsExtension.ts';
 import {
   RMMZ_SKILL_OCCASION_OPTIONS,
   skillOccasionOption,
@@ -95,6 +98,24 @@ import {
   type IdLabelRow
 } from '@presentation/components/usableItem/UsableEffectsEditor.tsx';
 import { SystemService } from '@services/SystemService.ts';
+import {
+  SkillJabsExtensionsPanel,
+  SKILL_JABS_ACCORDION_INITIAL_EXPANDED,
+  type SkillJabsAccordionId,
+} from '@presentation/boards/skills/SkillJabsExtensionsPanel.tsx';
+
+const SKILL_EDITOR_ACCORDION_INITIAL_EXPANDED: Record<string, boolean> = {
+  'editor-general': true,
+  'editor-usage': true,
+  'editor-execution': true,
+  'editor-bonus-hits': true,
+  'editor-messages': true,
+  'editor-damage': true,
+  'editor-effects': true,
+  'editor-skill-extend': true,
+  'editor-sks': true,
+  'editor-costs': true,
+};
 
 const noteFormulaFieldSx = {
   '& .MuiInputBase-input': { fontFamily: 'monospace' },
@@ -112,7 +133,12 @@ const SkillsBoard = () =>
 
   const { states } = useStates();
 
-  const { systemDataGeneration } = useProjectPath();
+  const {
+    systemDataGeneration,
+    projectRoot,
+    rmmzDataPath,
+    projectReloadGeneration,
+  } = useProjectPath();
 
   const stateEffectPickerRows = useMemo((): IdLabelRow[] =>
   {
@@ -167,6 +193,48 @@ const SkillsBoard = () =>
 
   const [ skillEditorTab, setSkillEditorTab ] = useState<number>(0);
 
+  const [ skillEditorAccordionExpanded, setSkillEditorAccordionExpanded ] = useState<Record<string, boolean>>(
+    () => ({ ...SKILL_EDITOR_ACCORDION_INITIAL_EXPANDED })
+  );
+
+  const [ jabsAccordionExpanded, setJabsAccordionExpanded ] = useState<Record<string, boolean>>(
+    () => ({ ...SKILL_JABS_ACCORDION_INITIAL_EXPANDED })
+  );
+
+  const handleSkillEditorAccordionChange = useCallback((
+    id: string,
+    expanded: boolean
+  ) =>
+  {
+    setSkillEditorAccordionExpanded((prev) => ({
+      ...prev,
+      [ id ]: expanded
+    }));
+  }, []);
+
+  const handleJabsAccordionChange = useCallback((
+    id: SkillJabsAccordionId,
+    expanded: boolean
+  ) =>
+  {
+    setJabsAccordionExpanded((prev) => ({
+      ...prev,
+      [ id ]: expanded
+    }));
+  }, []);
+
+  const editorAccordionProps = (id: string) =>
+    ({
+      expanded: skillEditorAccordionExpanded[ id ] ?? false,
+      onChange: (
+        _e: SyntheticEvent,
+        expanded: boolean
+      ) =>
+      {
+        handleSkillEditorAccordionChange(id, expanded);
+      },
+    });
+
   const serializedSkillNotePreview = useMemo(() =>
   {
     if (selectedSkill === null)
@@ -220,6 +288,71 @@ const SkillsBoard = () =>
     },
     [ selectedSkillIndex, setSkills ]
   );
+
+  const skillExtendPickerOptions = useMemo((): IdLabelRow[] =>
+  {
+    if (selectedSkill === null)
+    {
+      return [];
+    }
+    return skillEffectPickerRows.filter(
+      (o) => o.id >= 1 && o.id !== selectedSkill.id
+    );
+  }, [ skillEffectPickerRows, selectedSkill ]);
+
+  const selectedSkillExtendPickerValues = useMemo((): IdLabelRow[] =>
+  {
+    if (selectedSkill === null)
+    {
+      return [];
+    }
+    const byId = new Map(skillEffectPickerRows.map((o) => [ o.id, o ]));
+    return selectedSkill.skillExtendBaseIds.map((id) =>
+    {
+      const row = byId.get(id);
+      if (row !== undefined)
+      {
+        return row;
+      }
+      return {
+        id,
+        label: `${id}: (missing skill)`,
+      };
+    });
+  }, [ skillEffectPickerRows, selectedSkill ]);
+
+  const selectedSkillIdForExtendReverse =
+    selectedSkill === null
+      ? null
+      : selectedSkill.id;
+
+  const skillExtendersOfSelected = useMemo(() =>
+  {
+    if (selectedSkillIdForExtendReverse === null)
+    {
+      return [];
+    }
+    const baseId = selectedSkillIdForExtendReverse;
+    const rows: { listIndex: number; id: number; name: string }[] = [];
+    for (let i = 0; i < skills.length; i++)
+    {
+      const s = skills[ i ];
+      if (s.id === baseId)
+      {
+        continue;
+      }
+      if (s.skillExtendBaseIds.includes(baseId) === false)
+      {
+        continue;
+      }
+      rows.push({
+        listIndex: i,
+        id: s.id,
+        name: s.name,
+      });
+    }
+    return rows;
+  }, [ skills, selectedSkillIdForExtendReverse ]);
 
   const handleSkillListItemOnClickEventRef = useRef<
     (
@@ -284,11 +417,6 @@ const SkillsBoard = () =>
   {
     listWrapperRef.current?.focus();
   }, []);
-
-  useEffect(() =>
-  {
-    setSkillEditorTab(0);
-  }, [ selectedSkill?.id ]);
 
   const handleCopySerializedSkillNote = async () =>
   {
@@ -998,6 +1126,78 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  const handleSkillExtendBaseIdsChange = (
+    _event: SyntheticEvent,
+    options: IdLabelRow[]
+  ) =>
+  {
+    if (!selectedSkill)
+    {
+      return;
+    }
+
+    selectedSkill.skillExtendBaseIds = options.map((o) => o.id);
+    updateSkill(selectedSkill);
+  };
+
+  const handleSksSlotCostChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+  {
+    if (!selectedSkill)
+    {
+      return;
+    }
+
+    const t = event.target.value.trim();
+    if (t === '')
+    {
+      selectedSkill.sksSlotCost = null;
+      updateSkill(selectedSkill);
+      return;
+    }
+
+    const n = parseInt(t, 10);
+    if (Number.isNaN(n))
+    {
+      return;
+    }
+
+    selectedSkill.sksSlotCost = n;
+    updateSkill(selectedSkill);
+  };
+
+  const handleSksExplicitUnslottedChange = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    if (!selectedSkill)
+    {
+      return;
+    }
+
+    selectedSkill.sksExplicitUnslotted = event.target.checked;
+    updateSkill(selectedSkill);
+  };
+
+  const handleJabsChange = (next: SkillJabsExtension) =>
+  {
+    if (!selectedSkill)
+    {
+      return;
+    }
+
+    selectedSkill.jabs = next;
+    updateSkill(selectedSkill);
+  };
+
+  const patchSkillJabs = (partial: Partial<SkillJabsExtension>): void =>
+  {
+    if (!selectedSkill)
+    {
+      return;
+    }
+
+    selectedSkill.jabs = selectedSkill.jabs.clone(partial);
+    updateSkill(selectedSkill);
+  };
+
   const renderSkillListItem = (props: ListChildComponentProps) =>
   {
     const {
@@ -1155,14 +1355,18 @@ const SkillsBoard = () =>
               <Stack spacing={2}>
                 <Tabs
                   value={skillEditorTab}
-                  onChange={(_e, next) =>
+                  onChange={(
+                    _e,
+                    next
+                  ) =>
                   {
                     setSkillEditorTab(next);
                   }}
                   aria-label={'Skill editor sections'}
                 >
-                  <Tab label={'Editor'} id={'skill-editor-tab-0'} aria-controls={'skill-editor-tabpanel-0'} />
-                  <Tab label={'Note'} id={'skill-editor-tab-1'} aria-controls={'skill-editor-tabpanel-1'} />
+                  <Tab label={'Editor'} id={'skill-editor-tab-0'} aria-controls={'skill-editor-tabpanel-0'}/>
+                  <Tab label={'Note'} id={'skill-editor-tab-1'} aria-controls={'skill-editor-tabpanel-1'}/>
+                  <Tab label={'JABS'} id={'skill-editor-tab-2'} aria-controls={'skill-editor-tabpanel-2'}/>
                 </Tabs>
 
                 <Box
@@ -1170,374 +1374,521 @@ const SkillsBoard = () =>
                   role={'tabpanel'}
                   aria-labelledby={'skill-editor-tab-0'}
                   hidden={skillEditorTab !== 0}
-                  sx={{ display: skillEditorTab === 0
-                    ? 'block'
-                    : 'none' }}
+                  sx={{
+                    display: skillEditorTab === 0
+                      ? 'block'
+                      : 'none'
+                  }}
                 >
                   <Stack spacing={3}>
-                <Grid container spacing={2} alignItems={'flex-start'}>
-                  <Grid size={6}>
-                    <Stack spacing={2}>
-                      <Paper
-                        variant={'outlined'}
-                        sx={{
-                          padding: 1.5,
-                          borderColor: 'divider',
-                        }}
-                      >
-                        <Typography variant={'h6'} sx={{ color: 'text.primary' }}>
-                          General
-                        </Typography>
-                        <Stack spacing={2} sx={{ mt: 2 }} alignItems={'stretch'}>
-                          <Typography
-                            variant={'caption'}
+                    <Grid container spacing={2} alignItems={'flex-start'}>
+                      <Grid size={6}>
+                        <Stack spacing={2}>
+                          <Accordion
+                            {...editorAccordionProps('editor-general')}
+                            disableGutters
+                            elevation={0}
                             sx={{
-                              fontFamily: 'monospace',
-                              display: 'block',
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              '&:before': { display: 'none' },
                             }}
                           >
-                            {`Skill id: ${selectedSkill.id}`}
-                          </Typography>
-                          <TextField
-                            variant={'outlined'}
-                            label={'Name'}
-                            value={selectedSkill.name}
-                            onChange={handleSkillNameOnChangeEvent}
-                            size={'small'}
-                            fullWidth
-                          />
-                          <IconIndexField
-                            value={selectedSkill.iconIndex}
-                            onChange={handleSkillIconIndexOnChange}
-                          />
-                          <TextField
-                            variant={'outlined'}
-                            label={'Description'}
-                            value={selectedSkill.description}
-                            onChange={handleDescriptionOnChangeEvent}
-                            size={'small'}
-                            fullWidth
-                            multiline
-                            minRows={4}
-                          />
-                        </Stack>
-                      </Paper>
-
-                      <Accordion
-                        defaultExpanded
-                        disableGutters
-                        elevation={0}
-                        sx={{
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          '&:before': { display: 'none' },
-                        }}
-                      >
-                        <AccordionSummary expandIcon={<ExpandMore/>}>
-                          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                            Usage
-                          </Typography>
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          <Stack spacing={2}>
-                            <Grid container spacing={2} alignItems={'flex-start'}>
-                              <Grid size={4}>
-                                <Autocomplete<RmmzSkillScopeOption, false, false, false>
-                                  fullWidth
-                                  size={'small'}
-                                  options={[ ...RMMZ_SKILL_SCOPE_OPTIONS ]}
-                                  groupBy={(option) => option.group}
-                                  getOptionLabel={(option) => option.label}
-                                  isOptionEqualToValue={(
-                                    a,
-                                    b
-                                  ) => a.value === b.value}
-                                  value={skillScopeOption(selectedSkill.scope)}
-                                  onChange={handleSkillScopeAutocompleteOnChangeEvent}
-                                  filterOptions={(
-                                    options,
-                                    state
-                                  ) =>
-                                  {
-                                    const q = state.inputValue.trim()
-                                      .toLowerCase();
-                                    if (q === '')
-                                    {
-                                      return options;
-                                    }
-                                    return options.filter((o) =>
-                                      o.label.toLowerCase()
-                                        .includes(q)
-                                      || o.group.toLowerCase()
-                                        .includes(q));
+                            <AccordionSummary expandIcon={<ExpandMore/>}>
+                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+                                General
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Stack spacing={2} alignItems={'stretch'}>
+                                <Typography
+                                  variant={'caption'}
+                                  sx={{
+                                    fontFamily: 'monospace',
+                                    display: 'block',
                                   }}
-                                  slotProps={{
-                                    listbox: { style: { maxHeight: 240 } },
-                                  }}
-                                  renderInput={(params) =>
-                                    (
-                                      <TextField
-                                        {...params}
-                                        variant={'outlined'}
-                                        label={'Scope'}
-                                        placeholder={'Search targets…'}
-                                      />
-                                    )}
-                                />
-                              </Grid>
-                              <Grid size={4}>
-                                <Autocomplete<RmmzSkillOccasionOption, false, false, false>
-                                  fullWidth
-                                  size={'small'}
-                                  options={[ ...RMMZ_SKILL_OCCASION_OPTIONS ]}
-                                  getOptionLabel={(option) => option.label}
-                                  isOptionEqualToValue={(
-                                    a,
-                                    b
-                                  ) => a.value === b.value}
-                                  value={skillOccasionOption(selectedSkill.occasion)}
-                                  onChange={handleSkillOccasionAutocompleteOnChangeEvent}
-                                  filterOptions={(
-                                    options,
-                                    state
-                                  ) =>
-                                  {
-                                    const q = state.inputValue.trim()
-                                      .toLowerCase();
-                                    if (q === '')
-                                    {
-                                      return options;
-                                    }
-                                    return options.filter((o) =>
-                                      o.label.toLowerCase()
-                                        .includes(q)
-                                      || o.detail.toLowerCase()
-                                        .includes(q));
-                                  }}
-                                  slotProps={{
-                                    listbox: { style: { maxHeight: 240 } },
-                                  }}
-                                  renderInput={(params) =>
-                                    (
-                                      <TextField
-                                        {...params}
-                                        variant={'outlined'}
-                                        label={'Occasion'}
-                                        placeholder={'When this skill can be used…'}
-                                      />
-                                    )}
-                                />
-                              </Grid>
-                              <Grid size={4}>
-                                <Autocomplete<RmmzSkillStypeOption, false, false, false>
-                                  fullWidth
-                                  size={'small'}
-                                  options={skillStypeAutocompleteOptions(
-                                    selectedSkill.stypeId,
-                                    SystemService.skillTypes ?? []
-                                  )}
-                                  groupBy={(option) => option.group}
-                                  getOptionLabel={(option) => option.label}
-                                  isOptionEqualToValue={(
-                                    a,
-                                    b
-                                  ) => a.value === b.value}
-                                  value={skillStypeOptionForValue(
-                                    selectedSkill.stypeId,
-                                    SystemService.skillTypes ?? []
-                                  )}
-                                  onChange={handleSkillStypeAutocompleteOnChangeEvent}
-                                  filterOptions={(
-                                    options,
-                                    state
-                                  ) =>
-                                  {
-                                    const q = state.inputValue.trim()
-                                      .toLowerCase();
-                                    if (q === '')
-                                    {
-                                      return options;
-                                    }
-                                    return options.filter((o) =>
-                                      o.label.toLowerCase()
-                                        .includes(q)
-                                      || o.group.toLowerCase()
-                                        .includes(q)
-                                      || String(o.value).includes(q));
-                                  }}
-                                  slotProps={{
-                                    listbox: { style: { maxHeight: 240 } },
-                                  }}
-                                  renderInput={(params) =>
-                                    (
-                                      <TextField
-                                        {...params}
-                                        variant={'outlined'}
-                                        label={'Skill type'}
-                                        placeholder={'Search skill types…'}
-                                      />
-                                    )}
-                                />
-                              </Grid>
-                            </Grid>
-                            <Grid container spacing={2}>
-                              <Grid size={6}>
-                                <Autocomplete<RmmzWeaponTypeOption, false, false, false>
-                                  fullWidth
-                                  size={'small'}
-                                  options={weaponTypeAutocompleteOptions(
-                                    selectedSkill.requiredWtypeId1,
-                                    SystemService.weaponTypes ?? []
-                                  )}
-                                  groupBy={(option) => option.group}
-                                  getOptionLabel={(option) => option.label}
-                                  isOptionEqualToValue={(
-                                    a,
-                                    b
-                                  ) => a.value === b.value}
-                                  value={weaponTypeOptionForValue(
-                                    selectedSkill.requiredWtypeId1,
-                                    SystemService.weaponTypes ?? []
-                                  )}
-                                  onChange={handleSkillRequiredWtype1AutocompleteOnChangeEvent}
-                                  filterOptions={(
-                                    options,
-                                    state
-                                  ) =>
-                                  {
-                                    const q = state.inputValue.trim()
-                                      .toLowerCase();
-                                    if (q === '')
-                                    {
-                                      return options;
-                                    }
-                                    return options.filter((o) =>
-                                      o.label.toLowerCase()
-                                        .includes(q)
-                                      || o.group.toLowerCase()
-                                        .includes(q)
-                                      || String(o.value).includes(q));
-                                  }}
-                                  slotProps={{
-                                    listbox: { style: { maxHeight: 240 } },
-                                  }}
-                                  renderInput={(params) =>
-                                    (
-                                      <TextField
-                                        {...params}
-                                        variant={'outlined'}
-                                        label={'Weapon Type 1'}
-                                        placeholder={'Search weapon types…'}
-                                      />
-                                    )}
-                                />
-                              </Grid>
-                              <Grid size={6}>
-                                <Autocomplete<RmmzWeaponTypeOption, false, false, false>
-                                  fullWidth
-                                  size={'small'}
-                                  options={weaponTypeAutocompleteOptions(
-                                    selectedSkill.requiredWtypeId2,
-                                    SystemService.weaponTypes ?? []
-                                  )}
-                                  groupBy={(option) => option.group}
-                                  getOptionLabel={(option) => option.label}
-                                  isOptionEqualToValue={(
-                                    a,
-                                    b
-                                  ) => a.value === b.value}
-                                  value={weaponTypeOptionForValue(
-                                    selectedSkill.requiredWtypeId2,
-                                    SystemService.weaponTypes ?? []
-                                  )}
-                                  onChange={handleSkillRequiredWtype2AutocompleteOnChangeEvent}
-                                  filterOptions={(
-                                    options,
-                                    state
-                                  ) =>
-                                  {
-                                    const q = state.inputValue.trim()
-                                      .toLowerCase();
-                                    if (q === '')
-                                    {
-                                      return options;
-                                    }
-                                    return options.filter((o) =>
-                                      o.label.toLowerCase()
-                                        .includes(q)
-                                      || o.group.toLowerCase()
-                                        .includes(q)
-                                      || String(o.value).includes(q));
-                                  }}
-                                  slotProps={{
-                                    listbox: { style: { maxHeight: 240 } },
-                                  }}
-                                  renderInput={(params) =>
-                                    (
-                                      <TextField
-                                        {...params}
-                                        variant={'outlined'}
-                                        label={'Weapon Type 2'}
-                                        placeholder={'Search weapon types…'}
-                                      />
-                                    )}
-                                />
-                              </Grid>
-                            </Grid>
-                          </Stack>
-                        </AccordionDetails>
-                      </Accordion>
-
-                      <Accordion
-                        defaultExpanded
-                        disableGutters
-                        elevation={0}
-                        sx={{
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          '&:before': { display: 'none' },
-                        }}
-                      >
-                        <AccordionSummary expandIcon={<ExpandMore/>}>
-                          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                            Execution
-                          </Typography>
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          <Grid container spacing={3} alignItems={'flex-start'}>
-                            <Grid size={6}>
-                              <Stack spacing={2.5}>
-                                <NumberInputWithLabel
-                                  id={'skill-execution-speed'}
-                                  label={'Speed'}
-                                  labelPlacement={'start'}
+                                >
+                                  {`Skill id: ${selectedSkill.id}`}
+                                </Typography>
+                                <TextField
                                   variant={'outlined'}
+                                  label={'Name'}
+                                  value={selectedSkill.name}
+                                  onChange={handleSkillNameOnChangeEvent}
                                   size={'small'}
                                   fullWidth
-                                  value={selectedSkill.speed}
-                                  onChangeEventHandler={handleSkillSpeedOnChangeEvent}
-                                  htmlInput={{ step: 1 }}
                                 />
-                                <NumberInputWithLabel
-                                  id={'skill-execution-success'}
-                                  label={'Success'}
-                                  labelPlacement={'start'}
+                                <IconIndexField
+                                  value={selectedSkill.iconIndex}
+                                  onChange={handleSkillIconIndexOnChange}
+                                />
+                                <TextField
                                   variant={'outlined'}
+                                  label={'Description'}
+                                  value={selectedSkill.description}
+                                  onChange={handleDescriptionOnChangeEvent}
                                   size={'small'}
                                   fullWidth
-                                  value={selectedSkill.successRate}
-                                  onChangeEventHandler={handleSkillSuccessRateOnChangeEvent}
-                                  htmlInput={{
-                                    min: 0,
-                                    max: 100,
-                                    step: 1,
-                                  }}
-                                  endAdornment={'%'}
+                                  multiline
+                                  minRows={4}
                                 />
+                              </Stack>
+                            </AccordionDetails>
+                          </Accordion>
+
+                          <Accordion
+                            {...editorAccordionProps('editor-usage')}
+                            disableGutters
+                            elevation={0}
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              '&:before': { display: 'none' },
+                            }}
+                          >
+                            <AccordionSummary expandIcon={<ExpandMore/>}>
+                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+                                Usage
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Stack spacing={2}>
+                                <Typography variant={'caption'} color={'text.secondary'}>
+                                  Details about targeting, usability, and requirements.
+                                </Typography>
+                                <Grid container spacing={2} alignItems={'flex-start'}>
+                                  <Grid size={4}>
+                                    <Autocomplete<RmmzSkillScopeOption, false, false, false>
+                                      fullWidth
+                                      size={'small'}
+                                      options={[ ...RMMZ_SKILL_SCOPE_OPTIONS ]}
+                                      groupBy={(option) => option.group}
+                                      getOptionLabel={(option) => option.label}
+                                      isOptionEqualToValue={(
+                                        a,
+                                        b
+                                      ) => a.value === b.value}
+                                      value={skillScopeOption(selectedSkill.scope)}
+                                      onChange={handleSkillScopeAutocompleteOnChangeEvent}
+                                      filterOptions={(
+                                        options,
+                                        state
+                                      ) =>
+                                      {
+                                        const q = state.inputValue.trim()
+                                          .toLowerCase();
+                                        if (q === '')
+                                        {
+                                          return options;
+                                        }
+                                        return options.filter((o) =>
+                                          o.label.toLowerCase()
+                                            .includes(q)
+                                          || o.group.toLowerCase()
+                                            .includes(q));
+                                      }}
+                                      slotProps={{
+                                        listbox: { style: { maxHeight: 240 } },
+                                      }}
+                                      renderInput={(params) =>
+                                        (
+                                          <TextField
+                                            {...params}
+                                            variant={'outlined'}
+                                            label={'Scope'}
+                                            placeholder={'Search targets…'}
+                                          />
+                                        )}
+                                    />
+                                  </Grid>
+                                  <Grid size={4}>
+                                    <Autocomplete<RmmzSkillOccasionOption, false, false, false>
+                                      fullWidth
+                                      size={'small'}
+                                      options={[ ...RMMZ_SKILL_OCCASION_OPTIONS ]}
+                                      getOptionLabel={(option) => option.label}
+                                      isOptionEqualToValue={(
+                                        a,
+                                        b
+                                      ) => a.value === b.value}
+                                      value={skillOccasionOption(selectedSkill.occasion)}
+                                      onChange={handleSkillOccasionAutocompleteOnChangeEvent}
+                                      filterOptions={(
+                                        options,
+                                        state
+                                      ) =>
+                                      {
+                                        const q = state.inputValue.trim()
+                                          .toLowerCase();
+                                        if (q === '')
+                                        {
+                                          return options;
+                                        }
+                                        return options.filter((o) =>
+                                          o.label.toLowerCase()
+                                            .includes(q)
+                                          || o.detail.toLowerCase()
+                                            .includes(q));
+                                      }}
+                                      slotProps={{
+                                        listbox: { style: { maxHeight: 240 } },
+                                      }}
+                                      renderInput={(params) =>
+                                        (
+                                          <TextField
+                                            {...params}
+                                            variant={'outlined'}
+                                            label={'Occasion'}
+                                            placeholder={'When this skill can be used…'}
+                                          />
+                                        )}
+                                    />
+                                  </Grid>
+                                  <Grid size={4}>
+                                    <Autocomplete<RmmzSkillStypeOption, false, false, false>
+                                      fullWidth
+                                      size={'small'}
+                                      options={skillStypeAutocompleteOptions(
+                                        selectedSkill.stypeId,
+                                        SystemService.skillTypes ?? []
+                                      )}
+                                      groupBy={(option) => option.group}
+                                      getOptionLabel={(option) => option.label}
+                                      isOptionEqualToValue={(
+                                        a,
+                                        b
+                                      ) => a.value === b.value}
+                                      value={skillStypeOptionForValue(
+                                        selectedSkill.stypeId,
+                                        SystemService.skillTypes ?? []
+                                      )}
+                                      onChange={handleSkillStypeAutocompleteOnChangeEvent}
+                                      filterOptions={(
+                                        options,
+                                        state
+                                      ) =>
+                                      {
+                                        const q = state.inputValue.trim()
+                                          .toLowerCase();
+                                        if (q === '')
+                                        {
+                                          return options;
+                                        }
+                                        return options.filter((o) =>
+                                          o.label.toLowerCase()
+                                            .includes(q)
+                                          || o.group.toLowerCase()
+                                            .includes(q)
+                                          || String(o.value)
+                                            .includes(q));
+                                      }}
+                                      slotProps={{
+                                        listbox: { style: { maxHeight: 240 } },
+                                      }}
+                                      renderInput={(params) =>
+                                        (
+                                          <TextField
+                                            {...params}
+                                            variant={'outlined'}
+                                            label={'Skill type'}
+                                            placeholder={'Search skill types…'}
+                                          />
+                                        )}
+                                    />
+                                  </Grid>
+                                </Grid>
+                                <Grid container spacing={2}>
+                                  <Grid size={6}>
+                                    <Autocomplete<RmmzWeaponTypeOption, false, false, false>
+                                      fullWidth
+                                      size={'small'}
+                                      options={weaponTypeAutocompleteOptions(
+                                        selectedSkill.requiredWtypeId1,
+                                        SystemService.weaponTypes ?? []
+                                      )}
+                                      groupBy={(option) => option.group}
+                                      getOptionLabel={(option) => option.label}
+                                      isOptionEqualToValue={(
+                                        a,
+                                        b
+                                      ) => a.value === b.value}
+                                      value={weaponTypeOptionForValue(
+                                        selectedSkill.requiredWtypeId1,
+                                        SystemService.weaponTypes ?? []
+                                      )}
+                                      onChange={handleSkillRequiredWtype1AutocompleteOnChangeEvent}
+                                      filterOptions={(
+                                        options,
+                                        state
+                                      ) =>
+                                      {
+                                        const q = state.inputValue.trim()
+                                          .toLowerCase();
+                                        if (q === '')
+                                        {
+                                          return options;
+                                        }
+                                        return options.filter((o) =>
+                                          o.label.toLowerCase()
+                                            .includes(q)
+                                          || o.group.toLowerCase()
+                                            .includes(q)
+                                          || String(o.value)
+                                            .includes(q));
+                                      }}
+                                      slotProps={{
+                                        listbox: { style: { maxHeight: 240 } },
+                                      }}
+                                      renderInput={(params) =>
+                                        (
+                                          <TextField
+                                            {...params}
+                                            variant={'outlined'}
+                                            label={'Weapon Type 1'}
+                                            placeholder={'Search weapon types…'}
+                                          />
+                                        )}
+                                    />
+                                  </Grid>
+                                  <Grid size={6}>
+                                    <Autocomplete<RmmzWeaponTypeOption, false, false, false>
+                                      fullWidth
+                                      size={'small'}
+                                      options={weaponTypeAutocompleteOptions(
+                                        selectedSkill.requiredWtypeId2,
+                                        SystemService.weaponTypes ?? []
+                                      )}
+                                      groupBy={(option) => option.group}
+                                      getOptionLabel={(option) => option.label}
+                                      isOptionEqualToValue={(
+                                        a,
+                                        b
+                                      ) => a.value === b.value}
+                                      value={weaponTypeOptionForValue(
+                                        selectedSkill.requiredWtypeId2,
+                                        SystemService.weaponTypes ?? []
+                                      )}
+                                      onChange={handleSkillRequiredWtype2AutocompleteOnChangeEvent}
+                                      filterOptions={(
+                                        options,
+                                        state
+                                      ) =>
+                                      {
+                                        const q = state.inputValue.trim()
+                                          .toLowerCase();
+                                        if (q === '')
+                                        {
+                                          return options;
+                                        }
+                                        return options.filter((o) =>
+                                          o.label.toLowerCase()
+                                            .includes(q)
+                                          || o.group.toLowerCase()
+                                            .includes(q)
+                                          || String(o.value)
+                                            .includes(q));
+                                      }}
+                                      slotProps={{
+                                        listbox: { style: { maxHeight: 240 } },
+                                      }}
+                                      renderInput={(params) =>
+                                        (
+                                          <TextField
+                                            {...params}
+                                            variant={'outlined'}
+                                            label={'Weapon Type 2'}
+                                            placeholder={'Search weapon types…'}
+                                          />
+                                        )}
+                                    />
+                                  </Grid>
+                                </Grid>
+                              </Stack>
+                            </AccordionDetails>
+                          </Accordion>
+
+                          <Accordion
+                            {...editorAccordionProps('editor-execution')}
+                            disableGutters
+                            elevation={0}
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              '&:before': { display: 'none' },
+                            }}
+                          >
+                            <AccordionSummary expandIcon={<ExpandMore/>}>
+                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+                                Execution
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Stack spacing={2}>
+                                <Typography variant={'caption'} color={'text.secondary'}>
+                                  Details about how the skill lands and how the target interprets it.
+                                </Typography>
+                                <Grid container spacing={3} alignItems={'flex-start'}>
+                                  <Grid size={6}>
+                                    <Stack spacing={2.5}>
+                                      <NumberInputWithLabel
+                                        id={'skill-execution-speed'}
+                                        label={'Speed'}
+                                        labelPlacement={'start'}
+                                        variant={'outlined'}
+                                        size={'small'}
+                                        fullWidth
+                                        value={selectedSkill.speed}
+                                        onChangeEventHandler={handleSkillSpeedOnChangeEvent}
+                                        htmlInput={{ step: 1 }}
+                                        helperText={'Unused in JABS.'}
+                                      />
+                                      <NumberInputWithLabel
+                                        id={'skill-execution-success'}
+                                        label={'Success'}
+                                        labelPlacement={'start'}
+                                        variant={'outlined'}
+                                        size={'small'}
+                                        fullWidth
+                                        value={selectedSkill.successRate}
+                                        onChangeEventHandler={handleSkillSuccessRateOnChangeEvent}
+                                        htmlInput={{
+                                          min: 0,
+                                          max: 100,
+                                          step: 1,
+                                        }}
+                                        endAdornment={'%'}
+                                        helperText={'Failure causes "miss".'}
+                                      />
+                                    </Stack>
+                                  </Grid>
+                                  <Grid size={6}>
+                                    <Stack spacing={2}>
+                                      <Autocomplete<RmmzUsableHitTypeOption, false, false, false>
+                                        fullWidth
+                                        size={'small'}
+                                        options={[ ...RMMZ_USABLE_HIT_TYPE_OPTIONS ]}
+                                        groupBy={(option) => option.group}
+                                        getOptionLabel={(option) => option.label}
+                                        isOptionEqualToValue={(
+                                          a,
+                                          b
+                                        ) => a.value === b.value}
+                                        value={usableHitTypeOption(selectedSkill.hitType)}
+                                        onChange={handleSkillHitTypeAutocompleteOnChangeEvent}
+                                        filterOptions={(
+                                          options,
+                                          state
+                                        ) =>
+                                        {
+                                          const q = state.inputValue.trim()
+                                            .toLowerCase();
+                                          if (q === '')
+                                          {
+                                            return options;
+                                          }
+                                          return options.filter((o) =>
+                                            o.label.toLowerCase()
+                                              .includes(q)
+                                            || o.detail.toLowerCase()
+                                              .includes(q)
+                                            || o.group.toLowerCase()
+                                              .includes(q));
+                                        }}
+                                        slotProps={{
+                                          listbox: { style: { maxHeight: 240 } },
+                                        }}
+                                        renderInput={(params) =>
+                                          (
+                                            <TextField
+                                              {...params}
+                                              variant={'outlined'}
+                                              label={'Hit type'}
+                                              placeholder={'Search hit types…'}
+                                            />
+                                          )}
+                                      />
+                                      <Autocomplete<RmmzSkillAnimationOption, false, false, false>
+                                        fullWidth
+                                        size={'small'}
+                                        options={executionAnimationOptions}
+                                        groupBy={(option) => option.group}
+                                        getOptionLabel={(option) => option.label}
+                                        isOptionEqualToValue={(
+                                          a,
+                                          b
+                                        ) => a.value === b.value}
+                                        value={skillAnimationOptionForValue(
+                                          selectedSkill.animationId,
+                                          SystemService.skillAnimationAutocompleteOptions
+                                        )}
+                                        onChange={handleSkillAnimationAutocompleteOnChangeEvent}
+                                        filterOptions={(
+                                          options,
+                                          state
+                                        ) =>
+                                        {
+                                          const q = state.inputValue.trim()
+                                            .toLowerCase();
+                                          if (q === '')
+                                          {
+                                            return options;
+                                          }
+                                          return options.filter((o) =>
+                                            o.label.toLowerCase()
+                                              .includes(q)
+                                            || o.detail.toLowerCase()
+                                              .includes(q)
+                                            || o.group.toLowerCase()
+                                              .includes(q)
+                                            || String(o.value)
+                                              .includes(q));
+                                        }}
+                                        slotProps={{
+                                          listbox: { style: { maxHeight: 280 } },
+                                        }}
+                                        renderInput={(params) =>
+                                          (
+                                            <TextField
+                                              {...params}
+                                              variant={'outlined'}
+                                              label={'Animation'}
+                                              placeholder={'Search animations…'}
+                                            />
+                                          )}
+                                      />
+                                    </Stack>
+                                  </Grid>
+                                </Grid>
+                              </Stack>
+                            </AccordionDetails>
+                          </Accordion>
+
+                          <Accordion
+                            {...editorAccordionProps('editor-bonus-hits')}
+                            disableGutters
+                            elevation={0}
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              '&:before': { display: 'none' },
+                            }}
+                          >
+                            <AccordionSummary expandIcon={<ExpandMore/>}>
+                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+                                Additional Hits
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Stack spacing={2}>
+                                <Typography variant={'caption'} color={'text.secondary'}>
+                                  Details about how many times this skill lands on targets.
+                                </Typography>
                                 <NumberInputWithLabel
-                                  id={'skill-execution-repeats'}
+                                  id={'skill-bonus-hits-repeats'}
                                   label={'Repeats'}
                                   labelPlacement={'start'}
                                   variant={'outlined'}
@@ -1549,537 +1900,799 @@ const SkillsBoard = () =>
                                     min: 1,
                                     step: 1,
                                   }}
+                                  helperText={'Unused in JABS.'}
                                 />
-                              </Stack>
-                            </Grid>
-                            <Grid size={6}>
-                              <Stack spacing={2}>
-                                <Autocomplete<RmmzUsableHitTypeOption, false, false, false>
-                                  fullWidth
+                                <TextField
+                                  variant={'outlined'}
+                                  label={'Bonus hits (JABS)'}
                                   size={'small'}
-                                  options={[ ...RMMZ_USABLE_HIT_TYPE_OPTIONS ]}
-                                  groupBy={(option) => option.group}
-                                  getOptionLabel={(option) => option.label}
-                                  isOptionEqualToValue={(
-                                    a,
-                                    b
-                                  ) => a.value === b.value}
-                                  value={usableHitTypeOption(selectedSkill.hitType)}
-                                  onChange={handleSkillHitTypeAutocompleteOnChangeEvent}
-                                  filterOptions={(
-                                    options,
-                                    state
-                                  ) =>
-                                  {
-                                    const q = state.inputValue.trim()
-                                      .toLowerCase();
-                                    if (q === '')
-                                    {
-                                      return options;
-                                    }
-                                    return options.filter((o) =>
-                                      o.label.toLowerCase()
-                                        .includes(q)
-                                      || o.detail.toLowerCase()
-                                        .includes(q)
-                                      || o.group.toLowerCase()
-                                        .includes(q));
-                                  }}
-                                  slotProps={{
-                                    listbox: { style: { maxHeight: 240 } },
-                                  }}
-                                  renderInput={(params) =>
-                                    (
-                                      <TextField
-                                        {...params}
-                                        variant={'outlined'}
-                                        label={'Hit type'}
-                                        placeholder={'Search hit types…'}
-                                      />
-                                    )}
-                                />
-                                <Autocomplete<RmmzSkillAnimationOption, false, false, false>
                                   fullWidth
-                                  size={'small'}
-                                  options={executionAnimationOptions}
-                                  groupBy={(option) => option.group}
-                                  getOptionLabel={(option) => option.label}
-                                  isOptionEqualToValue={(
-                                    a,
-                                    b
-                                  ) => a.value === b.value}
-                                  value={skillAnimationOptionForValue(
-                                    selectedSkill.animationId,
-                                    SystemService.skillAnimationAutocompleteOptions
-                                  )}
-                                  onChange={handleSkillAnimationAutocompleteOnChangeEvent}
-                                  filterOptions={(
-                                    options,
-                                    state
-                                  ) =>
+                                  value={
+                                    selectedSkill.jabs.jabsBonusHitsFromSkillNote === null
+                                      ? ''
+                                      : String(selectedSkill.jabs.jabsBonusHitsFromSkillNote)
+                                  }
+                                  onChange={(e) =>
                                   {
-                                    const q = state.inputValue.trim()
-                                      .toLowerCase();
-                                    if (q === '')
+                                    const t = e.target.value.trim();
+                                    if (t === '')
                                     {
-                                      return options;
+                                      patchSkillJabs({ jabsBonusHitsFromSkillNote: null });
+                                      return;
                                     }
-                                    return options.filter((o) =>
-                                      o.label.toLowerCase()
-                                        .includes(q)
-                                      || o.detail.toLowerCase()
-                                        .includes(q)
-                                      || o.group.toLowerCase()
-                                        .includes(q)
-                                      || String(o.value).includes(q));
+                                    const n = parseInt(t, 10);
+                                    if (Number.isNaN(n))
+                                    {
+                                      return;
+                                    }
+                                    patchSkillJabs({ jabsBonusHitsFromSkillNote: n });
                                   }}
+                                  helperText={'How many additional hits per collision.'}
                                   slotProps={{
-                                    listbox: { style: { maxHeight: 280 } },
+                                    htmlInput: {
+                                      inputMode: 'numeric',
+                                      min: 0,
+                                      step: 1
+                                    },
                                   }}
-                                  renderInput={(params) =>
-                                    (
-                                      <TextField
-                                        {...params}
-                                        variant={'outlined'}
-                                        label={'Animation'}
-                                        placeholder={'Search animations…'}
-                                      />
-                                    )}
                                 />
+                                <Grid container spacing={2}>
+                                  <Grid size={6}>
+                                    <TextField
+                                      variant={'outlined'}
+                                      label={'Allowed Collision Count'}
+                                      size={'small'}
+                                      fullWidth
+                                      value={
+                                        selectedSkill.jabs.pierceMaxCount === null
+                                          ? ''
+                                          : String(selectedSkill.jabs.pierceMaxCount)
+                                      }
+                                      onChange={(e) =>
+                                      {
+                                        const t = e.target.value.trim();
+                                        if (t === '')
+                                        {
+                                          patchSkillJabs({
+                                            pierceMaxCount: null,
+                                            pierceDelayFrames: null,
+                                          });
+                                          return;
+                                        }
+                                        const n = parseInt(t, 10);
+                                        if (Number.isNaN(n))
+                                        {
+                                          return;
+                                        }
+                                        patchSkillJabs({ pierceMaxCount: n });
+                                      }}
+                                      helperText={'Clear and this will only hit one target.'}
+                                      slotProps={{
+                                        htmlInput: {
+                                          inputMode: 'numeric',
+                                          min: 0,
+                                          step: 1
+                                        },
+                                      }}
+                                    />
+                                  </Grid>
+                                  <Grid size={6}>
+                                    <TextField
+                                      variant={'outlined'}
+                                      label={'Frames between pierce hits'}
+                                      size={'small'}
+                                      fullWidth
+                                      disabled={selectedSkill.jabs.pierceMaxCount === null}
+                                      value={
+                                        selectedSkill.jabs.pierceDelayFrames === null
+                                          ? ''
+                                          : String(selectedSkill.jabs.pierceDelayFrames)
+                                      }
+                                      onChange={(e) =>
+                                      {
+                                        const t = e.target.value.trim();
+                                        if (t === '')
+                                        {
+                                          patchSkillJabs({ pierceDelayFrames: null });
+                                          return;
+                                        }
+                                        const n = parseInt(t, 10);
+                                        if (Number.isNaN(n))
+                                        {
+                                          return;
+                                        }
+                                        patchSkillJabs({ pierceDelayFrames: n });
+                                      }}
+                                      helperText={
+                                        selectedSkill.jabs.pierceMaxCount === null
+                                          ? 'Set max pierce first.'
+                                          : '0 = check every colliding frame.'
+                                      }
+                                      slotProps={{
+                                        htmlInput: {
+                                          inputMode: 'numeric',
+                                          min: 0,
+                                          step: 1
+                                        },
+                                      }}
+                                    />
+                                  </Grid>
+                                </Grid>
                               </Stack>
-                            </Grid>
-                          </Grid>
-                        </AccordionDetails>
-                      </Accordion>
+                            </AccordionDetails>
+                          </Accordion>
 
-                      <Accordion
-                        defaultExpanded
-                        disableGutters
-                        elevation={0}
-                        sx={{
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          '&:before': { display: 'none' },
-                        }}
-                      >
-                        <AccordionSummary expandIcon={<ExpandMore/>}>
-                          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                            Messages
-                          </Typography>
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          <Stack spacing={2}>
-                            <TextField
-                              variant={'outlined'}
-                              label={'Message 1'}
-                              value={selectedSkill.message1}
-                              onChange={handleSkillMessage1OnChangeEvent}
-                              size={'small'}
-                              fullWidth
-                              placeholder={'e.g. %1 attacks!'}
-                            />
-                            <TextField
-                              variant={'outlined'}
-                              label={'Message 2'}
-                              value={selectedSkill.message2}
-                              onChange={handleSkillMessage2OnChangeEvent}
-                              size={'small'}
-                              fullWidth
-                            />
-                          </Stack>
-                        </AccordionDetails>
-                      </Accordion>
-
-                    </Stack>
-                  </Grid>
-
-                  <Grid size={6}>
-                    <Stack spacing={2}>
-                      <Accordion
-                        defaultExpanded
-                        disableGutters
-                        elevation={0}
-                        sx={{
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          '&:before': { display: 'none' },
-                        }}
-                      >
-                        <AccordionSummary expandIcon={<ExpandMore/>}>
-                          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                            Damage
-                          </Typography>
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          <UsableItemDamageSection
-                            embedded
-                            value={{
-                              damageType: selectedSkill.damageType,
-                              damageElementId: selectedSkill.damageElementId,
-                              damageFormula: selectedSkill.damageFormula,
-                              damageVariance: selectedSkill.damageVariance,
-                              damageCritical: selectedSkill.damageCritical,
-                              attackElementIds: selectedSkill.attackElementIds,
-                              thisCritChanceFormula: selectedSkill.thisCritChanceFormula,
-                              thisCritDamageMultiplierFormula:
-                              selectedSkill.thisCritDamageMultiplierFormula,
-                              thisCritsAlways: selectedSkill.thisCritsAlways,
+                          <Accordion
+                            {...editorAccordionProps('editor-messages')}
+                            disableGutters
+                            elevation={0}
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              '&:before': { display: 'none' },
                             }}
-                            onChange={handleUsableItemDamageChange}
-                            elementNames={SystemService.elements ?? []}
-                          />
-                        </AccordionDetails>
-                      </Accordion>
-
-                      <Accordion
-                        defaultExpanded
-                        disableGutters
-                        elevation={0}
-                        sx={{
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          '&:before': { display: 'none' },
-                        }}
-                      >
-                        <AccordionSummary expandIcon={<ExpandMore/>}>
-                          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                            Effects
-                          </Typography>
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          <UsableEffectsEditor
-                            value={selectedSkill.effects}
-                            onChange={handleSkillEffectsChange}
-                            stateRows={stateEffectPickerRows}
-                            skillRows={skillEffectPickerRows}
-                            commonEventRows={commonEventPickerRows}
-                          />
-                        </AccordionDetails>
-                      </Accordion>
-
-                      <Accordion
-                        defaultExpanded
-                        disableGutters
-                        elevation={0}
-                        sx={{
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          '&:before': { display: 'none' },
-                        }}
-                      >
-                        <AccordionSummary expandIcon={<ExpandMore/>}>
-                          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                            Costs
-                          </Typography>
-                        </AccordionSummary>
-                        <AccordionDetails>
-                          <Stack spacing={2}>
-                          <Grid
-                            container
-                            spacing={2}
-                            alignItems={'stretch'}
-                            justifyContent={'left'}
                           >
-                            {/* HP */}
-                            <Grid size={4}>
-                              <Paper
-                                variant={'outlined'}
-                                sx={{
-                                  padding: 1.5,
-                                  borderColor: 'divider',
-                                  height: '100%',
-                                }}
-                              >
-                                <Typography variant={'h6'} color={'warning'}>
-                                  HP cost
+                            <AccordionSummary expandIcon={<ExpandMore/>}>
+                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+                                Messages
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Stack spacing={2}>
+                                <Typography variant={'caption'} color={'text.secondary'}>
+                                  Battle log lines when the skill is used. %1 = user name, %2 = skill name.
                                 </Typography>
-                                <Stack spacing={2} alignItems={'flex-start'}>
-                                  <NumberInputWithLabel
-                                    label={'flat'}
-                                    size={'small'}
-                                    value={selectedSkill.hpCostFlat}
-                                    onChangeEventHandler={handleHpCostFlatOnChangeEvent}
-                                  />
-                                  <NumberInputWithLabel
-                                    label={'%'}
-                                    size={'small'}
-                                    value={selectedSkill.hpCostPercent}
-                                    onChangeEventHandler={handleHpCostPercentOnChangeEvent}
-                                  />
-                                  <FormControlLabel
-                                    labelPlacement={'top'}
-                                    sx={{
-                                      alignItems: 'flex-start',
-                                      marginLeft: 0,
-                                    }}
-                                    control={
-                                      <Switch
-                                        size={'small'}
-                                        checked={selectedSkill.hpCostCanKill}
-                                        onChange={handleHpCostCanKillOnChangeEvent}
+                                <TextField
+                                  variant={'outlined'}
+                                  label={'Message 1'}
+                                  value={selectedSkill.message1}
+                                  onChange={handleSkillMessage1OnChangeEvent}
+                                  size={'small'}
+                                  fullWidth
+                                  placeholder={'e.g. %1 attacks!'}
+                                />
+                                <TextField
+                                  variant={'outlined'}
+                                  label={'Message 2'}
+                                  value={selectedSkill.message2}
+                                  onChange={handleSkillMessage2OnChangeEvent}
+                                  size={'small'}
+                                  fullWidth
+                                />
+                              </Stack>
+                            </AccordionDetails>
+                          </Accordion>
+
+                        </Stack>
+                      </Grid>
+
+                      <Grid size={6}>
+                        <Stack spacing={2}>
+                          <Accordion
+                            {...editorAccordionProps('editor-damage')}
+                            disableGutters
+                            elevation={0}
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              '&:before': { display: 'none' },
+                            }}
+                          >
+                            <AccordionSummary expandIcon={<ExpandMore/>}>
+                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+                                Damage
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Typography variant={'caption'} color={'text.secondary'} sx={{
+                                display: 'block',
+                                mb: 1.5
+                              }}>
+                                Details that define the damage dealt by this skill.
+                              </Typography>
+                              <UsableItemDamageSection
+                                embedded
+                                value={{
+                                  damageType: selectedSkill.damageType,
+                                  damageElementId: selectedSkill.damageElementId,
+                                  damageFormula: selectedSkill.damageFormula,
+                                  damageVariance: selectedSkill.damageVariance,
+                                  damageCritical: selectedSkill.damageCritical,
+                                  attackElementIds: selectedSkill.attackElementIds,
+                                  thisCritChanceFormula: selectedSkill.thisCritChanceFormula,
+                                  thisCritDamageMultiplierFormula:
+                                  selectedSkill.thisCritDamageMultiplierFormula,
+                                  thisCritsAlways: selectedSkill.thisCritsAlways,
+                                }}
+                                onChange={handleUsableItemDamageChange}
+                                elementNames={SystemService.elements ?? []}
+                              />
+                            </AccordionDetails>
+                          </Accordion>
+
+                          <Accordion
+                            {...editorAccordionProps('editor-effects')}
+                            disableGutters
+                            elevation={0}
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              '&:before': { display: 'none' },
+                            }}
+                          >
+                            <AccordionSummary expandIcon={<ExpandMore/>}>
+                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+                                Effects
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Typography variant={'caption'} color={'text.secondary'} sx={{
+                                display: 'block',
+                                mb: 1.5
+                              }}>
+                                Additional effects that execute against the target when a skill lands.
+                              </Typography>
+                              <UsableEffectsEditor
+                                value={selectedSkill.effects}
+                                onChange={handleSkillEffectsChange}
+                                stateRows={stateEffectPickerRows}
+                                skillRows={skillEffectPickerRows}
+                                commonEventRows={commonEventPickerRows}
+                              />
+                            </AccordionDetails>
+                          </Accordion>
+
+                          <Accordion
+                            {...editorAccordionProps('editor-skill-extend')}
+                            disableGutters
+                            elevation={0}
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              '&:before': { display: 'none' },
+                            }}
+                          >
+                            <AccordionSummary expandIcon={<ExpandMore/>}>
+                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+                                Skill extend
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Stack spacing={1.5}>
+                                <Typography variant={'caption'} color={'text.secondary'}>
+                                  The list of skills that this skill will functionally extend.
+                                </Typography>
+                                <Autocomplete<IdLabelRow, true, false, false>
+                                  multiple
+                                  size={'small'}
+                                  options={skillExtendPickerOptions}
+                                  getOptionLabel={(o) => o.label}
+                                  isOptionEqualToValue={(
+                                    a,
+                                    b
+                                  ) => a.id === b.id}
+                                  value={selectedSkillExtendPickerValues}
+                                  onChange={handleSkillExtendBaseIdsChange}
+                                  sx={{ width: '100%' }}
+                                  renderTags={(
+                                    tagValue,
+                                    getTagProps
+                                  ) =>
+                                    tagValue.map((
+                                      option,
+                                      index
+                                    ) =>
+                                    {
+                                      const {
+                                        key,
+                                        ...chipProps
+                                      } = getTagProps({ index });
+                                      const listIndex = skills.findIndex((s) => s.id === option.id);
+                                      const canNavigate = listIndex !== -1;
+
+                                      return (
+                                        <Chip
+                                          key={key}
+                                          {...chipProps}
+                                          label={option.label}
+                                          onClick={(event) =>
+                                          {
+                                            if (canNavigate === true)
+                                            {
+                                              event.stopPropagation();
+                                              listRef.current?.scrollToItem(listIndex, 'smart');
+                                              handleSkillListItemOnClickEvent(listIndex, false);
+                                            }
+                                          }}
+                                          sx={{
+                                            cursor: canNavigate === true
+                                              ? 'pointer'
+                                              : 'default',
+                                          }}
+                                        />
+                                      );
+                                    })}
+                                  renderInput={(params) =>
+                                    (
+                                      <TextField
+                                        {...params}
+                                        variant={'outlined'}
+                                        label={'Extends skills'}
+                                        placeholder={'Search skills…'}
                                       />
-                                    }
-                                    label={
-                                      <Typography variant={'body2'}>
-                                        Can die from HP costs?
-                                      </Typography>
-                                    }
-                                  />
-                                  <TextField
-                                    variant={'standard'}
-                                    label={'formula'}
-                                    value={selectedSkill.hpCostFormula}
-                                    onChange={handleHpCostFormulaOnChangeEvent}
-                                    size={'small'}
-                                    placeholder={'e.g. a.mhp * 0.1'}
-                                    sx={{
-                                      ...noteFormulaFieldSx,
-                                      width: 'min(100%, 220px)',
-                                    }}
-                                  />
-                                </Stack>
-                              </Paper>
-                            </Grid>
+                                    )}
+                                />
 
-                            {/* MP */}
-                            <Grid size={4}>
-                              <Paper
-                                variant={'outlined'}
-                                sx={{
-                                  padding: 1.5,
-                                  borderColor: 'divider',
-                                  height: '100%',
-                                }}
-                              >
-                                <Typography variant={'h6'} color={'info'}>
-                                  MP cost
+                                <Typography variant={'subtitle2'} sx={{
+                                  fontWeight: 600,
+                                  pt: 0.5
+                                }}>
+                                  Extended by
                                 </Typography>
-                                <Stack spacing={2} alignItems={'flex-start'}>
-                                  <NumberInputWithLabel
-                                    label={'db'}
-                                    size={'small'}
-                                    value={selectedSkill.mpCost}
-                                    onChangeEventHandler={handleMpCostOnChangeEvent}
-                                  />
-                                  <NumberInputWithLabel
-                                    label={'flat'}
-                                    size={'small'}
-                                    value={selectedSkill.mpCostTagFlat}
-                                    onChangeEventHandler={handleMpCostTagFlatOnChangeEvent}
-                                  />
-                                  <NumberInputWithLabel
-                                    label={'%'}
-                                    size={'small'}
-                                    value={selectedSkill.mpCostTagPercent}
-                                    onChangeEventHandler={handleMpCostTagPercentOnChangeEvent}
-                                  />
-                                  <TextField
-                                    variant={'standard'}
-                                    label={'formula'}
-                                    value={selectedSkill.mpCostTagFormula}
-                                    onChange={handleMpCostTagFormulaOnChangeEvent}
-                                    size={'small'}
-                                    sx={{
-                                      ...noteFormulaFieldSx,
-                                      width: 'min(100%, 220px)',
-                                    }}
-                                  />
-                                </Stack>
-                              </Paper>
-                            </Grid>
-
-                            {/* TP */}
-                            <Grid size={4}>
-                              <Paper
-                                variant={'outlined'}
-                                sx={{
-                                  padding: 1.5,
-                                  borderColor: 'divider',
-                                  height: '100%',
-                                }}
-                              >
-                                <Typography variant={'h6'} color={'success'}>
-                                  TP cost
+                                <Typography variant={'caption'} color={'text.secondary'}>
+                                  Other skills that augment this one when learned. Click a chip to open it in the list.
                                 </Typography>
-                                <Stack spacing={2} alignItems={'flex-start'}>
-                                  <NumberInputWithLabel
-                                    label={'db'}
-                                    size={'small'}
-                                    value={selectedSkill.tpCost}
-                                    onChangeEventHandler={handleTpCostOnChangeEvent}
-                                  />
-                                  <NumberInputWithLabel
-                                    label={'flat'}
-                                    size={'small'}
-                                    value={selectedSkill.tpCostTagFlat}
-                                    onChangeEventHandler={handleTpCostTagFlatOnChangeEvent}
-                                  />
-                                  <NumberInputWithLabel
-                                    label={'%'}
-                                    size={'small'}
-                                    value={selectedSkill.tpCostTagPercent}
-                                    onChangeEventHandler={handleTpCostTagPercentOnChangeEvent}
-                                  />
-                                  <TextField
-                                    variant={'standard'}
-                                    label={'formula'}
-                                    value={selectedSkill.tpCostTagFormula}
-                                    onChange={handleTpCostTagFormulaOnChangeEvent}
-                                    size={'small'}
-                                    sx={{
-                                      ...noteFormulaFieldSx,
-                                      width: 'min(100%, 220px)',
-                                    }}
-                                  />
-                                </Stack>
-                              </Paper>
-                            </Grid>
-                          </Grid>
+                                {skillExtendersOfSelected.length === 0
+                                  ? (
+                                    <Typography variant={'body2'} color={'text.secondary'}>
+                                      None
+                                    </Typography>
+                                  )
+                                  : (
+                                    <Box
+                                      sx={{
+                                        display: 'flex',
+                                        flexWrap: 'wrap',
+                                        gap: 0.75,
+                                      }}
+                                    >
+                                      {skillExtendersOfSelected.map((row) =>
+                                        (
+                                          <Chip
+                                            key={row.id}
+                                            size={'small'}
+                                            label={`${row.id}: ${row.name}`}
+                                            onClick={() =>
+                                            {
+                                              listRef.current?.scrollToItem(row.listIndex, 'smart');
+                                              handleSkillListItemOnClickEvent(row.listIndex, false);
+                                            }}
+                                            sx={{ cursor: 'pointer' }}
+                                          />
+                                        ))}
+                                    </Box>
+                                  )}
+                              </Stack>
+                            </AccordionDetails>
+                          </Accordion>
 
-                          <Divider/>
-
-                          <Grid
-                            container
-                            spacing={2}
-                            alignItems={'stretch'}
-                            justifyContent={'left'}
+                          <Accordion
+                            {...editorAccordionProps('editor-sks')}
+                            disableGutters
+                            elevation={0}
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              '&:before': { display: 'none' },
+                            }}
                           >
-                            <Grid size={4}>
-                              <Paper
-                                variant={'outlined'}
-                                sx={{
-                                  padding: 1.5,
-                                  borderColor: 'divider',
-                                  height: '100%',
-                                }}
-                              >
-                                <Typography variant={'h6'} color={'warning'}>
-                                  HP gain
+                            <AccordionSummary expandIcon={<ExpandMore/>}>
+                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+                                Skill slots
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Stack spacing={1.5}>
+                                <Typography variant={'caption'} color={'text.secondary'}>
+                                  Details about the slot cost of this skill. Does not apply if this skillType is not
+                                  among the plugin parameter's list of skills that require equipping.
                                 </Typography>
-                                <Stack spacing={2} alignItems={'flex-start'}>
-                                  <NumberInputWithLabel
-                                    label={'flat'}
-                                    size={'small'}
-                                    value={selectedSkill.onAttackHpGainFlat}
-                                    onChangeEventHandler={handleOnAttackHpGainFlatOnChangeEvent}
-                                  />
-                                  <NumberInputWithLabel
-                                    label={'%'}
-                                    size={'small'}
-                                    value={selectedSkill.onAttackHpGainPercent}
-                                    onChangeEventHandler={handleOnAttackHpGainPercentOnChangeEvent}
-                                  />
-                                  <TextField
-                                    variant={'standard'}
-                                    label={'formula'}
-                                    value={selectedSkill.onAttackHpGainFormula}
-                                    onChange={handleOnAttackHpGainFormulaOnChangeEvent}
-                                    size={'small'}
-                                    placeholder={'e.g. a.mat'}
-                                    sx={{
-                                      ...noteFormulaFieldSx,
-                                      width: 'min(100%, 220px)',
-                                    }}
-                                  />
-                                </Stack>
-                              </Paper>
-                            </Grid>
-                            <Grid size={4}>
-                              <Paper
-                                variant={'outlined'}
-                                sx={{
-                                  padding: 1.5,
-                                  borderColor: 'divider',
-                                  height: '100%',
-                                }}
-                              >
-                                <Typography variant={'h6'} color={'info'}>
-                                  MP gain
-                                </Typography>
-                                <Stack spacing={2} alignItems={'flex-start'}>
-                                  <NumberInputWithLabel
-                                    label={'flat'}
-                                    size={'small'}
-                                    value={selectedSkill.onAttackMpGainFlat}
-                                    onChangeEventHandler={handleOnAttackMpGainFlatOnChangeEvent}
-                                  />
-                                  <NumberInputWithLabel
-                                    label={'%'}
-                                    size={'small'}
-                                    value={selectedSkill.onAttackMpGainPercent}
-                                    onChangeEventHandler={handleOnAttackMpGainPercentOnChangeEvent}
-                                  />
-                                  <TextField
-                                    variant={'standard'}
-                                    label={'formula'}
-                                    value={selectedSkill.onAttackMpGainFormula}
-                                    onChange={handleOnAttackMpGainFormulaOnChangeEvent}
-                                    size={'small'}
-                                    sx={{
-                                      ...noteFormulaFieldSx,
-                                      width: 'min(100%, 220px)',
-                                    }}
-                                  />
-                                </Stack>
-                              </Paper>
-                            </Grid>
-                            <Grid size={4}>
-                              <Paper
-                                variant={'outlined'}
-                                sx={{
-                                  padding: 1.5,
-                                  borderColor: 'divider',
-                                  height: '100%',
-                                }}
-                              >
-                                <Typography variant={'h6'} color={'success'}>
-                                  TP gain
-                                </Typography>
-                                <Stack spacing={2} alignItems={'flex-start'}>
-                                  <NumberInputWithLabel
-                                    label={'db'}
-                                    size={'small'}
-                                    value={selectedSkill.tpGain}
-                                    onChangeEventHandler={handleTpGainOnChangeEvent}
-                                  />
-                                  <NumberInputWithLabel
-                                    label={'flat'}
-                                    size={'small'}
-                                    value={selectedSkill.onAttackTpGainFlat}
-                                    onChangeEventHandler={handleOnAttackTpGainFlatOnChangeEvent}
-                                  />
-                                  <NumberInputWithLabel
-                                    label={'%'}
-                                    size={'small'}
-                                    value={selectedSkill.onAttackTpGainPercent}
-                                    onChangeEventHandler={handleOnAttackTpGainPercentOnChangeEvent}
-                                  />
-                                  <TextField
-                                    variant={'standard'}
-                                    label={'formula'}
-                                    value={selectedSkill.onAttackTpGainFormula}
-                                    onChange={handleOnAttackTpGainFormulaOnChangeEvent}
-                                    size={'small'}
-                                    sx={{
-                                      ...noteFormulaFieldSx,
-                                      width: 'min(100%, 220px)',
-                                    }}
-                                  />
-                                </Stack>
-                              </Paper>
-                            </Grid>
-                          </Grid>
-                          </Stack>
-                        </AccordionDetails>
-                      </Accordion>
-                    </Stack>
-                  </Grid>
-                </Grid>
+                                <Grid container spacing={2} alignItems={'flex-start'}>
+                                  <Grid size={6}>
+                                    <TextField
+                                      label={'Slot cost (points)'}
+                                      size={'small'}
+                                      fullWidth
+                                      value={selectedSkill.sksSlotCost === null
+                                        ? ''
+                                        : String(selectedSkill.sksSlotCost)}
+                                      onChange={handleSksSlotCostChange}
+                                      helperText={
+                                        'Empty uses the plugin default. Integer slot points to equip (can be negative if your rules allow).'
+                                      }
+                                      slotProps={{
+                                        htmlInput: {
+                                          inputMode: 'numeric',
+                                          step: 1
+                                        }
+                                      }}
+                                    />
+                                  </Grid>
+                                  <Grid size={6}>
+                                    <FormControlLabel
+                                      label={'Always unslotted'}
+                                      control={
+                                        <Switch
+                                          size={'small'}
+                                          checked={selectedSkill.sksExplicitUnslotted}
+                                          onChange={handleSksExplicitUnslottedChange}
+                                        />
+                                      }
+                                    />
+                                    <Typography variant={'caption'} color={'text.secondary'} display={'block'}>
+                                      On: always available, not shown in the slot equip list. Off: clears only this
+                                      option;
+                                      skill type settings may still treat the skill as outside slots.
+                                    </Typography>
+                                  </Grid>
+                                </Grid>
+                              </Stack>
+                            </AccordionDetails>
+                          </Accordion>
+
+                          <Accordion
+                            {...editorAccordionProps('editor-costs')}
+                            disableGutters
+                            elevation={0}
+                            sx={{
+                              border: '1px solid',
+                              borderColor: 'divider',
+                              borderRadius: 1,
+                              '&:before': { display: 'none' },
+                            }}
+                          >
+                            <AccordionSummary expandIcon={<ExpandMore/>}>
+                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+                                Resources (costs/gains)
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <Typography variant={'caption'} color={'text.secondary'}>
+                                Details about the costs and gains of various resources when this skill is used.
+                              </Typography>
+                              <Stack spacing={2}>
+                                <Grid
+                                  container
+                                  spacing={2}
+                                  alignItems={'stretch'}
+                                  justifyContent={'left'}
+                                >
+                                  {/* HP */}
+                                  <Grid size={4}>
+                                    <Paper
+                                      variant={'outlined'}
+                                      sx={{
+                                        padding: 1.5,
+                                        borderColor: 'divider',
+                                        height: '100%',
+                                      }}
+                                    >
+                                      <Typography variant={'h6'} color={'warning'}>
+                                        HP cost
+                                      </Typography>
+                                      <Stack spacing={2} alignItems={'flex-start'}>
+                                        <NumberInputWithLabel
+                                          label={'flat'}
+                                          size={'small'}
+                                          value={selectedSkill.hpCostFlat}
+                                          onChangeEventHandler={handleHpCostFlatOnChangeEvent}
+                                        />
+                                        <NumberInputWithLabel
+                                          label={'%'}
+                                          size={'small'}
+                                          value={selectedSkill.hpCostPercent}
+                                          onChangeEventHandler={handleHpCostPercentOnChangeEvent}
+                                        />
+                                        <FormControlLabel
+                                          labelPlacement={'top'}
+                                          sx={{
+                                            alignItems: 'flex-start',
+                                            marginLeft: 0,
+                                          }}
+                                          control={
+                                            <Switch
+                                              size={'small'}
+                                              checked={selectedSkill.hpCostCanKill}
+                                              onChange={handleHpCostCanKillOnChangeEvent}
+                                            />
+                                          }
+                                          label={
+                                            <Typography variant={'body2'}>
+                                              Can die from HP costs?
+                                            </Typography>
+                                          }
+                                        />
+                                        <TextField
+                                          variant={'standard'}
+                                          label={'formula'}
+                                          value={selectedSkill.hpCostFormula}
+                                          onChange={handleHpCostFormulaOnChangeEvent}
+                                          size={'small'}
+                                          placeholder={'e.g. a.mhp * 0.1'}
+                                          helperText={'Evaluated when the skill is executed.'}
+                                          sx={{
+                                            ...noteFormulaFieldSx,
+                                            width: 'min(100%, 220px)',
+                                          }}
+                                        />
+                                      </Stack>
+                                    </Paper>
+                                  </Grid>
+
+                                  {/* MP */}
+                                  <Grid size={4}>
+                                    <Paper
+                                      variant={'outlined'}
+                                      sx={{
+                                        padding: 1.5,
+                                        borderColor: 'divider',
+                                        height: '100%',
+                                      }}
+                                    >
+                                      <Typography variant={'h6'} color={'info'}>
+                                        MP cost
+                                      </Typography>
+                                      <Stack spacing={2} alignItems={'flex-start'}>
+                                        <NumberInputWithLabel
+                                          label={'db'}
+                                          size={'small'}
+                                          value={selectedSkill.mpCost}
+                                          onChangeEventHandler={handleMpCostOnChangeEvent}
+                                          helperText={'Base MP before optional extras.'}
+                                        />
+                                        <NumberInputWithLabel
+                                          label={'flat'}
+                                          size={'small'}
+                                          value={selectedSkill.mpCostTagFlat}
+                                          onChangeEventHandler={handleMpCostTagFlatOnChangeEvent}
+                                        />
+                                        <NumberInputWithLabel
+                                          label={'%'}
+                                          size={'small'}
+                                          value={selectedSkill.mpCostTagPercent}
+                                          onChangeEventHandler={handleMpCostTagPercentOnChangeEvent}
+                                        />
+                                        <TextField
+                                          variant={'standard'}
+                                          label={'formula'}
+                                          value={selectedSkill.mpCostTagFormula}
+                                          onChange={handleMpCostTagFormulaOnChangeEvent}
+                                          size={'small'}
+                                          helperText={'Added to the database MP cost.'}
+                                          sx={{
+                                            ...noteFormulaFieldSx,
+                                            width: 'min(100%, 220px)',
+                                          }}
+                                        />
+                                      </Stack>
+                                    </Paper>
+                                  </Grid>
+
+                                  {/* TP */}
+                                  <Grid size={4}>
+                                    <Paper
+                                      variant={'outlined'}
+                                      sx={{
+                                        padding: 1.5,
+                                        borderColor: 'divider',
+                                        height: '100%',
+                                      }}
+                                    >
+                                      <Typography variant={'h6'} color={'success'}>
+                                        TP cost
+                                      </Typography>
+                                      <Stack spacing={2} alignItems={'flex-start'}>
+                                        <NumberInputWithLabel
+                                          label={'db'}
+                                          size={'small'}
+                                          value={selectedSkill.tpCost}
+                                          onChangeEventHandler={handleTpCostOnChangeEvent}
+                                          helperText={'Base TP before optional extras.'}
+                                        />
+                                        <NumberInputWithLabel
+                                          label={'flat'}
+                                          size={'small'}
+                                          value={selectedSkill.tpCostTagFlat}
+                                          onChangeEventHandler={handleTpCostTagFlatOnChangeEvent}
+                                        />
+                                        <NumberInputWithLabel
+                                          label={'%'}
+                                          size={'small'}
+                                          value={selectedSkill.tpCostTagPercent}
+                                          onChangeEventHandler={handleTpCostTagPercentOnChangeEvent}
+                                        />
+                                        <TextField
+                                          variant={'standard'}
+                                          label={'formula'}
+                                          value={selectedSkill.tpCostTagFormula}
+                                          onChange={handleTpCostTagFormulaOnChangeEvent}
+                                          size={'small'}
+                                          helperText={'Added to the database TP cost.'}
+                                          sx={{
+                                            ...noteFormulaFieldSx,
+                                            width: 'min(100%, 220px)',
+                                          }}
+                                        />
+                                      </Stack>
+                                    </Paper>
+                                  </Grid>
+                                </Grid>
+
+                                <Divider/>
+
+                                <Grid
+                                  container
+                                  spacing={2}
+                                  alignItems={'stretch'}
+                                  justifyContent={'left'}
+                                >
+                                  <Grid size={4}>
+                                    <Paper
+                                      variant={'outlined'}
+                                      sx={{
+                                        padding: 1.5,
+                                        borderColor: 'divider',
+                                        height: '100%',
+                                      }}
+                                    >
+                                      <Typography variant={'h6'} color={'warning'}>
+                                        HP gain
+                                      </Typography>
+                                      <Stack spacing={2} alignItems={'flex-start'}>
+                                        <NumberInputWithLabel
+                                          label={'flat'}
+                                          size={'small'}
+                                          value={selectedSkill.onAttackHpGainFlat}
+                                          onChangeEventHandler={handleOnAttackHpGainFlatOnChangeEvent}
+                                        />
+                                        <NumberInputWithLabel
+                                          label={'%'}
+                                          size={'small'}
+                                          value={selectedSkill.onAttackHpGainPercent}
+                                          onChangeEventHandler={handleOnAttackHpGainPercentOnChangeEvent}
+                                        />
+                                        <TextField
+                                          variant={'standard'}
+                                          label={'formula'}
+                                          value={selectedSkill.onAttackHpGainFormula}
+                                          onChange={handleOnAttackHpGainFormulaOnChangeEvent}
+                                          size={'small'}
+                                          placeholder={'e.g. a.mat'}
+                                          helperText={'Evaluated per connecting hit.'}
+                                          sx={{
+                                            ...noteFormulaFieldSx,
+                                            width: 'min(100%, 220px)',
+                                          }}
+                                        />
+                                      </Stack>
+                                    </Paper>
+                                  </Grid>
+                                  <Grid size={4}>
+                                    <Paper
+                                      variant={'outlined'}
+                                      sx={{
+                                        padding: 1.5,
+                                        borderColor: 'divider',
+                                        height: '100%',
+                                      }}
+                                    >
+                                      <Typography variant={'h6'} color={'info'}>
+                                        MP gain
+                                      </Typography>
+                                      <Stack spacing={2} alignItems={'flex-start'}>
+                                        <NumberInputWithLabel
+                                          label={'flat'}
+                                          size={'small'}
+                                          value={selectedSkill.onAttackMpGainFlat}
+                                          onChangeEventHandler={handleOnAttackMpGainFlatOnChangeEvent}
+                                        />
+                                        <NumberInputWithLabel
+                                          label={'%'}
+                                          size={'small'}
+                                          value={selectedSkill.onAttackMpGainPercent}
+                                          onChangeEventHandler={handleOnAttackMpGainPercentOnChangeEvent}
+                                        />
+                                        <TextField
+                                          variant={'standard'}
+                                          label={'formula'}
+                                          value={selectedSkill.onAttackMpGainFormula}
+                                          onChange={handleOnAttackMpGainFormulaOnChangeEvent}
+                                          size={'small'}
+                                          helperText={'Evaluated per connecting hit.'}
+                                          sx={{
+                                            ...noteFormulaFieldSx,
+                                            width: 'min(100%, 220px)',
+                                          }}
+                                        />
+                                      </Stack>
+                                    </Paper>
+                                  </Grid>
+                                  <Grid size={4}>
+                                    <Paper
+                                      variant={'outlined'}
+                                      sx={{
+                                        padding: 1.5,
+                                        borderColor: 'divider',
+                                        height: '100%',
+                                      }}
+                                    >
+                                      <Typography variant={'h6'} color={'success'}>
+                                        TP gain
+                                      </Typography>
+                                      <Stack spacing={2} alignItems={'flex-start'}>
+                                        <NumberInputWithLabel
+                                          label={'db'}
+                                          size={'small'}
+                                          value={selectedSkill.tpGain}
+                                          onChangeEventHandler={handleTpGainOnChangeEvent}
+                                          helperText={'Base TP reward when the skill succeeds.'}
+                                        />
+                                        <NumberInputWithLabel
+                                          label={'flat'}
+                                          size={'small'}
+                                          value={selectedSkill.onAttackTpGainFlat}
+                                          onChangeEventHandler={handleOnAttackTpGainFlatOnChangeEvent}
+                                        />
+                                        <NumberInputWithLabel
+                                          label={'%'}
+                                          size={'small'}
+                                          value={selectedSkill.onAttackTpGainPercent}
+                                          onChangeEventHandler={handleOnAttackTpGainPercentOnChangeEvent}
+                                        />
+                                        <TextField
+                                          variant={'standard'}
+                                          label={'formula'}
+                                          value={selectedSkill.onAttackTpGainFormula}
+                                          onChange={handleOnAttackTpGainFormulaOnChangeEvent}
+                                          size={'small'}
+                                          helperText={'Evaluated per connecting hit.'}
+                                          sx={{
+                                            ...noteFormulaFieldSx,
+                                            width: 'min(100%, 220px)',
+                                          }}
+                                        />
+                                      </Stack>
+                                    </Paper>
+                                  </Grid>
+                                </Grid>
+                              </Stack>
+                            </AccordionDetails>
+                          </Accordion>
+                        </Stack>
+                      </Grid>
+                    </Grid>
                   </Stack>
+                </Box>
+
+                <Box
+                  id={'skill-editor-tabpanel-2'}
+                  role={'tabpanel'}
+                  aria-labelledby={'skill-editor-tab-2'}
+                  hidden={skillEditorTab !== 2}
+                  sx={{
+                    display: skillEditorTab === 2
+                      ? 'block'
+                      : 'none'
+                  }}
+                >
+                  <SkillJabsExtensionsPanel
+                    projectRoot={projectRoot}
+                    rmmzDataPath={rmmzDataPath}
+                    systemDataGeneration={systemDataGeneration}
+                    projectReloadGeneration={projectReloadGeneration}
+                    jabs={selectedSkill.jabs}
+                    onJabsChange={handleJabsChange}
+                    skillPickerOptions={skillEffectPickerRows}
+                    editingSkillId={selectedSkill.id}
+                    contextSkillAnimationId={selectedSkill.animationId}
+                    accordionExpandedById={jabsAccordionExpanded}
+                    onAccordionExpandedChange={handleJabsAccordionChange}
+                  />
                 </Box>
 
                 <Box
@@ -2087,9 +2700,11 @@ const SkillsBoard = () =>
                   role={'tabpanel'}
                   aria-labelledby={'skill-editor-tab-1'}
                   hidden={skillEditorTab !== 1}
-                  sx={{ display: skillEditorTab === 1
-                    ? 'block'
-                    : 'none' }}
+                  sx={{
+                    display: skillEditorTab === 1
+                      ? 'block'
+                      : 'none'
+                  }}
                 >
                   <Stack spacing={2}>
                     <Stack
@@ -2099,13 +2714,7 @@ const SkillsBoard = () =>
                       spacing={2}
                     >
                       <Typography variant={'body2'} color={'text.secondary'} sx={{ flex: 1 }}>
-                        Serialized note as it would be written to{' '}
-                        <Typography component={'span'} variant={'body2'} sx={{ fontFamily: 'monospace' }}>
-                          Skills.json
-                        </Typography>
-                        {' '}
-                        (base note plus tags generated from fields in this editor). Read-only; edit structured
-                        fields on the Editor tab instead.
+                        Full note text as it would be saved. Read-only; change values on the Editor tab.
                       </Typography>
                       <Button
                         variant={'outlined'}

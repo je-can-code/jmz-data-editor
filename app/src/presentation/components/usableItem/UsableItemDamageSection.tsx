@@ -140,9 +140,12 @@ function UsableItemDamageSection({
     const n = typeof raw === "string"
       ? parseInt(raw, 10)
       : raw;
-    patch({ damageType: Number.isInteger(n)
-      ? n
-      : RmmzDamageType.HpDamage });
+    if (Number.isInteger(n) && n >= RmmzDamageType.None && n <= RmmzDamageType.MpDrain)
+    {
+      patch({ damageType: n });
+      return;
+    }
+    patch({ damageType: RmmzDamageType.HpDamage });
   };
 
   const handlePrimaryElementSelectChange = (event: SelectChangeEvent<number>) =>
@@ -208,7 +211,9 @@ function UsableItemDamageSection({
     patch({ thisCritsAlways: event.target.checked });
   };
 
-  const critExtrasDisabled = value.damageCritical === false;
+  const damageDisabled = value.damageType === RmmzDamageType.None;
+
+  const critExtrasDisabled = damageDisabled || value.damageCritical === false;
 
   const varianceClamped = clampDamageVariance(value.damageVariance);
 
@@ -237,7 +242,7 @@ function UsableItemDamageSection({
 
   const body = (
     <Grid container spacing={2} alignItems={"flex-start"}>
-        <Grid size={6}>
+        <Grid size={damageDisabled ? 12 : 6}>
           <Stack spacing={2}>
             <Box sx={damageSubGroupSx}>
               <Typography
@@ -245,7 +250,7 @@ function UsableItemDamageSection({
                 color={"text.secondary"}
                 sx={damageSectionTitleSx}
               >
-                Type, formula, and variance
+                {damageDisabled ? "Damage type" : "Type, formula, and variance"}
               </Typography>
               <Stack spacing={1.5}>
                 <FormControl size={"small"} fullWidth>
@@ -264,154 +269,175 @@ function UsableItemDamageSection({
                     ))}
                   </Select>
                 </FormControl>
-                <TextField
-                  label={"Formula"}
-                  value={value.damageFormula}
-                  onChange={handleFormulaChange}
-                  variant={"outlined"}
-                  size={"small"}
-                  sx={narrowFormulaSx}
-                />
-                <Stack spacing={1} sx={{ width: "100%", maxWidth: "min(100%, 320px)" }}>
-                  <Typography
-                    variant={"body2"}
-                    color={"text.secondary"}
-                    component={"div"}
-                  >
-                    {`Variance · ${varianceClamped}%`}
-                  </Typography>
-                  <Slider
-                    size={"small"}
-                    value={varianceClamped}
-                    onChange={handleVarianceSliderChange}
-                    min={0}
-                    max={100}
-                    step={1}
-                    valueLabelDisplay={"auto"}
-                    valueLabelFormat={(v) => `${v}%`}
-                    aria-label={"Damage variance percent"}
-                    getAriaValueText={(v) => `${v}%`}
-                  />
-                </Stack>
+                {damageDisabled
+                  ? (
+                    <FormHelperText>
+                      No damage step runs for this skill. Effects, states, and costs still apply.
+                    </FormHelperText>
+                  )
+                  : null}
+                {damageDisabled
+                  ? null
+                  : (
+                    <>
+                      <TextField
+                        label={"Formula"}
+                        value={value.damageFormula}
+                        onChange={handleFormulaChange}
+                        variant={"outlined"}
+                        size={"small"}
+                        sx={narrowFormulaSx}
+                      />
+                      <Stack spacing={1} sx={{ width: "100%", maxWidth: "min(100%, 320px)" }}>
+                        <Typography
+                          variant={"body2"}
+                          color={"text.secondary"}
+                          component={"div"}
+                        >
+                          {`Variance · ${varianceClamped}%`}
+                        </Typography>
+                        <Slider
+                          size={"small"}
+                          value={varianceClamped}
+                          onChange={handleVarianceSliderChange}
+                          min={0}
+                          max={100}
+                          step={1}
+                          valueLabelDisplay={"auto"}
+                          valueLabelFormat={(v) => `${v}%`}
+                          aria-label={"Damage variance percent"}
+                          getAriaValueText={(v) => `${v}%`}
+                        />
+                      </Stack>
+                    </>
+                  )}
               </Stack>
             </Box>
 
-            <Box sx={damageSubGroupSx}>
-              <Typography
-                variant={"subtitle2"}
-                color={"text.secondary"}
-                sx={damageSectionTitleSx}
-              >
-                Element
-              </Typography>
-              <Stack spacing={1.5}>
-                <FormControl size={"small"} fullWidth>
-                  <InputLabel id={"usable-item-damage-element-label"}>
-                    Primary
-                  </InputLabel>
-                  <Select<number>
-                    labelId={"usable-item-damage-element-label"}
-                    label={"Primary"}
-                    value={value.damageElementId}
-                    onChange={handlePrimaryElementSelectChange}
+            {damageDisabled
+              ? null
+              : (
+                <Box sx={damageSubGroupSx}>
+                  <Typography
+                    variant={"subtitle2"}
+                    color={"text.secondary"}
+                    sx={damageSectionTitleSx}
                   >
-                    <MenuItem value={RMMZ_DAMAGE_ELEMENT_NORMAL_ATTACK}>
-                      Normal attack
-                    </MenuItem>
-                    {primaryOptions.map((opt) =>
-                    (
-                      <MenuItem key={opt.id} value={opt.id}>
-                        {opt.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <Autocomplete<ElementOption, true, false, false>
-                  multiple
-                  size={"small"}
-                  options={extraElementOptions}
-                  getOptionLabel={(o) => o.label}
-                  isOptionEqualToValue={(a, b) => a.id === b.id}
-                  value={selectedExtraOptions}
-                  onChange={handleExtraElementsChange}
-                  sx={{ width: "100%" }}
-                  renderInput={(params) =>
-                  (
-                    <TextField
-                      {...params}
-                      variant={"outlined"}
-                      label={"Additional"}
-                      placeholder={"Add…"}
+                    Element
+                  </Typography>
+                  <Stack spacing={1.5}>
+                    <FormControl size={"small"} fullWidth>
+                      <InputLabel id={"usable-item-damage-element-label"}>
+                        Primary Element
+                      </InputLabel>
+                      <Select<number>
+                        labelId={"usable-item-damage-element-label"}
+                        label={"Primary Element"}
+                        value={value.damageElementId}
+                        onChange={handlePrimaryElementSelectChange}
+                      >
+                        <MenuItem value={RMMZ_DAMAGE_ELEMENT_NORMAL_ATTACK}>
+                          Normal attack
+                        </MenuItem>
+                        {primaryOptions.map((opt) =>
+                        (
+                          <MenuItem key={opt.id} value={opt.id}>
+                            {opt.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <Autocomplete<ElementOption, true, false, false>
+                      multiple
+                      size={"small"}
+                      options={extraElementOptions}
+                      getOptionLabel={(o) => o.label}
+                      isOptionEqualToValue={(a, b) => a.id === b.id}
+                      value={selectedExtraOptions}
+                      onChange={handleExtraElementsChange}
+                      sx={{ width: "100%" }}
+                      renderInput={(params) =>
+                      (
+                        <TextField
+                          {...params}
+                          variant={"outlined"}
+                          label={"Additional Elements"}
+                          placeholder={"Add…"}
+                        />
+                      )}
                     />
-                  )}
-                />
-              </Stack>
-            </Box>
+                  </Stack>
+                </Box>
+              )}
           </Stack>
         </Grid>
 
-        <Grid size={6}>
-          <Box sx={damageSubGroupSx}>
-            <Typography
-              variant={"subtitle2"}
-              color={"text.secondary"}
-              sx={damageSectionTitleSx}
-            >
-              Critical
-            </Typography>
-            <Stack spacing={1.5}>
-              <FormControlLabel
-                label={"Can score a critical hit"}
-                control={
-                  <Switch
-                    size={"small"}
-                    checked={value.damageCritical}
-                    onChange={handleCriticalSwitchChange}
+        {damageDisabled
+          ? null
+          : (
+            <Grid size={6}>
+              <Box sx={damageSubGroupSx}>
+                <Typography
+                  variant={"subtitle2"}
+                  color={"text.secondary"}
+                  sx={damageSectionTitleSx}
+                >
+                  Critical
+                </Typography>
+                <Stack spacing={1.5}>
+                  <FormControlLabel
+                    label={"Can score a critical hit"}
+                    control={
+                      <Switch
+                        size={"small"}
+                        checked={value.damageCritical}
+                        onChange={handleCriticalSwitchChange}
+                      />
+                    }
                   />
-                }
-              />
-              <FormControlLabel
-                disabled={critExtrasDisabled}
-                label={"Always critical"}
-                control={
-                  <Switch
+                  <FormControlLabel
+                    disabled={critExtrasDisabled}
+                    label={"Always critical"}
+                    control={
+                      <Switch
+                        size={"small"}
+                        disabled={critExtrasDisabled}
+                        checked={value.thisCritsAlways}
+                        onChange={handleThisCritsAlwaysChange}
+                      />
+                    }
+                  />
+                  <TextField
+                    label={"Bonus crit chance"}
+                    value={value.thisCritChanceFormula}
+                    onChange={handleThisCritChanceChange}
+                    variant={"outlined"}
                     size={"small"}
                     disabled={critExtrasDisabled}
-                    checked={value.thisCritsAlways}
-                    onChange={handleThisCritsAlwaysChange}
+                    placeholder={"e.g. 25 or a.luk * 0.5"}
+                    sx={fullWidthMonospaceFieldSx}
                   />
-                }
-              />
-              <TextField
-                label={"Bonus crit chance"}
-                value={value.thisCritChanceFormula}
-                onChange={handleThisCritChanceChange}
-                variant={"outlined"}
-                size={"small"}
-                disabled={critExtrasDisabled}
-                placeholder={"e.g. 25 or a.luk * 0.5"}
-                sx={fullWidthMonospaceFieldSx}
-              />
-              <TextField
-                label={"Bonus crit damage multiplier"}
-                value={value.thisCritDamageMultiplierFormula}
-                onChange={handleThisCritMultiplierChange}
-                variant={"outlined"}
-                size={"small"}
-                disabled={critExtrasDisabled}
-                placeholder={"e.g. 10 + a.agi"}
-                sx={fullWidthMonospaceFieldSx}
-              />
-              {critExtrasDisabled
-                ? (
-                  <FormHelperText>
-                    {`Turn on "Can score a critical hit" to edit the fields below.`}
-                  </FormHelperText>
-                )
-                : null}
-            </Stack>
-          </Box>
-        </Grid>
+                  <TextField
+                    label={"Bonus crit damage multiplier"}
+                    value={value.thisCritDamageMultiplierFormula}
+                    onChange={handleThisCritMultiplierChange}
+                    variant={"outlined"}
+                    size={"small"}
+                    disabled={critExtrasDisabled}
+                    placeholder={"e.g. 10 + a.agi"}
+                    sx={fullWidthMonospaceFieldSx}
+                  />
+                  {critExtrasDisabled
+                    ? (
+                      <FormHelperText>
+                        {`Turn on "Can score a critical hit" to edit the fields below.`}
+                      </FormHelperText>
+                    )
+                    : null}
+                </Stack>
+              </Box>
+            </Grid>
+          )}
       </Grid>
   );
 

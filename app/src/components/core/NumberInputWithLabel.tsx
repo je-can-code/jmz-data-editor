@@ -31,6 +31,8 @@ type NumberInputWithLabelProps = {
   id?: string;
   /** Fixed width for the start label column; used only when {@link labelPlacement} is {@code start}. */
   labelMinWidth?: string;
+  /** Shown under the numeric field (MUI {@code TextField} helper). */
+  helperText?: string;
 };
 
 /**
@@ -48,6 +50,7 @@ type NumberInputWithLabelProps = {
  * @param htmlInput Native input attributes.
  * @param id Input id for {@code label} association when {@code labelPlacement} is {@code start}.
  * @param labelMinWidth Minimum width of the start label.
+ * @param helperText Optional helper line under the input.
  */
 export default function NumberInputWithLabel({
   label,
@@ -63,6 +66,7 @@ export default function NumberInputWithLabel({
   htmlInput,
   id,
   labelMinWidth = '6.75rem',
+  helperText,
 }: NumberInputWithLabelProps)
 {
   const placement = labelPlacement;
@@ -75,6 +79,14 @@ export default function NumberInputWithLabel({
     px: '10px',
   };
 
+  const standardBaseSx: SxProps<Theme> =
+    helperText !== undefined && helperText !== ''
+      ? {
+        width: 160,
+        px: '10px',
+      }
+      : defaultStandardSx;
+
   const textFieldSx: SxProps<Theme> = (() =>
   {
     if (variant !== 'standard')
@@ -84,13 +96,13 @@ export default function NumberInputWithLabel({
     if (typeof sx === 'object' && sx !== null && !Array.isArray(sx))
     {
       return {
-        ...defaultStandardSx,
+        ...standardBaseSx,
         ...sx,
       };
     }
     if (sx === undefined || sx === null)
     {
-      return defaultStandardSx;
+      return standardBaseSx;
     }
     return sx;
   })();
@@ -137,6 +149,7 @@ export default function NumberInputWithLabel({
       fullWidth={isStart
         ? true
         : fullWidth}
+      helperText={helperText}
       slotProps={Object.keys(slotProps).length > 0
         ? slotProps as object
         : undefined}
@@ -156,6 +169,16 @@ export default function NumberInputWithLabel({
     />
   );
 
+  const startLabelAlign =
+    helperText !== undefined && helperText !== ''
+      ? 'flex-start'
+      : 'center';
+
+  const endLabelAlign =
+    helperText !== undefined && helperText !== ''
+      ? 'flex-start'
+      : 'center';
+
   if (isStart)
   {
     return (
@@ -171,6 +194,10 @@ export default function NumberInputWithLabel({
               sx={{
                 minWidth: labelMinWidth,
                 flexShrink: 0,
+                paddingTop:
+                  helperText !== undefined && helperText !== ''
+                    ? '8px'
+                    : 0,
               }}
             >
               {label}
@@ -185,7 +212,7 @@ export default function NumberInputWithLabel({
             ? '100%'
             : undefined,
           display: 'flex',
-          alignItems: 'center',
+          alignItems: startLabelAlign,
           gap: 2,
         }}
       />
@@ -204,7 +231,7 @@ export default function NumberInputWithLabel({
         display: 'flex',
         flexDirection: 'row',
         flexWrap: 'nowrap',
-        alignItems: 'center',
+        alignItems: endLabelAlign,
         columnGap: 1,
         ...(fullWidth === true
           ? {

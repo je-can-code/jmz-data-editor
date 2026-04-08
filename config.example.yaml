@@ -1,8 +1,0 @@
-# JMZ Data Editor — local settings (like appsettings.yaml)
-#
-# Copy into the repository (not committed):
-#   mkdir -p .config
-#   cp config.example.yaml .config/config.yaml
-# Then set projectRoot to your RMMZ project folder (the directory that contains data/ and img/).
-
-projectRoot: /absolute/path/to/your-game

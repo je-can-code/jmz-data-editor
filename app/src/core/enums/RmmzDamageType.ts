@@ -3,6 +3,10 @@
  */
 enum RmmzDamageType
 {
+  /**
+   * {@link Rmmz.Data.RPG_SkillDamage.type} — no damage step; formula and variance are ignored in-game.
+   */
+  None = 0,
   HpDamage = 1,
   MpDamage = 2,
   HpRecover = 3,
@@ -17,6 +21,7 @@ type RmmzDamageTypeOption = {
 };
 
 const RMMZ_DAMAGE_TYPE_OPTIONS: readonly RmmzDamageTypeOption[] = [
+  { value: RmmzDamageType.None, label: "None" },
   { value: RmmzDamageType.HpDamage, label: "HP damage" },
   { value: RmmzDamageType.MpDamage, label: "MP damage" },
   { value: RmmzDamageType.HpRecover, label: "HP recovery" },
@@ -27,13 +32,17 @@ const RMMZ_DAMAGE_TYPE_OPTIONS: readonly RmmzDamageTypeOption[] = [
 
 /**
  * @param raw Damage type from database JSON.
- * @returns Integer in [1, 6] when valid; otherwise {@link RmmzDamageType.HpDamage}.
+ * @returns {@link RmmzDamageType.None} for {@code 0}; {@code 1–6} when valid; otherwise {@link RmmzDamageType.HpDamage}.
  */
 function parseRmmzDamageType(raw: number): RmmzDamageType
 {
   if (!Number.isInteger(raw))
   {
     return RmmzDamageType.HpDamage;
+  }
+  if (raw === RmmzDamageType.None)
+  {
+    return RmmzDamageType.None;
   }
   if (raw < RmmzDamageType.HpDamage || raw > RmmzDamageType.MpDrain)
   {

@@ -226,22 +226,6 @@ function IconIndexField(props: IconIndexFieldProps)
 
   return (
     <Stack spacing={1}>
-      <Typography variant={"caption"} color={"text.secondary"}>
-        Icon (database index)
-      </Typography>
-      {resolvedPath !== "" && (
-        <Typography
-          variant={"caption"}
-          color={"text.secondary"}
-          sx={{
-            display: "block",
-            fontFamily: "monospace",
-            wordBreak: "break-all",
-          }}
-        >
-          {`IconSet.png: ${resolvedPath}`}
-        </Typography>
-      )}
       <Stack direction={"row"} spacing={1.5} alignItems={"center"} flexWrap={"wrap"} useFlexGap>
         {previewSpriteStyle !== null
           ? (

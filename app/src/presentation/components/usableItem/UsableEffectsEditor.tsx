@@ -4,7 +4,7 @@ import React, {
   useCallback,
   useMemo,
   useState,
-} from "react";
+} from 'react';
 import {
   Autocomplete,
   Box,
@@ -16,14 +16,14 @@ import {
   TextField,
   Tooltip,
   Typography,
-} from "@mui/material";
+} from '@mui/material';
 import {
   ArrowDownward,
   ArrowUpward,
   DeleteOutline,
   Percent,
-} from "@mui/icons-material";
-import NumberInputWithLabel from "../../../components/core/NumberInputWithLabel.tsx";
+} from '@mui/icons-material';
+import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 import {
   RMMZ_SPECIAL_EFFECT_ESCAPE,
   RMMZ_USABLE_EFFECT_OPTIONS,
@@ -31,7 +31,7 @@ import {
   catalogRowForEffectCode,
   defaultUsableEffectForCode,
   type RmmzUsableEffectCatalogOption,
-} from "@core/enums/RmmzUsableEffectCatalog.ts";
+} from '@core/enums/RmmzUsableEffectCatalog.ts';
 
 type IdLabelRow = {
   id: number;
@@ -96,16 +96,16 @@ function wrapUsableEffectParameters(content: ReactNode): ReactNode
   return (
     <Box
       sx={{
-        boxSizing: "border-box",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
         height: USABLE_EFFECTS_PARAMETERS_CELL_HEIGHT_PX,
         minHeight: USABLE_EFFECTS_PARAMETERS_CELL_HEIGHT_PX,
         minWidth: 0,
-        width: "100%",
-        overflowX: "hidden",
-        overflowY: "auto",
+        width: '100%',
+        overflowX: 'hidden',
+        overflowY: 'auto',
       }}
     >
       {content}
@@ -113,7 +113,11 @@ function wrapUsableEffectParameters(content: ReactNode): ReactNode
   );
 }
 
-function clampFinite(n: number, lo: number, hi: number): number
+function clampFinite(
+  n: number,
+  lo: number,
+  hi: number
+): number
 {
   if (!Number.isFinite(n))
   {
@@ -148,7 +152,7 @@ function stateChancePercentFromStored(stored: number): number
 
 function isForeignEffectOption(opt: UsableEffectTypeOption): opt is ForeignEffectTypeOption
 {
-  return "isForeign" in opt && opt.isForeign === true;
+  return 'isForeign' in opt && opt.isForeign === true;
 }
 
 function optionForEffect(effect: Rmmz.Data.RPG_UsableEffect): UsableEffectTypeOption
@@ -172,7 +176,10 @@ function replaceAt(
   row: Rmmz.Data.RPG_UsableEffect
 ): Rmmz.Data.RPG_UsableEffect[]
 {
-  return list.map((item, i) =>
+  return list.map((
+    item,
+    i
+  ) =>
   {
     if (i !== index)
     {
@@ -218,7 +225,10 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
     handleAddClose();
   };
 
-  const handleMove = (index: number, delta: number) =>
+  const handleMove = (
+    index: number,
+    delta: number
+  ) =>
   {
     const j = index + delta;
     if (j < 0 || j >= value.length)
@@ -226,18 +236,24 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
       return;
     }
     const next = value.slice();
-    const tmp = next[index]!;
-    next[index] = next[j]!;
-    next[j] = tmp;
+    const tmp = next[ index ]!;
+    next[ index ] = next[ j ]!;
+    next[ j ] = tmp;
     onChange(next);
   };
 
   const handleRemove = (index: number) =>
   {
-    onChange(value.filter((_, i) => i !== index));
+    onChange(value.filter((
+      _,
+      i
+    ) => i !== index));
   };
 
-  const handleTypeChange = (index: number, opt: UsableEffectTypeOption | null) =>
+  const handleTypeChange = (
+    index: number,
+    opt: UsableEffectTypeOption | null
+  ) =>
   {
     if (opt === null)
     {
@@ -251,9 +267,12 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
   };
 
   const patchRow = useCallback(
-    (index: number, patch: Partial<Rmmz.Data.RPG_UsableEffect>) =>
+    (
+      index: number,
+      patch: Partial<Rmmz.Data.RPG_UsableEffect>
+    ) =>
     {
-      const cur = value[index];
+      const cur = value[ index ];
       if (!cur)
       {
         return;
@@ -276,11 +295,14 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
     {
       return wrapUsableEffectParameters(
         (
-          <Stack direction={"row"} spacing={1} useFlexGap sx={{ flexWrap: "wrap", alignItems: "center" }}>
+          <Stack direction={'row'} spacing={1} useFlexGap sx={{
+            flexWrap: 'wrap',
+            alignItems: 'center'
+          }}>
             <NumberInputWithLabel
-              label={"Code"}
-              variant={"standard"}
-              size={"small"}
+              label={'Code'}
+              variant={'standard'}
+              size={'small'}
               value={effect.code}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
               htmlInput={{ step: 1 }}
@@ -295,9 +317,9 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
               }}
             />
             <NumberInputWithLabel
-              label={"dataId"}
-              variant={"standard"}
-              size={"small"}
+              label={'dataId'}
+              variant={'standard'}
+              size={'small'}
               value={effect.dataId}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
               htmlInput={{ step: 1 }}
@@ -312,9 +334,9 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
               }}
             />
             <NumberInputWithLabel
-              label={"value1"}
-              variant={"standard"}
-              size={"small"}
+              label={'value1'}
+              variant={'standard'}
+              size={'small'}
               value={effect.value1}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
               htmlInput={{ step: 1 }}
@@ -329,9 +351,9 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
               }}
             />
             <NumberInputWithLabel
-              label={"value2"}
-              variant={"standard"}
-              size={"small"}
+              label={'value2'}
+              variant={'standard'}
+              size={'small'}
               value={effect.value2}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
               htmlInput={{ step: 1 }}
@@ -354,14 +376,14 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
     {
       switch (catalog.dataId)
       {
-        case "none":
+        case 'none':
           return null;
-        case "state_add":
-        case "state_remove":
+        case 'state_add':
+        case 'state_remove':
           return (
             <Autocomplete
               fullWidth
-              size={"small"}
+              size={'small'}
               sx={{ minWidth: 0 }}
               options={stateRows}
               value={
@@ -370,7 +392,10 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                   label: `${effect.dataId}: (unset)`,
                 }
               }
-              onChange={(_e, opt) =>
+              onChange={(
+                _e,
+                opt
+              ) =>
               {
                 if (opt === null)
                 {
@@ -381,22 +406,25 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                 });
               }}
               getOptionLabel={(o) => o.label}
-              isOptionEqualToValue={(a, b) => a.id === b.id}
+              isOptionEqualToValue={(
+                a,
+                b
+              ) => a.id === b.id}
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  margin={"dense"}
-                  label={"dataId"}
-                  placeholder={"State"}
+                  margin={'dense'}
+                  label={'dataId'}
+                  placeholder={'State'}
                 />
               )}
             />
           );
-        case "param":
+        case 'param':
           return (
             <Autocomplete
               fullWidth
-              size={"small"}
+              size={'small'}
               sx={{ minWidth: 0 }}
               options={bparamRows}
               value={
@@ -405,7 +433,10 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                   label: `${effect.dataId}`,
                 }
               }
-              onChange={(_e, opt) =>
+              onChange={(
+                _e,
+                opt
+              ) =>
               {
                 if (opt === null)
                 {
@@ -416,28 +447,34 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                 });
               }}
               getOptionLabel={(o) => o.label}
-              isOptionEqualToValue={(a, b) => a.id === b.id}
+              isOptionEqualToValue={(
+                a,
+                b
+              ) => a.id === b.id}
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  margin={"dense"}
-                  label={"dataId"}
-                  placeholder={"Param"}
+                  margin={'dense'}
+                  label={'dataId'}
+                  placeholder={'Param'}
                 />
               )}
             />
           );
-        case "special":
+        case 'special':
           return (
             <Autocomplete
               fullWidth
-              size={"small"}
+              size={'small'}
               sx={{ minWidth: 0 }}
               options={SPECIAL_EFFECT_ROWS}
               value={
-                SPECIAL_EFFECT_ROWS.find((r) => r.id === effect.dataId) ?? SPECIAL_EFFECT_ROWS[0]
+                SPECIAL_EFFECT_ROWS.find((r) => r.id === effect.dataId) ?? SPECIAL_EFFECT_ROWS[ 0 ]
               }
-              onChange={(_e, opt) =>
+              onChange={(
+                _e,
+                opt
+              ) =>
               {
                 if (opt === null)
                 {
@@ -448,21 +485,24 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                 });
               }}
               getOptionLabel={(o) => o.label}
-              isOptionEqualToValue={(a, b) => a.id === b.id}
+              isOptionEqualToValue={(
+                a,
+                b
+              ) => a.id === b.id}
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  margin={"dense"}
-                  label={"dataId"}
+                  margin={'dense'}
+                  label={'dataId'}
                 />
               )}
             />
           );
-        case "skill":
+        case 'skill':
           return (
             <Autocomplete
               fullWidth
-              size={"small"}
+              size={'small'}
               sx={{ minWidth: 0 }}
               options={skillRows}
               value={
@@ -471,7 +511,10 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                   label: `${effect.dataId}: (unset)`,
                 }
               }
-              onChange={(_e, opt) =>
+              onChange={(
+                _e,
+                opt
+              ) =>
               {
                 if (opt === null)
                 {
@@ -482,22 +525,25 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                 });
               }}
               getOptionLabel={(o) => o.label}
-              isOptionEqualToValue={(a, b) => a.id === b.id}
+              isOptionEqualToValue={(
+                a,
+                b
+              ) => a.id === b.id}
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  margin={"dense"}
-                  label={"dataId"}
-                  placeholder={"Skill"}
+                  margin={'dense'}
+                  label={'dataId'}
+                  placeholder={'Skill'}
                 />
               )}
             />
           );
-        case "common_event":
+        case 'common_event':
           return (
             <Autocomplete
               fullWidth
-              size={"small"}
+              size={'small'}
               sx={{ minWidth: 0 }}
               options={commonEventRows}
               value={
@@ -506,7 +552,10 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                   label: `${effect.dataId}: (unset)`,
                 }
               }
-              onChange={(_e, opt) =>
+              onChange={(
+                _e,
+                opt
+              ) =>
               {
                 if (opt === null)
                 {
@@ -517,13 +566,16 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                 });
               }}
               getOptionLabel={(o) => o.label}
-              isOptionEqualToValue={(a, b) => a.id === b.id}
+              isOptionEqualToValue={(
+                a,
+                b
+              ) => a.id === b.id}
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  margin={"dense"}
-                  label={"dataId"}
-                  placeholder={"Common event"}
+                  margin={'dense'}
+                  label={'dataId'}
+                  placeholder={'Common event'}
                 />
               )}
             />
@@ -537,12 +589,12 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
     {
       switch (catalog.value1)
       {
-        case "recover_fraction":
+        case 'recover_fraction':
           return (
             <NumberInputWithLabel
-              label={"% max"}
-              variant={"standard"}
-              size={"small"}
+              label={'% max'}
+              variant={'standard'}
+              size={'small'}
               value={recoverPercentFromStored(effect.value1)}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
               htmlInput={{
@@ -563,12 +615,12 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
               }}
             />
           );
-        case "tp_amount":
+        case 'tp_amount':
           return (
             <NumberInputWithLabel
-              label={"TP amount"}
-              variant={"standard"}
-              size={"small"}
+              label={'TP amount'}
+              variant={'standard'}
+              size={'small'}
               value={clampFinite(Math.trunc(effect.value1), -9999, 9999)}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
               htmlInput={{
@@ -589,12 +641,12 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
               }}
             />
           );
-        case "state_chance":
+        case 'state_chance':
           return (
             <NumberInputWithLabel
-              label={"Chance"}
-              variant={"standard"}
-              size={"small"}
+              label={'Chance'}
+              variant={'standard'}
+              size={'small'}
               value={stateChancePercentFromStored(effect.value1)}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
               htmlInput={{
@@ -616,13 +668,13 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
               }}
             />
           );
-        case "buff_turns":
-        case "debuff_turns":
+        case 'buff_turns':
+        case 'debuff_turns':
           return (
             <NumberInputWithLabel
-              label={"Turns"}
-              variant={"standard"}
-              size={"small"}
+              label={'Turns'}
+              variant={'standard'}
+              size={'small'}
               value={clampFinite(Math.trunc(effect.value1), 0, 9999)}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
               htmlInput={{
@@ -643,12 +695,12 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
               }}
             />
           );
-        case "grow_delta":
+        case 'grow_delta':
           return (
             <NumberInputWithLabel
-              label={"Amount"}
-              variant={"standard"}
-              size={"small"}
+              label={'Amount'}
+              variant={'standard'}
+              size={'small'}
               value={Math.trunc(effect.value1)}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
               htmlInput={{
@@ -669,7 +721,7 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
               }}
             />
           );
-        case "unused":
+        case 'unused':
         default:
           return null;
       }
@@ -677,13 +729,13 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
 
     const v2 = () =>
     {
-      if (catalog.value2 === "recover_flat")
+      if (catalog.value2 === 'recover_flat')
       {
         return (
           <NumberInputWithLabel
-            label={"+ flat"}
-            variant={"standard"}
-            size={"small"}
+            label={'+ flat'}
+            variant={'standard'}
+            size={'small'}
             value={clampFinite(Math.trunc(effect.value2), -999999, 999999)}
             sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
             htmlInput={{
@@ -716,9 +768,9 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
     const hasNumericRow = v1El !== null || v2El !== null;
 
     const numericOnlyFormControlSx = {
-      width: "100%",
+      width: '100%',
       minWidth: 0,
-      "& .MuiFormControlLabel-root": {
+      '& .MuiFormControlLabel-root': {
         marginLeft: 0,
         marginRight: 0,
       },
@@ -732,20 +784,23 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
         <Stack
           spacing={USABLE_EFFECTS_STACKED_PARAMETER_SPACING}
           sx={{
-            alignItems: "stretch",
+            alignItems: 'stretch',
             minWidth: 0,
-            width: "100%",
+            width: '100%',
           }}
         >
-          <Box sx={{ width: "100%", minWidth: 0 }}>{dataEl}</Box>
+          <Box sx={{
+            width: '100%',
+            minWidth: 0
+          }}>{dataEl}</Box>
           <Box sx={numericOnlyFormControlSx}>
             <Stack
-              direction={"row"}
+              direction={'row'}
               spacing={1}
               useFlexGap
               sx={{
-                flexWrap: "wrap",
-                alignItems: "center",
+                flexWrap: 'wrap',
+                alignItems: 'center',
               }}
             >
               {v1El !== null && (
@@ -767,9 +822,9 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
           <Stack
             spacing={USABLE_EFFECTS_STACKED_PARAMETER_SPACING}
             sx={{
-              alignItems: "stretch",
+              alignItems: 'stretch',
               minWidth: 0,
-              width: "100%",
+              width: '100%',
             }}
           >
             <Box sx={numericOnlyFormControlSx}>{v1El}</Box>
@@ -794,18 +849,22 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
     {
       inner = (
         <Stack
-          direction={"row"}
+          direction={'row'}
           spacing={1}
           useFlexGap
           sx={{
-            flexWrap: "wrap",
-            alignItems: "center",
+            flexWrap: 'wrap',
+            alignItems: 'center',
             minWidth: 0,
-            width: "100%",
+            width: '100%',
           }}
         >
           {dataEl !== null && (
-            <Box sx={{ flex: "1 1 280px", minWidth: 200, maxWidth: "100%" }}>{dataEl}</Box>
+            <Box sx={{
+              flex: '1 1 280px',
+              minWidth: 200,
+              maxWidth: '100%'
+            }}>{dataEl}</Box>
           )}
           {v1El !== null && (
             <Box sx={{ flexShrink: 0 }}>{v1El}</Box>
@@ -822,10 +881,10 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
 
   return (
     <Stack spacing={1.5}>
-      <Stack direction={"row"} alignItems={"center"} spacing={1}>
+      <Stack direction={'row'} alignItems={'center'} spacing={1}>
         <Button
-          variant={"outlined"}
-          size={"small"}
+          variant={'outlined'}
+          size={'small'}
           onClick={handleAddOpen}
         >
           Add effect
@@ -850,57 +909,60 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
               }}
             >
               <Stack spacing={0}>
-                <Typography variant={"body2"}>{opt.label}</Typography>
-                <Typography variant={"caption"} color={"text.secondary"}>
+                <Typography variant={'body2'}>{opt.label}</Typography>
+                <Typography variant={'caption'} color={'text.secondary'}>
                   code {opt.code}
                 </Typography>
               </Stack>
             </MenuItem>
           ))}
         </Menu>
-        <Typography variant={"caption"} color={"text.secondary"}>
-          Reorder with arrows. Effect codes match RPG Maker MZ Game_Action constants.
-        </Typography>
       </Stack>
 
       {value.length === 0
         ? (
-          <Typography variant={"body2"} color={"text.secondary"}>
+          <Typography variant={'body2'} color={'text.secondary'}>
             No effects. Use &quot;Add effect&quot; to append a row.
           </Typography>
         )
         : (
-          <Box sx={{ overflowX: "auto", width: "100%" }}>
+          <Box sx={{
+            overflowX: 'auto',
+            width: '100%'
+          }}>
             <Stack spacing={0}>
               <Box
                 sx={{
-                  display: "grid",
+                  display: 'grid',
                   gridTemplateColumns: USABLE_EFFECTS_GRID_TEMPLATE,
                   columnGap: 1.5,
-                  alignItems: "end",
+                  alignItems: 'end',
                   pb: 1,
                   borderBottom: 1,
-                  borderColor: "divider",
+                  borderColor: 'divider',
                   minWidth: 0,
                 }}
               >
-                <Typography variant={"caption"} fontWeight={600} color={"text.secondary"}>
+                <Typography variant={'caption'} fontWeight={600} color={'text.secondary'}>
                   Order
                 </Typography>
-                <Typography variant={"caption"} fontWeight={600} color={"text.secondary"}>
+                <Typography variant={'caption'} fontWeight={600} color={'text.secondary'}>
                   Type
                 </Typography>
                 <Typography
-                  variant={"caption"}
+                  variant={'caption'}
                   fontWeight={600}
-                  color={"text.secondary"}
+                  color={'text.secondary'}
                   sx={{ minWidth: 0 }}
                 >
                   Parameters
                 </Typography>
                 <Box/>
               </Box>
-              {value.map((effect, index) =>
+              {value.map((
+                effect,
+                index
+              ) =>
               {
                 const catalog = catalogRowForEffectCode(effect.code);
                 const typeOpt = optionForEffect(effect);
@@ -908,70 +970,82 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                   <Box
                     key={`${index}-${effect.code}-${effect.dataId}`}
                     sx={{
-                      display: "grid",
+                      display: 'grid',
                       gridTemplateColumns: USABLE_EFFECTS_GRID_TEMPLATE,
                       columnGap: 1.5,
-                      alignItems: "center",
+                      alignItems: 'center',
                       py: 0.5,
                       borderBottom: 1,
-                      borderColor: "divider",
+                      borderColor: 'divider',
                       minWidth: 0,
-                      "&:last-of-type": {
+                      '&:last-of-type': {
                         borderBottom: 0,
                       },
                     }}
                   >
                     <Stack
-                      direction={"row"}
+                      direction={'row'}
                       spacing={0}
                       sx={{
-                        justifyContent: "center",
+                        justifyContent: 'center',
                       }}
                     >
-                      <Tooltip title={"Move up"}>
+                      <Tooltip title={'Move up'}>
                         <span>
                           <IconButton
-                            size={"small"}
+                            size={'small'}
                             disabled={index === 0}
                             onClick={() =>
                             {
                               handleMove(index, -1);
                             }}
                           >
-                            <ArrowUpward fontSize={"inherit"} />
+                            <ArrowUpward fontSize={'inherit'}/>
                           </IconButton>
                         </span>
                       </Tooltip>
-                      <Tooltip title={"Move down"}>
+                      <Tooltip title={'Move down'}>
                         <span>
                           <IconButton
-                            size={"small"}
+                            size={'small'}
                             disabled={index >= value.length - 1}
                             onClick={() =>
                             {
                               handleMove(index, 1);
                             }}
                           >
-                            <ArrowDownward fontSize={"inherit"} />
+                            <ArrowDownward fontSize={'inherit'}/>
                           </IconButton>
                         </span>
                       </Tooltip>
                     </Stack>
-                    <Box sx={{ minWidth: 0, width: "100%" }}>
+                    <Box sx={{
+                      minWidth: 0,
+                      width: '100%'
+                    }}>
                       <Autocomplete
                         fullWidth
-                        size={"small"}
+                        size={'small'}
                         options={RMMZ_USABLE_EFFECT_OPTIONS}
                         value={isForeignEffectOption(typeOpt)
                           ? null
                           : typeOpt}
-                        onChange={(_e, opt) =>
+                        onChange={(
+                          _e,
+                          opt
+                        ) =>
                         {
                           handleTypeChange(index, opt);
                         }}
                         getOptionLabel={(o) => o.label}
-                        isOptionEqualToValue={(a, b) => a.code === b.code}
-                        renderOption={(props, option) =>
+                        isOptionEqualToValue={(
+                          a,
+                          b
+                        ) => a.code === b.code}
+                        renderOption={(
+                          props,
+                          option
+                        ) =>
                         {
                           const {
                             key,
@@ -980,8 +1054,8 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                           return (
                             <li key={key} {...rest}>
                               <Stack spacing={0}>
-                                <Typography variant={"body2"}>{option.label}</Typography>
-                                <Typography variant={"caption"} color={"text.secondary"}>
+                                <Typography variant={'body2'}>{option.label}</Typography>
+                                <Typography variant={'caption'} color={'text.secondary'}>
                                   code {option.code}
                                 </Typography>
                               </Stack>
@@ -992,39 +1066,42 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                           <TextField
                             {...params}
                             fullWidth
-                            margin={"dense"}
-                            label={"Effect"}
+                            margin={'dense'}
+                            label={'Effect'}
                             placeholder={isForeignEffectOption(typeOpt)
                               ? typeOpt.label
-                              : ""}
+                              : ''}
                           />
                         )}
                       />
                       {isForeignEffectOption(typeOpt) && (
-                        <Typography variant={"caption"} color={"warning.main"} display={"block"} sx={{ mt: 0.5 }}>
+                        <Typography variant={'caption'} color={'warning.main'} display={'block'} sx={{ mt: 0.5 }}>
                           Non-vanilla code — use parameter fields on the right, or pick a standard type above.
                         </Typography>
                       )}
                     </Box>
-                    <Box sx={{ minWidth: 0, width: "100%" }}>
+                    <Box sx={{
+                      minWidth: 0,
+                      width: '100%'
+                    }}>
                       {renderValueFields(index, effect, catalog)}
                     </Box>
                     <Box
                       sx={{
-                        display: "flex",
-                        justifyContent: "center",
+                        display: 'flex',
+                        justifyContent: 'center',
                       }}
                     >
-                      <Tooltip title={"Remove"}>
+                      <Tooltip title={'Remove'}>
                         <IconButton
-                          size={"small"}
-                          color={"error"}
+                          size={'small'}
+                          color={'error'}
                           onClick={() =>
                           {
                             handleRemove(index);
                           }}
                         >
-                          <DeleteOutline fontSize={"small"} />
+                          <DeleteOutline fontSize={'small'}/>
                         </IconButton>
                       </Tooltip>
                     </Box>

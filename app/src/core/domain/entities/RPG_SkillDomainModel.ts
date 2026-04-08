@@ -24,6 +24,9 @@ import {
   parseRmmzUsableHitType,
   RmmzUsableHitType
 } from '@core/enums/RmmzUsableHitType.ts';
+import { SkillJabsExtension } from '@core/domain/entities/jabs/SkillJabsExtension.ts';
+import { SkillExtendParser } from '@services/parsers/SkillExtendParser.ts';
+import { SkillSksSkillNoteParser } from '@services/parsers/SkillSksSkillNoteParser.ts';
 import { SkillOnAttackGainParser } from '@services/parsers/SkillOnAttackGainParser.ts';
 import { SkillResourceCostParser } from '@services/parsers/SkillResourceCostParser.ts';
 import { UsableItemAttackElementsParser } from '@services/parsers/UsableItemAttackElementsParser.ts';
@@ -151,7 +154,7 @@ class RPG_SkillDomainModel
   public onAttackTpGainFormula: string = '';
 
   /**
-   * Core MZ {@link RPG_SkillDamage} fields (skills and items).
+   * Core MZ {@link RPG_SkillDamage} fields (skills and items). Type {@code 0} (none) skips the damage step in MZ.
    */
   public damageType: number = 1;
 
@@ -172,6 +175,21 @@ class RPG_SkillDomainModel
   public attackElementIds: number[] = [];
 
   /**
+   * J-SkillExtend: base skill ids this skill extends ({@code <skillExtend:[id,...]>}); overlay augments those skills when learned.
+   */
+  public skillExtendBaseIds: number[] = [];
+
+  /**
+   * J-SKS {@code <slotCost:N>}; {@code null} when the tag is omitted (runtime default applies).
+   */
+  public sksSlotCost: number | null = null;
+
+  /**
+   * J-SKS explicit {@code <unslotted>} tag only. In-game {@code unslotted} is also true when the skill type is not equippable per plugin params.
+   */
+  public sksExplicitUnslotted: boolean = false;
+
+  /**
    * J-CriticalFactors per-action modifiers (only apply when {@link damageCritical} is true in-game).
    */
   public thisCritChanceFormula: string = '';
@@ -184,6 +202,20 @@ class RPG_SkillDomainModel
    * Vanilla MZ {@link Rmmz.Core.RPG_UsableItem.effects} (HP/MP recover, states, buffs, common events, etc.).
    */
   public effects: RPG_UsableEffect[] = [];
+
+  /**
+   * JABS-related tags on this skill (see {@link SkillJabsExtension}).
+   */
+  public jabs!: SkillJabsExtension;
+
+  /**
+   * {@code <bonus-hits:N>} on this skill ({@code RPG_Skill#jabsBonusHitsFromSkillNote} / {@code J.ABS.RegExp.BonusHitsSkillNote}).
+   * Alias of {@link SkillJabsExtension.jabsBonusHitsFromSkillNote}; edits should go through {@link jabs} (e.g. extensions panel).
+   */
+  public get jabsBonusHitsFromSkillNote(): number | null
+  {
+    return this.jabs.jabsBonusHitsFromSkillNote;
+  }
 
   constructor(rmmz: RPG_Skill)
   {
@@ -292,6 +324,11 @@ class RPG_SkillDomainModel
     const extras = UsableItemAttackElementsParser.readAttackElements(this.note);
     this.attackElementIds = extras.filter((id) => id !== this.damageElementId);
 
+    this.skillExtendBaseIds = SkillExtendParser.readBaseSkillIds(this.note);
+
+    this.sksSlotCost = SkillSksSkillNoteParser.readSlotCost(this.note);
+    this.sksExplicitUnslotted = SkillSksSkillNoteParser.readExplicitUnslotted(this.note);
+
     this.thisCritChanceFormula =
       UsableItemThisCritParser.readThisCritChance(this.note);
     this.thisCritDamageMultiplierFormula =
@@ -299,6 +336,8 @@ class RPG_SkillDomainModel
     this.thisCritsAlways = UsableItemThisCritParser.readThisCritsAlways(this.note);
 
     this.effects = cloneUsableEffectsFromRmmz(rmmz.effects);
+
+    this.jabs = SkillJabsExtension.fromSkillNote(this.note);
   }
 
   protected syncNote(): string
@@ -329,12 +368,20 @@ class RPG_SkillDomainModel
     n = SkillOnAttackGainParser.writeOnAttackTpGainFormula(n, this.onAttackTpGainFormula);
 
     n = UsableItemAttackElementsParser.writeAttackElements(n, this.attackElementIds);
+    n = SkillExtendParser.writeSkillExtend(n, this.skillExtendBaseIds);
+    n = SkillSksSkillNoteParser.writeSksSkillTags(
+      n,
+      this.sksSlotCost,
+      this.sksExplicitUnslotted
+    );
     n = UsableItemThisCritParser.writeThisCritChance(n, this.thisCritChanceFormula);
     n = UsableItemThisCritParser.writeThisCritDamageMultiplier(
       n,
       this.thisCritDamageMultiplierFormula
     );
     n = UsableItemThisCritParser.writeThisCritsAlways(n, this.thisCritsAlways);
+
+    n = this.jabs.applyToNote(n);
 
     return NoteNormalizer.normalize(n);
   }
