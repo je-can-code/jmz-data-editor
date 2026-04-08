@@ -8,6 +8,8 @@ import {
 } from 'vitest';
 import { SystemService } from '@services/SystemService.ts';
 import {
+  loadAnimations,
+  loadCommonEvents,
   loadSystem
 } from '@services/DataService.ts';
 
@@ -16,6 +18,8 @@ vi.mock('../../src/services/DataService', () =>
 {
   return {
     loadSystem: vi.fn(),
+    loadAnimations: vi.fn(),
+    loadCommonEvents: vi.fn(),
     loadStates: vi.fn(),
     loadSkills: vi.fn(),
   };
@@ -55,6 +59,13 @@ describe('SystemService.loadSystemData', () =>
     (SystemService as any).weaponTypes = undefined;
     (SystemService as any).armorTypes = undefined;
     (SystemService as any).equipTypes = undefined;
+    (SystemService as any).skillAnimationAutocompleteOptions = [];
+    (SystemService as any).commonEventAutocompleteRows = [];
+
+    vi.mocked(loadAnimations)
+      .mockReset();
+    vi.mocked(loadCommonEvents)
+      .mockReset();
   });
 
   afterEach(() =>
@@ -68,6 +79,10 @@ describe('SystemService.loadSystemData', () =>
 
     vi.mocked(loadSystem)
       .mockResolvedValueOnce(sys as any);
+    vi.mocked(loadAnimations)
+      .mockResolvedValueOnce([ null, { id: 1, name: 'Hit Physical' } ] as any);
+    vi.mocked(loadCommonEvents)
+      .mockResolvedValueOnce([ null, { id: 1, name: 'Test CE' } ] as any);
 
     await SystemService.loadSystemData(projectPath);
 
@@ -77,6 +92,18 @@ describe('SystemService.loadSystemData', () =>
 
     expect(loadSystem)
       .toHaveBeenCalledWith(projectPath);
+
+    expect(loadAnimations)
+      .toHaveBeenCalledWith(projectPath);
+
+    expect(loadCommonEvents)
+      .toHaveBeenCalledWith(projectPath);
+
+    expect(SystemService.commonEventAutocompleteRows.some((o) => o.id === 1 && o.label.includes('Test CE')))
+      .toBe(true);
+
+    expect(SystemService.skillAnimationAutocompleteOptions.some((o) => o.value === 1))
+      .toBe(true);
 
     // Static caches are populated correctly from the returned data
     expect(SystemService.systemData)
@@ -105,12 +132,20 @@ describe('SystemService.loadSystemData', () =>
     // First load
     vi.mocked(loadSystem)
       .mockResolvedValueOnce(makeSystem(' A') as any);
+    vi.mocked(loadAnimations)
+      .mockResolvedValueOnce([ null ] as any);
+    vi.mocked(loadCommonEvents)
+      .mockResolvedValueOnce([ null ] as any);
 
     await SystemService.loadSystemData(projectPath);
 
     // Second load (different data)
     vi.mocked(loadSystem)
       .mockResolvedValueOnce(makeSystem(' B') as any);
+    vi.mocked(loadAnimations)
+      .mockResolvedValueOnce([ null ] as any);
+    vi.mocked(loadCommonEvents)
+      .mockResolvedValueOnce([ null ] as any);
 
     await SystemService.loadSystemData(projectPath);
 
@@ -137,6 +172,14 @@ describe('SystemService.loadSystemData', () =>
     await expect(SystemService.loadSystemData(projectPath))
       .rejects
       .toThrow('failed to load system');
+
+    expect(loadAnimations)
+      .not
+      .toHaveBeenCalled();
+
+    expect(loadCommonEvents)
+      .not
+      .toHaveBeenCalled();
 
     // Ensure no partial state was set
     expect(SystemService.systemData)

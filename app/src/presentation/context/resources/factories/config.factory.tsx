@@ -27,38 +27,38 @@ export function createConfigContext<T>(
 
   function ConfigProvider({ children }: { children: ReactNode })
   {
-    const { projectPath } = useProjectPath();
+    const { rmmzDataPath, projectReloadGeneration } = useProjectPath();
     const [ data, setData ] = useState<T[]>([]);
     const [ loading, setLoading ] = useState(true);
 
     const reload = useCallback(async () =>
     {
-      if (!projectPath || !projectPath.endsWith('/data'))
+      if (!rmmzDataPath || rmmzDataPath.trim() === "")
       {
         return;
       }
       setLoading(true);
       try
       {
-        const result = await executeLoad<any>(projectPath, filename);
+        const result = await executeLoad<any>(rmmzDataPath, filename);
         setData(result?.[ rootKey ] ?? []);
       }
       catch (error)
       { console.error(`Failed to load ${displayName}:`, error); }
       finally
       { setLoading(false); }
-    }, [ projectPath ]);
+    }, [ rmmzDataPath ]);
 
     const save = useCallback(async (updatedList: T[]) =>
     {
-      if (!projectPath)
+      if (!rmmzDataPath || rmmzDataPath.trim() === "")
       {
         return;
       }
       try
       {
         const payload = { [ rootKey ]: updatedList };
-        await executeSave(projectPath, filename, payload);
+        await executeSave(rmmzDataPath, filename, payload);
         setData(updatedList);
       }
       catch (error)
@@ -66,12 +66,12 @@ export function createConfigContext<T>(
         console.error(`Failed to save ${displayName}:`, error);
         throw error;
       }
-    }, [ projectPath ]);
+    }, [ rmmzDataPath ]);
 
     useEffect(() =>
     {
       reload();
-    }, [ reload ]);
+    }, [ reload, projectReloadGeneration ]);
 
     const value = useMemo(() => ({
       data,

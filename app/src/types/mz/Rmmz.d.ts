@@ -160,6 +160,24 @@ declare namespace Rmmz
       kind: 1;
     }
 
+    /**
+     * Row in {@code Animations.json}; other fields omitted for the data editor.
+     */
+    interface RPG_Animation
+    {
+      id: number;
+      name: string;
+    }
+
+    /**
+     * Row in {@code CommonEvents.json}; list field omitted for the data editor.
+     */
+    interface RPG_CommonEvent
+    {
+      id: number;
+      name: string;
+    }
+
     interface RPG_Skill
       extends Core.RPG_UsableItem
     {

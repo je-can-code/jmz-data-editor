@@ -1,5 +1,6 @@
 import React from 'react';
 import { ProjectPathProvider } from '../context/project-path.context.tsx';
+import { IconSetAtlasProvider } from '@presentation/context/icon-set-atlas.context.tsx';
 import { EnemiesProvider } from '@presentation/context/resources/enemies.context.tsx';
 import { SdpsProvider } from '@presentation/context/resources/sdps.context.tsx';
 import { ItemsProvider } from '@presentation/context/resources/items.context.tsx';
@@ -20,6 +21,7 @@ const AppProviders = ({ children }: { children: React.ReactNode }) =>
     <ProviderComposer
       providers={[
         ProjectPathProvider,
+        IconSetAtlasProvider,
         SdpsProvider,
         ProficiencyProvider,
         QuestsProvider,
