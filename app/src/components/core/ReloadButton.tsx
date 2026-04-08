@@ -19,7 +19,7 @@ type ReloadButtonProps = {
  * A normalized button dedicated to being used to represent a "reload data from disk".
  * @param handleReload The async function to execute upon clicking.
  * @param canReload The reverse conditional as to whether or not the button should be available.
- * @param extraReloadText Additional text to append after "Save" on the button.
+ * @param extraReloadText Additional text to append after "Reload" on the button.
  * @constructor
  */
 const ReloadButton = ({

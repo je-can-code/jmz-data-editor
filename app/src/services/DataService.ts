@@ -9,6 +9,9 @@ import RPG_Armor = Rmmz.Implementations.RPG_Armor;
 import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 import RPG_System = Rmmz.System.RPG_System;
 import RPG_State = Rmmz.Implementations.RPG_State;
+import RPG_Animation = Rmmz.Implementations.RPG_Animation;
+import RPG_CommonEvent = Rmmz.Implementations.RPG_CommonEvent;
+import type { RmmzMapJson } from "@core/types/RmmzMapJson.ts";
 
 type QuestConfiguration = Questopedia.Configuration;
 type SdpConfiguration = Sdp.Configuration;
@@ -137,6 +140,35 @@ const loadSystem = async (projectPath: string): Promise<RPG_System> =>
   return await executeLoad<RPG_System>(projectPath, ConfigFilenames.System);
 };
 
+const loadAnimations = async (projectPath: string): Promise<(RPG_Animation | null)[]> =>
+{
+  return await executeLoad<(RPG_Animation | null)[]>(projectPath, DatabaseFilenames.Animations);
+};
+
+const loadCommonEvents = async (projectPath: string): Promise<(RPG_CommonEvent | null)[]> =>
+{
+  return await executeLoad<(RPG_CommonEvent | null)[]>(projectPath, DatabaseFilenames.CommonEvents);
+};
+
+/**
+ * @param mapId RMMZ map id (e.g. {@code 2} for {@code Map002.json}).
+ */
+function rmmzMapDataFilename(mapId: number): string
+{
+  const n = Math.max(0, Math.trunc(mapId));
+  return `Map${String(n).padStart(3, "0")}.json`;
+}
+
+/**
+ * Loads a single map JSON from the project's {@code data/} folder.
+ * @param rmmzDataPath Absolute path to {@code data/}.
+ * @param mapId Map id as in MapInfos / editor.
+ */
+const loadMapJson = async (rmmzDataPath: string, mapId: number): Promise<RmmzMapJson> =>
+{
+  return await executeLoad<RmmzMapJson>(rmmzDataPath, rmmzMapDataFilename(mapId));
+};
+
 export {
   setJsonStore,
   executeSave,
@@ -151,6 +183,10 @@ export {
 
   loadStates,
   loadSystem,
+  loadAnimations,
+  loadCommonEvents,
+  loadMapJson,
+  rmmzMapDataFilename,
 
   loadQuests,
   loadSdps,

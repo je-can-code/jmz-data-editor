@@ -36,13 +36,13 @@ export function createCompositeConfigContext<T>(
 
   function CompositeConfigProvider({ children }: { children: ReactNode })
   {
-    const { projectPath } = useProjectPath();
+    const { rmmzDataPath, projectReloadGeneration } = useProjectPath();
     const [ config, setConfig ] = useState<T | null>(null);
     const [ loading, setLoading ] = useState(true);
 
     const reload = useCallback(async () =>
     {
-      if (!projectPath || !projectPath.endsWith('/data'))
+      if (!rmmzDataPath || rmmzDataPath.trim() === "")
       {
         return;
       }
@@ -50,7 +50,7 @@ export function createCompositeConfigContext<T>(
       setLoading(true);
       try
       {
-        const result = await executeLoad<T>(projectPath, filename);
+        const result = await executeLoad<T>(rmmzDataPath, filename);
         setConfig(result ?? null);
       }
       catch (error)
@@ -61,18 +61,18 @@ export function createCompositeConfigContext<T>(
       {
         setLoading(false);
       }
-    }, [ projectPath ]);
+    }, [ rmmzDataPath ]);
 
     const save = useCallback(async (updatedConfig: T) =>
     {
-      if (!projectPath)
+      if (!rmmzDataPath || rmmzDataPath.trim() === "")
       {
         return;
       }
 
       try
       {
-        await executeSave(projectPath, filename, updatedConfig);
+        await executeSave(rmmzDataPath, filename, updatedConfig);
         setConfig(updatedConfig);
       }
       catch (error)
@@ -80,12 +80,12 @@ export function createCompositeConfigContext<T>(
         console.error(`Failed to save ${displayName}:`, error);
         throw error;
       }
-    }, [ projectPath ]);
+    }, [ rmmzDataPath ]);
 
     useEffect(() =>
     {
       reload();
-    }, [ reload ]);
+    }, [ reload, projectReloadGeneration ]);
 
     const value = useMemo(() => (
       {

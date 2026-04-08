@@ -17,6 +17,7 @@
 * Vite is used as the build tool for the React frontend
 * TypeScript is used throughout the codebase
 
+
 ## Project Structure
 * `/app` - Contains the React frontend application
 * `/app/src` - Source code for the React application

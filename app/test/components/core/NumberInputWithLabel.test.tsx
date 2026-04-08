@@ -91,6 +91,29 @@ describe('NumberInputWithLabel', () =>
       .toBeInTheDocument();
   });
 
+  it('renders label before the input when labelPlacement is start', () =>
+  {
+    render(
+      <NumberInputWithLabel
+        id={'invocation-speed'}
+        label={'Speed'}
+        labelPlacement={'start'}
+        variant={'outlined'}
+        size={'small'}
+        fullWidth
+        value={0}
+        onChangeEventHandler={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Speed'))
+      .toBeInTheDocument();
+    expect(screen.getByRole('spinbutton'))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText('Speed'))
+      .toBeInTheDocument();
+  });
+
   it('applies default sizing without requiring sx (smoke test)', () =>
   {
     // We avoid asserting exact computed styles in jsdom (flaky),
