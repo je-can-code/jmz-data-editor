@@ -1,9 +1,5 @@
-import {
-  describe,
-  expect,
-  it
-} from 'vitest';
-import { SdpParser } from '../../../src/services/parsers/SdpParser.ts';
+import { describe, expect, it } from 'vitest';
+import { SdpParser } from '@services/parsers/SdpParser.ts';
 
 describe('SdpParser.readDrop', () =>
 {

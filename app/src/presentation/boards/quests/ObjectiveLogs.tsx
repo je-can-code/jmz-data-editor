@@ -1,16 +1,7 @@
-import OmniObjectiveLogType from "./OmniObjectiveLogType.ts";
-import {
-  Box,
-  TextField
-} from "@mui/material";
-import {
-  Announcement,
-  Bedtime,
-  Block,
-  CancelPresentation,
-  Verified
-} from "@mui/icons-material";
-import { yellow } from "@mui/material/colors";
+import OmniObjectiveLogType from './OmniObjectiveLogType.ts';
+import { Box, TextField } from '@mui/material';
+import { Announcement, Bedtime, Block, CancelPresentation, Verified } from '@mui/icons-material';
+import { yellow } from '@mui/material/colors';
 import OmniObjectiveLogs = Questopedia.OmniObjectiveLogs;
 
 const BoxStyles = {
@@ -34,7 +25,10 @@ export default function ObjectiveLogs(
     updateObjectiveLogsFunc
   }: ObjectiveLogsProps)
 {
-  const handleObjectiveLogsOnChangeEvent = (input: string, logType: OmniObjectiveLogType) =>
+  const handleObjectiveLogsOnChangeEvent = (
+    input: string,
+    logType: OmniObjectiveLogType
+  ) =>
   {
     let updatedObjectiveLogs = {
       ...logs,
@@ -67,17 +61,18 @@ export default function ObjectiveLogs(
       <Bedtime
         sx={{
           ...AdornmentStyles,
-          color: yellow[800]
+          color: yellow[ 800 ]
         }}
       />
       <TextField
-        variant={"standard"}
-        label={"Inactive"}
+        variant={'standard'}
+        label={'Inactive'}
         value={logs?.inactive}
         onChange={event => handleObjectiveLogsOnChangeEvent(
           event.target.value,
-          OmniObjectiveLogType.Inactive)}
-        size={"small"}
+          OmniObjectiveLogType.Inactive
+        )}
+        size={'small'}
         fullWidth
       />
     </Box>
@@ -85,16 +80,17 @@ export default function ObjectiveLogs(
     <Box sx={BoxStyles}>
       <Announcement
         sx={AdornmentStyles}
-        color={"primary"}
+        color={'primary'}
       />
       <TextField
-        variant={"standard"}
-        label={"Active"}
+        variant={'standard'}
+        label={'Active'}
         value={logs?.active}
         onChange={event => handleObjectiveLogsOnChangeEvent(
           event.target.value,
-          OmniObjectiveLogType.Active)}
-        size={"small"}
+          OmniObjectiveLogType.Active
+        )}
+        size={'small'}
         fullWidth
       />
     </Box>
@@ -102,16 +98,17 @@ export default function ObjectiveLogs(
     <Box sx={BoxStyles}>
       <Verified
         sx={AdornmentStyles}
-        color={"success"}
+        color={'success'}
       />
       <TextField
-        variant={"standard"}
-        label={"Completed"}
+        variant={'standard'}
+        label={'Completed'}
         value={logs?.completed}
         onChange={event => handleObjectiveLogsOnChangeEvent(
           event.target.value,
-          OmniObjectiveLogType.Completed)}
-        size={"small"}
+          OmniObjectiveLogType.Completed
+        )}
+        size={'small'}
         fullWidth
       />
     </Box>
@@ -119,16 +116,17 @@ export default function ObjectiveLogs(
     <Box sx={BoxStyles}>
       <CancelPresentation
         sx={AdornmentStyles}
-        color={"error"}
+        color={'error'}
       />
       <TextField
-        variant={"standard"}
-        label={"Failed"}
+        variant={'standard'}
+        label={'Failed'}
         value={logs?.failed}
         onChange={event => handleObjectiveLogsOnChangeEvent(
           event.target.value,
-          OmniObjectiveLogType.Failed)}
-        size={"small"}
+          OmniObjectiveLogType.Failed
+        )}
+        size={'small'}
         fullWidth
       />
     </Box>
@@ -136,18 +134,19 @@ export default function ObjectiveLogs(
     <Box sx={BoxStyles}>
       <Block
         sx={AdornmentStyles}
-        color={"secondary"}
+        color={'secondary'}
       />
       <TextField
-        variant={"standard"}
-        label={"Missed"}
+        variant={'standard'}
+        label={'Missed'}
         value={logs?.missed}
         onChange={event => handleObjectiveLogsOnChangeEvent(
           event.target.value,
-          OmniObjectiveLogType.Missed)}
-        size={"small"}
+          OmniObjectiveLogType.Missed
+        )}
+        size={'small'}
         fullWidth
       />
     </Box>
-  </>
+  </>;
 }

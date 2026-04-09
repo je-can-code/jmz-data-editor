@@ -1,15 +1,5 @@
-import {
-  FormControlLabel,
-  InputAdornment,
-  SxProps,
-  TextField,
-  Theme,
-  Typography
-} from '@mui/material';
-import React, {
-  ChangeEvent,
-  type InputHTMLAttributes
-} from 'react';
+import { FormControlLabel, InputAdornment, SxProps, TextField, Theme, Typography } from '@mui/material';
+import React, { ChangeEvent, type InputHTMLAttributes } from 'react';
 
 type NumberInputWithLabelProps = {
   label: string;
@@ -110,7 +100,7 @@ export default function NumberInputWithLabel({
   const slotProps: Record<string, unknown> = {};
   if (endAdornment != null)
   {
-    slotProps.input = {
+    slotProps[ 'input' ] = {
       endAdornment: (
         <InputAdornment position={'end'}>
           {endAdornment}
@@ -120,7 +110,7 @@ export default function NumberInputWithLabel({
   }
   if (htmlInput !== undefined)
   {
-    slotProps.htmlInput = htmlInput;
+    slotProps[ 'htmlInput' ] = htmlInput;
   }
 
   const endPlacementFieldSx: SxProps<Theme> = (() =>

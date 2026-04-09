@@ -9,13 +9,16 @@ export default class JsonMapper
   static parseObject(obj: any): any | null
   {
     // do not attempt to parse if the input is null.
-    if (obj === null || obj === undefined) return null;
+    if (obj === null || obj === undefined)
+    {
+      return null;
+    }
 
     // check if the object to parse is a string.
-    if (typeof obj === "string")
+    if (typeof obj === 'string')
     {
       // check if the string is an unparsed array.
-      if (obj.startsWith("[") && obj.endsWith("]"))
+      if (obj.startsWith('[') && obj.endsWith(']'))
       {
         // expose the stringified segments of the array.
         return this.parseArrayFromString(obj);
@@ -53,13 +56,13 @@ export default class JsonMapper
       .split(/, |,/);
 
     // grab the index of any possible inner arrays.
-    const innerArrayStartIndex = exposedArray.findIndex(element => element.startsWith("["));
+    const innerArrayStartIndex = exposedArray.findIndex(element => element.startsWith('['));
 
     // check if we found an opening inner array bracket.
     if (innerArrayStartIndex > -1)
     {
       // grab the last closing inner array bracket.
-      const outerArrayEndIndex = exposedArray.findLastIndex(element => element.endsWith("]"));
+      const outerArrayEndIndex = exposedArray.findLastIndex(element => element.endsWith(']'));
 
       // slice the array contents that we believe is an inner array.
       const slicedArrayString = exposedArray
@@ -86,14 +89,20 @@ export default class JsonMapper
   static parseString(str: string)
   {
     // check if its actually boolean true.
-    if (str.toLowerCase() === "true")
+    if (str.toLowerCase() === 'true')
     {
       return true;
     }// check if its actually boolean false.
-    else if (str.toLowerCase() === "false") return false;
+    else if (str.toLowerCase() === 'false')
+    {
+      return false;
+    }
 
     // check if its actually a number.
-    if (!Number.isNaN(parseFloat(str))) return parseFloat(str);
+    if (!Number.isNaN(parseFloat(str)))
+    {
+      return parseFloat(str);
+    }
 
     // it must just be a word or something.
     return str;

@@ -1,19 +1,11 @@
-import React, {
-  MouseEvent,
-  useEffect, useMemo,
-  useRef,
-  useState
-} from 'react';
-import {
-  FixedSizeList,
-  ListChildComponentProps
-} from 'react-window';
+import React, { MouseEvent, useEffect, useRef, useState } from 'react';
+import { FixedSizeList, ListChildComponentProps } from 'react-window';
 import {
   Alert,
   Autocomplete,
   Box,
   Button,
-  Checkbox, CircularProgress,
+  Checkbox,
   Dialog,
   DialogActions,
   DialogContent,
@@ -68,29 +60,19 @@ import {
   TrendingFlat,
   WaterfallChart
 } from '@mui/icons-material';
-import {
-  blue,
-  green,
-  grey,
-  orange,
-  purple,
-  yellow
-} from '@mui/material/colors';
-import {
-  MuiSnackbarSeverity,
-  MuiSnackbarVariant
-} from '@core/enums/MuiSnackbar.ts';
+import { blue, green, grey, orange, purple, yellow } from '@mui/material/colors';
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 
 import SaveButton from '../../../components/core/SaveButton.tsx';
 import KeyTextField from '../../../components/core/KeyTextField.tsx';
 import ReloadButton from '../../../components/core/ReloadButton.tsx';
 
 import { fromLongParameterIdToName } from '../../../mappers/ParameterIdMapper.ts';
+import { useSdps } from '@presentation/context/resources/sdps.context.tsx';
+import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import Panel = Sdp.StatDistributionPanel;
 import PanelParameter = Sdp.SdpParameter;
 import PanelReward = Sdp.SdpReward;
-import { useSdps } from '@presentation/context/resources/sdps.context.tsx';
-import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 
 const SdpBoard = () =>
 {

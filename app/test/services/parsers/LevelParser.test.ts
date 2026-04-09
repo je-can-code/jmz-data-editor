@@ -1,9 +1,5 @@
-import {
-  describe,
-  expect,
-  it
-} from 'vitest';
-import { LevelParser } from '../../../src/services/parsers/LevelParser.ts';
+import { describe, expect, it } from 'vitest';
+import { LevelParser } from '@services/parsers/LevelParser.ts';
 
 describe('LevelParser.read', () =>
 {

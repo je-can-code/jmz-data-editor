@@ -12,11 +12,6 @@ class RPG_ClassDomainModel
     super(rmmz);
   }
 
-  protected syncNote(): string
-  {
-    return this.note;
-  }
-
   public toRmmz(): RPG_Class
   {
     return {
@@ -25,6 +20,11 @@ class RPG_ClassDomainModel
       name: this.name,
       note: this.syncNote(),
     };
+  }
+
+  protected syncNote(): string
+  {
+    return this.note;
   }
 }
 

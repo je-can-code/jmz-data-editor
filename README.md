@@ -7,26 +7,28 @@ long-term goal is a setup that works cleanly on multiple OSes; today, follow the
 
 Each route is a “board” over JSON under your game’s `data/` folder (loaded via `projectRoot` in `.config/config.yaml`).
 
-| Board | Path | Focus |
-| --- | --- | --- |
-| Index | `/` | Entry / overview |
-| Enemies | `/enemies` | Enemy database, extra drops, JABS-related fields |
-| Skills | `/skills` | Skills (including usable item–style sections where applicable) |
-| SDP | `/sdp` | Stat Distribution (SDP) plugin data |
-| Quests | `/quests` | Questopedia-oriented quest data |
-| Crafting | `/crafting` | Crafting plugin configuration |
-| Proficiency | `/proficiency` | Skill Proficiency System |
+| Board       | Path           | Focus                                                          |
+|-------------|----------------|----------------------------------------------------------------|
+| Index       | `/`            | Entry / overview                                               |
+| Enemies     | `/enemies`     | Enemy database, extra drops, JABS-related fields               |
+| Skills      | `/skills`      | Skills (including usable item–style sections where applicable) |
+| SDP         | `/sdp`         | Stat Distribution (SDP) plugin data                            |
+| Quests      | `/quests`      | Questopedia-oriented quest data                                |
+| Crafting    | `/crafting`    | Crafting plugin configuration                                  |
+| Proficiency | `/proficiency` | Skill Proficiency System                                       |
 
 Coverage and polish vary by board; treat unsupported fields as “not yet in the editor.”
 
 ## Preamble
 
 On Linux, if webkit/GTK libraries are missing, see
-[this GitHub comment](https://github.com/bambulab/BambuStudio/issues/3973#issuecomment-2085476683) for environment hints.
+[this GitHub comment](https://github.com/bambulab/BambuStudio/issues/3973#issuecomment-2085476683) for environment
+hints.
 
 ## Point the editor at your RPG Maker MZ project
 
-The **Neutralino** build reads `projectRoot` from **YAML** at **`.config/config.yaml`** (not JSON). Paths are resolved from
+The **Neutralino** build reads `projectRoot` from **YAML** at **`.config/config.yaml`** (not JSON). Paths are resolved
+from
 the Neutralino application root—for this repository, that is normally the **repository root** (same directory as
 `neutralino.config.json`). If your tool runs with `NL_PATH` ending in `app`, `build`, or `dist`, the reader also checks
 the parent directory for `.config/config.yaml`.
@@ -51,7 +53,8 @@ In **Vite / browser dev** (`bun run dev` inside `app/`), that file is **not** lo
 ## Prerequisites
 
 - [Bun](https://bun.sh/docs/installation) (package install and scripts under `app/`)
-- For the **desktop** shell: [Neutralino CLI](https://neutralino.js.org/docs/getting-started/installation) (`neu`), aligned with the versions expected by this repo’s `neutralino.config.json`
+- For the **desktop** shell: [Neutralino CLI](https://neutralino.js.org/docs/getting-started/installation) (`neu`),
+  aligned with the versions expected by this repo’s `neutralino.config.json`
 
 ## Install dependencies
 

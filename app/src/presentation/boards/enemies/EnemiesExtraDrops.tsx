@@ -22,10 +22,7 @@ import {
   ToggleButtonGroup,
   Typography
 } from '@mui/material';
-import React, {
-  useEffect,
-  useState
-} from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Add,
   AutoAwesome,
@@ -40,15 +37,8 @@ import {
   Sync
 } from '@mui/icons-material';
 import DropItemType from '@core/enums/DropItemType.ts';
-import {
-  MuiSnackbarSeverity,
-  MuiSnackbarVariant
-} from '@core/enums/MuiSnackbar.ts';
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import { brown } from '@mui/material/colors';
-import RPG_DropItem = Rmmz.Data.RPG_DropItem;
-import RPG_Armor = Rmmz.Implementations.RPG_Armor;
-import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
-import RPG_Item = Rmmz.Implementations.RPG_Item;
 import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
 import { useItems } from '@presentation/context/resources/items.context.tsx';
 import { useWeapons } from '@presentation/context/resources/weapons.context.tsx';
@@ -56,6 +46,10 @@ import { useArmors } from '@presentation/context/resources/armors.context.tsx';
 import { RPG_ItemDomainModel } from '@core/domain/entities/RPG_ItemDomainModel.ts';
 import { RPG_WeaponDomainModel } from '@core/domain/entities/RPG_WeaponDomainModel.ts';
 import { RPG_ArmorDomainModel } from '@core/domain/entities/RPG_ArmorDomainModel.ts';
+import RPG_DropItem = Rmmz.Data.RPG_DropItem;
+import RPG_Armor = Rmmz.Implementations.RPG_Armor;
+import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
+import RPG_Item = Rmmz.Implementations.RPG_Item;
 
 type EnemiesExtraDropProps = {
   selectedEnemy: RPG_EnemyDomainModel;
@@ -375,11 +369,14 @@ const EnemiesExtraDrops = ({
       option: any
     ) =>
     {
-      const { key: optionKey, ...liProps } = props;
+      const {
+        key: optionKey,
+        ...liProps
+      } = props;
 
       if (!option || option.name === '' || option.name?.startsWith('=='))
       {
-        return <li key={optionKey} {...liProps} style={{ display: "none" }} />;
+        return <li key={optionKey} {...liProps} style={{ display: 'none' }}/>;
       }
 
       return (
@@ -639,7 +636,7 @@ const EnemiesExtraDrops = ({
 
     return <Chip
       icon={icon}
-      label={`${dropItemData?.name ?? "Unknown"} (${dropItem.denominator}%)`}
+      label={`${dropItemData?.name ?? 'Unknown'} (${dropItem.denominator}%)`}
       variant={variant}
       color={color}
     />;

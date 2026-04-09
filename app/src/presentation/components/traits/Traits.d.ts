@@ -8,4 +8,4 @@ interface Game_Trait
   valueString: string;
 }
 
-export { Game_Trait }
+export { Game_Trait };

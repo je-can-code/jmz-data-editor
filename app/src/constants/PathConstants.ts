@@ -1,7 +1,7 @@
 /**
  * Default RMMZ **project root** (folder that contains {@code data/}, {@code img/}, {@code js/}, …).
  */
-const defaultProjectRoot = "/var/mnt/exdrive/dev/gaming/ca/chef-adventure";
+const defaultProjectRoot = '/var/mnt/exdrive/dev/gaming/ca/chef-adventure';
 
 function pathSegments(pathStr: string): string[]
 {
@@ -16,7 +16,7 @@ function pathSegments(pathStr: string): string[]
 function toRmmzProjectRootFromPossibleDataPath(pathStr: string): string
 {
   const trimmed = pathStr.trim()
-    .replace(/[/\\]+$/u, "");
+    .replace(/[/\\]+$/u, '');
   if (trimmed.length === 0)
   {
     return trimmed;
@@ -28,25 +28,25 @@ function toRmmzProjectRootFromPossibleDataPath(pathStr: string): string
     return trimmed;
   }
 
-  const last = parts[parts.length - 1];
-  if (last.toLowerCase() !== "data")
+  const last = parts[ parts.length - 1 ];
+  if (last.toLowerCase() !== 'data')
   {
     return trimmed;
   }
 
   parts.pop();
-  const posixAbsolute = trimmed.startsWith("/");
-  const useBackslash = trimmed.includes("\\");
+  const posixAbsolute = trimmed.startsWith('/');
+  const useBackslash = trimmed.includes('\\');
   const sep = useBackslash
-    ? "\\"
-    : "/";
+    ? '\\'
+    : '/';
   if (parts.length === 0)
   {
     if (posixAbsolute && useBackslash === false)
     {
-      return "/";
+      return '/';
     }
-    return "";
+    return '';
   }
 
   let out = parts.join(sep);
@@ -65,15 +65,15 @@ function toRmmzProjectRootFromPossibleDataPath(pathStr: string): string
 function resolveRmmzDataDirectory(projectRoot: string): string
 {
   const root = projectRoot.trim()
-    .replace(/[/\\]+$/u, "");
+    .replace(/[/\\]+$/u, '');
   if (root.length === 0)
   {
-    return "";
+    return '';
   }
 
-  const sep = root.includes("\\")
-    ? "\\"
-    : "/";
+  const sep = root.includes('\\')
+    ? '\\'
+    : '/';
   return `${root}${sep}data`;
 }
 

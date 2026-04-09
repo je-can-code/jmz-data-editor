@@ -1,12 +1,12 @@
-import React from "react";
-import { Button } from "@mui/material";
-import { Save } from "@mui/icons-material";
+import React from 'react';
+import { Button } from '@mui/material';
+import { Save } from '@mui/icons-material';
 
 const SaveStyles = {
-  fontFamily: "monospace",
-  position: "absolute",
-  top: "1%",
-  left: "13%",
+  fontFamily: 'monospace',
+  position: 'absolute',
+  top: '1%',
+  left: '13%',
 };
 
 type SaveButtonProps = {
@@ -33,17 +33,17 @@ export default function SaveButton({
 {
   return <>
     <Button
-      size={"small"}
-      color={"secondary"}
+      size={'small'}
+      color={'secondary'}
       onClick={async () => handleSave()}
       disabled={!canSave || isSaving}
       loading={isSaving}
-      loadingPosition={"start"}
+      loadingPosition={'start'}
       startIcon={<Save/>}
       variant="contained"
       sx={SaveStyles}
     >
       <span>{`Save ${extraSaveText ?? ''}`}</span>
     </Button>
-  </>
+  </>;
 }

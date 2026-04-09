@@ -1,22 +1,13 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import {
-  app,
-  events,
-  init,
-  window as neuWindow
-} from '@neutralinojs/lib';
+import { app, events, init, window as neuWindow } from '@neutralinojs/lib';
 
-import {
-  createTheme,
-  CssBaseline,
-  ThemeProvider
-} from "@mui/material";
-import { NeutralinoJsonStore } from "./core/infrastructure/fs/neutralino/NeutralinoJsonStore.ts";
-import { setJsonStore } from "./services/DataService.ts";
+import { createTheme, CssBaseline, ThemeProvider } from '@mui/material';
+import { NeutralinoJsonStore } from './core/infrastructure/fs/neutralino/NeutralinoJsonStore.ts';
+import { setJsonStore } from './services/DataService.ts';
 import { HashRouter } from 'react-router-dom';
-import { AppRouter } from "./presentation/routing/app.router.tsx";
-import { AppProviders } from "./presentation/shell/app.providers.tsx";
+import { AppRouter } from './presentation/routing/app.router.tsx';
+import { AppProviders } from './presentation/shell/app.providers.tsx';
 
 // Create a dark theme
 const darkTheme = createTheme({
@@ -70,7 +61,10 @@ function tryLoadDevAuth()
     fetch('/.tmp/auth_info.json', { cache: 'no-store' })
       .then(async res =>
       {
-        if (!res.ok) return;
+        if (!res.ok)
+        {
+          return;
+        }
 
         const authInfo = await res.json();
         const {
@@ -117,7 +111,11 @@ function tryLoadDevAuth()
   }
 }
 
-function retryAsync<T>(fn: () => Promise<T>, attempts = 8, delayMs = 200): Promise<T | null>
+function retryAsync<T>(
+  fn: () => Promise<T>,
+  attempts = 8,
+  delayMs = 200
+): Promise<T | null>
 {
   return new Promise(resolve =>
   {

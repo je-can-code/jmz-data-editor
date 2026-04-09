@@ -1,13 +1,7 @@
 import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
 import { parseRmmzDamageElementId } from '@core/enums/RmmzDamageElementId.ts';
-import {
-  parseRmmzDamageType,
-  parseRmmzDamageVariance,
-} from '@core/enums/RmmzDamageType.ts';
-import {
-  parseRmmzSkillOccasion,
-  RmmzSkillOccasion
-} from '@core/enums/RmmzSkillOccasion.ts';
+import { parseRmmzDamageType, parseRmmzDamageVariance, } from '@core/enums/RmmzDamageType.ts';
+import { parseRmmzSkillOccasion, RmmzSkillOccasion } from '@core/enums/RmmzSkillOccasion.ts';
 import { normalizeSkillAnimationId } from '@core/enums/RmmzSkillAnimation.ts';
 import {
   normalizeSkillRepeats,
@@ -16,14 +10,8 @@ import {
 } from '@core/enums/RmmzSkillInvocation.ts';
 import { normalizeSkillStypeId } from '@core/enums/RmmzSkillStype.ts';
 import { normalizeRequiredWtypeId } from '@core/enums/RmmzWeaponType.ts';
-import {
-  parseRmmzSkillScope,
-  RmmzSkillScope
-} from '@core/enums/RmmzSkillScope.ts';
-import {
-  parseRmmzUsableHitType,
-  RmmzUsableHitType
-} from '@core/enums/RmmzUsableHitType.ts';
+import { parseRmmzSkillScope, RmmzSkillScope } from '@core/enums/RmmzSkillScope.ts';
+import { parseRmmzUsableHitType, RmmzUsableHitType } from '@core/enums/RmmzUsableHitType.ts';
 import { SkillJabsExtension } from '@core/domain/entities/jabs/SkillJabsExtension.ts';
 import { SkillExtendParser } from '@services/parsers/SkillExtendParser.ts';
 import { SkillSksSkillNoteParser } from '@services/parsers/SkillSksSkillNoteParser.ts';
@@ -208,15 +196,6 @@ class RPG_SkillDomainModel
    */
   public jabs!: SkillJabsExtension;
 
-  /**
-   * {@code <bonus-hits:N>} on this skill ({@code RPG_Skill#jabsBonusHitsFromSkillNote} / {@code J.ABS.RegExp.BonusHitsSkillNote}).
-   * Alias of {@link SkillJabsExtension.jabsBonusHitsFromSkillNote}; edits should go through {@link jabs} (e.g. extensions panel).
-   */
-  public get jabsBonusHitsFromSkillNote(): number | null
-  {
-    return this.jabs.jabsBonusHitsFromSkillNote;
-  }
-
   constructor(rmmz: RPG_Skill)
   {
     super(rmmz);
@@ -340,50 +319,13 @@ class RPG_SkillDomainModel
     this.jabs = SkillJabsExtension.fromSkillNote(this.note);
   }
 
-  protected syncNote(): string
+  /**
+   * {@code <bonus-hits:N>} on this skill ({@code RPG_Skill#jabsBonusHitsFromSkillNote} / {@code J.ABS.RegExp.BonusHitsSkillNote}).
+   * Alias of {@link SkillJabsExtension.jabsBonusHitsFromSkillNote}; edits should go through {@link jabs} (e.g. extensions panel).
+   */
+  public get jabsBonusHitsFromSkillNote(): number | null
   {
-    let n = this.note;
-
-    n = SkillResourceCostParser.writeHpCostFlat(n, this.hpCostFlat);
-    n = SkillResourceCostParser.writeHpCostPercent(n, this.hpCostPercent);
-    n = SkillResourceCostParser.writeHpCostFormula(n, this.hpCostFormula);
-    n = SkillResourceCostParser.writeHpCostCanKill(n, this.hpCostCanKill);
-
-    n = SkillResourceCostParser.writeMpCostTagFlat(n, this.mpCostTagFlat);
-    n = SkillResourceCostParser.writeMpCostTagPercent(n, this.mpCostTagPercent);
-    n = SkillResourceCostParser.writeMpCostTagFormula(n, this.mpCostTagFormula);
-
-    n = SkillResourceCostParser.writeTpCostTagFlat(n, this.tpCostTagFlat);
-    n = SkillResourceCostParser.writeTpCostTagPercent(n, this.tpCostTagPercent);
-    n = SkillResourceCostParser.writeTpCostTagFormula(n, this.tpCostTagFormula);
-
-    n = SkillOnAttackGainParser.writeOnAttackHpGainFlat(n, this.onAttackHpGainFlat);
-    n = SkillOnAttackGainParser.writeOnAttackHpGainPercent(n, this.onAttackHpGainPercent);
-    n = SkillOnAttackGainParser.writeOnAttackHpGainFormula(n, this.onAttackHpGainFormula);
-    n = SkillOnAttackGainParser.writeOnAttackMpGainFlat(n, this.onAttackMpGainFlat);
-    n = SkillOnAttackGainParser.writeOnAttackMpGainPercent(n, this.onAttackMpGainPercent);
-    n = SkillOnAttackGainParser.writeOnAttackMpGainFormula(n, this.onAttackMpGainFormula);
-    n = SkillOnAttackGainParser.writeOnAttackTpGainFlat(n, this.onAttackTpGainFlat);
-    n = SkillOnAttackGainParser.writeOnAttackTpGainPercent(n, this.onAttackTpGainPercent);
-    n = SkillOnAttackGainParser.writeOnAttackTpGainFormula(n, this.onAttackTpGainFormula);
-
-    n = UsableItemAttackElementsParser.writeAttackElements(n, this.attackElementIds);
-    n = SkillExtendParser.writeSkillExtend(n, this.skillExtendBaseIds);
-    n = SkillSksSkillNoteParser.writeSksSkillTags(
-      n,
-      this.sksSlotCost,
-      this.sksExplicitUnslotted
-    );
-    n = UsableItemThisCritParser.writeThisCritChance(n, this.thisCritChanceFormula);
-    n = UsableItemThisCritParser.writeThisCritDamageMultiplier(
-      n,
-      this.thisCritDamageMultiplierFormula
-    );
-    n = UsableItemThisCritParser.writeThisCritsAlways(n, this.thisCritsAlways);
-
-    n = this.jabs.applyToNote(n);
-
-    return NoteNormalizer.normalize(n);
+    return this.jabs.jabsBonusHitsFromSkillNote;
   }
 
   public toRmmz(): RPG_Skill
@@ -428,6 +370,52 @@ class RPG_SkillDomainModel
         value2: row.value2,
       })),
     };
+  }
+
+  protected syncNote(): string
+  {
+    let n = this.note;
+
+    n = SkillResourceCostParser.writeHpCostFlat(n, this.hpCostFlat);
+    n = SkillResourceCostParser.writeHpCostPercent(n, this.hpCostPercent);
+    n = SkillResourceCostParser.writeHpCostFormula(n, this.hpCostFormula);
+    n = SkillResourceCostParser.writeHpCostCanKill(n, this.hpCostCanKill);
+
+    n = SkillResourceCostParser.writeMpCostTagFlat(n, this.mpCostTagFlat);
+    n = SkillResourceCostParser.writeMpCostTagPercent(n, this.mpCostTagPercent);
+    n = SkillResourceCostParser.writeMpCostTagFormula(n, this.mpCostTagFormula);
+
+    n = SkillResourceCostParser.writeTpCostTagFlat(n, this.tpCostTagFlat);
+    n = SkillResourceCostParser.writeTpCostTagPercent(n, this.tpCostTagPercent);
+    n = SkillResourceCostParser.writeTpCostTagFormula(n, this.tpCostTagFormula);
+
+    n = SkillOnAttackGainParser.writeOnAttackHpGainFlat(n, this.onAttackHpGainFlat);
+    n = SkillOnAttackGainParser.writeOnAttackHpGainPercent(n, this.onAttackHpGainPercent);
+    n = SkillOnAttackGainParser.writeOnAttackHpGainFormula(n, this.onAttackHpGainFormula);
+    n = SkillOnAttackGainParser.writeOnAttackMpGainFlat(n, this.onAttackMpGainFlat);
+    n = SkillOnAttackGainParser.writeOnAttackMpGainPercent(n, this.onAttackMpGainPercent);
+    n = SkillOnAttackGainParser.writeOnAttackMpGainFormula(n, this.onAttackMpGainFormula);
+    n = SkillOnAttackGainParser.writeOnAttackTpGainFlat(n, this.onAttackTpGainFlat);
+    n = SkillOnAttackGainParser.writeOnAttackTpGainPercent(n, this.onAttackTpGainPercent);
+    n = SkillOnAttackGainParser.writeOnAttackTpGainFormula(n, this.onAttackTpGainFormula);
+
+    n = UsableItemAttackElementsParser.writeAttackElements(n, this.attackElementIds);
+    n = SkillExtendParser.writeSkillExtend(n, this.skillExtendBaseIds);
+    n = SkillSksSkillNoteParser.writeSksSkillTags(
+      n,
+      this.sksSlotCost,
+      this.sksExplicitUnslotted
+    );
+    n = UsableItemThisCritParser.writeThisCritChance(n, this.thisCritChanceFormula);
+    n = UsableItemThisCritParser.writeThisCritDamageMultiplier(
+      n,
+      this.thisCritDamageMultiplierFormula
+    );
+    n = UsableItemThisCritParser.writeThisCritsAlways(n, this.thisCritsAlways);
+
+    n = this.jabs.applyToNote(n);
+
+    return NoteNormalizer.normalize(n);
   }
 }
 

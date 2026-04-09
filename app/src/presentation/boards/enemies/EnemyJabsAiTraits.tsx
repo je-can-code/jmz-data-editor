@@ -1,26 +1,8 @@
-import {
-  Box,
-  ToggleButton,
-  ToggleButtonGroup,
-  Typography
-} from "@mui/material";
-import {
-  useEffect,
-  useState
-} from "react";
-import {
-  Bolt,
-  Favorite,
-  Gavel,
-  Group,
-  Shield,
-  Star
-} from "@mui/icons-material";
-import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
-import {
-  JabsAiTrait,
-  JabsAiTraitsData
-} from "@core/domain/valueObjects/jabs-ai-traits.ts";
+import { Box, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
+import { useEffect, useState } from 'react';
+import { Bolt, Favorite, Gavel, Group, Shield, Star } from '@mui/icons-material';
+import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
+import { JabsAiTrait, JabsAiTraitsData } from '@core/domain/valueObjects/jabs-ai-traits.ts';
 
 type EnemyJabsDataProps = {
   selectedEnemy: RPG_EnemyDomainModel;
@@ -45,12 +27,30 @@ const EnemyJabsAiTraits = ({
   {
     // Create an array of active trait strings to update the ToggleButtonGroup
     const activeTraits = [];
-    if (selectedEnemy.jabsAiTraits.careful) activeTraits.push(JabsAiTrait.Careful);
-    if (selectedEnemy.jabsAiTraits.executor) activeTraits.push(JabsAiTrait.Executor);
-    if (selectedEnemy.jabsAiTraits.reckless) activeTraits.push(JabsAiTrait.Reckless);
-    if (selectedEnemy.jabsAiTraits.healer) activeTraits.push(JabsAiTrait.Healer);
-    if (selectedEnemy.jabsAiTraits.leader) activeTraits.push(JabsAiTrait.Leader);
-    if (selectedEnemy.jabsAiTraits.follower) activeTraits.push(JabsAiTrait.Follower);
+    if (selectedEnemy.jabsAiTraits.careful)
+    {
+      activeTraits.push(JabsAiTrait.Careful);
+    }
+    if (selectedEnemy.jabsAiTraits.executor)
+    {
+      activeTraits.push(JabsAiTrait.Executor);
+    }
+    if (selectedEnemy.jabsAiTraits.reckless)
+    {
+      activeTraits.push(JabsAiTrait.Reckless);
+    }
+    if (selectedEnemy.jabsAiTraits.healer)
+    {
+      activeTraits.push(JabsAiTrait.Healer);
+    }
+    if (selectedEnemy.jabsAiTraits.leader)
+    {
+      activeTraits.push(JabsAiTrait.Leader);
+    }
+    if (selectedEnemy.jabsAiTraits.follower)
+    {
+      activeTraits.push(JabsAiTrait.Follower);
+    }
 
     // Update the stringTraits state to match the current traits
     setStringTraits(activeTraits);
@@ -63,7 +63,7 @@ const EnemyJabsAiTraits = ({
 
     // Sync the UI representation (string array for ToggleButtonGroup)
     const activeStrings = Object.values(JabsAiTrait)
-      .filter(t => selectedEnemy.jabsAiTraits[t as keyof JabsAiTraitsData])
+      .filter(t => selectedEnemy.jabsAiTraits[ t as keyof JabsAiTraitsData ]);
 
     setStringTraits(activeStrings);
     updateEnemy(selectedEnemy);
@@ -71,10 +71,10 @@ const EnemyJabsAiTraits = ({
 
   return <>
     <Typography
-      variant={"h4"}
+      variant={'h4'}
       gutterBottom={true}
-      color={"primary"}
-      align={"center"}
+      color={'primary'}
+      align={'center'}
       sx={{ paddingTop: 2 }}
     >
       JABS AI Traits
@@ -88,11 +88,14 @@ const EnemyJabsAiTraits = ({
     }}>
       {/* First row with main traits */}
       <ToggleButtonGroup
-        orientation={"horizontal"}
-        size={"small"}
-        color={"primary"}
+        orientation={'horizontal'}
+        size={'small'}
+        color={'primary'}
         value={stringTraits}
-        onChange={(_, newValues) =>
+        onChange={(
+          _,
+          newValues
+        ) =>
         {
           handleJabsAiTraitsUpdate(newValues);
         }}
@@ -111,7 +114,7 @@ const EnemyJabsAiTraits = ({
           sx={(theme) =>
             (
               {
-                "&.Mui-selected":
+                '&.Mui-selected':
                   {
                     borderColor: theme.palette.info.main,
                   }
@@ -134,7 +137,7 @@ const EnemyJabsAiTraits = ({
           sx={(theme) =>
             (
               {
-                "&.Mui-selected":
+                '&.Mui-selected':
                   {
                     borderColor: theme.palette.error.main,
                   }
@@ -157,7 +160,7 @@ const EnemyJabsAiTraits = ({
           sx={(theme) =>
             (
               {
-                "&.Mui-selected":
+                '&.Mui-selected':
                   {
                     borderColor: theme.palette.warning.main,
                   }
@@ -180,7 +183,7 @@ const EnemyJabsAiTraits = ({
           sx={(theme) =>
             (
               {
-                "&.Mui-selected":
+                '&.Mui-selected':
                   {
                     borderColor: theme.palette.success.main,
                   }
@@ -213,11 +216,14 @@ const EnemyJabsAiTraits = ({
           }}
         >
           <ToggleButtonGroup
-            orientation={"horizontal"}
-            size={"small"}
-            color={"primary"}
+            orientation={'horizontal'}
+            size={'small'}
+            color={'primary'}
             value={stringTraits}
-            onChange={(_, newValues) =>
+            onChange={(
+              _,
+              newValues
+            ) =>
             {
               handleJabsAiTraitsUpdate(newValues);
             }}
@@ -234,7 +240,7 @@ const EnemyJabsAiTraits = ({
               selected={selectedEnemy.jabsAiTraits.leader}
               sx={(theme) => (
                 {
-                  "&.Mui-selected":
+                  '&.Mui-selected':
                     {
                       borderColor: theme.palette.warning.main,
                     }
@@ -254,7 +260,7 @@ const EnemyJabsAiTraits = ({
               selected={selectedEnemy.jabsAiTraits.follower}
               sx={(theme) => (
                 {
-                  "&.Mui-selected":
+                  '&.Mui-selected':
                     {
                       borderColor: theme.palette.secondary.main,
                     }
@@ -276,4 +282,4 @@ const EnemyJabsAiTraits = ({
   </>;
 };
 
-export { EnemyJabsAiTraits }
+export { EnemyJabsAiTraits };

@@ -1,16 +1,16 @@
 enum MuiSnackbarSeverity
 {
-  Success = "success",
-  Warning = "warning",
-  Error = "error",
-  Info = "info"
+  Success = 'success',
+  Warning = 'warning',
+  Error = 'error',
+  Info = 'info'
 }
 
 enum MuiSnackbarVariant
 {
-  Standard = "standard",
-  Filled = "filled",
-  Outlined = "outlined",
+  Standard = 'standard',
+  Filled = 'filled',
+  Outlined = 'outlined',
 }
 
 export {

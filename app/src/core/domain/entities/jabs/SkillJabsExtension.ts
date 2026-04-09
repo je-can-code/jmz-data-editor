@@ -1,4 +1,4 @@
-import { SkillJabsNoteParser } from "@services/parsers/SkillJabsNoteParser.ts";
+import { SkillJabsNoteParser } from '@services/parsers/SkillJabsNoteParser.ts';
 
 /**
  * JABS skill note slice (all {@code ON SKILLS} tags from {@code J.ABS.RegExp}).

@@ -11,15 +11,33 @@
     ],
     "baseUrl": "./src",
     "paths": {
-      "@core/*": ["core/*"],
-      "@infrastructure/*": ["infrastructure/*"],
-
-      "@presentation/*": ["presentation/*"],
-      "@boards/*": ["presentation/boards/*"],
-
-      "@platform/*": ["platform/*"],
-      "@services/*": ["services/*"],
-      "@types/*": ["types/*"]
+      "@core/*": [
+        "core/*"
+      ],
+      "@components/*": [
+        "components/*"
+      ],
+      "@infrastructure/*": [
+        "infrastructure/*"
+      ],
+      "@presentation/*": [
+        "presentation/*"
+      ],
+      "@boards/*": [
+        "presentation/boards/*"
+      ],
+      "@platform/*": [
+        "platform/*"
+      ],
+      "@mappers/*": [
+        "mappers/*"
+      ],
+      "@services/*": [
+        "services/*"
+      ],
+      "@types/*": [
+        "types/*"
+      ]
     },
     "target": "ESNext",
     "module": "ESNext",

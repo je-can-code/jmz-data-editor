@@ -1,5 +1,5 @@
 import RPG_Base = Rmmz.Base.RPG_Base;
-import { NoteNormalizer } from "@services/utils/NoteNormalizer.ts";
+import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 
 /**
  * The architectural foundation for all domain-level entities that
@@ -8,12 +8,11 @@ import { NoteNormalizer } from "@services/utils/NoteNormalizer.ts";
  */
 abstract class RPG_BaseDomainModel<T extends RPG_Base>
 {
-  // Capture the original DTO to preserve unhandled fields (the "Capture")
-  protected readonly _original: T;
-
   public id: number;
   public name: string;
   public note: string;
+  // Capture the original DTO to preserve unhandled fields (the "Capture")
+  protected readonly _original: T;
 
   protected constructor(data: T)
   {

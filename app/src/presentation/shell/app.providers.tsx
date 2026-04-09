@@ -39,6 +39,6 @@ const AppProviders = ({ children }: { children: React.ReactNode }) =>
       {children}
     </ProviderComposer>
   );
-}
+};
 
 export { AppProviders };

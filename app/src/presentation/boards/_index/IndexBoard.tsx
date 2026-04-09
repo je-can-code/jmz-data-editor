@@ -1,5 +1,5 @@
-
-const IndexBoard = () => {
+const IndexBoard = () =>
+{
   return (<>
     <p>this is the index- WIP</p>
 

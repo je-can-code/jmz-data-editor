@@ -1,9 +1,4 @@
-import React, {
-  ChangeEvent,
-  MouseEvent,
-  useRef,
-  useState,
-} from 'react';
+import React, { ChangeEvent, MouseEvent, useRef, useState, } from 'react';
 import { FixedSizeList } from 'react-window';
 import {
   Alert,
@@ -52,10 +47,7 @@ import {
   Visibility,
   VisibilityOff
 } from '@mui/icons-material';
-import {
-  MuiSnackbarSeverity,
-  MuiSnackbarVariant
-} from '@core/enums/MuiSnackbar.ts';
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 
 import SaveButton from '../../../components/core/SaveButton.tsx';
 import KeyTextField from '../../../components/core/KeyTextField.tsx';
@@ -64,6 +56,9 @@ import ObjectiveLogs from './ObjectiveLogs.tsx';
 import ObjectiveFulfillmentData from './ObjectiveFulfillmentData.tsx';
 import OmniObjectiveFetchType from './OmniObjectiveFetchType.ts';
 
+import { useQuests } from '@presentation/context/resources/quests.context.tsx';
+import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Configuration = Questopedia.Configuration;
 import OmniQuest = Questopedia.OmniQuest;
 import OmniTag = Questopedia.OmniTag;
@@ -76,10 +71,6 @@ import FetchData = Questopedia.FetchData;
 import SlayData = Questopedia.SlayData;
 import QuestData = Questopedia.QuestData;
 import OmniFulfillmentData = Questopedia.OmniFulfillmentData;
-
-import { useQuests } from '@presentation/context/resources/quests.context.tsx';
-import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
-import { useLocation, useNavigate } from 'react-router-dom';
 
 const QuestBoard = () =>
 {

@@ -1,8 +1,4 @@
-import {
-  describe,
-  expect,
-  it
-} from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { MaxTpParser } from '@services/parsers/MaxTpParser.ts';
 
 describe('MaxTpParser.read', () =>

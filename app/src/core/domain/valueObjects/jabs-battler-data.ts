@@ -26,4 +26,4 @@ class EnemyJabsBattlerModel
 export {
   JabsBattlerData,
   EnemyJabsBattlerModel
-}
+};

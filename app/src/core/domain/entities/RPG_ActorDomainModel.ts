@@ -12,11 +12,6 @@ class RPG_ActorDomainModel
     super(rmmz);
   }
 
-  protected syncNote(): string
-  {
-    return this.note;
-  }
-
   public toRmmz(): RPG_Actor
   {
     return {
@@ -25,6 +20,11 @@ class RPG_ActorDomainModel
       name: this.name,
       note: this.syncNote(),
     };
+  }
+
+  protected syncNote(): string
+  {
+    return this.note;
   }
 }
 

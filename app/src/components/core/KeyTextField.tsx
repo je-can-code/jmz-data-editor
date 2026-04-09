@@ -1,9 +1,6 @@
-import {
-  InputAdornment,
-  TextField
-} from "@mui/material";
-import { Key } from "@mui/icons-material";
-import React from "react";
+import { InputAdornment, TextField } from '@mui/material';
+import { Key } from '@mui/icons-material';
+import React from 'react';
 
 type KeyTextFieldProps = {
   value: string;
@@ -21,24 +18,24 @@ export default function KeyTextField({
     <TextField
       required
       disabled={disabled ?? false}
-      variant={"outlined"}
-      label={"Key"}
+      variant={'outlined'}
+      label={'Key'}
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      size={"small"}
+      size={'small'}
       fullWidth
       slotProps={{
         input: {
-          startAdornment: <InputAdornment position={"start"}>
+          startAdornment: <InputAdornment position={'start'}>
             <Key/>
           </InputAdornment>
         }
       }}
       sx={{
-        "& .MuiOutlinedInput-root": {
-          fontFamily: "monospace",
+        '& .MuiOutlinedInput-root': {
+          fontFamily: 'monospace',
         },
       }}
     />
-  </>
+  </>;
 }

@@ -1,10 +1,11 @@
-import { JsonStore } from "../JsonStore.ts";
+import { JsonStore } from '../JsonStore.ts';
 
 /**
  * A JsonStore implementation that keeps data in-memory.
  * Useful for tests and dev fixtures.
  */
-class MemoryJsonStore implements JsonStore
+class MemoryJsonStore
+  implements JsonStore
 {
   private files = new Map<string, string>();
 
@@ -20,7 +21,7 @@ class MemoryJsonStore implements JsonStore
     {
       for (const [ path, value ] of Object.entries(initial))
       {
-        const text = typeof value === "string"
+        const text = typeof value === 'string'
           ? value
           : JSON.stringify(value, null, 2);
 
@@ -53,7 +54,10 @@ class MemoryJsonStore implements JsonStore
    * @param {string} path The key representing the file path.
    * @param {T} data The data to stringify and store.
    */
-  async writeJson<T = unknown>(path: string, data: T): Promise<void>
+  async writeJson<T = unknown>(
+    path: string,
+    data: T
+  ): Promise<void>
   {
     // stringify the data and update the map.
     const text = JSON.stringify(data, null, 2);

@@ -3,15 +3,10 @@
  */
 
 import React from 'react';
-import {
-  describe,
-  expect,
-  it,
-  vi
-} from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import SaveButton from '../../../src/components/core/SaveButton.tsx';
+import SaveButton from '@components/core/SaveButton.tsx';
 
 describe('SaveButton', () =>
 {

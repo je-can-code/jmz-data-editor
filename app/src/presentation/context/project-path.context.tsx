@@ -1,17 +1,10 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState
-} from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   defaultProjectRoot,
   resolveRmmzDataDirectory,
   toRmmzProjectRootFromPossibleDataPath
 } from '../../constants/PathConstants';
-import { JmzEditorYamlConfigReader } from "@platform/neutralino/readJmzEditorYamlConfig.ts";
+import { JmzEditorYamlConfigReader } from '@platform/neutralino/readJmzEditorYamlConfig.ts';
 import { SystemService } from '@services/SystemService';
 
 const LS_KEY_PROJECT_ROOT = 'rmmzProjectRoot';
@@ -140,6 +133,9 @@ export function ProjectPathProvider({ children }: { children: React.ReactNode })
 export function useProjectPath(): ProjectPathValue
 {
   const v = useContext(Ctx);
-  if (!v) throw new Error('useProjectPath must be used within <ProjectPathProvider />');
+  if (!v)
+  {
+    throw new Error('useProjectPath must be used within <ProjectPathProvider />');
+  }
   return v;
 }

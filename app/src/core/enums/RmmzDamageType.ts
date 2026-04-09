@@ -21,13 +21,34 @@ type RmmzDamageTypeOption = {
 };
 
 const RMMZ_DAMAGE_TYPE_OPTIONS: readonly RmmzDamageTypeOption[] = [
-  { value: RmmzDamageType.None, label: "None" },
-  { value: RmmzDamageType.HpDamage, label: "HP damage" },
-  { value: RmmzDamageType.MpDamage, label: "MP damage" },
-  { value: RmmzDamageType.HpRecover, label: "HP recovery" },
-  { value: RmmzDamageType.MpRecover, label: "MP recovery" },
-  { value: RmmzDamageType.HpDrain, label: "HP drain" },
-  { value: RmmzDamageType.MpDrain, label: "MP drain" },
+  {
+    value: RmmzDamageType.None,
+    label: 'None'
+  },
+  {
+    value: RmmzDamageType.HpDamage,
+    label: 'HP damage'
+  },
+  {
+    value: RmmzDamageType.MpDamage,
+    label: 'MP damage'
+  },
+  {
+    value: RmmzDamageType.HpRecover,
+    label: 'HP recovery'
+  },
+  {
+    value: RmmzDamageType.MpRecover,
+    label: 'MP recovery'
+  },
+  {
+    value: RmmzDamageType.HpDrain,
+    label: 'HP drain'
+  },
+  {
+    value: RmmzDamageType.MpDrain,
+    label: 'MP drain'
+  },
 ] as const;
 
 /**

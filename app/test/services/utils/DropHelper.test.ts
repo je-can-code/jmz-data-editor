@@ -1,10 +1,6 @@
-import {
-  describe,
-  expect,
-  it
-} from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import RPG_DropHelper from '../../../src/services/utils/DropHelper.ts';
+import RPG_DropHelper from '@services/utils/DropHelper.ts';
 
 describe('DropHelper', () =>
 {

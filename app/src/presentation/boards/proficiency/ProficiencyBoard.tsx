@@ -1,8 +1,4 @@
-import React, {
-  ChangeEvent,
-  MouseEvent,
-  useState
-} from 'react';
+import React, { ChangeEvent, MouseEvent, useState } from 'react';
 import { FixedSizeList } from 'react-window';
 import {
   Alert,
@@ -52,19 +48,15 @@ import {
 } from '@mui/icons-material';
 import styled from 'styled-components';
 
-import {
-  MuiSnackbarSeverity,
-  MuiSnackbarVariant
-} from '@core/enums/MuiSnackbar.ts';
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import SaveButton from '../../../components/core/SaveButton.tsx';
-
-import Conditional = Proficiency.Conditional;
-import Requirement = Proficiency.Requirement;
 import { useActors } from '@presentation/context/resources/actors.context.tsx';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { RPG_SkillDomainModel } from '@core/domain/entities/RPG_SkillDomainModel.ts';
 import { RPG_ActorDomainModel } from '@core/domain/entities/RPG_ActorDomainModel.ts';
 import { useProficiency } from '@presentation/context/resources/proficiency.context.tsx';
+import Conditional = Proficiency.Conditional;
+import Requirement = Proficiency.Requirement;
 
 //region setup
 const EntryText = styled(ListItemText)`
@@ -143,7 +135,10 @@ const ProficiencyBoard = () =>
     syncSelectionWithRequirement(firstReq, 0);
   };
 
-  const syncSelectionWithRequirement = (requirement: Requirement | null, index: number) =>
+  const syncSelectionWithRequirement = (
+    requirement: Requirement | null,
+    index: number
+  ) =>
   {
     setSelectedRequirementIndex(index);
     setSelectedRequirement(requirement);
@@ -156,7 +151,7 @@ const ProficiencyBoard = () =>
       : null;
 
     setRequirementSkill(skillModel);
-    setRequirementSkillText(skillModel?.name ?? "");
+    setRequirementSkillText(skillModel?.name ?? '');
   };
 
   //region updates

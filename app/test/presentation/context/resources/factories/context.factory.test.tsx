@@ -3,34 +3,32 @@
  */
 
 import React from 'react';
-import {
-  describe,
-  expect,
-  it,
-  vi,
-  beforeEach
-} from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
 import { createResourceContext } from '@presentation/context/resources/factories/context.factory.tsx';
 import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
 import { executeLoad, executeSave } from '@services/DataService.ts';
-import DatabaseFilenames from '../../../../../src/core/enums/DatabaseFilenames.ts';
+import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 
 // Mock DataService to prevent actual disk IO.
-vi.mock('../../../../../src/services/DataService.ts', () => ({
+vi.mock('@services/DataService.ts', () => ({
   executeLoad: vi.fn(),
   executeSave: vi.fn(),
 }));
 
 // Mock ProjectPath context to simulate a valid project environment.
-vi.mock('../../../../../src/presentation/context/project-path.context.tsx', () => ({
+vi.mock('@presentation/context/project-path.context.tsx', () => ({
   useProjectPath: () => ({
     projectRoot: '/test/project',
     rmmzDataPath: '/test/project/data',
-    setProjectRoot: () => {},
+    setProjectRoot: () =>
+    {
+    },
     systemDataGeneration: 0,
     projectReloadGeneration: 0,
-    reloadProjectFromDisk: async () => {},
+    reloadProjectFromDisk: async () =>
+    {
+    },
   }),
 }));
 
@@ -142,9 +140,15 @@ describe('context.factory', () =>
       .toBe(1);
   });
 
-  it("save() converts models back to RMMZ and prepends null", async () =>
+  it('save() converts models back to RMMZ and prepends null', async () =>
   {
-    const rawData = [ null, { id: 1, name: "Test" } ];
+    const rawData = [
+      null,
+      {
+        id: 1,
+        name: 'Test'
+      }
+    ];
     (executeLoad as any).mockResolvedValue(rawData);
 
     let saveFn: any;
@@ -157,13 +161,19 @@ describe('context.factory', () =>
 
     render(
       <Provider>
-        <Grabber />
+        <Grabber/>
       </Provider>
     );
 
-    await waitFor(() => expect(saveFn).toBeDefined());
+    await waitFor(() => expect(saveFn)
+      .toBeDefined());
 
-    const updatedModels = [ new MockModel({ id: 1, name: "Updated" }) ];
+    const updatedModels = [
+      new MockModel({
+        id: 1,
+        name: 'Updated'
+      })
+    ];
 
     // 2. Wrap the async call in act() to resolve the warning
     await act(async () =>
@@ -174,14 +184,14 @@ describe('context.factory', () =>
     // 3. Update assertion to include the note property produced by syncNote()
     expect(executeSave)
       .toHaveBeenCalledWith(
-        "/test/project/data",
+        '/test/project/data',
         DatabaseFilenames.Enemies,
         [
           null,
           {
             id: 1,
-            name: "Updated",
-            note: "" // Added to match the model's output
+            name: 'Updated',
+            note: '' // Added to match the model's output
           }
         ]
       );

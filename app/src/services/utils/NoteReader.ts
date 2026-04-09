@@ -1,5 +1,5 @@
-import JsonMapper from "../../mappers/JsonMapper.ts";
-import { NoteNormalizer } from "./NoteNormalizer.ts";
+import JsonMapper from '../../mappers/JsonMapper.ts';
+import { NoteNormalizer } from './NoteNormalizer.ts';
 import RPG_Base = Rmmz.Base.RPG_Base;
 
 /**
@@ -17,7 +17,8 @@ export default class NoteReader
   static getStringFromNoteByRegex(
     databaseNote: string,
     structure: RegExp,
-    nullIfEmpty: boolean | undefined = false): string | null
+    nullIfEmpty: boolean | undefined = false
+  ): string | null
   {
     // validate the incoming note.
     if (!databaseNote)
@@ -54,7 +55,10 @@ export default class NoteReader
       const result = structure.exec(line);
 
       // skip if we somehow encounter something amiss here.
-      if (result === null) return;
+      if (result === null)
+      {
+        return;
+      }
 
       // extract the captured formula.
       const [ /* skip first index */, stringResult ] = result;
@@ -90,7 +94,11 @@ export default class NoteReader
    * @param {boolean} tryParse Whether or not to attempt to parse the found array.
    * @returns {any[][]|null} The array of arrays from the notes, or null.
    */
-  static getArraysFromNotesByRegex(databaseNote: string, structure: RegExp, tryParse: boolean = true): any[][] | null
+  static getArraysFromNotesByRegex(
+    databaseNote: string,
+    structure: RegExp,
+    tryParse: boolean = true
+  ): any[][] | null
   {
     // get the note data from this skill.
     const lines = databaseNote.split(/[\r\n]+/);
@@ -123,7 +131,10 @@ export default class NoteReader
     });
 
     // if we didn't find a match, return null instead of attempting to parse.
-    if (!hasMatch) return null;
+    if (!hasMatch)
+    {
+      return null;
+    }
 
     // check if we're going to attempt to parse it, too.
     if (tryParse)
@@ -156,7 +167,8 @@ export default class NoteReader
   static getNumberFromNoteByRegex(
     databaseData: RPG_Base,
     structure: RegExp,
-    nullIfEmpty: boolean | undefined = false): number | null
+    nullIfEmpty: boolean | undefined = false
+  ): number | null
   {
     // validate the incoming data object.
     if (!databaseData)
@@ -192,7 +204,10 @@ export default class NoteReader
       const result = structure.exec(line);
 
       // skip if we somehow encounter something amiss here.
-      if (result === null) return;
+      if (result === null)
+      {
+        return;
+      }
 
       // extract the captured formula.
       const [ /* skip first index */, numericResult ] = result;

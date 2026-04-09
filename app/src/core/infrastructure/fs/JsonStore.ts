@@ -4,7 +4,11 @@
 interface JsonStore
 {
   readJson<T = unknown>(path: string): Promise<T>;
-  writeJson<T = unknown>(path: string, data: T): Promise<void>;
+
+  writeJson<T = unknown>(
+    path: string,
+    data: T
+  ): Promise<void>;
 }
 
 export { JsonStore };

@@ -1,12 +1,4 @@
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  ReactNode,
-} from 'react';
+import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState, } from 'react';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
 import { executeLoad, executeSave } from '@services/DataService.ts';
 import ConfigFilenames from '@core/enums/ConfigFilenames.ts';
@@ -36,13 +28,16 @@ export function createCompositeConfigContext<T>(
 
   function CompositeConfigProvider({ children }: { children: ReactNode })
   {
-    const { rmmzDataPath, projectReloadGeneration } = useProjectPath();
+    const {
+      rmmzDataPath,
+      projectReloadGeneration
+    } = useProjectPath();
     const [ config, setConfig ] = useState<T | null>(null);
     const [ loading, setLoading ] = useState(true);
 
     const reload = useCallback(async () =>
     {
-      if (!rmmzDataPath || rmmzDataPath.trim() === "")
+      if (!rmmzDataPath || rmmzDataPath.trim() === '')
       {
         return;
       }
@@ -65,7 +60,7 @@ export function createCompositeConfigContext<T>(
 
     const save = useCallback(async (updatedConfig: T) =>
     {
-      if (!rmmzDataPath || rmmzDataPath.trim() === "")
+      if (!rmmzDataPath || rmmzDataPath.trim() === '')
       {
         return;
       }

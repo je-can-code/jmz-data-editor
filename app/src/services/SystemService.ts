@@ -1,13 +1,9 @@
 import RPG_System = Rmmz.System.RPG_System;
 import RPG_Animation = Rmmz.Implementations.RPG_Animation;
 import RPG_CommonEvent = Rmmz.Implementations.RPG_CommonEvent;
-import { buildSkillAnimationAutocompleteOptions } from '@core/enums/RmmzSkillAnimation.ts';
 import type { RmmzSkillAnimationOption } from '@core/enums/RmmzSkillAnimation.ts';
-import {
-  loadAnimations,
-  loadCommonEvents,
-  loadSystem,
-} from './DataService.ts';
+import { buildSkillAnimationAutocompleteOptions } from '@core/enums/RmmzSkillAnimation.ts';
+import { loadAnimations, loadCommonEvents, loadSystem, } from './DataService.ts';
 
 type CommonEventAutocompleteRow = {
   id: number;
@@ -25,16 +21,16 @@ function buildCommonEventAutocompleteRows(
   const out: CommonEventAutocompleteRow[] = [];
   for (let i = 1; i < raw.length; i++)
   {
-    const row = raw[i];
+    const row = raw[ i ];
     if (row === null)
     {
       continue;
     }
-    if (typeof row.id !== "number")
+    if (typeof row.id !== 'number')
     {
       continue;
     }
-    const name = typeof row.name === "string" && row.name.length > 0
+    const name = typeof row.name === 'string' && row.name.length > 0
       ? row.name
       : `Event ${row.id}`;
     out.push({

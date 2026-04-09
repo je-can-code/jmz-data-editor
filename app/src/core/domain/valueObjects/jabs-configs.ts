@@ -1,15 +1,15 @@
 enum JabsConfig
 {
-  NoIdle = "noIdle",
-  CanIdle = "canIdle",
-  NoHpBar = "noHpBar",
-  ShowHpBar = "showHpBar",
-  Inanimate = "inanimate",
-  NotInanimate = "notInanimate",
-  Invincible = "invincible",
-  NotInvincible = "notInvincible",
-  NoName = "noName",
-  ShowName = "showName",
+  NoIdle = 'noIdle',
+  CanIdle = 'canIdle',
+  NoHpBar = 'noHpBar',
+  ShowHpBar = 'showHpBar',
+  Inanimate = 'inanimate',
+  NotInanimate = 'notInanimate',
+  Invincible = 'invincible',
+  NotInvincible = 'notInvincible',
+  NoName = 'noName',
+  ShowName = 'showName',
 }
 
 interface JabsConfigsData
@@ -64,16 +64,19 @@ class JabsConfigs
   /**
    * Business Logic: Updates a specific config and enforces mutual exclusivity rules.
    */
-  public updateConfig(configName: keyof JabsConfigsData, checked: boolean): void
+  public updateConfig(
+    configName: keyof JabsConfigsData,
+    checked: boolean
+  ): void
   {
-    this[configName] = checked;
+    this[ configName ] = checked;
 
     if (checked)
     {
-      const exclusivePartner = configExclusions[configName];
+      const exclusivePartner = configExclusions[ configName ];
       if (exclusivePartner)
       {
-        this[exclusivePartner] = false;
+        this[ exclusivePartner ] = false;
       }
     }
   }
