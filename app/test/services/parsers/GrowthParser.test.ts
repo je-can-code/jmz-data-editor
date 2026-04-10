@@ -1,11 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi
-} from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GrowthParser } from '@services/parsers/GrowthParser.ts';
 
 // Helper: minimal KnownParameter-like objects without importing the type
@@ -258,7 +251,7 @@ describe('GrowthParser.generateDataPoints', () =>
     // 0,5,10 plus forced 12
     expect(data.map(p => p.level))
       .toEqual([ 0, 5, 10, 12 ]);
-    expect(data[3].value)
+    expect(data[ 3 ].value)
       .toBe(12);
   });
 });

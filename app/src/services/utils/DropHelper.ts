@@ -18,7 +18,7 @@ export default class RPG_DropHelper
      * The drop item type that maps to "armors" in the database.
      */
     Armor: 3,
-  }
+  };
 
   /**
    * Translates a letter or word drop item type into its numeric counterpart.
@@ -46,7 +46,7 @@ export default class RPG_DropHelper
       default:
         throw new Error(`invalid item type letter provided: [${letter}].`);
     }
-  }
+  };
 
   /**
    * Translates a {@link RPG_DropItem} "kind" into its corresponding letter.
@@ -66,5 +66,5 @@ export default class RPG_DropHelper
       default:
         throw new Error(`invalid drop type (kind): [${dropType}].`);
     }
-  }
+  };
 }

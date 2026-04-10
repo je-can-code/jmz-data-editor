@@ -1,4 +1,4 @@
-import { NoteNormalizer } from "@services/utils/NoteNormalizer.ts";
+import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 
 /**
  * Reads and writes J-Elementalistics {@code <attackElements:[id,...]>} on skill/item notes.
@@ -14,7 +14,7 @@ class UsableItemAttackElementsParser
   static readAttackElements(note: string): number[]
   {
     const lines = NoteNormalizer.normalize(note)
-      .split("\n");
+      .split('\n');
     const seen = new Set<number>();
     const order: number[] = [];
 
@@ -26,7 +26,7 @@ class UsableItemAttackElementsParser
         continue;
       }
 
-      const parts = m[1].split(",");
+      const parts = m[ 1 ].split(',');
       for (const part of parts)
       {
         const n = parseInt(part.trim(), 10);
@@ -51,7 +51,10 @@ class UsableItemAttackElementsParser
    * @param ids Positive element ids; duplicates are dropped; order is preserved.
    * @returns Note with all prior {@code attackElements} lines removed and at most one new tag prepended.
    */
-  static writeAttackElements(note: string, ids: number[]): string
+  static writeAttackElements(
+    note: string,
+    ids: number[]
+  ): string
   {
     let n = NoteNormalizer.removeLinesMatching(
       note,
@@ -76,7 +79,7 @@ class UsableItemAttackElementsParser
       return NoteNormalizer.normalize(n);
     }
 
-    const tag = `<attackElements:[${unique.join(",")}]>`;
+    const tag = `<attackElements:[${unique.join(',')}]>`;
     return NoteNormalizer.prependBlock(n, tag);
   }
 }

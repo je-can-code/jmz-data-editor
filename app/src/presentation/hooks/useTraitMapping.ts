@@ -2,12 +2,8 @@ import React from 'react';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { useStates } from '@presentation/context/resources/states.context.tsx';
 import { SystemService } from '@services/SystemService.ts';
-import {
-  fromBParamIdToName,
-  fromSParamIdToName,
-  fromXParamIdToName
-} from '../../mappers/ParameterIdMapper.ts';
-import { SpecialFlag, CollapseEffect, PartyAbility } from '@core/enums/TraitValues.ts';
+import { fromBParamIdToName, fromSParamIdToName, fromXParamIdToName } from '../../mappers/ParameterIdMapper.ts';
+import { CollapseEffect, PartyAbility, SpecialFlag } from '@core/enums/TraitValues.ts';
 import { Game_Trait } from '../components/traits/Traits';
 import {
   Accessibility,
@@ -171,7 +167,7 @@ export function useTraitMapping()
       case 35:
       case 43:
       case 44:
-        return skillToName(dataId);
+        return `${skillToName(dataId)} (id:${dataId})`;
       case 41:
       case 42:
         return SystemService.skillTypes[ dataId ] ?? 'None';

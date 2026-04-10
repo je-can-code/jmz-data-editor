@@ -1,9 +1,5 @@
-import {
-  describe,
-  expect,
-  it
-} from 'vitest';
-import { NoteNormalizer } from '../../../src/services/utils/NoteNormalizer.ts';
+import { describe, expect, it } from 'vitest';
+import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 
 describe('NoteNormalizer.normalize', () =>
 {

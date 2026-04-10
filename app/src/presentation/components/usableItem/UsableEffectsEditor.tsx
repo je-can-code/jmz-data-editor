@@ -1,10 +1,4 @@
-import React, {
-  type ChangeEvent,
-  type ReactNode,
-  useCallback,
-  useMemo,
-  useState,
-} from 'react';
+import React, { type ChangeEvent, type ReactNode, useCallback, useMemo, useState, } from 'react';
 import {
   Autocomplete,
   Box,
@@ -17,19 +11,14 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import {
-  ArrowDownward,
-  ArrowUpward,
-  DeleteOutline,
-  Percent,
-} from '@mui/icons-material';
+import { ArrowDownward, ArrowUpward, DeleteOutline, Percent, } from '@mui/icons-material';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 import {
-  RMMZ_SPECIAL_EFFECT_ESCAPE,
-  RMMZ_USABLE_EFFECT_OPTIONS,
   buildBparamAutocompleteOptions,
   catalogRowForEffectCode,
   defaultUsableEffectForCode,
+  RMMZ_SPECIAL_EFFECT_ESCAPE,
+  RMMZ_USABLE_EFFECT_OPTIONS,
   type RmmzUsableEffectCatalogOption,
 } from '@core/enums/RmmzUsableEffectCatalog.ts';
 

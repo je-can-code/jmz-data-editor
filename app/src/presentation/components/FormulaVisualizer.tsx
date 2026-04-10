@@ -1,20 +1,6 @@
 // FormulaVisualizer.tsx
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState
-} from 'react';
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from 'recharts';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
   Box,
   Button,
@@ -32,12 +18,8 @@ import {
   TextField,
   Typography
 } from '@mui/material';
-import { GrowthParser } from "@services/parsers/GrowthParser.ts";
-import {
-  Functions,
-  ShowChart,
-  Update
-} from "@mui/icons-material";
+import { GrowthParser } from '@services/parsers/GrowthParser.ts';
+import { Functions, ShowChart, Update } from '@mui/icons-material';
 import { debounce } from 'lodash';
 
 type FormulaVisualizerProps = {
@@ -49,19 +31,19 @@ type FormulaVisualizerProps = {
 
 const presetFormulas = {
   linear: {
-    slow: "(a.level * 1.5)",
-    medium: "(a.level * 4)",
-    fast: "(a.level * 7)"
+    slow: '(a.level * 1.5)',
+    medium: '(a.level * 4)',
+    fast: '(a.level * 7)'
   },
   quadratic: {
-    slow: "(0.05 * (a.level ** 2))",
-    medium: "(0.1 * (a.level ** 2))",
-    fast: "(0.2 * (a.level ** 2))"
+    slow: '(0.05 * (a.level ** 2))',
+    medium: '(0.1 * (a.level ** 2))',
+    fast: '(0.2 * (a.level ** 2))'
   },
   exponential: {
-    slow: "(10 * (1.02 ** a.level))",
-    medium: "(10 * (1.03 ** a.level))",
-    fast: "(10 * (1.04 ** a.level))"
+    slow: '(10 * (1.02 ** a.level))',
+    medium: '(10 * (1.03 ** a.level))',
+    fast: '(10 * (1.04 ** a.level))'
   }
 };
 
@@ -71,13 +53,13 @@ function pickNextHighestLevel(target: number): number
 {
   for (let i = 0; i < levelOptions.length; i++)
   {
-    const option = levelOptions[i];
+    const option = levelOptions[ i ];
     if (option >= target)
     {
       return option;
     }
   }
-  return levelOptions[levelOptions.length - 1];
+  return levelOptions[ levelOptions.length - 1 ];
 }
 
 export default function FormulaVisualizer({
@@ -129,7 +111,10 @@ export default function FormulaVisualizer({
   const chartData = useMemo(
     () =>
     {
-      if (!open) return [];
+      if (!open)
+      {
+        return [];
+      }
       return GrowthParser.generateDataPoints(localFormula, maxLevel, 1);
     },
     [ localFormula, maxLevel, open ]
@@ -143,18 +128,18 @@ export default function FormulaVisualizer({
 
   return <>
     <Button
-      color={"inherit"}
-      variant={"outlined"}
+      color={'inherit'}
+      variant={'outlined'}
       startIcon={<ShowChart/>}
       onClick={() => setOpen(true)}
-      size={"small"}
+      size={'small'}
     >
       Visualize
     </Button>
 
     <Dialog
       open={open}
-      maxWidth={"lg"}
+      maxWidth={'lg'}
       fullWidth={true}
       onClose={() => setOpen(false)}
     >
@@ -165,10 +150,10 @@ export default function FormulaVisualizer({
       <DialogContent>
         <Stack spacing={2}>
           <TextField
-            label={"Formula"}
-            variant={"outlined"}
+            label={'Formula'}
+            variant={'outlined'}
             fullWidth={true}
-            size={"small"}
+            size={'small'}
             value={displayFormula}
             onChange={(e) =>
             {
@@ -177,9 +162,9 @@ export default function FormulaVisualizer({
               debouncedUpdateFormula(value);
             }}
             sx={{
-              fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+              fontFamily: '\'Consolas\', \'Monaco\', \'Courier New\', monospace',
               '& .MuiInputBase-input': {
-                fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace"
+                fontFamily: '\'Consolas\', \'Monaco\', \'Courier New\', monospace'
               }
             }}
           />
@@ -321,15 +306,15 @@ export default function FormulaVisualizer({
 
       <DialogActions>
         <Button
-          color={"inherit"}
+          color={'inherit'}
           onClick={() => setOpen(false)}
         >
           Close
         </Button>
         {onUpdateFormula && (
           <Button
-            color={"primary"}
-            variant={"contained"}
+            color={'primary'}
+            variant={'contained'}
             startIcon={<Update/>}
             onClick={() =>
             {

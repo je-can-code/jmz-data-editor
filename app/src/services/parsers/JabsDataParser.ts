@@ -1,16 +1,7 @@
-import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
-import {
-  JabsAiTrait,
-  JabsAiTraits
-} from "@core/domain/valueObjects/jabs-ai-traits.ts";
-import {
-  EnemyJabsBattlerModel,
-  JabsBattlerData
-} from "@core/domain/valueObjects/jabs-battler-data.ts";
-import {
-  JabsConfig,
-  JabsConfigs
-} from "@core/domain/valueObjects/jabs-configs.ts";
+import { NoteNormalizer } from '../utils/NoteNormalizer.ts';
+import { JabsAiTrait, JabsAiTraits } from '@core/domain/valueObjects/jabs-ai-traits.ts';
+import { EnemyJabsBattlerModel, JabsBattlerData } from '@core/domain/valueObjects/jabs-battler-data.ts';
+import { JabsConfig, JabsConfigs } from '@core/domain/valueObjects/jabs-configs.ts';
 
 class JabsDataParser
 {
@@ -44,7 +35,7 @@ class JabsDataParser
           {
             (
               traits as any
-            )[key] = true;
+            )[ key ] = true;
           }
         }
       }
@@ -53,19 +44,40 @@ class JabsDataParser
     return traits;
   }
 
-  static writeAiTraits(originalNote: string, traits: JabsAiTraits): string
+  static writeAiTraits(
+    originalNote: string,
+    traits: JabsAiTraits
+  ): string
   {
     // Remove any existing aiTrait lines and normalize the base.
     const base = NoteNormalizer.removeLinesMatching(originalNote, this.#aiTraitRegex);
 
     // Build trait lines in deterministic order.
     const traitLines: string[] = [];
-    if (traits.careful) traitLines.push(this.#aiTraitKey(JabsAiTrait.Careful));
-    if (traits.executor) traitLines.push(this.#aiTraitKey(JabsAiTrait.Executor));
-    if (traits.reckless) traitLines.push(this.#aiTraitKey(JabsAiTrait.Reckless));
-    if (traits.healer) traitLines.push(this.#aiTraitKey(JabsAiTrait.Healer));
-    if (traits.leader) traitLines.push(this.#aiTraitKey(JabsAiTrait.Leader));
-    if (traits.follower) traitLines.push(this.#aiTraitKey(JabsAiTrait.Follower));
+    if (traits.careful)
+    {
+      traitLines.push(this.#aiTraitKey(JabsAiTrait.Careful));
+    }
+    if (traits.executor)
+    {
+      traitLines.push(this.#aiTraitKey(JabsAiTrait.Executor));
+    }
+    if (traits.reckless)
+    {
+      traitLines.push(this.#aiTraitKey(JabsAiTrait.Reckless));
+    }
+    if (traits.healer)
+    {
+      traitLines.push(this.#aiTraitKey(JabsAiTrait.Healer));
+    }
+    if (traits.leader)
+    {
+      traitLines.push(this.#aiTraitKey(JabsAiTrait.Leader));
+    }
+    if (traits.follower)
+    {
+      traitLines.push(this.#aiTraitKey(JabsAiTrait.Follower));
+    }
 
     // If none enabled, return the cleaned base as-is.
     if (traitLines.length === 0)
@@ -89,38 +101,59 @@ class JabsDataParser
       // Sight
       this.#sightRegex.lastIndex = 0;
       let match = this.#sightRegex.exec(line);
-      if (match) battlerData.sight = Number(match[1]);
+      if (match)
+      {
+        battlerData.sight = Number(match[ 1 ]);
+      }
 
       // Pursuit
       this.#pursuitRegex.lastIndex = 0;
       match = this.#pursuitRegex.exec(line);
-      if (match) battlerData.pursuit = Number(match[1]);
+      if (match)
+      {
+        battlerData.pursuit = Number(match[ 1 ]);
+      }
 
       // Prepare Speed
       this.#prepareSpeedRegex.lastIndex = 0;
       match = this.#prepareSpeedRegex.exec(line);
-      if (match) battlerData.prepareSpeed = Number(match[1]);
+      if (match)
+      {
+        battlerData.prepareSpeed = Number(match[ 1 ]);
+      }
 
       // Alert Duration
       this.#alertDurationRegex.lastIndex = 0;
       match = this.#alertDurationRegex.exec(line);
-      if (match) battlerData.alertDuration = Number(match[1]);
+      if (match)
+      {
+        battlerData.alertDuration = Number(match[ 1 ]);
+      }
 
       // Alerted Sight Boost
       this.#alertSightBoostRegex.lastIndex = 0;
       match = this.#alertSightBoostRegex.exec(line);
-      if (match) battlerData.alertSightBoost = Number(match[1]);
+      if (match)
+      {
+        battlerData.alertSightBoost = Number(match[ 1 ]);
+      }
 
       // Alerted Pursuit Boost
       this.#alertPursuitBoostRegex.lastIndex = 0;
       match = this.#alertPursuitBoostRegex.exec(line);
-      if (match) battlerData.alertPursuitBoost = Number(match[1]);
+      if (match)
+      {
+        battlerData.alertPursuitBoost = Number(match[ 1 ]);
+      }
     });
 
     return battlerData;
   }
 
-  static writeBattlerData(originalNote: string, jabsBattlerData: JabsBattlerData): string
+  static writeBattlerData(
+    originalNote: string,
+    jabsBattlerData: JabsBattlerData
+  ): string
   {
     // Match any battler-data line.
     const battlerLineRegex = /<(sight|pursuit|prepare|alertDuration|alertedSightBoost|alertedPursuitBoost): ?\d+>/i;
@@ -130,10 +163,22 @@ class JabsDataParser
 
     // Build new lines in deterministic order (only if > 0).
     const battlerDataLines: string[] = [];
-    if (jabsBattlerData.sight > 0) battlerDataLines.push(`<sight:${jabsBattlerData.sight}>`);
-    if (jabsBattlerData.pursuit > 0) battlerDataLines.push(`<pursuit:${jabsBattlerData.pursuit}>`);
-    if (jabsBattlerData.prepareSpeed > 0) battlerDataLines.push(`<prepare:${jabsBattlerData.prepareSpeed}>`);
-    if (jabsBattlerData.alertDuration > 0) battlerDataLines.push(`<alertDuration:${jabsBattlerData.alertDuration}>`);
+    if (jabsBattlerData.sight > 0)
+    {
+      battlerDataLines.push(`<sight:${jabsBattlerData.sight}>`);
+    }
+    if (jabsBattlerData.pursuit > 0)
+    {
+      battlerDataLines.push(`<pursuit:${jabsBattlerData.pursuit}>`);
+    }
+    if (jabsBattlerData.prepareSpeed > 0)
+    {
+      battlerDataLines.push(`<prepare:${jabsBattlerData.prepareSpeed}>`);
+    }
+    if (jabsBattlerData.alertDuration > 0)
+    {
+      battlerDataLines.push(`<alertDuration:${jabsBattlerData.alertDuration}>`);
+    }
     if (jabsBattlerData.alertSightBoost
       > 0)
     {
@@ -191,10 +236,10 @@ class JabsDataParser
         if (configName)
         {
           const lc = configName.toLowerCase();
-          const mapped = keyMap[lc];
+          const mapped = keyMap[ lc ];
           if (mapped)
           {
-            (configs as any)[mapped] = true;
+            (configs as any)[ mapped ] = true;
           }
         }
       }
@@ -203,23 +248,56 @@ class JabsDataParser
     return configs;
   }
 
-  static writeConfigs(originalNote: string, configs: JabsConfigs): string
+  static writeConfigs(
+    originalNote: string,
+    configs: JabsConfigs
+  ): string
   {
     // Remove all existing config lines and get a normalized base
     const base = NoteNormalizer.removeLinesMatching(originalNote, this.#configRegex);
 
     // Build new config lines in deterministic order
     const configLines: string[] = [];
-    if (configs.noIdle) configLines.push(this.#configKey(JabsConfig.NoIdle));
-    if (configs.canIdle) configLines.push(this.#configKey(JabsConfig.CanIdle));
-    if (configs.noHpBar) configLines.push(this.#configKey(JabsConfig.NoHpBar));
-    if (configs.showHpBar) configLines.push(this.#configKey(JabsConfig.ShowHpBar));
-    if (configs.inanimate) configLines.push(this.#configKey(JabsConfig.Inanimate));
-    if (configs.notInanimate) configLines.push(this.#configKey(JabsConfig.NotInanimate));
-    if (configs.invincible) configLines.push(this.#configKey(JabsConfig.Invincible));
-    if (configs.notInvincible) configLines.push(this.#configKey(JabsConfig.NotInvincible));
-    if (configs.noName) configLines.push(this.#configKey(JabsConfig.NoName));
-    if (configs.showName) configLines.push(this.#configKey(JabsConfig.ShowName));
+    if (configs.noIdle)
+    {
+      configLines.push(this.#configKey(JabsConfig.NoIdle));
+    }
+    if (configs.canIdle)
+    {
+      configLines.push(this.#configKey(JabsConfig.CanIdle));
+    }
+    if (configs.noHpBar)
+    {
+      configLines.push(this.#configKey(JabsConfig.NoHpBar));
+    }
+    if (configs.showHpBar)
+    {
+      configLines.push(this.#configKey(JabsConfig.ShowHpBar));
+    }
+    if (configs.inanimate)
+    {
+      configLines.push(this.#configKey(JabsConfig.Inanimate));
+    }
+    if (configs.notInanimate)
+    {
+      configLines.push(this.#configKey(JabsConfig.NotInanimate));
+    }
+    if (configs.invincible)
+    {
+      configLines.push(this.#configKey(JabsConfig.Invincible));
+    }
+    if (configs.notInvincible)
+    {
+      configLines.push(this.#configKey(JabsConfig.NotInvincible));
+    }
+    if (configs.noName)
+    {
+      configLines.push(this.#configKey(JabsConfig.NoName));
+    }
+    if (configs.showName)
+    {
+      configLines.push(this.#configKey(JabsConfig.ShowName));
+    }
 
     if (configLines.length === 0)
     {
@@ -235,4 +313,4 @@ class JabsDataParser
 }
 
 
-export { JabsDataParser }
+export { JabsDataParser };

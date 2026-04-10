@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React, { type MouseEvent, useState, } from 'react';
 import {
   Autocomplete,
-  Avatar,
   Box,
   Button,
   Dialog,
@@ -15,36 +14,31 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Menu,
+  MenuItem,
   Stack,
   Step,
   StepButton,
-  Stepper, SxProps,
-  TextField, Theme,
+  Stepper,
+  TextField,
+  Tooltip,
   Typography
 } from '@mui/material';
 import { Game_Trait } from './Traits';
-import {
-  Add,
-  Clear,
-  Close,
-  Edit,
-  Percent,
-  SportsMma,
-  Sync,
-  Whatshot
-} from '@mui/icons-material';
+import { ArrowDownward, ArrowUpward, Close, DeleteOutline, Edit, Percent, Sync, } from '@mui/icons-material';
 import { SystemService } from '@services/SystemService.ts';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
-import {
-  fromBParamIdToName,
-  fromSParamIdToName,
-  fromXParamIdToName
-} from '../../../mappers/ParameterIdMapper.ts';
+import { fromBParamIdToName, fromSParamIdToName, fromXParamIdToName } from '../../../mappers/ParameterIdMapper.ts';
 import { CollapseEffect, PartyAbility, SpecialFlag } from '@core/enums/TraitValues.ts';
-import RPG_Trait = Rmmz.Data.RPG_Trait;
 import { useStates } from '@presentation/context/resources/states.context.tsx';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { useTraitMapping } from '@presentation/hooks/useTraitMapping.ts';
+import RPG_Trait = Rmmz.Data.RPG_Trait;
+
+/**
+ * Order | value text | trait labels | edit/delete. Matches {@link UsableEffectsEditor} row rhythm.
+ */
+const TRAIT_EDITOR_GRID_TEMPLATE = '88px minmax(4.5rem, 7rem) minmax(0, 1fr) 88px';
 
 type TraitEditorProps = {
   selectedTraits: RPG_Trait[],
@@ -66,7 +60,6 @@ const TraitEditor = ({
   } = useSkills();
   const {
     toGameTrait,
-    toCodeColor,
     toCodeIcon,
     codes,
     codeDescriptions,
@@ -81,6 +74,8 @@ const TraitEditor = ({
 
   const [ editTraitActive, setEditTraitActive ] = useState(false);
   const [ activeStep, setActiveStep ] = React.useState(0);
+
+  const [ addMenuAnchor, setAddMenuAnchor ] = useState<HTMLElement | null>(null);
   //endregion state
 
   //region actions
@@ -161,19 +156,46 @@ const TraitEditor = ({
     return initialTrait;
   };
 
-  const handleAddNewTraitOnClick = (index: number | null) =>
+  const handleAddMenuOpen = (event: MouseEvent<HTMLElement>) =>
   {
-    const newTrait = {
-      code: 11,
-      dataId: 1,
-      value: 1
-    } as RPG_Trait;
+    setAddMenuAnchor(event.currentTarget);
+  };
 
-    const updatedTraits = (index === null)
-      ? [ newTrait ]
-      : selectedTraits.toSpliced(index, 0, newTrait);
+  const handleAddMenuClose = () =>
+  {
+    setAddMenuAnchor(null);
+  };
 
-    applyTraits(updatedTraits);
+  const handleAddTraitPick = (code: number) =>
+  {
+    const newTrait = determineInitialTraitBeingEdited(code);
+    applyTraits([ ...selectedTraits, newTrait ]);
+    handleAddMenuClose();
+  };
+
+  const handleMoveTrait = (
+    index: number,
+    delta: number
+  ) =>
+  {
+    const nextIndex = index + delta;
+    if (nextIndex < 0 || nextIndex >= selectedTraits.length)
+    {
+      return;
+    }
+    const copy = [ ...selectedTraits ];
+    const [ row ] = copy.splice(index, 1);
+    copy.splice(nextIndex, 0, row);
+    applyTraits(copy);
+
+    if (selectedTraitIndex === index)
+    {
+      setSelectedTraitIndex(nextIndex);
+    }
+    else if (selectedTraitIndex === nextIndex)
+    {
+      setSelectedTraitIndex(index);
+    }
   };
 
   const handleUpdateTraitOnClick = (
@@ -190,126 +212,30 @@ const TraitEditor = ({
     const updatedTraits = selectedTraits.toSpliced(index, 1);
     applyTraits(updatedTraits);
 
-    // clean up dialog state if we deleted the trait we were currently viewing/editing
-    if (selectedTraitIndex === index)
+    if (selectedTraitIndex > index)
+    {
+      setSelectedTraitIndex(selectedTraitIndex - 1);
+    }
+    else if (selectedTraitIndex === index)
     {
       setEditTraitActive(false);
       setTraitBeingEdited(null);
       setSelectedTrait(null);
       setActiveStep(0);
+      setSelectedTraitIndex(
+        updatedTraits.length === 0
+          ? 0
+          : Math.min(index, updatedTraits.length - 1)
+      );
+    }
+    else if (selectedTraitIndex >= updatedTraits.length)
+    {
+      setSelectedTraitIndex(Math.max(0, updatedTraits.length - 1));
     }
   };
   //endregion actions
 
   //region render
-  const renderTraits = () =>
-  {
-    if (selectedTraits.length === 0)
-    {
-      return <></>;
-    }
-
-    return selectedTraits
-      .map(toGameTrait)
-      .map((
-        trait,
-        index
-      ) => renderTrait(trait, index));
-  };
-
-  const renderTrait = (
-    trait: Game_Trait,
-    index: number
-  ) =>
-  {
-    // Deconstruct the avatar configuration.
-    const avatarConfig = stringAvatar(trait.valueString, trait.code);
-
-    return (
-      <ListItem
-        key={index}
-        secondaryAction={
-          <>
-            <IconButton
-              edge={"start"}
-              onClick={() =>
-              {
-                handleTraitListItemOnClickEvent(index);
-                setEditTraitActive(true);
-              }}
-            >
-              <Edit />
-            </IconButton>
-            <IconButton
-              edge={"end"}
-              onClick={() =>
-              {
-                handleDeleteTraitOnClick(index);
-              }}
-            >
-              <Clear />
-            </IconButton>
-          </>
-        }
-        sx={{ px: 1, py: 0 }}
-      >
-        <ListItemIcon>
-          <Avatar
-            variant={"rounded"}
-            {...avatarConfig}
-          />
-        </ListItemIcon>
-        <ListItemButton
-          onClick={() => handleTraitListItemOnClickEvent(index)}
-          sx={{ px: 1, py: 0 }}
-        >
-          <ListItemText
-            primary={trait.dataName}
-            secondary={trait.codeName}
-          />
-        </ListItemButton>
-      </ListItem>
-    );
-  };
-
-  /**
-   * Converts a string into an object usable to render an avatar.
-   * @param {string} traitValue The display value for the trait.
-   * @param {number} traitCode The RMMZ trait code.
-   * @returns {{ sx: SxProps<Theme>, children: React.ReactNode }} The avatar configuration.
-   */
-  const stringAvatar = (
-    traitValue: string,
-    traitCode: number
-  ): { sx: SxProps<Theme>, children: React.ReactNode } =>
-  {
-    let childAvatar: React.ReactNode = traitValue;
-    if (traitCode === 31)
-    {
-      childAvatar = <Whatshot />;
-    }
-    else if (traitCode === 35)
-    {
-      childAvatar = <SportsMma />;
-    }
-
-    const coloring = toCodeColor(traitCode);
-
-    return {
-      sx: {
-        ...coloring,
-        width: 64,
-        height: 48,
-        textAlign: "center",
-        px: 0.5,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      },
-      children: childAvatar,
-    };
-  };
-
   const renderStepView = () =>
   {
     switch (activeStep)
@@ -737,54 +663,245 @@ const TraitEditor = ({
   }
 
   return <>
-    <Stack spacing={0}>
-      <Box sx={{
-        display: 'flex',
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-      }}>
-        <Typography
-          variant={'h5'}
-          align={'center'}
-          color={'primary'}
-          sx={{ paddingTop: 2 }}
-        >
-          Traits
-        </Typography>
-
+    <Stack spacing={1.5}>
+      <Typography variant={'caption'} color={'text.secondary'} sx={{ display: 'block' }}>
+        Passive traits and resistances. Edit opens the code / target / value steps.
+      </Typography>
+      <Stack direction={'row'} alignItems={'center'} spacing={1}>
         <Button
-          sx={{
-            px: 1,
-            paddingBottom: 0.5,
-            height: 32,
-          }}
-          color={'success'}
-          endIcon={<Add
-            sx={{
-              paddingBottom: 0.5,
-            }}
-          />}
           variant={'outlined'}
-          size={'large'}
-          onClick={() => handleAddNewTraitOnClick(selectedTraits.length)}
+          size={'small'}
+          onClick={handleAddMenuOpen}
         >
-          Add Trait
+          Add trait
         </Button>
-      </Box>
-
-      <div style={{ cursor: 'context-menu' }}>
-        <List
-          dense={true}
-          sx={{
-            overflow: 'auto',
-            maxHeight: 800
+        <Menu
+          anchorEl={addMenuAnchor}
+          open={addMenuAnchor !== null}
+          onClose={handleAddMenuClose}
+          slotProps={{
+            list: {
+              dense: true,
+              sx: { maxHeight: 360 },
+            },
           }}
         >
-          {selectedTraits.length > 0
-            ? renderTraits()
-            : <>Choose "Add Trait" to get started.</>}
-        </List>
-      </div>
+          {codes.map((code) => (
+            <MenuItem
+              key={code}
+              onClick={() =>
+              {
+                handleAddTraitPick(code);
+              }}
+            >
+              <Stack spacing={0}>
+                <Typography variant={'body2'}>{getTraitCodeName(code)}</Typography>
+                <Typography variant={'caption'} color={'text.secondary'}>
+                  {codeDescriptions[ code ]}
+                </Typography>
+              </Stack>
+            </MenuItem>
+          ))}
+        </Menu>
+      </Stack>
+
+      {selectedTraits.length === 0
+        ? (
+          <Typography variant={'body2'} color={'text.secondary'}>
+            No traits. Use &quot;Add trait&quot; to append a row.
+          </Typography>
+        )
+        : (
+          <Box sx={{
+            overflowX: 'auto',
+            width: '100%',
+          }}>
+            <Stack spacing={0}>
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: TRAIT_EDITOR_GRID_TEMPLATE,
+                  columnGap: 1.5,
+                  alignItems: 'end',
+                  pb: 1,
+                  borderBottom: 1,
+                  borderColor: 'divider',
+                  minWidth: 0,
+                }}
+              >
+                <Typography variant={'caption'} fontWeight={600} color={'text.secondary'}>
+                  Order
+                </Typography>
+                <Typography variant={'caption'} fontWeight={600} color={'text.secondary'}>
+                  Value
+                </Typography>
+                <Typography
+                  variant={'caption'}
+                  fontWeight={600}
+                  color={'text.secondary'}
+                  sx={{ minWidth: 0 }}
+                >
+                  Trait
+                </Typography>
+                <Box/>
+              </Box>
+              {selectedTraits.map((
+                rpgTrait,
+                index
+              ) =>
+              {
+                const trait = toGameTrait(rpgTrait);
+                const valueLabel = trait.valueString.trim() === ''
+                  ? '—'
+                  : trait.valueString;
+                return (
+                  <Box
+                    key={`${index}-${rpgTrait.code}-${rpgTrait.dataId}-${rpgTrait.value}`}
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: TRAIT_EDITOR_GRID_TEMPLATE,
+                      columnGap: 1.5,
+                      alignItems: 'center',
+                      py: 0.5,
+                      borderBottom: 1,
+                      borderColor: 'divider',
+                      minWidth: 0,
+                      '&:last-of-type': {
+                        borderBottom: 0,
+                      },
+                    }}
+                  >
+                    <Stack
+                      direction={'row'}
+                      spacing={0}
+                      sx={{
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Tooltip title={'Move up'}>
+                        <span>
+                          <IconButton
+                            size={'small'}
+                            disabled={index === 0}
+                            onClick={() =>
+                            {
+                              handleMoveTrait(index, -1);
+                            }}
+                          >
+                            <ArrowUpward fontSize={'inherit'}/>
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title={'Move down'}>
+                        <span>
+                          <IconButton
+                            size={'small'}
+                            disabled={index >= selectedTraits.length - 1}
+                            onClick={() =>
+                            {
+                              handleMoveTrait(index, 1);
+                            }}
+                          >
+                            <ArrowDownward fontSize={'inherit'}/>
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </Stack>
+                    <Box sx={{
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      minWidth: 0,
+                      px: 0.5,
+                    }}>
+                      <Typography
+                        variant={'body2'}
+                        component={'span'}
+                        color={'text.primary'}
+                        noWrap
+                        title={valueLabel}
+                        sx={{
+                          fontFamily: 'ui-monospace, monospace',
+                          fontVariantNumeric: 'tabular-nums',
+                          textAlign: 'center',
+                          minWidth: 0,
+                          width: '100%',
+                        }}
+                      >
+                        {valueLabel}
+                      </Typography>
+                    </Box>
+                    <Box
+                      role={'button'}
+                      tabIndex={0}
+                      onClick={() =>
+                      {
+                        handleTraitListItemOnClickEvent(index);
+                      }}
+                      onKeyDown={(ke) =>
+                      {
+                        if (ke.key === 'Enter' || ke.key === ' ')
+                        {
+                          ke.preventDefault();
+                          handleTraitListItemOnClickEvent(index);
+                        }
+                      }}
+                      sx={{
+                        minWidth: 0,
+                        cursor: 'pointer',
+                        py: 0.25,
+                      }}
+                    >
+                      <Typography
+                        variant={'body2'}
+                        noWrap
+                        title={trait.dataName}
+                        sx={{ minWidth: 0 }}
+                      >
+                        {trait.dataName}
+                      </Typography>
+                      <Typography variant={'caption'} color={'text.secondary'} noWrap sx={{ minWidth: 0 }}>
+                        {trait.codeName}
+                      </Typography>
+                    </Box>
+                    <Stack
+                      direction={'row'}
+                      spacing={0}
+                      sx={{
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Tooltip title={'Edit'}>
+                        <IconButton
+                          size={'small'}
+                          onClick={() =>
+                          {
+                            handleTraitListItemOnClickEvent(index);
+                            setEditTraitActive(true);
+                          }}
+                        >
+                          <Edit fontSize={'small'}/>
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title={'Remove'}>
+                        <IconButton
+                          size={'small'}
+                          color={'error'}
+                          onClick={() =>
+                          {
+                            handleDeleteTraitOnClick(index);
+                          }}
+                        >
+                          <DeleteOutline fontSize={'small'}/>
+                        </IconButton>
+                      </Tooltip>
+                    </Stack>
+                  </Box>
+                );
+              })}
+            </Stack>
+          </Box>
+        )}
     </Stack>
 
     {/*region not-grid-related elements */}

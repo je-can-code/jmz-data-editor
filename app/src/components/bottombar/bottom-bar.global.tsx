@@ -1,18 +1,6 @@
-import React, {
-  useEffect,
-  useState,
-  useRef
-} from 'react';
-import {
-  AppBar,
-  Autocomplete,
-  Box,
-  InputAdornment,
-  Slide,
-  TextField,
-  Typography
-} from '@mui/material';
-import { Search, KeyboardReturn } from '@mui/icons-material';
+import React, { useEffect, useRef, useState } from 'react';
+import { AppBar, Autocomplete, Box, InputAdornment, Slide, TextField, Typography } from '@mui/material';
+import { KeyboardReturn, Search } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { SearchResult, useGlobalSearch } from '@presentation/hooks/useGlobalSearch.ts';
 
@@ -101,7 +89,7 @@ const GlobalBottomBar = () =>
               <TextField
                 {...params}
                 inputRef={inputRef}
-                placeholder="Global Search (Enemies, Items, Quests...)"
+                placeholder="Global Search (Skills, States, Enemies, Items, Quests…)"
                 variant="outlined"
                 InputProps={{
                   ...params.InputProps,

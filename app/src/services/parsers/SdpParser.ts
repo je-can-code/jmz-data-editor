@@ -1,6 +1,6 @@
-import { SdpDropData } from "@core/domain/valueObjects/sdp-drop.ts";
-import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
-import NoteReader from "@services/utils/NoteReader.ts";
+import { SdpDropData } from '@core/domain/valueObjects/sdp-drop.ts';
+import { NoteNormalizer } from '../utils/NoteNormalizer.ts';
+import NoteReader from '@services/utils/NoteReader.ts';
 
 class SdpParser
 {
@@ -18,7 +18,7 @@ class SdpParser
 
     if (result && result.length > 0)
     {
-      const [ key, dropChance ] = result[0];
+      const [ key, dropChance ] = result[ 0 ];
       return {
         key: String(key),
         dropChance: Number(dropChance) || 0
@@ -27,7 +27,10 @@ class SdpParser
     return null;
   }
 
-  static writeDrop(originalNote: string, sdpData: SdpDropData): string
+  static writeDrop(
+    originalNote: string,
+    sdpData: SdpDropData
+  ): string
   {
     // empty key => remove any existing drop lines and normalize
     if (!sdpData.key.trim())
@@ -64,7 +67,10 @@ class SdpParser
    * @param points The SDP points value to write.
    * @returns The updated note.
    */
-  static writePoints(originalNote: string, points: number): string
+  static writePoints(
+    originalNote: string,
+    points: number
+  ): string
   {
     const newTag = `<sdpPoints:${points}>`;
 

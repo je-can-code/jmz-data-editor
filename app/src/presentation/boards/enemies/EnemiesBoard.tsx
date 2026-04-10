@@ -1,14 +1,5 @@
-import React, {
-  ChangeEvent,
-  useCallback,
-  useEffect,
-  useRef,
-  useState
-} from 'react';
-import {
-  FixedSizeList,
-  ListChildComponentProps
-} from 'react-window';
+import React, { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { FixedSizeList, ListChildComponentProps } from 'react-window';
 import {
   Accordion,
   AccordionDetails,
@@ -40,10 +31,7 @@ import {
 } from '@mui/icons-material';
 import { throttle } from 'lodash';
 
-import {
-  MuiSnackbarSeverity,
-  MuiSnackbarVariant
-} from '@core/enums/MuiSnackbar.ts';
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 
 import { ExtraDropManager } from '@services/parsers/ExtraDropParser.ts';
 
@@ -51,20 +39,7 @@ import EnemyBaseParameters from './EnemyBaseParameters.tsx';
 import EnemiesExtraDrops from './EnemiesExtraDrops.tsx';
 import SaveButton from '../../../components/core/SaveButton.tsx';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
-import {
-  amber,
-  blue,
-  brown,
-  cyan,
-  green,
-  indigo,
-  orange,
-  pink,
-  purple,
-  red,
-  teal,
-  yellow
-} from '@mui/material/colors';
+import { amber, blue, brown, cyan, green, indigo, orange, pink, purple, red, teal, yellow } from '@mui/material/colors';
 import TraitEditor from '../../components/traits/TraitEditor.tsx';
 import ParameterGrowth from './ParameterGrowth.tsx';
 import { knownLongParams } from '../../../mappers/ParameterIdMapper.ts';
@@ -75,10 +50,10 @@ import { EnemyJabsAiTraits } from './EnemyJabsAiTraits.tsx';
 import { EnemyJabsBattlerData } from './EnemyJabsBattlerData.tsx';
 import { useEnemies } from '@presentation/context/resources/enemies.context.tsx';
 import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
-import RPG_DropItem = Rmmz.Data.RPG_DropItem;
-import RPG_Trait = Rmmz.Data.RPG_Trait;
 import { EnemyJabsConfigs } from '@boards/enemies/EnemyJabsConfigs.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
+import RPG_DropItem = Rmmz.Data.RPG_DropItem;
+import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 const EnemiesBoard = () =>
 {
@@ -155,12 +130,12 @@ const EnemiesBoard = () =>
   };
 
   const { updateUrl } = useUrlSelection(
-    "enemyId",
+    'enemyId',
     enemies,
     (e) => e.id,
     selectedEnemyIndex,
     (index) => handleEnemyListItemOnClickEvent(index, false),
-    (index) => listRef.current?.scrollToItem(index, "smart")
+    (index) => listRef.current?.scrollToItem(index, 'smart')
   );
 
   const throttledListScroll = useCallback(
@@ -1102,7 +1077,7 @@ const EnemiesBoard = () =>
     </Snackbar>
 
     {/*endregion not-grid-related elements */}
-  </>
-}
+  </>;
+};
 
 export default EnemiesBoard;

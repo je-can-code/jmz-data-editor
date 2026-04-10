@@ -1,19 +1,6 @@
-import React, {
-  useMemo
-} from 'react';
-import {
-  Box,
-  Grid,
-  Paper,
-  Tab,
-  Tabs,
-  tabsClasses
-} from '@mui/material';
-import {
-  Outlet,
-  useLocation,
-  useNavigate
-} from 'react-router-dom';
+import React, { useMemo } from 'react';
+import { Box, Grid, Paper, Tab, Tabs, tabsClasses } from '@mui/material';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import ProjectPathAppBar from '../../components/topbar/ProjectPathAppBar.tsx';
 import { APP_ROUTES } from '@platform/compositionRoot/routing.config.tsx';
@@ -104,7 +91,7 @@ const AppLayout = () =>
       </Grid>
 
       {/* Bottom Bar */}
-      <GlobalBottomBar />
+      <GlobalBottomBar/>
     </Box>
   </>;
 };

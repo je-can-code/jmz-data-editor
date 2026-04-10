@@ -1,5 +1,5 @@
-import NoteReader from "../utils/NoteReader.ts";
-import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
+import NoteReader from '../utils/NoteReader.ts';
+import { NoteNormalizer } from '../utils/NoteNormalizer.ts';
 
 class MaxTpParser
 {
@@ -14,7 +14,10 @@ class MaxTpParser
     return NoteReader.getNumberFromNoteByRegex(dummy, this.#regex) ?? 0;
   }
 
-  static write(originalNote: string, maxTp: number): string
+  static write(
+    originalNote: string,
+    maxTp: number
+  ): string
   {
     if (maxTp === 0)
     {

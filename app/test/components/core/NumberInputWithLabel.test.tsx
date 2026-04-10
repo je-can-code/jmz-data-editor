@@ -3,19 +3,10 @@
  */
 
 import React from 'react';
-import {
-  describe,
-  expect,
-  it,
-  vi
-} from 'vitest';
-import {
-  render,
-  screen,
-  fireEvent
-} from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import NumberInputWithLabel from '../../../src/components/core/NumberInputWithLabel.tsx';
+import NumberInputWithLabel from '@components/core/NumberInputWithLabel.tsx';
 
 // A simple adornment we can assert on.
 const Adorn = () => <span data-testid="adorn">%</span>;

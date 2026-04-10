@@ -8,21 +8,21 @@ const fromBParamIdToName = (paramId: number): string =>
   switch (paramId)
   {
     case 0:
-      return "Max Life";
+      return 'Max Life';
     case 1:
-      return "Max Magi";
+      return 'Max Magi';
     case 2:
-      return "Power";
+      return 'Power';
     case 3:
-      return "Endurance";
+      return 'Endurance';
     case 4:
-      return "Force";
+      return 'Force';
     case 5:
-      return "Resist";
+      return 'Resist';
     case 6:
-      return "Speed";
+      return 'Speed';
     case 7:
-      return "Luck";
+      return 'Luck';
     default:
       throw new Error(`Unsupported ParamId: ${paramId}`);
   }
@@ -38,25 +38,25 @@ const fromSParamIdToName = (sParamId: number): string =>
   switch (sParamId)
   {
     case 0:
-      return "Aggro";
+      return 'Aggro';
     case 1:
-      return "Parry";
+      return 'Parry';
     case 2:
-      return "Healing Rate";
+      return 'Healing Rate';
     case 3:
-      return "Item Effects";
+      return 'Item Effects';
     case 4:
-      return "Magi Cost";
+      return 'Magi Cost';
     case 5:
-      return "Tech Cost";
+      return 'Tech Cost';
     case 6:
-      return "Phys Dmg Rate";
+      return 'Phys Dmg Rate';
     case 7:
-      return "Magi Dmg Rate";
+      return 'Magi Dmg Rate';
     case 8:
-      return "Environ Dmg Rate";
+      return 'Environ Dmg Rate';
     case 9:
-      return "Experience UP";
+      return 'Experience UP';
     default:
       throw new Error(`Unsupported sParamId: ${sParamId}`);
   }
@@ -72,25 +72,25 @@ const fromXParamIdToName = (xParamId: number): string =>
   switch (xParamId)
   {
     case 0:
-      return "Accuracy";
+      return 'Accuracy';
     case 1:
-      return "Parry Extend";
+      return 'Parry Extend';
     case 2:
-      return "Crit Rate";
+      return 'Crit Rate';
     case 3:
-      return "Crit Dodge";
+      return 'Crit Dodge';
     case 4:
-      return "Magic Evade";
+      return 'Magic Evade';
     case 5:
-      return "Magic Reflect";
+      return 'Magic Reflect';
     case 6:
-      return "Autocounter";
+      return 'Autocounter';
     case 7:
-      return "HP Regen";
+      return 'HP Regen';
     case 8:
-      return "MP Regen";
+      return 'MP Regen';
     case 9:
-      return "TP Regen";
+      return 'TP Regen';
     default:
       throw new Error(`Unsupported xParamId: ${xParamId}`);
   }
@@ -101,7 +101,7 @@ const fromXParamIdToName = (xParamId: number): string =>
  */
 const maxTpName = () =>
 {
-  return "Max Tech";
+  return 'Max Tech';
 };
 
 /**
@@ -173,14 +173,14 @@ const fromLongParameterIdToName = (paramId: number): string =>
     case 27:
       return fromSParamIdToName(paramId - 18); // exr
     case 28:
-      return "Crit Amp"; // cdm
+      return 'Crit Amp'; // cdm
     case 29:
-      return "Crit Block"; // cdr
+      return 'Crit Block'; // cdr
     case 30:
       return maxTpName(); // max tp
     default:
       console.warn(`paramId:${paramId} didn't map to any of the default parameters.`);
-      return "";
+      return '';
   }
 };
 
@@ -301,8 +301,8 @@ const knownExParams = (): KnownParameter[] =>
       key: 'trg',
       longParamId: 17
     },
-  ]
-}
+  ];
+};
 
 const knownSpParams = (): KnownParameter[] =>
 {
@@ -375,26 +375,26 @@ const knownRewardParams = (): KnownParameter[] =>
   return [
     {
       id: 0,
-      name: "Experience",
+      name: 'Experience',
       key: 'exp',
       longParamId: 31,
-      regex: "Plus"
+      regex: 'Plus'
     },
     {
       id: 1,
-      name: "Gold",
+      name: 'Gold',
       key: 'gold',
       longParamId: 32,
-      regex: "Plus"
+      regex: 'Plus'
     },
     {
       id: 2,
-      name: "SDPs",
+      name: 'SDPs',
       key: 'sdp',
       longParamId: 33,
-      regex: "Plus"
+      regex: 'Plus'
     },
-  ]
+  ];
 };
 
 const knownLongParams = (): KnownParameter[] =>
@@ -570,13 +570,13 @@ const knownLongParams = (): KnownParameter[] =>
     },
     {
       id: 0,
-      name: "Crit Amp",
+      name: 'Crit Amp',
       key: 'cdm',
       longParamId: 28
     },
     {
       id: 1,
-      name: "Crit Block",
+      name: 'Crit Block',
       key: 'cdr',
       longParamId: 29
     },
@@ -588,24 +588,24 @@ const knownLongParams = (): KnownParameter[] =>
     },
     {
       id: 0,
-      name: "Experience",
+      name: 'Experience',
       key: 'exp',
       longParamId: 31,
-      regex: "Plus"
+      regex: 'Plus'
     },
     {
       id: 1,
-      name: "Gold",
+      name: 'Gold',
       key: 'gold',
       longParamId: 32,
-      regex: "Plus"
+      regex: 'Plus'
     },
     {
       id: 2,
-      name: "SDPs",
+      name: 'SDPs',
       key: 'sdp',
       longParamId: 33,
-      regex: "Plus"
+      regex: 'Plus'
     },
   ];
 };

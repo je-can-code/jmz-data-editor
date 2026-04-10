@@ -1,4 +1,4 @@
-import { NoteNormalizer } from "@services/utils/NoteNormalizer.ts";
+import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 
 /**
  * Reads and writes J-CriticalFactors per-action crit tags on skill/item notes.
@@ -39,7 +39,7 @@ class UsableItemThisCritParser
   static readThisCritsAlways(note: string): boolean
   {
     const lines = NoteNormalizer.normalize(note)
-      .split("\n");
+      .split('\n');
     for (const line of lines)
     {
       UsableItemThisCritParser.#alwaysLine.lastIndex = 0;
@@ -55,7 +55,10 @@ class UsableItemThisCritParser
    * @param note Note text.
    * @param formula Inner formula; empty after trim removes the tag line.
    */
-  static writeThisCritChance(note: string, formula: string): string
+  static writeThisCritChance(
+    note: string,
+    formula: string
+  ): string
   {
     return UsableItemThisCritParser.#writeBracketTag(
       note,
@@ -69,7 +72,10 @@ class UsableItemThisCritParser
    * @param note Note text.
    * @param formula Inner formula; empty after trim removes the tag line.
    */
-  static writeThisCritDamageMultiplier(note: string, formula: string): string
+  static writeThisCritDamageMultiplier(
+    note: string,
+    formula: string
+  ): string
   {
     return UsableItemThisCritParser.#writeBracketTag(
       note,
@@ -83,13 +89,16 @@ class UsableItemThisCritParser
    * @param note Note text.
    * @param enabled When true, ensures {@code <thisCritsAlways>}; when false, strips it.
    */
-  static writeThisCritsAlways(note: string, enabled: boolean): string
+  static writeThisCritsAlways(
+    note: string,
+    enabled: boolean
+  ): string
   {
     let n = NoteNormalizer.removeLinesMatching(
       note,
       UsableItemThisCritParser.#alwaysLine
     );
-    n = n.replace(/<thisCritsAlways>/gi, "");
+    n = n.replace(/<thisCritsAlways>/gi, '');
     n = NoteNormalizer.normalize(n);
 
     if (enabled === false)
@@ -97,21 +106,24 @@ class UsableItemThisCritParser
       return n;
     }
 
-    return NoteNormalizer.prependBlock(n, "<thisCritsAlways>");
+    return NoteNormalizer.prependBlock(n, '<thisCritsAlways>');
   }
 
-  static #readLastBracketInner(note: string, lineRegex: RegExp): string
+  static #readLastBracketInner(
+    note: string,
+    lineRegex: RegExp
+  ): string
   {
     const lines = NoteNormalizer.normalize(note)
-      .split("\n");
-    let last = "";
+      .split('\n');
+    let last = '';
     for (const line of lines)
     {
       lineRegex.lastIndex = 0;
       const m = line.match(lineRegex);
       if (m !== null)
       {
-        last = m[1].trim();
+        last = m[ 1 ].trim();
       }
     }
     return last;
@@ -128,7 +140,7 @@ class UsableItemThisCritParser
     let n = NoteNormalizer.removeLinesMatching(note, lineRegex);
     n = NoteNormalizer.normalize(n);
 
-    if (inner === "")
+    if (inner === '')
     {
       return n;
     }

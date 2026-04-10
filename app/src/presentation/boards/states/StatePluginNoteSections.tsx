@@ -1,0 +1,876 @@
+import React, { type SyntheticEvent } from 'react';
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Autocomplete,
+  Box,
+  Button,
+  Checkbox,
+  Chip,
+  FormControlLabel,
+  Grid,
+  IconButton,
+  Stack,
+  TextField,
+  Tooltip,
+  Typography,
+} from '@mui/material';
+import { Add, Delete, ExpandMore } from '@mui/icons-material';
+import { RPG_StateDomainModel } from '@core/domain/entities/RPG_StateDomainModel.ts';
+import type { StateCritExtension } from '@core/domain/entities/state/StateCritExtension.ts';
+import type { StateDropsExtension } from '@core/domain/entities/state/StateDropsExtension.ts';
+import type { StateElemBoostRow } from '@core/domain/entities/state/StateElemBoostRow.ts';
+import type { StateElemExtension } from '@core/domain/entities/state/StateElemExtension.ts';
+import type { StateLevelExtension } from '@core/domain/entities/state/StateLevelExtension.ts';
+import type { StateProfExtension } from '@core/domain/entities/state/StateProfExtension.ts';
+import type { StateResourcesExtension } from '@core/domain/entities/state/StateResourcesExtension.ts';
+import type { StateSdpExtension } from '@core/domain/entities/state/StateSdpExtension.ts';
+import type { StateSksExtension } from '@core/domain/entities/state/StateSksExtension.ts';
+import type { IdLabelRow } from '@presentation/components/usableItem/UsableEffectsEditor.tsx';
+
+const accordionShellSx = {
+  border: '1px solid',
+  borderColor: 'divider',
+  borderRadius: 1,
+  '&:before': { display: 'none' },
+} as const;
+
+type StatePluginNoteSectionsProps = {
+  selectedState: RPG_StateDomainModel;
+  editorAccordionProps: (id: string) => {
+    expanded: boolean;
+    onChange: (
+      event: SyntheticEvent,
+      expanded: boolean
+    ) => void;
+  };
+  absorbElementOptions: IdLabelRow[];
+  selectedAbsorbElements: IdLabelRow[];
+  strictElementOptions: IdLabelRow[];
+  selectedStrictElements: IdLabelRow[];
+  boostElementIdOptions: IdLabelRow[];
+  patchCrit: (partial: Partial<StateCritExtension>) => void;
+  patchDrops: (partial: Partial<StateDropsExtension>) => void;
+  patchElem: (partial: Partial<StateElemExtension>) => void;
+  patchLevel: (partial: Partial<StateLevelExtension>) => void;
+  patchProf: (partial: Partial<StateProfExtension>) => void;
+  patchResources: (partial: Partial<StateResourcesExtension>) => void;
+  patchSdp: (partial: Partial<StateSdpExtension>) => void;
+  patchSks: (partial: Partial<StateSksExtension>) => void;
+};
+
+/**
+ * Cross-plugin state note tags (non-JABS) edited as separate domain slices.
+ */
+const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
+{
+  const {
+    selectedState,
+    editorAccordionProps,
+    absorbElementOptions,
+    selectedAbsorbElements,
+    strictElementOptions,
+    selectedStrictElements,
+    boostElementIdOptions,
+    patchCrit,
+    patchDrops,
+    patchElem,
+    patchLevel,
+    patchProf,
+    patchResources,
+    patchSdp,
+    patchSks,
+  } = props;
+
+  const defaultBoostElementId = boostElementIdOptions.find((o) => o.id > 0)?.id ?? 1;
+
+  const patchElemBoostRow = (
+    index: number,
+    row: StateElemBoostRow
+  ) =>
+  {
+    const next = selectedState.elem.elementBoosts.map((
+      r,
+      i
+    ) =>
+    {
+      return i === index
+        ? row
+        : r;
+    });
+    patchElem({ elementBoosts: next });
+  };
+
+  const removeElemBoostRow = (index: number) =>
+  {
+    const next = selectedState.elem.elementBoosts.filter((
+      _r,
+      i
+    ) =>
+    {
+      return i !== index;
+    });
+    patchElem({ elementBoosts: next });
+  };
+
+  const addElemBoostRow = () =>
+  {
+    patchElem({
+      elementBoosts: [
+        ...selectedState.elem.elementBoosts,
+        {
+          elementId: defaultBoostElementId,
+          boost: 0,
+        },
+      ],
+    });
+  };
+
+  return (
+    <>
+      <Accordion
+        {...editorAccordionProps('editor-plugin-crit')}
+        disableGutters
+        elevation={0}
+        sx={accordionShellSx}
+      >
+        <AccordionSummary expandIcon={<ExpandMore/>}>
+          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+            Critical damage
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2} alignItems={'stretch'}>
+            <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
+              Two separate mechanics: how hard you crit others, and how much you soften crits taken. Each side uses a
+              base tag and a stacking tag: critMultiplierBase + critMultiplier (outgoing) vs critReductionBase +
+              critReduction (incoming). Values are percent points summed like in-game.
+            </Typography>
+            <Typography variant={'subtitle2'} sx={{ pt: 0.5 }}>
+              Outgoing — damage when you score a critical hit
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid size={6}>
+                <TextField
+                  type={'number'}
+                  variant={'outlined'}
+                  label={'Multiplier base (%)'}
+                  helperText={'critMultiplierBase — summed into the base crit damage factor.'}
+                  value={selectedState.crit.critMultiplierBase === null
+                    ? ''
+                    : String(selectedState.crit.critMultiplierBase)}
+                  onChange={(e) =>
+                  {
+                    const t = e.target.value.trim();
+                    if (t === '')
+                    {
+                      patchCrit({ critMultiplierBase: null });
+                      return;
+                    }
+                    const n = parseInt(t, 10);
+                    if (Number.isNaN(n) === false && n >= 0)
+                    {
+                      patchCrit({ critMultiplierBase: n });
+                    }
+                  }}
+                  size={'small'}
+                  fullWidth
+                  slotProps={{ htmlInput: { min: 0 } }}
+                />
+              </Grid>
+              <Grid size={6}>
+                <TextField
+                  type={'number'}
+                  variant={'outlined'}
+                  label={'Multiplier extra (%)'}
+                  helperText={'critMultiplier — extra percent stacked with other sources.'}
+                  value={selectedState.crit.critMultiplier === null
+                    ? ''
+                    : String(selectedState.crit.critMultiplier)}
+                  onChange={(e) =>
+                  {
+                    const t = e.target.value.trim();
+                    if (t === '')
+                    {
+                      patchCrit({ critMultiplier: null });
+                      return;
+                    }
+                    const n = parseInt(t, 10);
+                    if (Number.isNaN(n) === false && n >= 0)
+                    {
+                      patchCrit({ critMultiplier: n });
+                    }
+                  }}
+                  size={'small'}
+                  fullWidth
+                  slotProps={{ htmlInput: { min: 0 } }}
+                />
+              </Grid>
+            </Grid>
+            <Typography variant={'subtitle2'} sx={{ pt: 0.5 }}>
+              Incoming — damage when you are hit by a critical hit
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid size={6}>
+                <TextField
+                  type={'number'}
+                  variant={'outlined'}
+                  label={'Reduction base (%)'}
+                  helperText={'critReductionBase — base reduction factor for crits you take.'}
+                  value={selectedState.crit.critReductionBase === null
+                    ? ''
+                    : String(selectedState.crit.critReductionBase)}
+                  onChange={(e) =>
+                  {
+                    const t = e.target.value.trim();
+                    if (t === '')
+                    {
+                      patchCrit({ critReductionBase: null });
+                      return;
+                    }
+                    const n = parseInt(t, 10);
+                    if (Number.isNaN(n) === false && n >= 0)
+                    {
+                      patchCrit({ critReductionBase: n });
+                    }
+                  }}
+                  size={'small'}
+                  fullWidth
+                  slotProps={{ htmlInput: { min: 0 } }}
+                />
+              </Grid>
+              <Grid size={6}>
+                <TextField
+                  type={'number'}
+                  variant={'outlined'}
+                  label={'Reduction extra (%)'}
+                  helperText={'critReduction — extra reduction stacked with other sources.'}
+                  value={selectedState.crit.critReduction === null
+                    ? ''
+                    : String(selectedState.crit.critReduction)}
+                  onChange={(e) =>
+                  {
+                    const t = e.target.value.trim();
+                    if (t === '')
+                    {
+                      patchCrit({ critReduction: null });
+                      return;
+                    }
+                    const n = parseInt(t, 10);
+                    if (Number.isNaN(n) === false && n >= 0)
+                    {
+                      patchCrit({ critReduction: n });
+                    }
+                  }}
+                  size={'small'}
+                  fullWidth
+                  slotProps={{ htmlInput: { min: 0 } }}
+                />
+              </Grid>
+            </Grid>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion
+        {...editorAccordionProps('editor-plugin-drops')}
+        disableGutters
+        elevation={0}
+        sx={accordionShellSx}
+      >
+        <AccordionSummary expandIcon={<ExpandMore/>}>
+          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+            Drops and gold
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2} alignItems={'stretch'}>
+            <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
+              Party drop and gold multiplier bonuses while an actor has this state (percent points summed before the
+              engine divides by 100).
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid size={6}>
+                <TextField
+                  type={'number'}
+                  variant={'outlined'}
+                  label={'Drop multiplier (%)'}
+                  value={selectedState.drops.dropMultiplier === null
+                    ? ''
+                    : String(selectedState.drops.dropMultiplier)}
+                  onChange={(e) =>
+                  {
+                    const t = e.target.value.trim();
+                    if (t === '')
+                    {
+                      patchDrops({ dropMultiplier: null });
+                      return;
+                    }
+                    const n = parseInt(t, 10);
+                    if (Number.isNaN(n) === false)
+                    {
+                      patchDrops({ dropMultiplier: n });
+                    }
+                  }}
+                  size={'small'}
+                  fullWidth
+                />
+              </Grid>
+              <Grid size={6}>
+                <TextField
+                  type={'number'}
+                  variant={'outlined'}
+                  label={'Gold multiplier (%)'}
+                  value={selectedState.drops.goldMultiplier === null
+                    ? ''
+                    : String(selectedState.drops.goldMultiplier)}
+                  onChange={(e) =>
+                  {
+                    const t = e.target.value.trim();
+                    if (t === '')
+                    {
+                      patchDrops({ goldMultiplier: null });
+                      return;
+                    }
+                    const n = parseInt(t, 10);
+                    if (Number.isNaN(n) === false)
+                    {
+                      patchDrops({ goldMultiplier: n });
+                    }
+                  }}
+                  size={'small'}
+                  fullWidth
+                />
+              </Grid>
+            </Grid>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion
+        {...editorAccordionProps('editor-plugin-elem')}
+        disableGutters
+        elevation={0}
+        sx={accordionShellSx}
+      >
+        <AccordionSummary expandIcon={<ExpandMore/>}>
+          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+            Elements
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2} alignItems={'stretch'}>
+            <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
+              Absorb and strict element lists, plus per-element rate boosts.
+            </Typography>
+            <Autocomplete<IdLabelRow, true, false, false>
+              multiple
+              size={'small'}
+              options={absorbElementOptions}
+              getOptionLabel={(o) => o.label}
+              isOptionEqualToValue={(
+                a,
+                b
+              ) => a.id === b.id}
+              value={selectedAbsorbElements}
+              onChange={(
+                _e,
+                next
+              ) =>
+              {
+                const ids = next.map((o) => o.id);
+                patchElem({
+                  absorbElementList: ids.length === 0
+                    ? ''
+                    : ids.join(', '),
+                });
+              }}
+              filterOptions={(
+                options,
+                state
+              ) =>
+              {
+                const q = state.inputValue.trim()
+                  .toLowerCase();
+                if (q === '')
+                {
+                  return options;
+                }
+                return options.filter((o) => o.label.toLowerCase()
+                  .includes(q));
+              }}
+              renderTags={(
+                tagValue,
+                getTagProps
+              ) => tagValue.map((
+                option,
+                index
+              ) =>
+              {
+                const {
+                  key,
+                  ...chipProps
+                } = getTagProps({ index });
+                return (
+                  <Chip
+                    key={key}
+                    {...chipProps}
+                    label={option.label}
+                    size={'small'}
+                  />
+                );
+              })}
+              renderInput={(params) =>
+                (
+                  <TextField
+                    {...params}
+                    variant={'outlined'}
+                    label={'Absorb elements'}
+                    placeholder={'Search…'}
+                  />
+                )}
+              sx={{ width: '100%' }}
+            />
+            <Autocomplete<IdLabelRow, true, false, false>
+              multiple
+              size={'small'}
+              options={strictElementOptions}
+              getOptionLabel={(o) => o.label}
+              isOptionEqualToValue={(
+                a,
+                b
+              ) => a.id === b.id}
+              value={selectedStrictElements}
+              onChange={(
+                _e,
+                next
+              ) =>
+              {
+                const ids = next.map((o) => o.id);
+                patchElem({
+                  strictElementList: ids.length === 0
+                    ? ''
+                    : ids.join(', '),
+                });
+              }}
+              filterOptions={(
+                options,
+                state
+              ) =>
+              {
+                const q = state.inputValue.trim()
+                  .toLowerCase();
+                if (q === '')
+                {
+                  return options;
+                }
+                return options.filter((o) => o.label.toLowerCase()
+                  .includes(q));
+              }}
+              renderTags={(
+                tagValue,
+                getTagProps
+              ) => tagValue.map((
+                option,
+                index
+              ) =>
+              {
+                const {
+                  key,
+                  ...chipProps
+                } = getTagProps({ index });
+                return (
+                  <Chip
+                    key={key}
+                    {...chipProps}
+                    label={option.label}
+                    size={'small'}
+                  />
+                );
+              })}
+              renderInput={(params) =>
+                (
+                  <TextField
+                    {...params}
+                    variant={'outlined'}
+                    label={'Strict elements'}
+                    placeholder={'Search…'}
+                    helperText={'If set, only these elements can affect the battler.'}
+                  />
+                )}
+              sx={{ width: '100%' }}
+            />
+            <Typography variant={'subtitle2'} sx={{ mt: 1 }}>
+              Element rate boosts
+            </Typography>
+            {selectedState.elem.elementBoosts.map((
+              row,
+              index
+            ) =>
+            {
+              const rowOption =
+                boostElementIdOptions.find((o) => o.id === row.elementId) ?? {
+                  id: row.elementId,
+                  label: `#${row.elementId}`,
+                };
+              return (
+                <Grid container spacing={1} alignItems={'center'}
+                      key={`boost-${String(index)}-${String(row.elementId)}`}>
+                  <Grid size={6}>
+                    <Autocomplete<IdLabelRow, false, false, false>
+                      size={'small'}
+                      options={boostElementIdOptions}
+                      getOptionLabel={(o) => o.label}
+                      isOptionEqualToValue={(
+                        a,
+                        b
+                      ) => a.id === b.id}
+                      value={rowOption}
+                      onChange={(
+                        _e,
+                        next
+                      ) =>
+                      {
+                        if (next === null)
+                        {
+                          return;
+                        }
+                        patchElemBoostRow(index, {
+                          elementId: next.id,
+                          boost: row.boost,
+                        });
+                      }}
+                      renderInput={(params) =>
+                        (
+                          <TextField
+                            {...params}
+                            variant={'outlined'}
+                            label={'Element'}
+                          />
+                        )}
+                      sx={{ width: '100%' }}
+                    />
+                  </Grid>
+                  <Grid size={4}>
+                    <TextField
+                      type={'number'}
+                      variant={'outlined'}
+                      label={'Boost %'}
+                      value={String(row.boost)}
+                      onChange={(e) =>
+                      {
+                        const n = parseInt(e.target.value, 10);
+                        if (Number.isNaN(n) === false)
+                        {
+                          patchElemBoostRow(index, {
+                            elementId: row.elementId,
+                            boost: n,
+                          });
+                        }
+                      }}
+                      size={'small'}
+                      fullWidth
+                    />
+                  </Grid>
+                  <Grid size={2}>
+                    <Tooltip title={'Remove row'}>
+                      <IconButton
+                        size={'small'}
+                        onClick={() =>
+                        {
+                          removeElemBoostRow(index);
+                        }}
+                        aria-label={'Remove element boost row'}
+                      >
+                        <Delete fontSize={'small'}/>
+                      </IconButton>
+                    </Tooltip>
+                  </Grid>
+                </Grid>
+              );
+            })}
+            <Box>
+              <Button
+                size={'small'}
+                startIcon={<Add/>}
+                onClick={addElemBoostRow}
+              >
+                Add boost
+              </Button>
+            </Box>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion
+        {...editorAccordionProps('editor-plugin-level')}
+        disableGutters
+        elevation={0}
+        sx={accordionShellSx}
+      >
+        <AccordionSummary expandIcon={<ExpandMore/>}>
+          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+            Level
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2} alignItems={'stretch'}>
+            <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
+              Level offset from this state and max-level boost for actors (stacked with equipment and other states).
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid size={6}>
+                <TextField
+                  type={'number'}
+                  variant={'outlined'}
+                  label={'Level offset'}
+                  value={selectedState.level.levelOffset === null
+                    ? ''
+                    : String(selectedState.level.levelOffset)}
+                  onChange={(e) =>
+                  {
+                    const t = e.target.value.trim();
+                    if (t === '')
+                    {
+                      patchLevel({ levelOffset: null });
+                      return;
+                    }
+                    const n = parseInt(t, 10);
+                    if (Number.isNaN(n) === false)
+                    {
+                      patchLevel({ levelOffset: n });
+                    }
+                  }}
+                  size={'small'}
+                  fullWidth
+                />
+              </Grid>
+              <Grid size={6}>
+                <TextField
+                  type={'number'}
+                  variant={'outlined'}
+                  label={'Max level boost'}
+                  value={selectedState.level.maxLevelBoost === null
+                    ? ''
+                    : String(selectedState.level.maxLevelBoost)}
+                  onChange={(e) =>
+                  {
+                    const t = e.target.value.trim();
+                    if (t === '')
+                    {
+                      patchLevel({ maxLevelBoost: null });
+                      return;
+                    }
+                    const n = parseInt(t, 10);
+                    if (Number.isNaN(n) === false)
+                    {
+                      patchLevel({ maxLevelBoost: n });
+                    }
+                  }}
+                  size={'small'}
+                  fullWidth
+                />
+              </Grid>
+            </Grid>
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion
+        {...editorAccordionProps('editor-plugin-prof')}
+        disableGutters
+        elevation={0}
+        sx={accordionShellSx}
+      >
+        <AccordionSummary expandIcon={<ExpandMore/>}>
+          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+            Skill proficiency
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2} alignItems={'stretch'}>
+            <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
+              Bonus proficiency gains and flow blocks while this state is active.
+            </Typography>
+            <TextField
+              type={'number'}
+              variant={'outlined'}
+              label={'Proficiency bonus'}
+              value={selectedState.prof.proficiencyBonus === null
+                ? ''
+                : String(selectedState.prof.proficiencyBonus)}
+              onChange={(e) =>
+              {
+                const t = e.target.value.trim();
+                if (t === '')
+                {
+                  patchProf({ proficiencyBonus: null });
+                  return;
+                }
+                const n = parseInt(t, 10);
+                if (Number.isNaN(n) === false && n >= 0)
+                {
+                  patchProf({ proficiencyBonus: n });
+                }
+              }}
+              size={'small'}
+              fullWidth
+              slotProps={{ htmlInput: { min: 0 } }}
+            />
+            <FormControlLabel
+              control={(
+                <Checkbox
+                  checked={selectedState.prof.proficiencyGivingBlock}
+                  onChange={(e) =>
+                  {
+                    patchProf({ proficiencyGivingBlock: e.target.checked });
+                  }}
+                  size={'small'}
+                />
+              )}
+              label={'Block granting proficiency to others'}
+            />
+            <FormControlLabel
+              control={(
+                <Checkbox
+                  checked={selectedState.prof.proficiencyGainingBlock}
+                  onChange={(e) =>
+                  {
+                    patchProf({ proficiencyGainingBlock: e.target.checked });
+                  }}
+                  size={'small'}
+                />
+              )}
+              label={'Block gaining proficiency'}
+            />
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion
+        {...editorAccordionProps('editor-plugin-resources')}
+        disableGutters
+        elevation={0}
+        sx={accordionShellSx}
+      >
+        <AccordionSummary expandIcon={<ExpandMore/>}>
+          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+            HP cost reduction
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2} alignItems={'stretch'}>
+            <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
+              Formula inside the tag reduces effective HP skill costs (evaluated in-game).
+            </Typography>
+            <TextField
+              variant={'outlined'}
+              label={'hrc formula (bracket interior)'}
+              value={selectedState.resources.hpCostReductionFormula}
+              onChange={(e) =>
+              {
+                patchResources({ hpCostReductionFormula: e.target.value });
+              }}
+              size={'small'}
+              fullWidth
+              placeholder={'e.g. a.mhp * 0.01'}
+            />
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion
+        {...editorAccordionProps('editor-plugin-sdp')}
+        disableGutters
+        elevation={0}
+        sx={accordionShellSx}
+      >
+        <AccordionSummary expandIcon={<ExpandMore/>}>
+          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+            SDP multiplier
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2} alignItems={'stretch'}>
+            <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
+              Bonus added to the actor SDP points multiplier (base 100 in engine, then divided by 100).
+            </Typography>
+            <TextField
+              type={'number'}
+              variant={'outlined'}
+              label={'Multiplier bonus'}
+              value={selectedState.sdp.sdpMultiplierBonus === null
+                ? ''
+                : String(selectedState.sdp.sdpMultiplierBonus)}
+              onChange={(e) =>
+              {
+                const t = e.target.value.trim();
+                if (t === '')
+                {
+                  patchSdp({ sdpMultiplierBonus: null });
+                  return;
+                }
+                const n = parseFloat(t);
+                if (Number.isNaN(n) === false)
+                {
+                  patchSdp({ sdpMultiplierBonus: n });
+                }
+              }}
+              size={'small'}
+              fullWidth
+              slotProps={{ htmlInput: { step: 'any' } }}
+            />
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+
+      <Accordion
+        {...editorAccordionProps('editor-plugin-sks')}
+        disableGutters
+        elevation={0}
+        sx={accordionShellSx}
+      >
+        <AccordionSummary expandIcon={<ExpandMore/>}>
+          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+            Skill slots
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={2} alignItems={'stretch'}>
+            <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
+              Flat modifier to skill slot point costs while this state applies.
+            </Typography>
+            <TextField
+              type={'number'}
+              variant={'outlined'}
+              label={'Slot cost modifier'}
+              value={selectedState.sks.slotCostModifier === null
+                ? ''
+                : String(selectedState.sks.slotCostModifier)}
+              onChange={(e) =>
+              {
+                const t = e.target.value.trim();
+                if (t === '')
+                {
+                  patchSks({ slotCostModifier: null });
+                  return;
+                }
+                const n = parseInt(t, 10);
+                if (Number.isNaN(n) === false)
+                {
+                  patchSks({ slotCostModifier: n });
+                }
+              }}
+              size={'small'}
+              fullWidth
+            />
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+    </>
+  );
+};
+
+export { StatePluginNoteSections };
+export type { StatePluginNoteSectionsProps };

@@ -1,4 +1,4 @@
-import { filesystem } from "@neutralinojs/lib";
+import { filesystem } from '@neutralinojs/lib';
 
 /**
  * Splits a filesystem path into non-empty segments (forward or backslash).
@@ -18,7 +18,7 @@ function normalizeProjectDataPathForFilesystem(projectDataPath: string): string
 {
   let s = projectDataPath.trim();
   const lower = s.toLowerCase();
-  if (lower.startsWith("file://"))
+  if (lower.startsWith('file://'))
   {
     try
     {
@@ -26,13 +26,13 @@ function normalizeProjectDataPathForFilesystem(projectDataPath: string): string
       if (/^\/[a-z]:\//iu.test(pathname))
       {
         return pathname.slice(1)
-          .replace(/\//gu, "\\");
+          .replace(/\//gu, '\\');
       }
       return pathname;
     }
     catch
     {
-      return s.replace(/^file:\/\//iu, "");
+      return s.replace(/^file:\/\//iu, '');
     }
   }
   return s;
@@ -46,33 +46,33 @@ function normalizeProjectDataPathForFilesystem(projectDataPath: string): string
 function resolveGameProjectRootFromDataPath(projectDataPath: string): string
 {
   const trimmed = normalizeProjectDataPathForFilesystem(projectDataPath)
-    .replace(/[/\\]+$/u, "");
-  const posixAbsolute = trimmed.startsWith("/");
+    .replace(/[/\\]+$/u, '');
+  const posixAbsolute = trimmed.startsWith('/');
   const parts = pathSegments(trimmed);
   if (parts.length === 0)
   {
     if (posixAbsolute)
     {
-      return "/";
+      return '/';
     }
     return trimmed;
   }
-  const last = parts[parts.length - 1];
-  if (last.toLowerCase() === "data")
+  const last = parts[ parts.length - 1 ];
+  if (last.toLowerCase() === 'data')
   {
     parts.pop();
   }
-  const useBackslash = trimmed.includes("\\");
+  const useBackslash = trimmed.includes('\\');
   const sep = useBackslash
-    ? "\\"
-    : "/";
+    ? '\\'
+    : '/';
   if (parts.length === 0)
   {
     if (posixAbsolute && useBackslash === false)
     {
-      return "/";
+      return '/';
     }
-    return "";
+    return '';
   }
   let out = parts.join(sep);
   if (posixAbsolute && useBackslash === false)
@@ -90,11 +90,11 @@ function resolveIconSetPngPath(projectDataPath: string): string
 {
   const normalized = normalizeProjectDataPathForFilesystem(projectDataPath);
   const root = resolveGameProjectRootFromDataPath(normalized);
-  const useBackslash = normalized.includes("\\") || root.includes("\\");
+  const useBackslash = normalized.includes('\\') || root.includes('\\');
   const sep = useBackslash
-    ? "\\"
-    : "/";
-  const rootTrim = root.replace(/[/\\]+$/u, "");
+    ? '\\'
+    : '/';
+  const rootTrim = root.replace(/[/\\]+$/u, '');
   return `${rootTrim}${sep}img${sep}system${sep}IconSet.png`;
 }
 

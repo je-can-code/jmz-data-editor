@@ -1,9 +1,7 @@
-import {
-  describe,
-  expect,
-  it
-} from 'vitest';
-import { JabsDataParser } from '../../../src/services/parsers/JabsDataParser.ts';
+import { describe, expect, it } from 'vitest';
+import { JabsAiTraits } from '@core/domain/valueObjects/jabs-ai-traits.ts';
+import { JabsConfigs } from '@core/domain/valueObjects/jabs-configs.ts';
+import { JabsDataParser } from '@services/parsers/JabsDataParser.ts';
 
 describe('JabsDataParser.readAiTraits', () =>
 {
@@ -58,14 +56,14 @@ describe('JabsDataParser.writeAiTraits', () =>
       '<bottom:keep>\r\r',
     ].join('');
 
-    const result = JabsDataParser.writeAiTraits(original, {
+    const result = JabsDataParser.writeAiTraits(original, new JabsAiTraits({
       careful: false,
       executor: true,
       reckless: true,
       healer: false,
       leader: true,
       follower: false,
-    });
+    }));
 
     // Expect LF-only and deterministic order: careful, executor, reckless, healer, leader, follower
     const expected = [
@@ -253,7 +251,7 @@ describe('JabsDataParser.writeConfigs', () =>
       '<bottom:keep>\n',
     ].join('');
 
-    const result = JabsDataParser.writeConfigs(original, {
+    const result = JabsDataParser.writeConfigs(original, new JabsConfigs({
       noIdle: false,
       canIdle: true,
       noHpBar: true,
@@ -264,7 +262,7 @@ describe('JabsDataParser.writeConfigs', () =>
       notInvincible: true,
       noName: false,
       showName: true,
-    });
+    }));
 
     // Order per implementation: NoIdle, CanIdle, NoHpBar, ShowHpBar, Inanimate, NotInanimate,
     //                           Invincible, NotInvincible, NoName, ShowName

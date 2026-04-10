@@ -1,11 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, } from 'vitest';
 
 import {
   executeLoad,
@@ -14,7 +7,8 @@ import {
   loadArmors,
   loadEnemies,
   loadItems,
-  loadQuests, loadSdps,
+  loadQuests,
+  loadSdps,
   loadSkills,
   loadStates,
   loadSystem,

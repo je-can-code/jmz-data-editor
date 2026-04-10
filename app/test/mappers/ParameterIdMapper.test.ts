@@ -1,11 +1,4 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi
-} from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   fromBParamIdToName,
   fromLongParameterIdToName,
@@ -17,7 +10,7 @@ import {
   knownParamByLongId,
   knownRewardParams,
   knownSpParams,
-} from '../../src/mappers/ParameterIdMapper.ts';
+} from '@mappers/ParameterIdMapper.ts';
 
 describe('ParameterIdMapper basic b/x/s param name lookups', () =>
 {
@@ -209,8 +202,8 @@ describe('ParameterIdMapper fromLongParameterIdToName', () =>
       .toBe('');
     expect(warnSpy)
       .toHaveBeenCalledTimes(1);
-    expect(String(warnSpy.mock.calls[0][0]))
-      .toContain("paramId:999 didn't map to any of the default parameters.");
+    expect(String(warnSpy.mock.calls[ 0 ][ 0 ]))
+      .toContain('paramId:999 didn\'t map to any of the default parameters.');
   });
 });
 
@@ -221,14 +214,14 @@ describe('ParameterIdMapper known param lists', () =>
     const base = knownBaseParams();
     expect(base.length)
       .toBe(8);
-    expect(base[0])
+    expect(base[ 0 ])
       .toEqual({
         id: 0,
         name: 'Max Life',
         key: 'mhp',
         longParamId: 0
       });
-    expect(base[7])
+    expect(base[ 7 ])
       .toEqual({
         id: 7,
         name: 'Luck',
@@ -242,14 +235,14 @@ describe('ParameterIdMapper known param lists', () =>
     const ex = knownExParams();
     expect(ex.length)
       .toBe(10);
-    expect(ex[0])
+    expect(ex[ 0 ])
       .toEqual({
         id: 0,
         name: 'Accuracy',
         key: 'hit',
         longParamId: 8
       });
-    expect(ex[9])
+    expect(ex[ 9 ])
       .toEqual({
         id: 9,
         name: 'TP Regen',
@@ -263,14 +256,14 @@ describe('ParameterIdMapper known param lists', () =>
     const sp = knownSpParams();
     expect(sp.length)
       .toBe(10);
-    expect(sp[0])
+    expect(sp[ 0 ])
       .toEqual({
         id: 0,
         name: 'Aggro',
         key: 'tgr',
         longParamId: 18
       });
-    expect(sp[9])
+    expect(sp[ 9 ])
       .toEqual({
         id: 9,
         name: 'Experience UP',
@@ -284,7 +277,7 @@ describe('ParameterIdMapper known param lists', () =>
     const rewards = knownRewardParams();
     expect(rewards.length)
       .toBe(3);
-    expect(rewards[0])
+    expect(rewards[ 0 ])
       .toEqual({
         id: 0,
         name: 'Experience',
@@ -292,7 +285,7 @@ describe('ParameterIdMapper known param lists', () =>
         longParamId: 31,
         regex: 'Plus'
       });
-    expect(rewards[1])
+    expect(rewards[ 1 ])
       .toEqual({
         id: 1,
         name: 'Gold',
@@ -300,7 +293,7 @@ describe('ParameterIdMapper known param lists', () =>
         longParamId: 32,
         regex: 'Plus'
       });
-    expect(rewards[2])
+    expect(rewards[ 2 ])
       .toEqual({
         id: 2,
         name: 'SDPs',

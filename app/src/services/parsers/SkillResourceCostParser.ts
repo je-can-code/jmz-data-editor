@@ -108,28 +108,6 @@ class SkillResourceCostParser
     return SkillResourceCostParser.#readFormulaTag(note, SkillResourceCostParser.#tpFormula);
   }
 
-  static #readNumberTag(
-    note: string,
-    regex: RegExp
-  ): number
-  {
-    const asBase = { note } as RPG_Base;
-    return NoteReader.getNumberFromNoteByRegex(asBase, regex) ?? 0;
-  }
-
-  static #readFormulaTag(
-    note: string,
-    regex: RegExp
-  ): string
-  {
-    const raw = NoteReader.getStringFromNoteByRegex(note, regex, true);
-    if (raw === null || raw === undefined)
-    {
-      return '';
-    }
-    return raw;
-  }
-
   /**
    * @param note Note text.
    * @param flat When &lt;= 0, flat HP cost tag lines are removed.
@@ -303,6 +281,28 @@ class SkillResourceCostParser
       (inner) => `<tp-cost:[${inner}]>`,
       formula
     );
+  }
+
+  static #readNumberTag(
+    note: string,
+    regex: RegExp
+  ): number
+  {
+    const asBase = { note } as RPG_Base;
+    return NoteReader.getNumberFromNoteByRegex(asBase, regex) ?? 0;
+  }
+
+  static #readFormulaTag(
+    note: string,
+    regex: RegExp
+  ): string
+  {
+    const raw = NoteReader.getStringFromNoteByRegex(note, regex, true);
+    if (raw === null || raw === undefined)
+    {
+      return '';
+    }
+    return raw;
   }
 
   /**

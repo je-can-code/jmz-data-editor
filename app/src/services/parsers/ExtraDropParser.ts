@@ -1,7 +1,7 @@
-import NoteReader from "../utils/NoteReader.ts";
-import RPG_DropHelper from "../utils/DropHelper.ts";
-import DropItemBuilder from "../utils/DropItemBuilder.ts";
-import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
+import NoteReader from '../utils/NoteReader.ts';
+import RPG_DropHelper from '../utils/DropHelper.ts';
+import DropItemBuilder from '../utils/DropItemBuilder.ts';
+import { NoteNormalizer } from '../utils/NoteNormalizer.ts';
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 
 type RPG_ExtraDropChance = [ dropType: 'i' | 'w' | 'a', dropId: number, chance: number ];
@@ -23,7 +23,10 @@ class ExtraDropManager
     const moreDrops = NoteReader.getArraysFromNotesByRegex(note, this.#regex, true) ?? [];
 
     // if there are no more drops, then skip processing.
-    if (moreDrops.length === 0) return [];
+    if (moreDrops.length === 0)
+    {
+      return [];
+    }
 
     // a mapping function to build proper drop items from the arrays.
     const mapper = (drop: RPG_ExtraDropChance): RPG_DropItem =>
@@ -49,17 +52,20 @@ class ExtraDropManager
    * @param originalNote The original note from the enemy to be modified.
    * @param extraDrops The extra drops being slotted onto the note.
    */
-  static write(originalNote: string, extraDrops: RPG_DropItem[]): string
+  static write(
+    originalNote: string,
+    extraDrops: RPG_DropItem[]
+  ): string
   {
     // remove all original extra drops lines
     const base = NoteNormalizer.removeLinesMatching(originalNote, this.#regex);
 
     // build new tags as a block
     const newBlock = extraDrops.map(extraDrop =>
-      {
-        const letter = RPG_DropHelper.LetterFromType(extraDrop.kind);
-        return `<drops:[${letter},${extraDrop.dataId},${extraDrop.denominator}]>`;
-      })
+    {
+      const letter = RPG_DropHelper.LetterFromType(extraDrop.kind);
+      return `<drops:[${letter},${extraDrop.dataId},${extraDrop.denominator}]>`;
+    })
       .join('\n');
 
     // if no new drops, return the cleaned base

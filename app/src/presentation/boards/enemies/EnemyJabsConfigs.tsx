@@ -1,10 +1,4 @@
-import {
-  Box,
-  Checkbox,
-  FormControlLabel,
-  Stack,
-  Typography
-} from "@mui/material";
+import { Box, Checkbox, FormControlLabel, Stack, Typography } from '@mui/material';
 import {
   Badge,
   BadgeSharp,
@@ -15,20 +9,10 @@ import {
   Security,
   Visibility,
   VisibilityOff
-} from "@mui/icons-material";
-import {
-  blue,
-  green,
-  grey,
-  orange,
-  purple,
-  red
-} from "@mui/material/colors";
-import {
-  JabsConfig,
-  JabsConfigsData
-} from "@core/domain/valueObjects/jabs-configs.ts";
-import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
+} from '@mui/icons-material';
+import { blue, green, grey, orange, purple, red } from '@mui/material/colors';
+import { JabsConfig, JabsConfigsData } from '@core/domain/valueObjects/jabs-configs.ts';
+import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
 
 type EnemyJabsConfigsProps = {
   selectedEnemy: RPG_EnemyDomainModel;
@@ -44,7 +28,10 @@ const EnemyJabsConfigs = ({
    * Updates the specific config property on the domain model
    * and triggers the parent update.
    */
-  const handleConfigChange = (configName: keyof JabsConfigsData, checked: boolean) =>
+  const handleConfigChange = (
+    configName: keyof JabsConfigsData,
+    checked: boolean
+  ) =>
   {
     selectedEnemy.jabsConfigs.updateConfig(configName, checked);
     updateEnemy(selectedEnemy);
@@ -53,12 +40,20 @@ const EnemyJabsConfigs = ({
   /**
    * Helper to render a consistent checkbox bound to the domain model.
    */
-  const renderCheckbox = (config: JabsConfig, label: string, icon: any, checkedIcon: any) => (
+  const renderCheckbox = (
+    config: JabsConfig,
+    label: string,
+    icon: any,
+    checkedIcon: any
+  ) => (
     <FormControlLabel
       control={
         <Checkbox
-          checked={selectedEnemy.jabsConfigs[config as keyof JabsConfigsData]}
-          onChange={(_, checked) => handleConfigChange(config as keyof JabsConfigsData, checked)}
+          checked={selectedEnemy.jabsConfigs[ config as keyof JabsConfigsData ]}
+          onChange={(
+            _,
+            checked
+          ) => handleConfigChange(config as keyof JabsConfigsData, checked)}
           icon={icon}
           checkedIcon={checkedIcon}
         />
@@ -69,10 +64,10 @@ const EnemyJabsConfigs = ({
 
   return <>
     <Typography
-      variant={"h4"}
+      variant={'h4'}
       gutterBottom={true}
-      color={"primary"}
-      align={"center"}
+      color={'primary'}
+      align={'center'}
       sx={{ paddingTop: 2 }}
     >
       JABS Configs
@@ -89,15 +84,15 @@ const EnemyJabsConfigs = ({
         <Stack>
           {renderCheckbox(
             JabsConfig.NoIdle,
-            "No Idle",
-            <DirectionsRun sx={{ color: grey[400] }}/>,
-            <DirectionsRun sx={{ color: red[500] }}/>
+            'No Idle',
+            <DirectionsRun sx={{ color: grey[ 400 ] }}/>,
+            <DirectionsRun sx={{ color: red[ 500 ] }}/>
           )}
           {renderCheckbox(
             JabsConfig.CanIdle,
-            "Can Idle",
-            <DirectionsRun sx={{ color: grey[400] }}/>,
-            <DirectionsRun sx={{ color: green[500] }}/>
+            'Can Idle',
+            <DirectionsRun sx={{ color: grey[ 400 ] }}/>,
+            <DirectionsRun sx={{ color: green[ 500 ] }}/>
           )}
         </Stack>
       </Box>
@@ -108,15 +103,15 @@ const EnemyJabsConfigs = ({
         <Stack>
           {renderCheckbox(
             JabsConfig.NoHpBar,
-            "No HP Bar",
-            <HeartBroken sx={{ color: grey[400] }}/>,
-            <HeartBroken sx={{ color: red[500] }}/>
+            'No HP Bar',
+            <HeartBroken sx={{ color: grey[ 400 ] }}/>,
+            <HeartBroken sx={{ color: red[ 500 ] }}/>
           )}
           {renderCheckbox(
             JabsConfig.ShowHpBar,
-            "Show HP Bar",
-            <Favorite sx={{ color: grey[400] }}/>,
-            <Favorite sx={{ color: blue[500] }}/>
+            'Show HP Bar',
+            <Favorite sx={{ color: grey[ 400 ] }}/>,
+            <Favorite sx={{ color: blue[ 500 ] }}/>
           )}
         </Stack>
       </Box>
@@ -127,15 +122,15 @@ const EnemyJabsConfigs = ({
         <Stack>
           {renderCheckbox(
             JabsConfig.Inanimate,
-            "Inanimate",
-            <VisibilityOff sx={{ color: grey[400] }}/>,
-            <VisibilityOff sx={{ color: purple[500] }}/>
+            'Inanimate',
+            <VisibilityOff sx={{ color: grey[ 400 ] }}/>,
+            <VisibilityOff sx={{ color: purple[ 500 ] }}/>
           )}
           {renderCheckbox(
             JabsConfig.NotInanimate,
-            "Not Inanimate",
-            <Visibility sx={{ color: grey[400] }}/>,
-            <Visibility sx={{ color: green[500] }}/>
+            'Not Inanimate',
+            <Visibility sx={{ color: grey[ 400 ] }}/>,
+            <Visibility sx={{ color: green[ 500 ] }}/>
           )}
         </Stack>
       </Box>
@@ -146,15 +141,15 @@ const EnemyJabsConfigs = ({
         <Stack>
           {renderCheckbox(
             JabsConfig.Invincible,
-            "Invincible",
-            <Security sx={{ color: grey[400] }}/>,
-            <Security sx={{ color: orange[500] }}/>
+            'Invincible',
+            <Security sx={{ color: grey[ 400 ] }}/>,
+            <Security sx={{ color: orange[ 500 ] }}/>
           )}
           {renderCheckbox(
             JabsConfig.NotInvincible,
-            "Not Invincible",
-            <NoEncryption sx={{ color: grey[400] }}/>,
-            <NoEncryption sx={{ color: blue[500] }}/>
+            'Not Invincible',
+            <NoEncryption sx={{ color: grey[ 400 ] }}/>,
+            <NoEncryption sx={{ color: blue[ 500 ] }}/>
           )}
         </Stack>
       </Box>
@@ -165,15 +160,15 @@ const EnemyJabsConfigs = ({
         <Stack>
           {renderCheckbox(
             JabsConfig.NoName,
-            "No Name",
-            <BadgeSharp sx={{ color: grey[400] }}/>,
-            <BadgeSharp sx={{ color: red[500] }}/>
+            'No Name',
+            <BadgeSharp sx={{ color: grey[ 400 ] }}/>,
+            <BadgeSharp sx={{ color: red[ 500 ] }}/>
           )}
           {renderCheckbox(
             JabsConfig.ShowName,
-            "Show Name",
-            <Badge sx={{ color: grey[400] }}/>,
-            <Badge sx={{ color: green[500] }}/>
+            'Show Name',
+            <Badge sx={{ color: grey[ 400 ] }}/>,
+            <Badge sx={{ color: green[ 500 ] }}/>
           )}
         </Stack>
       </Box>

@@ -12,7 +12,11 @@ class EnemySdpDropModel
   public dropChance: number;
   public isForcedOpen: boolean;
 
-  constructor(key: string = '', dropChance: number = 0, isForcedOpen: boolean = false)
+  constructor(
+    key: string = '',
+    dropChance: number = 0,
+    isForcedOpen: boolean = false
+  )
   {
     this.key = key;
     this.dropChance = dropChance;

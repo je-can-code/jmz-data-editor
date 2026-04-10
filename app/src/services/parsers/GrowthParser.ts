@@ -1,13 +1,16 @@
-import NoteReader from "../utils/NoteReader.ts";
-import { KnownParameter } from "../../mappers/ParameterIdMapper.ts";
-import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
+import NoteReader from '../utils/NoteReader.ts';
+import { KnownParameter } from '../../mappers/ParameterIdMapper.ts';
+import { NoteNormalizer } from '../utils/NoteNormalizer.ts';
 
 class GrowthParser
 {
-  static #defaultRegexPattern = "BuffPlus";
+  static #defaultRegexPattern = 'BuffPlus';
   static #validFormulaChars = /^[+\-*/ ().\w]*$/;
 
-  static read(growableNote: string, knownParam: KnownParameter): string
+  static read(
+    growableNote: string,
+    knownParam: KnownParameter
+  ): string
   {
     // build the regex from the template.
     const parameterizedRegex = this.#regex(knownParam.key, knownParam.regex);
@@ -16,7 +19,11 @@ class GrowthParser
     return NoteReader.getStringFromNoteByRegex(growableNote, parameterizedRegex) ?? '';
   }
 
-  static write(originalNote: string, knownParam: KnownParameter, newFormula: string): string
+  static write(
+    originalNote: string,
+    knownParam: KnownParameter,
+    newFormula: string
+  ): string
   {
     // Check if the formula contains invalid characters
     if (newFormula && !this.#validFormulaChars.test(newFormula))
@@ -37,7 +44,7 @@ class GrowthParser
     // create the new tag with the formula.
     const newTag = newFormula
       ? `<${knownParam.key}${regexPattern}:[${formattedValue}]>`
-      : "";
+      : '';
 
     // handle removal if new formula is empty
     if (!newFormula)
@@ -56,9 +63,15 @@ class GrowthParser
     return NoteNormalizer.appendBlock(originalNote, newTag);
   }
 
-  static evaluateFormula(formula: string, level: number): number
+  static evaluateFormula(
+    formula: string,
+    level: number
+  ): number
   {
-    if (!formula) return 0;
+    if (!formula)
+    {
+      return 0;
+    }
 
     try
     {
@@ -77,7 +90,11 @@ class GrowthParser
     }
   }
 
-  static generateDataPoints(formula: string, maxLevel: number = 100, step: number = 5)
+  static generateDataPoints(
+    formula: string,
+    maxLevel: number = 100,
+    step: number = 5
+  )
     : Array<{
     level: number,
     value: number
@@ -95,7 +112,7 @@ class GrowthParser
     }
 
     // Add the maxLevel as the final point if it's not already included.
-    const lastPoint = dataPoints[dataPoints.length - 1];
+    const lastPoint = dataPoints[ dataPoints.length - 1 ];
     if (lastPoint.level !== maxLevel)
     {
       const value = GrowthParser.evaluateFormula(formula, maxLevel);
@@ -108,8 +125,11 @@ class GrowthParser
     return dataPoints;
   }
 
-  static #regex = (paramKey: string, regexPattern?: string) =>
+  static #regex = (
+    paramKey: string,
+    regexPattern?: string
+  ) =>
     new RegExp(`<${paramKey}${regexPattern || this.#defaultRegexPattern}:\\[([+\\-*/ ().\\w]+)]>`, 'gi');
 }
 
-export { GrowthParser }
+export { GrowthParser };

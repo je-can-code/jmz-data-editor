@@ -1,5 +1,5 @@
-import type { SkillJabsExtension } from "@core/domain/entities/jabs/SkillJabsExtension.ts";
-import { NoteNormalizer } from "@services/utils/NoteNormalizer.ts";
+import type { SkillJabsExtension } from '@core/domain/entities/jabs/SkillJabsExtension.ts';
+import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 
 /**
  * Single place for all JABS {@code ON SKILLS} notetag read/write (mirrors {@code J.ABS.RegExp} in JABS).
@@ -206,6 +206,8 @@ class SkillJabsNoteParser
     SkillJabsNoteParser.#RE_NO_CAST_PREVIEW,
     SkillJabsNoteParser.#RE_CAST_PREVIEW_WARN,
   ];
+  static readonly #VIS_ANCHOR_DEFAULT = 0.5;
+  static readonly #VIS_SCALE_DEFAULT = 1;
 
   /**
    * Removes every JABS ON SKILLS tag this parser manages.
@@ -215,24 +217,18 @@ class SkillJabsNoteParser
     let n = note;
     for (const re of SkillJabsNoteParser.#STRIP_ORDER)
     {
-      n = n.replace(SkillJabsNoteParser.#ensureGlobal(re), "");
+      n = n.replace(SkillJabsNoteParser.#ensureGlobal(re), '');
     }
     return NoteNormalizer.normalize(n);
-  }
-
-  static #ensureGlobal(re: RegExp): RegExp
-  {
-    if (re.global)
-    {
-      return re;
-    }
-    return new RegExp(re.source, `${re.flags}g`);
   }
 
   /**
    * Fills {@link SkillJabsExtension} from {@code note}.
    */
-  static hydrate(ext: SkillJabsExtension, note: string): void
+  static hydrate(
+    ext: SkillJabsExtension,
+    note: string
+  ): void
   {
     ext.actionId = SkillJabsNoteParser.#readPositiveInt(note, SkillJabsNoteParser.#RE_ACTION_ID);
     ext.hideFromJabsMenu = SkillJabsNoteParser.#testAny(note, SkillJabsNoteParser.#RE_HIDE_MENU);
@@ -298,28 +294,44 @@ class SkillJabsNoteParser
     {
       const pierceCap = SkillJabsNoteParser.#readCapture(note, SkillJabsNoteParser.#RE_PIERCE);
       const piercePair = SkillJabsNoteParser.#parseBracketTwoNonNegInts(pierceCap);
-      ext.pierceMaxCount = piercePair === null ? null : piercePair.a;
-      ext.pierceDelayFrames = piercePair === null ? null : piercePair.b;
+      ext.pierceMaxCount = piercePair === null
+        ? null
+        : piercePair.a;
+      ext.pierceDelayFrames = piercePair === null
+        ? null
+        : piercePair.b;
     }
 
     {
       const guardCap = SkillJabsNoteParser.#readCapture(note, SkillJabsNoteParser.#RE_GUARD);
       const guardPair = SkillJabsNoteParser.#parseBracketTwoSignedInts(guardCap);
-      ext.guardFlat = guardPair === null ? null : guardPair.a;
-      ext.guardPercent = guardPair === null ? null : guardPair.b;
+      ext.guardFlat = guardPair === null
+        ? null
+        : guardPair.a;
+      ext.guardPercent = guardPair === null
+        ? null
+        : guardPair.b;
     }
     ext.parry = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_PARRY);
     {
       const cap = SkillJabsNoteParser.#readCapture(note, SkillJabsNoteParser.#RE_COUNTER_PARRY);
       const parsed = SkillJabsNoteParser.#parseCounterSkillChance(cap);
-      ext.counterParrySkillId = parsed === null ? null : parsed.skillId;
-      ext.counterParryChance = parsed === null ? null : parsed.chance;
+      ext.counterParrySkillId = parsed === null
+        ? null
+        : parsed.skillId;
+      ext.counterParryChance = parsed === null
+        ? null
+        : parsed.chance;
     }
     {
       const cap = SkillJabsNoteParser.#readCapture(note, SkillJabsNoteParser.#RE_COUNTER_GUARD);
       const parsed = SkillJabsNoteParser.#parseCounterSkillChance(cap);
-      ext.counterGuardSkillId = parsed === null ? null : parsed.skillId;
-      ext.counterGuardChance = parsed === null ? null : parsed.chance;
+      ext.counterGuardSkillId = parsed === null
+        ? null
+        : parsed.skillId;
+      ext.counterGuardChance = parsed === null
+        ? null
+        : parsed.chance;
     }
 
     ext.dodgeSteps = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_DODGE);
@@ -329,8 +341,12 @@ class SkillJabsNoteParser
     {
       const cap = SkillJabsNoteParser.#readCapture(note, SkillJabsNoteParser.#RE_IFRAMES);
       const pair = SkillJabsNoteParser.#parseBracketTwoNonNegInts(cap);
-      ext.iframesStartFrame = pair === null ? null : pair.a;
-      ext.iframesEndFrame = pair === null ? null : pair.b;
+      ext.iframesStartFrame = pair === null
+        ? null
+        : pair.a;
+      ext.iframesEndFrame = pair === null
+        ? null
+        : pair.b;
     }
     if (ext.invincibleDodge === true)
     {
@@ -370,7 +386,10 @@ class SkillJabsNoteParser
   /**
    * Serializes {@link SkillJabsExtension} tags, prepended to {@code baseNote} (already stripped).
    */
-  static writeSkillTags(ext: SkillJabsExtension, baseNote: string): string
+  static writeSkillTags(
+    ext: SkillJabsExtension,
+    baseNote: string
+  ): string
   {
     const parts: string[] = [];
 
@@ -380,7 +399,7 @@ class SkillJabsNoteParser
     }
     if (ext.hideFromJabsMenu)
     {
-      parts.push("<hideFromJabsMenu>");
+      parts.push('<hideFromJabsMenu>');
     }
 
     if (ext.castTime !== null)
@@ -398,11 +417,11 @@ class SkillJabsNoteParser
     }
     if (ext.uniqueCooldown)
     {
-      parts.push("<uniqueCooldown>");
+      parts.push('<uniqueCooldown>');
     }
     if (ext.ogcd)
     {
-      parts.push("<ogcd>");
+      parts.push('<ogcd>');
     }
     if (ext.globalCooldownOverride !== null && ext.globalCooldownOverride >= 1)
     {
@@ -421,17 +440,19 @@ class SkillJabsNoteParser
     {
       parts.push(`<radius:${SkillJabsNoteParser.#fmtNum(ext.rangeRadius)}>`);
     }
-    if (ext.hitboxShape !== null && ext.hitboxShape.trim() !== "")
+    if (ext.hitboxShape !== null && ext.hitboxShape.trim() !== '')
     {
-      parts.push(`<hitbox:${ext.hitboxShape.trim().toLowerCase()}>`);
+      parts.push(`<hitbox:${ext.hitboxShape.trim()
+        .toLowerCase()}>`);
     }
     if (ext.projectileCount !== null)
     {
       parts.push(`<projectile:${Math.trunc(ext.projectileCount)}>`);
     }
-    if (ext.projectileFormation !== null && ext.projectileFormation.trim() !== "")
+    if (ext.projectileFormation !== null && ext.projectileFormation.trim() !== '')
     {
-      parts.push(`<formation:${ext.projectileFormation.trim().toLowerCase()}>`);
+      parts.push(`<formation:${ext.projectileFormation.trim()
+        .toLowerCase()}>`);
     }
     if (ext.thickness !== null)
     {
@@ -440,11 +461,11 @@ class SkillJabsNoteParser
 
     if (ext.direct)
     {
-      parts.push("<direct>");
+      parts.push('<direct>');
     }
     if (ext.directLock)
     {
-      parts.push("<directLock>");
+      parts.push('<directLock>');
     }
     if (ext.proximity !== null)
     {
@@ -458,7 +479,7 @@ class SkillJabsNoteParser
     {
       parts.push(`<knockback:${Math.trunc(ext.knockback)}>`);
     }
-    if (ext.delayRaw !== null && ext.delayRaw.trim() !== "")
+    if (ext.delayRaw !== null && ext.delayRaw.trim() !== '')
     {
       parts.push(`<delay:${ext.delayRaw.trim()}>`);
     }
@@ -468,7 +489,7 @@ class SkillJabsNoteParser
     }
     if (ext.onDefeatedTarget)
     {
-      parts.push("<onDefeatedTarget>");
+      parts.push('<onDefeatedTarget>');
     }
 
     if (ext.selfAnimationId !== null)
@@ -480,26 +501,26 @@ class SkillJabsNoteParser
       parts.push(`<onCastAnimationId:${Math.trunc(ext.onCastAnimationId)}>`);
     }
 
-    if (ext.comboRaw !== null && ext.comboRaw.trim() !== "")
+    if (ext.comboRaw !== null && ext.comboRaw.trim() !== '')
     {
       parts.push(`<combo:${ext.comboRaw.trim()}>`);
     }
     if (ext.comboStarter)
     {
-      parts.push("<comboStarter>");
+      parts.push('<comboStarter>');
     }
     if (ext.aiSkillExclusion)
     {
-      parts.push("<aiSkillExclusion>");
+      parts.push('<aiSkillExclusion>');
     }
     if (ext.freeCombo)
     {
-      parts.push("<freeCombo>");
+      parts.push('<freeCombo>');
     }
 
     if (ext.noAutoAssign)
     {
-      parts.push("<noAutoAssign>");
+      parts.push('<noAutoAssign>');
     }
     if (ext.upgradeOverSkillId !== null && ext.upgradeOverSkillId > 0)
     {
@@ -507,11 +528,11 @@ class SkillJabsNoteParser
     }
     if (ext.noUpgrade)
     {
-      parts.push("<noUpgrade>");
+      parts.push('<noUpgrade>');
     }
     if (ext.onlyUpgrade)
     {
-      parts.push("<onlyUpgrade>");
+      parts.push('<onlyUpgrade>');
     }
 
     if (ext.bonusAggro !== null)
@@ -525,7 +546,7 @@ class SkillJabsNoteParser
 
     if (ext.unparryable)
     {
-      parts.push("<unparryable>");
+      parts.push('<unparryable>');
     }
     if (ext.jabsBonusHitsFromSkillNote !== null)
     {
@@ -533,14 +554,20 @@ class SkillJabsNoteParser
     }
     if (ext.pierceMaxCount !== null)
     {
-      const delay = ext.pierceDelayFrames === null ? 0 : Math.trunc(ext.pierceDelayFrames);
+      const delay = ext.pierceDelayFrames === null
+        ? 0
+        : Math.trunc(ext.pierceDelayFrames);
       parts.push(`<pierce:[${Math.trunc(ext.pierceMaxCount)}, ${delay}]>`);
     }
 
     if (ext.guardFlat !== null || ext.guardPercent !== null)
     {
-      const flat = ext.guardFlat === null ? 0 : Math.trunc(ext.guardFlat);
-      const pct = ext.guardPercent === null ? 0 : Math.trunc(ext.guardPercent);
+      const flat = ext.guardFlat === null
+        ? 0
+        : Math.trunc(ext.guardFlat);
+      const pct = ext.guardPercent === null
+        ? 0
+        : Math.trunc(ext.guardPercent);
       parts.push(`<guard:[${flat}, ${pct}]>`);
     }
     if (ext.parry !== null)
@@ -570,13 +597,14 @@ class SkillJabsNoteParser
     {
       parts.push(`<dodgeSpeed:${SkillJabsNoteParser.#fmtNum(ext.dodgeSpeed)}>`);
     }
-    if (ext.moveType !== null && ext.moveType.trim() !== "")
+    if (ext.moveType !== null && ext.moveType.trim() !== '')
     {
-      parts.push(`<moveType:${ext.moveType.trim().toLowerCase()}>`);
+      parts.push(`<moveType:${ext.moveType.trim()
+        .toLowerCase()}>`);
     }
     if (ext.invincibleDodge)
     {
-      parts.push("<invincibleDodge>");
+      parts.push('<invincibleDodge>');
     }
     if (
       ext.invincibleDodge === false
@@ -591,7 +619,7 @@ class SkillJabsNoteParser
 
     if (
       ext.visOffsetRaw !== null
-      && ext.visOffsetRaw.trim() !== ""
+      && ext.visOffsetRaw.trim() !== ''
       && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetRaw) === false
     )
     {
@@ -599,7 +627,7 @@ class SkillJabsNoteParser
     }
     if (
       ext.visAnchorRaw !== null
-      && ext.visAnchorRaw.trim() !== ""
+      && ext.visAnchorRaw.trim() !== ''
       && SkillJabsNoteParser.#isRedundantVisAnchor(ext.visAnchorRaw) === false
     )
     {
@@ -607,11 +635,11 @@ class SkillJabsNoteParser
     }
     if (ext.visRotate)
     {
-      parts.push("<visRotate>");
+      parts.push('<visRotate>');
     }
     if (
       ext.visScaleRaw !== null
-      && ext.visScaleRaw.trim() !== ""
+      && ext.visScaleRaw.trim() !== ''
       && SkillJabsNoteParser.#isRedundantVisScale(ext.visScaleRaw) === false
     )
     {
@@ -623,11 +651,11 @@ class SkillJabsNoteParser
     }
     if (ext.visDebug)
     {
-      parts.push("<visDebug>");
+      parts.push('<visDebug>');
     }
     if (
       ext.visOffsetURaw !== null
-      && ext.visOffsetURaw.trim() !== ""
+      && ext.visOffsetURaw.trim() !== ''
       && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetURaw) === false
     )
     {
@@ -635,7 +663,7 @@ class SkillJabsNoteParser
     }
     if (
       ext.visOffsetDRaw !== null
-      && ext.visOffsetDRaw.trim() !== ""
+      && ext.visOffsetDRaw.trim() !== ''
       && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetDRaw) === false
     )
     {
@@ -643,7 +671,7 @@ class SkillJabsNoteParser
     }
     if (
       ext.visOffsetLRaw !== null
-      && ext.visOffsetLRaw.trim() !== ""
+      && ext.visOffsetLRaw.trim() !== ''
       && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetLRaw) === false
     )
     {
@@ -651,7 +679,7 @@ class SkillJabsNoteParser
     }
     if (
       ext.visOffsetRRaw !== null
-      && ext.visOffsetRRaw.trim() !== ""
+      && ext.visOffsetRRaw.trim() !== ''
       && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetRRaw) === false
     )
     {
@@ -659,7 +687,7 @@ class SkillJabsNoteParser
     }
     if (
       ext.visOffsetURRaw !== null
-      && ext.visOffsetURRaw.trim() !== ""
+      && ext.visOffsetURRaw.trim() !== ''
       && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetURRaw) === false
     )
     {
@@ -667,7 +695,7 @@ class SkillJabsNoteParser
     }
     if (
       ext.visOffsetULRaw !== null
-      && ext.visOffsetULRaw.trim() !== ""
+      && ext.visOffsetULRaw.trim() !== ''
       && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetULRaw) === false
     )
     {
@@ -675,7 +703,7 @@ class SkillJabsNoteParser
     }
     if (
       ext.visOffsetDRRaw !== null
-      && ext.visOffsetDRRaw.trim() !== ""
+      && ext.visOffsetDRRaw.trim() !== ''
       && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetDRRaw) === false
     )
     {
@@ -683,7 +711,7 @@ class SkillJabsNoteParser
     }
     if (
       ext.visOffsetDLRaw !== null
-      && ext.visOffsetDLRaw.trim() !== ""
+      && ext.visOffsetDLRaw.trim() !== ''
       && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetDLRaw) === false
     )
     {
@@ -692,7 +720,7 @@ class SkillJabsNoteParser
 
     if (ext.noCastPreview)
     {
-      parts.push("<noCastPreview>");
+      parts.push('<noCastPreview>');
     }
     if (ext.castPreviewWarnAt !== null)
     {
@@ -705,14 +733,19 @@ class SkillJabsNoteParser
     }
 
     const head = parts.length > 0
-      ? `${parts.join("\n")}\n`
-      : "";
+      ? `${parts.join('\n')}\n`
+      : '';
     return NoteNormalizer.normalize(head + baseNote);
   }
 
-  static readonly #VIS_ANCHOR_DEFAULT = 0.5;
-
-  static readonly #VIS_SCALE_DEFAULT = 1;
+  static #ensureGlobal(re: RegExp): RegExp
+  {
+    if (re.global)
+    {
+      return re;
+    }
+    return new RegExp(re.source, `${re.flags}g`);
+  }
 
   /**
    * Strips visual tags that match engine defaults so notes stay minimal.
@@ -727,52 +760,55 @@ class SkillJabsNoteParser
     {
       ext.visScaleRaw = null;
     }
-    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, "visOffsetRaw");
-    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, "visOffsetURaw");
-    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, "visOffsetDRaw");
-    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, "visOffsetLRaw");
-    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, "visOffsetRRaw");
-    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, "visOffsetURRaw");
-    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, "visOffsetULRaw");
-    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, "visOffsetDRRaw");
-    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, "visOffsetDLRaw");
+    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, 'visOffsetRaw');
+    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, 'visOffsetURaw');
+    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, 'visOffsetDRaw');
+    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, 'visOffsetLRaw');
+    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, 'visOffsetRRaw');
+    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, 'visOffsetURRaw');
+    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, 'visOffsetULRaw');
+    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, 'visOffsetDRRaw');
+    SkillJabsNoteParser.#clearVisOffsetIfZero(ext, 'visOffsetDLRaw');
   }
 
   static #clearVisOffsetIfZero(
     ext: SkillJabsExtension,
     key:
-      | "visOffsetRaw"
-      | "visOffsetURaw"
-      | "visOffsetDRaw"
-      | "visOffsetLRaw"
-      | "visOffsetRRaw"
-      | "visOffsetURRaw"
-      | "visOffsetULRaw"
-      | "visOffsetDRRaw"
-      | "visOffsetDLRaw"
+      | 'visOffsetRaw'
+      | 'visOffsetURaw'
+      | 'visOffsetDRaw'
+      | 'visOffsetLRaw'
+      | 'visOffsetRRaw'
+      | 'visOffsetURRaw'
+      | 'visOffsetULRaw'
+      | 'visOffsetDRRaw'
+      | 'visOffsetDLRaw'
   ): void
   {
-    const v = ext[key];
+    const v = ext[ key ];
     if (v !== null && SkillJabsNoteParser.#isRedundantVisOffsetZero(v))
     {
-      ext[key] = null;
+      ext[ key ] = null;
     }
   }
 
   static #parseBracketInteriorTwo(raw: string): [ string, string ] | null
   {
     const t = raw.trim();
-    const inner = t.startsWith("[") && t.endsWith("]")
-      ? t.slice(1, -1).trim()
+    const inner = t.startsWith('[') && t.endsWith(']')
+      ? t.slice(1, -1)
+        .trim()
       : t;
-    const comma = inner.indexOf(",");
+    const comma = inner.indexOf(',');
     if (comma === -1)
     {
       return null;
     }
-    const a = inner.slice(0, comma).trim();
-    const b = inner.slice(comma + 1).trim();
-    if (a === "" || b === "")
+    const a = inner.slice(0, comma)
+      .trim();
+    const b = inner.slice(comma + 1)
+      .trim();
+    if (a === '' || b === '')
     {
       return null;
     }
@@ -786,8 +822,8 @@ class SkillJabsNoteParser
     {
       return false;
     }
-    const x = parseFloat(pair[0]);
-    const y = parseFloat(pair[1]);
+    const x = parseFloat(pair[ 0 ]);
+    const y = parseFloat(pair[ 1 ]);
     if (Number.isNaN(x) || Number.isNaN(y))
     {
       return false;
@@ -805,8 +841,8 @@ class SkillJabsNoteParser
     {
       return false;
     }
-    const x = parseFloat(pair[0]);
-    const y = parseFloat(pair[1]);
+    const x = parseFloat(pair[ 0 ]);
+    const y = parseFloat(pair[ 1 ]);
     if (Number.isNaN(x) || Number.isNaN(y))
     {
       return false;
@@ -824,8 +860,8 @@ class SkillJabsNoteParser
     {
       return false;
     }
-    const x = parseInt(pair[0], 10);
-    const y = parseInt(pair[1], 10);
+    const x = parseInt(pair[ 0 ], 10);
+    const y = parseInt(pair[ 1 ], 10);
     if (Number.isNaN(x) || Number.isNaN(y))
     {
       return false;
@@ -833,7 +869,10 @@ class SkillJabsNoteParser
     return x === 0 && y === 0;
   }
 
-  static #readCapture(note: string, re: RegExp): string | null
+  static #readCapture(
+    note: string,
+    re: RegExp
+  ): string | null
   {
     const g = SkillJabsNoteParser.#ensureGlobal(re);
     g.lastIndex = 0;
@@ -842,22 +881,28 @@ class SkillJabsNoteParser
     {
       return null;
     }
-    const s = m[1];
-    if (typeof s !== "string" || s.length === 0)
+    const s = m[ 1 ];
+    if (typeof s !== 'string' || s.length === 0)
     {
       return null;
     }
     return s;
   }
 
-  static #testAny(note: string, re: RegExp): boolean
+  static #testAny(
+    note: string,
+    re: RegExp
+  ): boolean
   {
     const g = SkillJabsNoteParser.#ensureGlobal(re);
     g.lastIndex = 0;
     return g.test(note);
   }
 
-  static #readPositiveInt(note: string, re: RegExp): number | null
+  static #readPositiveInt(
+    note: string,
+    re: RegExp
+  ): number | null
   {
     const s = SkillJabsNoteParser.#readCapture(note, re);
     if (s === null)
@@ -872,7 +917,10 @@ class SkillJabsNoteParser
     return v;
   }
 
-  static #readNonNegInt(note: string, re: RegExp): number | null
+  static #readNonNegInt(
+    note: string,
+    re: RegExp
+  ): number | null
   {
     const s = SkillJabsNoteParser.#readCapture(note, re);
     if (s === null)
@@ -887,7 +935,10 @@ class SkillJabsNoteParser
     return v;
   }
 
-  static #readInt(note: string, re: RegExp): number | null
+  static #readInt(
+    note: string,
+    re: RegExp
+  ): number | null
   {
     const s = SkillJabsNoteParser.#readCapture(note, re);
     if (s === null)
@@ -902,7 +953,10 @@ class SkillJabsNoteParser
     return v;
   }
 
-  static #readFloat(note: string, re: RegExp): number | null
+  static #readFloat(
+    note: string,
+    re: RegExp
+  ): number | null
   {
     const s = SkillJabsNoteParser.#readCapture(note, re);
     if (s === null)
@@ -919,7 +973,7 @@ class SkillJabsNoteParser
 
   static #parseBracketTwoNonNegInts(bracket: string | null): { a: number; b: number } | null
   {
-    if (bracket === null || bracket.trim() === "")
+    if (bracket === null || bracket.trim() === '')
     {
       return null;
     }
@@ -929,18 +983,21 @@ class SkillJabsNoteParser
     {
       return null;
     }
-    const a = parseInt(m[1], 10);
-    const b = parseInt(m[2], 10);
+    const a = parseInt(m[ 1 ], 10);
+    const b = parseInt(m[ 2 ], 10);
     if (Number.isNaN(a) || Number.isNaN(b))
     {
       return null;
     }
-    return { a, b };
+    return {
+      a,
+      b
+    };
   }
 
   static #parseBracketTwoSignedInts(bracket: string | null): { a: number; b: number } | null
   {
-    if (bracket === null || bracket.trim() === "")
+    if (bracket === null || bracket.trim() === '')
     {
       return null;
     }
@@ -950,18 +1007,21 @@ class SkillJabsNoteParser
     {
       return null;
     }
-    const a = parseInt(m[1], 10);
-    const b = parseInt(m[2], 10);
+    const a = parseInt(m[ 1 ], 10);
+    const b = parseInt(m[ 2 ], 10);
     if (Number.isNaN(a) || Number.isNaN(b))
     {
       return null;
     }
-    return { a, b };
+    return {
+      a,
+      b
+    };
   }
 
   static #parseCounterSkillChance(bracket: string | null): { skillId: number; chance: number } | null
   {
-    if (bracket === null || bracket.trim() === "")
+    if (bracket === null || bracket.trim() === '')
     {
       return null;
     }
@@ -971,8 +1031,8 @@ class SkillJabsNoteParser
     {
       return null;
     }
-    const skillId = parseInt(m[1], 10);
-    const chance = parseFloat(m[2]);
+    const skillId = parseInt(m[ 1 ], 10);
+    const chance = parseFloat(m[ 2 ]);
     if (Number.isNaN(skillId) || Number.isNaN(chance))
     {
       return null;
@@ -981,7 +1041,10 @@ class SkillJabsNoteParser
     {
       return null;
     }
-    return { skillId, chance };
+    return {
+      skillId,
+      chance
+    };
   }
 
   static #fmtNum(n: number): string

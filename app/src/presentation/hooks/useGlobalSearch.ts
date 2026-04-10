@@ -138,7 +138,10 @@ export const useGlobalSearch = () =>
         category: 'Quests'
       });
 
-      q.objectives.forEach((obj, index) =>
+      q.objectives.forEach((
+        obj,
+        index
+      ) =>
       {
         let targetName = '';
 

@@ -18,13 +18,13 @@ import { useEnemies } from '@presentation/context/resources/enemies.context.tsx'
 import { useQuests } from '@presentation/context/resources/quests.context.tsx';
 import { OmniObjectiveType } from '@core/enums/OmniObjectiveType.ts';
 import OmniObjectiveFetchType from './OmniObjectiveFetchType.ts';
+import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
 import OmniFulfillmentData = Questopedia.OmniFulfillmentData;
 import IndiscriminateData = Questopedia.IndiscriminateData;
 import DestinationData = Questopedia.DestinationData;
 import FetchData = Questopedia.FetchData;
 import SlayData = Questopedia.SlayData;
 import QuestData = Questopedia.QuestData;
-import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
 import RPG_Base = Rmmz.Base.RPG_Base;
 
 type ObjectiveDataProps = {
