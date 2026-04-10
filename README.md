@@ -33,19 +33,6 @@ Coverage and polish vary by board; unsupported engine or plugin fields should be
 - **Layering** — Domain-style models, services, and presentation components; plugin note parsing where boards need structured edits beyond raw text.
 - **CI** — GitHub Actions runs `bun run test` in `app/` on pull requests targeting `main` or `master` (`.github/workflows/test.yaml`).
 
-## Evolution (high level)
-
-Rough chronological summary of larger changes; see `git log` for full detail.
-
-- **States board** — Full states editor with plugin extension panels, natural growth UI, IconSet icons, traits, and tests.
-- **Skills board** — Skill editing with IconSet icon picker, usable-item-style sections, damage/effects editors, and JABS extension panel; dedicated note/parser support where applicable.
-- **Quality** — Extra drops indexing fix, React/MUI major upgrades, broader unit tests and formatting consistency across the repo.
-- **Architecture** — Composition-root routing, resource providers/contexts, `useUrlSelection`, enemy domain entity usage on the enemies board, SDP context integration.
-- **Global search** — Unified search across loaded databases and plugin data with navigation into boards that expose routes.
-- **Enemies** — Traits editor, JABS-related fields, UX improvements, and ongoing domain-driven tidy-ups.
-- **Plugin boards** — Crafting, Quests, Proficiency, and SDP boards brought to full edit workflows.
-- **Foundations** — Initial Neutralino + Vite shell, enemies-focused editing, then expansion into additional boards and test infrastructure.
-
 ## Preamble
 
 On Linux, if webkit/GTK libraries are missing, see
