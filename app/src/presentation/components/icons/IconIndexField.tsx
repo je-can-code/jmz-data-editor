@@ -1,29 +1,19 @@
-import React, {
-  type ChangeEvent,
-  useCallback,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { type ChangeEvent, useCallback, useLayoutEffect, useMemo, useRef, useState, } from 'react';
 import {
   Box,
   Button,
+  ButtonBase,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Stack,
   Typography,
-} from "@mui/material";
-import { alpha } from "@mui/material/styles";
-import { useIconSetAtlas } from "@presentation/context/icon-set-atlas.context.tsx";
-import {
-  RMMZ_ICON_SET_CELL_PX,
-  iconGridDimensions,
-  iconSlotCount,
-} from "@core/enums/RmmzIconSet.ts";
-import NumberInputWithLabel from "../../../components/core/NumberInputWithLabel.tsx";
+} from '@mui/material';
+import { alpha } from '@mui/material/styles';
+import { useIconSetAtlas } from '@presentation/context/icon-set-atlas.context.tsx';
+import { iconGridDimensions, iconSlotCount, RMMZ_ICON_SET_CELL_PX, } from '@core/enums/RmmzIconSet.ts';
+import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 
 type IconIndexFieldProps = {
   value: number;
@@ -83,7 +73,10 @@ function IconIndexField(props: IconIndexFieldProps)
         slots: 0,
       };
     }
-    const { cols, rows } = iconGridDimensions(imgSize.w, imgSize.h, RMMZ_ICON_SET_CELL_PX);
+    const {
+      cols,
+      rows
+    } = iconGridDimensions(imgSize.w, imgSize.h, RMMZ_ICON_SET_CELL_PX);
     return {
       cols,
       rows,
@@ -111,8 +104,8 @@ function IconIndexField(props: IconIndexFieldProps)
       return;
     }
     el.scrollIntoView({
-      block: "center",
-      inline: "nearest",
+      block: 'center',
+      inline: 'nearest',
     });
   }, []);
 
@@ -214,63 +207,71 @@ function IconIndexField(props: IconIndexFieldProps)
       width: PREVIEW_PX,
       height: PREVIEW_PX,
       backgroundImage: `url("${atlasUrl}")`,
-      backgroundRepeat: "no-repeat" as const,
+      backgroundRepeat: 'no-repeat' as const,
       backgroundSize: `${imgSize.w * scale}px ${imgSize.h * scale}px`,
       backgroundPosition: `${-col * PREVIEW_PX}px ${-row * PREVIEW_PX}px`,
-      border: "1px solid",
-      borderColor: "divider",
+      border: '1px solid',
+      borderColor: 'divider',
       borderRadius: 1,
       flexShrink: 0,
     };
   }, [ atlasUrl, grid.cols, grid.slots, imgSize, value ]);
 
+  const pickerDisabled =
+    disabled === true
+    || atlasUrl === null
+    || loadError !== null;
+
   return (
     <Stack spacing={1}>
-      <Stack direction={"row"} spacing={1.5} alignItems={"center"} flexWrap={"wrap"} useFlexGap>
-        {previewSpriteStyle !== null
-          ? (
-            <Box sx={previewSpriteStyle} />
-          )
-          : (
-            <Box
-              sx={{
-                width: PREVIEW_PX,
-                height: PREVIEW_PX,
-                border: "1px dashed",
-                borderColor: "divider",
-                borderRadius: 1,
-                flexShrink: 0,
-              }}
-            />
-          )}
-        <NumberInputWithLabel
-          label={"index"}
-          variant={"outlined"}
-          size={"small"}
-          value={Math.max(0, Math.trunc(value))}
-          htmlInput={{ min: 0, step: 1 }}
-          onChangeEventHandler={handleIndexInput}
-          disabled={disabled === true}
-          sx={{ width: 120 }}
-        />
-        <Button
-          variant={"outlined"}
-          size={"small"}
-          disabled={
-            disabled === true
-            || atlasUrl === null
-            || loadError !== null
-          }
+      <Stack direction={'row'} spacing={1.5} alignItems={'center'} flexWrap={'wrap'} useFlexGap>
+        <ButtonBase
+          type={'button'}
+          disabled={pickerDisabled}
           onClick={() =>
           {
             setDialogOpen(true);
           }}
-        >
-          Pick from sheet…
-        </Button>
+          aria-label={'Choose icon from IconSet sheet'}
+          sx={{
+            display: 'block',
+            padding: 0,
+            ...(previewSpriteStyle !== null
+              ? previewSpriteStyle
+              : {
+                width: PREVIEW_PX,
+                height: PREVIEW_PX,
+                border: '1px dashed',
+                borderColor: 'divider',
+                borderRadius: 1,
+                flexShrink: 0,
+              }),
+            '&:not(.Mui-disabled)': {
+              cursor: 'pointer',
+            },
+            '&:focus-visible': {
+              outline: '2px solid',
+              outlineColor: 'primary.main',
+              outlineOffset: 2,
+            },
+          }}
+        />
+        <NumberInputWithLabel
+          label={'index'}
+          variant={'outlined'}
+          size={'small'}
+          value={Math.max(0, Math.trunc(value))}
+          htmlInput={{
+            min: 0,
+            step: 1
+          }}
+          onChangeEventHandler={handleIndexInput}
+          disabled={disabled === true}
+          sx={{ width: 120 }}
+        />
       </Stack>
       {loadError !== null && (
-        <Typography variant={"caption"} color={"error"}>
+        <Typography variant={'caption'} color={'error'}>
           {loadError}
         </Typography>
       )}
@@ -286,8 +287,8 @@ function IconIndexField(props: IconIndexFieldProps)
           paper: {
             sx: {
               m: 2,
-              width: "fit-content",
-              maxWidth: "calc(100vw - 48px)",
+              width: 'fit-content',
+              maxWidth: 'calc(100vw - 48px)',
             },
           },
         }}
@@ -296,26 +297,26 @@ function IconIndexField(props: IconIndexFieldProps)
         <DialogContent
           dividers
           sx={{
-            overflow: "auto",
-            maxHeight: "70vh",
-            scrollbarGutter: "stable",
+            overflow: 'auto',
+            maxHeight: '70vh',
+            scrollbarGutter: 'stable',
             px: 3,
             pb: 1,
-            boxSizing: "border-box",
+            boxSizing: 'border-box',
           }}
         >
           {atlasUrl === null || imgSize === null || grid.slots <= 0
             ? (
-              <Typography color={"text.secondary"}>
+              <Typography color={'text.secondary'}>
                 Loading atlas…
               </Typography>
             )
             : (
               <Box
                 sx={{
-                  position: "relative",
-                  width: "fit-content",
-                  boxSizing: "border-box",
+                  position: 'relative',
+                  width: 'fit-content',
+                  boxSizing: 'border-box',
                 }}
               >
                 {pickerCrosshairLayout !== null && (
@@ -323,18 +324,18 @@ function IconIndexField(props: IconIndexFieldProps)
                     <Box
                       aria-hidden
                       sx={{
-                        position: "absolute",
+                        position: 'absolute',
                         left: pickerCrosshairLayout.colLeft,
                         top: 0,
                         width: DIALOG_CELL_PX,
                         height: pickerCrosshairLayout.gridH,
                         zIndex: 0,
-                        pointerEvents: "none",
+                        pointerEvents: 'none',
                         backgroundColor: (theme) =>
                           alpha(theme.palette.primary.main, 0.22),
-                        boxSizing: "border-box",
-                        borderLeft: "1px solid",
-                        borderRight: "1px solid",
+                        boxSizing: 'border-box',
+                        borderLeft: '1px solid',
+                        borderRight: '1px solid',
                         borderColor: (theme) =>
                           alpha(theme.palette.primary.light, 0.55),
                       }}
@@ -342,18 +343,18 @@ function IconIndexField(props: IconIndexFieldProps)
                     <Box
                       aria-hidden
                       sx={{
-                        position: "absolute",
+                        position: 'absolute',
                         left: 0,
                         top: pickerCrosshairLayout.rowTop,
                         width: pickerCrosshairLayout.gridW,
                         height: DIALOG_CELL_PX,
                         zIndex: 0,
-                        pointerEvents: "none",
+                        pointerEvents: 'none',
                         backgroundColor: (theme) =>
                           alpha(theme.palette.primary.main, 0.22),
-                        boxSizing: "border-box",
-                        borderTop: "1px solid",
-                        borderBottom: "1px solid",
+                        boxSizing: 'border-box',
+                        borderTop: '1px solid',
+                        borderBottom: '1px solid',
                         borderColor: (theme) =>
                           alpha(theme.palette.primary.light, 0.55),
                       }}
@@ -362,70 +363,79 @@ function IconIndexField(props: IconIndexFieldProps)
                 )}
                 <Box
                   sx={{
-                    display: "grid",
-                    position: "relative",
+                    display: 'grid',
+                    position: 'relative',
                     zIndex: 1,
                     gridTemplateColumns: `repeat(${grid.cols}, ${DIALOG_CELL_PX}px)`,
                     gap: `${GRID_GAP_PX}px`,
-                    width: "fit-content",
-                    boxSizing: "border-box",
+                    width: 'fit-content',
+                    boxSizing: 'border-box',
                   }}
                 >
-                  {Array.from({ length: grid.slots }, (_, idx) =>
-                  {
-                    const col = idx % grid.cols;
-                    const row = Math.floor(idx / grid.cols);
-                    const s = RMMZ_ICON_SET_CELL_PX;
-                    const scale = DIALOG_CELL_PX / s;
-                    const isCurrentPick = idx === clampedPickerIndex;
-                    return (
-                      <Box
-                        key={idx}
-                        ref={isCurrentPick
-                          ? currentIconCellRef
-                          : undefined}
-                        role={"button"}
-                        tabIndex={0}
-                        onClick={() =>
-                        {
-                          pickIndex(idx);
-                        }}
-                        onKeyDown={(ke) =>
-                        {
-                          if (ke.key === "Enter" || ke.key === " ")
+                  {Array.from(
+                    { length: grid.slots },
+                    (
+                      _,
+                      idx
+                    ) =>
+                    {
+                      const col = idx % grid.cols;
+                      const row = Math.floor(idx / grid.cols);
+                      const s = RMMZ_ICON_SET_CELL_PX;
+                      const scale = DIALOG_CELL_PX / s;
+                      const isCurrentPick = idx === clampedPickerIndex;
+                      return (
+                        <Box
+                          key={idx}
+                          ref={isCurrentPick
+                            ? currentIconCellRef
+                            : undefined}
+                          role={'button'}
+                          tabIndex={0}
+                          onClick={() =>
                           {
-                            ke.preventDefault();
                             pickIndex(idx);
-                          }
-                        }}
-                        sx={{
-                          width: DIALOG_CELL_PX,
-                          height: DIALOG_CELL_PX,
-                          boxSizing: "border-box",
-                          backgroundImage: `url("${atlasUrl}")`,
-                          backgroundRepeat: "no-repeat",
-                          backgroundSize: `${imgSize.w * scale}px ${imgSize.h * scale}px`,
-                          backgroundPosition: `${-col * DIALOG_CELL_PX}px ${-row * DIALOG_CELL_PX}px`,
-                          border: "1px solid",
-                          borderColor: "divider",
-                          cursor: "pointer",
-                          ...(isCurrentPick
-                            ? {
-                              zIndex: 2,
-                              border: "2px solid",
-                              borderColor: "primary.main",
-                              boxShadow: (theme) =>
-                                `0 0 0 1px ${theme.palette.background.paper}, 0 0 0 3px ${theme.palette.primary.main}, 0 0 12px ${alpha(theme.palette.primary.main, 0.65)}`,
+                          }}
+                          onKeyDown={(ke) =>
+                          {
+                            if (ke.key === 'Enter' || ke.key === ' ')
+                            {
+                              ke.preventDefault();
+                              pickIndex(idx);
                             }
-                            : {}),
-                          "&:hover": {
-                            outline: "1px solid",
-                            outlineColor: "primary.light",
-                          },
-                        }}
-                      />
-                    );
-                  })}
+                          }}
+                          sx={{
+                            width: DIALOG_CELL_PX,
+                            height: DIALOG_CELL_PX,
+                            boxSizing: 'border-box',
+                            backgroundImage: `url("${atlasUrl}")`,
+                            backgroundRepeat: 'no-repeat',
+                            backgroundSize: `${imgSize.w * scale}px ${imgSize.h * scale}px`,
+                            backgroundPosition: `${-col * DIALOG_CELL_PX}px ${-row * DIALOG_CELL_PX}px`,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            cursor: 'pointer',
+                            ...(isCurrentPick
+                              ? {
+                                zIndex: 2,
+                                border: '2px solid',
+                                borderColor: 'primary.main',
+                                boxShadow: (theme) =>
+                                  `0 0 0 1px ${theme.palette.background.paper}, 0 0 0 3px ${theme.palette.primary.main}, 0 0 12px ${alpha(
+                                    theme.palette.primary.main,
+                                    0.65
+                                  )}`,
+                              }
+                              : {}),
+                            '&:hover': {
+                              outline: '1px solid',
+                              outlineColor: 'primary.light',
+                            },
+                          }}
+                        />
+                      );
+                    }
+                  )}
                 </Box>
               </Box>
             )}

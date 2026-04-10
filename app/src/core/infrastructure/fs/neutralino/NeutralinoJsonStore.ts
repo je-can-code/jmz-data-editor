@@ -1,10 +1,11 @@
-import { filesystem } from "@neutralinojs/lib";
-import { JsonStore } from "../JsonStore.ts";
+import { filesystem } from '@neutralinojs/lib';
+import { JsonStore } from '../JsonStore.ts';
 
 /**
  * A JsonStore implementation backed by Neutralino's filesystem APIs.
  */
-class NeutralinoJsonStore implements JsonStore
+class NeutralinoJsonStore
+  implements JsonStore
 {
   /**
    * Reads a file from disk and parses it as JSON.
@@ -24,7 +25,10 @@ class NeutralinoJsonStore implements JsonStore
    * @param {string} path The absolute or project-relative path to the JSON file.
    * @param {T} data The data to be stringified and persisted.
    */
-  async writeJson<T = unknown>(path: string, data: T): Promise<void>
+  async writeJson<T = unknown>(
+    path: string,
+    data: T
+  ): Promise<void>
   {
     // stringify the data as pretty-printed JSON.
     const text = JSON.stringify(data, null, 2);

@@ -1,16 +1,12 @@
+import { describe, expect, it } from 'vitest';
 import {
-  describe,
-  expect,
-  it
-} from 'vitest';
-import {
-  RMMZ_EFFECT_ADD_STATE,
-  RMMZ_EFFECT_GAIN_TP,
-  RMMZ_EFFECT_RECOVER_HP,
   catalogRowForEffectCode,
   cloneUsableEffectsFromRmmz,
   defaultUsableEffectForCode,
   normalizeUsableEffect,
+  RMMZ_EFFECT_ADD_STATE,
+  RMMZ_EFFECT_GAIN_TP,
+  RMMZ_EFFECT_RECOVER_HP,
 } from '@core/enums/RmmzUsableEffectCatalog.ts';
 
 describe('RmmzUsableEffectCatalog', () =>
@@ -62,7 +58,7 @@ describe('RmmzUsableEffectCatalog', () =>
     const out = cloneUsableEffectsFromRmmz(raw);
     expect(out)
       .toHaveLength(1);
-    expect(out[0])
+    expect(out[ 0 ])
       .toEqual({
         code: 11,
         dataId: 0,

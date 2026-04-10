@@ -13,15 +13,6 @@ class RPG_ItemDomainModel
   }
 
   /**
-   * Synchronizes domain-specific properties back into the note string.
-   * @returns {string} The normalized note string.
-   */
-  protected syncNote(): string
-  {
-    return this.note;
-  }
-
-  /**
    * Converts the domain model back into the Rmmz format for saving.
    * Leverages the captured original object to preserve all unhandled fields.
    * @returns {RPG_Item} The raw RMMZ Item data.
@@ -35,6 +26,15 @@ class RPG_ItemDomainModel
       note: this.syncNote(),
     };
   }
+
+  /**
+   * Synchronizes domain-specific properties back into the note string.
+   * @returns {string} The normalized note string.
+   */
+  protected syncNote(): string
+  {
+    return this.note;
+  }
 }
 
-export { RPG_ItemDomainModel }
+export { RPG_ItemDomainModel };

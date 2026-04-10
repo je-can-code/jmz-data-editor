@@ -1,4 +1,4 @@
-import { fromBParamIdToName } from "../../mappers/ParameterIdMapper.ts";
+import { fromBParamIdToName } from '../../mappers/ParameterIdMapper.ts';
 
 /** Vanilla MZ {@link Game_Action} usable effect codes (skills / items). */
 const RMMZ_EFFECT_RECOVER_HP = 11;
@@ -19,26 +19,26 @@ const RMMZ_EFFECT_COMMON_EVENT = 44;
 const RMMZ_SPECIAL_EFFECT_ESCAPE = 0;
 
 type RmmzUsableEffectDataIdRole =
-  | "none"
-  | "state_add"
-  | "state_remove"
-  | "param"
-  | "special"
-  | "skill"
-  | "common_event";
+  | 'none'
+  | 'state_add'
+  | 'state_remove'
+  | 'param'
+  | 'special'
+  | 'skill'
+  | 'common_event';
 
 type RmmzUsableEffectValue1Role =
-  | "recover_fraction"
-  | "tp_amount"
-  | "state_chance"
-  | "buff_turns"
-  | "debuff_turns"
-  | "grow_delta"
-  | "unused";
+  | 'recover_fraction'
+  | 'tp_amount'
+  | 'state_chance'
+  | 'buff_turns'
+  | 'debuff_turns'
+  | 'grow_delta'
+  | 'unused';
 
 type RmmzUsableEffectValue2Role =
-  | "recover_flat"
-  | "unused";
+  | 'recover_flat'
+  | 'unused';
 
 type RmmzUsableEffectCatalogRow = {
   code: number;
@@ -51,94 +51,94 @@ type RmmzUsableEffectCatalogRow = {
 const RMMZ_USABLE_EFFECT_CATALOG: RmmzUsableEffectCatalogRow[] = [
   {
     code: RMMZ_EFFECT_RECOVER_HP,
-    label: "Recover HP",
-    dataId: "none",
-    value1: "recover_fraction",
-    value2: "recover_flat",
+    label: 'Recover HP',
+    dataId: 'none',
+    value1: 'recover_fraction',
+    value2: 'recover_flat',
   },
   {
     code: RMMZ_EFFECT_RECOVER_MP,
-    label: "Recover MP",
-    dataId: "none",
-    value1: "recover_fraction",
-    value2: "recover_flat",
+    label: 'Recover MP',
+    dataId: 'none',
+    value1: 'recover_fraction',
+    value2: 'recover_flat',
   },
   {
     code: RMMZ_EFFECT_GAIN_TP,
-    label: "Gain TP",
-    dataId: "none",
-    value1: "tp_amount",
-    value2: "unused",
+    label: 'Gain TP',
+    dataId: 'none',
+    value1: 'tp_amount',
+    value2: 'unused',
   },
   {
     code: RMMZ_EFFECT_ADD_STATE,
-    label: "Add state",
-    dataId: "state_add",
-    value1: "state_chance",
-    value2: "unused",
+    label: 'Add state',
+    dataId: 'state_add',
+    value1: 'state_chance',
+    value2: 'unused',
   },
   {
     code: RMMZ_EFFECT_REMOVE_STATE,
-    label: "Remove state",
-    dataId: "state_remove",
-    value1: "state_chance",
-    value2: "unused",
+    label: 'Remove state',
+    dataId: 'state_remove',
+    value1: 'state_chance',
+    value2: 'unused',
   },
   {
     code: RMMZ_EFFECT_ADD_BUFF,
-    label: "Add buff",
-    dataId: "param",
-    value1: "buff_turns",
-    value2: "unused",
+    label: 'Add buff',
+    dataId: 'param',
+    value1: 'buff_turns',
+    value2: 'unused',
   },
   {
     code: RMMZ_EFFECT_ADD_DEBUFF,
-    label: "Add debuff",
-    dataId: "param",
-    value1: "debuff_turns",
-    value2: "unused",
+    label: 'Add debuff',
+    dataId: 'param',
+    value1: 'debuff_turns',
+    value2: 'unused',
   },
   {
     code: RMMZ_EFFECT_REMOVE_BUFF,
-    label: "Remove buff",
-    dataId: "param",
-    value1: "unused",
-    value2: "unused",
+    label: 'Remove buff',
+    dataId: 'param',
+    value1: 'unused',
+    value2: 'unused',
   },
   {
     code: RMMZ_EFFECT_REMOVE_DEBUFF,
-    label: "Remove debuff",
-    dataId: "param",
-    value1: "unused",
-    value2: "unused",
+    label: 'Remove debuff',
+    dataId: 'param',
+    value1: 'unused',
+    value2: 'unused',
   },
   {
     code: RMMZ_EFFECT_SPECIAL,
-    label: "Special effect",
-    dataId: "special",
-    value1: "unused",
-    value2: "unused",
+    label: 'Special effect',
+    dataId: 'special',
+    value1: 'unused',
+    value2: 'unused',
   },
   {
     code: RMMZ_EFFECT_GROW,
-    label: "Grow parameter",
-    dataId: "param",
-    value1: "grow_delta",
-    value2: "unused",
+    label: 'Grow parameter',
+    dataId: 'param',
+    value1: 'grow_delta',
+    value2: 'unused',
   },
   {
     code: RMMZ_EFFECT_LEARN_SKILL,
-    label: "Learn skill",
-    dataId: "skill",
-    value1: "unused",
-    value2: "unused",
+    label: 'Learn skill',
+    dataId: 'skill',
+    value1: 'unused',
+    value2: 'unused',
   },
   {
     code: RMMZ_EFFECT_COMMON_EVENT,
-    label: "Common event",
-    dataId: "common_event",
-    value1: "unused",
-    value2: "unused",
+    label: 'Common event',
+    dataId: 'common_event',
+    value1: 'unused',
+    value2: 'unused',
   },
 ];
 
@@ -276,14 +276,17 @@ function buildBparamAutocompleteOptions(): { id: number; label: string }[]
  */
 function normalizeUsableEffect(raw: unknown): Rmmz.Data.RPG_UsableEffect
 {
-  if (raw === null || typeof raw !== "object")
+  if (raw === null || typeof raw !== 'object')
   {
     return defaultUsableEffectForCode(RMMZ_EFFECT_RECOVER_HP);
   }
   const o = raw as Record<string, unknown>;
-  const num = (v: unknown, fallback: number): number =>
+  const num = (
+    v: unknown,
+    fallback: number
+  ): number =>
   {
-    const n = typeof v === "number"
+    const n = typeof v === 'number'
       ? v
       : Number(v);
     return Number.isFinite(n)
@@ -291,10 +294,10 @@ function normalizeUsableEffect(raw: unknown): Rmmz.Data.RPG_UsableEffect
       : fallback;
   };
   return {
-    code: num(o["code"], RMMZ_EFFECT_RECOVER_HP),
-    dataId: num(o["dataId"], 0),
-    value1: num(o["value1"], 0),
-    value2: num(o["value2"], 0),
+    code: num(o[ 'code' ], RMMZ_EFFECT_RECOVER_HP),
+    dataId: num(o[ 'dataId' ], 0),
+    value1: num(o[ 'value1' ], 0),
+    value2: num(o[ 'value2' ], 0),
   };
 }
 

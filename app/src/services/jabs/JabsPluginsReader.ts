@@ -1,20 +1,23 @@
-import { filesystem } from "@neutralinojs/lib";
-import type { RmmzMapJson } from "@core/types/RmmzMapJson.ts";
+import { filesystem } from '@neutralinojs/lib';
+import type { RmmzMapJson } from '@core/types/RmmzMapJson.ts';
 
 const DEFAULT_JABS_ACTION_MAP_ID = 2;
 
-function joinProjectPath(root: string, ...segments: string[]): string
+function joinProjectPath(
+  root: string,
+  ...segments: string[]
+): string
 {
-  const sep = root.includes("\\")
-    ? "\\"
-    : "/";
-  const base = root.replace(/[/\\]+$/u, "");
+  const sep = root.includes('\\')
+    ? '\\'
+    : '/';
+  const base = root.replace(/[/\\]+$/u, '');
   return [ base, ...segments ].join(sep);
 }
 
 function isRecord(x: unknown): x is Record<string, unknown>
 {
-  return typeof x === "object" && x !== null;
+  return typeof x === 'object' && x !== null;
 }
 
 /**
@@ -22,11 +25,11 @@ function isRecord(x: unknown): x is Record<string, unknown>
  */
 function parsePluginsJsArray(text: string): unknown[]
 {
-  const first = text.indexOf("[");
-  const last = text.lastIndexOf("]");
+  const first = text.indexOf('[');
+  const last = text.lastIndexOf(']');
   if (first === -1 || last === -1 || last <= first)
   {
-    throw new Error("plugins.js: could not locate JSON array");
+    throw new Error('plugins.js: could not locate JSON array');
   }
   return JSON.parse(text.slice(first, last + 1)) as unknown[];
 }
@@ -38,12 +41,12 @@ function parsePluginsJsArray(text: string): unknown[]
 async function readJabsActionMapIdFromPluginsJs(projectRoot: string): Promise<number>
 {
   const trimmed = projectRoot.trim();
-  if (trimmed === "")
+  if (trimmed === '')
   {
     return DEFAULT_JABS_ACTION_MAP_ID;
   }
 
-  const path = joinProjectPath(trimmed, "js", "plugins.js");
+  const path = joinProjectPath(trimmed, 'js', 'plugins.js');
   try
   {
     const text = await filesystem.readFile(path);
@@ -54,19 +57,19 @@ async function readJabsActionMapIdFromPluginsJs(projectRoot: string): Promise<nu
       {
         continue;
       }
-      const name = entry["name"];
+      const name = entry[ 'name' ];
       // Core plugin path in plugins.js is still "abs/J-ABS" (hyphenated filename).
-      if (typeof name !== "string" || name.includes("J-ABS") === false)
+      if (typeof name !== 'string' || name.includes('J-ABS') === false)
       {
         continue;
       }
-      const parameters = entry["parameters"];
+      const parameters = entry[ 'parameters' ];
       if (!isRecord(parameters))
       {
         continue;
       }
-      const raw = parameters["actionMapId"];
-      if (typeof raw === "number")
+      const raw = parameters[ 'actionMapId' ];
+      if (typeof raw === 'number')
       {
         if (!Number.isNaN(raw) && raw > 0)
         {
@@ -74,7 +77,7 @@ async function readJabsActionMapIdFromPluginsJs(projectRoot: string): Promise<nu
         }
         continue;
       }
-      if (typeof raw === "string")
+      if (typeof raw === 'string')
       {
         const n = parseInt(raw, 10);
         if (!Number.isNaN(n) && n > 0)
@@ -106,15 +109,15 @@ function buildActionMapEventRows(map: RmmzMapJson): { id: number; label: string 
   const rows: { id: number; label: string }[] = [];
   for (let i = 1; i < events.length; i++)
   {
-    const ev = events[i];
-    if (ev === null || typeof ev !== "object")
+    const ev = events[ i ];
+    if (ev === null || typeof ev !== 'object')
     {
       continue;
     }
-    const id = typeof ev.id === "number"
+    const id = typeof ev.id === 'number'
       ? ev.id
       : i;
-    const name = typeof ev.name === "string" && ev.name.length > 0
+    const name = typeof ev.name === 'string' && ev.name.length > 0
       ? ev.name
       : `Event ${id}`;
     rows.push({

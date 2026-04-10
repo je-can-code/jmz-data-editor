@@ -1,20 +1,9 @@
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi
-} from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SystemService } from '@services/SystemService.ts';
-import {
-  loadAnimations,
-  loadCommonEvents,
-  loadSystem
-} from '@services/DataService.ts';
+import { loadAnimations, loadCommonEvents, loadSystem } from '@services/DataService.ts';
 
 // Mock DataService before importing the module under test
-vi.mock('../../src/services/DataService', () =>
+vi.mock('@services/DataService.ts', () =>
 {
   return {
     loadSystem: vi.fn(),
@@ -80,9 +69,21 @@ describe('SystemService.loadSystemData', () =>
     vi.mocked(loadSystem)
       .mockResolvedValueOnce(sys as any);
     vi.mocked(loadAnimations)
-      .mockResolvedValueOnce([ null, { id: 1, name: 'Hit Physical' } ] as any);
+      .mockResolvedValueOnce([
+        null,
+        {
+          id: 1,
+          name: 'Hit Physical'
+        }
+      ] as any);
     vi.mocked(loadCommonEvents)
-      .mockResolvedValueOnce([ null, { id: 1, name: 'Test CE' } ] as any);
+      .mockResolvedValueOnce([
+        null,
+        {
+          id: 1,
+          name: 'Test CE'
+        }
+      ] as any);
 
     await SystemService.loadSystemData(projectPath);
 
@@ -121,7 +122,7 @@ describe('SystemService.loadSystemData', () =>
       .toEqual(sys.equipTypes);
 
     // spot checks
-    expect(SystemService.elements[1])
+    expect(SystemService.elements[ 1 ])
       .toBe('Fire');
     expect(SystemService.equipTypes.includes('Accessory'))
       .toBe(true);
@@ -150,9 +151,9 @@ describe('SystemService.loadSystemData', () =>
     await SystemService.loadSystemData(projectPath);
 
     // Assert data reflects the second invocation
-    expect(SystemService.elements[0])
+    expect(SystemService.elements[ 0 ])
       .toBe('None B');
-    expect(SystemService.skillTypes[1])
+    expect(SystemService.skillTypes[ 1 ])
       .toBe('Magic B');
     expect(SystemService.weaponTypes)
       .toEqual([ 'Sword B', 'Axe B' ]);

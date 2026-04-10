@@ -1,6 +1,7 @@
-import DatabaseFilenames from "../core/enums/DatabaseFilenames.ts";
-import ConfigFilenames from "../core/enums/ConfigFilenames.ts";
-import { JsonStore } from "../core/infrastructure/fs/JsonStore.ts";
+import DatabaseFilenames from '../core/enums/DatabaseFilenames.ts';
+import ConfigFilenames from '../core/enums/ConfigFilenames.ts';
+import { JsonStore } from '../core/infrastructure/fs/JsonStore.ts';
+import type { RmmzMapJson } from '@core/types/RmmzMapJson.ts';
 import RPG_Actor = Rmmz.Implementations.RPG_Actor;
 import RPG_Skill = Rmmz.Implementations.RPG_Skill;
 import RPG_Item = Rmmz.Implementations.RPG_Item;
@@ -11,7 +12,6 @@ import RPG_System = Rmmz.System.RPG_System;
 import RPG_State = Rmmz.Implementations.RPG_State;
 import RPG_Animation = Rmmz.Implementations.RPG_Animation;
 import RPG_CommonEvent = Rmmz.Implementations.RPG_CommonEvent;
-import type { RmmzMapJson } from "@core/types/RmmzMapJson.ts";
 
 type QuestConfiguration = Questopedia.Configuration;
 type SdpConfiguration = Sdp.Configuration;
@@ -37,15 +37,19 @@ const setJsonStore = (store: JsonStore): void =>
  * @param filename The filename itself, including the extension.
  * @param data The data that will be JSONified at save.
  */
-const executeSave = async (projectPath: string, filename: string, data: any) =>
+const executeSave = async (
+  projectPath: string,
+  filename: string,
+  data: any
+) =>
 {
   // guard against missing store configuration.
   if (!jsonStore)
   {
-    throw new Error("JsonStore not configured");
+    throw new Error('JsonStore not configured');
   }
 
-  console.log("saving...");
+  console.log('saving...');
 
   // build the destination filepath to write the data to.
   const destination = `${projectPath}/${filename}`;
@@ -66,12 +70,15 @@ const executeSave = async (projectPath: string, filename: string, data: any) =>
  * @param projectPath The basepath to the location where the file should live.
  * @param filename The filename itself, including the extension.
  */
-const executeLoad = async <T>(projectPath: string, filename: string): Promise<T> =>
+const executeLoad = async <T>(
+  projectPath: string,
+  filename: string
+): Promise<T> =>
 {
   // guard against missing store configuration.
   if (!jsonStore)
   {
-    throw new Error("JsonStore not configured");
+    throw new Error('JsonStore not configured');
   }
 
   // build the target filepath to read the data from.
@@ -156,7 +163,8 @@ const loadCommonEvents = async (projectPath: string): Promise<(RPG_CommonEvent |
 function rmmzMapDataFilename(mapId: number): string
 {
   const n = Math.max(0, Math.trunc(mapId));
-  return `Map${String(n).padStart(3, "0")}.json`;
+  return `Map${String(n)
+    .padStart(3, '0')}.json`;
 }
 
 /**
@@ -164,7 +172,10 @@ function rmmzMapDataFilename(mapId: number): string
  * @param rmmzDataPath Absolute path to {@code data/}.
  * @param mapId Map id as in MapInfos / editor.
  */
-const loadMapJson = async (rmmzDataPath: string, mapId: number): Promise<RmmzMapJson> =>
+const loadMapJson = async (
+  rmmzDataPath: string,
+  mapId: number
+): Promise<RmmzMapJson> =>
 {
   return await executeLoad<RmmzMapJson>(rmmzDataPath, rmmzMapDataFilename(mapId));
 };

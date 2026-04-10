@@ -4,7 +4,7 @@ on:
   pull_request:
     # Run only for PRs targeting these branches (no runs on direct pushes or merges)
     branches: [ "main", "master" ]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [ opened, synchronize, reopened, ready_for_review ]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

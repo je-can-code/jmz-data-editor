@@ -1,17 +1,10 @@
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, } from 'react';
 import {
   loadIconSetPng,
   normalizeProjectDataPathForFilesystem,
   resolveIconSetPngPath,
-} from "@services/ImageService.ts";
-import { useProjectPath } from "@presentation/context/project-path.context.tsx";
+} from '@services/ImageService.ts';
+import { useProjectPath } from '@presentation/context/project-path.context.tsx';
 
 type IconSetAtlasValue = {
   atlasUrl: string | null;
@@ -26,7 +19,7 @@ const defaultValue: IconSetAtlasValue = {
   imgWidth: 0,
   imgHeight: 0,
   loadError: null,
-  resolvedPath: "",
+  resolvedPath: '',
 };
 
 const Ctx = createContext<IconSetAtlasValue>(defaultValue);
@@ -37,8 +30,8 @@ const Ctx = createContext<IconSetAtlasValue>(defaultValue);
  */
 async function decodePngDimensions(buf: ArrayBuffer): Promise<{ w: number; h: number }>
 {
-  const blob = new Blob([ buf ], { type: "image/png" });
-  if (typeof createImageBitmap === "function")
+  const blob = new Blob([ buf ], { type: 'image/png' });
+  if (typeof createImageBitmap === 'function')
   {
     const bmp = await createImageBitmap(blob);
     const w = bmp.width;
@@ -49,7 +42,10 @@ async function decodePngDimensions(buf: ArrayBuffer): Promise<{ w: number; h: nu
       h,
     };
   }
-  return await new Promise<{ w: number; h: number }>((resolve, reject) =>
+  return await new Promise<{ w: number; h: number }>((
+    resolve,
+    reject
+  ) =>
   {
     const url = URL.createObjectURL(blob);
     const img = new Image();
@@ -64,7 +60,7 @@ async function decodePngDimensions(buf: ArrayBuffer): Promise<{ w: number; h: nu
     img.onerror = () =>
     {
       URL.revokeObjectURL(url);
-      reject(new Error("Could not decode IconSet.png dimensions."));
+      reject(new Error('Could not decode IconSet.png dimensions.'));
     };
     img.src = url;
   });
@@ -75,7 +71,10 @@ async function decodePngDimensions(buf: ArrayBuffer): Promise<{ w: number; h: nu
  */
 function IconSetAtlasProvider({ children }: { children: React.ReactNode })
 {
-  const { projectRoot, projectReloadGeneration } = useProjectPath();
+  const {
+    projectRoot,
+    projectReloadGeneration
+  } = useProjectPath();
 
   const [ atlasUrl, setAtlasUrl ] = useState<string | null>(null);
   const [ imgWidth, setImgWidth ] = useState(0);
@@ -86,9 +85,9 @@ function IconSetAtlasProvider({ children }: { children: React.ReactNode })
 
   const resolvedPath = useMemo(() =>
   {
-    if (projectRoot.trim() === "")
+    if (projectRoot.trim() === '')
     {
-      return "";
+      return '';
     }
     return resolveIconSetPngPath(projectRoot);
   }, [ projectRoot ]);
@@ -105,9 +104,9 @@ function IconSetAtlasProvider({ children }: { children: React.ReactNode })
     setImgHeight(0);
     setLoadError(null);
 
-    if (projectRoot.trim() === "")
+    if (projectRoot.trim() === '')
     {
-      setLoadError("No project root.");
+      setLoadError('No project root.');
       return;
     }
 
@@ -123,12 +122,15 @@ function IconSetAtlasProvider({ children }: { children: React.ReactNode })
         {
           return;
         }
-        const { w, h } = await decodePngDimensions(buf);
+        const {
+          w,
+          h
+        } = await decodePngDimensions(buf);
         if (cancelled)
         {
           return;
         }
-        const blob = new Blob([ buf ], { type: "image/png" });
+        const blob = new Blob([ buf ], { type: 'image/png' });
         const url = URL.createObjectURL(blob);
         objectUrlRef.current = url;
         setImgWidth(w);
@@ -144,7 +146,7 @@ function IconSetAtlasProvider({ children }: { children: React.ReactNode })
         }
         const msg = e instanceof Error
           ? e.message
-          : "Could not load IconSet.png.";
+          : 'Could not load IconSet.png.';
         setLoadError(msg);
       }
     })();

@@ -1,11 +1,11 @@
 enum JabsAiTrait
 {
-  Careful = "careful",
-  Executor = "executor",
-  Reckless = "reckless",
-  Healer = "healer",
-  Leader = "leader",
-  Follower = "follower",
+  Careful = 'careful',
+  Executor = 'executor',
+  Reckless = 'reckless',
+  Healer = 'healer',
+  Leader = 'leader',
+  Follower = 'follower',
 }
 
 interface JabsAiTraitsData
@@ -42,7 +42,10 @@ class JabsAiTraits
    * Business Logic: Synchronizes boolean properties from an array of active trait strings.
    * Handles mutual exclusivity between Leader and Follower.
    */
-  public updateFromStrings(newTraits: string[], currentTraits: string[]): void
+  public updateFromStrings(
+    newTraits: string[],
+    currentTraits: string[]
+  ): void
   {
     let finalTraits = [ ...newTraits ];
 

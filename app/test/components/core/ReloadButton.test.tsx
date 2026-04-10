@@ -3,19 +3,10 @@
  */
 
 import React from 'react';
-import {
-  describe,
-  expect,
-  it,
-  vi
-} from 'vitest';
-import {
-  render,
-  screen,
-  fireEvent
-} from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import ReloadButton from '../../../src/components/core/ReloadButton.tsx';
+import ReloadButton from '@components/core/ReloadButton.tsx';
 
 describe('ReloadButton', () =>
 {

@@ -13,15 +13,6 @@ class RPG_ArmorDomainModel
   }
 
   /**
-   * Synchronizes domain-specific properties back into the note string.
-   * @returns {string} The normalized note string.
-   */
-  protected syncNote(): string
-  {
-    return this.note;
-  }
-
-  /**
    * Converts the domain model back into the Rmmz format for saving.
    * @returns {RPG_Armor} The raw RMMZ Armor data.
    */
@@ -33,6 +24,15 @@ class RPG_ArmorDomainModel
       name: this.name,
       note: this.syncNote(),
     };
+  }
+
+  /**
+   * Synchronizes domain-specific properties back into the note string.
+   * @returns {string} The normalized note string.
+   */
+  protected syncNote(): string
+  {
+    return this.note;
   }
 }
 

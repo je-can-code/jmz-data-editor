@@ -2,20 +2,14 @@
  * @vitest-environment jsdom
  */
 
-import {
-  describe,
-  expect,
-  it,
-  vi,
-  beforeEach
-} from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useTraitMapping } from '@presentation/hooks/useTraitMapping.ts';
 import { SystemService } from '@services/SystemService.ts';
 import { SpecialFlag } from '@core/enums/TraitValues.ts';
 
 // Mock the resource contexts that the hook depends on.
-vi.mock('../../../src/presentation/context/resources/skills.context.tsx', () => (
+vi.mock('@presentation/context/resources/skills.context.tsx', () => (
   {
     useSkills: () => (
       {
@@ -25,7 +19,7 @@ vi.mock('../../../src/presentation/context/resources/skills.context.tsx', () => 
   }
 ));
 
-vi.mock('../../../src/presentation/context/resources/states.context.tsx', () => (
+vi.mock('@presentation/context/resources/states.context.tsx', () => (
   {
     useStates: () => (
       {
@@ -88,14 +82,14 @@ describe('useTraitMapping', () =>
       .toBe('120 %');
   });
 
-  it('maps Add Skill (code 43) using the skills context', () =>
+  it('maps Add Skill (code 43) using the skills context and id suffix', () =>
   {
     const { result } = renderHook(() => useTraitMapping());
     const { toDataName } = result.current;
 
     const name = toDataName(43, 10);
     expect(name)
-      .toBe('Skill 10');
+      .toBe('Skill 10 (id:10)');
   });
 
   it('maps Special Flags (code 62) using the enum values', () =>
@@ -119,9 +113,12 @@ describe('useTraitMapping', () =>
     const iconDefault = toCodeIcon(999);
 
     // Check the type itself instead of displayName which can be flaky
-    expect(icon11.type).toBeDefined();
-    expect(icon21.type).toBeDefined();
-    expect(iconDefault.type).toBeDefined();
+    expect(icon11.type)
+      .toBeDefined();
+    expect(icon21.type)
+      .toBeDefined();
+    expect(iconDefault.type)
+      .toBeDefined();
   });
 
   it('returns appropriate background colors for different codes', () =>

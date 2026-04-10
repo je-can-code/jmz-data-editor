@@ -1,16 +1,5 @@
-import React, {
-  ChangeEvent,
-  type SyntheticEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState
-} from 'react';
-import {
-  FixedSizeList,
-  ListChildComponentProps
-} from 'react-window';
+import React, { ChangeEvent, type SyntheticEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FixedSizeList, ListChildComponentProps } from 'react-window';
 import {
   Accordion,
   AccordionDetails,
@@ -38,17 +27,8 @@ import {
   Tooltip,
   Typography
 } from '@mui/material';
-import {
-  ContentCopy,
-  DoubleArrow,
-  ExpandMore,
-  KeyboardArrowLeft,
-  KeyboardArrowRight
-} from '@mui/icons-material';
-import {
-  MuiSnackbarSeverity,
-  MuiSnackbarVariant
-} from '@core/enums/MuiSnackbar.ts';
+import { ContentCopy, DoubleArrow, ExpandMore, KeyboardArrowLeft, KeyboardArrowRight } from '@mui/icons-material';
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import SaveButton from '../../../components/core/SaveButton.tsx';
 import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
@@ -58,52 +38,49 @@ import { RPG_SkillDomainModel } from '@core/domain/entities/RPG_SkillDomainModel
 import { SkillJabsExtension } from '@core/domain/entities/jabs/SkillJabsExtension.ts';
 import {
   RMMZ_SKILL_OCCASION_OPTIONS,
-  skillOccasionOption,
-  type RmmzSkillOccasionOption
+  type RmmzSkillOccasionOption,
+  skillOccasionOption
 } from '@core/enums/RmmzSkillOccasion.ts';
+import { RMMZ_SKILL_SCOPE_OPTIONS, type RmmzSkillScopeOption, skillScopeOption } from '@core/enums/RmmzSkillScope.ts';
 import {
-  RMMZ_SKILL_SCOPE_OPTIONS,
-  skillScopeOption,
-  type RmmzSkillScopeOption
-} from '@core/enums/RmmzSkillScope.ts';
-import {
+  type RmmzSkillAnimationOption,
   skillAnimationAutocompleteOptionsForSkill,
-  skillAnimationOptionForValue,
-  type RmmzSkillAnimationOption
+  skillAnimationOptionForValue
 } from '@core/enums/RmmzSkillAnimation.ts';
 import {
+  type RmmzSkillStypeOption,
   skillStypeAutocompleteOptions,
-  skillStypeOptionForValue,
-  type RmmzSkillStypeOption
+  skillStypeOptionForValue
 } from '@core/enums/RmmzSkillStype.ts';
 import {
+  type RmmzWeaponTypeOption,
   weaponTypeAutocompleteOptions,
-  weaponTypeOptionForValue,
-  type RmmzWeaponTypeOption
+  weaponTypeOptionForValue
 } from '@core/enums/RmmzWeaponType.ts';
 import {
   RMMZ_USABLE_HIT_TYPE_OPTIONS,
-  usableHitTypeOption,
-  type RmmzUsableHitTypeOption
+  type RmmzUsableHitTypeOption,
+  usableHitTypeOption
 } from '@core/enums/RmmzUsableHitType.ts';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
 import { IconIndexField } from '@presentation/components/icons/IconIndexField.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import {
-  UsableItemDamageSection,
-  type UsableItemDamageEditorValue
+  type UsableItemDamageEditorValue,
+  UsableItemDamageSection
 } from '@presentation/components/usableItem/UsableItemDamageSection.tsx';
-import {
-  UsableEffectsEditor,
-  type IdLabelRow
-} from '@presentation/components/usableItem/UsableEffectsEditor.tsx';
+import { type IdLabelRow, UsableEffectsEditor } from '@presentation/components/usableItem/UsableEffectsEditor.tsx';
 import { SystemService } from '@services/SystemService.ts';
 import {
-  SkillJabsExtensionsPanel,
   SKILL_JABS_ACCORDION_INITIAL_EXPANDED,
   type SkillJabsAccordionId,
+  SkillJabsExtensionsPanel,
 } from '@presentation/boards/skills/SkillJabsExtensionsPanel.tsx';
 
+/**
+ * Default expanded/collapsed state for skill editor accordions on first paint.
+ * Keys match {@code accordion} ids in the skills board layout.
+ */
 const SKILL_EDITOR_ACCORDION_INITIAL_EXPANDED: Record<string, boolean> = {
   'editor-general': true,
   'editor-usage': true,
@@ -117,10 +94,18 @@ const SKILL_EDITOR_ACCORDION_INITIAL_EXPANDED: Record<string, boolean> = {
   'editor-costs': true,
 };
 
+/**
+ * MUI {@code sx} for formula and note fields that should render in a monospace font.
+ */
 const noteFormulaFieldSx = {
   '& .MuiInputBase-input': { fontFamily: 'monospace' },
 };
 
+/**
+ * Board for editing project skills: list selection, RMMZ fields, JABS extensions, and note preview.
+ *
+ * @returns Skills editor grid layout.
+ */
 const SkillsBoard = () =>
 {
   const {
@@ -140,6 +125,11 @@ const SkillsBoard = () =>
     projectReloadGeneration,
   } = useProjectPath();
 
+  /**
+   * States available as skill effect targets (id and display name).
+   *
+   * @returns Rows for state effect pickers, excluding empty names.
+   */
   const stateEffectPickerRows = useMemo((): IdLabelRow[] =>
   {
     const rows: IdLabelRow[] = [
@@ -162,6 +152,11 @@ const SkillsBoard = () =>
     return rows;
   }, [ states ]);
 
+  /**
+   * Skills available as effect or extend targets (id and display name).
+   *
+   * @returns Rows for skill pickers, excluding section headers.
+   */
   const skillEffectPickerRows = useMemo((): IdLabelRow[] =>
   {
     return skills
@@ -172,6 +167,11 @@ const SkillsBoard = () =>
       }));
   }, [ skills ]);
 
+  /**
+   * Common events from {@link SystemService} for skill effect configuration.
+   *
+   * @returns Id/label rows for common-event pickers.
+   */
   const commonEventPickerRows = useMemo((): IdLabelRow[] =>
   {
     return SystemService.commonEventAutocompleteRows.slice();
@@ -201,6 +201,13 @@ const SkillsBoard = () =>
     () => ({ ...SKILL_JABS_ACCORDION_INITIAL_EXPANDED })
   );
 
+  /**
+   * Expands or collapses a skill editor accordion section.
+   *
+   * @param id Accordion key aligned with {@link SKILL_EDITOR_ACCORDION_INITIAL_EXPANDED}.
+   * @param expanded Next expanded flag from MUI {@link Accordion}.
+   * @returns {void}
+   */
   const handleSkillEditorAccordionChange = useCallback((
     id: string,
     expanded: boolean
@@ -212,6 +219,13 @@ const SkillsBoard = () =>
     }));
   }, []);
 
+  /**
+   * Expands or collapses a JABS extensions accordion section.
+   *
+   * @param id Accordion id from {@link SkillJabsAccordionId}.
+   * @param expanded Next expanded flag from MUI {@link Accordion}.
+   * @returns {void}
+   */
   const handleJabsAccordionChange = useCallback((
     id: SkillJabsAccordionId,
     expanded: boolean
@@ -223,6 +237,12 @@ const SkillsBoard = () =>
     }));
   }, []);
 
+  /**
+   * Supplies {@code expanded} and {@code onChange} for a skill editor accordion.
+   *
+   * @param id Accordion section id.
+   * @returns Partial accordion props wired to local expanded state.
+   */
   const editorAccordionProps = (id: string) =>
     ({
       expanded: skillEditorAccordionExpanded[ id ] ?? false,
@@ -235,6 +255,11 @@ const SkillsBoard = () =>
       },
     });
 
+  /**
+   * Read-only note text for the Note tab (serialized RMMZ skill note).
+   *
+   * @returns Empty string when no skill selected; otherwise current {@code note}.
+   */
   const serializedSkillNotePreview = useMemo(() =>
   {
     if (selectedSkill === null)
@@ -244,6 +269,11 @@ const SkillsBoard = () =>
     return selectedSkill.toRmmz().note;
   }, [ selectedSkill ]);
 
+  /**
+   * Animation autocomplete options, optionally biased so the current skill animation stays visible.
+   *
+   * @returns Options for the execution animation {@link Autocomplete}.
+   */
   const executionAnimationOptions = useMemo(() =>
   {
     const base = SystemService.skillAnimationAutocompleteOptions;
@@ -254,6 +284,14 @@ const SkillsBoard = () =>
     return skillAnimationAutocompleteOptionsForSkill(selectedSkill.animationId, base);
   }, [ selectedSkill, systemDataGeneration ]);
 
+  /**
+   * Opens the snackbar with the given copy and presentation.
+   *
+   * @param message User-visible snack text.
+   * @param severity MUI severity; defaults to info.
+   * @param variant MUI variant; defaults to filled.
+   * @returns {void}
+   */
   const handleSnack = (
     message: string,
     severity: MuiSnackbarSeverity = MuiSnackbarSeverity.Info,
@@ -266,6 +304,12 @@ const SkillsBoard = () =>
     setSnackOpen(true);
   };
 
+  /**
+   * Clones the given skill into selection and list slot, and enables save.
+   *
+   * @param updatedSkill Domain model after in-place edits (typically current selection).
+   * @returns {void}
+   */
   const updateSkill = useCallback(
     (updatedSkill: RPG_SkillDomainModel) =>
     {
@@ -289,6 +333,11 @@ const SkillsBoard = () =>
     [ selectedSkillIndex, setSkills ]
   );
 
+  /**
+   * Skills that may appear in the extend-base multiselect (excludes headers and self-id).
+   *
+   * @returns Picker rows for skill extend configuration.
+   */
   const skillExtendPickerOptions = useMemo((): IdLabelRow[] =>
   {
     if (selectedSkill === null)
@@ -300,6 +349,11 @@ const SkillsBoard = () =>
     );
   }, [ skillEffectPickerRows, selectedSkill ]);
 
+  /**
+   * Current extend-base ids resolved to picker rows (missing ids get placeholder labels).
+   *
+   * @returns Selected rows for the extend-base {@link Autocomplete}.
+   */
   const selectedSkillExtendPickerValues = useMemo((): IdLabelRow[] =>
   {
     if (selectedSkill === null)
@@ -326,6 +380,11 @@ const SkillsBoard = () =>
       ? null
       : selectedSkill.id;
 
+  /**
+   * Other skills that list the selected skill as an extend base (reverse extend graph).
+   *
+   * @returns List indices, ids, and names of extenders.
+   */
   const skillExtendersOfSelected = useMemo(() =>
   {
     if (selectedSkillIdForExtendReverse === null)
@@ -372,6 +431,13 @@ const SkillsBoard = () =>
     (index) => listRef.current?.scrollToItem(index, 'smart')
   );
 
+  /**
+   * Selects a skill by list index and optionally keeps focus on the virtualized list.
+   *
+   * @param index Index in the {@code skills} array.
+   * @param keepListFocus When true, refocuses the list wrapper after selection.
+   * @returns {void}
+   */
   const handleSkillListItemOnClickEvent = (
     index: number,
     keepListFocus: boolean = true
@@ -418,6 +484,11 @@ const SkillsBoard = () =>
     listWrapperRef.current?.focus();
   }, []);
 
+  /**
+   * Copies the current skill serialized note to the clipboard and reports success or failure.
+   *
+   * @returns Promise resolved after clipboard write attempt.
+   */
   const handleCopySerializedSkillNote = async () =>
   {
     if (selectedSkill === null)
@@ -437,6 +508,12 @@ const SkillsBoard = () =>
     }
   };
 
+  /**
+   * Updates the search term, jumps to the first name match, and selects that skill.
+   *
+   * @param event Change event from the search field.
+   * @returns {void}
+   */
   const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) =>
   {
     const term = event.target.value.toLowerCase();
@@ -464,6 +541,14 @@ const SkillsBoard = () =>
     }
   };
 
+  /**
+   * Finds the next skill whose name contains the search query, walking the list cyclically.
+   *
+   * @param startIndex Current list index to search from (exclusive of first step).
+   * @param term Search string; trimmed and compared case-insensitively.
+   * @param direction {@code 1} forward, {@code -1} backward.
+   * @returns Matching index, or {@code -1} when empty query or no match.
+   */
   const findNextMatchIndex = (
     startIndex: number,
     term: string,
@@ -501,6 +586,11 @@ const SkillsBoard = () =>
     return -1;
   };
 
+  /**
+   * Selects the previous skill matching the current search term.
+   *
+   * @returns {void}
+   */
   const handleSearchPrevClick = () =>
   {
     const query = searchTerm.trim();
@@ -518,6 +608,11 @@ const SkillsBoard = () =>
     }
   };
 
+  /**
+   * Selects the next skill matching the current search term.
+   *
+   * @returns {void}
+   */
   const handleSearchNextClick = () =>
   {
     const query = searchTerm.trim();
@@ -535,12 +630,22 @@ const SkillsBoard = () =>
     }
   };
 
+  /**
+   * Persists all skills through the resource context.
+   *
+   * @returns Promise resolved when save completes.
+   */
   const handleSaveButtonOnClickEvent = async () =>
   {
     await save(skills);
     handleSnack('Skills data has been saved successfully.');
   };
 
+  /**
+   * Reloads skills from disk and clears the dirty flag on success.
+   *
+   * @returns Promise resolved when reload completes or rejected on failure.
+   */
   const handleReloadButtonOnClickEvent = async () =>
   {
     try
@@ -556,6 +661,11 @@ const SkillsBoard = () =>
     }
   };
 
+  /**
+   * Moves selection to the next skill in list order (wraps).
+   *
+   * @returns {void}
+   */
   const handleIterateNext = () =>
   {
     const length = skills.length;
@@ -573,6 +683,11 @@ const SkillsBoard = () =>
     handleSkillListItemOnClickEvent(nextIndex);
   };
 
+  /**
+   * Moves selection to the previous skill in list order (wraps).
+   *
+   * @returns {void}
+   */
   const handleIteratePrev = () =>
   {
     const length = skills.length;
@@ -590,6 +705,12 @@ const SkillsBoard = () =>
     handleSkillListItemOnClickEvent(prevIndex);
   };
 
+  /**
+   * Arrow up/down navigation for the focused skill list.
+   *
+   * @param event Keyboard event from the list container.
+   * @returns {void}
+   */
   const handleListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) =>
   {
     if (event.key === 'ArrowDown')
@@ -604,6 +725,12 @@ const SkillsBoard = () =>
     }
   };
 
+  /**
+   * Writes the skill display name from the general editor field.
+   *
+   * @param event Change event from the name input.
+   * @returns {void}
+   */
   const handleSkillNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -615,6 +742,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes the skill help/description text.
+   *
+   * @param event Change event from the description field.
+   * @returns {void}
+   */
   const handleDescriptionOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -626,6 +759,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Updates the skill icon index from {@link IconIndexField}.
+   *
+   * @param next Chosen icon index in the icon set.
+   * @returns {void}
+   */
   const handleSkillIconIndexOnChange = (next: number) =>
   {
     if (!selectedSkill)
@@ -637,6 +776,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes battle or menu message line 1.
+   *
+   * @param event Change event from the message field.
+   * @returns {void}
+   */
   const handleSkillMessage1OnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -648,6 +793,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes battle or menu message line 2.
+   *
+   * @param event Change event from the message field.
+   * @returns {void}
+   */
   const handleSkillMessage2OnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -659,6 +810,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Parses MP/TP-style cost text; invalid input becomes {@code 0}.
+   *
+   * @param raw Digits from a cost field.
+   * @returns Non-negative parsed integer.
+   */
   const parseCostInput = (raw: string): number =>
   {
     const parsed = parseInt(raw, 10);
@@ -669,6 +826,12 @@ const SkillsBoard = () =>
     return parsed;
   };
 
+  /**
+   * Parses execution speed; invalid input becomes {@code 0}.
+   *
+   * @param raw Digits from the speed field.
+   * @returns Parsed speed value.
+   */
   const parseExecutionSpeedInput = (raw: string): number =>
   {
     const parsed = parseInt(raw, 10);
@@ -679,6 +842,12 @@ const SkillsBoard = () =>
     return parsed;
   };
 
+  /**
+   * Parses success rate percent; clamps to {@code 0}..{@code 100}, default {@code 100} when NaN.
+   *
+   * @param raw Digits from the success rate field.
+   * @returns Clamped success rate.
+   */
   const parseExecutionSuccessInput = (raw: string): number =>
   {
     const parsed = parseInt(raw, 10);
@@ -697,6 +866,12 @@ const SkillsBoard = () =>
     return parsed;
   };
 
+  /**
+   * Parses repeat count; minimum {@code 1}, default {@code 1} when NaN.
+   *
+   * @param raw Digits from the repeats field.
+   * @returns At least one repeat.
+   */
   const parseExecutionRepeatsInput = (raw: string): number =>
   {
     const parsed = parseInt(raw, 10);
@@ -711,6 +886,12 @@ const SkillsBoard = () =>
     return parsed;
   };
 
+  /**
+   * Writes base MP cost from {@link parseCostInput}.
+   *
+   * @param event Change event from the MP cost field.
+   * @returns {void}
+   */
   const handleMpCostOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -722,6 +903,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes base TP cost from {@link parseCostInput}.
+   *
+   * @param event Change event from the TP cost field.
+   * @returns {void}
+   */
   const handleTpCostOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -733,6 +920,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes TP gain on use from {@link parseCostInput}.
+   *
+   * @param event Change event from the TP gain field.
+   * @returns {void}
+   */
   const handleTpGainOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -744,6 +937,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes HP cost flat amount from {@link parseCostInput}.
+   *
+   * @param event Change event from the HP flat cost field.
+   * @returns {void}
+   */
   const handleHpCostFlatOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -755,6 +954,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes HP cost percent from {@link parseCostInput}.
+   *
+   * @param event Change event from the HP percent cost field.
+   * @returns {void}
+   */
   const handleHpCostPercentOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -766,6 +971,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes HP cost formula text.
+   *
+   * @param event Change event from the HP formula field.
+   * @returns {void}
+   */
   const handleHpCostFormulaOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -777,6 +988,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Toggles whether HP cost may reduce the user below 1 HP.
+   *
+   * @param event Change event from the checkbox.
+   * @returns {void}
+   */
   const handleHpCostCanKillOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -788,6 +1005,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes JABS MP cost tag flat component from {@link parseCostInput}.
+   *
+   * @param event Change event from the tag flat field.
+   * @returns {void}
+   */
   const handleMpCostTagFlatOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -799,6 +1022,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes JABS MP cost tag percent component from {@link parseCostInput}.
+   *
+   * @param event Change event from the tag percent field.
+   * @returns {void}
+   */
   const handleMpCostTagPercentOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -810,6 +1039,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes JABS MP cost tag formula string.
+   *
+   * @param event Change event from the tag formula field.
+   * @returns {void}
+   */
   const handleMpCostTagFormulaOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -821,6 +1056,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes JABS TP cost tag flat component from {@link parseCostInput}.
+   *
+   * @param event Change event from the tag flat field.
+   * @returns {void}
+   */
   const handleTpCostTagFlatOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -832,6 +1073,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes JABS TP cost tag percent component from {@link parseCostInput}.
+   *
+   * @param event Change event from the tag percent field.
+   * @returns {void}
+   */
   const handleTpCostTagPercentOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -843,6 +1090,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes JABS TP cost tag formula string.
+   *
+   * @param event Change event from the tag formula field.
+   * @returns {void}
+   */
   const handleTpCostTagFormulaOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -854,6 +1107,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes on-attack HP gain flat from {@link parseCostInput}.
+   *
+   * @param event Change event from the flat gain field.
+   * @returns {void}
+   */
   const handleOnAttackHpGainFlatOnChangeEvent = (
     event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>
   ) =>
@@ -867,6 +1126,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes on-attack HP gain percent from {@link parseCostInput}.
+   *
+   * @param event Change event from the percent gain field.
+   * @returns {void}
+   */
   const handleOnAttackHpGainPercentOnChangeEvent = (
     event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>
   ) =>
@@ -880,6 +1145,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes on-attack HP gain formula text.
+   *
+   * @param event Change event from the formula field.
+   * @returns {void}
+   */
   const handleOnAttackHpGainFormulaOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -891,6 +1162,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes on-attack MP gain flat from {@link parseCostInput}.
+   *
+   * @param event Change event from the flat gain field.
+   * @returns {void}
+   */
   const handleOnAttackMpGainFlatOnChangeEvent = (
     event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>
   ) =>
@@ -904,6 +1181,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes on-attack MP gain percent from {@link parseCostInput}.
+   *
+   * @param event Change event from the percent gain field.
+   * @returns {void}
+   */
   const handleOnAttackMpGainPercentOnChangeEvent = (
     event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>
   ) =>
@@ -917,6 +1200,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes on-attack MP gain formula text.
+   *
+   * @param event Change event from the formula field.
+   * @returns {void}
+   */
   const handleOnAttackMpGainFormulaOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -928,6 +1217,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes on-attack TP gain flat from {@link parseCostInput}.
+   *
+   * @param event Change event from the flat gain field.
+   * @returns {void}
+   */
   const handleOnAttackTpGainFlatOnChangeEvent = (
     event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>
   ) =>
@@ -941,6 +1236,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes on-attack TP gain percent from {@link parseCostInput}.
+   *
+   * @param event Change event from the percent gain field.
+   * @returns {void}
+   */
   const handleOnAttackTpGainPercentOnChangeEvent = (
     event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>
   ) =>
@@ -954,6 +1255,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes on-attack TP gain formula text.
+   *
+   * @param event Change event from the formula field.
+   * @returns {void}
+   */
   const handleOnAttackTpGainFormulaOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -965,6 +1272,13 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Applies skill scope from the usage {@link Autocomplete}.
+   *
+   * @param _event Unused MUI autocomplete change event.
+   * @param option Selected scope row, or {@code null} when cleared.
+   * @returns {void}
+   */
   const handleSkillScopeAutocompleteOnChangeEvent = (
     _event: React.SyntheticEvent,
     option: RmmzSkillScopeOption | null
@@ -979,6 +1293,13 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Applies skill occasion (menu vs battle) from the usage {@link Autocomplete}.
+   *
+   * @param _event Unused MUI autocomplete change event.
+   * @param option Selected occasion row, or {@code null} when cleared.
+   * @returns {void}
+   */
   const handleSkillOccasionAutocompleteOnChangeEvent = (
     _event: React.SyntheticEvent,
     option: RmmzSkillOccasionOption | null
@@ -993,6 +1314,13 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Applies skill type id from the usage {@link Autocomplete}.
+   *
+   * @param _event Unused MUI autocomplete change event.
+   * @param option Selected skill-type row, or {@code null} when cleared.
+   * @returns {void}
+   */
   const handleSkillStypeAutocompleteOnChangeEvent = (
     _event: React.SyntheticEvent,
     option: RmmzSkillStypeOption | null
@@ -1007,6 +1335,13 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Applies first required weapon type from the usage {@link Autocomplete}.
+   *
+   * @param _event Unused MUI autocomplete change event.
+   * @param option Selected weapon-type row, or {@code null} when cleared.
+   * @returns {void}
+   */
   const handleSkillRequiredWtype1AutocompleteOnChangeEvent = (
     _event: React.SyntheticEvent,
     option: RmmzWeaponTypeOption | null
@@ -1021,6 +1356,13 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Applies second required weapon type from the usage {@link Autocomplete}.
+   *
+   * @param _event Unused MUI autocomplete change event.
+   * @param option Selected weapon-type row, or {@code null} when cleared.
+   * @returns {void}
+   */
   const handleSkillRequiredWtype2AutocompleteOnChangeEvent = (
     _event: React.SyntheticEvent,
     option: RmmzWeaponTypeOption | null
@@ -1035,6 +1377,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes execution speed via {@link parseExecutionSpeedInput}.
+   *
+   * @param event Change event from the speed field.
+   * @returns {void}
+   */
   const handleSkillSpeedOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -1046,6 +1394,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes success rate via {@link parseExecutionSuccessInput}.
+   *
+   * @param event Change event from the success rate field.
+   * @returns {void}
+   */
   const handleSkillSuccessRateOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -1057,6 +1411,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Writes repeat count via {@link parseExecutionRepeatsInput}.
+   *
+   * @param event Change event from the repeats field.
+   * @returns {void}
+   */
   const handleSkillRepeatsOnChangeEvent = (event: ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -1068,6 +1428,13 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Applies damage hit type from the execution {@link Autocomplete}.
+   *
+   * @param _event Unused MUI autocomplete change event.
+   * @param option Selected hit-type row, or {@code null} when cleared.
+   * @returns {void}
+   */
   const handleSkillHitTypeAutocompleteOnChangeEvent = (
     _event: React.SyntheticEvent,
     option: RmmzUsableHitTypeOption | null
@@ -1082,6 +1449,13 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Applies battle animation id from the execution {@link Autocomplete}.
+   *
+   * @param _event Unused MUI autocomplete change event.
+   * @param option Selected animation row, or {@code null} when cleared.
+   * @returns {void}
+   */
   const handleSkillAnimationAutocompleteOnChangeEvent = (
     _event: React.SyntheticEvent,
     option: RmmzSkillAnimationOption | null
@@ -1096,6 +1470,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Copies damage editor state (formula, elements, crit overrides) onto the skill.
+   *
+   * @param next Value emitted from {@link UsableItemDamageSection}.
+   * @returns {void}
+   */
   const handleUsableItemDamageChange = (next: UsableItemDamageEditorValue) =>
   {
     if (!selectedSkill)
@@ -1115,6 +1495,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Replaces the skill effects array from {@link UsableEffectsEditor}.
+   *
+   * @param next Full effects list for the skill.
+   * @returns {void}
+   */
   const handleSkillEffectsChange = (next: Rmmz.Data.RPG_UsableEffect[]) =>
   {
     if (!selectedSkill)
@@ -1126,6 +1512,13 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Persists extend-base skill ids from the multi-select {@link Autocomplete}.
+   *
+   * @param _event Unused MUI autocomplete change event.
+   * @param options Selected skill rows (order preserved).
+   * @returns {void}
+   */
   const handleSkillExtendBaseIdsChange = (
     _event: SyntheticEvent,
     options: IdLabelRow[]
@@ -1140,6 +1533,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Parses J-SKS slot cost; empty clears to {@code null}, invalid numbers ignored.
+   *
+   * @param event Change event from the slot cost field.
+   * @returns {void}
+   */
   const handleSksSlotCostChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
   {
     if (!selectedSkill)
@@ -1165,6 +1564,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Toggles explicit-unslotted SKS flag from the checkbox.
+   *
+   * @param event Change event from the checkbox.
+   * @returns {void}
+   */
   const handleSksExplicitUnslottedChange = (event: ChangeEvent<HTMLInputElement>) =>
   {
     if (!selectedSkill)
@@ -1176,6 +1581,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Replaces the whole JABS extension from {@link SkillJabsExtensionsPanel}.
+   *
+   * @param next Cloned extension snapshot from the panel.
+   * @returns {void}
+   */
   const handleJabsChange = (next: SkillJabsExtension) =>
   {
     if (!selectedSkill)
@@ -1187,6 +1598,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Merges a partial JABS update without replacing unrelated fields.
+   *
+   * @param partial Subset of {@link SkillJabsExtension} fields to apply.
+   * @returns {void}
+   */
   const patchSkillJabs = (partial: Partial<SkillJabsExtension>): void =>
   {
     if (!selectedSkill)
@@ -1198,6 +1615,12 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  /**
+   * Row renderer for the virtualized skill list.
+   *
+   * @param props react-window row props (index, style, etc.).
+   * @returns List row element or empty fragment for gaps or section headers.
+   */
   const renderSkillListItem = (props: ListChildComponentProps) =>
   {
     const {
@@ -1365,8 +1788,8 @@ const SkillsBoard = () =>
                   aria-label={'Skill editor sections'}
                 >
                   <Tab label={'Editor'} id={'skill-editor-tab-0'} aria-controls={'skill-editor-tabpanel-0'}/>
-                  <Tab label={'Note'} id={'skill-editor-tab-1'} aria-controls={'skill-editor-tabpanel-1'}/>
-                  <Tab label={'JABS'} id={'skill-editor-tab-2'} aria-controls={'skill-editor-tabpanel-2'}/>
+                  <Tab label={'JABS'} id={'skill-editor-tab-1'} aria-controls={'skill-editor-tabpanel-1'}/>
+                  <Tab label={'Note'} id={'skill-editor-tab-2'} aria-controls={'skill-editor-tabpanel-2'}/>
                 </Tabs>
 
                 <Box
@@ -1411,18 +1834,24 @@ const SkillsBoard = () =>
                                 >
                                   {`Skill id: ${selectedSkill.id}`}
                                 </Typography>
-                                <TextField
-                                  variant={'outlined'}
-                                  label={'Name'}
-                                  value={selectedSkill.name}
-                                  onChange={handleSkillNameOnChangeEvent}
-                                  size={'small'}
-                                  fullWidth
-                                />
-                                <IconIndexField
-                                  value={selectedSkill.iconIndex}
-                                  onChange={handleSkillIconIndexOnChange}
-                                />
+                                <Grid container spacing={2} alignItems={'flex-start'}>
+                                  <Grid size={6}>
+                                    <TextField
+                                      variant={'outlined'}
+                                      label={'Name'}
+                                      value={selectedSkill.name}
+                                      onChange={handleSkillNameOnChangeEvent}
+                                      size={'small'}
+                                      fullWidth
+                                    />
+                                  </Grid>
+                                  <Grid size={6}>
+                                    <IconIndexField
+                                      value={selectedSkill.iconIndex}
+                                      onChange={handleSkillIconIndexOnChange}
+                                    />
+                                  </Grid>
+                                </Grid>
                                 <TextField
                                   variant={'outlined'}
                                   label={'Description'}
@@ -2670,12 +3099,12 @@ const SkillsBoard = () =>
                 </Box>
 
                 <Box
-                  id={'skill-editor-tabpanel-2'}
+                  id={'skill-editor-tabpanel-1'}
                   role={'tabpanel'}
-                  aria-labelledby={'skill-editor-tab-2'}
-                  hidden={skillEditorTab !== 2}
+                  aria-labelledby={'skill-editor-tab-1'}
+                  hidden={skillEditorTab !== 1}
                   sx={{
-                    display: skillEditorTab === 2
+                    display: skillEditorTab === 1
                       ? 'block'
                       : 'none'
                   }}
@@ -2696,12 +3125,12 @@ const SkillsBoard = () =>
                 </Box>
 
                 <Box
-                  id={'skill-editor-tabpanel-1'}
+                  id={'skill-editor-tabpanel-2'}
                   role={'tabpanel'}
-                  aria-labelledby={'skill-editor-tab-1'}
-                  hidden={skillEditorTab !== 1}
+                  aria-labelledby={'skill-editor-tab-2'}
+                  hidden={skillEditorTab !== 2}
                   sx={{
-                    display: skillEditorTab === 1
+                    display: skillEditorTab === 2
                       ? 'block'
                       : 'none'
                   }}

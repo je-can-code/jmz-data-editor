@@ -133,7 +133,7 @@ function skillScopeOption(scope: RmmzSkillScope): RmmzSkillScopeOption
   {
     return found;
   }
-  return RMMZ_SKILL_SCOPE_OPTIONS[0];
+  return RMMZ_SKILL_SCOPE_OPTIONS[ 0 ];
 }
 
 export {

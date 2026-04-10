@@ -1,9 +1,6 @@
 // noinspection HtmlUnknownTaret,JSUnresolvedLibraryURL
 
-import type {
-  Plugin,
-  ResolvedConfig
-} from 'vite';
+import type { Plugin, ResolvedConfig } from 'vite';
 import { defineConfig } from 'vite';
 import * as path from 'node:path';
 import { dirname } from 'node:path';
@@ -68,12 +65,14 @@ export default defineConfig({
     alias: {
       // keep these in sync with tsconfig.json
       '@core': path.resolve(_dirname, 'src/core'),
+      '@components': path.resolve(_dirname, 'src/components'),
       '@infrastructure': path.resolve(_dirname, 'src/infrastructure'),
 
       '@presentation': path.resolve(_dirname, 'src/presentation'),
       '@boards': path.resolve(_dirname, 'src/presentation/boards'),
 
       '@platform': path.resolve(_dirname, 'src/platform'),
+      '@mappers': path.resolve(_dirname, 'src/mappers'),
       '@services': path.resolve(_dirname, 'src/services'),
       '@types': path.resolve(_dirname, 'src/types'),
     },

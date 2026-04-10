@@ -3,19 +3,10 @@
  */
 
 import React from 'react';
-import {
-  describe,
-  expect,
-  it,
-  vi
-} from 'vitest';
-import {
-  render,
-  screen,
-  fireEvent
-} from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import KeyTextField from '../../../src/components/core/KeyTextField.tsx';
+import KeyTextField from '@components/core/KeyTextField.tsx';
 
 describe('KeyTextField', () =>
 {

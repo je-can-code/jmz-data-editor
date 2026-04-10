@@ -1,9 +1,5 @@
-import {
-  describe,
-  expect,
-  it
-} from 'vitest';
-import NoteReader from '../../../src/services/utils/NoteReader.ts';
+import { describe, expect, it } from 'vitest';
+import NoteReader from '@services/utils/NoteReader.ts';
 
 describe('NoteReader.getStringFromNoteByRegex', () =>
 {

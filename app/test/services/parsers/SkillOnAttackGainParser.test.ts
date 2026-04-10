@@ -1,10 +1,6 @@
-import {
-  describe,
-  expect,
-  it
-} from 'vitest';
-import { SkillOnAttackGainParser } from '../../../src/services/parsers/SkillOnAttackGainParser.ts';
-import { NoteNormalizer } from '../../../src/services/utils/NoteNormalizer.ts';
+import { describe, expect, it } from 'vitest';
+import { SkillOnAttackGainParser } from '@services/parsers/SkillOnAttackGainParser.ts';
+import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 
 const syncOnAttackGainTags = (
   note: string,
@@ -52,18 +48,23 @@ describe('SkillOnAttackGainParser', () =>
       0,
       ''
     );
-    expect(SkillOnAttackGainParser.readOnAttackHpGainFlat(note)).toBe(5);
-    expect(SkillOnAttackGainParser.readOnAttackHpGainPercent(note)).toBe(10);
-    expect(SkillOnAttackGainParser.readOnAttackHpGainFormula(note)).toBe('a.atk');
+    expect(SkillOnAttackGainParser.readOnAttackHpGainFlat(note))
+      .toBe(5);
+    expect(SkillOnAttackGainParser.readOnAttackHpGainPercent(note))
+      .toBe(10);
+    expect(SkillOnAttackGainParser.readOnAttackHpGainFormula(note))
+      .toBe('a.atk');
   });
 
   it('writeOnAttackMpGainFlat replaces and clears', () =>
   {
     const added = SkillOnAttackGainParser.writeOnAttackMpGainFlat('', 7);
-    expect(added).toContain('<on-attack-mp-gain:7>');
+    expect(added)
+      .toContain('<on-attack-mp-gain:7>');
 
     const cleared = SkillOnAttackGainParser.writeOnAttackMpGainFlat('<on-attack-mp-gain:7>', 0);
-    expect(cleared.includes('on-attack-mp-gain')).toBe(false);
+    expect(cleared.includes('on-attack-mp-gain'))
+      .toBe(false);
   });
 
   it('TP gain tags are independent of HP/MP', () =>
@@ -72,8 +73,11 @@ describe('SkillOnAttackGainParser', () =>
       SkillOnAttackGainParser.writeOnAttackTpGainFlat('', 2),
       15
     );
-    expect(SkillOnAttackGainParser.readOnAttackTpGainFlat(note)).toBe(2);
-    expect(SkillOnAttackGainParser.readOnAttackTpGainPercent(note)).toBe(15);
-    expect(SkillOnAttackGainParser.readOnAttackHpGainFlat(note)).toBe(0);
+    expect(SkillOnAttackGainParser.readOnAttackTpGainFlat(note))
+      .toBe(2);
+    expect(SkillOnAttackGainParser.readOnAttackTpGainPercent(note))
+      .toBe(15);
+    expect(SkillOnAttackGainParser.readOnAttackHpGainFlat(note))
+      .toBe(0);
   });
 });

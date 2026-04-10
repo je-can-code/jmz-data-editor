@@ -1,4 +1,4 @@
-import { NoteNormalizer } from "@services/utils/NoteNormalizer.ts";
+import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 
 /**
  * Reads and writes J-SKS skill-only notetags ({@code J.SKS.RegExp.SlotCost}, {@code Unslotted}).
@@ -15,13 +15,13 @@ class SkillSksSkillNoteParser
    */
   static readSlotCost(note: string): number | null
   {
-    const re = new RegExp(SkillSksSkillNoteParser.#RE_SLOT_COST.source, "gi");
+    const re = new RegExp(SkillSksSkillNoteParser.#RE_SLOT_COST.source, 'gi');
     const m = re.exec(note);
-    if (m === null || typeof m[1] !== "string")
+    if (m === null || typeof m[ 1 ] !== 'string')
     {
       return null;
     }
-    const v = parseInt(m[1], 10);
+    const v = parseInt(m[ 1 ], 10);
     if (Number.isNaN(v))
     {
       return null;
@@ -35,7 +35,7 @@ class SkillSksSkillNoteParser
    */
   static readExplicitUnslotted(note: string): boolean
   {
-    const re = new RegExp(SkillSksSkillNoteParser.#RE_UNSLOTTED.source, "gi");
+    const re = new RegExp(SkillSksSkillNoteParser.#RE_UNSLOTTED.source, 'gi');
     return re.test(note);
   }
 
@@ -53,12 +53,12 @@ class SkillSksSkillNoteParser
   ): string
   {
     let n = note.replace(
-      new RegExp(SkillSksSkillNoteParser.#RE_SLOT_COST.source, "gi"),
-      ""
+      new RegExp(SkillSksSkillNoteParser.#RE_SLOT_COST.source, 'gi'),
+      ''
     );
     n = n.replace(
-      new RegExp(SkillSksSkillNoteParser.#RE_UNSLOTTED.source, "gi"),
-      ""
+      new RegExp(SkillSksSkillNoteParser.#RE_UNSLOTTED.source, 'gi'),
+      ''
     );
     n = NoteNormalizer.normalize(n);
 
@@ -69,14 +69,14 @@ class SkillSksSkillNoteParser
     }
     if (explicitUnslotted === true)
     {
-      parts.push("<unslotted>");
+      parts.push('<unslotted>');
     }
     if (parts.length === 0)
     {
       return n;
     }
 
-    return NoteNormalizer.prependBlock(n, parts.join("\n"));
+    return NoteNormalizer.prependBlock(n, parts.join('\n'));
   }
 }
 

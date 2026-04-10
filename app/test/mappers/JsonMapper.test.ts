@@ -1,9 +1,5 @@
-import {
-  describe,
-  expect,
-  it
-} from 'vitest';
-import JsonMapper from '../../src/mappers/JsonMapper.ts';
+import { describe, expect, it } from 'vitest';
+import JsonMapper from '@mappers/JsonMapper.ts';
 
 // The class under test implements three main entry points:
 // - parseString

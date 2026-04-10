@@ -1,4 +1,4 @@
-import { RPG_BaseDomainModel } from "@core/domain/entities/RPG_BaseDomainModel.ts";
+import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
 
 /**
@@ -10,15 +10,6 @@ class RPG_WeaponDomainModel
   constructor(rmmz: RPG_Weapon)
   {
     super(rmmz);
-  }
-
-  /**
-   * Synchronizes domain-specific properties back into the note string.
-   * @returns {string} The normalized note string.
-   */
-  protected syncNote(): string
-  {
-    return this.note;
   }
 
   /**
@@ -34,6 +25,15 @@ class RPG_WeaponDomainModel
       note: this.syncNote(),
     };
   }
+
+  /**
+   * Synchronizes domain-specific properties back into the note string.
+   * @returns {string} The normalized note string.
+   */
+  protected syncNote(): string
+  {
+    return this.note;
+  }
 }
 
-export { RPG_WeaponDomainModel }
+export { RPG_WeaponDomainModel };

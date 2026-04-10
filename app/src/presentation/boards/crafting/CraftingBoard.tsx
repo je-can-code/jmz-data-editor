@@ -1,8 +1,4 @@
-import React, {
-  ChangeEvent,
-  MouseEvent,
-  useState
-} from 'react';
+import React, { ChangeEvent, MouseEvent, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -48,19 +44,16 @@ import styled from 'styled-components';
 import { FixedSizeList } from 'react-window';
 import CraftingComponentList from './CraftingComponentList.tsx';
 
-import {
-  MuiSnackbarSeverity,
-  MuiSnackbarVariant
-} from '@core/enums/MuiSnackbar.ts';
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import CraftingListType from '@core/enums/CraftingListType.ts';
 
 import SaveButton from '../../../components/core/SaveButton.tsx';
 import KeyTextField from '../../../components/core/KeyTextField.tsx';
+import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 import Configuration = Crafting.Configuration;
 import Recipe = Crafting.Recipe;
 import Category = Crafting.Category;
 import CraftingComponent = Crafting.CraftingComponent;
-import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 
 const EntryText = styled(ListItemText)`
   font-family: monospace;

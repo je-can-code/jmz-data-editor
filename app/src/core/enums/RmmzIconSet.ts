@@ -41,7 +41,10 @@ function iconGridDimensions(
  * @param rows Grid height in icons.
  * @returns Total icon slots ({@code cols * rows}).
  */
-function iconSlotCount(cols: number, rows: number): number
+function iconSlotCount(
+  cols: number,
+  rows: number
+): number
 {
   if (cols <= 0 || rows <= 0)
   {

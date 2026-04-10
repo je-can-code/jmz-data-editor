@@ -24,7 +24,10 @@ class NoteNormalizer
   /**
    * Removes any lines matching the regex, then normalizes.
    */
-  static removeLinesMatching(input: string, regex: RegExp): string
+  static removeLinesMatching(
+    input: string,
+    regex: RegExp
+  ): string
   {
     const asLf = (input ?? '')
       .replace(/\r\n/g, '\n')
@@ -35,7 +38,7 @@ class NoteNormalizer
       .filter(line =>
       {
         regex.lastIndex = 0;
-        return !regex.test(line)
+        return !regex.test(line);
       })
       .join('\n');
 
@@ -46,7 +49,10 @@ class NoteNormalizer
    * Appends a block to a base text with a single separating newline (if both present),
    * then normalizes the result.
    */
-  static appendBlock(base: string, block: string): string
+  static appendBlock(
+    base: string,
+    block: string
+  ): string
   {
     const left = NoteNormalizer.normalize(base);
     const right = NoteNormalizer.normalize(block);
@@ -58,7 +64,10 @@ class NoteNormalizer
     return NoteNormalizer.normalize(joined);
   }
 
-  static prependBlock(base: string, block: string): string
+  static prependBlock(
+    base: string,
+    block: string
+  ): string
   {
     const left = NoteNormalizer.normalize(base);
     const right = NoteNormalizer.normalize(block);
@@ -69,7 +78,11 @@ class NoteNormalizer
     return NoteNormalizer.normalize(joined);
   }
 
-  static replaceOrAppendInline(base: string, regex: RegExp, newTag: string): string
+  static replaceOrAppendInline(
+    base: string,
+    regex: RegExp,
+    newTag: string
+  ): string
   {
     const lf = NoteNormalizer.normalize(base);
     const lines = lf.split('\n');

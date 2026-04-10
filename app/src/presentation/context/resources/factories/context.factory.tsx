@@ -1,14 +1,6 @@
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  ReactNode,
-} from 'react';
+import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState, } from 'react';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
-import { executeSave, executeLoad } from '@services/DataService.ts';
+import { executeLoad, executeSave } from '@services/DataService.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
 import RPG_Base = Rmmz.Base.RPG_Base;
@@ -40,13 +32,16 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
 
   function ResourceProvider({ children }: { children: ReactNode })
   {
-    const { rmmzDataPath, projectReloadGeneration } = useProjectPath();
+    const {
+      rmmzDataPath,
+      projectReloadGeneration
+    } = useProjectPath();
     const [ data, setData ] = useState<TModel[]>([]);
     const [ loading, setLoading ] = useState(true);
 
     const reload = useCallback(async () =>
     {
-      if (!rmmzDataPath || rmmzDataPath.trim() === "")
+      if (!rmmzDataPath || rmmzDataPath.trim() === '')
       {
         return;
       }
@@ -75,7 +70,7 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
 
     const save = useCallback(async (updatedList: TModel[]) =>
     {
-      if (!rmmzDataPath || rmmzDataPath.trim() === "")
+      if (!rmmzDataPath || rmmzDataPath.trim() === '')
       {
         return;
       }

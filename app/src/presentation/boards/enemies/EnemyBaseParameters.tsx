@@ -1,10 +1,4 @@
-import {
-  Box,
-  Grid,
-  Stack,
-  Tooltip,
-  Typography
-} from "@mui/material";
+import { Box, Grid, Stack, Tooltip, Typography } from '@mui/material';
 import {
   AutoFixHigh,
   Battery6Bar,
@@ -16,25 +10,21 @@ import {
   PhotoFilter,
   Shield,
   ShowChart,
-} from "@mui/icons-material";
-import {
-  blue,
-  green,
-  lightBlue,
-  lightGreen,
-  pink,
-  red
-} from "@mui/material/colors";
-import { EnemyBaseParam } from "@core/enums/EnemyParameter.ts";
-import React from "react";
-import NumberInputWithLabel from "../../../components/core/NumberInputWithLabel.tsx";
-import { GrowthParser } from "@services/parsers/GrowthParser.ts";
-import { knownLongParams } from "../../../mappers/ParameterIdMapper.ts";
-import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
+} from '@mui/icons-material';
+import { blue, green, lightBlue, lightGreen, pink, red } from '@mui/material/colors';
+import { EnemyBaseParam } from '@core/enums/EnemyParameter.ts';
+import React from 'react';
+import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
+import { GrowthParser } from '@services/parsers/GrowthParser.ts';
+import { knownLongParams } from '../../../mappers/ParameterIdMapper.ts';
+import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
 
 type EnemyBaseParametersProps = {
   selectedEnemy: RPG_EnemyDomainModel;
-  updateEnemyWithNewParam: (parameterId: number, updatedValue: number) => void;
+  updateEnemyWithNewParam: (
+    parameterId: number,
+    updatedValue: number
+  ) => void;
   updateEnemy: (updatedEnemy: RPG_EnemyDomainModel) => void;
 };
 
@@ -59,55 +49,55 @@ export default function EnemyBaseParameters({
   // Create parameter data array for rendering
   const parameterData = [
     {
-      label: "Max HP",
+      label: 'Max HP',
       paramId: EnemyBaseParam.MaxHp,
-      icon: <HeartBroken sx={{ color: pink[200] }}/>,
+      icon: <HeartBroken sx={{ color: pink[ 200 ] }}/>,
       longParamId: 0
     },
     {
-      label: "Max MP",
+      label: 'Max MP',
       paramId: EnemyBaseParam.MaxMp,
-      icon: <MonitorHeart sx={{ color: lightBlue[400] }}/>,
+      icon: <MonitorHeart sx={{ color: lightBlue[ 400 ] }}/>,
       longParamId: 1
     },
     {
-      label: "Max TP",
+      label: 'Max TP',
       paramId: -1, // display-only; no base param index exists for TP
-      icon: <Battery6Bar sx={{ color: lightGreen[400] }}/>,
+      icon: <Battery6Bar sx={{ color: lightGreen[ 400 ] }}/>,
       longParamId: 30
     },
     {
-      label: "Power",
+      label: 'Power',
       paramId: EnemyBaseParam.Attack,
-      icon: <FitnessCenter sx={{ color: red[900] }}/>,
+      icon: <FitnessCenter sx={{ color: red[ 900 ] }}/>,
       longParamId: 2
     },
     {
-      label: "Endurance",
+      label: 'Endurance',
       paramId: EnemyBaseParam.Defense,
-      icon: <Shield sx={{ color: blue[700] }}/>,
+      icon: <Shield sx={{ color: blue[ 700 ] }}/>,
       longParamId: 3
     },
     {
-      label: "Force",
+      label: 'Force',
       paramId: EnemyBaseParam.MAttack,
-      icon: <AutoFixHigh sx={{ color: green[500] }}/>,
+      icon: <AutoFixHigh sx={{ color: green[ 500 ] }}/>,
       longParamId: 4
     },
     {
-      label: "Resist",
+      label: 'Resist',
       paramId: EnemyBaseParam.MDefense,
-      icon: <PhotoFilter sx={{ color: pink[400] }}/>,
+      icon: <PhotoFilter sx={{ color: pink[ 400 ] }}/>,
       longParamId: 5
     },
     {
-      label: "Speed",
+      label: 'Speed',
       paramId: EnemyBaseParam.Speed,
-      icon: <DirectionsRun color={"warning"}/>,
+      icon: <DirectionsRun color={'warning'}/>,
       longParamId: 6
     },
     {
-      label: "Luck",
+      label: 'Luck',
       paramId: EnemyBaseParam.Luck,
       icon: <Casino/>,
       longParamId: 7
@@ -117,9 +107,9 @@ export default function EnemyBaseParameters({
   return <>
     <Stack spacing={1}>
       <Typography
-        variant={"h5"}
-        align={"center"}
-        color={"primary"}
+        variant={'h5'}
+        align={'center'}
+        color={'primary'}
       >
         Base Parameters
       </Typography>
@@ -129,7 +119,9 @@ export default function EnemyBaseParameters({
         {
           const formula = getGrowthFormula(param.longParamId);
           const isMaxTp = (param.longParamId === 30);
-          const maxTpValue = isMaxTp ? selectedEnemy.maxTp : 0;
+          const maxTpValue = isMaxTp
+            ? selectedEnemy.maxTp
+            : 0;
 
           return (
             <React.Fragment key={param.paramId}>
@@ -152,7 +144,7 @@ export default function EnemyBaseParameters({
                     <NumberInputWithLabel
                       label={param.label}
                       endAdornment={param.icon}
-                      value={selectedEnemy.params[param.paramId]}
+                      value={selectedEnemy.params[ param.paramId ]}
                       onChangeEventHandler={(event) =>
                       {
                         const updatedValue = parseInt(event.target.value) ?? 1;
@@ -185,7 +177,7 @@ export default function EnemyBaseParameters({
                         <Typography
                           variant="caption"
                           sx={{
-                            fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+                            fontFamily: '\'Consolas\', \'Monaco\', \'Courier New\', monospace',
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -206,5 +198,5 @@ export default function EnemyBaseParameters({
         })}
       </Grid>
     </Stack>
-  </>
+  </>;
 }

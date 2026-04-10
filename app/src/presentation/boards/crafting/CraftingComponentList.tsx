@@ -36,15 +36,8 @@ import {
   Sync
 } from '@mui/icons-material';
 import { brown } from '@mui/material/colors';
-import React, {
-  MouseEvent,
-  useEffect,
-  useState
-} from 'react';
-import {
-  MuiSnackbarSeverity,
-  MuiSnackbarVariant
-} from '@core/enums/MuiSnackbar.ts';
+import React, { MouseEvent, useEffect, useState } from 'react';
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import CraftingListType from '@core/enums/CraftingListType.ts';
 import { useItems } from '@presentation/context/resources/items.context.tsx';
 import { useWeapons } from '@presentation/context/resources/weapons.context.tsx';
@@ -748,7 +741,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
         </Button>
       </DialogActions>
     </Dialog>
-  </>
-}
+  </>;
+};
 
 export default CraftingComponentList;

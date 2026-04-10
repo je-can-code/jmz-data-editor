@@ -1,21 +1,8 @@
-import React from "react";
-import {
-  JabsBattlerData,
-} from "@services/parsers/JabsDataParser.ts";
-import NumberInputWithLabel from "../../../components/core/NumberInputWithLabel.tsx";
-import {
-  Divider,
-  Stack,
-  Typography
-} from "@mui/material";
-import {
-  AccessAlarm,
-  DirectionsRun,
-  Speed,
-  TrendingUp,
-  Visibility
-} from "@mui/icons-material";
-import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
+import React from 'react';
+import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
+import { Divider, Stack, Typography } from '@mui/material';
+import { AccessAlarm, DirectionsRun, Speed, TrendingUp, Visibility } from '@mui/icons-material';
+import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
 
 type EnemyJabsBattlerDataProps = {
   selectedEnemy: RPG_EnemyDomainModel;
@@ -65,10 +52,10 @@ const EnemyJabsBattlerData = ({
 
   return <>
     <Typography
-      variant={"h4"}
+      variant={'h4'}
       gutterBottom={true}
-      color={"primary"}
-      align={"center"}
+      color={'primary'}
+      align={'center'}
       sx={{ paddingTop: 2 }}
     >
       JABS Battler Data
@@ -77,7 +64,7 @@ const EnemyJabsBattlerData = ({
     {/* Main container for vertical layout */}
     <Stack
       spacing={2}
-      direction={"column"}
+      direction={'column'}
     >
       {/* Basic battler data section */}
       <Stack spacing={1}>
@@ -86,13 +73,13 @@ const EnemyJabsBattlerData = ({
           label="Sight Range"
           value={selectedEnemy.jabsBattlerData.sight}
           onChangeEventHandler={(event) => handleSightChange(Number(event.target.value))}
-          endAdornment={<Visibility color={"info"}/>}
+          endAdornment={<Visibility color={'info'}/>}
         />
         <NumberInputWithLabel
           label="Pursuit Range"
           value={selectedEnemy.jabsBattlerData.pursuit}
           onChangeEventHandler={(event) => handlePursuitChange(Number(event.target.value))}
-          endAdornment={<DirectionsRun color={"success"}/>}
+          endAdornment={<DirectionsRun color={'success'}/>}
         />
         <NumberInputWithLabel
           label="Prepare Speed"
@@ -110,23 +97,23 @@ const EnemyJabsBattlerData = ({
           label="Alert Duration"
           value={selectedEnemy.jabsBattlerData.alertDuration}
           onChangeEventHandler={(event) => handleAlertDurationChange(Number(event.target.value))}
-          endAdornment={<AccessAlarm color={"warning"}/>} // Orange/yellow for caution/alert
+          endAdornment={<AccessAlarm color={'warning'}/>} // Orange/yellow for caution/alert
         />
         <NumberInputWithLabel
           label="Alert Sight Boost"
           value={selectedEnemy.jabsBattlerData.alertSightBoost}
           onChangeEventHandler={(event) => handleAlertSightBoostChange(Number(event.target.value))}
-          endAdornment={<TrendingUp color={"secondary"}/>} // Purple for enhancement
+          endAdornment={<TrendingUp color={'secondary'}/>} // Purple for enhancement
         />
         <NumberInputWithLabel
           label="Alert Pursuit Boost"
           value={selectedEnemy.jabsBattlerData.alertPursuitBoost}
           onChangeEventHandler={(event) => handleAlertPursuitBoostChange(Number(event.target.value))}
-          endAdornment={<Speed color={"error"}/>} // Red for speed/intensity
+          endAdornment={<Speed color={'error'}/>} // Red for speed/intensity
         />
       </Stack>
     </Stack>
   </>;
 };
 
-export { EnemyJabsBattlerData }
+export { EnemyJabsBattlerData };

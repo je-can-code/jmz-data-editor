@@ -1,12 +1,12 @@
-import React from "react";
-import { Button } from '@mui/material'
-import { SdCard } from "@mui/icons-material";
+import React from 'react';
+import { Button } from '@mui/material';
+import { SdCard } from '@mui/icons-material';
 
 const ReloadStyles = {
-  fontFamily: "monospace",
-  position: "absolute",
-  top: "1%",
-  left: "23%",
+  fontFamily: 'monospace',
+  position: 'absolute',
+  top: '1%',
+  left: '23%',
 };
 
 type ReloadButtonProps = {
@@ -30,18 +30,18 @@ const ReloadButton = ({
 {
   return <>
     <Button
-      size={"small"}
-      color={"warning"}
+      size={'small'}
+      color={'warning'}
       onClick={async () => handleReload()}
       loading={!canReload}
-      loadingPosition={"start"}
+      loadingPosition={'start'}
       startIcon={<SdCard/>}
-      variant={"contained"}
+      variant={'contained'}
       sx={ReloadStyles}
     >
       <span>{`Reload ${extraReloadText ?? ''}`}</span>
     </Button>
-  </>
+  </>;
 };
 
 export default ReloadButton;

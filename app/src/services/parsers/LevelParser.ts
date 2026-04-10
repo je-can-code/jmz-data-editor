@@ -1,5 +1,5 @@
-import NoteReader from "../utils/NoteReader.ts";
-import { NoteNormalizer } from "../utils/NoteNormalizer.ts";
+import NoteReader from '../utils/NoteReader.ts';
+import { NoteNormalizer } from '../utils/NoteNormalizer.ts';
 import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 
 class LevelParser
@@ -11,7 +11,10 @@ class LevelParser
     return NoteReader.getNumberFromNoteByRegex(enemy, this.#regex) ?? 0;
   }
 
-  static write(originalNote: string, level: number): string
+  static write(
+    originalNote: string,
+    level: number
+  ): string
   {
     if (level <= 0)
     {
@@ -35,7 +38,7 @@ class LevelParser
   }
 }
 
-export { LevelParser }
+export { LevelParser };
 
 /*
       points     stats

@@ -1,13 +1,6 @@
-import {
-  describe,
-  expect,
-  it,
-} from 'vitest';
+import { describe, expect, it, } from 'vitest';
 
-import {
-  resolveGameProjectRootFromDataPath,
-  resolveIconSetPngPath,
-} from '@services/ImageService.ts';
+import { resolveGameProjectRootFromDataPath, resolveIconSetPngPath, } from '@services/ImageService.ts';
 
 describe('resolveGameProjectRootFromDataPath', () =>
 {
@@ -37,12 +30,14 @@ describe('resolveGameProjectRootFromDataPath', () =>
 
   it('returns empty string when the path is only data (no parent)', () =>
   {
-    expect(resolveGameProjectRootFromDataPath('data')).toBe('');
+    expect(resolveGameProjectRootFromDataPath('data'))
+      .toBe('');
   });
 
   it('treats /data as the data dir at filesystem root', () =>
   {
-    expect(resolveGameProjectRootFromDataPath('/data')).toBe('/');
+    expect(resolveGameProjectRootFromDataPath('/data'))
+      .toBe('/');
   });
 });
 

@@ -1,5 +1,5 @@
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
-import RPG_DropHelper from "./DropHelper.ts";
+import RPG_DropHelper from './DropHelper.ts';
 
 /**
  * A builder class for simply developing {@link RPG_DropItem}s.
@@ -92,7 +92,10 @@ export default class DropItemBuilder
    * @param {number} percentChance The chance that this loot should drop.
    * @return {RPG_DropItem} A item-based loot drop with the given parameters.
    */
-  itemLoot(databaseId: number, percentChance: number): RPG_DropItem
+  itemLoot(
+    databaseId: number,
+    percentChance: number
+  ): RPG_DropItem
   {
     this.setType(RPG_DropHelper.Types.Item);
     this.setId(databaseId);
@@ -106,7 +109,10 @@ export default class DropItemBuilder
    * @param {number} percentChance The chance that this loot should drop.
    * @return {RPG_DropItem} A weapon-based loot drop with the given parameters.
    */
-  weaponLoot(databaseId: number, percentChance: number): RPG_DropItem
+  weaponLoot(
+    databaseId: number,
+    percentChance: number
+  ): RPG_DropItem
   {
     this.setType(RPG_DropHelper.Types.Weapon);
     this.setId(databaseId);
@@ -120,7 +126,10 @@ export default class DropItemBuilder
    * @param {number} percentChance The chance that this loot should drop.
    * @return {RPG_DropItem} A armor-based loot drop with the given parameters.
    */
-  armorLoot(databaseId: number, percentChance: number): RPG_DropItem
+  armorLoot(
+    databaseId: number,
+    percentChance: number
+  ): RPG_DropItem
   {
     this.setType(RPG_DropHelper.Types.Armor);
     this.setId(databaseId);

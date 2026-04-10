@@ -1,8 +1,4 @@
-import {
-  describe,
-  expect,
-  it
-} from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ExtraDropManager } from '@services/parsers/ExtraDropParser.ts';
 
 // RPG_DropItem is a simple shape: { kind: number, dataId: number, denominator: number }
@@ -34,19 +30,19 @@ describe('ExtraDropManager.read', () =>
     expect(result.length)
       .toBe(3);
 
-    expect(result[0])
+    expect(result[ 0 ])
       .toEqual({
         kind: 1,
         dataId: 1,
         denominator: 10
       });
-    expect(result[1])
+    expect(result[ 1 ])
       .toEqual({
         kind: 2,
         dataId: 5,
         denominator: 3
       });
-    expect(result[2])
+    expect(result[ 2 ])
       .toEqual({
         kind: 3,
         dataId: 7,

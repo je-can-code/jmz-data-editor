@@ -1,5 +1,5 @@
-import DatabaseFilenames from "@core/enums/DatabaseFilenames.ts";
-import { RPG_ItemDomainModel } from "@core/domain/entities/RPG_ItemDomainModel.ts";
+import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
+import { RPG_ItemDomainModel } from '@core/domain/entities/RPG_ItemDomainModel.ts';
 import { createResourceContext } from '@presentation/context/resources/factories/context.factory.tsx';
 
 export const {
@@ -8,5 +8,5 @@ export const {
 } = createResourceContext(
   DatabaseFilenames.Items,
   RPG_ItemDomainModel,
-  "Items"
+  'Items'
 );
