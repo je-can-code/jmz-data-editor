@@ -154,6 +154,40 @@ describe('EnemyDomainModel', () =>
       .toContain('<atkBuffPlus:[a.level * 5]>');
   });
 
+  it('should round-trip Passive-ABS affix gate tags on enemy notes', () =>
+  {
+    const rmmz = createMockRmmzEnemy({
+      note: [
+        '<no-rng-passive-prefixes>',
+        '<passive-affix-suffix-chance:40>',
+      ].join('\n'),
+    });
+
+    const model = new RPG_EnemyDomainModel(rmmz);
+
+    expect(model.noRngPassivePrefixes)
+      .toBe(true);
+    expect(model.noRngPassiveSuffixes)
+      .toBe(false);
+    expect(model.passiveAffixPrefixChance)
+      .toBe(null);
+    expect(model.passiveAffixSuffixChance)
+      .toBe(40);
+
+    model.noRngPassivePrefixes = false;
+    model.passiveAffixPrefixChance = 25;
+
+    const out = model.toRmmz();
+
+    expect(out.note)
+      .toContain('<passive-affix-prefix-chance:25>');
+    expect(out.note)
+      .toContain('<passive-affix-suffix-chance:40>');
+    expect(out.note)
+      .not
+      .toContain('<no-rng-passive-prefixes>');
+  });
+
   it('should handle malformed or missing data without crashing', () =>
   {
     const rmmz = createMockRmmzEnemy({
