@@ -1,4 +1,4 @@
-import React, { ChangeEvent, MouseEvent, useState } from 'react';
+import React, { ChangeEvent, MouseEvent, useRef, useState } from 'react';
 import { FixedSizeList } from 'react-window';
 import {
   Alert,
@@ -24,7 +24,6 @@ import {
   ListSubheader,
   Menu,
   MenuItem,
-  Paper,
   Snackbar,
   SpeedDial,
   SpeedDialAction,
@@ -54,6 +53,8 @@ import { useActors } from '@presentation/context/resources/actors.context.tsx';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { RPG_SkillDomainModel } from '@core/domain/entities/RPG_SkillDomainModel.ts';
 import { RPG_ActorDomainModel } from '@core/domain/entities/RPG_ActorDomainModel.ts';
+import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
+import { useElementClientRect } from '@presentation/hooks/useElementClientRect.ts';
 import { useProficiency } from '@presentation/context/resources/proficiency.context.tsx';
 import Conditional = Proficiency.Conditional;
 import Requirement = Proficiency.Requirement;
@@ -85,6 +86,8 @@ const ProficiencyBoard = () =>
   } = useSkills();
 
   //region state
+  const listViewportRef = useRef<HTMLDivElement>(null);
+  const listViewportSize = useElementClientRect(listViewportRef);
   const [ selectedConditional, setSelectedConditional ] = useState<Conditional | null>(null);
   const [ selectedConditionalIndex, setSelectedConditionalIndex ] = useState<number>(0);
   const [ conditionalsContextMenu, setConditionalsContextMenu ] = useState<{
@@ -720,17 +723,48 @@ const ProficiencyBoard = () =>
 
   if (actorsLoading || skillsLoading || proficiencyLoading)
   {
-    return <Typography>Loading database and proficiency resources...</Typography>;
+    return (
+      <Box sx={{
+        flex: 1,
+        minHeight: 0,
+        overflow: 'auto',
+        p: 2,
+      }}>
+        <Typography>Loading database and proficiency resources...</Typography>
+      </Box>
+    );
   }
 
+  const listPixelHeight = listViewportSize.height > 0
+    ? listViewportSize.height
+    : 600;
+  const listPixelWidth = listViewportSize.width > 0
+    ? listViewportSize.width
+    : 300;
+
   return <>
-    <Grid container spacing={2}>
-      {/* This is the data list of all entries the user can modify. */}
-      <Grid size={3}>
-        <div onContextMenu={handleConditionalContextMenu} style={{ cursor: 'context-menu' }}>
+    <Box sx={{
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      <EditorBoardSplitLayout
+        sidebarColumnWidth={'min(360px, 28vw)'}
+        sidebar={
+          <Box
+            ref={listViewportRef}
+            sx={{
+              flex: 1,
+              minHeight: 0,
+            }}
+          >
+        <div onContextMenu={handleConditionalContextMenu} style={{ cursor: 'context-menu', height: '100%' }}>
           {/* @ts-ignore */}
           <FixedSizeList
-            height={1030}
+            height={listPixelHeight}
+            width={listPixelWidth}
             itemSize={30}
             overscanCount={5}
             itemCount={conditionals.length}
@@ -738,15 +772,9 @@ const ProficiencyBoard = () =>
             {renderConditionalListItem}
           </FixedSizeList>
         </div>
-      </Grid>
-
-      {/* This is the form fields for modifying the selected entry. */}
-      <Grid size={9}>
-        <Paper sx={{
-          height: '100%',
-          width: '100%',
-          padding: 2
-        }} elevation={10}>
+          </Box>
+        }
+      >
           {(selectedConditional === null)
             ? <Typography>
               Please select a conditional on the left.<br/>
@@ -1026,8 +1054,8 @@ const ProficiencyBoard = () =>
                 </Stack>
               </Grid>
             </Grid>}
-        </Paper>
-      </Grid>
+      </EditorBoardSplitLayout>
+    </Box>
 
       {/*region not-grid-related elements */}
       {/* This dialog contains skill detail for the user to understand more about their skill rewards. */}
@@ -1221,7 +1249,6 @@ const ProficiencyBoard = () =>
         </MenuItem>
       </Menu>
       {/*endregion not-grid-related elements */}
-    </Grid>
   </>;
 };
 

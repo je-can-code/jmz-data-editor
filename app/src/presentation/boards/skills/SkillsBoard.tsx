@@ -1,5 +1,13 @@
-import React, { ChangeEvent, type SyntheticEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FixedSizeList, ListChildComponentProps } from 'react-window';
+import React, {
+  ChangeEvent,
+  type SyntheticEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { FixedSizeList } from 'react-window';
 import {
   Accordion,
   AccordionDetails,
@@ -13,10 +21,6 @@ import {
   FormControlLabel,
   Grid,
   IconButton,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
   Paper,
   Snackbar,
   Stack,
@@ -27,7 +31,7 @@ import {
   Tooltip,
   Typography
 } from '@mui/material';
-import { ContentCopy, DoubleArrow, ExpandMore, KeyboardArrowLeft, KeyboardArrowRight } from '@mui/icons-material';
+import { ContentCopy, ExpandMore, KeyboardArrowLeft, KeyboardArrowRight } from '@mui/icons-material';
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import SaveButton from '../../../components/core/SaveButton.tsx';
 import ReloadButton from '../../../components/core/ReloadButton.tsx';
@@ -64,6 +68,16 @@ import {
 } from '@core/enums/RmmzUsableHitType.ts';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
 import { IconIndexField } from '@presentation/components/icons/IconIndexField.tsx';
+import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
+import {
+  type VirtualizedSidebarRow,
+  VirtualizedSidebarList,
+  virtualizedSidebarColumnWidth,
+  VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+  VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT,
+} from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import {
   type UsableItemDamageEditorValue,
@@ -100,6 +114,11 @@ const SKILL_EDITOR_ACCORDION_INITIAL_EXPANDED: Record<string, boolean> = {
 const noteFormulaFieldSx = {
   '& .MuiInputBase-input': { fontFamily: 'monospace' },
 };
+
+const skillsBoardListColumnWidth = virtualizedSidebarColumnWidth(
+  VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH,
+);
 
 /**
  * Board for editing project skills: list selection, RMMZ fields, JABS extensions, and note preview.
@@ -459,6 +478,39 @@ const SkillsBoard = () =>
   };
 
   handleSkillListItemOnClickEventRef.current = handleSkillListItemOnClickEvent;
+
+  const updateUrlRef = useRef(updateUrl);
+  updateUrlRef.current = updateUrl;
+
+  /**
+   * Rebinds {@code selectedSkill} when {@code skills} is replaced (reload / project switch) so the editor matches disk.
+   */
+  useEffect(() =>
+  {
+    if (skills.length === 0)
+    {
+      setSelectedSkill(null);
+      return;
+    }
+
+    const idx = Math.min(Math.max(0, selectedSkillIndex), skills.length - 1);
+    let next: RPG_SkillDomainModel = skills[idx];
+    const priorId = selectedSkill?.id;
+    if (typeof priorId === 'number' && priorId >= 1)
+    {
+      const found = skills.find((s) => s.id === priorId);
+      if (found !== undefined)
+      {
+        next = found;
+      }
+    }
+
+    if (next !== selectedSkill)
+    {
+      setSelectedSkill(next);
+      updateUrlRef.current(next);
+    }
+  }, [ skills, selectedSkillIndex, selectedSkill ]);
 
   useEffect(() =>
   {
@@ -1616,76 +1668,42 @@ const SkillsBoard = () =>
   };
 
   /**
-   * Row renderer for the virtualized skill list.
+   * Maps a skill array index to a virtualized sidebar row (spacer for gaps/headers).
    *
-   * @param props react-window row props (index, style, etc.).
-   * @returns List row element or empty fragment for gaps or section headers.
+   * @param index Row index in {@link skills}.
+   * @returns Spacer or item descriptor for {@link VirtualizedSidebarList}.
    */
-  const renderSkillListItem = (props: ListChildComponentProps) =>
+  const getSkillSidebarRow = useCallback((index: number): VirtualizedSidebarRow =>
   {
-    const {
-      index,
-      style
-    } = props;
-
     const skill = skills.at(index);
 
-    if (!skill)
+    if (skill === undefined || skill.name.startsWith('==='))
     {
-      return <></>;
+      return {
+        type: 'spacer',
+      };
     }
 
-    if (skill.name.startsWith('==='))
-    {
-      return <></>;
-    }
-
-    return (
-      <ListItem
-        key={index}
-        style={{
-          ...style,
-          height: 'auto',
-          paddingTop: 0,
-          paddingBottom: 0
-        }}
-      >
-        <ListItemButton
-          sx={{
-            maxHeight: '30px',
-            paddingLeft: '0px',
-            marginLeft: '-14px',
-          }}
-          selected={selectedSkillIndex === index}
-          onMouseDown={(e) =>
-          {
-            e.preventDefault();
-          }}
-          tabIndex={-1}
-          onClick={() => handleSkillListItemOnClickEvent(index)}
-        >
-          <ListItemIcon sx={{ minWidth: '24px' }}>
-            {(
-              selectedSkillIndex === index
-            )
-              ? <DoubleArrow color={'success'} fontSize={'small'}/>
-              : <KeyboardArrowRight color={'warning'} fontSize={'small'}/>}
-          </ListItemIcon>
-          <ListItemText
-            disableTypography
-            primary={`${skill.id}: ${skill.name}`}
-            sx={{
-              fontSize: 16,
-              fontFamily: 'monospace',
-            }}/>
-        </ListItemButton>
-      </ListItem>
-    );
-  };
+    return {
+      type: 'item',
+      label: `${skill.id}: ${skill.name}`,
+      title: `${skill.id}: ${skill.name}`,
+      iconIndex: skill.iconIndex,
+    };
+  }, [ skills ]);
 
   return <>
-    <Grid container spacing={2}>
-      <Grid size={2}>
+    <Box sx={{
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      <EditorBoardSplitLayout
+        sidebarColumnWidth={skillsBoardListColumnWidth}
+        sidebar={
+          <>
         <Stack direction={'row'} spacing={1} alignItems={'center'} sx={{ marginTop: 1 }}>
           <Tooltip title={'Previous match'}>
             <span>
@@ -1737,35 +1755,27 @@ const SkillsBoard = () =>
             </span>
           </Tooltip>
         </Stack>
-        <div
-          ref={listWrapperRef}
-          tabIndex={0}
-          role={'listbox'}
-          onKeyDown={handleListKeyDown}
-          style={{
-            outline: 'none'
+        <Box sx={{ flex: 1, minHeight: 0 }}>
+        <VirtualizedSidebarList
+          ref={listRef}
+          itemCount={skills.length}
+          itemSize={VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE}
+          fillContainer
+          listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
+          labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
+          selectedIndex={selectedSkillIndex}
+          getRow={getSkillSidebarRow}
+          onSelectIndex={(index) =>
+          {
+            handleSkillListItemOnClickEvent(index);
           }}
-        >
-          {/* @ts-ignore */}
-          <FixedSizeList
-            ref={listRef}
-            height={960}
-            width={310}
-            itemSize={30}
-            overscanCount={5}
-            itemCount={skills.length}
-          >
-            {renderSkillListItem}
-          </FixedSizeList>
-        </div>
-      </Grid>
-
-      <Grid size={10}>
-        <Paper sx={{
-          height: '100%',
-          width: '100%',
-          padding: 2
-        }} elevation={10}>
+          onListKeyDown={handleListKeyDown}
+          listWrapperRef={listWrapperRef}
+        />
+        </Box>
+          </>
+        }
+      >
           {(
             selectedSkill === null
           )
@@ -3178,9 +3188,8 @@ const SkillsBoard = () =>
                 </Box>
               </Stack>
             )}
-        </Paper>
-      </Grid>
-    </Grid>
+      </EditorBoardSplitLayout>
+    </Box>
 
     {/*region not-grid-related elements */}
     <Box sx={{

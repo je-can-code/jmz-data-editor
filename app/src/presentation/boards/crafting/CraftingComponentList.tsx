@@ -1,5 +1,6 @@
 import {
   Autocomplete,
+  Box,
   Button,
   Chip,
   Dialog,
@@ -20,6 +21,7 @@ import {
   TextField,
   ToggleButton,
   ToggleButtonGroup,
+  Tooltip,
   Typography
 } from '@mui/material';
 import CraftingComponentType from '@core/enums/CraftingComponentType.ts';
@@ -30,13 +32,14 @@ import {
   Close,
   ContentCopy,
   Edit,
+  KeyboardArrowDown,
+  KeyboardArrowUp,
   LocalDining,
-  QuestionMark,
   Shield,
   Sync
 } from '@mui/icons-material';
 import { brown } from '@mui/material/colors';
-import React, { MouseEvent, useEffect, useState } from 'react';
+import React, { MouseEvent, useEffect, useMemo, useState } from 'react';
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import CraftingListType from '@core/enums/CraftingListType.ts';
 import { useItems } from '@presentation/context/resources/items.context.tsx';
@@ -45,6 +48,7 @@ import { useArmors } from '@presentation/context/resources/armors.context.tsx';
 import { RPG_ArmorDomainModel } from '@core/domain/entities/RPG_ArmorDomainModel.ts';
 import { RPG_ItemDomainModel } from '@core/domain/entities/RPG_ItemDomainModel.ts';
 import { RPG_WeaponDomainModel } from '@core/domain/entities/RPG_WeaponDomainModel.ts';
+import { IconSetSprite } from '@presentation/components/icons/IconSetSprite.tsx';
 
 type CraftingListProps = {
   type: CraftingListType;
@@ -60,6 +64,54 @@ type CraftingListProps = {
   ) => void;
 };
 
+/**
+ * Reads {@link Rmmz.Base.RPG_BaseItem.iconIndex} from a database row via {@link RPG_BaseDomainModel.toRmmz}.
+ */
+export function readDatabaseIconIndex(
+  row: RPG_ItemDomainModel | RPG_WeaponDomainModel | RPG_ArmorDomainModel | null
+): number
+{
+  if (row === null)
+  {
+    return 0;
+  }
+
+  const dto = row.toRmmz() as { iconIndex?: number };
+  if (typeof dto.iconIndex !== 'number')
+  {
+    return 0;
+  }
+
+  const v = Math.trunc(dto.iconIndex);
+  if (v < 0)
+  {
+    return 0;
+  }
+
+  return v;
+}
+
+/**
+ * Reads {@link Rmmz.Base.RPG_BaseItem.description} from a database row via {@link RPG_BaseDomainModel.toRmmz}.
+ */
+export function readDatabaseDescription(
+  row: RPG_ItemDomainModel | RPG_WeaponDomainModel | RPG_ArmorDomainModel | null
+): string
+{
+  if (row === null)
+  {
+    return '';
+  }
+
+  const dto = row.toRmmz() as { description?: string };
+  if (typeof dto.description !== 'string')
+  {
+    return '';
+  }
+
+  return dto.description;
+}
+
 const CraftingComponentList = (props: CraftingListProps) =>
 {
   //region state
@@ -71,14 +123,17 @@ const CraftingComponentList = (props: CraftingListProps) =>
 
   const {
     data: items,
+    byId: itemsById,
     loading: itemsLoading
   } = useItems();
   const {
     data: weapons,
+    byId: weaponsById,
     loading: weaponsLoading
   } = useWeapons();
   const {
     data: armors,
+    byId: armorsById,
     loading: armorsLoading
   } = useArmors();
 
@@ -88,6 +143,54 @@ const CraftingComponentList = (props: CraftingListProps) =>
   } | null>(null);
   const [ componentModifierOpen, setComponentModifierOpen ] = useState(false);
   //endregion state
+
+  const itemOptionsForPicker = useMemo(
+    () => [ ...items ].filter((row) => row.name.trim() !== '' && !row.name.startsWith('=='))
+      .sort((a, b) => a.id - b.id),
+    [ items ]
+  );
+
+  const weaponOptionsForPicker = useMemo(
+    () => [ ...weapons ].filter((row) => row.name.trim() !== '' && !row.name.startsWith('=='))
+      .sort((a, b) => a.id - b.id),
+    [ weapons ]
+  );
+
+  const armorOptionsForPicker = useMemo(
+    () => [ ...armors ].filter((row) => row.name.trim() !== '' && !row.name.startsWith('=='))
+      .sort((a, b) => a.id - b.id),
+    [ armors ]
+  );
+
+  const itemPickerValue = useMemo((): RPG_ItemDomainModel | null =>
+  {
+    if (selectedComponentType !== CraftingComponentType.Item || pendingComponent === null)
+    {
+      return null;
+    }
+
+    return itemsById.get(pendingComponent.id) ?? null;
+  }, [ selectedComponentType, pendingComponent, itemsById ]);
+
+  const weaponPickerValue = useMemo((): RPG_WeaponDomainModel | null =>
+  {
+    if (selectedComponentType !== CraftingComponentType.Weapon || pendingComponent === null)
+    {
+      return null;
+    }
+
+    return weaponsById.get(pendingComponent.id) ?? null;
+  }, [ selectedComponentType, pendingComponent, weaponsById ]);
+
+  const armorPickerValue = useMemo((): RPG_ArmorDomainModel | null =>
+  {
+    if (selectedComponentType !== CraftingComponentType.Armor || pendingComponent === null)
+    {
+      return null;
+    }
+
+    return armorsById.get(pendingComponent.id) ?? null;
+  }, [ selectedComponentType, pendingComponent, armorsById ]);
 
   /**
    * Initializes the board with the data from the configuration.
@@ -281,6 +384,45 @@ const CraftingComponentList = (props: CraftingListProps) =>
 
     setPendingComponent(null);
   };
+
+  const handleReorderComponent = (
+    index: number,
+    delta: -1 | 1
+  ) =>
+  {
+    const partner = index + delta;
+    if (partner < 0 || partner >= currentComponents.length)
+    {
+      return;
+    }
+
+    const next = currentComponents.slice();
+    const [ moved ] = next.splice(index, 1);
+    next.splice(partner, 0, moved);
+
+    setCurrentComponents(next);
+    props.updateRecipeFunc(next, props.type);
+
+    const prevSel = selectedComponentIndex;
+    const nextSel = selectedComponentIndex === index
+      ? partner
+      : (
+        selectedComponentIndex === partner
+          ? index
+          : selectedComponentIndex
+      );
+    setSelectedComponentIndex(nextSel);
+    setSelectedComponent(next[ nextSel ] ?? null);
+
+    if (
+      componentModifierOpen
+      && pendingComponent !== null
+      && (prevSel === index || prevSel === partner)
+    )
+    {
+      setPendingComponent(next[ nextSel ] ?? null);
+    }
+  };
   //endregion list updates
 
   //region render
@@ -301,125 +443,168 @@ const CraftingComponentList = (props: CraftingListProps) =>
     }
 
     let ingredientData = null;
-    let icon = <QuestionMark/>;
     switch (ingredient.type)
     {
       case CraftingComponentType.Item:
-        ingredientData = items.at(ingredient.id);
-        icon = <BusinessCenter color={'success'}/>;
+        ingredientData = itemsById.get(ingredient.id) ?? null;
         break;
       case CraftingComponentType.Weapon:
-        ingredientData = weapons.at(ingredient.id);
-        icon = <LocalDining color={'error'}/>;
+        ingredientData = weaponsById.get(ingredient.id) ?? null;
         break;
       case CraftingComponentType.Armor:
-        ingredientData = armors.at(ingredient.id);
-        icon = <Shield color={'info'}/>;
+        ingredientData = armorsById.get(ingredient.id) ?? null;
         break;
       // TODO: implement gold cost as ingredient.
       default:
         throw new Error(`unknown ingredient type detected: ${ingredient.type}`);
     }
 
+    const spriteIndex = readDatabaseIconIndex(ingredientData);
+    const dbDescription = readDatabaseDescription(ingredientData);
+    const hasDescriptionTooltip = dbDescription.trim() !== '';
+
+    const rowButton = (
+      <ListItemButton
+        selected={selectedComponentIndex === index}
+        onClick={() => handleRecipeComponentListItemOnClickEvent(index)}
+      >
+        <ListItemIcon sx={{ minWidth: 36 }}>
+          <IconSetSprite
+            iconIndex={spriteIndex}
+            sizePx={28}
+          />
+        </ListItemIcon>
+        <ListItemText
+          primary={`${ingredient.id}: ${ingredientData?.name} (${ingredient.count})`}
+          disableTypography
+          sx={{ width: '100%' }}
+        />
+      </ListItemButton>
+    );
+
     return (
       <ListItem
         key={`${index}-${ingredient.type}-${ingredient.id}`}
         disableGutters
-        secondaryAction={<>
-          <IconButton
-            edge="start"
-            onClick={() =>
-            {
-              handleRecipeComponentListItemOnClickEvent(index);
-              handleOpenComponentModifierDialogOnClick();
-            }}>
-            <Edit/>
-          </IconButton>
-          <IconButton
-            edge="end"
-            onClick={() => handleDeleteTargetComponent(index)}>
-            <Clear/>
-          </IconButton>
-        </>}
+        secondaryAction={
+          <Stack
+            direction="row"
+            spacing={0}
+            alignItems="center"
+          >
+            <IconButton
+              size="small"
+              aria-label="Move component up"
+              disabled={index === 0}
+              onClick={() => handleReorderComponent(index, -1)}
+            >
+              <KeyboardArrowUp fontSize="small"/>
+            </IconButton>
+            <IconButton
+              size="small"
+              aria-label="Move component down"
+              disabled={index >= currentComponents.length - 1}
+              onClick={() => handleReorderComponent(index, 1)}
+            >
+              <KeyboardArrowDown fontSize="small"/>
+            </IconButton>
+            <IconButton
+              size="small"
+              aria-label="Edit component"
+              onClick={() =>
+              {
+                handleRecipeComponentListItemOnClickEvent(index);
+                handleOpenComponentModifierDialogOnClick();
+              }}
+            >
+              <Edit fontSize="small"/>
+            </IconButton>
+            <IconButton
+              size="small"
+              aria-label="Remove component"
+              onClick={() => handleDeleteTargetComponent(index)}
+            >
+              <Clear fontSize="small"/>
+            </IconButton>
+          </Stack>
+        }
       >
-        <ListItemButton
-          selected={selectedComponentIndex === index}
-          onClick={() => handleRecipeComponentListItemOnClickEvent(index)}
-        >
-          <ListItemIcon sx={{ minWidth: '30px' }}>
-            {icon}
-          </ListItemIcon>
-          <ListItemText
-            primary={`${ingredient.id}: ${ingredientData?.name} (${ingredient.count})`}
-            disableTypography
-            sx={{ width: '100%' }}
-          />
-        </ListItemButton>
+        {hasDescriptionTooltip
+          ? (
+            <Tooltip
+              enterDelay={400}
+              placement="right-start"
+              slotProps={{
+                tooltip: {
+                  sx: {
+                    maxWidth: 'min(90vw, 52rem)',
+                    boxSizing: 'border-box',
+                  },
+                },
+              }}
+              title={
+                <Typography
+                  component="div"
+                  variant="body2"
+                  sx={{ whiteSpace: 'pre-wrap' }}
+                >
+                  {dbDescription}
+                </Typography>
+              }
+            >
+              {rowButton}
+            </Tooltip>
+          )
+          : rowButton}
       </ListItem>
     );
   };
 
   const renderRelevantRecipeComponentDropdown = () =>
   {
-    const renderOption = (
-      props: any,
-      option: any
-    ) =>
+    const listboxProps = {
+      listbox: {
+        sx: { maxHeight: '170px' },
+      },
+    };
+
+    const optionLabelWithId = (
+      option: RPG_ItemDomainModel | RPG_WeaponDomainModel | RPG_ArmorDomainModel | null
+    ): string =>
     {
-      if (option === null || option.name === '' || option.name.startsWith('=='))
+      if (option === null)
       {
-        return <li {...props} style={{ display: 'none' }}/>;
+        return '';
       }
 
-      return (
-        <li {...props} key={props.key} style={{ height: 32 }}>
-          <ListItem disableGutters disablePadding sx={{ height: 32 }}>
-            <ListItemButton
-              sx={{ height: 32 }}
-              onClick={() =>
-              {
-                handleRelevantComponentDropdownOnClickEvent(option);
-              }}
-            >
-              <ListItemText
-                primary={`${option.id}: ${option.name}`}
-                disableTypography={true}
-              />
-            </ListItemButton>
-          </ListItem>
-        </li>
-      );
+      return `${option.id}: ${option.name}`;
     };
 
     switch (selectedComponentType)
     {
       case CraftingComponentType.Item:
         return (
-          <Autocomplete
+          <Autocomplete<RPG_ItemDomainModel, false, false, false>
             size={'small'}
-            options={[ ...items ].sort((
-              a,
-              b
+            options={itemOptionsForPicker}
+            value={itemPickerValue}
+            onChange={(
+              _,
+              value
             ) =>
             {
-              if (a === null || b === null)
+              if (value !== null)
               {
-                return (a as any) - (b as any);
-              }
-              return a.id - b.id;
-            })}
-            slotProps={{
-              listbox: {
-                sx: { maxHeight: '170px' }
+                handleRelevantComponentDropdownOnClickEvent(value);
               }
             }}
-            getOptionKey={(option) => option?.id ?? 'no-key'}
-            getOptionLabel={(option) => option?.name ?? ''}
+            slotProps={listboxProps}
+            getOptionKey={(option) => option.id}
+            getOptionLabel={optionLabelWithId}
             isOptionEqualToValue={(
               option,
-              otherOption
-            ) => option.id === otherOption.id}
-            renderOption={renderOption}
+              other
+            ) => option.id === other.id}
             renderInput={(params) =>
             {
               return <TextField
@@ -432,66 +617,68 @@ const CraftingComponentList = (props: CraftingListProps) =>
           />);
       case CraftingComponentType.Weapon:
         return (
-          <Autocomplete
+          <Autocomplete<RPG_WeaponDomainModel, false, false, false>
             size={'small'}
-            options={[ ...weapons ].sort((
-              a,
-              b
+            options={weaponOptionsForPicker}
+            value={weaponPickerValue}
+            onChange={(
+              _,
+              value
             ) =>
             {
-              if (a === null || b === null)
+              if (value !== null)
               {
-                return (a as any) - (b as any);
-              }
-              return a.id - b.id;
-            })}
-            slotProps={{
-              listbox: {
-                sx: { maxHeight: '170px' }
+                handleRelevantComponentDropdownOnClickEvent(value);
               }
             }}
-            getOptionKey={(option) => option?.id ?? 'no-key'}
-            getOptionLabel={(option) => option?.name ?? ''}
-            renderOption={renderOption}
+            slotProps={listboxProps}
+            getOptionKey={(option) => option.id}
+            getOptionLabel={optionLabelWithId}
+            isOptionEqualToValue={(
+              option,
+              other
+            ) => option.id === other.id}
             renderInput={(params) =>
             {
-              return (<TextField
+              return <TextField
                 {...params}
                 size={'small'}
                 label={'Weapons'}
-                placeholder="Weapon name..."/>);
+                placeholder="Weapon name..."
+              />;
             }}
           />);
       case CraftingComponentType.Armor:
         return (
-          <Autocomplete
+          <Autocomplete<RPG_ArmorDomainModel, false, false, false>
             size={'small'}
-            options={[ ...armors ].sort((
-              a,
-              b
+            options={armorOptionsForPicker}
+            value={armorPickerValue}
+            onChange={(
+              _,
+              value
             ) =>
             {
-              if (a === null || b === null)
+              if (value !== null)
               {
-                return (a as any) - (b as any);
-              }
-              return a.id - b.id;
-            })}
-            slotProps={{
-              listbox: {
-                sx: { maxHeight: '170px' }
+                handleRelevantComponentDropdownOnClickEvent(value);
               }
             }}
-            getOptionKey={(option) => option?.id ?? 'no-key'}
-            getOptionLabel={(option) => option?.name ?? ''}
-            renderOption={renderOption}
+            slotProps={listboxProps}
+            getOptionKey={(option) => option.id}
+            getOptionLabel={optionLabelWithId}
+            isOptionEqualToValue={(
+              option,
+              other
+            ) => option.id === other.id}
             renderInput={(params) =>
             {
-              return (<TextField
+              return <TextField
                 {...params}
                 size={'small'}
                 label={'Armors'}
-                placeholder="Armor name..."/>);
+                placeholder="Armor name..."
+              />;
             }}
           />);
     }
@@ -551,33 +738,36 @@ const CraftingComponentList = (props: CraftingListProps) =>
   {
     let componentData = null;
     let color: ('primary' | 'success' | 'error' | 'info') = 'primary';
-    let icon = <QuestionMark/>;
     switch (craftingComponent.type)
     {
       case CraftingComponentType.Item:
-        componentData = items[ craftingComponent.id ];
+        componentData = itemsById.get(craftingComponent.id) ?? null;
         color = 'success';
-        icon = <BusinessCenter color={'success'}/>;
         break;
       case CraftingComponentType.Weapon:
-        componentData = weapons[ craftingComponent.id ];
+        componentData = weaponsById.get(craftingComponent.id) ?? null;
         color = 'error';
-        icon = <LocalDining color={'error'}/>;
         break;
       case CraftingComponentType.Armor:
-        componentData = armors[ craftingComponent.id ];
+        componentData = armorsById.get(craftingComponent.id) ?? null;
         color = 'info';
-        icon = <Shield color={'info'}/>;
         break;
       // TODO: implement gold cost as ingredient.
       default:
         throw new Error(`unknown ingredient type detected: ${craftingComponent.type}`);
     }
 
+    const chipIcon = (
+      <IconSetSprite
+        iconIndex={readDatabaseIconIndex(componentData)}
+        sizePx={22}
+      />
+    );
+
     return (
       <Chip
-        icon={icon}
-        label={`${componentData.name} (${craftingComponent.count})`}
+        icon={chipIcon}
+        label={`${componentData?.name ?? `#${craftingComponent.id}`} (${craftingComponent.count})`}
         variant={variant}
         color={color}
       />
@@ -591,30 +781,41 @@ const CraftingComponentList = (props: CraftingListProps) =>
   }
 
   return <>
-    <Stack spacing={1}>
-      <Typography variant={'h5'} align={'center'}>
-        {props.type}
-      </Typography>
-      {currentComponents.length > 0 && selectedComponentType !== null
-        ? <></>
-        : <></>}
-      <div onContextMenu={handleComponentListContextMenu} style={{ cursor: 'context-menu' }}>
-        <List dense>
-          {currentComponents.length > 0
-            ? currentComponents.map((
-              ingredient,
-              index
-            ) => renderRecipeComponent(ingredient, index))
-            : (
-              <Button
-                fullWidth
-                startIcon={<Add/>}
-                onClick={() => handleAddNewComponent(null)}
-                variant={'contained'}/>
-            )}
-        </List>
-      </div>
-    </Stack>
+    <Box
+      sx={{
+        minWidth: 0,
+        width: '100%',
+        height: '100%',
+        boxSizing: 'border-box',
+        p: 1.5,
+        border: 1,
+        borderColor: 'divider',
+        borderRadius: 1,
+        bgcolor: 'action.hover',
+      }}
+    >
+      <Stack spacing={1}>
+        <Typography variant={'subtitle1'} align={'center'} fontWeight={600}>
+          {props.type}
+        </Typography>
+        <div onContextMenu={handleComponentListContextMenu} style={{ cursor: 'context-menu' }}>
+          <List dense>
+            {currentComponents.length > 0
+              ? currentComponents.map((
+                ingredient,
+                index
+              ) => renderRecipeComponent(ingredient, index))
+              : (
+                <Button
+                  fullWidth
+                  startIcon={<Add/>}
+                  onClick={() => handleAddNewComponent(null)}
+                  variant={'contained'}/>
+              )}
+          </List>
+        </div>
+      </Stack>
+    </Box>
     <Menu
       open={componentListContextMenu !== null}
       onClose={handleComponentListContextMenuOnCloseEvent}

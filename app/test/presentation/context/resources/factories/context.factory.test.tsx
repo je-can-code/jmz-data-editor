@@ -84,17 +84,19 @@ describe('context.factory', () =>
   /**
    * A helper component to capture the data loaded into the context.
    */
-  const TestComponent = ({ onDataLoaded }: { onDataLoaded: (data: any) => void }) =>
+  const TestComponent = (
+    { onLoaded }: { onLoaded: (ctx: { data: MockModel[]; byId: ReadonlyMap<number, MockModel> }) => void }
+  ) =>
   {
     const {
       data,
+      byId,
       loading
     } = useResource();
 
-    // only notify when loading is complete.
     if (!loading)
     {
-      onDataLoaded(data);
+      onLoaded({ data, byId });
     }
     return null;
   };
@@ -120,24 +122,31 @@ describe('context.factory', () =>
     ];
     (executeLoad as any).mockResolvedValue(rawData);
 
-    let loadedData: any[] = [];
+    let loadedData: MockModel[] = [];
+    let loadedById: ReadonlyMap<number, MockModel> = new Map();
     render(
       <Provider>
-        <TestComponent onDataLoaded={(data) => loadedData = data}/>
+        <TestComponent onLoaded={({ data, byId }) =>
+        {
+          loadedData = data;
+          loadedById = byId;
+        }}/>
       </Provider>
     );
 
-    // wait for the DataService to be called.
     await waitFor(() => expect(executeLoad)
       .toHaveBeenCalled());
 
-    // check that the null was filtered and models were instantiated.
     expect(loadedData.length)
       .toBe(2);
     expect(loadedData[ 0 ])
       .toBeInstanceOf(MockModel);
     expect(loadedData[ 0 ].id)
       .toBe(1);
+    expect(loadedById.get(1)?.name)
+      .toBe('Test');
+    expect(loadedById.get(2)?.name)
+      .toBe('Test 2');
   });
 
   it('save() converts models back to RMMZ and prepends null', async () =>

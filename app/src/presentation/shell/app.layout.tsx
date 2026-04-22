@@ -77,15 +77,26 @@ const AppLayout = () =>
           </Paper>
         </Grid>
 
-        {/* Routed board content */}
+        {/* Routed board content: boards own internal scroll (sidebar + main split). */}
         <Grid sx={{
           flex: 1,
           height: '100%',
-          overflow: 'auto',
-          minWidth: 0
+          minHeight: 0,
+          overflow: 'hidden',
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: 'column',
         }}>
           <ErrorBoundary>
-            <Outlet/>
+            <Box sx={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}>
+              <Outlet/>
+            </Box>
           </ErrorBoundary>
         </Grid>
       </Grid>
