@@ -12,7 +12,6 @@ import {
   ListItemButton,
   ListItemIcon,
   ListItemText,
-  Paper,
   Snackbar,
   Stack,
   TextField,
@@ -48,9 +47,12 @@ import EnemySdpDrop from './EnemySdpDrop.tsx';
 import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import { EnemyJabsAiTraits } from './EnemyJabsAiTraits.tsx';
 import { EnemyJabsBattlerData } from './EnemyJabsBattlerData.tsx';
+import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
+import { useElementClientRect } from '@presentation/hooks/useElementClientRect.ts';
 import { useEnemies } from '@presentation/context/resources/enemies.context.tsx';
 import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
 import { EnemyJabsConfigs } from '@boards/enemies/EnemyJabsConfigs.tsx';
+import { EnemyPassiveAbs } from '@boards/enemies/EnemyPassiveAbs.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Trait = Rmmz.Data.RPG_Trait;
@@ -72,6 +74,8 @@ const EnemiesBoard = () =>
   const [ currentFamilyIndex, setCurrentFamilyIndex ] = useState<number>(0);
   const [ currentGroupIndex, setCurrentGroupIndex ] = useState<number>(0);
   const listRef = useRef<FixedSizeList>(null);
+  const listViewportRef = useRef<HTMLDivElement>(null);
+  const listViewportSize = useElementClientRect(listViewportRef);
 
   const [ selectedEnemyDropItems, setSelectedEnemyDropItems ] = useState<RPG_DropItem[]>([]);
 
@@ -137,6 +141,48 @@ const EnemiesBoard = () =>
     (index) => handleEnemyListItemOnClickEvent(index, false),
     (index) => listRef.current?.scrollToItem(index, 'smart')
   );
+
+  const updateUrlRef = useRef(updateUrl);
+  updateUrlRef.current = updateUrl;
+
+  /**
+   * Rebinds {@code selectedEnemy} when {@code enemies} is replaced (reload / project switch) so the detail pane matches disk.
+   */
+  useEffect(() =>
+  {
+    if (!enemies || enemies.length === 0)
+    {
+      setSelectedEnemy(null);
+      setSelectedEnemyDropItems([]);
+      return;
+    }
+
+    const idx = Math.min(Math.max(0, selectedEnemyIndex), enemies.length - 1);
+    let next: RPG_EnemyDomainModel = enemies[idx];
+    const priorId = selectedEnemy?.id;
+    if (typeof priorId === 'number' && priorId >= 1)
+    {
+      const found = enemies.find((e) => e.id === priorId);
+      if (found !== undefined)
+      {
+        next = found;
+      }
+    }
+
+    if (next !== selectedEnemy)
+    {
+      setSelectedEnemy(next);
+      setSelectedEnemyDropItems(ExtraDropManager.read(next.note));
+      updateUrlRef.current(next);
+    }
+  }, [ enemies, selectedEnemyIndex, selectedEnemy ]);
+
+  const enemySideAccordionSx = {
+    border: '1px solid',
+    borderColor: 'divider',
+    borderRadius: 1,
+    '&:before': { display: 'none' },
+  } as const;
 
   const throttledListScroll = useCallback(
     throttle(({ scrollOffset }: {
@@ -648,9 +694,25 @@ const EnemiesBoard = () =>
   };
   //endregion color mappings
 
+  const listPixelHeight = listViewportSize.height > 0
+    ? listViewportSize.height
+    : 600;
+  const listPixelWidth = listViewportSize.width > 0
+    ? listViewportSize.width
+    : 310;
+
   return <>
-    <Grid container spacing={2}>
-      <Grid size={2}>
+    <Box sx={{
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      <EditorBoardSplitLayout
+        sidebarColumnWidth={'320px'}
+        sidebar={
+          <>
         <Stack direction={'row'} spacing={1} alignItems={'center'} sx={{ marginTop: 1 }}>
           <Tooltip title={'Previous match'}>
     <span>
@@ -702,6 +764,13 @@ const EnemiesBoard = () =>
     </span>
           </Tooltip>
         </Stack>
+        <Box
+          ref={listViewportRef}
+          sx={{
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
         <div
           ref={listWrapperRef}
           tabIndex={0}
@@ -713,14 +782,15 @@ const EnemiesBoard = () =>
           }}
           style={{
             cursor: 'context-menu',
-            outline: 'none'
+            outline: 'none',
+            height: '100%',
           }}
         >
           {/* @ts-ignore */}
           <FixedSizeList
             ref={listRef}
-            height={960}
-            width={310}
+            height={listPixelHeight}
+            width={listPixelWidth}
             itemSize={30}
             overscanCount={5}
             itemCount={enemies.length}
@@ -729,14 +799,10 @@ const EnemiesBoard = () =>
             {renderEnemyListItem}
           </FixedSizeList>
         </div>
-      </Grid>
-
-      <Grid size={10}>
-        <Paper sx={{
-          height: '100%',
-          width: '100%',
-          padding: 2
-        }} elevation={10}>
+        </Box>
+          </>
+        }
+      >
           {(
             selectedEnemy === null
           )
@@ -966,13 +1032,23 @@ const EnemiesBoard = () =>
                 </Grid>
                 <Grid size={4}>
                   <Stack spacing={1}>
-                    <Accordion>
-                      <AccordionSummary
-                        expandIcon={<ExpandMore/>}
-                      >
-                        <Typography>
-                          Traits
-                        </Typography>
+                    <Accordion
+                      defaultExpanded={false}
+                      disableGutters={true}
+                      elevation={0}
+                      sx={enemySideAccordionSx}
+                    >
+                      <AccordionSummary expandIcon={<ExpandMore/>}>
+                        <Stack spacing={0.25}>
+                          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+                            Traits
+                          </Typography>
+                          <Typography variant={'caption'} color={'text.secondary'}>
+                            {selectedEnemy.traits.length === 0
+                              ? 'No traits on this enemy.'
+                              : `${selectedEnemy.traits.length} trait${selectedEnemy.traits.length === 1 ? '' : 's'}`}
+                          </Typography>
+                        </Stack>
                       </AccordionSummary>
                       <AccordionDetails>
                         <TraitEditor
@@ -988,6 +1064,11 @@ const EnemiesBoard = () =>
                     />
 
                     <EnemyJabsConfigs
+                      selectedEnemy={selectedEnemy}
+                      updateEnemy={updateEnemy}
+                    />
+
+                    <EnemyPassiveAbs
                       selectedEnemy={selectedEnemy}
                       updateEnemy={updateEnemy}
                     />
@@ -1009,9 +1090,8 @@ const EnemiesBoard = () =>
                 </Grid>
               </Grid>
             </>}
-        </Paper>
-      </Grid>
-    </Grid>
+      </EditorBoardSplitLayout>
+    </Box>
 
     {/*region not-grid-related elements */}
     <Box sx={{

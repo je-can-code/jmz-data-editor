@@ -10,6 +10,10 @@ import RPG_Base = Rmmz.Base.RPG_Base;
  */
 export type ResourceContextValue<TModel> = {
   data: TModel[];
+  /**
+   * RMMZ database id → model. Rebuilt whenever `data` changes; use for lookups instead of treating array index as id.
+   */
+  byId: ReadonlyMap<number, TModel>;
   setData: React.Dispatch<React.SetStateAction<TModel[]>>;
   save: (updatedList: TModel[]) => Promise<void>;
   reload: () => Promise<void>;
@@ -95,15 +99,26 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
       reload();
     }, [ reload, projectReloadGeneration ]);
 
+    const byId = useMemo((): ReadonlyMap<number, TModel> =>
+    {
+      const map = new Map<number, TModel>();
+      for (const item of data)
+      {
+        map.set(item.id, item);
+      }
+      return map;
+    }, [ data ]);
+
     const value = useMemo(() => (
       {
         data,
+        byId,
         setData,
         save,
         reload,
         loading,
       }
-    ), [ data, save, reload, loading ]);
+    ), [ data, byId, save, reload, loading ]);
 
     return (
       <Context.Provider value={value}>

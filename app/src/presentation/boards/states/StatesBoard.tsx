@@ -1,5 +1,5 @@
 import React, { ChangeEvent, type SyntheticEvent, useCallback, useEffect, useMemo, useRef, useState, } from 'react';
-import { FixedSizeList, ListChildComponentProps, } from 'react-window';
+import { FixedSizeList, } from 'react-window';
 import {
   Accordion,
   AccordionDetails,
@@ -13,12 +13,7 @@ import {
   FormControlLabel,
   Grid,
   IconButton,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
   MenuItem,
-  Paper,
   Slider,
   Snackbar,
   Stack,
@@ -28,7 +23,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { ContentCopy, DoubleArrow, ExpandMore, KeyboardArrowLeft, KeyboardArrowRight, } from '@mui/icons-material';
+import { ContentCopy, ExpandMore, KeyboardArrowLeft, KeyboardArrowRight, } from '@mui/icons-material';
 import { MuiSnackbarSeverity, MuiSnackbarVariant, } from '@core/enums/MuiSnackbar.ts';
 import SaveButton from '../../../components/core/SaveButton.tsx';
 import ReloadButton from '../../../components/core/ReloadButton.tsx';
@@ -44,10 +39,21 @@ import type { StateLevelExtension } from '@core/domain/entities/state/StateLevel
 import type { StateProfExtension } from '@core/domain/entities/state/StateProfExtension.ts';
 import type { StateResourcesExtension } from '@core/domain/entities/state/StateResourcesExtension.ts';
 import type { StateSdpExtension } from '@core/domain/entities/state/StateSdpExtension.ts';
+import type { StatePassiveAbsExtension } from '@core/domain/entities/state/StatePassiveAbsExtension.ts';
 import type { StateSksExtension } from '@core/domain/entities/state/StateSksExtension.ts';
 import { StatePluginNoteSections } from '@presentation/boards/states/StatePluginNoteSections.tsx';
 import { NaturalGrowthQuadrantsEditor } from '@presentation/components/naturalGrowth/NaturalGrowthQuadrantsEditor.tsx';
 import { IconIndexField } from '@presentation/components/icons/IconIndexField.tsx';
+import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
+import {
+  type VirtualizedSidebarRow,
+  VirtualizedSidebarList,
+  virtualizedSidebarColumnWidth,
+  VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+  VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT,
+} from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import { RMMZ_STATE_MOTION_OPTIONS, } from '@core/enums/RmmzStateMotion.ts';
 import { RMMZ_STATE_OVERLAY_OPTIONS, } from '@core/enums/RmmzStateOverlay.ts';
@@ -80,11 +86,17 @@ const STATE_EDITOR_ACCORDION_INITIAL_EXPANDED: Record<string, boolean> = {
   'editor-plugin-prof': false,
   'editor-plugin-resources': false,
   'editor-plugin-sdp': false,
+  'editor-plugin-passive-abs': false,
   'editor-plugin-sks': false,
   'editor-removal': false,
   'editor-messages': false,
   'editor-traits': true,
 };
+
+const statesBoardListColumnWidth = virtualizedSidebarColumnWidth(
+  VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH,
+);
 
 /**
  * Human-readable approximate duration label for J-ABS frame counts.
@@ -431,6 +443,42 @@ const StatesBoard = () =>
     selectedState?.elem.elementBoosts,
     systemDataGeneration,
   ]);
+
+  /**
+   * Prefix and suffix affix weight totals across all loaded states (same default 100 as J-Passive-ABS when weight omitted).
+   */
+  const passiveAffixPoolTotals = useMemo(() =>
+  {
+    let prefixTotal = 0;
+    let suffixTotal = 0;
+    if (states === null || states === undefined)
+    {
+      return {
+        prefixTotal,
+        suffixTotal,
+      };
+    }
+    for (const row of states)
+    {
+      if (row === null)
+      {
+        continue;
+      }
+      const w = row.passiveAbs.affixWeight ?? 100;
+      if (row.passiveAbs.enemyPrefix === true)
+      {
+        prefixTotal += w;
+      }
+      if (row.passiveAbs.enemySuffix === true)
+      {
+        suffixTotal += w;
+      }
+    }
+    return {
+      prefixTotal,
+      suffixTotal,
+    };
+  }, [ states ]);
 
   /**
    * Currently selected absorb-element rows for the plugin elem editor.
@@ -1178,6 +1226,23 @@ const StatesBoard = () =>
   };
 
   /**
+   * Merges fields into the J-Passive-ABS extension and rebuilds the note.
+   *
+   * @param partial Subset of Passive-ABS extension fields to apply.
+   * @returns {void}
+   */
+  const patchStatePassiveAbs = (partial: Partial<StatePassiveAbsExtension>) =>
+  {
+    if (selectedState === null)
+    {
+      return;
+    }
+    selectedState.passiveAbs = selectedState.passiveAbs.clone(partial);
+    selectedState.rebuildNoteFromExtensions();
+    updateState(selectedState);
+  };
+
+  /**
    * Sets the raw state note from the natural-growth editor, then rebuilds plugin extensions from it.
    *
    * @param nextNote Full note text after quadrant edits.
@@ -1554,6 +1619,40 @@ const StatesBoard = () =>
 
   handleStateListItemOnClickEventRef.current = handleStateListItemOnClickEvent;
 
+  const updateUrlRef = useRef(updateUrl);
+  updateUrlRef.current = updateUrl;
+
+  /**
+   * After reload or project switch, {@code states} is a new array of fresh models; without this, {@code selectedState}
+   * would keep a stale reference and the editor would show unsaved edits that no longer exist on disk.
+   */
+  useEffect(() =>
+  {
+    if (states.length === 0)
+    {
+      setSelectedState(null);
+      return;
+    }
+
+    const idx = Math.min(Math.max(0, selectedStateIndex), states.length - 1);
+    let next: RPG_StateDomainModel = states[idx];
+    const priorId = selectedState?.id;
+    if (typeof priorId === 'number' && priorId >= 1)
+    {
+      const found = states.find((s) => s.id === priorId);
+      if (found !== undefined)
+      {
+        next = found;
+      }
+    }
+
+    if (next !== selectedState)
+    {
+      setSelectedState(next);
+      updateUrlRef.current(next);
+    }
+  }, [ states, selectedStateIndex, selectedState ]);
+
   useEffect(() =>
   {
     if (states.length === 0)
@@ -1796,71 +1895,42 @@ const StatesBoard = () =>
   };
 
   /**
-   * Row renderer for the virtualized state list.
+   * Maps a state array index to a virtualized sidebar row.
    *
-   * @param props react-window row props (index, style, etc.).
-   * @returns List row element or empty fragment when out of range.
+   * @param index Row index in {@link states}.
+   * @returns Spacer or item descriptor for {@link VirtualizedSidebarList}.
    */
-  const renderStateListItem = (props: ListChildComponentProps) =>
+  const getStateSidebarRow = useCallback((index: number): VirtualizedSidebarRow =>
   {
-    const {
-      index,
-      style,
-    } = props;
-
     const state = states.at(index);
 
-    if (!state)
+    if (state === undefined)
     {
-      return <></>;
+      return {
+        type: 'spacer',
+      };
     }
 
-    return (
-      <ListItem
-        key={index}
-        style={{
-          ...style,
-          height: 'auto',
-          paddingTop: 0,
-          paddingBottom: 0,
-        }}
-      >
-        <ListItemButton
-          sx={{
-            maxHeight: '30px',
-            paddingLeft: '0px',
-            marginLeft: '-14px',
-          }}
-          selected={selectedStateIndex === index}
-          onMouseDown={(e) =>
-          {
-            e.preventDefault();
-          }}
-          tabIndex={-1}
-          onClick={() => handleStateListItemOnClickEvent(index)}
-        >
-          <ListItemIcon sx={{ minWidth: '24px' }}>
-            {(
-              selectedStateIndex === index
-            )
-              ? <DoubleArrow color={'success'} fontSize={'small'}/>
-              : <KeyboardArrowRight color={'warning'} fontSize={'small'}/>}
-          </ListItemIcon>
-          <ListItemText
-            disableTypography
-            primary={`${state.id}: ${state.name}`}
-            sx={{
-              fontSize: 16,
-              fontFamily: 'monospace',
-            }}/>
-        </ListItemButton>
-      </ListItem>
-    );
-  };
+    return {
+      type: 'item',
+      label: `${state.id}: ${state.name}`,
+      title: `${state.id}: ${state.name}`,
+      iconIndex: state.iconIndex,
+    };
+  }, [ states ]);
 
   return <>
-    <Grid container spacing={2}>
-      <Grid size={2}>
+    <Box sx={{
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      <EditorBoardSplitLayout
+        sidebarColumnWidth={statesBoardListColumnWidth}
+        sidebar={
+          <>
         <Stack direction={'row'} spacing={1} alignItems={'center'} sx={{ marginTop: 1 }}>
           <Tooltip title={'Previous match'}>
             <span>
@@ -1912,35 +1982,27 @@ const StatesBoard = () =>
             </span>
           </Tooltip>
         </Stack>
-        <div
-          ref={listWrapperRef}
-          tabIndex={0}
-          role={'listbox'}
-          onKeyDown={handleListKeyDown}
-          style={{
-            outline: 'none',
+        <Box sx={{ flex: 1, minHeight: 0 }}>
+        <VirtualizedSidebarList
+          ref={listRef}
+          itemCount={states.length}
+          itemSize={VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE}
+          fillContainer
+          listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
+          labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
+          selectedIndex={selectedStateIndex}
+          getRow={getStateSidebarRow}
+          onSelectIndex={(index) =>
+          {
+            handleStateListItemOnClickEvent(index);
           }}
-        >
-          {/* @ts-ignore */}
-          <FixedSizeList
-            ref={listRef}
-            height={960}
-            width={310}
-            itemSize={30}
-            overscanCount={5}
-            itemCount={states.length}
-          >
-            {renderStateListItem}
-          </FixedSizeList>
-        </div>
-      </Grid>
-
-      <Grid size={10}>
-        <Paper sx={{
-          height: '100%',
-          width: '100%',
-          padding: 2,
-        }} elevation={10}>
+          onListKeyDown={handleListKeyDown}
+          listWrapperRef={listWrapperRef}
+        />
+        </Box>
+          </>
+        }
+      >
           {(
             selectedState === null
           )
@@ -2523,6 +2585,9 @@ const StatesBoard = () =>
                             patchResources={patchStateResources}
                             patchSdp={patchStateSdp}
                             patchSks={patchStateSks}
+                            patchPassiveAbs={patchStatePassiveAbs}
+                            passiveAffixPrefixPoolTotal={passiveAffixPoolTotals.prefixTotal}
+                            passiveAffixSuffixPoolTotal={passiveAffixPoolTotals.suffixTotal}
                           />
                         </Stack>
                       </Grid>
@@ -3950,9 +4015,8 @@ const StatesBoard = () =>
                 </Box>
               </Stack>
             )}
-        </Paper>
-      </Grid>
-    </Grid>
+      </EditorBoardSplitLayout>
+    </Box>
 
     <Box sx={{
       display: 'flex',

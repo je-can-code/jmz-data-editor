@@ -1,8 +1,19 @@
-import { Box, Checkbox, FormControlLabel, Stack, Typography } from '@mui/material';
+import type { ReactNode } from 'react';
+import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Box,
+  Checkbox,
+  FormControlLabel,
+  Stack,
+  Typography
+} from '@mui/material';
 import {
   Badge,
   BadgeSharp,
   DirectionsRun,
+  ExpandMore,
   Favorite,
   HeartBroken,
   NoEncryption,
@@ -18,6 +29,13 @@ type EnemyJabsConfigsProps = {
   selectedEnemy: RPG_EnemyDomainModel;
   updateEnemy: (enemy: RPG_EnemyDomainModel) => void;
 };
+
+const accordionShellSx = {
+  border: '1px solid',
+  borderColor: 'divider',
+  borderRadius: 1,
+  '&:before': { display: 'none' },
+} as const;
 
 const EnemyJabsConfigs = ({
   selectedEnemy,
@@ -37,14 +55,30 @@ const EnemyJabsConfigs = ({
     updateEnemy(selectedEnemy);
   };
 
+  const jabsConfigKeys: (keyof JabsConfigsData)[] = [
+    'noIdle',
+    'canIdle',
+    'noHpBar',
+    'showHpBar',
+    'inanimate',
+    'notInanimate',
+    'invincible',
+    'notInvincible',
+    'noName',
+    'showName',
+  ];
+
+  const activeJabsOptionCount = jabsConfigKeys.filter((k) => selectedEnemy.jabsConfigs[ k ] === true)
+    .length;
+
   /**
-   * Helper to render a consistent checkbox bound to the domain model.
+   * Checkbox row using custom icons for unchecked vs checked (JABS config pattern).
    */
   const renderCheckbox = (
     config: JabsConfig,
     label: string,
-    icon: any,
-    checkedIcon: any
+    icon: ReactNode,
+    checkedIcon: ReactNode
   ) => (
     <FormControlLabel
       control={
@@ -62,35 +96,44 @@ const EnemyJabsConfigs = ({
     />
   );
 
-  return <>
-    <Typography
-      variant={'h4'}
-      gutterBottom={true}
-      color={'primary'}
-      align={'center'}
-      sx={{ paddingTop: 2 }}
+  return (
+    <Accordion
+      defaultExpanded={false}
+      disableGutters={true}
+      elevation={0}
+      sx={accordionShellSx}
     >
-      JABS Configs
-    </Typography>
-
-    <Box sx={{
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 1
-    }}>
+      <AccordionSummary expandIcon={<ExpandMore/>}>
+        <Stack spacing={0.25}>
+          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
+            JABS behavior
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            {activeJabsOptionCount === 0
+              ? 'No JABS flags on — defaults apply in-game.'
+              : `${activeJabsOptionCount} option${activeJabsOptionCount === 1 ? '' : 's'} on`}
+          </Typography>
+        </Stack>
+      </AccordionSummary>
+      <AccordionDetails>
+        <Box sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 1
+        }}>
       {/* Movement configs */}
       <Box sx={{ mb: 1 }}>
         <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Movement</Typography>
         <Stack>
           {renderCheckbox(
             JabsConfig.NoIdle,
-            'No Idle',
+            'No idle',
             <DirectionsRun sx={{ color: grey[ 400 ] }}/>,
             <DirectionsRun sx={{ color: red[ 500 ] }}/>
           )}
           {renderCheckbox(
             JabsConfig.CanIdle,
-            'Can Idle',
+            'Can idle',
             <DirectionsRun sx={{ color: grey[ 400 ] }}/>,
             <DirectionsRun sx={{ color: green[ 500 ] }}/>
           )}
@@ -103,13 +146,13 @@ const EnemyJabsConfigs = ({
         <Stack>
           {renderCheckbox(
             JabsConfig.NoHpBar,
-            'No HP Bar',
+            'No HP bar',
             <HeartBroken sx={{ color: grey[ 400 ] }}/>,
             <HeartBroken sx={{ color: red[ 500 ] }}/>
           )}
           {renderCheckbox(
             JabsConfig.ShowHpBar,
-            'Show HP Bar',
+            'Show HP bar',
             <Favorite sx={{ color: grey[ 400 ] }}/>,
             <Favorite sx={{ color: blue[ 500 ] }}/>
           )}
@@ -128,7 +171,7 @@ const EnemyJabsConfigs = ({
           )}
           {renderCheckbox(
             JabsConfig.NotInanimate,
-            'Not Inanimate',
+            'Not inanimate',
             <Visibility sx={{ color: grey[ 400 ] }}/>,
             <Visibility sx={{ color: green[ 500 ] }}/>
           )}
@@ -147,7 +190,7 @@ const EnemyJabsConfigs = ({
           )}
           {renderCheckbox(
             JabsConfig.NotInvincible,
-            'Not Invincible',
+            'Not invincible',
             <NoEncryption sx={{ color: grey[ 400 ] }}/>,
             <NoEncryption sx={{ color: blue[ 500 ] }}/>
           )}
@@ -160,20 +203,22 @@ const EnemyJabsConfigs = ({
         <Stack>
           {renderCheckbox(
             JabsConfig.NoName,
-            'No Name',
+            'Hide name',
             <BadgeSharp sx={{ color: grey[ 400 ] }}/>,
             <BadgeSharp sx={{ color: red[ 500 ] }}/>
           )}
           {renderCheckbox(
             JabsConfig.ShowName,
-            'Show Name',
+            'Show name',
             <Badge sx={{ color: grey[ 400 ] }}/>,
             <Badge sx={{ color: green[ 500 ] }}/>
           )}
         </Stack>
-      </Box>
-    </Box>
-  </>;
+        </Box>
+        </Box>
+      </AccordionDetails>
+    </Accordion>
+  );
 };
 
 export { EnemyJabsConfigs };

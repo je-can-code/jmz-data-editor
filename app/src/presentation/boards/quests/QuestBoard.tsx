@@ -3,6 +3,7 @@ import { FixedSizeList } from 'react-window';
 import {
   Alert,
   Autocomplete,
+  Box,
   Button,
   Checkbox,
   Dialog,
@@ -23,7 +24,6 @@ import {
   ListItemText,
   Menu,
   MenuItem,
-  Paper,
   Select,
   Snackbar,
   Stack,
@@ -56,6 +56,8 @@ import ObjectiveLogs from './ObjectiveLogs.tsx';
 import ObjectiveFulfillmentData from './ObjectiveFulfillmentData.tsx';
 import OmniObjectiveFetchType from './OmniObjectiveFetchType.ts';
 
+import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
+import { useElementClientRect } from '@presentation/hooks/useElementClientRect.ts';
 import { useQuests } from '@presentation/context/resources/quests.context.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -89,6 +91,8 @@ const QuestBoard = () =>
 
   //region state
   const listRef = useRef<FixedSizeList>(null);
+  const listViewportRef = useRef<HTMLDivElement>(null);
+  const listViewportSize = useElementClientRect(listViewportRef);
 
   const [ selectedQuest, setSelectedQuest ] = useState<OmniQuest | null>(null);
   const [ selectedQuestIndex, setSelectedQuestIndex ] = useState<number>(0);
@@ -1148,20 +1152,52 @@ const QuestBoard = () =>
 
   if (loading)
   {
-    return <Typography>Loading quests configuration…</Typography>;
+    return (
+      <Box sx={{
+        flex: 1,
+        minHeight: 0,
+        overflow: 'auto',
+        p: 2,
+      }}>
+        <Typography>Loading quests configuration…</Typography>
+      </Box>
+    );
   }
 
+  const listPixelHeight = listViewportSize.height > 0
+    ? listViewportSize.height
+    : 600;
+  const listPixelWidth = listViewportSize.width > 0
+    ? listViewportSize.width
+    : 400;
+
   return <>
-    <Grid container spacing={2}>
-      <Grid size={4}>
+    <Box sx={{
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      <EditorBoardSplitLayout
+        sidebarColumnWidth={'400px'}
+        sidebar={
+          <Box
+            ref={listViewportRef}
+            sx={{
+              flex: 1,
+              minHeight: 0,
+            }}
+          >
         <div
           onContextMenu={handleQuestListContextMenu}
-          style={{ cursor: 'context-menu' }}
+          style={{ cursor: 'context-menu', height: '100%' }}
         >
           {/* @ts-ignore */}
           <FixedSizeList
             ref={listRef}
-            height={1030}
+            height={listPixelHeight}
+            width={listPixelWidth}
             itemSize={30}
             overscanCount={5}
             itemCount={quests.length}
@@ -1169,17 +1205,9 @@ const QuestBoard = () =>
             {renderQuestListItem}
           </FixedSizeList>
         </div>
-      </Grid>
-
-      <Grid size={8}>
-        <Paper
-          sx={{
-            height: '100%',
-            width: '100%',
-            padding: 2
-          }}
-          elevation={10}
-        >
+          </Box>
+        }
+      >
           {(selectedQuest === null)
             ? <Typography>
               Please select a quest on the left.<br/>
@@ -1450,9 +1478,8 @@ const QuestBoard = () =>
 
               </Grid>
             </>}
-        </Paper>
-      </Grid>
-    </Grid>
+      </EditorBoardSplitLayout>
+    </Box>
 
     {/*region not-grid-related elements */}
     <SaveButton

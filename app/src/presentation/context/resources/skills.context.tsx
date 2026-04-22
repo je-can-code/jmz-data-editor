@@ -14,6 +14,7 @@ export function useSkills()
 {
   const {
     data,
+    byId,
     ...rest
   } = base.useResource();
 
@@ -24,11 +25,12 @@ export function useSkills()
    */
   const toName = (id: number): string =>
   {
-    return data.find(s => s.id === id)?.name ?? `Unknown Skill (id:${id})`;
+    return byId.get(id)?.name ?? `Unknown Skill (id:${id})`;
   };
 
   return {
     skills: data,
+    byId,
     toName,
     ...rest
   } as const;

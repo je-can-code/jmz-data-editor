@@ -14,6 +14,7 @@ export function useStates()
 {
   const {
     data,
+    byId,
     ...rest
   } = base.useResource();
 
@@ -24,11 +25,12 @@ export function useStates()
    */
   const toName = (id: number): string =>
   {
-    return data.find(s => s.id === id)?.name ?? `Unknown State (id:${id})`;
+    return byId.get(id)?.name ?? `Unknown State (id:${id})`;
   };
 
   return {
     states: data,
+    byId,
     toName,
     ...rest
   } as const;

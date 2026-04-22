@@ -1,7 +1,16 @@
-import React, { ChangeEvent, MouseEvent, useState } from 'react';
+import React, {
+  ChangeEvent,
+  MouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   Alert,
   Autocomplete,
+  Box,
   Button,
   Checkbox,
   Dialog,
@@ -19,7 +28,6 @@ import {
   ListItemText,
   Menu,
   MenuItem,
-  Paper,
   Snackbar,
   Stack,
   TextField,
@@ -32,24 +40,43 @@ import {
   DonutLarge,
   DonutSmall,
   Key,
-  ListAlt,
   Lock,
   LockOpen,
   Remove,
-  Subject,
   Visibility,
   VisibilityOff
 } from '@mui/icons-material';
 import styled from 'styled-components';
 import { FixedSizeList } from 'react-window';
-import CraftingComponentList from './CraftingComponentList.tsx';
+import CraftingComponentList, {
+  readDatabaseDescription,
+  readDatabaseIconIndex,
+} from './CraftingComponentList.tsx';
 
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
+import CraftingComponentType from '@core/enums/CraftingComponentType.ts';
 import CraftingListType from '@core/enums/CraftingListType.ts';
+import { RPG_ArmorDomainModel } from '@core/domain/entities/RPG_ArmorDomainModel.ts';
+import { RPG_ItemDomainModel } from '@core/domain/entities/RPG_ItemDomainModel.ts';
+import { RPG_WeaponDomainModel } from '@core/domain/entities/RPG_WeaponDomainModel.ts';
 
 import SaveButton from '../../../components/core/SaveButton.tsx';
+import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import KeyTextField from '../../../components/core/KeyTextField.tsx';
 import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
+import { useItems } from '@presentation/context/resources/items.context.tsx';
+import { useWeapons } from '@presentation/context/resources/weapons.context.tsx';
+import { useArmors } from '@presentation/context/resources/armors.context.tsx';
+import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
+import {
+  VirtualizedSidebarList,
+  virtualizedSidebarColumnWidth,
+  VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+  VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT,
+} from '@presentation/components/board/VirtualizedSidebarList.tsx';
+import type { VirtualizedSidebarRow } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import Configuration = Crafting.Configuration;
 import Recipe = Crafting.Recipe;
 import Category = Crafting.Category;
@@ -58,6 +85,59 @@ import CraftingComponent = Crafting.CraftingComponent;
 const EntryText = styled(ListItemText)`
   font-family: monospace;
 `;
+
+const craftingBoardListColumnWidth = virtualizedSidebarColumnWidth(
+  VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH,
+);
+
+/**
+ * First recipe output mapped to its items/weapons/armors DB row, or {@code null}.
+ */
+const recipeFirstOutputDatabaseRow = (
+  recipe: Recipe,
+  itemsById: ReadonlyMap<number, RPG_ItemDomainModel>,
+  weaponsById: ReadonlyMap<number, RPG_WeaponDomainModel>,
+  armorsById: ReadonlyMap<number, RPG_ArmorDomainModel>
+): RPG_ItemDomainModel | RPG_WeaponDomainModel | RPG_ArmorDomainModel | null =>
+{
+  const output = recipe.outputs.at(0);
+  if (output === undefined)
+  {
+    return null;
+  }
+
+  switch (output.type)
+  {
+    case CraftingComponentType.Item:
+      return itemsById.get(output.id) ?? null;
+    case CraftingComponentType.Weapon:
+      return weaponsById.get(output.id) ?? null;
+    case CraftingComponentType.Armor:
+      return armorsById.get(output.id) ?? null;
+    default:
+      return null;
+  }
+};
+
+/**
+ * Sidebar icon matches plugin rules: {@link Recipe.iconIndex} when not {@code -1}; when {@code -1}, first output's DB icon; else {@code 0}.
+ */
+const recipeListRowIconIndex = (
+  recipe: Recipe,
+  itemsById: ReadonlyMap<number, RPG_ItemDomainModel>,
+  weaponsById: ReadonlyMap<number, RPG_WeaponDomainModel>,
+  armorsById: ReadonlyMap<number, RPG_ArmorDomainModel>
+): number =>
+{
+  const explicit = Math.trunc(recipe.iconIndex);
+  if (explicit !== -1)
+  {
+    return explicit;
+  }
+
+  return readDatabaseIconIndex(recipeFirstOutputDatabaseRow(recipe, itemsById, weaponsById, armorsById));
+};
 
 /**
  * The main board that encapsulates all things related to crafting.
@@ -70,8 +150,22 @@ const CraftingBoard = () =>
     setRecipes,
     setCategories,
     save,
+    reload,
     loading
   } = useCrafting();
+
+  const {
+    byId: itemsById,
+  } = useItems();
+  const {
+    byId: weaponsById,
+  } = useWeapons();
+  const {
+    byId: armorsById,
+  } = useArmors();
+
+  const listRef = useRef<FixedSizeList>(null);
+  const listWrapperRef = useRef<HTMLDivElement>(null);
 
   //region state
   const [ selectedRecipe, setSelectedRecipe ] = useState<Recipe | null>(null);
@@ -103,6 +197,26 @@ const CraftingBoard = () =>
   const [ categoryDialogOpen, setCategoryDialogOpen ] = useState<boolean>(false);
   //endregion state
 
+  const recipeDescriptionPlaceholderFromFirstOutput = useMemo(() =>
+  {
+    if (selectedRecipe === null)
+    {
+      return '';
+    }
+
+    if (selectedRecipe.description.trim().length > 0)
+    {
+      return '';
+    }
+
+    return readDatabaseDescription(recipeFirstOutputDatabaseRow(
+      selectedRecipe,
+      itemsById,
+      weaponsById,
+      armorsById
+    ));
+  }, [ selectedRecipe, itemsById, weaponsById, armorsById ]);
+
   //region actions
   const handleSnack = (
     message: string,
@@ -129,11 +243,13 @@ const CraftingBoard = () =>
     setSnackOpen(false);
   };
 
-  const handleRecipeListItemOnClickEvent = (index: number,) =>
+  const handleRecipeListItemOnClickEvent = useCallback((
+    index: number
+  ) =>
   {
     setSelectedRecipeIndex(index);
 
-    if (recipes?.length > 0)
+    if (recipes.length > 0)
     {
       const recipe = recipes.at(index) as Recipe;
       setSelectedRecipe(recipe);
@@ -142,9 +258,47 @@ const CraftingBoard = () =>
       setCurrentTools(recipe.tools);
       setCurrentOutputs(recipe.outputs);
     }
-  };
+  }, [ recipes ]);
 
-  const handlRecipeListContextMenu = (event: MouseEvent) =>
+  /**
+   * When crafting data is ready and nothing is selected yet, open the first recipe (SDP-style).
+   */
+  useEffect(() =>
+  {
+    if (loading || recipes.length === 0 || selectedRecipe !== null)
+    {
+      return;
+    }
+
+    handleRecipeListItemOnClickEvent(0);
+    requestAnimationFrame(() =>
+    {
+      listRef.current?.scrollToItem(0, 'start');
+    });
+  }, [ loading, recipes, selectedRecipe, handleRecipeListItemOnClickEvent ]);
+
+  /**
+   * When the category dialog opens or the in-memory category list is replaced, clamp the index and bind the
+   * form to the corresponding row. Row clicks still go through {@link handleCategoryListItemOnClickEvent};
+   * this effect covers open, reload, delete, and edits that swap the array under the same index.
+   */
+  useEffect(() =>
+  {
+    if (!categoryDialogOpen || loading || categories.length === 0)
+    {
+      return;
+    }
+
+    const idx = Math.min(Math.max(0, selectedCategoryIndex), categories.length - 1);
+    if (idx !== selectedCategoryIndex)
+    {
+      setSelectedCategoryIndex(idx);
+    }
+
+    setSelectedCategory(categories[ idx ]);
+  }, [ categoryDialogOpen, categories, loading, selectedCategoryIndex ]);
+
+  const handleRecipeListContextMenu = (event: MouseEvent) =>
   {
     event.preventDefault();
 
@@ -163,15 +317,13 @@ const CraftingBoard = () =>
     setRecipeListContextMenu(null);
   };
 
-  const handleCategoryListItemOnClickEven = (index: number) =>
+  const handleCategoryListItemOnClickEvent = (index: number) =>
   {
     setSelectedCategoryIndex(index);
 
     if (categories.length > 0)
     {
-      const category = categories[ index ];
-      setSelectedCategory(category);
-      // TODO: update the inputs.
+      setSelectedCategory(categories[ index ]);
     }
   };
 
@@ -208,127 +360,79 @@ const CraftingBoard = () =>
     setCanSave(true);
   };
 
-  const handleRecipeKeyOnChangeEvent = (input: string) =>
+  const patchSelectedRecipe = (patch: Partial<Recipe>) =>
   {
-    // if there is no entry, stop processing.
-    if (!selectedRecipe)
+    if (selectedRecipe === null)
     {
       return;
     }
 
-    // update the entry.
     const updatedRecipe = {
       ...selectedRecipe,
-      key: input
+      ...patch,
     } as Recipe;
 
     setSelectedRecipe(updatedRecipe);
     applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
+  };
+
+  const patchSelectedCategory = (patch: Partial<Category>) =>
+  {
+    if (selectedCategory === null)
+    {
+      return;
+    }
+
+    const updatedCategory = {
+      ...selectedCategory,
+      ...patch,
+    } as Category;
+
+    setSelectedCategory(updatedCategory);
+    applyCategories(categories.with(selectedCategoryIndex, updatedCategory));
+  };
+
+  const handleRecipeKeyOnChangeEvent = (input: string) =>
+  {
+    patchSelectedRecipe({ key: input });
   };
 
   const handleRecipeNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    if (!selectedRecipe)
-    {
-      return;
-    }
-
-    const updatedRecipe = {
-      ...selectedRecipe,
-      name: event.target.value
-    } as Recipe;
-
-    setSelectedRecipe(updatedRecipe);
-    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
+    patchSelectedRecipe({ name: event.target.value });
   };
 
   const handleRecipeIconIndexOnChangeEvent = (value: number) =>
   {
-    // if there is no entry, stop processing.
-    if (!selectedRecipe)
-    {
-      return;
-    }
-
     const updatedValue = value < -1
       ? -1
       : value;
 
-    // update the entry.
-    const updatedRecipe = {
-      ...selectedRecipe,
-      iconIndex: updatedValue
-    };
-
-    setSelectedRecipe(updatedRecipe);
-    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
+    patchSelectedRecipe({ iconIndex: updatedValue });
   };
 
   const handleRecipeDescriptionOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    // if there is no entry, stop processing.
-    if (!selectedRecipe)
-    {
-      return;
-    }
-
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
-
-    // update the entry.
-    const updatedRecipe = {
-      ...selectedRecipe,
-      description: updatedValue
-    };
-
-    setSelectedRecipe(updatedRecipe);
-    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
+    patchSelectedRecipe({ description: event.target.value });
   };
 
   const handleRecipeMaskedUntilCraftedOnCheckEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    // if there is no entry, stop processing.
-    if (!selectedRecipe)
-    {
-      return;
-    }
-
-    // grab the updated value from the input.
-    const updatedValue = event.target.checked;
-
-    // update the entry.
-    const updatedRecipe = {
-      ...selectedRecipe,
-      maskedUntilCrafted: updatedValue
-    };
-
-    setSelectedRecipe(updatedRecipe);
-    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
+    patchSelectedRecipe({ maskedUntilCrafted: event.target.checked });
   };
 
   const handleRecipeUnlockedByDefaultOnCheckEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    // if there is no entry, stop processing.
-    if (!selectedRecipe)
-    {
-      return;
-    }
-
-    // grab the updated value from the input.
-    const updatedValue = event.target.checked;
-
-    // update the entry.
-    const updatedRecipe = {
-      ...selectedRecipe,
-      unlockedByDefault: updatedValue
-    };
-
-    setSelectedRecipe(updatedRecipe);
-    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
+    patchSelectedRecipe({ unlockedByDefault: event.target.checked });
   };
 
   const handleRecipeCategoryKeyToggle = (value: string) =>
   {
+    if (selectedRecipe === null)
+    {
+      return;
+    }
+
     const currentIndex = applicableCategories.indexOf(value);
     const newChecked = [ ...applicableCategories ];
 
@@ -341,121 +445,38 @@ const CraftingBoard = () =>
       newChecked.splice(currentIndex, 1);
     }
 
-    setApplicableCategories(newChecked.sort());
-
-    const updatedRecipe = {
-      ...selectedRecipe,
-      categoryKeys: newChecked
-    } as Recipe;
-
-    setSelectedRecipe(updatedRecipe);
-    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
+    const sorted = newChecked.sort();
+    setApplicableCategories(sorted);
+    patchSelectedRecipe({ categoryKeys: sorted });
   };
 
   const handleCategoryKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    // if there is no entry, stop processing.
-    if (!selectedCategory)
-    {
-      return;
-    }
-
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
-
-    // update the entry.
-    const updatedCategory = {
-      ...selectedCategory,
-      key: updatedValue
-    } as Category;
-
-    setSelectedCategory(updatedCategory);
-    applyCategories(categories.with(selectedCategoryIndex, updatedCategory));
+    patchSelectedCategory({ key: event.target.value });
   };
 
   const handleCategoryNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    // if there is no entry, stop processing.
-    if (!selectedCategory)
-    {
-      return;
-    }
-
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
-
-    // update the entry.
-    const updatedCategory = {
-      ...selectedCategory,
-      name: updatedValue
-    } as Category;
-
-    setSelectedCategory(updatedCategory);
-    applyCategories(categories.with(selectedCategoryIndex, updatedCategory));
+    patchSelectedCategory({ name: event.target.value });
   };
 
   const handleCategoryIconIndexOnChangeEvent = (value: number) =>
   {
-    // if there is no entry, stop processing.
-    if (!selectedCategory)
-    {
-      return;
-    }
-
     const updatedValue = value < -1
       ? -1
       : value;
 
-    // update the entry.
-    const updatedCategory = {
-      ...selectedCategory,
-      iconIndex: updatedValue
-    } as Category;
-
-    setSelectedCategory(updatedCategory);
-    applyCategories(categories.with(selectedCategoryIndex, updatedCategory));
+    patchSelectedCategory({ iconIndex: updatedValue });
   };
 
   const handleCategoryUnlockedByDefaultOnCheckEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    // if there is no entry, stop processing.
-    if (!selectedCategory)
-    {
-      return;
-    }
-
-    // grab the updated value from the input.
-    const updatedValue = event.target.checked;
-
-    // update the entry.
-    const updatedCategory = {
-      ...selectedCategory,
-      unlockedByDefault: updatedValue
-    } as Category;
-
-    setSelectedCategory(updatedCategory);
-    applyCategories(categories.with(selectedCategoryIndex, updatedCategory));
+    patchSelectedCategory({ unlockedByDefault: event.target.checked });
   };
 
   const handleCategoryDescriptionOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    // if there is no entry, stop processing.
-    if (!selectedCategory)
-    {
-      return;
-    }
-
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
-
-    // update the entry.
-    const updatedCategory = {
-      ...selectedCategory,
-      description: updatedValue
-    } as Category;
-
-    setSelectedCategory(updatedCategory);
-    applyCategories(categories.with(selectedCategoryIndex, updatedCategory));
+    patchSelectedCategory({ description: event.target.value });
   };
 
   const updateCraftingComponentList = (
@@ -463,28 +484,26 @@ const CraftingBoard = () =>
     craftingListType: CraftingListType
   ) =>
   {
-    const updatedRecipe = {
-      ...selectedRecipe,
-    } as Recipe;
+    if (selectedRecipe === null)
+    {
+      return;
+    }
 
     switch (craftingListType)
     {
       case CraftingListType.Ingredients:
-        updatedRecipe.ingredients = craftingComponents;
         setCurrentIngredients(craftingComponents);
+        patchSelectedRecipe({ ingredients: craftingComponents });
         break;
       case CraftingListType.Tools:
-        updatedRecipe.tools = craftingComponents;
         setCurrentTools(craftingComponents);
+        patchSelectedRecipe({ tools: craftingComponents });
         break;
       case CraftingListType.Outputs:
-        updatedRecipe.outputs = craftingComponents;
         setCurrentOutputs(craftingComponents);
+        patchSelectedRecipe({ outputs: craftingComponents });
         break;
     }
-
-    setSelectedRecipe(updatedRecipe);
-    applyRecipes(recipes.with(selectedRecipeIndex, updatedRecipe));
   };
 
   const handleAddNewRecipe = (index: number) =>
@@ -540,7 +559,26 @@ const CraftingBoard = () =>
       return;
     }
 
-    applyRecipes(recipes.toSpliced(index, 1));
+    const nextRecipes = recipes.toSpliced(index, 1);
+    applyRecipes(nextRecipes);
+
+    if (nextRecipes.length === 0)
+    {
+      setSelectedRecipe(null);
+      setSelectedRecipeIndex(0);
+      setApplicableCategories([]);
+      setCurrentIngredients([]);
+      setCurrentTools([]);
+      setCurrentOutputs([]);
+      return;
+    }
+
+    const nextIndex = Math.min(index, nextRecipes.length - 1);
+    handleRecipeListItemOnClickEvent(nextIndex);
+    requestAnimationFrame(() =>
+    {
+      listRef.current?.scrollToItem(nextIndex, 'smart');
+    });
   };
 
   const handleAddCategory = (index: number) =>
@@ -581,47 +619,65 @@ const CraftingBoard = () =>
       return;
     }
 
-    applyCategories(categories.toSpliced(index, 1));
+    const nextCategories = categories.toSpliced(index, 1);
+    applyCategories(nextCategories);
+
+    if (nextCategories.length === 0)
+    {
+      setSelectedCategory(null);
+      setSelectedCategoryIndex(0);
+      return;
+    }
+
+    const nextIndex = Math.min(index, nextCategories.length - 1);
+    setSelectedCategoryIndex(nextIndex);
+    setSelectedCategory(nextCategories[ nextIndex ]);
+  };
+
+  const handleReloadButtonOnClickEvent = async () =>
+  {
+    await reload();
+    setCanSave(false);
+    setSelectedRecipe(null);
+    setApplicableCategories([]);
+    setCurrentIngredients([]);
+    setCurrentTools([]);
+    setCurrentOutputs([]);
+    handleSnack('Crafting data has been reloaded successfully.', MuiSnackbarSeverity.Success);
   };
   //endregion updates
 
   //region render
-  const renderRecipeListItem = (props: ListChildComponentProps) =>
+  /**
+   * Virtualized recipe list row (label + first-output icon).
+   *
+   * @param index Index in {@link recipes}.
+   * @returns Spacer or sidebar row descriptor.
+   */
+  const getRecipeSidebarRow = useCallback((index: number): VirtualizedSidebarRow =>
   {
-    const {
-      index,
-      style
-    } = props;
-
     const recipe = recipes.at(index);
-
     if (!recipe)
     {
-      return <></>;
+      return {
+        type: 'spacer',
+      };
     }
 
-    return (
-      <ListItem key={index} style={style}>
-        <ListItemButton
-          focusRipple={false}
-          selected={selectedRecipeIndex === index}
-          onClick={() => handleRecipeListItemOnClickEvent(index)}
-        >
-          <ListItemIcon>
-            {(selectedRecipeIndex === index)
-              ? <ListAlt color={'success'}/>
-              : <Subject color={'secondary'}/>}
-          </ListItemIcon>
-          <EntryText
-            primary={recipe.name.length === 0
-              ? recipe.key
-              : recipe.name}
-            disableTypography={true}
-          />
-        </ListItemButton>
-      </ListItem>
-    );
-  };
+    const label = recipe.name.length === 0
+      ? recipe.key
+      : recipe.name;
+    const title = recipe.name.length === 0
+      ? recipe.key
+      : `${recipe.key}: ${recipe.name}`;
+
+    return {
+      type: 'item',
+      label,
+      title,
+      iconIndex: recipeListRowIconIndex(recipe, itemsById, weaponsById, armorsById),
+    };
+  }, [ recipes, itemsById, weaponsById, armorsById ]);
 
   const renderCategoryListItem = (
     category: Category,
@@ -635,7 +691,7 @@ const CraftingBoard = () =>
         disableGutters
       >
         <ListItemButton
-          onClick={() => handleCategoryListItemOnClickEven(index)}
+          onClick={() => handleCategoryListItemOnClickEvent(index)}
           selected={selectedCategoryIndex === index}
         >
           <ListItemIcon>
@@ -655,33 +711,50 @@ const CraftingBoard = () =>
 
   if (loading)
   {
-    return <Typography>Loading crafting configuration...</Typography>;
+    return (
+      <Box sx={{
+        flex: 1,
+        minHeight: 0,
+        overflow: 'auto',
+        p: 2,
+      }}>
+        <Typography>Loading crafting configuration...</Typography>
+      </Box>
+    );
   }
 
   return <>
-    <Grid container spacing={2}>
-      {/* This is the data list of all entries the user can modify. */}
-      <Grid size={3}>
-        <div onContextMenu={handlRecipeListContextMenu} style={{ cursor: 'context-menu' }}>
-          {/* @ts-ignore */}
-          <FixedSizeList
-            height={1030}
-            itemSize={30}
-            overscanCount={5}
-            itemCount={recipes.length}
-          >
-            {renderRecipeListItem}
-          </FixedSizeList>
-        </div>
-      </Grid>
-
-      {/* This is the form fields for modifying the selected entry. */}
-      <Grid size={9}>
-        <Paper sx={{
-          height: '100%',
-          width: '100%',
-          padding: 2
-        }} elevation={10}>
+    <Box sx={{
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      <EditorBoardSplitLayout
+        sidebarColumnWidth={craftingBoardListColumnWidth}
+        sidebar={
+          <Box sx={{ flex: 1, minHeight: 0 }}>
+          <div onContextMenu={handleRecipeListContextMenu} style={{ cursor: 'context-menu' }}>
+            <VirtualizedSidebarList
+              ref={listRef}
+              itemCount={recipes.length}
+              itemSize={VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE}
+              fillContainer
+              listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
+              labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
+              selectedIndex={selectedRecipeIndex}
+              getRow={getRecipeSidebarRow}
+              onSelectIndex={(index) =>
+              {
+                handleRecipeListItemOnClickEvent(index);
+              }}
+              listWrapperRef={listWrapperRef}
+            />
+          </div>
+          </Box>
+        }
+      >
           {(selectedRecipe === null)
             ? <Grid container>
               <Typography>
@@ -761,6 +834,12 @@ const CraftingBoard = () =>
                     multiline
                     fullWidth
                     rows={4}
+                    InputLabelProps={selectedRecipe.description.trim().length === 0 && recipeDescriptionPlaceholderFromFirstOutput.length > 0
+                      ? { shrink: true }
+                      : undefined}
+                    placeholder={selectedRecipe.description.trim().length === 0 && recipeDescriptionPlaceholderFromFirstOutput.length > 0
+                      ? recipeDescriptionPlaceholderFromFirstOutput
+                      : undefined}
                   />
                 </Grid>
 
@@ -793,14 +872,32 @@ const CraftingBoard = () =>
                         option
                       ) =>
                       {
+                        const {
+                          key,
+                          style,
+                          ...optionProps
+                        } = props;
+
                         if (option === null || option.name === '' || option.name.startsWith('=='))
                         {
-                          return <li {...props} style={{ display: 'none' }}/>;
+                          return <li key={key} {...optionProps} style={{ display: 'none' }}/>;
                         }
 
+                        const mergedStyle = {
+                          ...(typeof style === 'object' && style !== null && !Array.isArray(style)
+                            ? style
+                            : {}),
+                          height: 32,
+                        };
+
                         return (
-                          <li {...props} key={props.key} style={{ height: 32 }}>
-                            <ListItem disableGutters disablePadding sx={{ height: 32 }}>
+                          <li key={key} {...optionProps} style={mergedStyle}>
+                            <ListItem
+                              component="div"
+                              disableGutters
+                              disablePadding
+                              sx={{ height: 32 }}
+                            >
                               <ListItemIcon sx={{ height: 32 }}>
                                 <Checkbox
                                   checked={applicableCategories.includes(option.key)}
@@ -826,46 +923,45 @@ const CraftingBoard = () =>
                   </Stack>
                 </Grid>
 
-                {/* Ingredients management */}
-                <Grid size={4}>
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                    gap: 2,
+                    width: '100%',
+                    alignItems: 'stretch',
+                  }}
+                >
                   <CraftingComponentList
                     type={CraftingListType.Ingredients}
                     updateRecipeFunc={updateCraftingComponentList}
                     components={currentIngredients}
                     handleSnack={handleSnack}
                   />
-                </Grid>
-
-                {/* Tools management */}
-                <Grid size={4}>
                   <CraftingComponentList
                     type={CraftingListType.Tools}
                     updateRecipeFunc={updateCraftingComponentList}
                     components={currentTools}
                     handleSnack={handleSnack}
                   />
-                </Grid>
-
-                {/* Outputs management */}
-                <Grid size={4}>
                   <CraftingComponentList
                     type={CraftingListType.Outputs}
                     updateRecipeFunc={updateCraftingComponentList}
                     components={currentOutputs}
                     handleSnack={handleSnack}
                   />
-                </Grid>
+                </Box>
               </Grid>
             </>}
 
-        </Paper>
-      </Grid>
+      </EditorBoardSplitLayout>
+    </Box>
 
       {/*region not-grid-related elements */}
       {/* This is over-arching save button- it will save all recipes to disk. */}
       <SaveButton
         extraSaveText={'Recipes'}
-        canSave={canSave}
+        canSave={canSave && !loading}
         handleSave={async () =>
         {
           setCanSave(false);
@@ -875,6 +971,11 @@ const CraftingBoard = () =>
           } as Configuration);
           handleSnack('Crafting data has been saved successfully.');
         }}
+      />
+      <ReloadButton
+        handleReload={handleReloadButtonOnClickEvent}
+        canReload={!loading}
+        extraReloadText={'Crafting Data'}
       />
 
       <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
@@ -1106,7 +1207,6 @@ const CraftingBoard = () =>
         </MenuItem>
       </Menu>
       {/*endregion not-grid-related elements */}
-    </Grid>
   </>;
 };
 

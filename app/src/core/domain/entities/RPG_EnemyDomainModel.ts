@@ -10,6 +10,7 @@ import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 import { EnemySdpDropModel } from '@core/domain/valueObjects/sdp-drop.ts';
 import { knownLongParams } from '../../../mappers/ParameterIdMapper.ts';
 import { GrowthParser } from '@services/parsers/GrowthParser.ts';
+import { PassiveAbsEnemyNoteParser } from '@services/parsers/PassiveAbsEnemyNoteParser.ts';
 import { JabsAiTraits } from '@core/domain/valueObjects/jabs-ai-traits.ts';
 import { JabsBattlerData } from '@core/domain/valueObjects/jabs-battler-data.ts';
 import { JabsConfigs } from '@core/domain/valueObjects/jabs-configs.ts';
@@ -37,6 +38,22 @@ class RPG_EnemyDomainModel
   public jabsConfigs: JabsConfigs;
   public sdpDrop: EnemySdpDropModel;
   public growths: Map<number, string> = new Map();
+
+  /** When true, random passive prefix affixes are skipped for this enemy. */
+  public noRngPassivePrefixes: boolean = false;
+
+  /** When true, random passive suffix affixes are skipped for this enemy. */
+  public noRngPassiveSuffixes: boolean = false;
+
+  /**
+   * Optional 0–100 override for the prefix affix roll gate; {@code null} means omit the tag (engine default at roll time).
+   */
+  public passiveAffixPrefixChance: number | null = null;
+
+  /**
+   * Optional 0–100 override for the suffix affix roll gate; {@code null} means omit the tag.
+   */
+  public passiveAffixSuffixChance: number | null = null;
 
   constructor(rmmz: RPG_Enemy)
   {
@@ -70,6 +87,12 @@ class RPG_EnemyDomainModel
     this.jabsAiTraits = JabsDataParser.readAiTraits(this.note);
     this.jabsBattlerData = JabsDataParser.readBattlerData(this.note);
     this.jabsConfigs = JabsDataParser.readConfigs(this.note);
+
+    const passiveAbsFlags = PassiveAbsEnemyNoteParser.read(this.note);
+    this.noRngPassivePrefixes = passiveAbsFlags.noRngPassivePrefixes;
+    this.noRngPassiveSuffixes = passiveAbsFlags.noRngPassiveSuffixes;
+    this.passiveAffixPrefixChance = passiveAbsFlags.passiveAffixPrefixChance;
+    this.passiveAffixSuffixChance = passiveAbsFlags.passiveAffixSuffixChance;
 
     this.rehydrateGrowthsFromNote();
   }
@@ -131,6 +154,13 @@ class RPG_EnemyDomainModel
     updatedNote = JabsDataParser.writeAiTraits(updatedNote, this.jabsAiTraits);
     updatedNote = JabsDataParser.writeBattlerData(updatedNote, this.jabsBattlerData);
     updatedNote = JabsDataParser.writeConfigs(updatedNote, this.jabsConfigs);
+
+    updatedNote = PassiveAbsEnemyNoteParser.write(updatedNote, {
+      noRngPassivePrefixes: this.noRngPassivePrefixes,
+      noRngPassiveSuffixes: this.noRngPassiveSuffixes,
+      passiveAffixPrefixChance: this.passiveAffixPrefixChance,
+      passiveAffixSuffixChance: this.passiveAffixSuffixChance,
+    });
 
     // Sync formulas for each parameter
     knownLongParams()

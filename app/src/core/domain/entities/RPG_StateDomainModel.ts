@@ -7,6 +7,7 @@ import { StateLevelExtension } from '@core/domain/entities/state/StateLevelExten
 import { StateProfExtension } from '@core/domain/entities/state/StateProfExtension.ts';
 import { StateResourcesExtension } from '@core/domain/entities/state/StateResourcesExtension.ts';
 import { StateSdpExtension } from '@core/domain/entities/state/StateSdpExtension.ts';
+import { StatePassiveAbsExtension } from '@core/domain/entities/state/StatePassiveAbsExtension.ts';
 import { StateSksExtension } from '@core/domain/entities/state/StateSksExtension.ts';
 import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 import RPG_State = Rmmz.Implementations.RPG_State;
@@ -139,6 +140,8 @@ class RPG_StateDomainModel
 
   public sks: StateSksExtension = new StateSksExtension();
 
+  public passiveAbs: StatePassiveAbsExtension = new StatePassiveAbsExtension();
+
   constructor(rmmz: RPG_State)
   {
     super(rmmz);
@@ -173,6 +176,7 @@ class RPG_StateDomainModel
     this.resources = StateResourcesExtension.fromStateNote(note);
     this.sdp = StateSdpExtension.fromStateNote(note);
     this.sks = StateSksExtension.fromStateNote(note);
+    this.passiveAbs = StatePassiveAbsExtension.fromStateNote(note);
   }
 
   /**
@@ -224,6 +228,7 @@ class RPG_StateDomainModel
     n = this.resources.applyToNote(n);
     n = this.sdp.applyToNote(n);
     n = this.sks.applyToNote(n);
+    n = this.passiveAbs.applyToNote(n);
     n = this.jabs.applyToNote(n);
     return NoteNormalizer.normalize(n);
   }

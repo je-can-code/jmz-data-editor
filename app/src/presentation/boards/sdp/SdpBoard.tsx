@@ -1,5 +1,5 @@
 import React, { MouseEvent, useEffect, useRef, useState } from 'react';
-import { FixedSizeList, ListChildComponentProps } from 'react-window';
+import { FixedSizeList } from 'react-window';
 import {
   Alert,
   Autocomplete,
@@ -70,9 +70,24 @@ import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import { fromLongParameterIdToName } from '../../../mappers/ParameterIdMapper.ts';
 import { useSdps } from '@presentation/context/resources/sdps.context.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
+import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
+import {
+  VirtualizedSidebarList,
+  virtualizedSidebarColumnWidth,
+  VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+  VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT,
+} from '@presentation/components/board/VirtualizedSidebarList.tsx';
+import type { VirtualizedSidebarRow } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import Panel = Sdp.StatDistributionPanel;
 import PanelParameter = Sdp.SdpParameter;
 import PanelReward = Sdp.SdpReward;
+
+const sdpBoardListColumnWidth = virtualizedSidebarColumnWidth(
+  VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH,
+);
 
 const SdpBoard = () =>
 {
@@ -86,6 +101,7 @@ const SdpBoard = () =>
 
   //region state
   const listRef = useRef<FixedSizeList>(null);
+  const listWrapperRef = useRef<HTMLDivElement>(null);
 
   const [ selectedPanel, setSelectedPanel ] = useState<Panel | null>(null);
   const [ selectedPanelIndex, setSelectedPanelIndex ] = useState<number>(0);
@@ -835,83 +851,6 @@ const SdpBoard = () =>
   //endregion updates
 
   //region render
-  const isHeaderRow = (index: number) =>
-  {
-    const sdp = sdps.at(index);
-    if (!sdp)
-    {
-      return false;
-    }
-    return sdp.key.endsWith('___');
-  };
-
-  const renderSdpListItem = (props: ListChildComponentProps) =>
-  {
-    const {
-      index,
-      style
-    } = props;
-
-    const sdp = sdps.at(index);
-    if (!sdp)
-    {
-      return <></>;
-    }
-
-    const isHeader = isHeaderRow(index);
-
-    const textStyle = {
-      fontFamily: 'monospace',
-      fontWeight: isHeader
-        ? 'bold'
-        : 'normal',
-      color: fromRarityColorIndexToColor(sdp.rarity)
-    } as const;
-
-    // Determine if a divider should appear below this row (i.e., next row is a header)
-    const next = sdps.at(index + 1);
-    const isNextHeader = isHeaderRow(index + 1) ?? false;
-    const nextHeaderColor = isNextHeader
-      ? fromRarityColorIndexToColor(next!.rarity)
-      : undefined;
-
-    return <>
-      <ListItem key={sdp.key} style={style}>
-        <ListItemButton
-          sx={{
-            maxHeight: '30px',
-            position: 'relative',
-            // Option A: thick border line
-            ...(
-              isNextHeader && {
-                borderBottom: `4px solid ${nextHeaderColor}`,
-                // keep the border visible under selection styles
-                '&.Mui-selected': {
-                  borderBottom: `3px solid ${nextHeaderColor}`,
-                }
-              }
-            ),
-          }}
-          selected={selectedPanelIndex === index}
-          onClick={() => handleSdpListItemOnClickEvent(index)}
-        >
-          <ListItemIcon>
-            {(
-              selectedPanelIndex === index
-            )
-              ? <DoubleArrow color={'success'}/>
-              : <KeyboardArrowRight color={'warning'}/>}
-          </ListItemIcon>
-          <ListItemText
-            primary={`[${sdp.key}]: ${sdp.name}`}
-            disableTypography
-            sx={textStyle}
-          />
-        </ListItemButton>
-      </ListItem>
-    </>;
-  };
-
   const fromRarityColorIndexToName = (rarityColorIndex: number) =>
   {
     switch (rarityColorIndex)
@@ -982,6 +921,60 @@ const SdpBoard = () =>
         console.warn(`${rarityColorIndex} was not an implemented option.`);
         return grey[ 100 ];
     }
+  };
+
+  /**
+   * Row model for the virtualized SDP panel list (rarity-colored labels, {@link Panel.iconIndex} sprite, section borders).
+   *
+   * @param index Index in {@link sdps}.
+   * @returns Spacer or sidebar row descriptor.
+   */
+  const getSdpSidebarRow = (index: number): VirtualizedSidebarRow =>
+  {
+    const sdp = sdps.at(index);
+    if (!sdp)
+    {
+      return {
+        type: 'spacer',
+      };
+    }
+
+    const isHeader = sdp.key.endsWith('___');
+    const next = sdps.at(index + 1);
+    const isNextHeader = next !== undefined && next.key.endsWith('___');
+    const nextHeaderColor = isNextHeader
+      ? fromRarityColorIndexToColor(next.rarity)
+      : undefined;
+
+    const labelSx = {
+      fontWeight: isHeader
+        ? 'bold'
+        : 'normal',
+      color: fromRarityColorIndexToColor(sdp.rarity),
+    };
+
+    const listItemButtonSx = (
+      isNextHeader && nextHeaderColor !== undefined
+    )
+      ? {
+        borderBottom: `4px solid ${nextHeaderColor}`,
+        '&.Mui-selected': {
+          borderBottom: `3px solid ${nextHeaderColor}`,
+        },
+        position: 'relative' as const,
+      }
+      : {
+        position: 'relative' as const,
+      };
+
+    return {
+      type: 'item',
+      label: `[${sdp.key}]: ${sdp.name}`,
+      title: `[${sdp.key}]: ${sdp.name}`,
+      iconIndex: sdp.iconIndex,
+      labelSx,
+      listItemButtonSx,
+    };
   };
 
   const renderSdpRarities = () =>
@@ -1285,12 +1278,30 @@ const SdpBoard = () =>
 
   if (loading)
   {
-    return <Typography>Loading SDP configuration...</Typography>;
+    return (
+      <Box sx={{
+        flex: 1,
+        minHeight: 0,
+        overflow: 'auto',
+        p: 2,
+      }}>
+        <Typography>Loading SDP configuration...</Typography>
+      </Box>
+    );
   }
 
   return <>
-    <Grid container spacing={2}>
-      <Grid size={3}>
+    <Box sx={{
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      <EditorBoardSplitLayout
+        sidebarColumnWidth={sdpBoardListColumnWidth}
+        sidebar={
+          <>
         {/* Search bar for SDPs */}
         <TextField
           variant={'outlined'}
@@ -1321,43 +1332,42 @@ const SdpBoard = () =>
             }
           }}
         />
+        <Box sx={{ flex: 1, minHeight: 0 }}>
         <div
           onContextMenu={handlePanelListContextMenu}
           style={{ cursor: 'context-menu' }}
         >
           {sdps.length > 0
-            ? <>
-              {/* @ts-ignore */}
-              <FixedSizeList
+            ? (
+              <VirtualizedSidebarList
                 ref={listRef}
-                height={960}
-                width={'100%'}
-                itemSize={30}
-                overscanCount={5}
                 itemCount={sdps.length}
-              >
-                {renderSdpListItem}
-              </FixedSizeList>
-            </>
-            : <>
+                itemSize={VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE}
+                fillContainer
+                listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
+                labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
+                selectedIndex={selectedPanelIndex}
+                getRow={getSdpSidebarRow}
+                onSelectIndex={(index) =>
+                {
+                  handleSdpListItemOnClickEvent(index);
+                }}
+                listWrapperRef={listWrapperRef}
+              />
+            )
+            : (
               <Button
                 fullWidth
                 startIcon={<Add/>}
                 onClick={() => handleAddNewPanel(null)}
-                variant={'contained'}/>
-            </>}
+                variant={'contained'}
+              />
+            )}
         </div>
-      </Grid>
-
-      <Grid size={9}>
-        <Paper
-          sx={{
-            height: '100%',
-            width: '100%',
-            padding: 2
-          }}
-          elevation={10}
-        >
+        </Box>
+          </>
+        }
+      >
           {(
             selectedPanel === null
           )
@@ -1709,9 +1719,8 @@ const SdpBoard = () =>
               </Grid>
             </>
           }
-        </Paper>
-      </Grid>
-    </Grid>
+      </EditorBoardSplitLayout>
+    </Box>
 
     {/*region not-grid-related elements */}
     <SaveButton
