@@ -7,6 +7,7 @@ class JabsDataParser
 {
   static #aiTraitRegex = /<aiTrait: ?(careful|executor|reckless|healer|leader|follower)>/i;
   static #configRegex = /<jabsConfig: ?(noIdle|canIdle|noHpBar|showHpBar|inanimate|notInanimate|invincible|notInvincible|noName|showName)>/i;
+  static #teamIdRegex = /<teamId: ?(\d+)>/i;
   static #sightRegex = /<sight: ?(\d+)>/i;
   static #pursuitRegex = /<pursuit: ?(\d+)>/i;
   static #prepareSpeedRegex = /<prepare: ?(\d+)>/i;
@@ -199,6 +200,45 @@ class JabsDataParser
     // Append as a normalized block (LF-only, no extra gaps).
     const block = battlerDataLines.join('\n');
     return NoteNormalizer.appendBlock(base, block);
+  }
+
+  static readTeamId(originalNote: string): number | null
+  {
+    const lines = NoteNormalizer.normalize(originalNote)
+      .split('\n');
+
+    let teamId: number | null = null;
+    lines.forEach(line =>
+    {
+      this.#teamIdRegex.lastIndex = 0;
+      const match = this.#teamIdRegex.exec(line);
+      if (match)
+      {
+        const parsed = Number(match[ 1 ]);
+        teamId = Number.isFinite(parsed) ? parsed : null;
+      }
+    });
+
+    return teamId;
+  }
+
+  static writeTeamId(
+    originalNote: string,
+    teamId: number | null
+  ): string
+  {
+    // strip any existing teamId tag.
+    const base = NoteNormalizer.removeLinesMatching(originalNote, this.#teamIdRegex);
+
+    // omit the tag when null to preserve engine/plugin defaults.
+    if (teamId === null)
+    {
+      return base;
+    }
+
+    // append the new tag.
+    const tag = `<teamId:${teamId}>`;
+    return NoteNormalizer.appendBlock(base, tag);
   }
 
   static readConfigs(originalNote: string): JabsConfigs

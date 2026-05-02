@@ -36,6 +36,7 @@ class RPG_EnemyDomainModel
   public jabsAiTraits: JabsAiTraits;
   public jabsBattlerData: JabsBattlerData;
   public jabsConfigs: JabsConfigs;
+  public jabsTeamId: number | null;
   public sdpDrop: EnemySdpDropModel;
   public growths: Map<number, string> = new Map();
 
@@ -87,6 +88,7 @@ class RPG_EnemyDomainModel
     this.jabsAiTraits = JabsDataParser.readAiTraits(this.note);
     this.jabsBattlerData = JabsDataParser.readBattlerData(this.note);
     this.jabsConfigs = JabsDataParser.readConfigs(this.note);
+    this.jabsTeamId = JabsDataParser.readTeamId(this.note);
 
     const passiveAbsFlags = PassiveAbsEnemyNoteParser.read(this.note);
     this.noRngPassivePrefixes = passiveAbsFlags.noRngPassivePrefixes;
@@ -153,6 +155,7 @@ class RPG_EnemyDomainModel
     updatedNote = ExtraDropManager.write(updatedNote, this.extraDrops);
     updatedNote = JabsDataParser.writeAiTraits(updatedNote, this.jabsAiTraits);
     updatedNote = JabsDataParser.writeBattlerData(updatedNote, this.jabsBattlerData);
+    updatedNote = JabsDataParser.writeTeamId(updatedNote, this.jabsTeamId);
     updatedNote = JabsDataParser.writeConfigs(updatedNote, this.jabsConfigs);
 
     updatedNote = PassiveAbsEnemyNoteParser.write(updatedNote, {

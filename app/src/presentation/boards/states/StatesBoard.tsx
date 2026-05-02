@@ -2206,7 +2206,7 @@ const StatesBoard = () =>
                                       size={'small'}
                                       fullWidth
                                       multiline
-                                      minRows={4}
+                                      minRows={2}
                                     />
                                   </Grid>
                                 </Grid>
