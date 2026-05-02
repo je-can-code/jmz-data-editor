@@ -47,6 +47,7 @@ import EnemySdpDrop from './EnemySdpDrop.tsx';
 import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import { EnemyJabsAiTraits } from './EnemyJabsAiTraits.tsx';
 import { EnemyJabsBattlerData } from './EnemyJabsBattlerData.tsx';
+import EnemyJabsTeam from './EnemyJabsTeam.tsx';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
 import { useElementClientRect } from '@presentation/hooks/useElementClientRect.ts';
 import { useEnemies } from '@presentation/context/resources/enemies.context.tsx';
@@ -1059,6 +1060,11 @@ const EnemiesBoard = () =>
                     </Accordion>
 
                     <EnemyJabsBattlerData
+                      selectedEnemy={selectedEnemy}
+                      updateEnemy={updateEnemy}
+                    />
+
+                    <EnemyJabsTeam
                       selectedEnemy={selectedEnemy}
                       updateEnemy={updateEnemy}
                     />

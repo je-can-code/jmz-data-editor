@@ -1,4 +1,6 @@
 import React, { MouseEvent, useEffect, useRef, useState } from 'react';
+
+import { resolveSdpEffectiveRankUpParts } from '../../../constants/sdpRarityCostDefaults';
 import { FixedSizeList } from 'react-window';
 import {
   Alert,
@@ -60,7 +62,7 @@ import {
   TrendingFlat,
   WaterfallChart
 } from '@mui/icons-material';
-import { blue, green, grey, orange, purple, yellow } from '@mui/material/colors';
+import { green, orange, purple } from '@mui/material/colors';
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 
 import SaveButton from '../../../components/core/SaveButton.tsx';
@@ -68,6 +70,11 @@ import KeyTextField from '../../../components/core/KeyTextField.tsx';
 import ReloadButton from '../../../components/core/ReloadButton.tsx';
 
 import { fromLongParameterIdToName } from '../../../mappers/ParameterIdMapper.ts';
+import {
+  sdpRarityToMuiColor,
+  sdpRarityMenuLabel,
+  SDP_RARITY_VALUES
+} from '@services/sdp/sdpPanelRarity.ts';
 import { useSdps } from '@presentation/context/resources/sdps.context.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
@@ -83,6 +90,30 @@ import type { VirtualizedSidebarRow } from '@presentation/components/board/Virtu
 import Panel = Sdp.StatDistributionPanel;
 import PanelParameter = Sdp.SdpParameter;
 import PanelReward = Sdp.SdpReward;
+
+const SDP_MONO_CAP_CH = 80;
+
+const stripRmmzEscapeCodes = (text: string) =>
+{
+  // remove common RMMZ escape codes so we can approximate visible character counts.
+  return text
+    .replace(/\\C\[\d+]/g, "")
+    .replace(/\\FS\[\d+]/g, "")
+    .replace(/\\I\[\d+]/g, "")
+    .replace(/\\\*/g, "")
+    .replace(/\\_/g, "");
+};
+
+const maxVisibleLineLength = (text: string) =>
+{
+  const normalized = stripRmmzEscapeCodes(text);
+  return Math.max(
+    ...normalized
+      .split("\n")
+      .map(l => l.length),
+    0,
+  );
+};
 
 const sdpBoardListColumnWidth = virtualizedSidebarColumnWidth(
   VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
@@ -396,6 +427,18 @@ const SdpBoard = () =>
   };
   //endregion actions
 
+  //region validators
+  const topFlavorMaxLine = selectedPanel
+    ? maxVisibleLineLength(selectedPanel.topFlavorText)
+    : 0;
+  const topFlavorTooLong = topFlavorMaxLine > SDP_MONO_CAP_CH;
+
+  const descriptionMaxLine = selectedPanel
+    ? maxVisibleLineLength(selectedPanel.description)
+    : 0;
+  const descriptionTooLong = descriptionMaxLine > SDP_MONO_CAP_CH;
+  //endregion validators
+
   //region updates
   /**
    * Centralized helper to apply updated panels to the context and enable saving.
@@ -665,9 +708,9 @@ const SdpBoard = () =>
       description: 'The best panel ever, hands down. You only need to acquire it somehow!',
       topFlavorText: 'Get this panel, you will not regret it.',
       maxRank: 10,
-      baseCost: 100,
-      flatGrowthCost: 50,
-      multGrowthCost: 1.20,
+      baseCost: 0,
+      flatGrowthCost: 0,
+      multGrowthCost: 1,
       panelParameters: [],
       panelRewards: [],
       rarity: 0,
@@ -851,75 +894,33 @@ const SdpBoard = () =>
   //endregion updates
 
   //region render
-  const fromRarityColorIndexToName = (rarityColorIndex: number) =>
-  {
-    switch (rarityColorIndex)
-    {
-      case 0:
-        return 'Common (Tier 1)';
-      case 3:
-        return 'Magical (Tier 2)';
-      case 23:
-        return 'Rare (Tier 3)';
-      case 31:
-        return 'Epic (Tier 4)';
-      case 20:
-        return 'Legendary (Tier 5)';
-      case 25:
-        return 'Godlike (Tier 6)';
-      default:
-        console.warn('if modifying the rarity dropdown options, be sure to fix them here, too.');
-        console.warn(`${rarityColorIndex} was not an implemented option.`);
-        return 'UNKNOWN';
-    }
-  };
-
-  const fromRarityColorIndexToIcon = (rarityColorIndex: number) =>
+  /**
+   * Icons parallel **sdpRarityMenuLabel** ordering (Common..Godlike).
+   *
+   * @param rarityIndex `rarity` **0–5** from JSON.
+   */
+  const sdpRarityIcon = (rarityIndex: number) =>
   {
     const styles = {
-      color: fromRarityColorIndexToColor(rarityColorIndex)
+      color: sdpRarityToMuiColor(rarityIndex)
     };
-    switch (rarityColorIndex)
+    switch (rarityIndex)
     {
       case 0:
         return <ShowChart sx={styles}/>;
-      case 3:
+      case 1:
         return <StackedLineChart sx={styles}/>;
-      case 23:
+      case 2:
         return <Insights sx={styles}/>;
-      case 31:
+      case 3:
         return <AutoGraph sx={styles}/>;
-      case 20:
+      case 4:
         return <SwitchAccessShortcut sx={styles}/>;
-      case 25:
+      case 5:
         return <AutoAwesome sx={styles}/>;
       default:
-        console.warn('if modifying the rarity dropdown options, be sure to fix them here, too.');
-        console.warn(`${rarityColorIndex} was not an implemented option.`);
+        console.warn(`sdpRarityIcon: unknown rarity index [ ${rarityIndex} ].`);
         return <Circle/>;
-    }
-  };
-
-  const fromRarityColorIndexToColor = (rarityColorIndex: number) =>
-  {
-    switch (rarityColorIndex)
-    {
-      case 0:
-        return grey[ 600 ];
-      case 3:
-        return green[ 600 ];
-      case 23:
-        return blue[ 600 ];
-      case 31:
-        return purple[ 500 ];
-      case 20:
-        return orange[ 600 ];
-      case 25:
-        return yellow[ 600 ];
-      default:
-        console.warn('if modifying the rarity dropdown options, be sure to fix them here, too.');
-        console.warn(`${rarityColorIndex} was not an implemented option.`);
-        return grey[ 100 ];
     }
   };
 
@@ -943,14 +944,14 @@ const SdpBoard = () =>
     const next = sdps.at(index + 1);
     const isNextHeader = next !== undefined && next.key.endsWith('___');
     const nextHeaderColor = isNextHeader
-      ? fromRarityColorIndexToColor(next.rarity)
+      ? sdpRarityToMuiColor(next.rarity)
       : undefined;
 
     const labelSx = {
       fontWeight: isHeader
         ? 'bold'
         : 'normal',
-      color: fromRarityColorIndexToColor(sdp.rarity),
+      color: sdpRarityToMuiColor(sdp.rarity),
     };
 
     const listItemButtonSx = (
@@ -979,16 +980,14 @@ const SdpBoard = () =>
 
   const renderSdpRarities = () =>
   {
-    const rarities = [ 0, 3, 23, 31, 20, 25 ];
-    return rarities.map((
-      rarityColorIndex =>
-        <MenuItem
-          key={rarityColorIndex}
-          value={rarityColorIndex}
-        >
-          {fromRarityColorIndexToIcon(rarityColorIndex)} {fromRarityColorIndexToName(rarityColorIndex)}
-        </MenuItem>
-    ));
+    return SDP_RARITY_VALUES.map(rarityIndex =>
+      <MenuItem
+        key={rarityIndex}
+        value={rarityIndex}
+      >
+        {sdpRarityIcon(rarityIndex)} {sdpRarityMenuLabel(rarityIndex)}
+      </MenuItem>
+    );
   };
 
   const fromParameterIdToIconElement = (
@@ -1212,17 +1211,17 @@ const SdpBoard = () =>
       baseCost,
       multGrowthCost,
       flatGrowthCost,
-      maxRank
+      maxRank,
+      rarity
     } = selectedPanel;
+    const parts = resolveSdpEffectiveRankUpParts(rarity, baseCost, flatGrowthCost, multGrowthCost);
     let accumulatedCost = 0;
 
     for (let rank = 1; rank <= maxRank; rank++)
     {
-      const nextLevelCost = Math.ceil(baseCost + (
-        multGrowthCost * (
-          flatGrowthCost * rank
-        )
-      ));
+      // Match J-SDP v3 rankUpCost: rarity defaults + panel offsets, then base + floor(flat * mult^rank).
+      const growth = Math.floor(parts.flatGrowthCost * (parts.multGrowthCost ** rank));
+      const nextLevelCost = parts.baseCost + growth;
 
       accumulatedCost += nextLevelCost;
 
@@ -1259,17 +1258,16 @@ const SdpBoard = () =>
       baseCost,
       multGrowthCost,
       flatGrowthCost,
-      maxRank
+      maxRank,
+      rarity
     } = selectedPanel;
+    const parts = resolveSdpEffectiveRankUpParts(rarity, baseCost, flatGrowthCost, multGrowthCost);
     let accumulatedCost = 0;
 
     for (let rank = 1; rank <= maxRank; rank++)
     {
-      accumulatedCost += Math.ceil(baseCost + (
-        multGrowthCost * (
-          flatGrowthCost * rank
-        )
-      ));
+      const growth = Math.floor(parts.flatGrowthCost * (parts.multGrowthCost ** rank));
+      accumulatedCost += parts.baseCost + growth;
     }
 
     return accumulatedCost;
@@ -1447,6 +1445,10 @@ const SdpBoard = () =>
                     label={'Top Flavor Text'}
                     value={selectedPanel.topFlavorText}
                     onChange={event => handlePanelTopFlavorTextChange(event.target.value)}
+                    error={topFlavorTooLong}
+                    helperText={topFlavorTooLong
+                      ? `Longest line ~${topFlavorMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
+                      : undefined}
                   />
                 </Grid>
 
@@ -1462,6 +1464,10 @@ const SdpBoard = () =>
                     rows={4}
                     value={selectedPanel.description}
                     onChange={event => handlePanelDescriptionChange(event.target.value)}
+                    error={descriptionTooLong}
+                    helperText={descriptionTooLong
+                      ? `Longest line ~${descriptionMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
+                      : undefined}
                   />
                 </Grid>
 
@@ -1482,7 +1488,7 @@ const SdpBoard = () =>
                 <Grid size={1} sx={{ mr: 5 }}>
                   <TextField
                     type={'number'}
-                    label={'Base Cost'}
+                    label={'Base offset'}
                     variant={'outlined'}
                     value={selectedPanel.baseCost}
                     onChange={event => handlePanelBaseCostChange(parseInt(event.target.value) ?? 0)}
@@ -1494,7 +1500,7 @@ const SdpBoard = () =>
                 <Grid size={1} sx={{ mr: 5 }}>
                   <TextField
                     type={'number'}
-                    label={'Flat Growth'}
+                    label={'Flat offset'}
                     variant={'outlined'}
                     value={selectedPanel.flatGrowthCost}
                     onChange={event => handlePanelFlatGrowthCostChange(parseInt(event.target.value) ?? 0)}
@@ -1506,7 +1512,7 @@ const SdpBoard = () =>
                 <Grid size={1}>
                   <FormControl>
                     <InputLabel>
-                      Multiplier
+                      Mult scale
                     </InputLabel>
                     <FilledInput
                       type={'number'}
