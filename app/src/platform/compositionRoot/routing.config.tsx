@@ -5,7 +5,8 @@ import QuestBoard from '../../presentation/boards/quests/QuestBoard.tsx';
 import CraftingBoard from '../../presentation/boards/crafting/CraftingBoard.tsx';
 import ProficiencyBoard from '../../presentation/boards/proficiency/ProficiencyBoard.tsx';
 import EnemiesBoard from '../../presentation/boards/enemies/EnemiesBoard.tsx';
-import { AccountTree, Android, Construction, Hub, LocalHospital, Rule, School, } from '@mui/icons-material';
+import JabsTeamsBoard from '@boards/jabs/JabsTeamsBoard.tsx';
+import { AccountTree, Android, Construction, Hub, LocalHospital, Rule, School, Groups, } from '@mui/icons-material';
 import IndexBoard from '@boards/_index/IndexBoard.tsx';
 import SkillsBoard from '@boards/skills/SkillsBoard.tsx';
 import StatesBoard from '@boards/states/StatesBoard.tsx';
@@ -90,6 +91,16 @@ const proficiencyBoard: BoardDefinition = {
   featureFlag: 'proficiency',
 };
 
+const jabsTeamsBoard: BoardDefinition = {
+  id: 'jabs-teams',
+  title: 'JABS',
+  path: '/jabs',
+  component: JabsTeamsBoard,
+  guard: () => true,
+  icon: <Groups fontSize={'small'}/>,
+  featureFlag: 'jabs',
+};
+
 const APP_ROUTES: BoardDefinition[] = [
   indexBoard,
   enemyBoard,
@@ -99,6 +110,7 @@ const APP_ROUTES: BoardDefinition[] = [
   questBoard,
   craftingBoard,
   proficiencyBoard,
+  jabsTeamsBoard,
 ];
 
 export { APP_ROUTES };

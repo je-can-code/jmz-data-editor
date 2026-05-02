@@ -4,6 +4,7 @@ enum ConfigFilenames
   Proficiency = 'config.proficiency.json',
   Quests = 'config.quest.json',
   Sdps = 'config.sdp.json',
+  Jabs = 'config.jabs.json',
   System = 'System.json',
 }
 

@@ -20,7 +20,8 @@ export type ConfigContextValue<T> = {
 export function createConfigContext<T>(
   filename: ConfigFilenames,
   rootKey: string,
-  displayName: string
+  displayName: string,
+  normalizeLoaded?: (rows: T[]) => T[]
 )
 {
   const Context = createContext<ConfigContextValue<T> | null>(null);
@@ -44,13 +45,20 @@ export function createConfigContext<T>(
       try
       {
         const result = await executeLoad<any>(rmmzDataPath, filename);
-        setData(result?.[ rootKey ] ?? []);
+        let rows = result?.[ rootKey ] ?? [];
+
+        if (normalizeLoaded)
+        {
+          rows = normalizeLoaded(rows);
+        }
+
+        setData(rows);
       }
       catch (error)
       { console.error(`Failed to load ${displayName}:`, error); }
       finally
       { setLoading(false); }
-    }, [ rmmzDataPath ]);
+    }, [ rmmzDataPath, filename, rootKey, normalizeLoaded ]);
 
     const save = useCallback(async (updatedList: T[]) =>
     {
