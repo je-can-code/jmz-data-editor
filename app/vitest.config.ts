@@ -30,7 +30,6 @@ export default mergeConfig(
           '**/*.{test,spec}.ts?(x)',
           '**/vite.config.*',
           '**/vitest.config.*',
-          '**/neutralino.config.*',
           '**/scripts/**',
         ],
       },

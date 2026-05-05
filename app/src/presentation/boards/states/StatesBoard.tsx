@@ -1982,7 +1982,6 @@ const StatesBoard = () =>
             </span>
           </Tooltip>
         </Stack>
-        <Box sx={{ flex: 1, minHeight: 0 }}>
         <VirtualizedSidebarList
           ref={listRef}
           itemCount={states.length}
@@ -1999,7 +1998,6 @@ const StatesBoard = () =>
           onListKeyDown={handleListKeyDown}
           listWrapperRef={listWrapperRef}
         />
-        </Box>
           </>
         }
       >

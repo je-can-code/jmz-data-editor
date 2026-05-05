@@ -7,6 +7,20 @@ import React, {
 import { FixedSizeList, ListChildComponentProps } from "react-window";
 import { Box } from "@mui/material";
 import type { SxProps, Theme } from "@mui/material/styles";
+
+/**
+ * Standard sidebar list-column shell: grows with {@link EditorBoardSplitLayout}, constrains height for react-window.
+ */
+export const VIRTUALIZED_SIDEBAR_LIST_REGION_SX: SxProps<Theme> = {
+  flex: 1,
+  minHeight: 0,
+  minWidth: 0,
+  display: "flex",
+  flexDirection: "column",
+  overflow: "hidden",
+  width: "100%",
+  boxSizing: "border-box",
+};
 import {
   ListItem,
   ListItemButton,
@@ -63,10 +77,14 @@ type VirtualizedSidebarListProps = {
   onListKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
   listWrapperRef: React.RefObject<HTMLDivElement | null>;
   /**
-   * When true, the list fills a flex parent ({@code flex: 1}; {@code minHeight: 0}) and
-   * {@link listHeight} is only used until the container is measured.
+   * When true, applies {@link VIRTUALIZED_SIDEBAR_LIST_REGION_SX} on the root so the list column
+   * stretches under {@link EditorBoardSplitLayout}; {@link listHeight} is only used until measured.
    */
   fillContainer?: boolean;
+  /**
+   * Optional context menu on the list column (e.g. SDP / crafting recipe list).
+   */
+  onContextMenu?: React.MouseEventHandler<HTMLDivElement>;
 };
 
 const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListProps>(
@@ -83,6 +101,7 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
       onListKeyDown,
       listWrapperRef,
       fillContainer = false,
+      onContextMenu,
     } = props;
 
     const listColumnRef = useRef<HTMLDivElement>(null);
@@ -241,24 +260,27 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
                 )}
             </ListItemIcon>
             <ListItemText
-              disableTypography
               primary={row.label}
-              sx={
-                [
+              sx={{
+                flex: "1 1 auto",
+                minWidth: `${labelMinCh}ch`,
+                overflow: "hidden",
+              }}
+              primaryTypographyProps={{
+                noWrap: true,
+                sx: [
                   {
                     fontSize: 16,
                     fontFamily: "monospace",
-                    flex: "1 1 auto",
-                    minWidth: `${labelMinCh}ch`,
                     lineHeight: 1.2,
-                    whiteSpace: "nowrap",
+                    textOverflow: "ellipsis",
                     overflow: "hidden",
                   },
                   ...(row.labelSx !== undefined
                     ? [ row.labelSx ]
                     : []),
-                ] as SxProps<Theme>
-              }
+                ] as SxProps<Theme>,
+              }}
             />
           </ListItemButton>
         </ListItem>
@@ -268,15 +290,15 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
     return (
       <Box
         ref={listColumnRef}
+        onContextMenu={onContextMenu}
         sx={{
           width: "100%",
           overflow: "hidden",
           ...(fillContainer
-            ? {
-              flex: 1,
-              minHeight: 0,
-              minWidth: 0,
-            }
+            ? VIRTUALIZED_SIDEBAR_LIST_REGION_SX
+            : {}),
+          ...(onContextMenu !== undefined
+            ? { cursor: "context-menu" }
             : {}),
         }}
       >
@@ -311,6 +333,43 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
 
 VirtualizedSidebarList.displayName = "VirtualizedSidebarList";
 
+type VirtualizedSidebarListRegionProps = {
+  children: React.ReactNode;
+  onContextMenu?: React.MouseEventHandler<HTMLDivElement>;
+};
+
+/**
+ * Flex shell for a sidebar slot that is not only {@link VirtualizedSidebarList} (e.g. list or placeholder button).
+ * Uses the same layout rules as {@link VirtualizedSidebarList} with {@code fillContainer}.
+ *
+ * @param props.children Region content.
+ * @param props.onContextMenu Optional context menu handler for the whole slot.
+ * @returns MUI {@link Box} wrapper.
+ */
+const VirtualizedSidebarListRegion = (props: VirtualizedSidebarListRegionProps) =>
+{
+  const {
+    children,
+    onContextMenu,
+  } = props;
+
+  return (
+    <Box
+      onContextMenu={onContextMenu}
+      sx={{
+        ...VIRTUALIZED_SIDEBAR_LIST_REGION_SX,
+        ...(onContextMenu !== undefined
+          ? { cursor: "context-menu" }
+          : {}),
+      }}
+    >
+      {children}
+    </Box>
+  );
+};
+
+VirtualizedSidebarListRegion.displayName = "VirtualizedSidebarListRegion";
+
 /**
  * CSS width for the sidebar column: {@code iconRowPx} + {@code labelMinCh} in {@code ch}.
  *
@@ -323,7 +382,7 @@ function virtualizedSidebarColumnWidth(iconRowPx: number, labelMinCh: number): s
   return `calc(${iconRowPx}px + ${labelMinCh}ch)`;
 }
 
-const VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX = 52;
+const VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX = 102;
 
 const VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH = 30;
 
@@ -333,12 +392,17 @@ const VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT = 960;
 
 export {
   VirtualizedSidebarList,
+  VirtualizedSidebarListRegion,
   virtualizedSidebarColumnWidth,
   VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
   VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH,
   VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE,
   VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT,
 };
-export type { VirtualizedSidebarListProps, VirtualizedSidebarRow };
+export type {
+  VirtualizedSidebarListProps,
+  VirtualizedSidebarListRegionProps,
+  VirtualizedSidebarRow,
+};
 
 //endregion VirtualizedSidebarList

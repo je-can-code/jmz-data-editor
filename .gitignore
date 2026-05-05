@@ -1,21 +1,11 @@
-# Neutralinojs binaries and builds
-/bin
-/dist
-
-# Neutralinojs client (minified)
-neutralino.js
-
-# Neutralinojs related files
-.tmp
-.storage
-*.log
-
 # Local app settings (copy from config.example.yaml)
 .config/
 
 # Node and React ignores
 node_modules
 build
+dist
+bin
 
 # IDEs
 .idea

@@ -1,5 +1,4 @@
-import React, { ChangeEvent, MouseEvent, useRef, useState } from 'react';
-import { FixedSizeList } from 'react-window';
+import React, { ChangeEvent, MouseEvent, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -35,9 +34,7 @@ import {
 import {
   Add,
   ContentCopy,
-  ExitToApp,
   Key,
-  NavigateNext,
   Person,
   PlaylistRemove,
   PriceCheck,
@@ -54,16 +51,41 @@ import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { RPG_SkillDomainModel } from '@core/domain/entities/RPG_SkillDomainModel.ts';
 import { RPG_ActorDomainModel } from '@core/domain/entities/RPG_ActorDomainModel.ts';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
-import { useElementClientRect } from '@presentation/hooks/useElementClientRect.ts';
 import { useProficiency } from '@presentation/context/resources/proficiency.context.tsx';
+import {
+  VirtualizedSidebarList,
+  virtualizedSidebarColumnWidth,
+  VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT,
+} from '@presentation/components/board/VirtualizedSidebarList.tsx';
+import type { VirtualizedSidebarRow } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import Conditional = Proficiency.Conditional;
 import Requirement = Proficiency.Requirement;
 
 //region setup
 const EntryText = styled(ListItemText)`
   font-family: monospace;
+  overflow: hidden;
+
+  .MuiListItemText-primary {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .MuiListItemText-secondary {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 `;
 //endregion setup
+
+const proficiencyBoardListColumnWidth = virtualizedSidebarColumnWidth(
+  VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH,
+);
 
 const ProficiencyBoard = () =>
 {
@@ -82,12 +104,13 @@ const ProficiencyBoard = () =>
 
   const {
     skills,
+    byId: skillsById,
     loading: skillsLoading
   } = useSkills();
 
   //region state
-  const listViewportRef = useRef<HTMLDivElement>(null);
-  const listViewportSize = useElementClientRect(listViewportRef);
+  const listRef = useRef<any>(null);
+  const listWrapperRef = useRef<HTMLDivElement>(null);
   const [ selectedConditional, setSelectedConditional ] = useState<Conditional | null>(null);
   const [ selectedConditionalIndex, setSelectedConditionalIndex ] = useState<number>(0);
   const [ conditionalsContextMenu, setConditionalsContextMenu ] = useState<{
@@ -126,6 +149,24 @@ const ProficiencyBoard = () =>
     setCanSave(true);
   };
 
+  useEffect(() =>
+  {
+    // auto-select the first entry when opening the board.
+    if (selectedConditional !== null)
+    {
+      return;
+    }
+
+    const first = conditionals.at(0) ?? null;
+    if (first === null)
+    {
+      return;
+    }
+
+    setSelectedConditionalIndex(0);
+    syncSelectionWithConditional(first);
+  }, [ conditionals, selectedConditional ]);
+
   const syncSelectionWithConditional = (conditional: Conditional | null) =>
   {
     setSelectedConditional(conditional);
@@ -150,7 +191,7 @@ const ProficiencyBoard = () =>
     // Lookup the skill domain model for the requirement's primary skill.
     const skillId = requirement?.skillId ?? 0;
     const skillModel = skillId > 0
-      ? skills.find(s => s.id === skillId) ?? null
+      ? skillsById.get(skillId) ?? null
       : null;
 
     setRequirementSkill(skillModel);
@@ -585,42 +626,26 @@ const ProficiencyBoard = () =>
   //endregion selections
 
   //region render
-  /**
-   * A mapping function for creating a data list entry in the list.
-   */
-  const renderConditionalListItem = (props: ListChildComponentProps) =>
+  const getConditionalSidebarRow = useCallback((index: number): VirtualizedSidebarRow =>
   {
-    const {
-      index,
-      style
-    } = props;
-
     const conditional = conditionals.at(index);
-
     if (!conditional)
     {
-      return <React.Fragment key={index}></React.Fragment>;
+      return { type: 'spacer' };
     }
 
-    return (
-      <ListItem key={conditional.key} style={style}>
-        <ListItemButton
-          selected={selectedConditionalIndex === index}
-          onClick={event => handleConditionalListItemOnClickEvent(event, index)}
-        >
-          <ListItemIcon>
-            {(selectedConditionalIndex === index)
-              ? <ExitToApp color={'success'}/>
-              : <NavigateNext color={'secondary'}/>}
-          </ListItemIcon>
-          <EntryText
-            primary={conditional.key}
-            disableTypography={true}
-          />
-        </ListItemButton>
-      </ListItem>
-    );
-  };
+    const iconSkillId = conditional.skillRewards?.at(0) ?? 0;
+    const iconIndex = iconSkillId > 0
+      ? skillsById.get(iconSkillId)?.iconIndex
+      : undefined;
+
+    return {
+      type: 'item',
+      label: conditional.key,
+      title: conditional.key,
+      iconIndex,
+    };
+  }, [ conditionals, skillsById ]);
 
   /**
    * A mapping function for creating an entry in the actor list.
@@ -658,7 +683,7 @@ const ProficiencyBoard = () =>
 
   const renderSkillIdRewards = (skillId: number) =>
   {
-    const skill = skills.at(skillId);
+    const skill = skillsById.get(skillId);
     if (!skill)
     {
       return <React.Fragment key={skillId}></React.Fragment>;
@@ -690,11 +715,21 @@ const ProficiencyBoard = () =>
       return <React.Fragment key={index}></React.Fragment>;
     }
 
-    const skill = skills.at(requirement.skillId);
+    const skill = skillsById.get(requirement.skillId);
     if (!skill)
     {
       return <React.Fragment key={index}></React.Fragment>;
     }
+
+    const secondarySkillText = requirement.secondarySkillIds
+      .slice()
+      .sort((a, b) => a - b)
+      .map(skillId =>
+      {
+        const name = skillsById.get(skillId)?.name ?? `Unknown Skill (id:${skillId})`;
+        return `${name}(${skillId})`;
+      })
+      .join(', ');
 
     return (
       <ListItem key={`${index}-${skill.id}`}>
@@ -709,10 +744,7 @@ const ProficiencyBoard = () =>
           </ListItemIcon>
           <EntryText
             primary={`${skill.id}: ${skill.name}`}
-            secondary={currentRequirements[ index ].secondarySkillIds
-              .sort()
-              .map(skillId => `${skills[ skillId ].name}(${skillId})`)
-              .join(', ')}
+            secondary={secondarySkillText}
           />
         </ListItemButton>
 
@@ -735,13 +767,6 @@ const ProficiencyBoard = () =>
     );
   }
 
-  const listPixelHeight = listViewportSize.height > 0
-    ? listViewportSize.height
-    : 600;
-  const listPixelWidth = listViewportSize.width > 0
-    ? listViewportSize.width
-    : 300;
-
   return <>
     <Box sx={{
       flex: 1,
@@ -751,28 +776,24 @@ const ProficiencyBoard = () =>
       overflow: 'hidden',
     }}>
       <EditorBoardSplitLayout
-        sidebarColumnWidth={'min(360px, 28vw)'}
+        sidebarColumnWidth={proficiencyBoardListColumnWidth}
         sidebar={
-          <Box
-            ref={listViewportRef}
-            sx={{
-              flex: 1,
-              minHeight: 0,
-            }}
-          >
-        <div onContextMenu={handleConditionalContextMenu} style={{ cursor: 'context-menu', height: '100%' }}>
-          {/* @ts-ignore */}
-          <FixedSizeList
-            height={listPixelHeight}
-            width={listPixelWidth}
-            itemSize={30}
-            overscanCount={5}
+          <VirtualizedSidebarList
+            ref={listRef}
             itemCount={conditionals.length}
-          >
-            {renderConditionalListItem}
-          </FixedSizeList>
-        </div>
-          </Box>
+            itemSize={30}
+            fillContainer
+            listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
+            labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
+            selectedIndex={selectedConditionalIndex}
+            getRow={getConditionalSidebarRow}
+            onSelectIndex={(index) =>
+            {
+              handleConditionalListItemOnClickEvent(null, index);
+            }}
+            onContextMenu={handleConditionalContextMenu}
+            listWrapperRef={listWrapperRef}
+          />
         }
       >
           {(selectedConditional === null)
@@ -1064,13 +1085,13 @@ const ProficiencyBoard = () =>
         onClose={() => setIsSkillDialogOpen(false)}
       >
         <DialogTitle>
-          {`Skill Detail: ${skills.at(clickedSkill)?.name}`}
+          {`Skill Detail: ${skillsById.get(clickedSkill)?.name}`}
         </DialogTitle>
         <DialogContent
           sx={{ height: '200px' }}
         >
           <DialogContentText>
-            {skills.at(clickedSkill)?.description}
+            {skillsById.get(clickedSkill)?.description}
           </DialogContentText>
           <SpeedDial
             ariaLabel={'skill-speed-dial'}
@@ -1085,14 +1106,14 @@ const ProficiencyBoard = () =>
               key={'mp-cost'}
               icon={'MP'}
               sx={{ color: 'pink' }}
-              tooltipTitle={skills.at(clickedSkill)?.mpCost}
+              tooltipTitle={skillsById.get(clickedSkill)?.mpCost}
               tooltipOpen
               tooltipPlacement={'right'}
             />
             <SpeedDialAction
               key={'tp-cost'}
               icon={'TP'}
-              tooltipTitle={skills.at(clickedSkill)?.tpCost}
+              tooltipTitle={skillsById.get(clickedSkill)?.tpCost}
               tooltipOpen
               tooltipPlacement={'right'}
             />

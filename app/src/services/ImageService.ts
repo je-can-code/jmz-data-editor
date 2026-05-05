@@ -1,4 +1,4 @@
-import { filesystem } from '@neutralinojs/lib';
+import { getJmzHttpApiBase } from '../constants/jmzHttpApiBase.ts';
 
 /**
  * Splits a filesystem path into non-empty segments (forward or backslash).
@@ -99,24 +99,27 @@ function resolveIconSetPngPath(projectDataPath: string): string
 }
 
 /**
- * Loads {@code IconSet.png} bytes via Neutralino (same filesystem access as JSON database files).
- * @param projectDataPath RMMZ project root or {@code data/} directory.
+ * Loads {@code IconSet.png} bytes via Go HTTP {@code GET /api/iconset}.
+ * @param projectDataPath RMMZ project root or {@code data/} directory (unused — server uses {@code JMZ_PROJECT_ROOT}).
  * @returns Raw PNG bytes.
  */
 async function loadIconSetPng(projectDataPath: string): Promise<ArrayBuffer>
 {
-  const target = resolveIconSetPngPath(projectDataPath);
-  try
+  const apiBase = getJmzHttpApiBase();
+  if (apiBase === null)
   {
-    return await filesystem.readBinaryFile(target);
+    throw new Error('IconSet load failed: JMZ HTTP API base is not configured.');
   }
-  catch (err)
+
+  const url = `${apiBase}/api/iconset`;
+  const response = await fetch(url, { method: 'GET' });
+  if (!response.ok)
   {
-    const detail = err instanceof Error
-      ? err.message
-      : String(err);
-    throw new Error(`${detail} — tried: ${target}`);
+    throw new Error(
+      `IconSet GET failed (${String(response.status)} ${response.statusText}) — ${url}`,
+    );
   }
+  return await response.arrayBuffer();
 }
 
 export {

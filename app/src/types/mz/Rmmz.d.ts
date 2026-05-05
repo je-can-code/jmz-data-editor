@@ -1,16 +1,12 @@
-declare namespace Rmmz
-{
-  namespace Data
-  {
-    interface RPG_Trait
-    {
+declare namespace Rmmz {
+  namespace Data {
+    interface RPG_Trait {
       code: number;
       dataId: number;
       value: number;
     }
 
-    interface RPG_SkillDamage
-    {
+    interface RPG_SkillDamage {
       critical: boolean;
       elementId: number;
       formula: string;
@@ -18,23 +14,20 @@ declare namespace Rmmz
       variance: number;
     }
 
-    interface RPG_UsableEffect
-    {
+    interface RPG_UsableEffect {
       code: number;
       dataId: number;
       value1: number;
       value2: number;
     }
 
-    interface RPG_ClassLearning
-    {
+    interface RPG_ClassLearning {
       level: number;
       skillId: number;
       note: string;
     }
 
-    interface RPG_EnemyAction
-    {
+    interface RPG_EnemyAction {
       conditionParam1: number;
       conditionParam2: number;
       conditionType: number;
@@ -42,58 +35,49 @@ declare namespace Rmmz
       skillId: number;
     }
 
-    interface RPG_DropItem
-    {
+    interface RPG_DropItem {
       dataId: number;
       denominator: number;
       kind: number;
     }
   }
 
-  namespace Base
-  {
-    interface RPG_Base
-    {
+  namespace Base {
+    interface RPG_Base {
       id: number;
-      meta: any;
+      // meta: any; // not actually stored on the JSON
       name: string;
       note: string;
     }
 
     interface RPG_BaseBattler
-      extends RPG_Base
-    {
+      extends RPG_Base {
       battlerName: string;
       traits: Data.RPG_Trait[];
     }
 
     interface RPG_BaseItem
-      extends RPG_Base
-    {
+      extends RPG_Base {
       description: string;
       iconIndex: number;
     }
 
     interface RPG_Traited
-      extends RPG_BaseItem
-    {
+      extends RPG_BaseItem {
       traits: Data.RPG_Trait[];
     }
   }
 
-  namespace Core
-  {
+  namespace Core {
     interface RPG_EquipItem
-      extends Base.RPG_Traited
-    {
+      extends Base.RPG_Traited {
       etypeId: number;
       params: number[];
       price: number;
     }
 
     interface RPG_UsableItem
-      extends Base.RPG_BaseItem
-    {
+      extends Base.RPG_BaseItem {
       animationId: number;
       damage: Data.RPG_SkillDamage;
       effects: Data.RPG_UsableEffect[];
@@ -107,11 +91,9 @@ declare namespace Rmmz
     }
   }
 
-  namespace Implementations
-  {
+  namespace Implementations {
     interface RPG_Actor
-      extends Base.RPG_BaseBattler
-    {
+      extends Base.RPG_BaseBattler {
       characterIndex: number;
       characterName: string;
       classId: number;
@@ -120,29 +102,26 @@ declare namespace Rmmz
       faceName: string;
       initialLevel: number;
       maxLevel: number;
-      nickName: string;
+      nickname: string;
       profile: string;
     }
 
     interface RPG_Armor
-      extends Core.RPG_EquipItem
-    {
+      extends Core.RPG_EquipItem {
       atypeId: number;
       kind: 3;
     }
 
     interface RPG_Class
-      extends Base.RPG_Base
-    {
+      extends Base.RPG_Base {
       expParams: [ number, number, number, number ];
       learnings: Data.RPG_ClassLearning[];
-      params: number[];
+      params: number[][];
       traits: Data.RPG_Trait[];
     }
 
     interface RPG_Enemy
-      extends Base.RPG_BaseBattler
-    {
+      extends Base.RPG_BaseBattler {
       actions: Data.RPG_EnemyAction[];
       battlerHue: number;
       dropItems: Data.RPG_DropItem[];
@@ -152,8 +131,7 @@ declare namespace Rmmz
     }
 
     interface RPG_Item
-      extends Core.RPG_UsableItem
-    {
+      extends Core.RPG_UsableItem {
       consumable: boolean;
       itypeId: number;
       price: number;
@@ -163,8 +141,7 @@ declare namespace Rmmz
     /**
      * Row in {@code Animations.json}; other fields omitted for the data editor.
      */
-    interface RPG_Animation
-    {
+    interface RPG_Animation {
       id: number;
       name: string;
     }
@@ -172,15 +149,13 @@ declare namespace Rmmz
     /**
      * Row in {@code CommonEvents.json}; list field omitted for the data editor.
      */
-    interface RPG_CommonEvent
-    {
+    interface RPG_CommonEvent {
       id: number;
       name: string;
     }
 
     interface RPG_Skill
-      extends Core.RPG_UsableItem
-    {
+      extends Core.RPG_UsableItem {
       message1: string;
       message2: string;
       messageType: number;
@@ -192,17 +167,15 @@ declare namespace Rmmz
     }
 
     interface RPG_State
-      extends Base.RPG_Traited
-    {
+      extends Base.RPG_Traited {
       autoRemovalTiming: number;
       chanceByDamage: number;
-      description: string;
       maxTurns: number;
       message1: string;
       message2: string;
       message3: string;
       message4: string;
-      messageType: number;
+      // messageType: number; // not real.
       minTurns: number;
       motion: number;
       overlay: number;
@@ -216,18 +189,15 @@ declare namespace Rmmz
     }
 
     interface RPG_Weapon
-      extends Core.RPG_EquipItem
-    {
+      extends Core.RPG_EquipItem {
       animationId: number;
       wtypeId: number;
       kind: 2;
     }
   }
 
-  namespace System
-  {
-    interface RPG_System
-    {
+  namespace System {
+    interface RPG_System {
       armorTypes: string[];
       elements: string[];
       equipTypes: string[];
@@ -240,8 +210,7 @@ declare namespace Rmmz
       variables: string[];
     }
 
-    interface RPG_SystemTerms
-    {
+    interface RPG_SystemTerms {
       basic: string[];
       commands: string[];
       params: string[];

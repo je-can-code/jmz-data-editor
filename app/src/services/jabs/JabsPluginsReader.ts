@@ -1,19 +1,7 @@
-import { filesystem } from '@neutralinojs/lib';
 import type { RmmzMapJson } from '@core/types/RmmzMapJson.ts';
+import { getJmzHttpApiBase } from '../../constants/jmzHttpApiBase.ts';
 
 const DEFAULT_JABS_ACTION_MAP_ID = 2;
-
-function joinProjectPath(
-  root: string,
-  ...segments: string[]
-): string
-{
-  const sep = root.includes('\\')
-    ? '\\'
-    : '/';
-  const base = root.replace(/[/\\]+$/u, '');
-  return [ base, ...segments ].join(sep);
-}
 
 function isRecord(x: unknown): x is Record<string, unknown>
 {
@@ -38,18 +26,24 @@ function parsePluginsJsArray(text: string): unknown[]
  * Reads JABS {@code actionMapId} from {@code js/plugins.js} under the project root (plugin name still contains {@code J-ABS}).
  * @returns Parsed id, or {@link DEFAULT_JABS_ACTION_MAP_ID} when missing or unreadable.
  */
-async function readJabsActionMapIdFromPluginsJs(projectRoot: string): Promise<number>
+async function readJabsActionMapIdFromPluginsJs(_projectRoot: string): Promise<number>
 {
-  const trimmed = projectRoot.trim();
-  if (trimmed === '')
-  {
-    return DEFAULT_JABS_ACTION_MAP_ID;
-  }
-
-  const path = joinProjectPath(trimmed, 'js', 'plugins.js');
   try
   {
-    const text = await filesystem.readFile(path);
+    const apiBase = getJmzHttpApiBase();
+    if (apiBase === null)
+    {
+      return DEFAULT_JABS_ACTION_MAP_ID;
+    }
+
+    const url = `${apiBase}/api/plugin-metadata`;
+    const response = await fetch(url, { method: 'GET' });
+    if (!response.ok)
+    {
+      return DEFAULT_JABS_ACTION_MAP_ID;
+    }
+
+    const text = await response.text();
     const arr = parsePluginsJsArray(text);
     for (const entry of arr)
     {

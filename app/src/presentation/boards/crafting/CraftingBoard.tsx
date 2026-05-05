@@ -734,25 +734,22 @@ const CraftingBoard = () =>
       <EditorBoardSplitLayout
         sidebarColumnWidth={craftingBoardListColumnWidth}
         sidebar={
-          <Box sx={{ flex: 1, minHeight: 0 }}>
-          <div onContextMenu={handleRecipeListContextMenu} style={{ cursor: 'context-menu' }}>
-            <VirtualizedSidebarList
-              ref={listRef}
-              itemCount={recipes.length}
-              itemSize={VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE}
-              fillContainer
-              listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
-              labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
-              selectedIndex={selectedRecipeIndex}
-              getRow={getRecipeSidebarRow}
-              onSelectIndex={(index) =>
-              {
-                handleRecipeListItemOnClickEvent(index);
-              }}
-              listWrapperRef={listWrapperRef}
-            />
-          </div>
-          </Box>
+          <VirtualizedSidebarList
+            ref={listRef}
+            itemCount={recipes.length}
+            itemSize={VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE}
+            fillContainer
+            listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
+            labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
+            selectedIndex={selectedRecipeIndex}
+            getRow={getRecipeSidebarRow}
+            onSelectIndex={(index) =>
+            {
+              handleRecipeListItemOnClickEvent(index);
+            }}
+            onContextMenu={handleRecipeListContextMenu}
+            listWrapperRef={listWrapperRef}
+          />
         }
       >
           {(selectedRecipe === null)

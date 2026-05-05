@@ -6,7 +6,7 @@
 * You should NEVER write to the filesystem, ever. I will choose what files to add and what to add to them.
 * Prefer your own internal tools over various terminal commands for parsing/searching code (ex: open_file instead of
   cat).
-* This codebase is a neutralinojs app, using react as a front end.
+* This codebase is a React (Vite) app with a local Go HTTP API backend for disk I/O.
 * The purpose of the app is to act as a replacement front end for RPG Maker MZ's database editor.
   * Additionally, to grant ease of manipulation of various notes on objects throughout the database with GUI elements.
 * All code responses should use the same coding style and formatting as exists across the codebase.
