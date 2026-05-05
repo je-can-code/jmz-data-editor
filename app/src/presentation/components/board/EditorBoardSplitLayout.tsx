@@ -55,9 +55,22 @@ const EditorBoardSplitLayout = (props: EditorBoardSplitLayoutProps) =>
             overflow: "hidden",
             display: "flex",
             flexDirection: "column",
+            height: "100%",
+            alignSelf: "stretch",
           }}
         >
-          {sidebar}
+          <Box
+            sx={{
+              flex: 1,
+              minHeight: 0,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              width: "100%",
+            }}
+          >
+            {sidebar}
+          </Box>
         </Grid>
 
         <Grid

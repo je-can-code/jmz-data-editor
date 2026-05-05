@@ -80,6 +80,7 @@ import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
 import {
   VirtualizedSidebarList,
+  VirtualizedSidebarListRegion,
   virtualizedSidebarColumnWidth,
   VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
   VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE,
@@ -1330,11 +1331,7 @@ const SdpBoard = () =>
             }
           }}
         />
-        <Box sx={{ flex: 1, minHeight: 0 }}>
-        <div
-          onContextMenu={handlePanelListContextMenu}
-          style={{ cursor: 'context-menu' }}
-        >
+        <VirtualizedSidebarListRegion onContextMenu={handlePanelListContextMenu}>
           {sdps.length > 0
             ? (
               <VirtualizedSidebarList
@@ -1361,8 +1358,7 @@ const SdpBoard = () =>
                 variant={'contained'}
               />
             )}
-        </div>
-        </Box>
+        </VirtualizedSidebarListRegion>
           </>
         }
       >

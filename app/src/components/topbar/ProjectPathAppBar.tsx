@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { AppBar, Box, Button, Toolbar, Typography } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
-import { JmzEditorYamlConfigReader } from '@platform/neutralino/readJmzEditorYamlConfig.ts';
 
 const ProjectPathAppBar = () =>
 {
@@ -63,7 +62,7 @@ const ProjectPathAppBar = () =>
           >
             {
               projectRoot === ''
-                ? `project root unset — add ${JmzEditorYamlConfigReader.CONFIG_YAML_RELATIVE_HINT} (see config.example.yaml)`
+                ? 'project root unset — set it in the app (stored in localStorage) and ensure JMZ_PROJECT_ROOT is set for the Go API.'
                 : projectRoot
             }
           </Typography>

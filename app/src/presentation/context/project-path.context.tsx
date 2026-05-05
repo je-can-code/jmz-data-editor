@@ -4,7 +4,6 @@ import {
   resolveRmmzDataDirectory,
   toRmmzProjectRootFromPossibleDataPath
 } from '../../constants/PathConstants';
-import { JmzEditorYamlConfigReader } from '@platform/neutralino/readJmzEditorYamlConfig.ts';
 import { SystemService } from '@services/SystemService';
 
 const LS_KEY_PROJECT_ROOT = 'rmmzProjectRoot';
@@ -66,32 +65,11 @@ export function ProjectPathProvider({ children }: { children: React.ReactNode })
 
   useEffect(() =>
   {
-    let cancelled = false;
-
-    void (async () =>
-    {
-      const fromYaml = await JmzEditorYamlConfigReader.readFromDisk();
-      if (cancelled || fromYaml === null)
-      {
-        return;
-      }
-
-      setProjectRoot(fromYaml.projectRoot);
-    })();
-
-    return () =>
-    {
-      cancelled = true;
-    };
+    // no-op.
   }, []);
 
   const reloadProjectFromDisk = useCallback(async () =>
   {
-    const fromYaml = await JmzEditorYamlConfigReader.readFromDisk();
-    if (fromYaml !== null)
-    {
-      setProjectRoot(fromYaml.projectRoot);
-    }
     setProjectReloadGeneration((n) => n + 1);
   }, []);
 
