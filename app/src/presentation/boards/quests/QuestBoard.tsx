@@ -1,5 +1,5 @@
-import React, { ChangeEvent, MouseEvent, useRef, useState, } from 'react';
-import { FixedSizeList } from 'react-window';
+import React, { ChangeEvent, MouseEvent, useEffect, useRef, useState, } from 'react';
+import type { FixedSizeList } from 'react-window';
 import {
   Alert,
   Autocomplete,
@@ -57,10 +57,16 @@ import ObjectiveFulfillmentData from './ObjectiveFulfillmentData.tsx';
 import OmniObjectiveFetchType from './OmniObjectiveFetchType.ts';
 
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
-import { useElementClientRect } from '@presentation/hooks/useElementClientRect.ts';
 import { useQuests } from '@presentation/context/resources/quests.context.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  VirtualizedSidebarList,
+  virtualizedSidebarColumnWidth,
+  VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+  VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT,
+} from '@presentation/components/board/VirtualizedSidebarList.tsx';
+import type { VirtualizedSidebarRow } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import Configuration = Questopedia.Configuration;
 import OmniQuest = Questopedia.OmniQuest;
 import OmniTag = Questopedia.OmniTag;
@@ -91,8 +97,7 @@ const QuestBoard = () =>
 
   //region state
   const listRef = useRef<FixedSizeList>(null);
-  const listViewportRef = useRef<HTMLDivElement>(null);
-  const listViewportSize = useElementClientRect(listViewportRef);
+  const listWrapperRef = useRef<HTMLDivElement>(null);
 
   const [ selectedQuest, setSelectedQuest ] = useState<OmniQuest | null>(null);
   const [ selectedQuestIndex, setSelectedQuestIndex ] = useState<number>(0);
@@ -1006,40 +1011,32 @@ const QuestBoard = () =>
   //endregion updates
 
   //region render
-  const renderQuestListItem = (props: ListChildComponentProps) =>
-  {
-    const {
-      index,
-      style
-    } = props;
+  const QUEST_LABEL_MIN_CH = 40;
+  const questBoardListColumnWidth = virtualizedSidebarColumnWidth(
+    VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
+    QUEST_LABEL_MIN_CH,
+  );
 
+  const getQuestSidebarRow = (index: number): VirtualizedSidebarRow =>
+  {
     const omniQuest = quests.at(index);
 
     if (!omniQuest)
     {
-      return <></>;
+      return { type: 'spacer' };
     }
 
-    return <>
-      <ListItem key={index} style={style}>
-        <ListItemButton
-          sx={{ maxHeight: '30px' }}
-          selected={selectedQuestIndex === index}
-          onClick={() => handleQuestListItemOnClickEvent(index)}
-        >
-          <ListItemIcon>
-            {(selectedQuestIndex === index)
-              ? <DoubleArrow color={'success'}/>
-              : <KeyboardArrowRight color={'warning'}/>}
-          </ListItemIcon>
-          <ListItemText
-            primary={`[${omniQuest.key}]: ${omniQuest.name}`}
-            disableTypography
-            sx={{ fontFamily: 'monospace' }}
-          />
-        </ListItemButton>
-      </ListItem>
-    </>;
+    const label = `[${omniQuest.key}]: ${omniQuest.name}`;
+    const categoryIconIndex = categories.find(c => c.key === omniQuest.categoryKey)?.iconIndex;
+    return {
+      type: 'item',
+      label,
+      title: label,
+      iconIndex: categoryIconIndex,
+      labelSx: {
+        fontFamily: 'monospace',
+      },
+    };
   };
 
   const renderCategoryListItem = (
@@ -1150,6 +1147,26 @@ const QuestBoard = () =>
     (index) => listRef.current?.scrollToItem(index, 'smart')
   );
 
+  useEffect(() =>
+  {
+    // Auto-select the first quest when landing on the board (unless URL selection already chose one).
+    if (quests.length === 0)
+    {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('questKey'))
+    {
+      return;
+    }
+
+    if (selectedQuest === null)
+    {
+      handleQuestListItemOnClickEvent(0);
+    }
+  }, [ quests.length ]);
+
   if (loading)
   {
     return (
@@ -1164,13 +1181,6 @@ const QuestBoard = () =>
     );
   }
 
-  const listPixelHeight = listViewportSize.height > 0
-    ? listViewportSize.height
-    : 600;
-  const listPixelWidth = listViewportSize.width > 0
-    ? listViewportSize.width
-    : 400;
-
   return <>
     <Box sx={{
       flex: 1,
@@ -1180,32 +1190,24 @@ const QuestBoard = () =>
       overflow: 'hidden',
     }}>
       <EditorBoardSplitLayout
-        sidebarColumnWidth={'400px'}
+        sidebarColumnWidth={questBoardListColumnWidth}
         sidebar={
-          <Box
-            ref={listViewportRef}
-            sx={{
-              flex: 1,
-              minHeight: 0,
-            }}
-          >
-        <div
-          onContextMenu={handleQuestListContextMenu}
-          style={{ cursor: 'context-menu', height: '100%' }}
-        >
-          {/* @ts-ignore */}
-          <FixedSizeList
+          <VirtualizedSidebarList
             ref={listRef}
-            height={listPixelHeight}
-            width={listPixelWidth}
-            itemSize={30}
-            overscanCount={5}
             itemCount={quests.length}
-          >
-            {renderQuestListItem}
-          </FixedSizeList>
-        </div>
-          </Box>
+            itemSize={30}
+            fillContainer
+            listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
+            labelMinCh={QUEST_LABEL_MIN_CH}
+            selectedIndex={selectedQuestIndex}
+            getRow={getQuestSidebarRow}
+            onSelectIndex={(index) =>
+            {
+              handleQuestListItemOnClickEvent(index);
+            }}
+            onContextMenu={handleQuestListContextMenu}
+            listWrapperRef={listWrapperRef}
+          />
         }
       >
           {(selectedQuest === null)

@@ -1,9 +1,0 @@
-# Copy to .config/config.yaml and set projectRoot to your RPG Maker MZ project
-# (the folder that contains data/ and img/). Paths should be absolute.
-#
-#   mkdir -p .config
-#   cp config.example.yaml .config/config.yaml
-#
-# Legacy key projectPath is still accepted if projectRoot is omitted.
-
-projectRoot: /absolute/path/to/your/rmmz/project

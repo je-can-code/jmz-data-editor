@@ -129,6 +129,7 @@ const SkillsBoard = () =>
 {
   const {
     skills,
+    byId: skillsById,
     setData: setSkills,
     loading,
     save,
@@ -466,7 +467,7 @@ const SkillsBoard = () =>
 
     if (skills.length > 0)
     {
-      const skill = skills.at(index)!;
+      const skill = skills[index]!;
       setSelectedSkill(skill);
       updateUrl(skill);
     }
@@ -498,8 +499,8 @@ const SkillsBoard = () =>
     const priorId = selectedSkill?.id;
     if (typeof priorId === 'number' && priorId >= 1)
     {
-      const found = skills.find((s) => s.id === priorId);
-      if (found !== undefined)
+      const found = skillsById.get(priorId);
+      if (found !== undefined && skills.includes(found))
       {
         next = found;
       }
@@ -1675,7 +1676,7 @@ const SkillsBoard = () =>
    */
   const getSkillSidebarRow = useCallback((index: number): VirtualizedSidebarRow =>
   {
-    const skill = skills.at(index);
+    const skill = skills[index];
 
     if (skill === undefined || skill.name.startsWith('==='))
     {
@@ -1755,7 +1756,6 @@ const SkillsBoard = () =>
             </span>
           </Tooltip>
         </Stack>
-        <Box sx={{ flex: 1, minHeight: 0 }}>
         <VirtualizedSidebarList
           ref={listRef}
           itemCount={skills.length}
@@ -1772,7 +1772,6 @@ const SkillsBoard = () =>
           onListKeyDown={handleListKeyDown}
           listWrapperRef={listWrapperRef}
         />
-        </Box>
           </>
         }
       >

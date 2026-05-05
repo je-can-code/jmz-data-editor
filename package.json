@@ -3,12 +3,14 @@
   "private": true,
   "license": "MIT",
   "scripts": {
-    "start": "distrobox enter ex -- neu run -- --window-enable-inspector",
-    "dev": "distrobox enter ex -- neu run -- --window-enable-inspector",
-    "build": "distrobox enter ex -- neu build",
-    "publish": "distrobox enter ex -- neu build --release"
+    "dev": "bun run scripts/dev-full.ts",
+    "dev:ui": "cd app && bun run start",
+    "nw:dev": "nw ./nw-app",
+    "build": "cd app && bun run build",
+    "test": "cd app && bun run test"
   },
   "devDependencies": {
-    "@types/node": "^22.9.3"
+    "@types/node": "^22.9.3",
+    "bun-types": "^1.3.13"
   }
 }
