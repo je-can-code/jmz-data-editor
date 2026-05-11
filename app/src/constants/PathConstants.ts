@@ -1,7 +1,7 @@
 /**
  * Default RMMZ **project root** (folder that contains {@code data/}, {@code img/}, {@code js/}, …).
  */
-const defaultProjectRoot = '/var/mnt/exdrive/dev/gaming/ca/chef-adventure';
+const defaultProjectRoot = '/run/media/je/exdrive/dev/gaming/ca/chef-adventure/';
 
 function pathSegments(pathStr: string): string[]
 {

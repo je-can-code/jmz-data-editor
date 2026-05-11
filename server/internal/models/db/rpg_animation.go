@@ -1,5 +1,7 @@
 package db
 
+import "encoding/json"
+
 // RpgSoundEffect matches MZ SE blobs embedded in animations (and elsewhere).
 type RpgSoundEffect struct {
 	Name   string `json:"name"`
@@ -54,9 +56,11 @@ type RpgAnimation struct {
 
 	EffectName string `json:"effectName,omitempty"`
 
-	FlashTimings []RpgAnimationFlashTiming `json:"flashTimings,omitempty"`
-	SoundTimings []RpgAnimationSoundTiming `json:"soundTimings,omitempty"`
-	Timings      []RpgAnimationTiming      `json:"timings,omitempty"`
+	// Slices must not use omitempty: MZ runtime concatenates / iterates these and
+	// expects the keys to exist (empty [] is fine; missing keys are not).
+	FlashTimings []RpgAnimationFlashTiming `json:"flashTimings"`
+	SoundTimings []RpgAnimationSoundTiming `json:"soundTimings"`
+	Timings      []RpgAnimationTiming      `json:"timings"`
 
 	OffsetX int `json:"offsetX"`
 	OffsetY int `json:"offsetY"`
@@ -69,6 +73,48 @@ type RpgAnimation struct {
 	Animation1Name string     `json:"animation1Name,omitempty"`
 	Animation2Hue  int        `json:"animation2Hue,omitempty"`
 	Animation2Name string     `json:"animation2Name,omitempty"`
-	Frames         [][][8]int `json:"frames,omitempty"`
+	Frames         [][][8]int `json:"frames"`
 	Position       int        `json:"position,omitempty"`
+}
+
+// MarshalJSON forces MZ-required slice fields to JSON [] instead of null when Go holds nil.
+func (a RpgAnimation) MarshalJSON() ([]byte, error) {
+	type animJSON RpgAnimation
+	aux := animJSON(a)
+	if aux.FlashTimings == nil {
+		aux.FlashTimings = []RpgAnimationFlashTiming{}
+	}
+	if aux.SoundTimings == nil {
+		aux.SoundTimings = []RpgAnimationSoundTiming{}
+	}
+	if aux.Timings == nil {
+		aux.Timings = []RpgAnimationTiming{}
+	}
+	if aux.Frames == nil {
+		aux.Frames = [][][8]int{}
+	}
+	return json.Marshal(aux)
+}
+
+// UnmarshalJSON normalizes omitted or null slice fields to empty slices for stable round-trips.
+func (a *RpgAnimation) UnmarshalJSON(data []byte) error {
+	type animJSON RpgAnimation
+	var tmp animJSON
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	*a = RpgAnimation(tmp)
+	if a.FlashTimings == nil {
+		a.FlashTimings = []RpgAnimationFlashTiming{}
+	}
+	if a.SoundTimings == nil {
+		a.SoundTimings = []RpgAnimationSoundTiming{}
+	}
+	if a.Timings == nil {
+		a.Timings = []RpgAnimationTiming{}
+	}
+	if a.Frames == nil {
+		a.Frames = [][][8]int{}
+	}
+	return nil
 }

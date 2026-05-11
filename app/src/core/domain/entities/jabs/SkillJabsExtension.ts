@@ -162,6 +162,46 @@ class SkillJabsExtension
   public castPreviewWarnAt: number | null = null;
 
   /**
+   * {@code <jabsJuiceIcon:N>} — J-ABS-Juice override for the weapon-swing IconSet index.
+   * {@code null} (no tag) or a negative value means "let the plugin infer from the equipped weapon / offhand".
+   */
+  public juiceIconIndex: number | null = null;
+
+  /**
+   * {@code <jabsJuiceWeaponStyle:KEY>} — names a row in the J-ABS-Juice "Weapon style multipliers" JSON.
+   * Free identifier (letters, digits, underscore, dash). Empty / null lets the plugin infer the row.
+   */
+  public juiceWeaponStyle: string | null = null;
+
+  /**
+   * {@code <juiceMotion:NAME>} — preset weapon swing motion (kebab-case). Canonical keys:
+   * {@code arc}, {@code arc-reverse}, {@code bash}, {@code present}, {@code recoil}, {@code spin},
+   * {@code spin-reverse}, {@code stab-forward}. Legacy aliases (e.g. {@code swing-top-down}) are mapped at runtime.
+   */
+  public juiceMotion: string | null = null;
+
+  /**
+   * {@code <juiceSpan:N>} — arc span in degrees for {@code arc} / {@code arc-reverse} (plugin default 120; typical 30–300).
+   */
+  public juiceArcSpanDegrees: number | null = null;
+
+  /**
+   * {@code <juiceSpinCount:N>} — full rotations for {@code spin} / {@code spin-reverse} (plugin default 1; clamped 1–8).
+   */
+  public juiceSpinCount: number | null = null;
+
+  /**
+   * {@code <juiceStabTipDegrees:N>} — tip / bore bearing from Pixi +x at rotation 0, in degrees (signed; see plugin help).
+   */
+  public juiceStabTipDegrees: number | null = null;
+
+  /**
+   * {@code <juiceProfileGun>} — side-profile gun overlay: flip horizontally for east/west aim
+   * instead of the default ~180° rotation flip.
+   */
+  public juiceProfileGun: boolean = false;
+
+  /**
    * @param note Skill {@code note} text.
    */
   static fromSkillNote(note: string): SkillJabsExtension

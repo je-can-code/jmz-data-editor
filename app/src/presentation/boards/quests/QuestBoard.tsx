@@ -50,6 +50,7 @@ import {
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 
 import SaveButton from '../../../components/core/SaveButton.tsx';
+import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import KeyTextField from '../../../components/core/KeyTextField.tsx';
 import { OmniObjectiveType } from '@core/enums/OmniObjectiveType.ts';
 import ObjectiveLogs from './ObjectiveLogs.tsx';
@@ -92,6 +93,7 @@ const QuestBoard = () =>
     setTags,
     setCategories,
     save,
+    reload,
     loading,
   } = useQuests();
 
@@ -212,6 +214,30 @@ const QuestBoard = () =>
     setSnackSeverity(severity);
     setSnackVariant(variant);
     setSnackOpen(true);
+  };
+
+  const handleReloadButtonOnClickEvent = async () =>
+  {
+    try
+    {
+      // drop the in-memory selection before triggering reload — the auto-select effect at the end of
+      // the component (deps: [quests.length]) re-fires once the fresh quests array lands, so the form
+      // re-binds to the first quest from disk instead of dangling on a stale pre-reload reference.
+      setSelectedQuest(null);
+      setSelectedObjective(null);
+      setSelectedObjectiveIndex(0);
+
+      await reload();
+
+      handleSnack('Quests data has been reloaded successfully.', MuiSnackbarSeverity.Success);
+    }
+    catch (error)
+    {
+      const message = error instanceof Error
+        ? error.message
+        : 'Unknown error.';
+      handleSnack(`Failed to reload quests data: ${message}`, MuiSnackbarSeverity.Error);
+    }
   };
 
   const handleQuestListContextMenu = (event: MouseEvent) =>
@@ -1150,6 +1176,8 @@ const QuestBoard = () =>
   useEffect(() =>
   {
     // Auto-select the first quest when landing on the board (unless URL selection already chose one).
+    // depend on the quests array reference rather than just length so that a reload that returns the
+    // same number of quests still re-fires this effect and the form rebinds to fresh data.
     if (quests.length === 0)
     {
       return;
@@ -1165,7 +1193,7 @@ const QuestBoard = () =>
     {
       handleQuestListItemOnClickEvent(0);
     }
-  }, [ quests.length ]);
+  }, [ quests ]);
 
   if (loading)
   {
@@ -1495,6 +1523,12 @@ const QuestBoard = () =>
           categories,
         } as Configuration);
       }}
+    />
+
+    <ReloadButton
+      handleReload={handleReloadButtonOnClickEvent}
+      canReload={!loading}
+      extraReloadText={'Quests'}
     />
 
     <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>

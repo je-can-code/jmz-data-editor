@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
+import { JabsBattlerRole } from '@core/domain/valueObjects/jabs-battler-roles.ts';
 import RPG_Enemy = Rmmz.Implementations.RPG_Enemy;
 
 describe('EnemyDomainModel', () =>
@@ -87,28 +88,118 @@ describe('EnemyDomainModel', () =>
       .toBeLessThan(5);
   });
 
-  it('should enforce AI Trait mutual exclusivity (Leader vs Follower)', () =>
+  it('should enforce Coordination axis mutual exclusivity (Leader vs Follower) via setCoordination', () =>
   {
+    // legacy <aiTrait:leader> notetag still hydrates the leader role on read — the migration
+    // is one-way and gets normalized on save.
     const model = new RPG_EnemyDomainModel(createMockRmmzEnemy({ note: '<aiTrait:leader>' }));
-    expect(model.jabsAiTraits.leader)
+    expect(model.jabsBattlerRoles.leader)
       .toBe(true);
+    expect(model.jabsBattlerRoles.getCoordination())
+      .toBe('leader');
 
-    // Simulating Toggle: User adds 'follower' while 'leader' is active
-    const currentTraits = [ 'leader' ];
-    const newTraits = [ 'leader', 'follower' ];
-    model.jabsAiTraits.updateFromStrings(newTraits, currentTraits);
+    // switching to follower must clear leader — the value object owns the invariant, not the UI.
+    model.jabsBattlerRoles.setCoordination(JabsBattlerRole.Follower);
 
-    expect(model.jabsAiTraits.follower)
+    expect(model.jabsBattlerRoles.follower)
       .toBe(true);
-    expect(model.jabsAiTraits.leader)
+    expect(model.jabsBattlerRoles.leader)
       .toBe(false);
 
     const result = model.toRmmz();
+    // on save the canonical <aiRole:*> form is written and the legacy <aiTrait:leader> alias
+    // is scrubbed by writeAiTraits, so neither leader-flavored line should remain.
     expect(result.note)
-      .toContain('<aiTrait:follower>');
+      .toContain('<aiRole:follower>');
     expect(result.note)
       .not
       .toContain('<aiTrait:leader>');
+    expect(result.note)
+      .not
+      .toContain('<aiRole:leader>');
+  });
+
+  it('should enforce Protection axis mutual exclusivity (Guardian vs Ward) via setProtection', () =>
+  {
+    const model = new RPG_EnemyDomainModel(createMockRmmzEnemy({ note: '<aiRole:guardian>' }));
+    expect(model.jabsBattlerRoles.guardian)
+      .toBe(true);
+    expect(model.jabsBattlerRoles.getProtection())
+      .toBe('guardian');
+
+    // a battler cannot simultaneously protect a ward and be protected as one — switching to
+    // ward must clear guardian.
+    model.jabsBattlerRoles.setProtection(JabsBattlerRole.Ward);
+
+    expect(model.jabsBattlerRoles.ward)
+      .toBe(true);
+    expect(model.jabsBattlerRoles.guardian)
+      .toBe(false);
+
+    // explicitly clear both — the tri-state "None" path.
+    model.jabsBattlerRoles.setProtection(null);
+
+    expect(model.jabsBattlerRoles.guardian)
+      .toBe(false);
+    expect(model.jabsBattlerRoles.ward)
+      .toBe(false);
+    expect(model.jabsBattlerRoles.getProtection())
+      .toBe(null);
+  });
+
+  it('should leave Solo and Sentinel orthogonal to the coordination/protection pairs', () =>
+  {
+    const model = new RPG_EnemyDomainModel(createMockRmmzEnemy());
+
+    // solo is the master opt-out at runtime, but at this layer it does NOT auto-clear the pairs
+    // — the value object's invariants only enforce the two pair-level exclusions.
+    model.jabsBattlerRoles.setCoordination(JabsBattlerRole.Leader);
+    model.jabsBattlerRoles.setProtection(JabsBattlerRole.Guardian);
+    model.jabsBattlerRoles.setSolo(true);
+    model.jabsBattlerRoles.setSentinel(true);
+
+    expect(model.jabsBattlerRoles.leader)
+      .toBe(true);
+    expect(model.jabsBattlerRoles.guardian)
+      .toBe(true);
+    expect(model.jabsBattlerRoles.solo)
+      .toBe(true);
+    expect(model.jabsBattlerRoles.sentinel)
+      .toBe(true);
+
+    const result = model.toRmmz();
+    expect(result.note)
+      .toContain('<aiRole:leader>');
+    expect(result.note)
+      .toContain('<aiRole:guardian>');
+    expect(result.note)
+      .toContain('<aiRole:solo>');
+    expect(result.note)
+      .toContain('<aiRole:sentinel>');
+  });
+
+  it('should migrate legacy <aiTrait:leader>/<aiTrait:follower> notetags to canonical <aiRole:*> on save', () =>
+  {
+    const model = new RPG_EnemyDomainModel(createMockRmmzEnemy({ note: '<aiTrait:follower>\n<aiTrait:careful>' }));
+
+    // careful is a real skill-choice trait and should hydrate the trait flag.
+    expect(model.jabsAiTraits.careful)
+      .toBe(true);
+    // follower is a role, not a trait — it hydrates the role flag, not anything on jabsAiTraits.
+    expect(model.jabsBattlerRoles.follower)
+      .toBe(true);
+
+    const result = model.toRmmz();
+
+    // round-trip writes canonical forms for both: <aiTrait:careful> stays as a trait, and
+    // <aiTrait:follower> becomes <aiRole:follower>.
+    expect(result.note)
+      .toContain('<aiTrait:careful>');
+    expect(result.note)
+      .toContain('<aiRole:follower>');
+    expect(result.note)
+      .not
+      .toContain('<aiTrait:follower>');
   });
 
   it('should enforce JABS Config mutual exclusivity via updateConfig', () =>
