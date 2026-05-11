@@ -1,17 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { JabsAiTraits } from '@core/domain/valueObjects/jabs-ai-traits.ts';
+import { JabsBattlerRoles } from '@core/domain/valueObjects/jabs-battler-roles.ts';
 import { JabsConfigs } from '@core/domain/valueObjects/jabs-configs.ts';
 import { JabsDataParser } from '@services/parsers/JabsDataParser.ts';
 
 describe('JabsDataParser.readAiTraits', () =>
 {
-  it('parses traits case-insensitively and defaults missing ones to false', () =>
+  it('parses all eight canonical skill-choice traits case-insensitively and defaults missing ones to false', () =>
   {
     const note = [
       '<aiTrait: Careful>',
       '<aiTrait:executor>',
       '<lore:alpha>',
       '<aiTrait:RECKLESS>',
+      '<aiTrait:Tactical>',
+      '<aiTrait:berserker>',
+      '<aiTrait:cleanser>',
+      '<aiTrait:healer>',
+      '<aiTrait:buffer>',
     ].join('\n');
 
     const traits = JabsDataParser.readAiTraits(note);
@@ -21,9 +27,11 @@ describe('JabsDataParser.readAiTraits', () =>
         careful: true,
         executor: true,
         reckless: true,
-        healer: false,
-        leader: false,
-        follower: false,
+        tactical: true,
+        berserker: true,
+        cleanser: true,
+        healer: true,
+        buffer: true,
       });
   });
 
@@ -38,10 +46,33 @@ describe('JabsDataParser.readAiTraits', () =>
         careful: false,
         executor: false,
         reckless: false,
+        tactical: false,
+        berserker: false,
+        cleanser: false,
         healer: false,
-        leader: false,
-        follower: false,
+        buffer: false,
       });
+  });
+
+  it('does NOT populate trait flags from legacy <aiTrait:leader>/<aiTrait:follower> notetags (those are roles now)', () =>
+  {
+    const note = [
+      '<aiTrait:leader>',
+      '<aiTrait:follower>',
+      '<aiTrait:careful>',
+    ].join('\n');
+
+    const traits = JabsDataParser.readAiTraits(note);
+
+    // careful comes through; leader/follower do NOT — they belong to JabsBattlerRoles now.
+    expect(traits.careful)
+      .toBe(true);
+    expect(traits)
+      .not
+      .toHaveProperty('leader');
+    expect(traits)
+      .not
+      .toHaveProperty('follower');
   });
 });
 
@@ -60,22 +91,171 @@ describe('JabsDataParser.writeAiTraits', () =>
       careful: false,
       executor: true,
       reckless: true,
+      tactical: false,
+      berserker: false,
+      cleanser: false,
       healer: false,
-      leader: true,
-      follower: false,
+      buffer: true,
     }));
 
-    // Expect LF-only and deterministic order: careful, executor, reckless, healer, leader, follower
+    // canonical order matches the enum declaration: careful, executor, reckless, tactical,
+    // berserker, cleanser, healer, buffer.
     const expected = [
       '<top:keep>',
       '<bottom:keep>',
       '<aiTrait:executor>',
       '<aiTrait:reckless>',
-      '<aiTrait:leader>',
+      '<aiTrait:buffer>',
     ].join('\n');
 
     expect(result)
       .toBe(expected);
+  });
+
+  it('strips legacy <aiTrait:leader>/<aiTrait:follower> lines so the role writer can re-emit them as <aiRole:*>', () =>
+  {
+    const original = [
+      '<top:keep>',
+      '<aiTrait:leader>',
+      '<aiTrait:follower>',
+      '<aiTrait:careful>',
+      '<bottom:keep>',
+    ].join('\n');
+
+    const result = JabsDataParser.writeAiTraits(original, new JabsAiTraits({
+      careful: true,
+    }));
+
+    // legacy leader/follower aliases are scrubbed, and only the canonical careful trait remains.
+    const expected = [
+      '<top:keep>',
+      '<bottom:keep>',
+      '<aiTrait:careful>',
+    ].join('\n');
+
+    expect(result)
+      .toBe(expected);
+  });
+});
+
+describe('JabsDataParser.readBattlerRoles', () =>
+{
+  it('parses all six canonical roles from <aiRole:X> notetags', () =>
+  {
+    const note = [
+      '<aiRole:leader>',
+      '<aiRole: Follower>',
+      '<aiRole:GUARDIAN>',
+      '<aiRole:ward>',
+      '<aiRole:solo>',
+      '<aiRole:sentinel>',
+    ].join('\n');
+
+    const roles = JabsDataParser.readBattlerRoles(note);
+
+    expect(roles)
+      .toEqual({
+        leader: true,
+        follower: true,
+        guardian: true,
+        ward: true,
+        solo: true,
+        sentinel: true,
+      });
+  });
+
+  it('hydrates leader/follower from legacy <aiTrait:leader>/<aiTrait:follower> aliases', () =>
+  {
+    const note = [
+      '<aiTrait:leader>',
+      '<aiTrait:follower>',
+    ].join('\n');
+
+    const roles = JabsDataParser.readBattlerRoles(note);
+
+    expect(roles.leader)
+      .toBe(true);
+    expect(roles.follower)
+      .toBe(true);
+  });
+
+  it('prefers canonical <aiRole:X> over the legacy alias on the same line family', () =>
+  {
+    const note = [
+      '<aiRole:leader>',
+      '<aiTrait:follower>',
+    ].join('\n');
+
+    const roles = JabsDataParser.readBattlerRoles(note);
+
+    expect(roles.leader)
+      .toBe(true);
+    expect(roles.follower)
+      .toBe(true);
+  });
+
+  it('returns all false when no role tags are present', () =>
+  {
+    const note = '<lore:alpha>\n<aiTrait:careful>';
+
+    const roles = JabsDataParser.readBattlerRoles(note);
+
+    expect(roles)
+      .toEqual({
+        leader: false,
+        follower: false,
+        guardian: false,
+        ward: false,
+        solo: false,
+        sentinel: false,
+      });
+  });
+});
+
+describe('JabsDataParser.writeBattlerRoles', () =>
+{
+  it('removes existing <aiRole:*> lines and writes the enabled roles in deterministic order', () =>
+  {
+    const original = [
+      '<top:keep>',
+      '<aiRole:leader>',
+      '<aiRole:sentinel>',
+      '<bottom:keep>',
+    ].join('\n');
+
+    const result = JabsDataParser.writeBattlerRoles(original, new JabsBattlerRoles({
+      leader: false,
+      follower: true,
+      guardian: true,
+      ward: false,
+      solo: false,
+      sentinel: true,
+    }));
+
+    // canonical order matches the enum: leader, follower, guardian, ward, solo, sentinel.
+    const expected = [
+      '<top:keep>',
+      '<bottom:keep>',
+      '<aiRole:follower>',
+      '<aiRole:guardian>',
+      '<aiRole:sentinel>',
+    ].join('\n');
+
+    expect(result)
+      .toBe(expected);
+  });
+
+  it('returns the cleaned base when no roles are enabled', () =>
+  {
+    const original = [
+      '<keep:me>',
+      '<aiRole:leader>',
+    ].join('\n');
+
+    const result = JabsDataParser.writeBattlerRoles(original, new JabsBattlerRoles());
+
+    expect(result)
+      .toBe('<keep:me>');
   });
 });
 

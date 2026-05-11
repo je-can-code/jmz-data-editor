@@ -46,6 +46,7 @@ import { GrowthParser } from '@services/parsers/GrowthParser.ts';
 import EnemySdpDrop from './EnemySdpDrop.tsx';
 import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import { EnemyJabsAiTraits } from './EnemyJabsAiTraits.tsx';
+import { EnemyJabsBattlerRoles } from './EnemyJabsBattlerRoles.tsx';
 import { EnemyJabsBattlerData } from './EnemyJabsBattlerData.tsx';
 import EnemyJabsTeam from './EnemyJabsTeam.tsx';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
@@ -815,7 +816,13 @@ const EnemiesBoard = () =>
             </>
             : <>
               <Grid container spacing={2}>
-                <Grid size={4}>
+                {/* leftmost column gets +1 unit of grid space (5/12 instead of 4/12) so the
+                    JABS AI Traits Attack row of 5 chips has room to breathe without spilling
+                    into the next column. the middle column compensates with -1 (3/12); its
+                    content is mostly accordions with short summary text that read fine in a
+                    narrower column. the right column keeps its 4/12 because SDP picker + drop
+                    rows are the chunkiest content on the board. */}
+                <Grid size={5}>
                   <Stack spacing={1}>
                     <TextField
                       variant={'outlined'}
@@ -1029,9 +1036,14 @@ const EnemiesBoard = () =>
                       updateEnemy={updateEnemy}
                     />
 
+                    <EnemyJabsBattlerRoles
+                      selectedEnemy={selectedEnemy}
+                      updateEnemy={updateEnemy}
+                    />
+
                   </Stack>
                 </Grid>
-                <Grid size={4}>
+                <Grid size={3}>
                   <Stack spacing={1}>
                     <Accordion
                       defaultExpanded={false}

@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
 import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
 import { useJabs } from "@presentation/context/resources/jabs.context.tsx";
-import type { JabsTeamDefinition } from "@core/domain/valueObjects/jabs-teams.ts";
+import type { JabsTeamDefinition } from "@core/domain/valueObjects/jabs-config.ts";
 
 type EnemyJabsTeamProps = {
   selectedEnemy: RPG_EnemyDomainModel;

@@ -46,6 +46,7 @@ import styled from 'styled-components';
 
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import SaveButton from '../../../components/core/SaveButton.tsx';
+import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import { useActors } from '@presentation/context/resources/actors.context.tsx';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { RPG_SkillDomainModel } from '@core/domain/entities/RPG_SkillDomainModel.ts';
@@ -94,6 +95,7 @@ const ProficiencyBoard = () =>
     conditionals,
     setConditionals,
     save,
+    reload,
     loading: proficiencyLoading
   } = useProficiency();
 
@@ -379,6 +381,40 @@ const ProficiencyBoard = () =>
     setSnackSeverity(severity);
     setSnackVariant(variant);
     setSnackOpen(true);
+  };
+
+  const handleReloadButtonOnClickEvent = async () =>
+  {
+    try
+    {
+      // drop in-memory selection state before the reload so the auto-select effect re-binds the form
+      // to the freshly-loaded conditionals once they land. without this, selectedConditional would
+      // keep pointing at the stale pre-reload object and the form would not visually refresh.
+      setSelectedConditional(null);
+      setSelectedConditionalIndex(0);
+      setCurrentRequirements([]);
+      setSelectedRequirement(null);
+      setSelectedRequirementIndex(0);
+      setActorIdsChecked([]);
+      setSkillIdRewardEarned([]);
+      setRequirementSecondarySkillIds([]);
+      setRequirementSkill(null);
+      setRequirementSkillText('');
+      // any pending unsaved diff is discarded by reload; reset the dirty flag too.
+      setCanSave(false);
+
+      await reload();
+
+      handleSnack('Proficiency data has been reloaded successfully.', MuiSnackbarSeverity.Success);
+    }
+    catch (error)
+    {
+      console.error('Failed to reload proficiency data:', error);
+      const message = error instanceof Error
+        ? error.message
+        : 'Unknown error.';
+      handleSnack(`Failed to reload proficiency data: ${message}`, MuiSnackbarSeverity.Error);
+    }
   };
   //endregion updates
 
@@ -1135,6 +1171,12 @@ const ProficiencyBoard = () =>
           await save(conditionals);
           handleSnack('Proficiency data saved successfully!', MuiSnackbarSeverity.Success);
         }}
+      />
+
+      <ReloadButton
+        handleReload={handleReloadButtonOnClickEvent}
+        canReload={!proficiencyLoading}
+        extraReloadText={'Proficiencies'}
       />
 
       {/* The snackbar for conveying useful messages. */}

@@ -12,6 +12,7 @@ import { knownLongParams } from '../../../mappers/ParameterIdMapper.ts';
 import { GrowthParser } from '@services/parsers/GrowthParser.ts';
 import { PassiveAbsEnemyNoteParser } from '@services/parsers/PassiveAbsEnemyNoteParser.ts';
 import { JabsAiTraits } from '@core/domain/valueObjects/jabs-ai-traits.ts';
+import { JabsBattlerRoles } from '@core/domain/valueObjects/jabs-battler-roles.ts';
 import { JabsBattlerData } from '@core/domain/valueObjects/jabs-battler-data.ts';
 import { JabsConfigs } from '@core/domain/valueObjects/jabs-configs.ts';
 import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
@@ -34,6 +35,7 @@ class RPG_EnemyDomainModel
   public sdpPoints: number;
   public extraDrops: RPG_DropItem[];
   public jabsAiTraits: JabsAiTraits;
+  public jabsBattlerRoles: JabsBattlerRoles;
   public jabsBattlerData: JabsBattlerData;
   public jabsConfigs: JabsConfigs;
   public jabsTeamId: number | null;
@@ -86,6 +88,7 @@ class RPG_EnemyDomainModel
     );
     this.extraDrops = ExtraDropManager.read(this.note);
     this.jabsAiTraits = JabsDataParser.readAiTraits(this.note);
+    this.jabsBattlerRoles = JabsDataParser.readBattlerRoles(this.note);
     this.jabsBattlerData = JabsDataParser.readBattlerData(this.note);
     this.jabsConfigs = JabsDataParser.readConfigs(this.note);
     this.jabsTeamId = JabsDataParser.readTeamId(this.note);
@@ -153,7 +156,11 @@ class RPG_EnemyDomainModel
     }
 
     updatedNote = ExtraDropManager.write(updatedNote, this.extraDrops);
+    // order matters: writeAiTraits strips ALL <aiTrait:*> lines (including legacy leader/follower),
+    // then writeBattlerRoles emits the canonical <aiRole:*> replacements. swapping the order would
+    // leave legacy aliases behind on save.
     updatedNote = JabsDataParser.writeAiTraits(updatedNote, this.jabsAiTraits);
+    updatedNote = JabsDataParser.writeBattlerRoles(updatedNote, this.jabsBattlerRoles);
     updatedNote = JabsDataParser.writeBattlerData(updatedNote, this.jabsBattlerData);
     updatedNote = JabsDataParser.writeTeamId(updatedNote, this.jabsTeamId);
     updatedNote = JabsDataParser.writeConfigs(updatedNote, this.jabsConfigs);
