@@ -193,4 +193,107 @@ describe('SkillJabsNoteParser', () =>
       .not
       .toMatch(/iframes/i);
   });
+
+  it('round-trips J-ABS-Juice tags (icon, weapon style, motion, span, spin, stab tip, profile gun)', () =>
+  {
+    const note = [
+      '<jabsJuiceIcon:97>',
+      '<jabsJuiceWeaponStyle:sword_a>',
+      '<juiceMotion:arc-reverse>',
+      '<juiceSpan:90>',
+      '<juiceSpinCount:3>',
+      '<juiceStabTipDegrees:-45>',
+      '<juiceProfileGun>',
+      '<hp-cost:5>',
+    ].join('\n');
+    const j = SkillJabsExtension.fromSkillNote(note);
+    expect(j.juiceIconIndex)
+      .toBe(97);
+    expect(j.juiceWeaponStyle)
+      .toBe('sword_a');
+    expect(j.juiceMotion)
+      .toBe('arc-reverse');
+    expect(j.juiceArcSpanDegrees)
+      .toBe(90);
+    expect(j.juiceSpinCount)
+      .toBe(3);
+    expect(j.juiceStabTipDegrees)
+      .toBe(-45);
+    expect(j.juiceProfileGun)
+      .toBe(true);
+
+    const out = j.applyToNote('<hp-cost:5>');
+    expect(out)
+      .toContain('<jabsJuiceIcon:97>');
+    expect(out)
+      .toContain('<jabsJuiceWeaponStyle:sword_a>');
+    expect(out)
+      .toContain('<juiceMotion:arc-reverse>');
+    expect(out)
+      .toContain('<juiceSpan:90>');
+    expect(out)
+      .toContain('<juiceSpinCount:3>');
+    expect(out)
+      .toContain('<juiceStabTipDegrees:-45>');
+    expect(out)
+      .toContain('<juiceProfileGun>');
+    expect(out)
+      .toContain('<hp-cost:5>');
+  });
+
+  it('strip removes every managed J-ABS-Juice tag', () =>
+  {
+    const stripped = SkillJabsNoteParser.stripSkillTags(
+      '<jabsJuiceIcon:12><jabsJuiceWeaponStyle:bow_a><juiceMotion:spin>'
+      + '<juiceSpan:120><juiceSpinCount:2><juiceStabTipDegrees:30><juiceProfileGun>keep'
+    );
+    expect(stripped)
+      .toContain('keep');
+    expect(stripped)
+      .not
+      .toMatch(/juice/i);
+  });
+
+  it('write clamps spin count above 8 and drops disabled / blank juice fields', () =>
+  {
+    const j = new SkillJabsExtension();
+    j.juiceIconIndex = -1;
+    j.juiceWeaponStyle = '   ';
+    j.juiceMotion = '';
+    j.juiceArcSpanDegrees = null;
+    j.juiceSpinCount = 99;
+    j.juiceStabTipDegrees = null;
+    j.juiceProfileGun = false;
+
+    const out = SkillJabsNoteParser.writeSkillTags(j, '');
+    expect(out)
+      .not
+      .toMatch(/jabsJuiceIcon/i);
+    expect(out)
+      .not
+      .toMatch(/jabsJuiceWeaponStyle/i);
+    expect(out)
+      .not
+      .toMatch(/juiceMotion/i);
+    expect(out)
+      .not
+      .toMatch(/juiceSpan/i);
+    expect(out)
+      .not
+      .toMatch(/juiceStabTipDegrees/i);
+    expect(out)
+      .not
+      .toMatch(/juiceProfileGun/i);
+    expect(out)
+      .toContain('<juiceSpinCount:8>');
+  });
+
+  it('write normalizes juiceMotion casing to kebab-case lowercase', () =>
+  {
+    const j = new SkillJabsExtension();
+    j.juiceMotion = ' Arc-Reverse ';
+    const out = SkillJabsNoteParser.writeSkillTags(j, '');
+    expect(out)
+      .toContain('<juiceMotion:arc-reverse>');
+  });
 });

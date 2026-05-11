@@ -1,11 +1,25 @@
 import { NoteNormalizer } from '../utils/NoteNormalizer.ts';
 import { JabsAiTrait, JabsAiTraits } from '@core/domain/valueObjects/jabs-ai-traits.ts';
+import { JabsBattlerRole, JabsBattlerRoles } from '@core/domain/valueObjects/jabs-battler-roles.ts';
 import { EnemyJabsBattlerModel, JabsBattlerData } from '@core/domain/valueObjects/jabs-battler-data.ts';
 import { JabsConfig, JabsConfigs } from '@core/domain/valueObjects/jabs-configs.ts';
 
 class JabsDataParser
 {
-  static #aiTraitRegex = /<aiTrait: ?(careful|executor|reckless|healer|leader|follower)>/i;
+  // canonical AI trait names (skill-choice). matches the 8 flags owned by JABS_EnemyAI.
+  static #aiTraitRegex = /<aiTrait: ?(careful|executor|reckless|tactical|berserker|cleanser|healer|buffer)>/i;
+  // wide strip regex used on save to scrub ALL <aiTrait:*> lines — including the legacy
+  // <aiTrait:leader> / <aiTrait:follower> aliases that now map to roles. running this before
+  // writeBattlerRoles is what migrates a legacy note to the canonical <aiRole:*> form.
+  static #aiTraitStripRegex = /<aiTrait: ?[A-Za-z]+>/i;
+  // canonical battler-role names (coordination). matches the 6 flags owned by JABS_BattlerRole.
+  static #aiRoleRegex = /<aiRole: ?(leader|follower|guardian|ward|solo|sentinel)>/i;
+  // legacy aliases retained for hydrate-only: the plugin source still parses these for back-compat
+  // but the editor always writes the canonical <aiRole:*> form, so reading <aiTrait:leader> off
+  // disk and writing <aiRole:leader> back is a one-way migration each time an enemy is saved.
+  static #legacyRoleAliasRegex = /<aiTrait: ?(leader|follower)>/i;
+  // strip regex for <aiRole:*> lines on save.
+  static #aiRoleStripRegex = /<aiRole: ?[A-Za-z]+>/i;
   static #configRegex = /<jabsConfig: ?(noIdle|canIdle|noHpBar|showHpBar|inanimate|notInanimate|invincible|notInvincible|noName|showName)>/i;
   static #teamIdRegex = /<teamId: ?(\d+)>/i;
   static #sightRegex = /<sight: ?(\d+)>/i;
@@ -50,10 +64,14 @@ class JabsDataParser
     traits: JabsAiTraits
   ): string
   {
-    // Remove any existing aiTrait lines and normalize the base.
-    const base = NoteNormalizer.removeLinesMatching(originalNote, this.#aiTraitRegex);
+    // strip ALL <aiTrait:*> lines (including legacy leader/follower aliases). this is the half
+    // of the legacy migration owned by the trait writer; writeBattlerRoles owns the other half
+    // by emitting the canonical <aiRole:*> replacements. order matters in syncNote: traits
+    // must be written BEFORE roles, otherwise the role writer's strip would not remove legacy
+    // <aiTrait:leader>/<aiTrait:follower> lines.
+    const base = NoteNormalizer.removeLinesMatching(originalNote, this.#aiTraitStripRegex);
 
-    // Build trait lines in deterministic order.
+    // build trait lines in deterministic order, matching the enum declaration order.
     const traitLines: string[] = [];
     if (traits.careful)
     {
@@ -67,27 +85,134 @@ class JabsDataParser
     {
       traitLines.push(this.#aiTraitKey(JabsAiTrait.Reckless));
     }
+    if (traits.tactical)
+    {
+      traitLines.push(this.#aiTraitKey(JabsAiTrait.Tactical));
+    }
+    if (traits.berserker)
+    {
+      traitLines.push(this.#aiTraitKey(JabsAiTrait.Berserker));
+    }
+    if (traits.cleanser)
+    {
+      traitLines.push(this.#aiTraitKey(JabsAiTrait.Cleanser));
+    }
     if (traits.healer)
     {
       traitLines.push(this.#aiTraitKey(JabsAiTrait.Healer));
     }
-    if (traits.leader)
+    if (traits.buffer)
     {
-      traitLines.push(this.#aiTraitKey(JabsAiTrait.Leader));
-    }
-    if (traits.follower)
-    {
-      traitLines.push(this.#aiTraitKey(JabsAiTrait.Follower));
+      traitLines.push(this.#aiTraitKey(JabsAiTrait.Buffer));
     }
 
-    // If none enabled, return the cleaned base as-is.
+    // if none enabled, return the cleaned base as-is.
     if (traitLines.length === 0)
     {
       return base;
     }
 
-    // Append trait lines as a single block with normalized joining.
+    // append trait lines as a single block with normalized joining.
     const block = traitLines.join('\n');
+    return NoteNormalizer.appendBlock(base, block);
+  }
+
+  static readBattlerRoles(originalNote: string): JabsBattlerRoles
+  {
+    const roles = new JabsBattlerRoles();
+    const lines = NoteNormalizer.normalize(originalNote)
+      .split('\n');
+
+    lines.forEach(line =>
+    {
+      // first try the canonical <aiRole:X> form.
+      this.#aiRoleRegex.lastIndex = 0;
+      const roleMatch = this.#aiRoleRegex.exec(line);
+      if (roleMatch)
+      {
+        const [ , roleName ] = roleMatch;
+        if (roleName)
+        {
+          const key = roleName.toLowerCase();
+          if (key in roles)
+          {
+            (
+              roles as any
+            )[ key ] = true;
+          }
+        }
+        // line consumed by the canonical match — do not fall through to legacy.
+        return;
+      }
+
+      // fall through to the legacy <aiTrait:leader>/<aiTrait:follower> aliases. these still hydrate
+      // roles, because the plugin source explicitly retains them as back-compat, but writeAiTraits
+      // strips them on save so a round-trip will normalize them to <aiRole:*>.
+      this.#legacyRoleAliasRegex.lastIndex = 0;
+      const legacyMatch = this.#legacyRoleAliasRegex.exec(line);
+      if (legacyMatch)
+      {
+        const [ , legacyRoleName ] = legacyMatch;
+        if (legacyRoleName)
+        {
+          const key = legacyRoleName.toLowerCase();
+          if (key in roles)
+          {
+            (
+              roles as any
+            )[ key ] = true;
+          }
+        }
+      }
+    });
+
+    return roles;
+  }
+
+  static writeBattlerRoles(
+    originalNote: string,
+    roles: JabsBattlerRoles
+  ): string
+  {
+    // strip ALL <aiRole:*> lines. legacy <aiTrait:leader>/<aiTrait:follower> lines were already
+    // scrubbed by writeAiTraits earlier in the syncNote sequence, so no second pass is needed
+    // here.
+    const base = NoteNormalizer.removeLinesMatching(originalNote, this.#aiRoleStripRegex);
+
+    // build role lines in deterministic order, matching the enum declaration order.
+    const roleLines: string[] = [];
+    if (roles.leader)
+    {
+      roleLines.push(this.#aiRoleKey(JabsBattlerRole.Leader));
+    }
+    if (roles.follower)
+    {
+      roleLines.push(this.#aiRoleKey(JabsBattlerRole.Follower));
+    }
+    if (roles.guardian)
+    {
+      roleLines.push(this.#aiRoleKey(JabsBattlerRole.Guardian));
+    }
+    if (roles.ward)
+    {
+      roleLines.push(this.#aiRoleKey(JabsBattlerRole.Ward));
+    }
+    if (roles.solo)
+    {
+      roleLines.push(this.#aiRoleKey(JabsBattlerRole.Solo));
+    }
+    if (roles.sentinel)
+    {
+      roleLines.push(this.#aiRoleKey(JabsBattlerRole.Sentinel));
+    }
+
+    // if none enabled, return the cleaned base as-is.
+    if (roleLines.length === 0)
+    {
+      return base;
+    }
+
+    const block = roleLines.join('\n');
     return NoteNormalizer.appendBlock(base, block);
   }
 
@@ -348,6 +473,8 @@ class JabsDataParser
   }
 
   static #aiTraitKey = (trait: JabsAiTrait) => `<aiTrait:${trait}>`;
+
+  static #aiRoleKey = (role: JabsBattlerRole) => `<aiRole:${role}>`;
 
   static #configKey = (config: JabsConfig) => `<jabsConfig:${config}>`;
 }

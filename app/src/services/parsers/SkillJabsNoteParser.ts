@@ -139,6 +139,21 @@ class SkillJabsNoteParser
 
   static readonly #RE_CAST_PREVIEW_WARN = /<castPreviewWarnAt:[ ]?(\d+)>/gi;
 
+  // J-ABS-Juice (J.ABS.EXT.JUICE.RegExp): caster swing / pulse motion polish, all read from RPG_Skill notes.
+  static readonly #RE_JUICE_ICON = /<jabsJuiceIcon:[ ]?(\d+)>/gi;
+
+  static readonly #RE_JUICE_WEAPON_STYLE = /<jabsJuiceWeaponStyle:[ ]?([a-zA-Z0-9_-]+)>/gi;
+
+  static readonly #RE_JUICE_MOTION = /<juiceMotion:[ ]?([a-zA-Z0-9_-]+)>/gi;
+
+  static readonly #RE_JUICE_SPAN = /<juiceSpan:[ ]?(\d+)>/gi;
+
+  static readonly #RE_JUICE_SPIN_COUNT = /<juiceSpinCount:[ ]?(\d+)>/gi;
+
+  static readonly #RE_JUICE_STAB_TIP_DEGREES = /<juiceStabTipDegrees:[ ]?(-?\d+)>/gi;
+
+  static readonly #RE_JUICE_PROFILE_GUN = /<juiceProfileGun>/gi;
+
   static readonly #STRIP_ORDER: RegExp[] = [
     SkillJabsNoteParser.#RE_ACTION_ID,
     SkillJabsNoteParser.#RE_HIDE_MENU,
@@ -205,6 +220,13 @@ class SkillJabsNoteParser
     SkillJabsNoteParser.#RE_VIS_DL,
     SkillJabsNoteParser.#RE_NO_CAST_PREVIEW,
     SkillJabsNoteParser.#RE_CAST_PREVIEW_WARN,
+    SkillJabsNoteParser.#RE_JUICE_ICON,
+    SkillJabsNoteParser.#RE_JUICE_WEAPON_STYLE,
+    SkillJabsNoteParser.#RE_JUICE_MOTION,
+    SkillJabsNoteParser.#RE_JUICE_SPAN,
+    SkillJabsNoteParser.#RE_JUICE_SPIN_COUNT,
+    SkillJabsNoteParser.#RE_JUICE_STAB_TIP_DEGREES,
+    SkillJabsNoteParser.#RE_JUICE_PROFILE_GUN,
   ];
   static readonly #VIS_ANCHOR_DEFAULT = 0.5;
   static readonly #VIS_SCALE_DEFAULT = 1;
@@ -381,6 +403,16 @@ class SkillJabsNoteParser
     {
       ext.castPreviewWarnAt = ext.castTime;
     }
+
+    // J-ABS-Juice swing / motion polish. Each tag is optional; absent means "use plugin inference / defaults".
+    ext.juiceIconIndex = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_JUICE_ICON);
+    ext.juiceWeaponStyle = SkillJabsNoteParser.#readCapture(note, SkillJabsNoteParser.#RE_JUICE_WEAPON_STYLE);
+    ext.juiceMotion = SkillJabsNoteParser.#readCapture(note, SkillJabsNoteParser.#RE_JUICE_MOTION);
+    ext.juiceArcSpanDegrees = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_JUICE_SPAN);
+    ext.juiceSpinCount = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_JUICE_SPIN_COUNT);
+    // stab-tip degrees is signed: arc 0 points at Pixi +x; negative bearings rotate the bore clockwise.
+    ext.juiceStabTipDegrees = SkillJabsNoteParser.#readInt(note, SkillJabsNoteParser.#RE_JUICE_STAB_TIP_DEGREES);
+    ext.juiceProfileGun = SkillJabsNoteParser.#testAny(note, SkillJabsNoteParser.#RE_JUICE_PROFILE_GUN);
   }
 
   /**
@@ -730,6 +762,48 @@ class SkillJabsNoteParser
         warnAt = Math.trunc(ext.castTime);
       }
       parts.push(`<castPreviewWarnAt:${warnAt}>`);
+    }
+
+    // J-ABS-Juice tags. Negative / blank values "fall back to plugin inference", so the corresponding tags are omitted.
+    if (ext.juiceIconIndex !== null && ext.juiceIconIndex >= 0)
+    {
+      parts.push(`<jabsJuiceIcon:${Math.trunc(ext.juiceIconIndex)}>`);
+    }
+    if (ext.juiceWeaponStyle !== null && ext.juiceWeaponStyle.trim() !== '')
+    {
+      parts.push(`<jabsJuiceWeaponStyle:${ext.juiceWeaponStyle.trim()}>`);
+    }
+    if (ext.juiceMotion !== null && ext.juiceMotion.trim() !== '')
+    {
+      // kebab-case is the canonical form; mirrors how hitboxShape / projectileFormation normalize on write.
+      parts.push(`<juiceMotion:${ext.juiceMotion.trim()
+        .toLowerCase()}>`);
+    }
+    if (ext.juiceArcSpanDegrees !== null && ext.juiceArcSpanDegrees >= 0)
+    {
+      parts.push(`<juiceSpan:${Math.trunc(ext.juiceArcSpanDegrees)}>`);
+    }
+    if (ext.juiceSpinCount !== null && ext.juiceSpinCount >= 1)
+    {
+      // plugin clamps 1–8 at runtime; mirror the upper bound so saved notes never read as "unsafe".
+      let spin = Math.trunc(ext.juiceSpinCount);
+      if (spin < 1)
+      {
+        spin = 1;
+      }
+      if (spin > 8)
+      {
+        spin = 8;
+      }
+      parts.push(`<juiceSpinCount:${spin}>`);
+    }
+    if (ext.juiceStabTipDegrees !== null)
+    {
+      parts.push(`<juiceStabTipDegrees:${Math.trunc(ext.juiceStabTipDegrees)}>`);
+    }
+    if (ext.juiceProfileGun === true)
+    {
+      parts.push('<juiceProfileGun>');
     }
 
     const head = parts.length > 0
