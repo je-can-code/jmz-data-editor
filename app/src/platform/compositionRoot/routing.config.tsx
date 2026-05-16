@@ -6,10 +6,13 @@ import CraftingBoard from '../../presentation/boards/crafting/CraftingBoard.tsx'
 import ProficiencyBoard from '../../presentation/boards/proficiency/ProficiencyBoard.tsx';
 import EnemiesBoard from '../../presentation/boards/enemies/EnemiesBoard.tsx';
 import JabsConfigBoard from '@boards/jabs/JabsConfigBoard.tsx';
-import { AccountTree, Android, Construction, Hub, LocalHospital, Rule, School, Groups, } from '@mui/icons-material';
+import { AccountTree, Android, Build, Construction, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, } from '@mui/icons-material';
 import IndexBoard from '@boards/_index/IndexBoard.tsx';
 import SkillsBoard from '@boards/skills/SkillsBoard.tsx';
 import StatesBoard from '@boards/states/StatesBoard.tsx';
+import WeaponsBoard from '@boards/weapons/WeaponsBoard.tsx';
+import ArmorsBoard from '@boards/armors/ArmorsBoard.tsx';
+import ItemsBoard from '@boards/items/ItemsBoard.tsx';
 
 const indexBoard: BoardDefinition = {
   id: 'root',
@@ -101,11 +104,44 @@ const jabsConfigBoard: BoardDefinition = {
   featureFlag: 'jabs',
 };
 
+const weaponsBoard: BoardDefinition = {
+  id: 'weapons',
+  title: 'Weapons',
+  path: '/weapons',
+  component: WeaponsBoard,
+  guard: () => true,
+  icon: <Build fontSize={'small'}/>,
+  featureFlag: 'db.weapons',
+};
+
+const armorsBoard: BoardDefinition = {
+  id: 'armors',
+  title: 'Armors',
+  path: '/armors',
+  component: ArmorsBoard,
+  guard: () => true,
+  icon: <Shield fontSize={'small'}/>,
+  featureFlag: 'db.armors',
+};
+
+const itemsBoard: BoardDefinition = {
+  id: 'items',
+  title: 'Items',
+  path: '/items',
+  component: ItemsBoard,
+  guard: () => true,
+  icon: <Inventory2 fontSize={'small'}/>,
+  featureFlag: 'db.items',
+};
+
 const APP_ROUTES: BoardDefinition[] = [
   indexBoard,
   enemyBoard,
   skillsBoard,
   statesBoard,
+  weaponsBoard,
+  armorsBoard,
+  itemsBoard,
   sdpBoard,
   questBoard,
   craftingBoard,
