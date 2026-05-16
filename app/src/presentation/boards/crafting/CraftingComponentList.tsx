@@ -27,6 +27,8 @@ import {
 import CraftingComponentType from '@core/enums/CraftingComponentType.ts';
 import {
   Add,
+  AttachMoney,
+  AutoAwesome,
   BusinessCenter,
   Clear,
   Close,
@@ -49,6 +51,14 @@ import { RPG_ArmorDomainModel } from '@core/domain/entities/RPG_ArmorDomainModel
 import { RPG_ItemDomainModel } from '@core/domain/entities/RPG_ItemDomainModel.ts';
 import { RPG_WeaponDomainModel } from '@core/domain/entities/RPG_WeaponDomainModel.ts';
 import { IconSetSprite } from '@presentation/components/icons/IconSetSprite.tsx';
+
+/**
+ * Mirrors J-Base {@code IconManager.rewardParam}: {@code rewardParam(1)} gold → 2048, {@code rewardParam(4)} SDP → 445.
+ * Same mapping as JAFTING Creation {@code CraftingComponent#getIconIndex} / recipe detail panels — update both if you
+ * change reward icons in {@code IconManager.rewardParam}.
+ */
+const EDITOR_REWARD_PARAM_ICON_GOLD = 2048;
+const EDITOR_REWARD_PARAM_ICON_SDP = 445;
 
 type CraftingListProps = {
   type: CraftingListType;
@@ -307,11 +317,42 @@ const CraftingComponentList = (props: CraftingListProps) =>
   };
 
   const handleRecipeComponentTypeOnChangeEvent = (
-    _: any,
-    newValue: CraftingComponentType
+    _: unknown,
+    newValue: CraftingComponentType | null
   ) =>
   {
+    if (newValue === null)
+    {
+      return;
+    }
+
     setSelectedComponentType(newValue);
+
+    setPendingComponent((prev) =>
+    {
+      if (prev === null)
+      {
+        return {
+          id: 0,
+          type: newValue,
+          count: 1,
+        } as Crafting.CraftingComponent;
+      }
+
+      if (newValue === CraftingComponentType.Gold || newValue === CraftingComponentType.Sdp)
+      {
+        return {
+          ...prev,
+          type: newValue,
+          id: 0,
+        } as Crafting.CraftingComponent;
+      }
+
+      return {
+        ...prev,
+        type: newValue,
+      } as Crafting.CraftingComponent;
+    });
   };
   //endregion component updates
 
@@ -443,23 +484,38 @@ const CraftingComponentList = (props: CraftingListProps) =>
     }
 
     let ingredientData = null;
+    let spriteIndex = 0;
+    let primaryLine = '';
+
     switch (ingredient.type)
     {
       case CraftingComponentType.Item:
         ingredientData = itemsById.get(ingredient.id) ?? null;
+        spriteIndex = readDatabaseIconIndex(ingredientData);
+        primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
         break;
       case CraftingComponentType.Weapon:
         ingredientData = weaponsById.get(ingredient.id) ?? null;
+        spriteIndex = readDatabaseIconIndex(ingredientData);
+        primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
         break;
       case CraftingComponentType.Armor:
         ingredientData = armorsById.get(ingredient.id) ?? null;
+        spriteIndex = readDatabaseIconIndex(ingredientData);
+        primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
         break;
-      // TODO: implement gold cost as ingredient.
+      case CraftingComponentType.Gold:
+        spriteIndex = EDITOR_REWARD_PARAM_ICON_GOLD;
+        primaryLine = `Gold (${ingredient.count})`;
+        break;
+      case CraftingComponentType.Sdp:
+        spriteIndex = EDITOR_REWARD_PARAM_ICON_SDP;
+        primaryLine = `SDP (${ingredient.count})`;
+        break;
       default:
         throw new Error(`unknown ingredient type detected: ${ingredient.type}`);
     }
 
-    const spriteIndex = readDatabaseIconIndex(ingredientData);
     const dbDescription = readDatabaseDescription(ingredientData);
     const hasDescriptionTooltip = dbDescription.trim() !== '';
 
@@ -475,7 +531,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
           />
         </ListItemIcon>
         <ListItemText
-          primary={`${ingredient.id}: ${ingredientData?.name} (${ingredient.count})`}
+          primary={primaryLine}
           disableTypography
           sx={{ width: '100%' }}
         />
@@ -681,6 +737,28 @@ const CraftingComponentList = (props: CraftingListProps) =>
               />;
             }}
           />);
+      case CraftingComponentType.Gold:
+        return (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+          >
+            Party gold component (<code>type: &quot;g&quot;</code>, <code>id: 0</code>). Use count below — consumed when
+            listed under ingredients; tools only check balance (not consumed).
+          </Typography>
+        );
+      case CraftingComponentType.Sdp:
+        return (
+          <Typography
+            variant="body2"
+            color="text.secondary"
+          >
+            SDP points (<code>type: &quot;s&quot;</code>, <code>id: 0</code>). Requires J-SDP linkage in game; count is
+            points gained or spent per JAFTING recipe.
+          </Typography>
+        );
+      default:
+        return <></>;
     }
   };
 
@@ -737,29 +815,47 @@ const CraftingComponentList = (props: CraftingListProps) =>
   ) =>
   {
     let componentData = null;
-    let color: ('primary' | 'success' | 'error' | 'info') = 'primary';
+    let color: ('primary' | 'secondary' | 'success' | 'error' | 'info' | 'warning') = 'primary';
+    let chipLabel = '';
+    let chipIconIndex = 0;
+
     switch (craftingComponent.type)
     {
       case CraftingComponentType.Item:
         componentData = itemsById.get(craftingComponent.id) ?? null;
         color = 'success';
+        chipLabel = `${componentData?.name ?? `#${craftingComponent.id}`} (${craftingComponent.count})`;
+        chipIconIndex = readDatabaseIconIndex(componentData);
         break;
       case CraftingComponentType.Weapon:
         componentData = weaponsById.get(craftingComponent.id) ?? null;
         color = 'error';
+        chipLabel = `${componentData?.name ?? `#${craftingComponent.id}`} (${craftingComponent.count})`;
+        chipIconIndex = readDatabaseIconIndex(componentData);
         break;
       case CraftingComponentType.Armor:
         componentData = armorsById.get(craftingComponent.id) ?? null;
         color = 'info';
+        chipLabel = `${componentData?.name ?? `#${craftingComponent.id}`} (${craftingComponent.count})`;
+        chipIconIndex = readDatabaseIconIndex(componentData);
         break;
-      // TODO: implement gold cost as ingredient.
+      case CraftingComponentType.Gold:
+        color = 'warning';
+        chipLabel = `Gold (${craftingComponent.count})`;
+        chipIconIndex = EDITOR_REWARD_PARAM_ICON_GOLD;
+        break;
+      case CraftingComponentType.Sdp:
+        color = 'secondary';
+        chipLabel = `SDP (${craftingComponent.count})`;
+        chipIconIndex = EDITOR_REWARD_PARAM_ICON_SDP;
+        break;
       default:
         throw new Error(`unknown ingredient type detected: ${craftingComponent.type}`);
     }
 
     const chipIcon = (
       <IconSetSprite
-        iconIndex={readDatabaseIconIndex(componentData)}
+        iconIndex={chipIconIndex}
         sizePx={22}
       />
     );
@@ -767,7 +863,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
     return (
       <Chip
         icon={chipIcon}
-        label={`${componentData?.name ?? `#${craftingComponent.id}`} (${craftingComponent.count})`}
+        label={chipLabel}
         variant={variant}
         color={color}
       />
@@ -889,6 +985,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
                 defaultValue={CraftingComponentType.Item}
                 onChange={handleRecipeComponentTypeOnChangeEvent}
                 fullWidth
+                sx={{ flexWrap: 'wrap', gap: 0.5 }}
               >
                 <ToggleButton
                   selected={selectedComponentType === CraftingComponentType.Item}
@@ -904,6 +1001,16 @@ const CraftingComponentList = (props: CraftingListProps) =>
                   selected={selectedComponentType === CraftingComponentType.Armor}
                   value={CraftingComponentType.Armor}>
                   <Shield color={'info'}/>
+                </ToggleButton>
+                <ToggleButton
+                  selected={selectedComponentType === CraftingComponentType.Gold}
+                  value={CraftingComponentType.Gold}>
+                  <AttachMoney color={'warning'}/>
+                </ToggleButton>
+                <ToggleButton
+                  selected={selectedComponentType === CraftingComponentType.Sdp}
+                  value={CraftingComponentType.Sdp}>
+                  <AutoAwesome color={'secondary'}/>
                 </ToggleButton>
               </ToggleButtonGroup>
 

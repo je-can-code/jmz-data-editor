@@ -1,21 +1,35 @@
 import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
+import { MaxTpParser } from '@services/parsers/MaxTpParser.ts';
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
+import RPG_Trait = Rmmz.Data.RPG_Trait;
 
-/**
- * Domain model representing an RPG Maker MZ Weapon.
- */
 class RPG_WeaponDomainModel
   extends RPG_BaseDomainModel<RPG_Weapon>
 {
+  public iconIndex: number;
+  public description: string;
+  public price: number;
+  public wtypeId: number;
+  public animationId: number;
+  public params: number[];
+  public traits: RPG_Trait[];
+  public maxTp: number;
+  public etypeId: number;
+
   constructor(rmmz: RPG_Weapon)
   {
     super(rmmz);
+    this.iconIndex = rmmz.iconIndex;
+    this.description = rmmz.description;
+    this.price = rmmz.price;
+    this.wtypeId = rmmz.wtypeId;
+    this.animationId = rmmz.animationId;
+    this.params = [ ...rmmz.params ];
+    this.traits = rmmz.traits.map((t) => ({ ...t }));
+    this.maxTp = MaxTpParser.read(rmmz.note);
+    this.etypeId = rmmz.etypeId;
   }
 
-  /**
-   * Converts the domain model back into the Rmmz format for saving.
-   * @returns {RPG_Weapon} The raw RMMZ Weapon data.
-   */
   public toRmmz(): RPG_Weapon
   {
     return {
@@ -23,16 +37,20 @@ class RPG_WeaponDomainModel
       id: this.id,
       name: this.name,
       note: this.syncNote(),
+      iconIndex: this.iconIndex,
+      description: this.description,
+      price: this.price,
+      wtypeId: this.wtypeId,
+      animationId: this.animationId,
+      params: [ ...this.params ],
+      traits: this.traits.map((t) => ({ ...t })),
+      etypeId: this.etypeId,
     };
   }
 
-  /**
-   * Synchronizes domain-specific properties back into the note string.
-   * @returns {string} The normalized note string.
-   */
   protected syncNote(): string
   {
-    return this.note;
+    return MaxTpParser.write(this.note, this.maxTp);
   }
 }
 
