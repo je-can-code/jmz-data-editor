@@ -1,152 +1,117 @@
-import OmniObjectiveLogType from './OmniObjectiveLogType.ts';
-import { Box, TextField } from '@mui/material';
+import { InputAdornment, Stack, TextField } from '@mui/material';
 import { Announcement, Bedtime, Block, CancelPresentation, Verified } from '@mui/icons-material';
 import { yellow } from '@mui/material/colors';
+import OmniObjectiveLogType from './OmniObjectiveLogType.ts';
 import OmniObjectiveLogs = Questopedia.OmniObjectiveLogs;
-
-const BoxStyles = {
-  display: 'flex',
-  alignItems: 'flex-end'
-};
-
-const AdornmentStyles = {
-  mr: 1,
-  my: 0.5
-};
 
 type ObjectiveLogsProps = {
   logs?: OmniObjectiveLogs;
   updateObjectiveLogsFunc: (updatedObjectiveLogs: OmniObjectiveLogs) => void;
 };
 
-export default function ObjectiveLogs(
-  {
-    logs,
-    updateObjectiveLogsFunc
-  }: ObjectiveLogsProps)
+export default function ObjectiveLogs({ logs, updateObjectiveLogsFunc }: ObjectiveLogsProps)
 {
-  const handleObjectiveLogsOnChangeEvent = (
-    input: string,
-    logType: OmniObjectiveLogType
-  ) =>
+  const handleChange = (input: string, logType: OmniObjectiveLogType) =>
   {
-    let updatedObjectiveLogs = {
-      ...logs,
-    } as OmniObjectiveLogs;
-
+    const updated = { ...logs } as OmniObjectiveLogs;
     switch (logType)
     {
-      case OmniObjectiveLogType.Inactive:
-        updatedObjectiveLogs.inactive = input;
-        break;
-      case OmniObjectiveLogType.Active:
-        updatedObjectiveLogs.active = input;
-        break;
-      case OmniObjectiveLogType.Completed:
-        updatedObjectiveLogs.completed = input;
-        break;
-      case OmniObjectiveLogType.Failed:
-        updatedObjectiveLogs.failed = input;
-        break;
-      case OmniObjectiveLogType.Missed:
-        updatedObjectiveLogs.missed = input;
-        break;
+      case OmniObjectiveLogType.Inactive:   updated.inactive  = input; break;
+      case OmniObjectiveLogType.Active:     updated.active    = input; break;
+      case OmniObjectiveLogType.Completed:  updated.completed = input; break;
+      case OmniObjectiveLogType.Failed:     updated.failed    = input; break;
+      case OmniObjectiveLogType.Missed:     updated.missed    = input; break;
     }
-
-    updateObjectiveLogsFunc(updatedObjectiveLogs);
+    updateObjectiveLogsFunc(updated);
   };
 
-  return <>
-    <Box sx={BoxStyles}>
-      <Bedtime
-        sx={{
-          ...AdornmentStyles,
-          color: yellow[ 800 ]
+  return (
+    <Stack spacing={1.5}>
+      <TextField
+        variant={'outlined'}
+        label={'Inactive'}
+        value={logs?.inactive ?? ''}
+        onChange={event => handleChange(event.target.value, OmniObjectiveLogType.Inactive)}
+        size={'small'}
+        fullWidth
+        slotProps={{
+          input: {
+            startAdornment: (
+              <InputAdornment position={'start'}>
+                <Bedtime sx={{ color: yellow[800] }} fontSize={'small'}/>
+              </InputAdornment>
+            )
+          }
         }}
       />
       <TextField
-        variant={'standard'}
-        label={'Inactive'}
-        value={logs?.inactive}
-        onChange={event => handleObjectiveLogsOnChangeEvent(
-          event.target.value,
-          OmniObjectiveLogType.Inactive
-        )}
-        size={'small'}
-        fullWidth
-      />
-    </Box>
-
-    <Box sx={BoxStyles}>
-      <Announcement
-        sx={AdornmentStyles}
-        color={'primary'}
-      />
-      <TextField
-        variant={'standard'}
+        variant={'outlined'}
         label={'Active'}
-        value={logs?.active}
-        onChange={event => handleObjectiveLogsOnChangeEvent(
-          event.target.value,
-          OmniObjectiveLogType.Active
-        )}
+        value={logs?.active ?? ''}
+        onChange={event => handleChange(event.target.value, OmniObjectiveLogType.Active)}
         size={'small'}
         fullWidth
-      />
-    </Box>
-
-    <Box sx={BoxStyles}>
-      <Verified
-        sx={AdornmentStyles}
-        color={'success'}
+        slotProps={{
+          input: {
+            startAdornment: (
+              <InputAdornment position={'start'}>
+                <Announcement color={'primary'} fontSize={'small'}/>
+              </InputAdornment>
+            )
+          }
+        }}
       />
       <TextField
-        variant={'standard'}
+        variant={'outlined'}
         label={'Completed'}
-        value={logs?.completed}
-        onChange={event => handleObjectiveLogsOnChangeEvent(
-          event.target.value,
-          OmniObjectiveLogType.Completed
-        )}
+        value={logs?.completed ?? ''}
+        onChange={event => handleChange(event.target.value, OmniObjectiveLogType.Completed)}
         size={'small'}
         fullWidth
-      />
-    </Box>
-
-    <Box sx={BoxStyles}>
-      <CancelPresentation
-        sx={AdornmentStyles}
-        color={'error'}
+        slotProps={{
+          input: {
+            startAdornment: (
+              <InputAdornment position={'start'}>
+                <Verified color={'success'} fontSize={'small'}/>
+              </InputAdornment>
+            )
+          }
+        }}
       />
       <TextField
-        variant={'standard'}
+        variant={'outlined'}
         label={'Failed'}
-        value={logs?.failed}
-        onChange={event => handleObjectiveLogsOnChangeEvent(
-          event.target.value,
-          OmniObjectiveLogType.Failed
-        )}
+        value={logs?.failed ?? ''}
+        onChange={event => handleChange(event.target.value, OmniObjectiveLogType.Failed)}
         size={'small'}
         fullWidth
-      />
-    </Box>
-
-    <Box sx={BoxStyles}>
-      <Block
-        sx={AdornmentStyles}
-        color={'secondary'}
+        slotProps={{
+          input: {
+            startAdornment: (
+              <InputAdornment position={'start'}>
+                <CancelPresentation color={'error'} fontSize={'small'}/>
+              </InputAdornment>
+            )
+          }
+        }}
       />
       <TextField
-        variant={'standard'}
+        variant={'outlined'}
         label={'Missed'}
-        value={logs?.missed}
-        onChange={event => handleObjectiveLogsOnChangeEvent(
-          event.target.value,
-          OmniObjectiveLogType.Missed
-        )}
+        value={logs?.missed ?? ''}
+        onChange={event => handleChange(event.target.value, OmniObjectiveLogType.Missed)}
         size={'small'}
         fullWidth
+        slotProps={{
+          input: {
+            startAdornment: (
+              <InputAdornment position={'start'}>
+                <Block color={'secondary'} fontSize={'small'}/>
+              </InputAdornment>
+            )
+          }
+        }}
       />
-    </Box>
-  </>;
+    </Stack>
+  );
 }

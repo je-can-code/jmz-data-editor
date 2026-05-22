@@ -1,8 +1,5 @@
-import React, { type SyntheticEvent } from 'react';
+import React from 'react';
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Autocomplete,
   Box,
   Button,
@@ -17,7 +14,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { Add, Delete, ExpandMore } from '@mui/icons-material';
+import { Add, Delete } from '@mui/icons-material';
 import { RPG_StateDomainModel } from '@core/domain/entities/RPG_StateDomainModel.ts';
 import type { StateCritExtension } from '@core/domain/entities/state/StateCritExtension.ts';
 import type { StateDropsExtension } from '@core/domain/entities/state/StateDropsExtension.ts';
@@ -35,13 +32,7 @@ import {
   TIER_COLOR_PRESETS,
   type TierColorPreset,
 } from '@core/domain/valueObjects/tierColorPresets.ts';
-
-const accordionShellSx = {
-  border: '1px solid',
-  borderColor: 'divider',
-  borderRadius: 1,
-  '&:before': { display: 'none' },
-} as const;
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 
 /**
  * Value shown in the tier-color autocomplete: a named preset, or a synthetic row for an out-of-list hex.
@@ -132,13 +123,6 @@ const TierStripeSwatch = ({
 
 type StatePluginNoteSectionsProps = {
   selectedState: RPG_StateDomainModel;
-  editorAccordionProps: (id: string) => {
-    expanded: boolean;
-    onChange: (
-      event: SyntheticEvent,
-      expanded: boolean
-    ) => void;
-  };
   absorbElementOptions: IdLabelRow[];
   selectedAbsorbElements: IdLabelRow[];
   strictElementOptions: IdLabelRow[];
@@ -168,7 +152,6 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
 {
   const {
     selectedState,
-    editorAccordionProps,
     absorbElementOptions,
     selectedAbsorbElements,
     strictElementOptions,
@@ -233,18 +216,7 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
 
   return (
     <>
-      <Accordion
-        {...editorAccordionProps('editor-plugin-crit')}
-        disableGutters
-        elevation={0}
-        sx={accordionShellSx}
-      >
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Critical damage
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+        <BoardSectionCard title={'Critical damage'} collapsible defaultExpanded={false}>
           <Stack spacing={2} alignItems={'stretch'}>
             <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
               Two separate mechanics: how hard you crit others, and how much you soften crits taken. Each side uses a
@@ -374,21 +346,9 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
               </Grid>
             </Grid>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion
-        {...editorAccordionProps('editor-plugin-drops')}
-        disableGutters
-        elevation={0}
-        sx={accordionShellSx}
-      >
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Drops and gold
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+        <BoardSectionCard title={'Drops and gold'} collapsible defaultExpanded={false}>
           <Stack spacing={2} alignItems={'stretch'}>
             <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
               Party drop and gold multiplier bonuses while an actor has this state (percent points summed before the
@@ -449,21 +409,9 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
               </Grid>
             </Grid>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion
-        {...editorAccordionProps('editor-plugin-elem')}
-        disableGutters
-        elevation={0}
-        sx={accordionShellSx}
-      >
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Elements
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+        <BoardSectionCard title={'Elements'} collapsible defaultExpanded={false}>
           <Stack spacing={2} alignItems={'stretch'}>
             <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
               Absorb and strict element lists, plus per-element rate boosts.
@@ -704,21 +652,9 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
               </Button>
             </Box>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion
-        {...editorAccordionProps('editor-plugin-level')}
-        disableGutters
-        elevation={0}
-        sx={accordionShellSx}
-      >
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Level
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+        <BoardSectionCard title={'Level'} collapsible defaultExpanded={false}>
           <Stack spacing={2} alignItems={'stretch'}>
             <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
               Level offset from this state and max-level boost for actors (stacked with equipment and other states).
@@ -778,21 +714,9 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
               </Grid>
             </Grid>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion
-        {...editorAccordionProps('editor-plugin-prof')}
-        disableGutters
-        elevation={0}
-        sx={accordionShellSx}
-      >
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Skill proficiency
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+        <BoardSectionCard title={'Skill proficiency'} collapsible defaultExpanded={false}>
           <Stack spacing={2} alignItems={'stretch'}>
             <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
               Bonus proficiency gains and flow blocks while this state is active.
@@ -849,21 +773,9 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
               label={'Block gaining proficiency'}
             />
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion
-        {...editorAccordionProps('editor-plugin-resources')}
-        disableGutters
-        elevation={0}
-        sx={accordionShellSx}
-      >
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            HP cost reduction
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+        <BoardSectionCard title={'HP cost reduction'} collapsible defaultExpanded={false}>
           <Stack spacing={2} alignItems={'stretch'}>
             <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
               Formula inside the tag reduces effective HP skill costs (evaluated in-game).
@@ -881,21 +793,9 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
               placeholder={'e.g. a.mhp * 0.01'}
             />
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion
-        {...editorAccordionProps('editor-plugin-sdp')}
-        disableGutters
-        elevation={0}
-        sx={accordionShellSx}
-      >
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            SDP multiplier
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+        <BoardSectionCard title={'SDP multiplier'} collapsible defaultExpanded={false}>
           <Stack spacing={2} alignItems={'stretch'}>
             <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
               Bonus added to the actor SDP points multiplier (base 100 in engine, then divided by 100).
@@ -926,21 +826,9 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
               slotProps={{ htmlInput: { step: 'any' } }}
             />
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion
-        {...editorAccordionProps('editor-plugin-passive-abs')}
-        disableGutters
-        elevation={0}
-        sx={accordionShellSx}
-      >
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Passive Affixes
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+        <BoardSectionCard title={'Passive Affixes'} collapsible defaultExpanded={false}>
           <Stack spacing={2} alignItems={'stretch'}>
             <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
               Enemy tier nameplates and weighted prefix or suffix pools. Affix weights only matter relative to other
@@ -1179,21 +1067,9 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
               </Stack>
             </Stack>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion
-        {...editorAccordionProps('editor-plugin-sks')}
-        disableGutters
-        elevation={0}
-        sx={accordionShellSx}
-      >
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Skill slots
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+        <BoardSectionCard title={'Skill slots'} collapsible defaultExpanded={false}>
           <Stack spacing={2} alignItems={'stretch'}>
             <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
               Flat modifier to skill slot point costs while this state applies.
@@ -1223,8 +1099,7 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
               fullWidth
             />
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
     </>
   );
 };

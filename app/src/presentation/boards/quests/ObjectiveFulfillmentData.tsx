@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import {
   Autocomplete,
   Chip,
@@ -8,7 +8,6 @@ import {
   Select,
   Stack,
   TextField,
-  Typography
 } from '@mui/material';
 
 import { useItems } from '@presentation/context/resources/items.context.tsx';
@@ -31,15 +30,21 @@ type ObjectiveDataProps = {
   fulfillmentData: OmniFulfillmentData | undefined;
   fulfillmentType: OmniObjectiveType | undefined;
   updateIndiscriminateFunc: (updatedIndiscriminate: IndiscriminateData) => void;
-  updateDestinationFunc: (updatedIndiscriminate: DestinationData) => void;
-  updateFetchFunc: (updatedIndiscriminate: FetchData) => void;
-  updateSlayFunc: (updatedIndiscriminate: SlayData) => void;
-  updateQuestFunc: (updatedIndiscriminate: QuestData) => void;
+  updateDestinationFunc: (updatedDestination: DestinationData) => void;
+  updateFetchFunc: (updatedFetch: FetchData) => void;
+  updateSlayFunc: (updatedSlay: SlayData) => void;
+  updateQuestFunc: (updatedQuest: QuestData) => void;
+};
+
+const FETCH_TYPE_LABELS: Record<OmniObjectiveFetchType, string> = {
+  [OmniObjectiveFetchType.Unset]:  'Unset',
+  [OmniObjectiveFetchType.Item]:   'Item',
+  [OmniObjectiveFetchType.Weapon]: 'Weapon',
+  [OmniObjectiveFetchType.Armor]:  'Armor',
 };
 
 const ObjectiveFulfillmentData = (props: ObjectiveDataProps) =>
 {
-  //region state
   const {
     fulfillmentData,
     fulfillmentType,
@@ -50,492 +55,239 @@ const ObjectiveFulfillmentData = (props: ObjectiveDataProps) =>
     updateQuestFunc,
   } = props;
 
-  const {
-    data: items,
-    loading: itemsLoading
-  } = useItems();
-  const {
-    data: weapons,
-    loading: weaponsLoading
-  } = useWeapons();
-  const {
-    data: armors,
-    loading: armorsLoading
-  } = useArmors();
-  const {
-    data: enemies,
-    loading: enemiesLoading
-  } = useEnemies();
-  const {
-    quests,
-    loading: questsLoading
-  } = useQuests();
+  const { data: items }   = useItems();
+  const { data: weapons } = useWeapons();
+  const { data: armors }  = useArmors();
+  const { data: enemies } = useEnemies();
+  const { quests }        = useQuests();
 
-  const [ newQuestKey, setNewQuestKey ] = useState<string>('');
-  //endregion state
-
-  //region update
-  //region indiscriminate
-  const handleUpdateIndiscriminateHint = (newHint: string) =>
-  {
-    if (!fulfillmentData)
-    {
-      return;
-    }
-
-    const updatedFulfillmentData = {
-      hint: newHint,
-    } as IndiscriminateData;
-
-    updateIndiscriminateFunc(updatedFulfillmentData);
-  };
-  //endregion indiscriminate
-
-  //region destination
-  const handleUpdateDestinationMapId = (newMapId: number) =>
-  {
-    if (!fulfillmentData)
-    {
-      return;
-    }
-
-    const updatedFulfillmentData = {
-      ...fulfillmentData.destination,
-      mapId: newMapId,
-    } as DestinationData;
-
-    updateDestinationFunc(updatedFulfillmentData);
-  };
-
-  /**
-   * Centralized handler for updating destination coordinates.
-   * @param {keyof DestinationData} key The coordinate key to update.
-   * @param {number} value The new coordinate value.
-   */
-  const handleUpdateDestinationCoordinate = (
-    key: keyof DestinationData,
-    value: number
-  ) =>
-  {
-    if (!fulfillmentData)
-    {
-      return;
-    }
-
-    const updatedFulfillmentData = {
-      ...fulfillmentData.destination,
-      [ key ]: value,
-    } as DestinationData;
-
-    updateDestinationFunc(updatedFulfillmentData);
-  };
-  //endregion destination
-
-  //region fetch
-  const handleUpdateFetchType = (newFetchType: OmniObjectiveFetchType) =>
-  {
-    if (!fulfillmentData)
-    {
-      return;
-    }
-
-    updateFetchFunc({
-      ...fulfillmentData.fetch,
-      type: newFetchType,
-      // Reset ID when type changes to avoid cross-contamination
-      id: -1
-    });
-  };
-
-  const handleUpdateFetchDatabaseId = (newDatabaseId: number) =>
-  {
-    if (!fulfillmentData)
-    {
-      return;
-    }
-
-    updateFetchFunc({
-      ...fulfillmentData.fetch,
-      id: newDatabaseId,
-    });
-  };
-
-  const handleUpdateFetchAmount = (newAmount: number) =>
-  {
-    if (!fulfillmentData)
-    {
-      return;
-    }
-
-    updateFetchFunc({
-      ...fulfillmentData.fetch,
-      amount: newAmount,
-    });
-  };
-  //endregion fetch
-
-  //region slay
-  const handleUpdateSlayEnemyId = (newEnemyId: number) =>
-  {
-    if (!fulfillmentData)
-    {
-      return;
-    }
-
-    props.updateSlayFunc({
-      ...fulfillmentData.slay,
-      id: newEnemyId,
-    });
-  };
-
-  const handleUpdateSlayAmount = (newAmount: number) =>
-  {
-    if (!fulfillmentData)
-    {
-      return;
-    }
-
-    updateSlayFunc({
-      ...fulfillmentData.slay,
-      amount: newAmount,
-    });
-  };
-  //endregion slay
-
-  //region quest
-  const handleUpdateQuestKeys = (newKeys: string[]) =>
-  {
-    if (!fulfillmentData)
-    {
-      return;
-    }
-
-    const updatedFulfillmentData = {
-      keys: newKeys
-    } as QuestData;
-
-    updateQuestFunc(updatedFulfillmentData);
-  };
-
-  const addQuestToFulfillmentData = (questKey: string) =>
-  {
-    if (!fulfillmentData)
-    {
-      return;
-    }
-
-    const updatedQuestKeys = fulfillmentData.quest.keys.toSpliced(0, 0);
-    updatedQuestKeys.push(questKey);
-    handleUpdateQuestKeys(updatedQuestKeys);
-  };
-
-  const removeQuestFromFulfillmentData = (questKey: string) =>
-  {
-    if (!fulfillmentData)
-    {
-      return;
-    }
-
-    const targetQuestKeyIndex = fulfillmentData.quest.keys.indexOf(questKey);
-    const updatedQuestKeys = fulfillmentData.quest.keys.toSpliced(targetQuestKeyIndex, 1);
-
-    handleUpdateQuestKeys(updatedQuestKeys);
-  };
-  //endregion quest
-  //endregion update
-
-  //region render
-  const renderFulfillmentData = () =>
-  {
-    switch (fulfillmentType)
-    {
-      case OmniObjectiveType.Indiscriminate:
-        return renderIndiscriminateData();
-      case OmniObjectiveType.Destination:
-        return renderDestinationData();
-      case OmniObjectiveType.Fetch:
-        return renderFetchData();
-      case OmniObjectiveType.Slay:
-        return renderSlayData();
-      case OmniObjectiveType.Quest:
-        return renderQuestData();
-      default:
-        return <></>;
-    }
-  };
-
-  const renderIndiscriminateData = () =>
-  {
-    if (!fulfillmentData)
-    {
-      return <></>;
-    }
-
-    return <TextField
-      key={'indiscriminate'}
-      variant={'standard'}
-      label={'Hint'}
-      value={fulfillmentData?.indiscriminate.hint}
-      onChange={event => handleUpdateIndiscriminateHint(event.target.value)}
-      size={'small'}
-      fullWidth
-    />;
-  };
-
-  const renderDestinationData = () =>
-  {
-    return <React.Fragment key={'destination'}>
-      <Stack direction={'row'} spacing={2}>
-        <TextField
-          type={'number'}
-          label={'Map Id'}
-          variant={'outlined'}
-          value={fulfillmentData?.destination.mapId ?? -1}
-          onChange={(event) => handleUpdateDestinationMapId(parseInt(event.target.value) ?? -1)}
-          sx={{ width: '120px' }}
-        />
-        <TextField
-          type={'number'}
-          label={'X1 ↖️'}
-          variant={'filled'}
-          value={fulfillmentData?.destination.x1 ?? -1}
-          onChange={(event) => handleUpdateDestinationCoordinate('x1', parseInt(event.target.value) || -1)}
-          color={'secondary'}
-          sx={{ width: '140px' }}
-        />
-        <TextField
-          type={'number'}
-          label={'X2 ↗️'}
-          variant={'filled'}
-          value={fulfillmentData?.destination.x2 ?? -1}
-          onChange={(event) => handleUpdateDestinationCoordinate('x2', parseInt(event.target.value) || -1)}
-          color={'secondary'}
-          sx={{ width: '140px' }}
-        />
-        <TextField
-          type={'number'}
-          label={'Y1 ↙️'}
-          variant={'filled'}
-          value={fulfillmentData?.destination.y1 ?? -1}
-          onChange={(event) => handleUpdateDestinationCoordinate('y1', parseInt(event.target.value) || -1)}
-          color={'success'}
-          sx={{ width: '140px' }}
-        />
-        <TextField
-          type={'number'}
-          label={'Y2 ↘️'}
-          variant={'filled'}
-          value={fulfillmentData?.destination.y2 ?? -1}
-          onChange={(event) => handleUpdateDestinationCoordinate('y2', parseInt(event.target.value) || -1)}
-          color={'success'}
-          sx={{ width: '140px' }}
-        />
-      </Stack>
-    </React.Fragment>;
-  };
-
-  /**
-   * Memoizes the data source for fetch objectives.
-   * This prevents recalculating the list reference unless the fetch type
-   * or the underlying database resources change.
-   */
   const dataSource = useMemo<RPG_BaseDomainModel<RPG_Base>[]>(() =>
   {
-    if (!fulfillmentData)
-    {
-      return [];
-    }
-
+    if (!fulfillmentData) return [];
     switch (fulfillmentData.fetch.type)
     {
-      case OmniObjectiveFetchType.Item:
-        return items;
-      case OmniObjectiveFetchType.Weapon:
-        return weapons;
-      case OmniObjectiveFetchType.Armor:
-        return armors;
-      default:
-        return [];
+      case OmniObjectiveFetchType.Item:   return items;
+      case OmniObjectiveFetchType.Weapon: return weapons;
+      case OmniObjectiveFetchType.Armor:  return armors;
+      default:                            return [];
     }
   }, [ fulfillmentData?.fetch.type, items, weapons, armors ]);
 
-  const renderFetchData = () =>
+  if (!fulfillmentData || !fulfillmentType)
   {
-    if (!fulfillmentData)
-    {
-      return <></>;
-    }
+    return null;
+  }
 
-    return (
-      <React.Fragment key={'fetch'}>
-        <Stack direction={'row'} spacing={2}>
-          <FormControl sx={{ minWidth: '140px' }}>
+  switch (fulfillmentType)
+  {
+    case OmniObjectiveType.Indiscriminate:
+      return (
+        <TextField
+          variant={'outlined'}
+          label={'Hint'}
+          value={fulfillmentData.indiscriminate.hint}
+          onChange={event => updateIndiscriminateFunc({ hint: event.target.value })}
+          size={'small'}
+          fullWidth
+        />
+      );
+
+    case OmniObjectiveType.Destination:
+      return (
+        <Stack direction={'row'} spacing={1.5} flexWrap={'wrap'} useFlexGap>
+          <TextField
+            type={'number'}
+            label={'Map Id'}
+            variant={'outlined'}
+            size={'small'}
+            value={fulfillmentData.destination.mapId ?? -1}
+            onChange={event => updateDestinationFunc({
+              ...fulfillmentData.destination,
+              mapId: parseInt(event.target.value) || -1,
+            })}
+            sx={{ width: 110 }}
+          />
+          <TextField
+            type={'number'}
+            label={'X1 ↖'}
+            variant={'outlined'}
+            size={'small'}
+            value={fulfillmentData.destination.x1 ?? -1}
+            onChange={event => updateDestinationFunc({
+              ...fulfillmentData.destination,
+              x1: parseInt(event.target.value) || -1,
+            })}
+            sx={{ width: 110 }}
+          />
+          <TextField
+            type={'number'}
+            label={'X2 ↗'}
+            variant={'outlined'}
+            size={'small'}
+            value={fulfillmentData.destination.x2 ?? -1}
+            onChange={event => updateDestinationFunc({
+              ...fulfillmentData.destination,
+              x2: parseInt(event.target.value) || -1,
+            })}
+            sx={{ width: 110 }}
+          />
+          <TextField
+            type={'number'}
+            label={'Y1 ↙'}
+            variant={'outlined'}
+            size={'small'}
+            value={fulfillmentData.destination.y1 ?? -1}
+            onChange={event => updateDestinationFunc({
+              ...fulfillmentData.destination,
+              y1: parseInt(event.target.value) || -1,
+            })}
+            sx={{ width: 110 }}
+          />
+          <TextField
+            type={'number'}
+            label={'Y2 ↘'}
+            variant={'outlined'}
+            size={'small'}
+            value={fulfillmentData.destination.y2 ?? -1}
+            onChange={event => updateDestinationFunc({
+              ...fulfillmentData.destination,
+              y2: parseInt(event.target.value) || -1,
+            })}
+            sx={{ width: 110 }}
+          />
+        </Stack>
+      );
+
+    case OmniObjectiveType.Fetch:
+      return (
+        <Stack direction={'row'} spacing={1.5} alignItems={'flex-start'}>
+          <FormControl size={'small'} sx={{ minWidth: 130 }}>
             <InputLabel>Fetch Type</InputLabel>
             <Select
-              variant={'filled'}
+              variant={'outlined'}
               value={fulfillmentData.fetch.type}
-              label="Fetch Type"
-              onChange={event => handleUpdateFetchType(Number(event.target.value))}
+              label={'Fetch Type'}
+              onChange={event => updateFetchFunc({
+                ...fulfillmentData.fetch,
+                type: Number(event.target.value) as OmniObjectiveFetchType,
+                id: -1,
+              })}
             >
               {Object.values(OmniObjectiveFetchType)
-                .filter(entry => !isNaN(Number(entry)))
-                .map((
-                  type,
-                  idx
-                ) => renderFetchTypeMenuItem(type, idx))}
+                .filter(v => !isNaN(Number(v)))
+                .map(v => (
+                  <MenuItem key={v} value={v}>
+                    {FETCH_TYPE_LABELS[v as OmniObjectiveFetchType]}
+                  </MenuItem>
+                ))}
             </Select>
           </FormControl>
 
           <Autocomplete
             fullWidth
+            size={'small'}
             options={dataSource}
-            getOptionLabel={(option) => `${option.id}: ${option.name}`}
+            getOptionLabel={(option) => `[${option.id}] ${option.name}`}
             value={dataSource.find(i => i.id === fulfillmentData.fetch.id) ?? null}
-            onChange={(
-              _,
-              newValue
-            ) => handleUpdateFetchDatabaseId(newValue?.id ?? -1)}
-            renderInput={(params) => <TextField {...params} label="Select Resource" variant="outlined"/>}
+            onChange={(_, newValue) => updateFetchFunc({
+              ...fulfillmentData.fetch,
+              id: newValue?.id ?? -1,
+            })}
+            renderInput={(params) => (
+              <TextField {...params} label={'Select Resource'} variant={'outlined'}/>
+            )}
           />
 
           <TextField
             type={'number'}
             label={'Amount'}
-            variant={'filled'}
+            variant={'outlined'}
+            size={'small'}
             value={fulfillmentData.fetch.amount}
-            onChange={(event) => handleUpdateFetchAmount(parseInt(event.target.value) || 0)}
-            sx={{ width: '120px' }}
+            onChange={event => updateFetchFunc({
+              ...fulfillmentData.fetch,
+              amount: parseInt(event.target.value) || 0,
+            })}
+            sx={{ width: 110 }}
           />
         </Stack>
-      </React.Fragment>
-    );
-  };
+      );
 
-  const renderFetchTypeMenuItem = (
-    fetchType: string | OmniObjectiveFetchType,
-    index: number
-  ) =>
-  {
-    let menuName;
-    switch (fetchType)
-    {
-      case -1:
-        menuName = 'Unset';
-        break;
-      case 0:
-        menuName = 'Item';
-        break;
-      case 1:
-        menuName = 'Weapon';
-        break;
-      case 2:
-        menuName = 'Armor';
-        break;
-    }
-    return <MenuItem
-      key={`${fetchType}-${index}`}
-      value={fetchType}
-    >
-      {menuName}
-    </MenuItem>;
-  };
-
-  const renderSlayData = () =>
-  {
-    if (!fulfillmentData)
-    {
-      return <></>;
-    }
-
-    return (
-      <React.Fragment key={'slay'}>
-        <Stack direction={'row'} spacing={2} sx={{ width: '100%' }}>
+    case OmniObjectiveType.Slay:
+      return (
+        <Stack direction={'row'} spacing={1.5} alignItems={'flex-start'}>
           <Autocomplete
             fullWidth
+            size={'small'}
             options={enemies}
-            getOptionLabel={(option) => `${option.id}: ${option.name}`}
+            getOptionLabel={(option) => `[${option.id}] ${option.name}`}
             value={enemies.find(e => e.id === fulfillmentData.slay.id) ?? null}
-            onChange={(
-              _,
-              newValue
-            ) => handleUpdateSlayEnemyId(newValue?.id ?? -1)}
-            renderInput={(params) => <TextField {...params} label="Select Enemy" variant="outlined"/>}
+            onChange={(_, newValue) => updateSlayFunc({
+              ...fulfillmentData.slay,
+              id: newValue?.id ?? -1,
+            })}
+            renderInput={(params) => (
+              <TextField {...params} label={'Select Enemy'} variant={'outlined'}/>
+            )}
           />
           <TextField
             type={'number'}
             label={'Amount'}
-            variant={'filled'}
+            variant={'outlined'}
+            size={'small'}
             value={fulfillmentData.slay.amount}
-            onChange={(event) => handleUpdateSlayAmount(parseInt(event.target.value) || 0)}
-            sx={{ width: '120px' }}
+            onChange={event => updateSlayFunc({
+              ...fulfillmentData.slay,
+              amount: parseInt(event.target.value) || 0,
+            })}
+            sx={{ width: 110 }}
           />
         </Stack>
-      </React.Fragment>
-    );
-  };
+      );
 
-  const renderQuestData = () =>
-  {
-    if (!fulfillmentData)
+    case OmniObjectiveType.Quest:
     {
-      return <></>;
-    }
-
-    // Filter out quests that are already in the fulfillment list
-    const availableQuests = quests.filter(q => !fulfillmentData.quest.keys.includes(q.key));
-
-    return (
-      <Stack direction={'row'} spacing={2}>
-        <Stack spacing={2} sx={{ width: '300px' }}>
+      const availableQuests = quests.filter(q => !fulfillmentData.quest.keys.includes(q.key));
+      return (
+        <Stack spacing={1.5}>
           <Autocomplete
+            size={'small'}
             options={availableQuests}
             getOptionLabel={(option) => `${option.name} (${option.key})`}
-            onChange={(
-              _,
-              newValue
-            ) =>
+            onChange={(_, newValue) =>
             {
               if (newValue)
               {
-                addQuestToFulfillmentData(newValue.key);
+                const updated = fulfillmentData.quest.keys.toSpliced(0, 0);
+                updated.push(newValue.key);
+                updateQuestFunc({ keys: updated });
               }
             }}
-            renderInput={(params) => <TextField {...params} label="Add Quest Prerequisite" variant="outlined"/>}
+            renderInput={(params) => (
+              <TextField {...params} label={'Add Quest Prerequisite'} variant={'outlined'}/>
+            )}
           />
+          <Stack direction={'row'} spacing={1} flexWrap={'wrap'} useFlexGap>
+            {fulfillmentData.quest.keys.map(questKey => (
+              <Chip
+                key={questKey}
+                label={questKey}
+                variant={'outlined'}
+                onDelete={() =>
+                {
+                  const idx = fulfillmentData.quest.keys.indexOf(questKey);
+                  updateQuestFunc({ keys: fulfillmentData.quest.keys.toSpliced(idx, 1) });
+                }}
+              />
+            ))}
+          </Stack>
         </Stack>
+      );
+    }
 
-        <Stack spacing={1} direction="row" useFlexGap flexWrap="wrap">
-          {fulfillmentData.quest.keys.map(renderQuestChip)}
-        </Stack>
-      </Stack>
-    );
-  };
-
-  const renderQuestChip = (questKey: string) =>
-  {
-    return <>
-      <Chip
-        label={questKey}
-        variant={'outlined'}
-        onDelete={() => removeQuestFromFulfillmentData(questKey)}
-      />
-    </>;
-  };
-  //endregion render
-
-  if (itemsLoading || weaponsLoading || armorsLoading || enemiesLoading || questsLoading)
-  {
-    return <Typography variant="caption">Loading database resources...</Typography>;
+    default:
+      return null;
   }
-
-  if (fulfillmentData === null)
-  {
-    return <></>;
-  }
-
-  return <>
-    {renderFulfillmentData()}
-  </>;
 };
 
 export default ObjectiveFulfillmentData;

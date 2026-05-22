@@ -1,4 +1,5 @@
 import { Box, Stack, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import { alpha } from '@mui/material/styles';
 import {
   Anchor,
@@ -155,19 +156,8 @@ const EnemyJabsBattlerRoles = ({
     updateEnemy(selectedEnemy);
   };
 
-  return <>
-    <Typography
-      variant={'subtitle1'}
-      color={'primary'}
-      sx={{
-        fontWeight: 700,
-        mt: 2,
-        mb: 1
-      }}
-    >
-      JABS Battler Roles
-    </Typography>
-
+  return (
+    <BoardSectionCard title={'Battler Roles'}>
     <Stack
       spacing={1.5}
       sx={{ alignItems: 'stretch' }}
@@ -527,7 +517,8 @@ const EnemyJabsBattlerRoles = ({
         </Box>
       </Stack>
     </Stack>
-  </>;
+    </BoardSectionCard>
+  );
 };
 
 export { EnemyJabsBattlerRoles };

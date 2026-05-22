@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
@@ -17,6 +17,7 @@ import {
 } from "@mui/material";
 import { Add, Delete } from "@mui/icons-material";
 import EditorBoardSplitLayout from "@presentation/components/board/EditorBoardSplitLayout.tsx";
+import { BoardSectionCard } from "@presentation/components/board/BoardSectionCard.tsx";
 import { useUrlSelection } from "@presentation/hooks/useUrlSelection.ts";
 import { useJabs } from "@presentation/context/resources/jabs.context.tsx";
 import type { JabsTeamDefinition } from "@core/domain/valueObjects/jabs-config.ts";
@@ -84,7 +85,6 @@ const JabsTeamsTab = () =>
     "teamId",
     teams,
     team => team.id,
-    selectedTeamIndex,
     (index) => setSelectedTeamIndex(index),
     (_) => undefined
   );
@@ -257,94 +257,103 @@ const JabsTeamsTab = () =>
       }
     >
       <Box sx={{ p: 2, height: "100%", overflow: "auto" }}>
-        <Typography variant={"h4"} align={"center"} color={"primary"} gutterBottom={true}>
-          JABS Teams
-        </Typography>
+        <Stack spacing={3} sx={{ maxWidth: 720, mx: "auto" }}>
+          <Typography variant={"h4"} color={"primary"}>
+            JABS Teams
+          </Typography>
 
-        {selectedTeam
-          ? (
-            <Stack spacing={2} sx={{ maxWidth: 720, mx: "auto" }}>
-              <TextField
-                label={"Team Id"}
-                type={"number"}
-                value={selectedTeam.id}
-                disabled={true}
-                helperText={"Team ids are referenced by enemies/events. Delete + re-add to renumber."}
-              />
+          <Typography variant={"body2"} color={"text.secondary"}>
+            Per-team faction definitions. Each battler is assigned a team; teams listed under{" "}
+            <strong>Opposes</strong> will actively attack each other on the field.
+          </Typography>
 
-              <TextField
-                label={"Key"}
-                value={selectedTeam.key ?? ""}
-                onChange={e => updateTeam({
-                  ...selectedTeam,
-                  key: e.target.value,
-                })}
-                helperText={"Optional stable key for tooling (ex: ALLY, ENEMY, NEUTRAL)."}
-              />
+          {selectedTeam
+            ? (
+              <BoardSectionCard title={"Team details"} subtitle={"Properties for the selected team."}>
+                <Stack spacing={2}>
+                  <TextField
+                    label={"Team Id"}
+                    type={"number"}
+                    value={selectedTeam.id}
+                    disabled={true}
+                    helperText={"Team ids are referenced by enemies/events. Delete + re-add to renumber."}
+                  />
 
-              <TextField
-                label={"Name"}
-                value={selectedTeam.name ?? ""}
-                onChange={e => updateTeam({
-                  ...selectedTeam,
-                  name: e.target.value,
-                })}
-              />
-
-              <FormControl>
-                <InputLabel id={"jabs-opposes-label"}>Opposes</InputLabel>
-                <Select
-                  labelId={"jabs-opposes-label"}
-                  multiple={true}
-                  value={selectedTeam.opposes ?? []}
-                  input={<OutlinedInput label={"Opposes"}/>}
-                  renderValue={(selected) =>
-                  {
-                    const ids = selected as number[];
-                    if (ids.length === 0)
-                    {
-                      return "(none)";
-                    }
-
-                    return (
-                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                        {ids.map(id =>
-                        {
-                          const t = teams.find(x => x.id === id);
-                          return <Chip key={id} label={t ? displayTeamLabel(t) : String(id)}/>;
-                        })}
-                      </Box>
-                    );
-                  }}
-                  onChange={e =>
-                  {
-                    const next = e.target.value as number[];
-                    updateTeam({
+                  <TextField
+                    label={"Key"}
+                    value={selectedTeam.key ?? ""}
+                    onChange={e => updateTeam({
                       ...selectedTeam,
-                      opposes: next,
-                    });
-                  }}
-                >
-                  {teamIds
-                    .filter(id => id !== selectedTeam.id)
-                    .map(id =>
-                    {
-                      const team = teams.find(t => t.id === id)!;
-                      return (
-                        <MenuItem key={id} value={id}>
-                          <ListItemText primary={displayTeamLabel(team)}/>
-                        </MenuItem>
-                      );
+                      key: e.target.value,
                     })}
-                </Select>
-              </FormControl>
-            </Stack>
-          )
-          : (
-            <Typography align={"center"} color={"text.secondary"}>
-              No teams found.
-            </Typography>
-          )}
+                    helperText={"Optional stable key for tooling (ex: ALLY, ENEMY, NEUTRAL)."}
+                  />
+
+                  <TextField
+                    label={"Name"}
+                    value={selectedTeam.name ?? ""}
+                    onChange={e => updateTeam({
+                      ...selectedTeam,
+                      name: e.target.value,
+                    })}
+                  />
+
+                  <FormControl>
+                    <InputLabel id={"jabs-opposes-label"}>Opposes</InputLabel>
+                    <Select
+                      labelId={"jabs-opposes-label"}
+                      multiple={true}
+                      value={selectedTeam.opposes ?? []}
+                      input={<OutlinedInput label={"Opposes"}/>}
+                      renderValue={(selected) =>
+                      {
+                        const ids = selected as number[];
+                        if (ids.length === 0)
+                        {
+                          return "(none)";
+                        }
+
+                        return (
+                          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                            {ids.map(id =>
+                            {
+                              const t = teams.find(x => x.id === id);
+                              return <Chip key={id} label={t ? displayTeamLabel(t) : String(id)}/>;
+                            })}
+                          </Box>
+                        );
+                      }}
+                      onChange={e =>
+                      {
+                        const next = e.target.value as number[];
+                        updateTeam({
+                          ...selectedTeam,
+                          opposes: next,
+                        });
+                      }}
+                    >
+                      {teamIds
+                        .filter(id => id !== selectedTeam.id)
+                        .map(id =>
+                        {
+                          const team = teams.find(t => t.id === id)!;
+                          return (
+                            <MenuItem key={id} value={id}>
+                              <ListItemText primary={displayTeamLabel(team)}/>
+                            </MenuItem>
+                          );
+                        })}
+                    </Select>
+                  </FormControl>
+                </Stack>
+            </BoardSectionCard>
+            )
+            : (
+              <Typography color={"text.secondary"}>
+                No teams found.
+              </Typography>
+            )}
+        </Stack>
       </Box>
     </EditorBoardSplitLayout>
   );

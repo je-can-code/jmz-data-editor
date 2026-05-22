@@ -1,7 +1,6 @@
-import React, { type SyntheticEvent, useState } from "react";
+import { type SyntheticEvent, useState } from "react";
 import { Box, Tab, Tabs } from "@mui/material";
-import SaveButton from "@components/core/SaveButton.tsx";
-import ReloadButton from "@components/core/ReloadButton.tsx";
+import { useBoardActions } from "@presentation/context/board-actions.context.tsx";
 import { useJabs } from "@presentation/context/resources/jabs.context.tsx";
 import JabsTeamsTab from "@boards/jabs/JabsTeamsTab.tsx";
 import JabsJuiceTab from "@boards/jabs/JabsJuiceTab.tsx";
@@ -62,12 +61,15 @@ const JabsConfigBoard = () =>
   const canSave = loading === false && jabsConfig !== null;
   const canReload = loading === false;
 
-  // matches the EnemiesBoard / SkillsBoard layout: the main content lives in a flex-column Box, and
-  // the SaveButton / ReloadButton are emitted as siblings (NOT children) so their absolute positioning
-  // bubbles up to the app shell's positioned ancestor — landing them on the app bar with every other
-  // board's buttons. wrapping them inside a `position: relative` container (the previous mistake)
-  // captured them locally and made them collide with the tabs strip.
-  return <>
+  useBoardActions({
+    onSave: handleSave,
+    canSave,
+    isSaving,
+    onReload: handleReload,
+    canReload,
+  });
+
+  return (
     <Box sx={{
       flex: 1,
       minHeight: 0,
@@ -88,25 +90,7 @@ const JabsConfigBoard = () =>
           : <JabsJuiceTab/>}
       </Box>
     </Box>
-
-    {/* not-grid-related elements — float onto the app bar via the absolute positioning baked into each button. */}
-    <Box sx={{
-      display: "flex",
-      gap: 2,
-    }}>
-      <SaveButton
-        handleSave={handleSave}
-        canSave={canSave}
-        isSaving={isSaving}
-        extraSaveText={"JABS"}
-      />
-      <ReloadButton
-        handleReload={handleReload}
-        canReload={canReload}
-        extraReloadText={"JABS"}
-      />
-    </Box>
-  </>;
+  );
 };
 
 export default JabsConfigBoard;

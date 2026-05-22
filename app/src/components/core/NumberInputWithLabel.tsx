@@ -9,6 +9,11 @@ type NumberInputWithLabelProps = {
   endAdornment?: React.ReactNode | undefined;
   sx?: SxProps<Theme> | undefined;
   /**
+   * When true, renders the label as a MUI floating label inside the outlined box (same style as TextField).
+   * Overrides {@link labelPlacement} — the FormControlLabel wrapper is skipped entirely.
+   */
+  floatingLabel?: boolean;
+  /**
    * {@code end}: control then label (default, historical). {@code start}: label on the left, then control.
    */
   labelPlacement?: 'end' | 'start';
@@ -49,6 +54,7 @@ export default function NumberInputWithLabel({
   disabled,
   endAdornment,
   sx,
+  floatingLabel = true,
   labelPlacement = 'end',
   variant = 'standard',
   size = 'medium',
@@ -135,10 +141,9 @@ export default function NumberInputWithLabel({
       type={'number'}
       variant={variant}
       size={size}
+      label={floatingLabel ? label : undefined}
       disabled={disabled === true}
-      fullWidth={isStart
-        ? true
-        : fullWidth}
+      fullWidth={floatingLabel ? fullWidth : (isStart ? true : fullWidth)}
       helperText={helperText}
       slotProps={Object.keys(slotProps).length > 0
         ? slotProps as object
@@ -158,6 +163,11 @@ export default function NumberInputWithLabel({
       onChange={onChangeEventHandler}
     />
   );
+
+  if (floatingLabel)
+  {
+    return textField;
+  }
 
   const startLabelAlign =
     helperText !== undefined && helperText !== ''

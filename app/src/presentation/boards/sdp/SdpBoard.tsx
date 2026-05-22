@@ -1,58 +1,65 @@
-import React, { MouseEvent, useEffect, useRef, useState } from 'react';
+import { MouseEvent, useEffect, useRef, useState } from 'react';
 
 import { resolveSdpEffectiveRankUpParts } from '../../../constants/sdpRarityCostDefaults';
 import { FixedSizeList } from 'react-window';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Autocomplete,
   Box,
   Button,
-  Checkbox,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
-  FilledInput,
   FormControl,
   FormControlLabel,
   Grid,
+  IconButton,
   InputLabel,
   List,
   ListItem,
-  ListItemButton,
   ListItemIcon,
   ListItemText,
   ListSubheader,
   Menu,
   MenuItem,
-  Paper,
   Select,
   Snackbar,
   Stack,
+  Switch,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material';
 import {
   Add,
   AddReaction,
+  AllInclusive,
+  ArrowDownward,
+  ArrowUpward,
   AutoAwesome,
   AutoGraph,
   Check,
   Circle,
   ContentCopy,
-  DoubleArrow,
+  DeleteOutline,
+  EmojiEvents,
+  ExpandMore,
   Insights,
   KeyboardArrowRight,
   Lock,
   LockOpen,
+  Numbers,
   Percent,
   PlayCircleFilled,
-  PlayCircleOutline,
   Psychology,
   Quiz,
-  Redeem,
   Remove,
   ShowChart,
   SportsHandball,
@@ -63,11 +70,11 @@ import {
   WaterfallChart
 } from '@mui/icons-material';
 import { green, orange, purple } from '@mui/material/colors';
+import { alpha } from '@mui/material/styles';
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 
-import SaveButton from '../../../components/core/SaveButton.tsx';
+import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import KeyTextField from '../../../components/core/KeyTextField.tsx';
-import ReloadButton from '../../../components/core/ReloadButton.tsx';
 
 import { fromLongParameterIdToName } from '../../../mappers/ParameterIdMapper.ts';
 import {
@@ -76,6 +83,10 @@ import {
   SDP_RARITY_VALUES
 } from '@services/sdp/sdpPanelRarity.ts';
 import { useSdps } from '@presentation/context/resources/sdps.context.tsx';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
+import { IconIndexField } from '@presentation/components/icons/IconIndexField.tsx';
+import { SdpRewardEffectEditor } from './SdpRewardEffectEditor.tsx';
+import { parseRewardEffect, rawEffectSummary } from '@services/sdp/sdpRewardEffect.ts';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
 import {
@@ -91,6 +102,56 @@ import type { VirtualizedSidebarRow } from '@presentation/components/board/Virtu
 import Panel = Sdp.StatDistributionPanel;
 import PanelParameter = Sdp.SdpParameter;
 import PanelReward = Sdp.SdpReward;
+
+type RankMode = 'every' | 'mastery' | 'specific';
+
+const rankModeFromRequired = (rankRequired: number): RankMode =>
+{
+  if (rankRequired === -1) return 'every';
+  if (rankRequired === 0) return 'mastery';
+  return 'specific';
+};
+
+const rankLabel = (rankRequired: number, maxRank: number): string =>
+{
+  if (rankRequired === -1) return 'every rank';
+  if (rankRequired === 0) return `on max (${maxRank})`;
+  return `rank ${rankRequired}`;
+};
+
+const deriveRewardName = (raw: string): string =>
+{
+  const effect = parseRewardEffect(raw);
+  switch (effect.type)
+  {
+    case 'unlock-sdp-learner':
+    case 'unlock-sdp-party':
+      return `Unlock SDP: \\sdp[${effect.key}]`;
+    case 'gain-item':
+      return effect.count > 1
+        ? `Gain Item: \\item[${effect.itemId}] x${effect.count}`
+        : `Gain Item: \\item[${effect.itemId}]`;
+    case 'gain-weapon':
+      return effect.count > 1
+        ? `Gain Weapon: \\weapon[${effect.weaponId}] x${effect.count}`
+        : `Gain Weapon: \\weapon[${effect.weaponId}]`;
+    case 'gain-armor':
+      return effect.count > 1
+        ? `Gain Armor: \\armor[${effect.armorId}] x${effect.count}`
+        : `Gain Armor: \\armor[${effect.armorId}]`;
+    case 'learn-skill':
+      return `Learn Skill: \\skill[${effect.skillId}]`;
+    case 'gain-exp':        return `+${effect.amount} EXP`;
+    case 'gain-gold':       return `+${effect.amount} Gold`;
+    case 'gain-ap':         return `+${effect.amount} AP`;
+    case 'gain-sdp-points': return `+${effect.amount} SDP Points`;
+    case 'custom':
+    {
+      const trimmed = effect.raw.trim();
+      return trimmed.length === 0 ? '(custom)' : trimmed.slice(0, 40);
+    }
+  }
+};
 
 const SDP_MONO_CAP_CH = 80;
 
@@ -131,6 +192,7 @@ const SdpBoard = () =>
     reload
   } = useSdps();
 
+
   //region state
   const listRef = useRef<FixedSizeList>(null);
   const listWrapperRef = useRef<HTMLDivElement>(null);
@@ -143,21 +205,9 @@ const SdpBoard = () =>
   } | null>(null);
   const [ searchTerm, setSearchTerm ] = useState<string>('');
 
-  const [ selectedPanelParameter, setSelectedPanelParameter ] = useState<PanelParameter | null>(null);
-  const [ selectedPanelParameterIndex, setSelectedPanelParameterIndex ] = useState<number>(0);
-  const [ parameterListContextMenu, setParameterListContextMenu ] = useState<{
-    mouseX: number;
-    mouseY: number;
-  } | null>(null);
 
   const [ canSave, setCanSave ] = useState<boolean>(false);
-
-  const [ selectedPanelReward, setSelectedPanelReward ] = useState<PanelReward | null>(null);
-  const [ selectedPanelRewardIndex, setSelectedPanelRewardIndex ] = useState<number>(0);
-  const [ rewardListContextMenu, setRewardListContextMenu ] = useState<{
-    mouseX: number;
-    mouseY: number;
-  } | null>(null);
+  const [ manualAutoNameOff, setManualAutoNameOff ] = useState<Set<number>>(new Set());
 
   const [ rankupCostProjectionDialog, setRankupCostProjectionDialog ] = useState<boolean>(false);
 
@@ -177,7 +227,8 @@ const SdpBoard = () =>
    */
   useEffect(() =>
   {
-    if (sdps.length > 0 && !selectedPanel)
+    const params = new URLSearchParams(window.location.search);
+    if (sdps.length > 0 && !selectedPanel && !params.get('sdpKey'))
     {
       const firstPanel = sdps.at(0)!;
       syncSelectionWithPanel(firstPanel, 0);
@@ -194,6 +245,11 @@ const SdpBoard = () =>
     scrollListToIndex(selectedPanelIndex, 'smart');
   }, [ selectedPanelIndex, sdps.length ]);
 
+  useEffect(() =>
+  {
+    setManualAutoNameOff(new Set());
+  }, [ selectedPanel?.key ]);
+
   /**
    * Syncs the entire board state when a new panel is selected.
    * @param {Panel | null} panel The panel to select.
@@ -206,16 +262,6 @@ const SdpBoard = () =>
   {
     setSelectedPanelIndex(index);
     setSelectedPanel(panel);
-
-    // Automatically select the first parameter of the panel.
-    const firstParam = panel?.panelParameters?.at(0) ?? null;
-    setSelectedPanelParameter(firstParam);
-    setSelectedPanelParameterIndex(0);
-
-    // Automatically select the first reward of the panel.
-    const firstReward = panel?.panelRewards?.at(0) ?? null;
-    setSelectedPanelReward(firstReward);
-    setSelectedPanelRewardIndex(0);
   };
   //endregion setup
 
@@ -234,22 +280,9 @@ const SdpBoard = () =>
     'sdpKey',
     sdps,
     (p) => p.key,
-    selectedPanelIndex,
     handleSdpListItemOnClickEvent,
     (index) => scrollListToIndex(index, 'smart')
   );
-
-  const handleSdpPanelParameterListItemOnClickEvent = (index: number) =>
-  {
-    setSelectedPanelParameterIndex(index);
-    setSelectedPanelParameter(selectedPanel?.panelParameters.at(index) ?? null);
-  };
-
-  const handleSdpPanelRewardListItemOnClickEvent = (index: number) =>
-  {
-    setSelectedPanelRewardIndex(index);
-    setSelectedPanelReward(selectedPanel?.panelRewards.at(index) ?? null);
-  };
 
   const handleReloadButtonOnClickEvent = async () =>
   {
@@ -294,34 +327,6 @@ const SdpBoard = () =>
       : null;
 
     setPanelListContextMenu(newContextMenuState);
-  };
-
-  const handleParameterListContextMenu = (event: MouseEvent) =>
-  {
-    event.preventDefault();
-
-    const newContextMenuState = parameterListContextMenu === null
-      ? {
-        mouseX: event.clientX + 2,
-        mouseY: event.clientY - 6,
-      }
-      : null;
-
-    setParameterListContextMenu(newContextMenuState);
-  };
-
-  const handleRewardListContextMenu = (event: MouseEvent) =>
-  {
-    event.preventDefault();
-
-    const newContextMenuState = rewardListContextMenu === null
-      ? {
-        mouseX: event.clientX + 2,
-        mouseY: event.clientY - 6,
-      }
-      : null;
-
-    setRewardListContextMenu(newContextMenuState);
   };
 
   const openCloneFromDialog = (insertIndex: number) =>
@@ -560,83 +565,6 @@ const SdpBoard = () =>
     updatePanel(updatedPanel, selectedPanelIndex);
   };
 
-  const handleUpdatePanelParameterIdChange = (input: number) =>
-  {
-    const updatedPanelParameter = {
-      ...selectedPanelParameter,
-      parameterId: input,
-    } as PanelParameter;
-    setSelectedPanelParameter(updatedPanelParameter);
-
-    updatePanelParameters(updatedPanelParameter, selectedPanelParameterIndex);
-  };
-
-  const handleUpdatePanelParameterPerRankChange = (input: number) =>
-  {
-    const updatedPanelParameter = {
-      ...selectedPanelParameter,
-      perRank: input,
-    } as PanelParameter;
-    setSelectedPanelParameter(updatedPanelParameter);
-
-    updatePanelParameters(updatedPanelParameter, selectedPanelParameterIndex);
-  };
-
-  const handleUpdatePanelParameterIsCoreChange = (input: boolean) =>
-  {
-    const updatedPanelParameter = {
-      ...selectedPanelParameter,
-      isCore: input,
-    } as PanelParameter;
-    setSelectedPanelParameter(updatedPanelParameter);
-
-    updatePanelParameters(updatedPanelParameter, selectedPanelParameterIndex);
-  };
-
-  const handleUpdatePanelParameterIsFlatChange = (input: boolean) =>
-  {
-    const updatedPanelParameter = {
-      ...selectedPanelParameter,
-      isFlat: input,
-    } as PanelParameter;
-    setSelectedPanelParameter(updatedPanelParameter);
-
-    updatePanelParameters(updatedPanelParameter, selectedPanelParameterIndex);
-  };
-
-  const handleUpdatePanelRewardRankRequired = (input: number) =>
-  {
-    const updatedPanelReward = {
-      ...selectedPanelReward,
-      rankRequired: input,
-    } as PanelReward;
-    setSelectedPanelReward(updatedPanelReward);
-
-    updatePanelRewards(updatedPanelReward, selectedPanelRewardIndex);
-  };
-
-  const handleUpdatePanelRewardName = (input: string) =>
-  {
-    const updatedPanelReward = {
-      ...selectedPanelReward,
-      rewardName: input,
-    } as PanelReward;
-    setSelectedPanelReward(updatedPanelReward);
-
-    updatePanelRewards(updatedPanelReward, selectedPanelRewardIndex);
-  };
-
-  const handleUpdatePanelRewardEffect = (input: string) =>
-  {
-    const updatedPanelReward = {
-      ...selectedPanelReward,
-      effect: input,
-    } as PanelReward;
-    setSelectedPanelReward(updatedPanelReward);
-
-    updatePanelRewards(updatedPanelReward, selectedPanelRewardIndex);
-  };
-
   /**
    * Updates a specific parameter within the currently selected panel.
    * @param {PanelParameter} updatedParam The updated parameter data.
@@ -653,7 +581,6 @@ const SdpBoard = () =>
     }
 
     const updatedParams = selectedPanel.panelParameters.with(index, updatedParam);
-    setSelectedPanelParameter(updatedParam);
 
     updatePanel({
       ...selectedPanel,
@@ -677,7 +604,6 @@ const SdpBoard = () =>
     }
 
     const updatedRewards = selectedPanel.panelRewards.with(index, updatedReward);
-    setSelectedPanelReward(updatedReward);
 
     updatePanel({
       ...selectedPanel,
@@ -782,20 +708,35 @@ const SdpBoard = () =>
     }, selectedPanelIndex);
   };
 
+  const handleMoveParameter = (
+    fromIdx: number,
+    toIdx: number
+  ) =>
+  {
+    if (!selectedPanel) return;
+    if (toIdx < 0 || toIdx >= selectedPanel.panelParameters.length) return;
+    const params = [...selectedPanel.panelParameters];
+    const [moved] = params.splice(fromIdx, 1);
+    params.splice(toIdx, 0, moved);
+    updatePanel({ ...selectedPanel, panelParameters: params }, selectedPanelIndex);
+  };
+
   /**
    * Clones an existing parameter within the selected panel.
-   * @param {number} index The index of the parameter to clone.
+   * @param {number} index The index to insert the clone at.
+   * @param {PanelParameter} parameter The parameter to clone.
    */
-  const handleClonePanelParameter = (index: number) =>
+  const handleClonePanelParameter = (
+    index: number,
+    parameter: PanelParameter
+  ) =>
   {
-    if (!selectedPanel || !selectedPanelParameter)
+    if (!selectedPanel)
     {
       return;
     }
 
-    const clonedParameter = {
-      ...selectedPanelParameter,
-    } as PanelParameter;
+    const clonedParameter = { ...parameter } as PanelParameter;
 
     const updatedParameters = selectedPanel.panelParameters.toSpliced(index, 0, clonedParameter);
 
@@ -851,20 +792,35 @@ const SdpBoard = () =>
     }, selectedPanelIndex);
   };
 
+  const handleMoveReward = (
+    fromIdx: number,
+    toIdx: number
+  ) =>
+  {
+    if (!selectedPanel) return;
+    if (toIdx < 0 || toIdx >= selectedPanel.panelRewards.length) return;
+    const rewards = [...selectedPanel.panelRewards];
+    const [moved] = rewards.splice(fromIdx, 1);
+    rewards.splice(toIdx, 0, moved);
+    updatePanel({ ...selectedPanel, panelRewards: rewards }, selectedPanelIndex);
+  };
+
   /**
    * Clones an existing reward within the selected panel.
-   * @param {number} index The index of the reward to clone.
+   * @param {number} index The index to insert the clone at.
+   * @param {PanelReward} reward The reward to clone.
    */
-  const handleClonePanelReward = (index: number) =>
+  const handleClonePanelReward = (
+    index: number,
+    reward: PanelReward
+  ) =>
   {
-    if (!selectedPanel || !selectedPanelReward)
+    if (!selectedPanel)
     {
       return;
     }
 
-    const clonedReward = {
-      ...selectedPanelReward
-    } as PanelReward;
+    const clonedReward = { ...reward } as PanelReward;
 
     const updatedRewards = selectedPanel.panelRewards.toSpliced(index, 0, clonedReward);
 
@@ -893,6 +849,7 @@ const SdpBoard = () =>
     }, selectedPanelIndex);
   };
   //endregion updates
+
 
   //region render
   /**
@@ -1032,52 +989,6 @@ const SdpBoard = () =>
     }
   };
 
-  const renderSdpParameterListItem = (
-    parameter: PanelParameter,
-    index: number
-  ) =>
-  {
-    const selected = (
-      selectedPanelParameterIndex === index
-    );
-    const icon = selected
-      ? <DoubleArrow color={'primary'}/>
-      : <KeyboardArrowRight color={'inherit'}/>;
-    const coreIcon = selected
-      ? <PlayCircleFilled color={'primary'}/>
-      : <PlayCircleOutline color={'inherit'}/>;
-    const parameterIcon = fromParameterIdToIconElement(parameter.parameterId, selected);
-
-    const isPositive = parameter.perRank > 0;
-    const percent = parameter.isFlat === false
-      ? '%'
-      : '';
-    const amountPerRank = `${isPositive
-      ? '+'
-      : ''} ${parameter.perRank}${percent} / rank`;
-
-    const totalBonus = `${isPositive
-      ? '+'
-      : ''}${parameter.perRank * selectedPanel!.maxRank}${percent}`;
-
-    return <ListItem key={`${selectedPanelParameter?.parameterId}-${index}`}>
-      <ListItemButton
-        selected={selectedPanelParameterIndex === index}
-        onClick={() => handleSdpPanelParameterListItemOnClickEvent(index)}
-      >
-        <ListItemIcon>{parameter.isCore
-          ? coreIcon
-          : icon}
-          {parameterIcon}</ListItemIcon>
-        <ListItemText
-          primary={`${fromLongParameterIdToName(parameter.parameterId)} (${totalBonus})`}
-          secondary={amountPerRank}
-          sx={{ height: '28px' }}
-        />
-      </ListItemButton>
-    </ListItem>;
-  };
-
   const mapParametersToSelectMenuItems = () =>
   {
     const parameterItems = [];
@@ -1156,49 +1067,6 @@ const SdpBoard = () =>
     return parameterItems;
   };
 
-  const renderPanelRewardListItem = (
-    panelReward: PanelReward,
-    index: number
-  ) =>
-  {
-    let rankRequired;
-    switch (panelReward.rankRequired)
-    {
-      case -1:
-        rankRequired = 'Every Rank Up';
-        break;
-      case 0:
-        rankRequired = `Upon max (${selectedPanel!.maxRank})`;
-        break;
-      default:
-        rankRequired = panelReward.rankRequired;
-        break;
-    }
-
-    const selected = (
-      selectedPanelRewardIndex === index
-    );
-    const icon = selected
-      ? <Redeem color={'primary'}/>
-      : <KeyboardArrowRight color={'inherit'}/>;
-    return (
-      <ListItem
-        key={`${index}-${panelReward.rewardName}`}
-      >
-        <ListItemButton
-          selected={selected}
-          onClick={() => handleSdpPanelRewardListItemOnClickEvent(index)}
-        >
-          <ListItemIcon>{icon}</ListItemIcon>
-          <ListItemText
-            primary={panelReward.rewardName}
-            secondary={`Rank Rewarded: ${rankRequired}`}
-          />
-        </ListItemButton>
-      </ListItem>
-    );
-  };
-
   const renderCostProjection = () =>
   {
     if (!selectedPanel)
@@ -1274,6 +1142,26 @@ const SdpBoard = () =>
     return accumulatedCost;
   };
   //endregion render
+
+  useBoardActions({
+    onSave: async () =>
+    {
+      setCanSave(false);
+      const resolved = sdps.map(panel => ({
+        ...panel,
+        panelRewards: panel.panelRewards.map(reward =>
+          reward.rewardName === ''
+            ? { ...reward, rewardName: deriveRewardName(reward.effect) }
+            : reward
+        ),
+      }));
+      await save(resolved as typeof sdps);
+      handleSnack('SDP data has been saved successfully.', MuiSnackbarSeverity.Success);
+    },
+    canSave: canSave && !loading,
+    onReload: handleReloadButtonOnClickEvent,
+    canReload: !loading,
+  });
 
   if (loading)
   {
@@ -1370,376 +1258,608 @@ const SdpBoard = () =>
               If there are no sdps then consider making one.
             </Typography>
             : <>
-              <Grid container rowSpacing={2} columnSpacing={4}>
-                {/* ROW 1 */}
-                {/* key */}
-                <Grid size={2}>
-                  <KeyTextField
-                    value={selectedPanel.key}
-                    onChange={handlePanelKeyChange}
-                  />
-                </Grid>
-
-                {/* name */}
+              <Grid container columnSpacing={2}>
+                {/* Left column: Identity + Parameters */}
                 <Grid size={6}>
-                  <TextField
-                    variant={'standard'}
-                    label={'Name'}
-                    value={selectedPanel.name}
-                    onChange={event => handlePanelNameChange(event.target.value)}
-                    size={'small'}
-                    fullWidth
-                  />
-                </Grid>
-
-                {/* icon index */}
-                <Grid size={2}>
-                  <TextField
-                    type={'number'}
-                    label={'Icon Index'}
-                    variant={'filled'}
-                    value={selectedPanel.iconIndex}
-                    onChange={event => handlePanelIconIndexChange(parseInt(event.target.value) ?? -1)}
-                    sx={{ width: '100px' }}
-                  />
-                </Grid>
-
-                {/* unlocked by default */}
-                <Grid size={2}>
-                  <FormControlLabel
-                    control={<Checkbox
-                      checked={selectedPanel.unlockedByDefault}
-                      checkedIcon={<LockOpen color={'success'}/>}
-                      icon={<Lock color={'error'}/>}
-                      onChange={event => handlePanelUnlockedByDefaultChange(event.target.checked)}
-                    />}
-                    label={selectedPanel.unlockedByDefault
-                      ? 'Unlocked By Default'
-                      : 'Locked by Default'}
-                    labelPlacement={'end'}
-                  />
-                </Grid>
-
-                {/* ROW 2 */}
-                {/* rarity */}
-                <Grid size={3}>
-                  <Select
-                    value={selectedPanel.rarity}
-                    onChange={event => handlePanelRarityChange(parseInt(event.target.value.toString()))}
-                    autoWidth
-                  >
-                    {renderSdpRarities()}
-                  </Select>
-                </Grid>
-
-                {/* top flavor text */}
-                <Grid size={9}>
-                  <TextField
-                    fullWidth
-                    size={'small'}
-                    variant={'outlined'}
-                    label={'Top Flavor Text'}
-                    value={selectedPanel.topFlavorText}
-                    onChange={event => handlePanelTopFlavorTextChange(event.target.value)}
-                    error={topFlavorTooLong}
-                    helperText={topFlavorTooLong
-                      ? `Longest line ~${topFlavorMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
-                      : undefined}
-                  />
-                </Grid>
-
-                {/* ROW 3 */}
-                {/* description */}
-                <Grid size={12}>
-                  <TextField
-                    fullWidth
-                    size={'small'}
-                    variant={'outlined'}
-                    label={'Description'}
-                    multiline
-                    rows={4}
-                    value={selectedPanel.description}
-                    onChange={event => handlePanelDescriptionChange(event.target.value)}
-                    error={descriptionTooLong}
-                    helperText={descriptionTooLong
-                      ? `Longest line ~${descriptionMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
-                      : undefined}
-                  />
-                </Grid>
-
-                {/* ROW 4 */}
-                {/* max rank */}
-                <Grid size={1}>
-                  <TextField
-                    type={'number'}
-                    label={'Max Rank'}
-                    variant={'outlined'}
-                    value={selectedPanel.maxRank}
-                    onChange={event => handlePanelMaxRankChange(parseInt(event.target.value) ?? 1)}
-                    sx={{ width: '80px' }}
-                  />
-                </Grid>
-
-                {/* base growth */}
-                <Grid size={1} sx={{ mr: 5 }}>
-                  <TextField
-                    type={'number'}
-                    label={'Base offset'}
-                    variant={'outlined'}
-                    value={selectedPanel.baseCost}
-                    onChange={event => handlePanelBaseCostChange(parseInt(event.target.value) ?? 0)}
-                    sx={{ width: '120px' }}
-                  />
-                </Grid>
-
-                {/* flat growth */}
-                <Grid size={1} sx={{ mr: 5 }}>
-                  <TextField
-                    type={'number'}
-                    label={'Flat offset'}
-                    variant={'outlined'}
-                    value={selectedPanel.flatGrowthCost}
-                    onChange={event => handlePanelFlatGrowthCostChange(parseInt(event.target.value) ?? 0)}
-                    sx={{ width: '120px' }}
-                  />
-                </Grid>
-
-                {/* growth multiplier */}
-                <Grid size={1}>
-                  <FormControl>
-                    <InputLabel>
-                      Mult scale
-                    </InputLabel>
-                    <FilledInput
-                      type={'number'}
-                      value={selectedPanel.multGrowthCost}
-                      onChange={event => handlePanelMultGrowthCostChange(parseFloat(event.target.value) ?? 0.01)}
-                      slotProps={{
-                        input: {
-                          min: '0.01',
-                          step: '0.01'
-                        }
-                      }}
-                      sx={{ width: '80px' }}
-                    />
-                  </FormControl>
-                </Grid>
-
-                {/* cost to master projection */}
-                <Grid size={2}>
-                  <Typography variant={'body1'}>
-                    Total Cost to Master:<br/> <strong>{projectTotalCost()}</strong>
-                  </Typography>
-                </Grid>
-
-                {/* cost per level projections */}
-                <Grid size={4}>
-                  <Button
-                    color={'info'}
-                    variant={'outlined'}
-                    startIcon={<span><WaterfallChart color={'secondary'}/><Quiz color={'success'}/></span>}
-
-                    onClick={() => setRankupCostProjectionDialog(true)}
-                  >
-                    <Typography variant={'body2'}>
-                      Cost Per Level Projections
-                    </Typography>
-                  </Button>
-                </Grid>
-
-                {/* SPACER */}
-                <Grid size={1}/>
-
-                {/* ROW 5 */}
-                {/* Parameter List */}
-                {/* Parameter List */}
-                <Grid size={3}>
-                  <div
-                    onContextMenu={handleParameterListContextMenu}
-                    style={{ cursor: 'context-menu' }}
-                  >
-                    <List dense>
-                      {(selectedPanel?.panelParameters?.length ?? 0) > 0
-                        ? selectedPanel!.panelParameters.map(renderSdpParameterListItem)
-                        : <>
-                          <Button
-                            fullWidth
-                            startIcon={<Add/>}
-                            onClick={() => handleAddNewPanelParameter(null)}
-                            variant={'contained'}/>
-                        </>}
-                    </List>
-                  </div>
-                </Grid>
-
-                {/* Selected Parameter Data */}
-                <Grid size={3}>
-                  {(
-                    !selectedPanelParameter
-                  )
-                    ? <></>
-                    : <>
-                      <Stack spacing={8}>
-                        {/* Parameter Toggles */}
-                        <Stack>
-                          {/* Parameter Core or Regular */}
-                          <FormControlLabel
-                            control={<Checkbox
-                              checked={selectedPanelParameter!.isCore}
-                              checkedIcon={<PlayCircleFilled color={'primary'}/>}
-                              icon={<KeyboardArrowRight color={'inherit'}/>}
-                              onChange={event => handleUpdatePanelParameterIsCoreChange(event.target.checked)}
-                            />}
-                            label={selectedPanelParameter!.isCore
-                              ? 'Is Core'
-                              : 'Is Regular'}
-                            labelPlacement={'end'}
+                  <Stack spacing={2}>
+                    <BoardSectionCard title={'Identity'}>
+                      <Grid container spacing={1.5} alignItems={'center'}>
+                        <Grid size={3}>
+                          <KeyTextField
+                            value={selectedPanel.key}
+                            onChange={handlePanelKeyChange}
                           />
-
-                          {/* Growth Flat or Percent */}
-                          <FormControlLabel
-                            control={<Checkbox
-                              checked={selectedPanelParameter!.isFlat}
-                              checkedIcon={<TrendingFlat color={'primary'}/>}
-                              icon={<Percent color={'secondary'}/>}
-                              onChange={event => handleUpdatePanelParameterIsFlatChange(event.target.checked)}
-                            />}
-                            label={selectedPanelParameter!.isFlat
-                              ? 'Flat Growth'
-                              : 'Percent Growth'}
-                            labelPlacement={'end'}
-                          />
-                        </Stack>
-
-                        {/* Per Rank Growth */}
-                        <FormControl>
-                          <InputLabel>
-                            Per Rank
-                          </InputLabel>
-                          <FilledInput
-                            type={'number'}
-                            value={selectedPanelParameter?.perRank}
-                            onChange={event => handleUpdatePanelParameterPerRankChange(parseFloat(event.target.value)
-                              ?? 0.01)}
-                            slotProps={{
-                              input: {
-                                step: '0.1',
-
-                              }
-                            }}
-                            sx={{ width: '80px' }}
-                          />
-                        </FormControl>
-
-                        {/* Parameter Type */}
-                        <Select
-                          label="Parameter Type"
-                          value={selectedPanelParameter!.parameterId}
-                          onChange={event => handleUpdatePanelParameterIdChange(parseInt(event.target.value.toString()))}
-                          autoWidth
-                        >
-                          {mapParametersToSelectMenuItems()}
-                        </Select>
-                      </Stack>
-                    </>}
-                </Grid>
-
-                <Grid size={6}>
-                  <Paper
-                    sx={{
-                      padding: 2
-                    }}
-                    elevation={10}
-                  >
-                    <Stack spacing={2}>
-
-                      {/* Selected Reward Data */}
-                      <Typography variant={'h6'}>
-                        Rank Rewards
-                      </Typography>
-
-                      <div
-                        onContextMenu={handleRewardListContextMenu}
-                        style={{ cursor: 'context-menu' }}
-                      >
-                        <List dense>
-                          {(selectedPanel?.panelRewards?.length ?? 0) > 0
-                            ? selectedPanel!.panelRewards.map(renderPanelRewardListItem)
-                            : <>
-                              <Button
-                                fullWidth
-                                startIcon={<Add/>}
-                                onClick={() => handleAddNewPanelReward(null)}
-                                variant={'contained'}/>
-                            </>}
-                        </List>
-                      </div>
-
-                      {(
-                        !selectedPanelReward
-                      )
-                        ? <></>
-                        : <>
+                        </Grid>
+                        <Grid size={6}>
                           <TextField
-                            type={'number'}
-                            label={'Rank Required'}
                             variant={'outlined'}
-                            value={selectedPanelReward!.rankRequired}
-                            onChange={event => handleUpdatePanelRewardRankRequired(parseInt(event.target.value) ?? 0)}
-                            sx={{ width: '120px' }}
-                          />
-                          <TextField
-                            variant={'standard'}
-                            label={'Reward Name'}
-                            value={selectedPanelReward!.rewardName}
-                            onChange={event => handleUpdatePanelRewardName(event.target.value)}
+                            label={'Name'}
+                            value={selectedPanel.name}
+                            onChange={event => handlePanelNameChange(event.target.value)}
                             size={'small'}
                             fullWidth
                           />
+                        </Grid>
+                        <Grid size={3}>
+                          <FormControlLabel
+                            control={
+                              <Switch
+                                size={'small'}
+                                checked={selectedPanel.unlockedByDefault}
+                                onChange={event => handlePanelUnlockedByDefaultChange(event.target.checked)}
+                              />
+                            }
+                            label={
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                {selectedPanel.unlockedByDefault
+                                  ? <LockOpen color={'success'} fontSize={'small'}/>
+                                  : <Lock color={'error'} fontSize={'small'}/>}
+                                <Typography variant={'body2'}>
+                                  {selectedPanel.unlockedByDefault ? 'Unlocked' : 'Locked'}
+                                </Typography>
+                              </Box>
+                            }
+                          />
+                        </Grid>
+                        <Grid size={5}>
+                          <IconIndexField
+                            value={selectedPanel.iconIndex}
+                            onChange={handlePanelIconIndexChange}
+                          />
+                        </Grid>
+                        <Grid size={7}>
+                          <FormControl size={'small'} fullWidth>
+                            <InputLabel id={'sdp-rarity-label'}>Rarity</InputLabel>
+                            <Select
+                              labelId={'sdp-rarity-label'}
+                              label={'Rarity'}
+                              value={selectedPanel.rarity}
+                              onChange={event => handlePanelRarityChange(parseInt(event.target.value.toString()))}
+                            >
+                              {renderSdpRarities()}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid size={12}>
                           <TextField
                             fullWidth
                             size={'small'}
                             variant={'outlined'}
-                            label={'Effect'}
+                            label={'Top Flavor Text'}
+                            value={selectedPanel.topFlavorText}
+                            onChange={event => handlePanelTopFlavorTextChange(event.target.value)}
+                            error={topFlavorTooLong}
+                            helperText={topFlavorTooLong
+                              ? `Longest line ~${topFlavorMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
+                              : undefined}
+                          />
+                        </Grid>
+                        <Grid size={12}>
+                          <TextField
+                            fullWidth
+                            size={'small'}
+                            variant={'outlined'}
+                            label={'Description'}
                             multiline
                             rows={4}
-                            value={selectedPanelReward!.effect}
-                            onChange={event => handleUpdatePanelRewardEffect(event.target.value)}
-                            sx={{
-                              '& .MuiOutlinedInput-root': {
-                                fontFamily: 'monospace',
-                                fontSize: 14
-                              },
-                            }}
+                            value={selectedPanel.description}
+                            onChange={event => handlePanelDescriptionChange(event.target.value)}
+                            error={descriptionTooLong}
+                            helperText={descriptionTooLong
+                              ? `Longest line ~${descriptionMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
+                              : undefined}
                           />
-                        </>}
+                        </Grid>
+                      </Grid>
+                    </BoardSectionCard>
 
+                    <BoardSectionCard title={'Parameters'}>
+                      <Stack spacing={1}>
+                        <Button
+                          fullWidth
+                          startIcon={<Add/>}
+                          variant={'outlined'}
+                          onClick={() => handleAddNewPanelParameter(0)}
+                        >
+                          Add Parameter
+                        </Button>
+                        {selectedPanel.panelParameters.map((parameter, idx) =>
+                        {
+                          const isPositive = parameter.perRank > 0;
+                          const pct = parameter.isFlat ? '' : '%';
+                          const sign = isPositive ? '+' : '';
+                          const perRankText = `${sign}${parameter.perRank}${pct} / rank`;
+                          const totalText = `${sign}${parameter.perRank * selectedPanel.maxRank}${pct} total`;
+                          return (
+                            <Accordion
+                              key={idx}
+                              disableGutters
+                              sx={{
+                                border: '1px solid',
+                                borderColor: parameter.isCore ? 'warning.dark' : 'divider',
+                                '&:before': { display: 'none' },
+                              }}
+                            >
+                              <AccordionSummary expandIcon={<ExpandMore/>}>
+                                <Stack
+                                  direction={'row'}
+                                  alignItems={'center'}
+                                  justifyContent={'space-between'}
+                                  sx={{ flex: 1, mr: 1 }}
+                                >
+                                  <Stack direction={'row'} alignItems={'center'} spacing={1}>
+                                    {fromParameterIdToIconElement(parameter.parameterId, parameter.isCore)}
+                                    <Stack>
+                                      <Stack direction={'row'} alignItems={'center'} spacing={0.5}>
+                                        <Typography variant={'body2'}>
+                                          {fromLongParameterIdToName(parameter.parameterId)}
+                                        </Typography>
+                                        {parameter.isCore && (
+                                          <PlayCircleFilled sx={{ fontSize: 14, color: 'warning.main' }}/>
+                                        )}
+                                      </Stack>
+                                      <Typography variant={'caption'} color={'text.secondary'}>
+                                        {perRankText} — {totalText}
+                                      </Typography>
+                                    </Stack>
+                                  </Stack>
+                                  <Stack direction={'row'} spacing={0.5}>
+                                    <IconButton
+                                      size={'small'}
+                                      disabled={idx === 0}
+                                      onClick={e =>
+                                      {
+                                        e.stopPropagation();
+                                        handleMoveParameter(idx, idx - 1);
+                                      }}
+                                    >
+                                      <ArrowUpward fontSize={'small'}/>
+                                    </IconButton>
+                                    <IconButton
+                                      size={'small'}
+                                      disabled={idx === selectedPanel.panelParameters.length - 1}
+                                      onClick={e =>
+                                      {
+                                        e.stopPropagation();
+                                        handleMoveParameter(idx, idx + 1);
+                                      }}
+                                    >
+                                      <ArrowDownward fontSize={'small'}/>
+                                    </IconButton>
+                                    <IconButton
+                                      size={'small'}
+                                      onClick={e =>
+                                      {
+                                        e.stopPropagation();
+                                        handleClonePanelParameter(idx + 1, parameter);
+                                      }}
+                                    >
+                                      <ContentCopy fontSize={'small'}/>
+                                    </IconButton>
+                                    <IconButton
+                                      size={'small'}
+                                      onClick={e =>
+                                      {
+                                        e.stopPropagation();
+                                        handleDeletePanelParameter(idx);
+                                      }}
+                                    >
+                                      <DeleteOutline fontSize={'small'}/>
+                                    </IconButton>
+                                  </Stack>
+                                </Stack>
+                              </AccordionSummary>
+                              <AccordionDetails>
+                                <Stack spacing={1.5}>
+                                  <FormControl size={'small'} fullWidth>
+                                    <InputLabel id={`sdp-param-type-label-${idx}`}>Parameter Type</InputLabel>
+                                    <Select
+                                      labelId={`sdp-param-type-label-${idx}`}
+                                      label={'Parameter Type'}
+                                      value={parameter.parameterId}
+                                      onChange={event => updatePanelParameters(
+                                        { ...parameter, parameterId: parseInt(event.target.value.toString()) },
+                                        idx
+                                      )}
+                                    >
+                                      {mapParametersToSelectMenuItems()}
+                                    </Select>
+                                  </FormControl>
+                                  <Stack direction={'row'} spacing={1.5} flexWrap={'wrap'} useFlexGap>
+                                    <ToggleButtonGroup
+                                      exclusive
+                                      size={'small'}
+                                      value={parameter.isCore ? 'core' : 'standard'}
+                                      onChange={(_e, val: string | null) =>
+                                      {
+                                        if (!val) return;
+                                        updatePanelParameters({ ...parameter, isCore: val === 'core' }, idx);
+                                      }}
+                                    >
+                                      <ToggleButton
+                                        value={'standard'}
+                                        sx={(theme) => ({
+                                          '&.Mui-selected': {
+                                            backgroundColor: alpha(theme.palette.info.main, 0.16),
+                                            borderColor: theme.palette.info.main,
+                                            color: theme.palette.info.main,
+                                            '&:hover': { backgroundColor: alpha(theme.palette.info.main, 0.24) },
+                                          },
+                                        })}
+                                      >
+                                        <KeyboardArrowRight fontSize={'small'} sx={{ mr: 0.75 }}/>
+                                        Standard
+                                      </ToggleButton>
+                                      <ToggleButton
+                                        value={'core'}
+                                        sx={(theme) => ({
+                                          '&.Mui-selected': {
+                                            backgroundColor: alpha(theme.palette.warning.main, 0.16),
+                                            borderColor: theme.palette.warning.main,
+                                            color: theme.palette.warning.main,
+                                            '&:hover': { backgroundColor: alpha(theme.palette.warning.main, 0.24) },
+                                          },
+                                        })}
+                                      >
+                                        <PlayCircleFilled fontSize={'small'} sx={{ mr: 0.75 }}/>
+                                        Core
+                                      </ToggleButton>
+                                    </ToggleButtonGroup>
+                                    <ToggleButtonGroup
+                                      exclusive
+                                      size={'small'}
+                                      value={parameter.isFlat ? 'flat' : 'percent'}
+                                      onChange={(_e, val: string | null) =>
+                                      {
+                                        if (!val) return;
+                                        updatePanelParameters({ ...parameter, isFlat: val === 'flat' }, idx);
+                                      }}
+                                    >
+                                      <ToggleButton
+                                        value={'flat'}
+                                        sx={(theme) => ({
+                                          '&.Mui-selected': {
+                                            backgroundColor: alpha(theme.palette.success.main, 0.16),
+                                            borderColor: theme.palette.success.main,
+                                            color: theme.palette.success.main,
+                                            '&:hover': { backgroundColor: alpha(theme.palette.success.main, 0.24) },
+                                          },
+                                        })}
+                                      >
+                                        <TrendingFlat fontSize={'small'} sx={{ mr: 0.75 }}/>
+                                        Flat
+                                      </ToggleButton>
+                                      <ToggleButton
+                                        value={'percent'}
+                                        sx={(theme) => ({
+                                          '&.Mui-selected': {
+                                            backgroundColor: alpha(theme.palette.secondary.main, 0.16),
+                                            borderColor: theme.palette.secondary.main,
+                                            color: theme.palette.secondary.main,
+                                            '&:hover': { backgroundColor: alpha(theme.palette.secondary.main, 0.24) },
+                                          },
+                                        })}
+                                      >
+                                        <Percent fontSize={'small'} sx={{ mr: 0.75 }}/>
+                                        % Growth
+                                      </ToggleButton>
+                                    </ToggleButtonGroup>
+                                  </Stack>
+                                  <TextField
+                                    type={'number'}
+                                    label={'Per Rank'}
+                                    variant={'outlined'}
+                                    size={'small'}
+                                    value={parameter.perRank}
+                                    onChange={event => updatePanelParameters(
+                                      { ...parameter, perRank: parseFloat(event.target.value) || 0.01 },
+                                      idx
+                                    )}
+                                    slotProps={{ htmlInput: { step: '0.1' } }}
+                                    sx={{ width: '120px' }}
+                                  />
+                                </Stack>
+                              </AccordionDetails>
+                            </Accordion>
+                          );
+                        })}
+                      </Stack>
+                    </BoardSectionCard>
+                  </Stack>
+                </Grid>
 
-                    </Stack>
-                  </Paper>
+                {/* Right column: Rank-Up Cost + Rank Rewards */}
+                <Grid size={6}>
+                  <Stack spacing={2}>
+                    <BoardSectionCard title={'Rank-Up Cost'}>
+                      <Grid container spacing={1.5} alignItems={'center'}>
+                        <Grid size={3}>
+                          <TextField
+                            type={'number'}
+                            label={'Max Rank'}
+                            variant={'outlined'}
+                            size={'small'}
+                            fullWidth
+                            value={selectedPanel.maxRank}
+                            onChange={event => handlePanelMaxRankChange(parseInt(event.target.value) ?? 1)}
+                          />
+                        </Grid>
+                        <Grid size={3}>
+                          <TextField
+                            type={'number'}
+                            label={'Base offset'}
+                            variant={'outlined'}
+                            size={'small'}
+                            fullWidth
+                            value={selectedPanel.baseCost}
+                            onChange={event => handlePanelBaseCostChange(parseInt(event.target.value) ?? 0)}
+                          />
+                        </Grid>
+                        <Grid size={3}>
+                          <TextField
+                            type={'number'}
+                            label={'Flat offset'}
+                            variant={'outlined'}
+                            size={'small'}
+                            fullWidth
+                            value={selectedPanel.flatGrowthCost}
+                            onChange={event => handlePanelFlatGrowthCostChange(parseInt(event.target.value) ?? 0)}
+                          />
+                        </Grid>
+                        <Grid size={3}>
+                          <TextField
+                            type={'number'}
+                            label={'Mult scale'}
+                            variant={'outlined'}
+                            size={'small'}
+                            fullWidth
+                            value={selectedPanel.multGrowthCost}
+                            onChange={event => handlePanelMultGrowthCostChange(parseFloat(event.target.value) ?? 0.01)}
+                            slotProps={{ htmlInput: { min: '0.01', step: '0.01' } }}
+                          />
+                        </Grid>
+                        <Grid size={6}>
+                          <Typography variant={'body1'}>
+                            Total Cost to Master:<br/> <strong>{projectTotalCost()}</strong>
+                          </Typography>
+                        </Grid>
+                        <Grid size={6}>
+                          <Button
+                            color={'info'}
+                            variant={'outlined'}
+                            startIcon={<span><WaterfallChart color={'secondary'}/><Quiz color={'success'}/></span>}
+                            onClick={() => setRankupCostProjectionDialog(true)}
+                          >
+                            <Typography variant={'body2'}>
+                              Cost Per Level Projections
+                            </Typography>
+                          </Button>
+                        </Grid>
+                      </Grid>
+                    </BoardSectionCard>
+
+                    <BoardSectionCard title={'Rank Rewards'}>
+                      <Stack spacing={1}>
+                        <Button
+                          fullWidth
+                          startIcon={<Add/>}
+                          variant={'outlined'}
+                          onClick={() => handleAddNewPanelReward(0)}
+                        >
+                          Add Reward
+                        </Button>
+                        {selectedPanel.panelRewards.map((reward, idx) =>
+                        {
+                          const rewardRankLabel = rankLabel(reward.rankRequired, selectedPanel.maxRank);
+                          const derivedName = deriveRewardName(reward.effect);
+                          const isAutoName = !manualAutoNameOff.has(idx)
+                            && (reward.rewardName === '' || reward.rewardName === derivedName);
+                          return (
+                            <Accordion
+                              key={idx}
+                              disableGutters
+                              sx={{
+                                border: '1px solid',
+                                borderColor: 'divider',
+                                '&:before': { display: 'none' },
+                              }}
+                            >
+                              <AccordionSummary expandIcon={<ExpandMore/>}>
+                                <Stack
+                                  direction={'row'}
+                                  alignItems={'center'}
+                                  justifyContent={'space-between'}
+                                  sx={{ flex: 1, mr: 1 }}
+                                >
+                                  <Stack>
+                                    <Typography variant={'body2'}>
+                                      {isAutoName ? derivedName : reward.rewardName}
+                                    </Typography>
+                                    <Typography variant={'caption'} color={'text.secondary'}>
+                                      {rewardRankLabel} — {rawEffectSummary(reward.effect)}
+                                    </Typography>
+                                  </Stack>
+                                  <Stack direction={'row'} spacing={0.5}>
+                                    <IconButton
+                                      size={'small'}
+                                      disabled={idx === 0}
+                                      onClick={e =>
+                                      {
+                                        e.stopPropagation();
+                                        handleMoveReward(idx, idx - 1);
+                                      }}
+                                    >
+                                      <ArrowUpward fontSize={'small'}/>
+                                    </IconButton>
+                                    <IconButton
+                                      size={'small'}
+                                      disabled={idx === selectedPanel.panelRewards.length - 1}
+                                      onClick={e =>
+                                      {
+                                        e.stopPropagation();
+                                        handleMoveReward(idx, idx + 1);
+                                      }}
+                                    >
+                                      <ArrowDownward fontSize={'small'}/>
+                                    </IconButton>
+                                    <IconButton
+                                      size={'small'}
+                                      onClick={e =>
+                                      {
+                                        e.stopPropagation();
+                                        handleClonePanelReward(idx + 1, reward);
+                                      }}
+                                    >
+                                      <ContentCopy fontSize={'small'}/>
+                                    </IconButton>
+                                    <IconButton
+                                      size={'small'}
+                                      onClick={e =>
+                                      {
+                                        e.stopPropagation();
+                                        handleDeletePanelReward(idx);
+                                      }}
+                                    >
+                                      <DeleteOutline fontSize={'small'}/>
+                                    </IconButton>
+                                  </Stack>
+                                </Stack>
+                              </AccordionSummary>
+                              <AccordionDetails>
+                                <Stack spacing={1.5}>
+                                  <Stack direction={'row'} spacing={1.5} alignItems={'center'} flexWrap={'wrap'} useFlexGap>
+                                    <ToggleButtonGroup
+                                      exclusive
+                                      size={'small'}
+                                      value={rankModeFromRequired(reward.rankRequired)}
+                                      onChange={(_e, mode: string | null) =>
+                                      {
+                                        if (!mode) return;
+                                        if (mode === 'every') updatePanelRewards({ ...reward, rankRequired: -1 }, idx);
+                                        else if (mode === 'mastery') updatePanelRewards({ ...reward, rankRequired: 0 }, idx);
+                                        else updatePanelRewards({ ...reward, rankRequired: reward.rankRequired >= 1 ? reward.rankRequired : 1 }, idx);
+                                      }}
+                                    >
+                                      <ToggleButton
+                                        value={'every'}
+                                        sx={(theme) => ({
+                                          '&.Mui-selected': {
+                                            backgroundColor: alpha(theme.palette.info.main, 0.16),
+                                            borderColor: theme.palette.info.main,
+                                            color: theme.palette.info.main,
+                                            '&:hover': { backgroundColor: alpha(theme.palette.info.main, 0.24) },
+                                          },
+                                        })}
+                                      >
+                                        <AllInclusive fontSize={'small'} sx={{ mr: 0.75 }}/>
+                                        Every Rank
+                                      </ToggleButton>
+                                      <ToggleButton
+                                        value={'mastery'}
+                                        sx={(theme) => ({
+                                          '&.Mui-selected': {
+                                            backgroundColor: alpha(theme.palette.warning.main, 0.16),
+                                            borderColor: theme.palette.warning.main,
+                                            color: theme.palette.warning.main,
+                                            '&:hover': { backgroundColor: alpha(theme.palette.warning.main, 0.24) },
+                                          },
+                                        })}
+                                      >
+                                        <EmojiEvents fontSize={'small'} sx={{ mr: 0.75 }}/>
+                                        Upon Mastery
+                                      </ToggleButton>
+                                      <ToggleButton
+                                        value={'specific'}
+                                        sx={(theme) => ({
+                                          '&.Mui-selected': {
+                                            backgroundColor: alpha(theme.palette.secondary.main, 0.16),
+                                            borderColor: theme.palette.secondary.main,
+                                            color: theme.palette.secondary.main,
+                                            '&:hover': { backgroundColor: alpha(theme.palette.secondary.main, 0.24) },
+                                          },
+                                        })}
+                                      >
+                                        <Numbers fontSize={'small'} sx={{ mr: 0.75 }}/>
+                                        Specific Rank
+                                      </ToggleButton>
+                                    </ToggleButtonGroup>
+                                    {reward.rankRequired >= 1 && (
+                                      <TextField
+                                        type={'number'}
+                                        label={'Rank #'}
+                                        variant={'outlined'}
+                                        size={'small'}
+                                        value={reward.rankRequired}
+                                        onChange={event => updatePanelRewards(
+                                          { ...reward, rankRequired: Math.max(1, parseInt(event.target.value, 10) || 1) },
+                                          idx
+                                        )}
+                                        slotProps={{ htmlInput: { min: '1', step: '1' } }}
+                                        sx={{ width: 100 }}
+                                      />
+                                    )}
+                                  </Stack>
+                                  <Stack direction={'row'} spacing={1} alignItems={'center'}>
+                                    <TextField
+                                      label={'Reward Name'}
+                                      variant={'outlined'}
+                                      size={'small'}
+                                      sx={{ flex: 1 }}
+                                      disabled={isAutoName}
+                                      value={isAutoName ? derivedName : reward.rewardName}
+                                      onChange={event => updatePanelRewards(
+                                        { ...reward, rewardName: event.target.value },
+                                        idx
+                                      )}
+                                    />
+                                    <FormControlLabel
+                                      control={
+                                        <Switch
+                                          size={'small'}
+                                          checked={isAutoName}
+                                          onChange={e =>
+                                          {
+                                            if (e.target.checked)
+                                            {
+                                              setManualAutoNameOff(prev =>
+                                              {
+                                                const next = new Set(prev);
+                                                next.delete(idx);
+                                                return next;
+                                              });
+                                              if (reward.rewardName !== '' && reward.rewardName !== derivedName)
+                                              {
+                                                updatePanelRewards({ ...reward, rewardName: '' }, idx);
+                                              }
+                                            }
+                                            else
+                                            {
+                                              setManualAutoNameOff(prev => new Set([...prev, idx]));
+                                            }
+                                          }}
+                                        />
+                                      }
+                                      label={'Auto'}
+                                    />
+                                  </Stack>
+                                  <SdpRewardEffectEditor
+                                    value={reward.effect}
+                                    onChange={next => updatePanelRewards({ ...reward, effect: next }, idx)}
+                                  />
+                                </Stack>
+                              </AccordionDetails>
+                            </Accordion>
+                          );
+                        })}
+                      </Stack>
+                    </BoardSectionCard>
+                  </Stack>
                 </Grid>
               </Grid>
             </>
           }
       </EditorBoardSplitLayout>
     </Box>
-
-    {/*region not-grid-related elements */}
-    <SaveButton
-      extraSaveText={'sdps'}
-      canSave={canSave && !loading}
-      handleSave={async () =>
-      {
-        setCanSave(false);
-        await save(sdps);
-        handleSnack('SDP data has been saved successfully.', MuiSnackbarSeverity.Success);
-      }}
-    />
-    <ReloadButton
-      handleReload={handleReloadButtonOnClickEvent}
-      canReload={!loading}
-      extraReloadText={'SDP Data'}
-    />
 
     <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
       <Alert
@@ -1827,128 +1947,6 @@ const SdpBoard = () =>
       {
         handleDeletePanel(selectedPanelIndex);
         setPanelListContextMenu(null);
-      }}>
-        <ListItemIcon><Remove/></ListItemIcon>
-        <Typography>Remove selected</Typography>
-      </MenuItem>
-    </Menu>
-
-    <Menu
-      open={parameterListContextMenu !== null}
-      onClose={() => setParameterListContextMenu(null)}
-      anchorReference="anchorPosition"
-      anchorPosition={parameterListContextMenu !== null
-        ? {
-          top: parameterListContextMenu.mouseY,
-          left: parameterListContextMenu.mouseX
-        }
-        : undefined}
-    >
-      <MenuItem onClick={() =>
-      {
-        handleAddNewPanelParameter(selectedPanelParameterIndex);
-        setParameterListContextMenu(null);
-      }}>
-        <ListItemIcon><Add/></ListItemIcon>
-        <Typography>Add new above</Typography>
-      </MenuItem>
-
-      <MenuItem onClick={() =>
-      {
-        handleAddNewPanelParameter(selectedPanelParameterIndex + 1);
-        setParameterListContextMenu(null);
-      }}>
-        <ListItemIcon><Add/></ListItemIcon>
-        <Typography>Add new below</Typography>
-      </MenuItem>
-
-      <Divider/>
-
-      <MenuItem onClick={() =>
-      {
-        handleClonePanelParameter(selectedPanelParameterIndex);
-        setParameterListContextMenu(null);
-      }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
-        <Typography>Clone above</Typography>
-      </MenuItem>
-
-      <MenuItem onClick={() =>
-      {
-        handleClonePanelParameter(selectedPanelParameterIndex + 1);
-        setParameterListContextMenu(null);
-      }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
-        <Typography>Clone below</Typography>
-      </MenuItem>
-
-      <Divider/>
-
-      <MenuItem onClick={() =>
-      {
-        handleDeletePanelParameter(selectedPanelParameterIndex);
-        setParameterListContextMenu(null);
-      }}>
-        <ListItemIcon><Remove/></ListItemIcon>
-        <Typography>Remove selected</Typography>
-      </MenuItem>
-    </Menu>
-
-    <Menu
-      open={rewardListContextMenu !== null}
-      onClose={() => setRewardListContextMenu(null)}
-      anchorReference="anchorPosition"
-      anchorPosition={rewardListContextMenu !== null
-        ? {
-          top: rewardListContextMenu.mouseY,
-          left: rewardListContextMenu.mouseX
-        }
-        : undefined}
-    >
-      <MenuItem onClick={() =>
-      {
-        handleAddNewPanelReward(selectedPanelParameterIndex);
-        setRewardListContextMenu(null);
-      }}>
-        <ListItemIcon><Add/></ListItemIcon>
-        <Typography>Add new above</Typography>
-      </MenuItem>
-
-      <MenuItem onClick={() =>
-      {
-        handleAddNewPanelReward(selectedPanelParameterIndex + 1);
-        setRewardListContextMenu(null);
-      }}>
-        <ListItemIcon><Add/></ListItemIcon>
-        <Typography>Add new below</Typography>
-      </MenuItem>
-
-      <Divider/>
-
-      <MenuItem onClick={() =>
-      {
-        handleClonePanelReward(selectedPanelParameterIndex);
-        setRewardListContextMenu(null);
-      }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
-        <Typography>Clone above</Typography>
-      </MenuItem>
-
-      <MenuItem onClick={() =>
-      {
-        handleClonePanelReward(selectedPanelParameterIndex + 1);
-        setRewardListContextMenu(null);
-      }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
-        <Typography>Clone below</Typography>
-      </MenuItem>
-
-      <Divider/>
-
-      <MenuItem onClick={() =>
-      {
-        handleDeletePanelReward(selectedPanelParameterIndex);
-        setRewardListContextMenu(null);
       }}>
         <ListItemIcon><Remove/></ListItemIcon>
         <Typography>Remove selected</Typography>

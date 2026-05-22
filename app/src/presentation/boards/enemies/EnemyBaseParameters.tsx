@@ -1,3 +1,4 @@
+import { type ReactNode, Fragment } from 'react';
 import { Box, Grid, Stack, Tooltip, Typography } from '@mui/material';
 import {
   AutoFixHigh,
@@ -13,19 +14,68 @@ import {
 } from '@mui/icons-material';
 import { blue, green, lightBlue, lightGreen, pink, red } from '@mui/material/colors';
 import { EnemyBaseParam } from '@core/enums/EnemyParameter.ts';
-import React from 'react';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 import { GrowthParser } from '@services/parsers/GrowthParser.ts';
 import { knownLongParams } from '../../../mappers/ParameterIdMapper.ts';
 import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 
 type EnemyBaseParametersProps = {
   selectedEnemy: RPG_EnemyDomainModel;
-  updateEnemyWithNewParam: (
-    parameterId: number,
-    updatedValue: number
-  ) => void;
+  updateEnemyWithNewParam: (parameterId: number, updatedValue: number) => void;
   updateEnemy: (updatedEnemy: RPG_EnemyDomainModel) => void;
+};
+
+type ParamDef = {
+  label: string;
+  paramId: number;
+  icon: ReactNode;
+  longParamId: number;
+};
+
+const RESOURCES: ParamDef[] = [
+  { label: 'Max HP', paramId: EnemyBaseParam.MaxHp,  icon: <HeartBroken sx={{ color: pink[ 200 ] }}/>,      longParamId: 0  },
+  { label: 'Max MP', paramId: EnemyBaseParam.MaxMp,  icon: <MonitorHeart sx={{ color: lightBlue[ 400 ] }}/>, longParamId: 1  },
+  { label: 'Max TP', paramId: -1,                    icon: <Battery6Bar sx={{ color: lightGreen[ 400 ] }}/>, longParamId: 30 },
+];
+
+const OFFENSE: ParamDef[] = [
+  { label: 'Power',  paramId: EnemyBaseParam.Attack,  icon: <FitnessCenter sx={{ color: red[ 900 ] }}/>,   longParamId: 2 },
+  { label: 'Force',  paramId: EnemyBaseParam.MAttack, icon: <AutoFixHigh sx={{ color: green[ 500 ] }}/>,   longParamId: 4 },
+  { label: 'Speed',  paramId: EnemyBaseParam.Speed,   icon: <DirectionsRun color={'warning'}/>,             longParamId: 6 },
+];
+
+const DEFENSE: ParamDef[] = [
+  { label: 'Endurance', paramId: EnemyBaseParam.Defense,  icon: <Shield sx={{ color: blue[ 700 ] }}/>,         longParamId: 3 },
+  { label: 'Resist',    paramId: EnemyBaseParam.MDefense, icon: <PhotoFilter sx={{ color: pink[ 400 ] }}/>,     longParamId: 5 },
+  { label: 'Luck',      paramId: EnemyBaseParam.Luck,     icon: <Casino/>,                                      longParamId: 7 },
+];
+
+const formulaCellSx = {
+  fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace",
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  display: 'inline-block',
+  color: 'text.secondary',
+} as const;
+
+const FormulaCell = ({ formula }: { formula: string }) =>
+{
+  if (!formula)
+  {
+    return null;
+  }
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+      <ShowChart sx={{ color: 'text.secondary', mr: 0.5, fontSize: '0.875rem', flexShrink: 0 }}/>
+      <Tooltip title={formula}>
+        <Typography variant="caption" sx={formulaCellSx}>
+          {formula}
+        </Typography>
+      </Tooltip>
+    </Box>
+  );
 };
 
 export default function EnemyBaseParameters({
@@ -34,169 +84,66 @@ export default function EnemyBaseParameters({
   updateEnemy,
 }: EnemyBaseParametersProps)
 {
-  // Get all parameter definitions
   const allParams = knownLongParams();
 
-  // Function to get growth formula for a parameter
-  const getGrowthFormula = (longParamId: number): string =>
+  const getFormula = (longParamId: number): string =>
   {
-    const paramData = allParams.find(param => param.longParamId === longParamId);
-    return paramData
-      ? GrowthParser.read(selectedEnemy.note, paramData)
-      : '';
+    const p = allParams.find((p) => p.longParamId === longParamId);
+    return p ? GrowthParser.read(selectedEnemy.note, p) : '';
   };
 
-  // Create parameter data array for rendering
-  const parameterData = [
-    {
-      label: 'Max HP',
-      paramId: EnemyBaseParam.MaxHp,
-      icon: <HeartBroken sx={{ color: pink[ 200 ] }}/>,
-      longParamId: 0
-    },
-    {
-      label: 'Max MP',
-      paramId: EnemyBaseParam.MaxMp,
-      icon: <MonitorHeart sx={{ color: lightBlue[ 400 ] }}/>,
-      longParamId: 1
-    },
-    {
-      label: 'Max TP',
-      paramId: -1, // display-only; no base param index exists for TP
-      icon: <Battery6Bar sx={{ color: lightGreen[ 400 ] }}/>,
-      longParamId: 30
-    },
-    {
-      label: 'Power',
-      paramId: EnemyBaseParam.Attack,
-      icon: <FitnessCenter sx={{ color: red[ 900 ] }}/>,
-      longParamId: 2
-    },
-    {
-      label: 'Endurance',
-      paramId: EnemyBaseParam.Defense,
-      icon: <Shield sx={{ color: blue[ 700 ] }}/>,
-      longParamId: 3
-    },
-    {
-      label: 'Force',
-      paramId: EnemyBaseParam.MAttack,
-      icon: <AutoFixHigh sx={{ color: green[ 500 ] }}/>,
-      longParamId: 4
-    },
-    {
-      label: 'Resist',
-      paramId: EnemyBaseParam.MDefense,
-      icon: <PhotoFilter sx={{ color: pink[ 400 ] }}/>,
-      longParamId: 5
-    },
-    {
-      label: 'Speed',
-      paramId: EnemyBaseParam.Speed,
-      icon: <DirectionsRun color={'warning'}/>,
-      longParamId: 6
-    },
-    {
-      label: 'Luck',
-      paramId: EnemyBaseParam.Luck,
-      icon: <Casino/>,
-      longParamId: 7
-    }
-  ];
+  const renderRow = (p: ParamDef) =>
+  {
+    const isMaxTp = p.longParamId === 30;
+    return (
+      <Fragment key={p.longParamId}>
+        <Grid size={4}>
+          <NumberInputWithLabel
+            label={p.label}
+            endAdornment={p.icon}
+            variant={'outlined'}
+            size={'small'}
+            fullWidth
+            value={isMaxTp ? selectedEnemy.maxTp : selectedEnemy.params[ p.paramId ]}
+            onChangeEventHandler={(event) =>
+            {
+              if (isMaxTp)
+              {
+                selectedEnemy.maxTp = parseInt(event.target.value) ?? 0;
+                updateEnemy(selectedEnemy);
+              }
+              else
+              {
+                updateEnemyWithNewParam(p.paramId, parseInt(event.target.value) ?? 1);
+              }
+            }}
+          />
+        </Grid>
+        <Grid size={8}>
+          <FormulaCell formula={getFormula(p.longParamId)}/>
+        </Grid>
+      </Fragment>
+    );
+  };
 
-  return <>
-    <Stack spacing={1}>
-      <Typography
-        variant={'h5'}
-        align={'center'}
-        color={'primary'}
-      >
-        Base Parameters
+  const renderGroup = (title: string, params: ParamDef[]) => (
+    <Stack spacing={1} key={title}>
+      <Typography variant="caption" color="text.secondary" fontWeight={600} textTransform="uppercase">
+        {title}
       </Typography>
-
-      <Grid container spacing={1}>
-        {parameterData.map(param =>
-        {
-          const formula = getGrowthFormula(param.longParamId);
-          const isMaxTp = (param.longParamId === 30);
-          const maxTpValue = isMaxTp
-            ? selectedEnemy.maxTp
-            : 0;
-
-          return (
-            <React.Fragment key={param.paramId}>
-              {/* Parameter Input - Left Column */}
-              <Grid size={6}>
-                {isMaxTp
-                  ? (
-                    <NumberInputWithLabel
-                      label={param.label}
-                      endAdornment={param.icon}
-                      value={maxTpValue}
-                      onChangeEventHandler={(event) =>
-                      {
-                        selectedEnemy.maxTp = parseInt(event.target.value) ?? 0;
-                        updateEnemy(selectedEnemy);
-                      }}
-                    />
-                  )
-                  : (
-                    <NumberInputWithLabel
-                      label={param.label}
-                      endAdornment={param.icon}
-                      value={selectedEnemy.params[ param.paramId ]}
-                      onChangeEventHandler={(event) =>
-                      {
-                        const updatedValue = parseInt(event.target.value) ?? 1;
-                        updateEnemyWithNewParam(param.paramId, updatedValue);
-                      }}
-                    />
-                  )}
-              </Grid>
-
-              {/* Growth Formula - Right Column */}
-              <Grid size={6}>
-                <Box sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  height: '30px', // Match height of NumberInputWithLabel
-                }}>
-                  {formula && (
-                    <Box sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      width: '100%'
-                    }}>
-                      <ShowChart sx={{
-                        color: 'text.secondary',
-                        mr: 0.5,
-                        fontSize: '0.875rem',
-                        flexShrink: 0
-                      }}/>
-                      <Tooltip title={formula}>
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            fontFamily: '\'Consolas\', \'Monaco\', \'Courier New\', monospace',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            width: '100%',
-                            display: 'inline-block',
-                            color: 'text.secondary'
-                          }}
-                        >
-                          {formula}
-                        </Typography>
-                      </Tooltip>
-                    </Box>
-                  )}
-                </Box>
-              </Grid>
-            </React.Fragment>
-          );
-        })}
+      <Grid container spacing={1} alignItems={'center'}>
+        {params.map(renderRow)}
       </Grid>
     </Stack>
-  </>;
+  );
+
+  return (
+    <BoardSectionCard title={'Base Parameters'}>
+      <Stack spacing={2}>
+        {renderGroup('Resources', RESOURCES)}
+        {renderGroup('Offense', OFFENSE)}
+        {renderGroup('Defense', DEFENSE)}
+      </Stack>
+    </BoardSectionCard>
+  );
 }

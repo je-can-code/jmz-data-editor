@@ -1,6 +1,6 @@
-import React from 'react';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 import { Divider, Stack, Typography } from '@mui/material';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import { AccessAlarm, DirectionsRun, Speed, TrendingUp, Visibility } from '@mui/icons-material';
 import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
 
@@ -50,25 +50,14 @@ const EnemyJabsBattlerData = ({
     updateEnemy(selectedEnemy);
   };
 
-  return <>
-    <Typography
-      variant={'h4'}
-      gutterBottom={true}
-      color={'primary'}
-      align={'center'}
-      sx={{ paddingTop: 2 }}
-    >
-      JABS Battler Data
-    </Typography>
-
-    {/* Main container for vertical layout */}
+  return (
+    <BoardSectionCard title={'Battler Data'}>
     <Stack
       spacing={2}
       direction={'column'}
     >
-      {/* Basic battler data section */}
       <Stack spacing={1}>
-        <Typography variant="subtitle1" color="primary">Basic Parameters</Typography>
+        <Typography variant="subtitle2" color="text.secondary">Basic Parameters</Typography>
         <NumberInputWithLabel
           label="Sight Range"
           value={selectedEnemy.jabsBattlerData.sight}
@@ -92,7 +81,7 @@ const EnemyJabsBattlerData = ({
 
       {/* Alert-related data section */}
       <Stack spacing={1}>
-        <Typography variant="subtitle1" color="primary">Alert Parameters</Typography>
+        <Typography variant="subtitle2" color="text.secondary">Alert Parameters</Typography>
         <NumberInputWithLabel
           label="Alert Duration"
           value={selectedEnemy.jabsBattlerData.alertDuration}
@@ -113,7 +102,8 @@ const EnemyJabsBattlerData = ({
         />
       </Stack>
     </Stack>
-  </>;
+    </BoardSectionCard>
+  );
 };
 
 export { EnemyJabsBattlerData };

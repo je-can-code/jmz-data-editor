@@ -1,14 +1,12 @@
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Checkbox,
   FormControlLabel,
   Stack,
   TextField,
   Typography
 } from '@mui/material';
-import { ExpandMore, FirstPage, LastPage } from '@mui/icons-material';
+import { FirstPage, LastPage } from '@mui/icons-material';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import { grey, orange } from '@mui/material/colors';
 import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
 
@@ -16,13 +14,6 @@ type EnemyPassiveAbsProps = {
   selectedEnemy: RPG_EnemyDomainModel;
   updateEnemy: (enemy: RPG_EnemyDomainModel) => void;
 };
-
-const accordionShellSx = {
-  border: '1px solid',
-  borderColor: 'divider',
-  borderRadius: 1,
-  '&:before': { display: 'none' },
-} as const;
 
 /**
  * J-Passive-ABS enemy note tags: block random affix rolls, optional per-slot roll odds.
@@ -117,25 +108,12 @@ const EnemyPassiveAbs = ({
   };
 
   return (
-    <Accordion
+    <BoardSectionCard
+      title={'Random passive affixes'}
+      subtitle={'Prefix / suffix roll overrides'}
+      collapsible
       defaultExpanded={false}
-      disableGutters={true}
-      elevation={0}
-      sx={accordionShellSx}
     >
-      <AccordionSummary expandIcon={<ExpandMore/>}>
-        <Stack spacing={0.25}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Random passive affixes
-          </Typography>
-          <Typography variant={'caption'} color={'text.secondary'} component={'div'}>
-            {prefixSummaryLine()}
-            <br/>
-            {suffixSummaryLine()}
-          </Typography>
-        </Stack>
-      </AccordionSummary>
-      <AccordionDetails>
         <Stack spacing={2}>
           <Typography variant={'body2'} color={'text.secondary'}>
             Applies when this enemy is built from a map event. Checked means that side never receives a rolled passive
@@ -206,8 +184,7 @@ const EnemyPassiveAbs = ({
             slotProps={{ htmlInput: { min: 0, max: 100, step: 1 } }}
           />
         </Stack>
-      </AccordionDetails>
-    </Accordion>
+    </BoardSectionCard>
   );
 };
 

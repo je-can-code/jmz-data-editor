@@ -1,4 +1,5 @@
 import { Stack, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import { alpha } from '@mui/material/styles';
 import {
   AutoFixHigh,
@@ -101,19 +102,8 @@ const EnemyJabsAiTraits = ({
     updateEnemy(selectedEnemy);
   };
 
-  return <>
-    <Typography
-      variant={'subtitle1'}
-      color={'primary'}
-      sx={{
-        fontWeight: 700,
-        mt: 2,
-        mb: 1
-      }}
-    >
-      JABS AI Traits
-    </Typography>
-
+  return (
+    <BoardSectionCard title={'AI Traits'}>
     <Stack
       spacing={1.5}
       sx={{ alignItems: 'stretch' }}
@@ -449,7 +439,8 @@ const EnemyJabsAiTraits = ({
         </ToggleButtonGroup>
       </Stack>
     </Stack>
-  </>;
+    </BoardSectionCard>
+  );
 };
 
 export { EnemyJabsAiTraits };
