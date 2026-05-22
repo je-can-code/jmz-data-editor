@@ -1,9 +1,6 @@
-import React, { ChangeEvent, type SyntheticEvent, useCallback, useEffect, useMemo, useRef, useState, } from 'react';
+import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState, } from 'react';
 import { FixedSizeList, } from 'react-window';
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Alert,
   Autocomplete,
   Box,
@@ -23,10 +20,9 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { ContentCopy, ExpandMore, KeyboardArrowLeft, KeyboardArrowRight, } from '@mui/icons-material';
+import { ContentCopy, KeyboardArrowLeft, KeyboardArrowRight, } from '@mui/icons-material';
 import { MuiSnackbarSeverity, MuiSnackbarVariant, } from '@core/enums/MuiSnackbar.ts';
-import SaveButton from '../../../components/core/SaveButton.tsx';
-import ReloadButton from '../../../components/core/ReloadButton.tsx';
+import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import { useStates } from '@presentation/context/resources/states.context.tsx';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
@@ -62,36 +58,8 @@ import { RMMZ_STATE_AUTO_REMOVAL_TIMING_OPTIONS, } from '@core/enums/RmmzStateAu
 import TraitEditor from '../../components/traits/TraitEditor.tsx';
 import { type IdLabelRow, } from '@presentation/components/usableItem/UsableEffectsEditor.tsx';
 import { SystemService } from '@services/SystemService.ts';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
-
-/**
- * Default expanded/collapsed state for editor accordions on first paint.
- * Keys match {@code accordion} ids in the state editor layout.
- */
-const STATE_EDITOR_ACCORDION_INITIAL_EXPANDED: Record<string, boolean> = {
-  'editor-general': true,
-  'editor-details': false,
-  'editor-stacking': false,
-  'editor-jabs-aggro': false,
-  'editor-state-duration': false,
-  'editor-slip-regen': false,
-  'editor-jabs-shield': false,
-  'editor-jabs-speed': false,
-  'editor-jabs-timing': false,
-  'editor-jabs-gap-close': false,
-  'editor-plugin-crit': false,
-  'editor-plugin-drops': false,
-  'editor-plugin-elem': false,
-  'editor-plugin-level': false,
-  'editor-plugin-prof': false,
-  'editor-plugin-resources': false,
-  'editor-plugin-sdp': false,
-  'editor-plugin-passive-abs': false,
-  'editor-plugin-sks': false,
-  'editor-removal': false,
-  'editor-messages': false,
-  'editor-traits': true,
-};
 
 const statesBoardListColumnWidth = virtualizedSidebarColumnWidth(
   VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
@@ -334,10 +302,6 @@ const StatesBoard = () =>
   const [ snackMessage, setSnackMessage ] = useState<string>('');
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
-
-  const [ stateEditorAccordionExpanded, setStateEditorAccordionExpanded ] = useState<Record<string, boolean>>(
-    () => ({ ...STATE_EDITOR_ACCORDION_INITIAL_EXPANDED })
-  );
 
   const [ stateEditorTab, setStateEditorTab ] = useState<number>(0);
 
@@ -633,42 +597,6 @@ const StatesBoard = () =>
     selectedState,
     shieldBreakSkillAutocompleteOptions,
   ]);
-
-  /**
-   * Expands or collapses a state editor accordion section.
-   *
-   * @param id Accordion key aligned with {@link STATE_EDITOR_ACCORDION_INITIAL_EXPANDED}.
-   * @param expanded Next expanded flag from MUI {@link Accordion}.
-   * @returns {void}
-   */
-  const handleStateEditorAccordionChange = useCallback((
-    id: string,
-    expanded: boolean
-  ) =>
-  {
-    setStateEditorAccordionExpanded((prev) => ({
-      ...prev,
-      [ id ]: expanded,
-    }));
-  }, []);
-
-  /**
-   * Supplies {@code expanded} and {@code onChange} for a state editor accordion.
-   *
-   * @param id Accordion section id.
-   * @returns Partial accordion props wired to local expanded state.
-   */
-  const editorAccordionProps = (id: string) =>
-    ({
-      expanded: stateEditorAccordionExpanded[ id ] ?? false,
-      onChange: (
-        _e: SyntheticEvent,
-        expanded: boolean
-      ) =>
-      {
-        handleStateEditorAccordionChange(id, expanded);
-      },
-    });
 
   /**
    * Clones the given state into selection and list slot, and enables save.
@@ -1585,7 +1513,6 @@ const StatesBoard = () =>
     'stateId',
     states,
     (s) => s.id,
-    selectedStateIndex,
     (index) => handleStateListItemOnClickEventRef.current(index, false),
     (index) => listRef.current?.scrollToItem(index, 'smart'),
   );
@@ -1919,6 +1846,26 @@ const StatesBoard = () =>
     };
   }, [ states ]);
 
+  useBoardActions({
+    onSave: async () =>
+    {
+      setIsSaving(true);
+      try
+      {
+        await handleSaveButtonOnClickEvent();
+        setCanSave(false);
+      }
+      finally
+      {
+        setIsSaving(false);
+      }
+    },
+    canSave,
+    isSaving,
+    onReload: handleReloadButtonOnClickEvent,
+    canReload: !loading,
+  });
+
   return <>
     <Box sx={{
       flex: 1,
@@ -2059,23 +2006,7 @@ const StatesBoard = () =>
                         md: 7
                       }}>
                         <Stack spacing={2}>
-                          <Accordion
-                            {...editorAccordionProps('editor-general')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                General
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'General'} collapsible>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography
                                   variant={'caption'}
@@ -2209,26 +2140,9 @@ const StatesBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-details')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Details
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Details'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography variant={'body2'} color={'text.secondary'}>
                                   Details that describe the (JABS) negative effects of being afflicted with this state.
@@ -2347,26 +2261,9 @@ const StatesBoard = () =>
                                   )}
                                 />
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-slip-regen')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Regen & DoT
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Regen & DoT'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
                                   Details about the various slip effects this state applies to the afflicted battler.
@@ -2564,12 +2461,10 @@ const StatesBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
                           <StatePluginNoteSections
                             selectedState={selectedState}
-                            editorAccordionProps={editorAccordionProps}
                             absorbElementOptions={statePluginElementAutocompleteOptions}
                             selectedAbsorbElements={selectedAbsorbElements}
                             strictElementOptions={statePluginElementAutocompleteOptions}
@@ -2595,47 +2490,14 @@ const StatesBoard = () =>
                         md: 5
                       }}>
                         <Stack spacing={2}>
-                          <Accordion
-                            {...editorAccordionProps('editor-traits')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Traits
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Traits'} collapsible>
                               <TraitEditor
                                 selectedTraits={selectedState.traits}
                                 updateEnemyTraits={updateStateTraits}
                               />
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-messages')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Messages
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Messages'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography variant={'caption'} color={'text.secondary'}>
                                   {'Use %1 for the battler name.'}
@@ -2689,26 +2551,9 @@ const StatesBoard = () =>
                                   />
                                 </Stack>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-removal')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Removal Conditions
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Removal Conditions'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Grid container spacing={2} alignItems={'center'}>
                                   <Grid size={6}>
@@ -2832,26 +2677,9 @@ const StatesBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-state-duration')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                State duration
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'State duration'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
                                   Details on how OTHER state durations are impacted for the battler afflicted with this
@@ -2955,26 +2783,9 @@ const StatesBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-jabs-aggro')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Aggro Generation
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Aggro Generation'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography variant={'body2'} color={'text.secondary'}>
                                   Details on how aggro is affected for the battler afflicted with this state.
@@ -3037,26 +2848,9 @@ const StatesBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-jabs-speed')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Walk speed
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Walk speed'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
                                   Map movement speed offset for the afflicted battler.
@@ -3081,26 +2875,9 @@ const StatesBoard = () =>
                                   }}
                                 />
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-jabs-gap-close')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Gap close
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Gap close'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
                                   Whether gap-close skills may target this battler.
@@ -3119,26 +2896,9 @@ const StatesBoard = () =>
                                   label={'Valid gap-close target'}
                                 />
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-jabs-shield')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Shield
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Shield'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
                                   Details the shield effect this state applies to the afflicted battler.
@@ -3349,26 +3109,9 @@ const StatesBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-jabs-timing')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Cast &amp; cooldown
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Cast & cooldown'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
                                   Formulas that affect the cast time and cooldown time of skills executed while the
@@ -3729,26 +3472,9 @@ const StatesBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-stacking')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Stacking & reapply
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Stacking & reapply'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
                                   How this state behaves when reapplied while already active—refresh, extend, or
@@ -3927,8 +3653,7 @@ const StatesBoard = () =>
                                   )}
                                 />
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
                         </Stack>
                       </Grid>
                     </Grid>
@@ -4014,39 +3739,6 @@ const StatesBoard = () =>
               </Stack>
             )}
       </EditorBoardSplitLayout>
-    </Box>
-
-    <Box sx={{
-      display: 'flex',
-      gap: 2,
-    }}>
-      <SaveButton
-        extraSaveText={'States Data'}
-        canSave={canSave}
-        isSaving={isSaving}
-        handleSave={async () =>
-        {
-          setIsSaving(true);
-          try
-          {
-            await handleSaveButtonOnClickEvent();
-            setCanSave(false);
-          }
-          finally
-          {
-            setIsSaving(false);
-          }
-        }}
-      />
-
-      <ReloadButton
-        handleReload={async () =>
-        {
-          await handleReloadButtonOnClickEvent();
-        }}
-        canReload={!loading}
-        extraReloadText={'States Data'}
-      />
     </Box>
 
     <Snackbar

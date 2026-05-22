@@ -88,6 +88,7 @@ describe('NumberInputWithLabel', () =>
       <NumberInputWithLabel
         id={'invocation-speed'}
         label={'Speed'}
+        floatingLabel={false}
         labelPlacement={'start'}
         variant={'outlined'}
         size={'small'}

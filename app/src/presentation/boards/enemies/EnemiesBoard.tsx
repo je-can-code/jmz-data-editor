@@ -1,9 +1,6 @@
 import React, { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { FixedSizeList, ListChildComponentProps } from 'react-window';
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Alert,
   Box,
   Grid,
@@ -14,6 +11,8 @@ import {
   ListItemText,
   Snackbar,
   Stack,
+  Tab,
+  Tabs,
   TextField,
   Tooltip,
   Typography
@@ -21,11 +20,11 @@ import {
 import {
   Addchart,
   DoubleArrow,
-  ExpandMore,
   KeyboardArrowLeft,
   KeyboardArrowRight,
   MonetizationOn,
   SdCard,
+  ShowChart,
   Timeline
 } from '@mui/icons-material';
 import { throttle } from 'lodash';
@@ -40,6 +39,7 @@ import SaveButton from '../../../components/core/SaveButton.tsx';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 import { amber, blue, brown, cyan, green, indigo, orange, pink, purple, red, teal, yellow } from '@mui/material/colors';
 import TraitEditor from '../../components/traits/TraitEditor.tsx';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import ParameterGrowth from './ParameterGrowth.tsx';
 import { knownLongParams } from '../../../mappers/ParameterIdMapper.ts';
 import { GrowthParser } from '@services/parsers/GrowthParser.ts';
@@ -80,6 +80,8 @@ const EnemiesBoard = () =>
   const listViewportSize = useElementClientRect(listViewportRef);
 
   const [ selectedEnemyDropItems, setSelectedEnemyDropItems ] = useState<RPG_DropItem[]>([]);
+
+  const [ enemyTab, setEnemyTab ] = useState(0);
 
   const [ isSaving, setIsSaving ] = useState<boolean>(false);
   const [ canSave, setCanSave ] = useState<boolean>(false);
@@ -139,7 +141,6 @@ const EnemiesBoard = () =>
     'enemyId',
     enemies,
     (e) => e.id,
-    selectedEnemyIndex,
     (index) => handleEnemyListItemOnClickEvent(index, false),
     (index) => listRef.current?.scrollToItem(index, 'smart')
   );
@@ -158,6 +159,9 @@ const EnemiesBoard = () =>
       setSelectedEnemyDropItems([]);
       return;
     }
+
+    const params = new URLSearchParams(window.location.search);
+    if (!selectedEnemy && params.get('enemyId')) return;
 
     const idx = Math.min(Math.max(0, selectedEnemyIndex), enemies.length - 1);
     let next: RPG_EnemyDomainModel = enemies[idx];
@@ -178,13 +182,6 @@ const EnemiesBoard = () =>
       updateUrlRef.current(next);
     }
   }, [ enemies, selectedEnemyIndex, selectedEnemy ]);
-
-  const enemySideAccordionSx = {
-    border: '1px solid',
-    borderColor: 'divider',
-    borderRadius: 1,
-    '&:before': { display: 'none' },
-  } as const;
 
   const throttledListScroll = useCallback(
     throttle(({ scrollOffset }: {
@@ -815,72 +812,96 @@ const EnemiesBoard = () =>
               </Typography>
             </>
             : <>
-              <Grid container spacing={2}>
-                {/* leftmost column gets +1 unit of grid space (5/12 instead of 4/12) so the
-                    JABS AI Traits Attack row of 5 chips has room to breathe without spilling
-                    into the next column. the middle column compensates with -1 (3/12); its
-                    content is mostly accordions with short summary text that read fine in a
-                    narrower column. the right column keeps its 4/12 because SDP picker + drop
-                    rows are the chunkiest content on the board. */}
-                <Grid size={5}>
-                  <Stack spacing={1}>
-                    <TextField
-                      variant={'outlined'}
-                      label={'Name'}
-                      value={selectedEnemy.name}
-                      onChange={handleEnemyNameOnChangeEvent}
-                      size={'small'}
-                      sx={{ paddingBottom: 2 }}
-                      fullWidth
-                    />
+              <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
+                <Tabs value={enemyTab} onChange={(_, v) => setEnemyTab(v)}>
+                  <Tab label={'Base'} id={'enemy-tab-0'} aria-controls={'enemy-tabpanel-0'}/>
+                  <Tab label={'JABS'} id={'enemy-tab-1'} aria-controls={'enemy-tabpanel-1'}/>
+                </Tabs>
+              </Box>
 
-                    <NumberInputWithLabel
-                      label={'Default Level'}
-                      endAdornment={<Timeline sx={{ color: yellow[ 600 ] }}/>}
-                      value={selectedEnemy.level}
-                      onChangeEventHandler={(event) =>
-                      {
-                        const updatedValue = parseInt(event.target.value) ?? 0;
-                        updateEnemyLevel(updatedValue);
-                      }}
-                    />
+              {enemyTab === 0 && (
+                <Grid container spacing={2} alignItems={'flex-start'}>
+                  <Grid size={5}>
+                    <Stack spacing={1}>
+                      <BoardSectionCard title={'Identity'}>
+                        <Grid container spacing={1.5} alignItems={'center'}>
+                          <Grid size={9}>
+                            <TextField
+                              variant={'outlined'}
+                              label={'Name'}
+                              value={selectedEnemy.name}
+                              onChange={handleEnemyNameOnChangeEvent}
+                              size={'small'}
+                              fullWidth
+                            />
+                          </Grid>
+                          <Grid size={3}>
+                            <NumberInputWithLabel
+                              label={'Default Level'}
+                              endAdornment={<Timeline sx={{ color: yellow[ 600 ] }}/>}
+                              variant={'outlined'}
+                              size={'small'}
+                              fullWidth
+                              value={selectedEnemy.level}
+                              onChangeEventHandler={(event) =>
+                              {
+                                const updatedValue = parseInt(event.target.value) ?? 0;
+                                updateEnemyLevel(updatedValue);
+                              }}
+                            />
+                          </Grid>
+                        </Grid>
+                      </BoardSectionCard>
 
-                    {/* rewards */}
-                    <Grid container spacing={1}>
-                      {/* Experience */}
-                      <Grid size={6}>
-                        <NumberInputWithLabel
-                          label={'Exp'}
-                          value={selectedEnemy.exp}
-                          endAdornment={<Addchart sx={{ color: purple[ 600 ] }}/>}
-                          onChangeEventHandler={(event) =>
-                          {
-                            const updatedValue = parseInt(event.target.value) ?? 0;
-                            handleEnemyExpOnChangeEvent(updatedValue);
-                          }}
-                        />
-                      </Grid>
-                      <Grid size={6}>
-                        <Box sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          height: '30px',
-                        }}>
-                          {(
-                            () =>
+                      <BoardSectionCard title={'Rewards'}>
+                        <Grid container spacing={1} alignItems={'center'}>
+                          {[
                             {
-                              const expParam = knownLongParams()
-                                .find(param => param.key === 'exp');
-                              const formula = expParam
-                                ? GrowthParser.read(selectedEnemy.note, expParam)
-                                : '';
-                              return formula
-                                ? (
-                                  <Box sx={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    width: '100%'
-                                  }}>
+                              label: 'Exp',
+                              icon: <Addchart sx={{ color: purple[ 600 ] }}/>,
+                              value: selectedEnemy.exp,
+                              onChange: (v: number) => handleEnemyExpOnChangeEvent(v),
+                              formula: (() =>
+                              {
+                                const p = knownLongParams().find(p => p.key === 'exp');
+                                return p ? GrowthParser.read(selectedEnemy.note, p) : '';
+                              })(),
+                            },
+                            {
+                              label: 'Gold',
+                              icon: <MonetizationOn sx={{ color: yellow[ 800 ] }}/>,
+                              value: selectedEnemy.gold,
+                              onChange: (v: number) => handleEnemyGoldOnChangeEvent(v),
+                              formula: selectedEnemy.growths.get(32) ?? '',
+                            },
+                            {
+                              label: 'SDPs',
+                              icon: <SdCard sx={{ color: purple[ 100 ] }}/>,
+                              value: selectedEnemy.sdpPoints,
+                              onChange: (v: number) =>
+                              {
+                                selectedEnemy.sdpPoints = v;
+                                updateEnemy(selectedEnemy);
+                              },
+                              formula: selectedEnemy.growths.get(33) ?? '',
+                            },
+                          ].map(({ label, icon, value, onChange, formula }) => (
+                            <>
+                              <Grid size={4} key={label}>
+                                <NumberInputWithLabel
+                                  label={label}
+                                  endAdornment={icon}
+                                  variant={'outlined'}
+                                  size={'small'}
+                                  fullWidth
+                                  value={value}
+                                  onChangeEventHandler={(e) => onChange(parseInt(e.target.value) ?? 0)}
+                                />
+                              </Grid>
+                              <Grid size={8} key={`${label}-formula`}>
+                                {formula && (
+                                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                    <ShowChart sx={{ color: 'text.secondary', mr: 0.5, fontSize: '0.875rem', flexShrink: 0 }}/>
                                     <Tooltip title={formula}>
                                       <Typography
                                         variant="caption"
@@ -889,224 +910,102 @@ const EnemiesBoard = () =>
                                           whiteSpace: 'nowrap',
                                           overflow: 'hidden',
                                           textOverflow: 'ellipsis',
-                                          width: '100%',
                                           display: 'inline-block',
-                                          color: 'text.secondary'
+                                          color: 'text.secondary',
                                         }}
                                       >
                                         {formula}
                                       </Typography>
                                     </Tooltip>
                                   </Box>
-                                )
-                                : null;
-                            }
-                          )()}
-                        </Box>
-                      </Grid>
+                                )}
+                              </Grid>
+                            </>
+                          ))}
+                        </Grid>
+                      </BoardSectionCard>
 
-                      {/* Gold */}
-                      <Grid size={6}>
-                        <NumberInputWithLabel
-                          label={'Gold'}
-                          value={selectedEnemy.gold}
-                          endAdornment={<MonetizationOn sx={{ color: yellow[ 800 ] }}/>}
-                          onChangeEventHandler={(event) =>
-                          {
-                            const updatedValue = parseInt(event.target.value) ?? 0;
-                            handleEnemyGoldOnChangeEvent(updatedValue);
-                          }}
-                        />
-                      </Grid>
-                      <Grid size={6}>
-                        <Box sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          height: '30px',
-                        }}>
-                          {(
-                            () =>
-                            {
-                              // 32 = Gold
-                              const formula = selectedEnemy.growths.get(32) ?? '';
-                              return formula
-                                ? (
-                                  <Box sx={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    width: '100%'
-                                  }}>
-                                    <Tooltip title={formula}>
-                                      <Typography
-                                        variant="caption"
-                                        sx={{
-                                          fontFamily: '\'Consolas\', \'Monaco\', \'Courier New\', monospace',
-                                          whiteSpace: 'nowrap',
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis',
-                                          width: '100%',
-                                          display: 'inline-block',
-                                          color: 'text.secondary'
-                                        }}
-                                      >
-                                        {formula}
-                                      </Typography>
-                                    </Tooltip>
-                                  </Box>
-                                )
-                                : null;
-                            }
-                          )()}
-                        </Box>
-                      </Grid>
+                      <EnemyBaseParameters
+                        selectedEnemy={selectedEnemy}
+                        updateEnemyWithNewParam={updateEnemyWithNewParam}
+                        updateEnemy={updateEnemy}
+                      />
+                      <br/>
 
-                      {/* SDPs */}
-                      <Grid size={6}>
-                        <NumberInputWithLabel
-                          label={'SDPs'}
-                          endAdornment={<SdCard sx={{ color: purple[ 100 ] }}/>}
-                          value={selectedEnemy.sdpPoints}
-                          onChangeEventHandler={(event) =>
-                          {
-                            selectedEnemy.sdpPoints = parseInt(event.target.value) ?? 0;
-                            updateEnemy(selectedEnemy);
-                          }}
-                        />
-                      </Grid>
-                      <Grid size={6}>
-                        <Box sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          height: '30px',
-                        }}>
-                          {(
-                            () =>
-                            {
-                              // 33 = SDP
-                              const formula = selectedEnemy.growths.get(33) ?? '';
-                              return formula
-                                ? (
-                                  <Box sx={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    width: '100%'
-                                  }}>
-                                    <Tooltip title={formula}>
-                                      <Typography
-                                        variant="caption"
-                                        sx={{
-                                          fontFamily: '\'Consolas\', \'Monaco\', \'Courier New\', monospace',
-                                          whiteSpace: 'nowrap',
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis',
-                                          width: '100%',
-                                          display: 'inline-block',
-                                          color: 'text.secondary'
-                                        }}
-                                      >
-                                        {formula}
-                                      </Typography>
-                                    </Tooltip>
-                                  </Box>
-                                )
-                                : null;
-                            }
-                          )()}
-                        </Box>
-                      </Grid>
-                    </Grid>
-
-                    <EnemyBaseParameters
-                      selectedEnemy={selectedEnemy}
-                      updateEnemyWithNewParam={updateEnemyWithNewParam}
-                      updateEnemy={updateEnemy}
-                    />
-                    <br/>
-
-                    <ParameterGrowth
-                      selectedEnemy={selectedEnemy}
-                      growableName={selectedEnemy.name}
-                      updateEnemy={updateEnemy}
-                      otherSubjects={enemies}
-                      suggestedLevel={selectedEnemy.level}
-                    />
-
-                    <EnemyJabsAiTraits
-                      selectedEnemy={selectedEnemy}
-                      updateEnemy={updateEnemy}
-                    />
-
-                    <EnemyJabsBattlerRoles
-                      selectedEnemy={selectedEnemy}
-                      updateEnemy={updateEnemy}
-                    />
-
-                  </Stack>
-                </Grid>
-                <Grid size={3}>
-                  <Stack spacing={1}>
-                    <Accordion
-                      defaultExpanded={false}
-                      disableGutters={true}
-                      elevation={0}
-                      sx={enemySideAccordionSx}
-                    >
-                      <AccordionSummary expandIcon={<ExpandMore/>}>
-                        <Stack spacing={0.25}>
-                          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                            Traits
-                          </Typography>
-                          <Typography variant={'caption'} color={'text.secondary'}>
-                            {selectedEnemy.traits.length === 0
-                              ? 'No traits on this enemy.'
-                              : `${selectedEnemy.traits.length} trait${selectedEnemy.traits.length === 1 ? '' : 's'}`}
-                          </Typography>
-                        </Stack>
-                      </AccordionSummary>
-                      <AccordionDetails>
+                      <ParameterGrowth
+                        selectedEnemy={selectedEnemy}
+                        growableName={selectedEnemy.name}
+                        updateEnemy={updateEnemy}
+                        otherSubjects={enemies}
+                        suggestedLevel={selectedEnemy.level}
+                      />
+                    </Stack>
+                  </Grid>
+                  <Grid size={7}>
+                    <Stack spacing={1}>
+                      <BoardSectionCard
+                        title={'Traits'}
+                        subtitle={selectedEnemy.traits.length === 0
+                          ? 'No traits on this enemy.'
+                          : `${selectedEnemy.traits.length} trait${selectedEnemy.traits.length === 1 ? '' : 's'}`}
+                        collapsible
+                        defaultExpanded={false}
+                      >
                         <TraitEditor
                           selectedTraits={selectedEnemy.traits}
                           updateEnemyTraits={updateEnemyTraits}
                         />
-                      </AccordionDetails>
-                    </Accordion>
-
-                    <EnemyJabsBattlerData
-                      selectedEnemy={selectedEnemy}
-                      updateEnemy={updateEnemy}
-                    />
-
-                    <EnemyJabsTeam
-                      selectedEnemy={selectedEnemy}
-                      updateEnemy={updateEnemy}
-                    />
-
-                    <EnemyJabsConfigs
-                      selectedEnemy={selectedEnemy}
-                      updateEnemy={updateEnemy}
-                    />
-
-                    <EnemyPassiveAbs
-                      selectedEnemy={selectedEnemy}
-                      updateEnemy={updateEnemy}
-                    />
-                  </Stack>
+                      </BoardSectionCard>
+                      <EnemySdpDrop
+                        selectedEnemy={selectedEnemy}
+                        updateEnemy={updateEnemy}
+                      />
+                      <EnemiesExtraDrops
+                        selectedEnemy={selectedEnemy}
+                        updateEnemy={updateEnemy}
+                        handleSnack={handleSnack}
+                      />
+                    </Stack>
+                  </Grid>
                 </Grid>
-                <Grid size={4}>
-                  <Stack spacing={1}>
-                    <EnemySdpDrop
-                      selectedEnemy={selectedEnemy}
-                      updateEnemy={updateEnemy}
-                    />
-                    <EnemiesExtraDrops
-                      selectedEnemy={selectedEnemy}
-                      updateEnemy={updateEnemy}
-                      handleSnack={handleSnack}
-                    />
-                  </Stack>
+              )}
 
+              {enemyTab === 1 && (
+                <Grid container spacing={2} alignItems={'flex-start'}>
+                  <Grid size={6}>
+                    <Stack spacing={1}>
+                      <EnemyJabsAiTraits
+                        selectedEnemy={selectedEnemy}
+                        updateEnemy={updateEnemy}
+                      />
+                      <EnemyJabsBattlerRoles
+                        selectedEnemy={selectedEnemy}
+                        updateEnemy={updateEnemy}
+                      />
+                      <EnemyJabsBattlerData
+                        selectedEnemy={selectedEnemy}
+                        updateEnemy={updateEnemy}
+                      />
+                      <EnemyJabsTeam
+                        selectedEnemy={selectedEnemy}
+                        updateEnemy={updateEnemy}
+                      />
+                    </Stack>
+                  </Grid>
+                  <Grid size={6}>
+                    <Stack spacing={1}>
+                      <EnemyJabsConfigs
+                        selectedEnemy={selectedEnemy}
+                        updateEnemy={updateEnemy}
+                      />
+                      <EnemyPassiveAbs
+                        selectedEnemy={selectedEnemy}
+                        updateEnemy={updateEnemy}
+                      />
+                    </Stack>
+                  </Grid>
                 </Grid>
-              </Grid>
+              )}
             </>}
       </EditorBoardSplitLayout>
     </Box>

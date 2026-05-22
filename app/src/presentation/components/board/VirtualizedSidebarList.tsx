@@ -1,12 +1,32 @@
 import React, {
+  ChangeEvent,
   forwardRef,
+  useCallback,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { FixedSizeList, ListChildComponentProps } from "react-window";
-import { Box } from "@mui/material";
+import {
+  Box,
+  IconButton,
+  InputAdornment,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
+  Stack,
+  TextField,
+} from "@mui/material";
 import type { SxProps, Theme } from "@mui/material/styles";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Close,
+  DoubleArrow,
+  KeyboardArrowRight,
+} from "@mui/icons-material";
+import { IconSetSprite } from "@presentation/components/icons/IconSetSprite.tsx";
 
 /**
  * Standard sidebar list-column shell: grows with {@link EditorBoardSplitLayout}, constrains height for react-window.
@@ -21,14 +41,6 @@ export const VIRTUALIZED_SIDEBAR_LIST_REGION_SX: SxProps<Theme> = {
   width: "100%",
   boxSizing: "border-box",
 };
-import {
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-} from "@mui/material";
-import { DoubleArrow, KeyboardArrowRight } from "@mui/icons-material";
-import { IconSetSprite } from "@presentation/components/icons/IconSetSprite.tsx";
 
 //region VirtualizedSidebarList
 
@@ -85,6 +97,15 @@ type VirtualizedSidebarListProps = {
    * Optional context menu on the list column (e.g. SDP / crafting recipe list).
    */
   onContextMenu?: React.MouseEventHandler<HTMLDivElement>;
+  /**
+   * When true, renders a search bar above the list with prev/next navigation.
+   * Search matches against each item row's {@link VirtualizedSidebarRow.label}.
+   */
+  searchable?: boolean;
+  /**
+   * Label shown inside the search field. Defaults to {@code "Search"}.
+   */
+  searchLabel?: string;
 };
 
 const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListProps>(
@@ -102,23 +123,29 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
       listWrapperRef,
       fillContainer = false,
       onContextMenu,
+      searchable = false,
+      searchLabel = 'Search',
     } = props;
 
     const listColumnRef = useRef<HTMLDivElement>(null);
+    const listAreaRef = useRef<HTMLDivElement>(null);
+    const internalListRef = useRef<FixedSizeList>(null);
+
     const [ listViewportWidthPx, setListViewportWidthPx ] = useState(320);
     const [ listViewportHeightPx, setListViewportHeightPx ] = useState(listHeight);
+    const [ searchTerm, setSearchTerm ] = useState('');
 
     useLayoutEffect(() =>
     {
-      const el = listColumnRef.current;
-      if (!el)
+      const outerEl = listColumnRef.current;
+      if (!outerEl)
       {
         return;
       }
 
       const measure = () =>
       {
-        const w = Math.floor(el.clientWidth);
+        const w = Math.floor(outerEl.clientWidth);
         if (w > 0)
         {
           setListViewportWidthPx(w);
@@ -126,7 +153,9 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
 
         if (fillContainer)
         {
-          const h = Math.floor(el.clientHeight);
+          // When searchable, measure the inner list area so the search bar height is excluded.
+          const heightEl = listAreaRef.current ?? outerEl;
+          const h = Math.floor(heightEl.clientHeight);
           if (h > 0)
           {
             setListViewportHeightPx(h);
@@ -136,7 +165,11 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
 
       measure();
       const ro = new ResizeObserver(measure);
-      ro.observe(el);
+      ro.observe(outerEl);
+      if (listAreaRef.current && listAreaRef.current !== outerEl)
+      {
+        ro.observe(listAreaRef.current);
+      }
       return () =>
       {
         ro.disconnect();
@@ -148,6 +181,69 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
         ? listViewportHeightPx
         : listHeight)
       : listHeight;
+
+    // Searches forward (direction=1) or backward (direction=-1) from startIndex.
+    const findMatchIndex = useCallback((
+      startIndex: number,
+      term: string,
+      direction: 1 | -1
+    ): number =>
+    {
+      const query = term.trim().toLowerCase();
+      if (query === '' || itemCount === 0)
+      {
+        return -1;
+      }
+      for (let step = 1; step <= itemCount; step++)
+      {
+        const idx = (startIndex + direction * step + itemCount) % itemCount;
+        const row = getRow(idx);
+        if (row.type === 'item' && row.label.toLowerCase().includes(query))
+        {
+          return idx;
+        }
+      }
+      return -1;
+    }, [ itemCount, getRow ]);
+
+    const jumpTo = useCallback((idx: number) =>
+    {
+      internalListRef.current?.scrollToItem(idx, 'auto');
+      onSelectIndex(idx);
+    }, [ onSelectIndex ]);
+
+    const handleSearchChange = (e: ChangeEvent<HTMLInputElement>) =>
+    {
+      const term = e.target.value;
+      setSearchTerm(term);
+      if (term.trim() === '')
+      {
+        return;
+      }
+      const idx = findMatchIndex(-1, term, 1);
+      if (idx !== -1)
+      {
+        jumpTo(idx);
+      }
+    };
+
+    const handleSearchPrev = () =>
+    {
+      const idx = findMatchIndex(selectedIndex, searchTerm, -1);
+      if (idx !== -1)
+      {
+        jumpTo(idx);
+      }
+    };
+
+    const handleSearchNext = () =>
+    {
+      const idx = findMatchIndex(selectedIndex, searchTerm, 1);
+      if (idx !== -1)
+      {
+        jumpTo(idx);
+      }
+    };
 
     const renderRow = (rowProps: ListChildComponentProps) =>
     {
@@ -290,42 +386,117 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
     return (
       <Box
         ref={listColumnRef}
-        onContextMenu={onContextMenu}
         sx={{
           width: "100%",
           overflow: "hidden",
           ...(fillContainer
             ? VIRTUALIZED_SIDEBAR_LIST_REGION_SX
             : {}),
-          ...(onContextMenu !== undefined
-            ? { cursor: "context-menu" }
-            : {}),
         }}
       >
-        <div
-          ref={listWrapperRef}
-          tabIndex={0}
-          role={"listbox"}
-          onKeyDown={onListKeyDown}
-          style={{
-            outline: "none",
-            width: "100%",
-            minWidth: 0,
-            overflow: "hidden",
+        {searchable && (
+          <Stack
+            direction={'row'}
+            spacing={0.5}
+            alignItems={'center'}
+            sx={{ px: 0.5, pt: 0.5, pb: 0.5, flexShrink: 0 }}
+          >
+            <IconButton
+              size={'small'}
+              onClick={handleSearchPrev}
+              disabled={searchTerm.trim() === ''}
+              tabIndex={-1}
+              title={'Previous match'}
+            >
+              <ChevronLeft fontSize={'small'}/>
+            </IconButton>
+            <TextField
+              size={'small'}
+              label={searchLabel}
+              value={searchTerm}
+              onChange={handleSearchChange}
+              fullWidth
+              slotProps={{
+                input: {
+                  endAdornment: searchTerm.length > 0
+                    ? (
+                      <InputAdornment position={'end'}>
+                        <IconButton
+                          size={'small'}
+                          edge={'end'}
+                          onClick={() => setSearchTerm('')}
+                          tabIndex={-1}
+                        >
+                          <Close fontSize={'small'}/>
+                        </IconButton>
+                      </InputAdornment>
+                    )
+                    : null,
+                },
+              }}
+            />
+            <IconButton
+              size={'small'}
+              onClick={handleSearchNext}
+              disabled={searchTerm.trim() === ''}
+              tabIndex={-1}
+              title={'Next match'}
+            >
+              <ChevronRight fontSize={'small'}/>
+            </IconButton>
+          </Stack>
+        )}
+
+        <Box
+          ref={listAreaRef}
+          onContextMenu={onContextMenu}
+          sx={{
+            overflow: 'hidden',
+            width: '100%',
+            ...(fillContainer
+              ? { flex: 1, minHeight: 0 }
+              : {}),
+            ...(onContextMenu !== undefined
+              ? { cursor: 'context-menu' }
+              : {}),
           }}
         >
-          {/* @ts-ignore react-window width */}
-          <FixedSizeList
-            ref={ref}
-            height={resolvedListHeight}
-            width={listViewportWidthPx}
-            itemSize={itemSize}
-            overscanCount={5}
-            itemCount={itemCount}
+          <div
+            ref={listWrapperRef}
+            tabIndex={0}
+            role={"listbox"}
+            onKeyDown={onListKeyDown}
+            style={{
+              outline: "none",
+              width: "100%",
+              minWidth: 0,
+              overflow: "hidden",
+            }}
           >
-            {renderRow}
-          </FixedSizeList>
-        </div>
+            {/* @ts-ignore react-window width */}
+            <FixedSizeList
+              ref={(instance) =>
+              {
+                internalListRef.current = instance;
+                if (typeof ref === 'function')
+                {
+                  ref(instance);
+                }
+                else if (ref !== null && ref !== undefined)
+                {
+                  (ref as React.MutableRefObject<FixedSizeList | null>).current = instance;
+                }
+              }}
+              height={resolvedListHeight}
+              width={listViewportWidthPx}
+              itemSize={itemSize}
+              overscanCount={5}
+              itemCount={itemCount}
+            >
+              {renderRow}
+            </FixedSizeList>
+          </div>
+        </Box>
       </Box>
     );
   },

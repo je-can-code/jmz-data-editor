@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Collapse, IconButton, Paper, Stack, Typography } from '@mui/material';
+import { Box, Collapse, IconButton, Stack, Typography } from '@mui/material';
 import { ExpandMore } from '@mui/icons-material';
 
 type BoardSectionCardAccent = 'neutral' | 'primary' | 'jabs' | 'plugin';
@@ -36,76 +36,51 @@ function BoardSectionCard({
 {
   const [ expanded, setExpanded ] = useState(defaultExpanded);
 
-  const headerPy = density === 'compact'
-    ? 0.75
-    : 1.25;
-  const contentPx = density === 'compact'
-    ? 1.5
-    : 2;
-  const contentPy = density === 'compact'
-    ? 1
-    : 1.5;
+  const headerPy = density === 'compact' ? 0.75 : 1;
+  const contentPx = density === 'compact' ? 1.5 : 2;
+  const contentPy = density === 'compact' ? 1 : 1.5;
 
   const accentColor = ACCENT_COLORS[ accent ];
+  const hasAccent = accent !== 'neutral';
 
   const handleToggle = () =>
   {
-    if (collapsible)
-    {
-      setExpanded((prev) => !prev);
-    }
+    if (collapsible) setExpanded((prev) => !prev);
   };
 
   return (
-    <Paper
-      variant={'outlined'}
+    <Box
       sx={{
-        borderColor: 'divider',
-        overflow: 'hidden',
         width: '100%',
         boxSizing: 'border-box',
+        border: '1px solid',
+        borderColor: hasAccent ? accentColor : 'divider',
+        borderRadius: 1,
+        bgcolor: 'action.hover',
+        overflow: 'hidden',
       }}
     >
       <Box
-        onClick={collapsible
-          ? handleToggle
-          : undefined}
+        onClick={collapsible ? handleToggle : undefined}
         sx={{
           display: 'flex',
           alignItems: 'center',
           px: contentPx,
           py: headerPy,
-          borderBottom: expanded
-            ? '1px solid'
-            : 'none',
+          borderBottom: (!collapsible || expanded) ? '1px solid' : 'none',
           borderColor: 'divider',
-          borderLeft: '3px solid',
-          borderLeftColor: accentColor,
-          cursor: collapsible
-            ? 'pointer'
-            : 'default',
+          cursor: collapsible ? 'pointer' : 'default',
           userSelect: 'none',
-          '&:hover': collapsible
-            ? { bgcolor: 'action.hover' }
-            : {},
+          '&:hover': collapsible ? { bgcolor: 'action.selected' } : {},
         }}
       >
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography
-            variant={'subtitle1'}
-            fontWeight={600}
-            lineHeight={1.3}
-            noWrap
-          >
+          <Typography variant={'subtitle1'} fontWeight={600} lineHeight={1.3}>
             {title}
           </Typography>
           {subtitle
             ? (
-              <Typography
-                variant={'caption'}
-                color={'text.secondary'}
-                display={'block'}
-              >
+              <Typography variant={'caption'} color={'text.secondary'} display={'block'}>
                 {subtitle}
               </Typography>
             )
@@ -131,9 +106,7 @@ function BoardSectionCard({
               }}
               sx={{
                 ml: 0.5,
-                transform: expanded
-                  ? 'rotate(0deg)'
-                  : 'rotate(-90deg)',
+                transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)',
                 transition: 'transform 200ms',
               }}
             >
@@ -148,7 +121,7 @@ function BoardSectionCard({
           {children}
         </Box>
       </Collapse>
-    </Paper>
+    </Box>
   );
 }
 

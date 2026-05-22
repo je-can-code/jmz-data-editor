@@ -11,12 +11,8 @@ import {
   Alert,
   Autocomplete,
   Box,
-  Button,
   Checkbox,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
+  Chip,
   Divider,
   FormControlLabel,
   Grid,
@@ -30,12 +26,15 @@ import {
   MenuItem,
   Snackbar,
   Stack,
+  Switch,
+  Tab,
+  Tabs,
   TextField,
-  Typography
+  Typography,
 } from '@mui/material';
 import {
   Add,
-  Check,
+  Construction,
   ContentCopy,
   DonutLarge,
   DonutSmall,
@@ -44,7 +43,7 @@ import {
   LockOpen,
   Remove,
   Visibility,
-  VisibilityOff
+  VisibilityOff,
 } from '@mui/icons-material';
 import styled from 'styled-components';
 import { FixedSizeList } from 'react-window';
@@ -60,13 +59,15 @@ import { RPG_ArmorDomainModel } from '@core/domain/entities/RPG_ArmorDomainModel
 import { RPG_ItemDomainModel } from '@core/domain/entities/RPG_ItemDomainModel.ts';
 import { RPG_WeaponDomainModel } from '@core/domain/entities/RPG_WeaponDomainModel.ts';
 
-import SaveButton from '../../../components/core/SaveButton.tsx';
-import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import KeyTextField from '../../../components/core/KeyTextField.tsx';
+import { BoardEmptyState } from '@presentation/components/board/BoardEmptyState.tsx';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
+import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 import { useItems } from '@presentation/context/resources/items.context.tsx';
 import { useWeapons } from '@presentation/context/resources/weapons.context.tsx';
 import { useArmors } from '@presentation/context/resources/armors.context.tsx';
+import { IconIndexField } from '@presentation/components/icons/IconIndexField.tsx';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
 import {
   VirtualizedSidebarList,
@@ -168,6 +169,7 @@ const CraftingBoard = () =>
   const listWrapperRef = useRef<HTMLDivElement>(null);
 
   //region state
+  const [ tabIndex, setTabIndex ] = useState(0);
   const [ selectedRecipe, setSelectedRecipe ] = useState<Recipe | null>(null);
   const [ selectedRecipeIndex, setSelectedRecipeIndex ] = useState<number>(0);
 
@@ -193,29 +195,26 @@ const CraftingBoard = () =>
     mouseX: number;
     mouseY: number;
   } | null>(null);
-
-  const [ categoryDialogOpen, setCategoryDialogOpen ] = useState<boolean>(false);
   //endregion state
+
+  const recipeFirstOutput = useMemo(
+    () => selectedRecipe === null
+      ? null
+      : recipeFirstOutputDatabaseRow(selectedRecipe, itemsById, weaponsById, armorsById),
+    [ selectedRecipe, itemsById, weaponsById, armorsById ],
+  );
+
+  const recipeNamePlaceholderFromFirstOutput = useMemo(() =>
+  {
+    if (selectedRecipe === null || selectedRecipe.name.trim().length > 0) return '';
+    return recipeFirstOutput?.name ?? '';
+  }, [ selectedRecipe, recipeFirstOutput ]);
 
   const recipeDescriptionPlaceholderFromFirstOutput = useMemo(() =>
   {
-    if (selectedRecipe === null)
-    {
-      return '';
-    }
-
-    if (selectedRecipe.description.trim().length > 0)
-    {
-      return '';
-    }
-
-    return readDatabaseDescription(recipeFirstOutputDatabaseRow(
-      selectedRecipe,
-      itemsById,
-      weaponsById,
-      armorsById
-    ));
-  }, [ selectedRecipe, itemsById, weaponsById, armorsById ]);
+    if (selectedRecipe === null || selectedRecipe.description.trim().length > 0) return '';
+    return readDatabaseDescription(recipeFirstOutput);
+  }, [ selectedRecipe, recipeFirstOutput ]);
 
   //region actions
   const handleSnack = (
@@ -278,13 +277,11 @@ const CraftingBoard = () =>
   }, [ loading, recipes, selectedRecipe, handleRecipeListItemOnClickEvent ]);
 
   /**
-   * When the category dialog opens or the in-memory category list is replaced, clamp the index and bind the
-   * form to the corresponding row. Row clicks still go through {@link handleCategoryListItemOnClickEvent};
-   * this effect covers open, reload, delete, and edits that swap the array under the same index.
+   * Clamps the category selection index and syncs the form whenever categories change.
    */
   useEffect(() =>
   {
-    if (!categoryDialogOpen || loading || categories.length === 0)
+    if (loading || categories.length === 0)
     {
       return;
     }
@@ -296,7 +293,7 @@ const CraftingBoard = () =>
     }
 
     setSelectedCategory(categories[ idx ]);
-  }, [ categoryDialogOpen, categories, loading, selectedCategoryIndex ]);
+  }, [ categories, loading, selectedCategoryIndex ]);
 
   const handleRecipeListContextMenu = (event: MouseEvent) =>
   {
@@ -424,30 +421,6 @@ const CraftingBoard = () =>
   const handleRecipeUnlockedByDefaultOnCheckEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     patchSelectedRecipe({ unlockedByDefault: event.target.checked });
-  };
-
-  const handleRecipeCategoryKeyToggle = (value: string) =>
-  {
-    if (selectedRecipe === null)
-    {
-      return;
-    }
-
-    const currentIndex = applicableCategories.indexOf(value);
-    const newChecked = [ ...applicableCategories ];
-
-    if (currentIndex === -1)
-    {
-      newChecked.push(value);
-    }
-    else
-    {
-      newChecked.splice(currentIndex, 1);
-    }
-
-    const sorted = newChecked.sort();
-    setApplicableCategories(sorted);
-    patchSelectedRecipe({ categoryKeys: sorted });
   };
 
   const handleCategoryKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
@@ -650,9 +623,6 @@ const CraftingBoard = () =>
   //region render
   /**
    * Virtualized recipe list row (label + first-output icon).
-   *
-   * @param index Index in {@link recipes}.
-   * @returns Spacer or sidebar row descriptor.
    */
   const getRecipeSidebarRow = useCallback((index: number): VirtualizedSidebarRow =>
   {
@@ -664,12 +634,10 @@ const CraftingBoard = () =>
       };
     }
 
-    const label = recipe.name.length === 0
-      ? recipe.key
-      : recipe.name;
-    const title = recipe.name.length === 0
-      ? recipe.key
-      : `${recipe.key}: ${recipe.name}`;
+    const outputName = recipeFirstOutputDatabaseRow(recipe, itemsById, weaponsById, armorsById)?.name ?? '';
+    const displayName = recipe.name.length > 0 ? recipe.name : outputName;
+    const label = displayName.length > 0 ? displayName : recipe.key;
+    const title = displayName.length > 0 ? `${recipe.key}: ${displayName}` : recipe.key;
 
     return {
       type: 'item',
@@ -702,12 +670,23 @@ const CraftingBoard = () =>
           <EntryText
             primary={`${category.key}: ${category.name}`}
             disableTypography/>
-
         </ListItemButton>
       </ListItem>
     );
   };
   //endregion render
+
+  useBoardActions({
+    onSave: async () =>
+    {
+      setCanSave(false);
+      await save({ recipes, categories } as Configuration);
+      handleSnack('Crafting data has been saved successfully.');
+    },
+    canSave: canSave && !loading,
+    onReload: handleReloadButtonOnClickEvent,
+    canReload: !loading,
+  });
 
   if (loading)
   {
@@ -723,257 +702,342 @@ const CraftingBoard = () =>
     );
   }
 
+  const categoryPickerOptions = [ ...categories ]
+    .filter((c) => c.name !== '' && !c.name.startsWith('=='))
+    .sort((a, b) => a.key.localeCompare(b.key));
+
+  const categoryPickerValue = categoryPickerOptions.filter((c) => applicableCategories.includes(c.key));
+
   return <>
-    <Box sx={{
-      flex: 1,
-      minHeight: 0,
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-    }}>
-      <EditorBoardSplitLayout
-        sidebarColumnWidth={craftingBoardListColumnWidth}
-        sidebar={
-          <VirtualizedSidebarList
-            ref={listRef}
-            itemCount={recipes.length}
-            itemSize={VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE}
-            fillContainer
-            listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
-            labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
-            selectedIndex={selectedRecipeIndex}
-            getRow={getRecipeSidebarRow}
-            onSelectIndex={(index) =>
-            {
-              handleRecipeListItemOnClickEvent(index);
-            }}
-            onContextMenu={handleRecipeListContextMenu}
-            listWrapperRef={listWrapperRef}
-          />
-        }
-      >
-          {(selectedRecipe === null)
-            ? <Grid container>
-              <Typography>
-                Please select a recipe on the left.<br/>
-                If there are no recipes, then consider making one.
-              </Typography>
-            </Grid>
+    <EditorBoardSplitLayout
+      sidebarColumnWidth={craftingBoardListColumnWidth}
+      sidebar={
+        <VirtualizedSidebarList
+          ref={listRef}
+          itemCount={recipes.length}
+          itemSize={VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE}
+          fillContainer
+          listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
+          labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
+          selectedIndex={selectedRecipeIndex}
+          getRow={getRecipeSidebarRow}
+          onSelectIndex={(index) =>
+          {
+            handleRecipeListItemOnClickEvent(index);
+          }}
+          onContextMenu={handleRecipeListContextMenu}
+          listWrapperRef={listWrapperRef}
+          searchable
+          searchLabel={'Search recipes'}
+        />
+      }
+    >
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
+        <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
+          <Tab label={'Recipes'} id={'crafting-tab-0'} aria-controls={'crafting-tabpanel-0'}/>
+          <Tab label={'Categories'} id={'crafting-tab-1'} aria-controls={'crafting-tabpanel-1'}/>
+        </Tabs>
+      </Box>
 
-            : <>
-              <Grid container rowSpacing={2} columnSpacing={4}>
-                {/* Key */}
-                <Grid size={4}>
-                  <KeyTextField
-                    value={selectedRecipe.key}
-                    onChange={handleRecipeKeyOnChangeEvent}
-                  />
-                </Grid>
-
-                {/* Name */}
-                <Grid size={4}>
-                  <TextField
-                    variant={'outlined'}
-                    label={'Name'}
-                    value={selectedRecipe.name}
-                    onChange={handleRecipeNameOnChangeEvent}
-                    size={'small'}
-                    fullWidth
-                  />
-                </Grid>
-
-                {/* Icon */}
-                <Grid size={1}>
-                  <TextField
-                    type={'number'}
-                    label={'Icon Index'}
-                    value={selectedRecipe.iconIndex ?? -1}
-                    sx={{ width: '80px' }}
-                    onChange={(event) => handleRecipeIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
-                  />
-                </Grid>
-
-                {/* Initial visibility checkboxes */}
-                <Grid size={3}>
-                  <Stack spacing={0}>
-                    <FormControlLabel
-                      control={<Checkbox
-                        checked={selectedRecipe.unlockedByDefault}
-                        checkedIcon={<LockOpen/>}
-                        icon={<Lock/>}
-                        onChange={handleRecipeUnlockedByDefaultOnCheckEvent}
-                      />}
-                      label="Unlocked By Default"
-                      labelPlacement={'end'}
+      {tabIndex === 0 && (
+        selectedRecipe === null
+          ? (
+            <BoardEmptyState
+              icon={<Construction sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }}/>}
+              message={'Select a recipe from the list, or right-click the list to add one.'}
+            />
+          )
+          : (
+            <Stack spacing={2}>
+              <BoardSectionCard title={'Recipe'}>
+                <Grid container rowSpacing={2} columnSpacing={2} alignItems={'flex-start'}>
+                  <Grid size={3}>
+                    <KeyTextField
+                      value={selectedRecipe.key}
+                      onChange={handleRecipeKeyOnChangeEvent}
                     />
+                  </Grid>
 
-                    <FormControlLabel
-                      control={<Checkbox
-                        checked={selectedRecipe.maskedUntilCrafted}
-                        checkedIcon={<VisibilityOff/>}
-                        icon={<Visibility/>}
-                        onChange={handleRecipeMaskedUntilCraftedOnCheckEvent}
-                      />}
-                      label="Masked Until Crafted"
-                      labelPlacement={'end'}
-                    />
-                  </Stack>
-                </Grid>
-
-                {/* Description */}
-                <Grid size={8}>
-                  <TextField
-                    variant={'outlined'}
-                    label={'Description'}
-                    value={selectedRecipe.description}
-                    onChange={handleRecipeDescriptionOnChangeEvent}
-                    size={'small'}
-                    multiline
-                    fullWidth
-                    rows={4}
-                    InputLabelProps={selectedRecipe.description.trim().length === 0 && recipeDescriptionPlaceholderFromFirstOutput.length > 0
-                      ? { shrink: true }
-                      : undefined}
-                    placeholder={selectedRecipe.description.trim().length === 0 && recipeDescriptionPlaceholderFromFirstOutput.length > 0
-                      ? recipeDescriptionPlaceholderFromFirstOutput
-                      : undefined}
-                  />
-                </Grid>
-
-                {/* Category key management */}
-                <Grid size={4}>
-                  <Stack spacing={2}>
-                    <Button
+                  <Grid size={4}>
+                    <TextField
+                      variant={'outlined'}
+                      label={'Name'}
+                      value={selectedRecipe.name}
+                      onChange={handleRecipeNameOnChangeEvent}
                       size={'small'}
                       fullWidth
-                      variant={'outlined'}
-                      color={'secondary'}
-                      onClick={() => setCategoryDialogOpen(true)}
-                    >
-                      Modify Categories
-                    </Button>
-                    <Autocomplete
-                      size={'small'}
-                      options={[ ...categories ].sort()}
-                      disableCloseOnSelect
-                      groupBy={option => option.key.split('-')[ 0 ]}
-                      slotProps={{
-                        listbox: {
-                          sx: { maxHeight: '400px' }
+                      InputLabelProps={selectedRecipe.name.trim().length === 0 && recipeNamePlaceholderFromFirstOutput.length > 0
+                        ? { shrink: true }
+                        : undefined}
+                      placeholder={selectedRecipe.name.trim().length === 0 && recipeNamePlaceholderFromFirstOutput.length > 0
+                        ? recipeNamePlaceholderFromFirstOutput
+                        : undefined}
+                    />
+                  </Grid>
+
+                  <Grid size={2}>
+                    <Stack spacing={0.5}>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            size={'small'}
+                            checked={selectedRecipe.iconIndex === -1}
+                            onChange={(e) => handleRecipeIconIndexOnChangeEvent(e.target.checked
+                              ? -1
+                              : 0)}
+                          />
                         }
+                        label={'Auto icon'}
+                      />
+                      {selectedRecipe.iconIndex !== -1 && (
+                        <IconIndexField
+                          value={selectedRecipe.iconIndex}
+                          onChange={handleRecipeIconIndexOnChangeEvent}
+                        />
+                      )}
+                    </Stack>
+                  </Grid>
+
+                  <Grid size={3}>
+                    <Stack spacing={0}>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={selectedRecipe.unlockedByDefault}
+                            checkedIcon={<LockOpen/>}
+                            icon={<Lock/>}
+                            onChange={handleRecipeUnlockedByDefaultOnCheckEvent}
+                          />
+                        }
+                        label={selectedRecipe.unlockedByDefault
+                          ? 'Unlocked by default'
+                          : 'Locked by default'}
+                      />
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={selectedRecipe.maskedUntilCrafted}
+                            checkedIcon={<VisibilityOff/>}
+                            icon={<Visibility/>}
+                            onChange={handleRecipeMaskedUntilCraftedOnCheckEvent}
+                          />
+                        }
+                        label={selectedRecipe.maskedUntilCrafted
+                          ? 'Masked until crafted'
+                          : 'Visible immediately'}
+                      />
+                    </Stack>
+                  </Grid>
+
+                  <Grid size={8}>
+                    <TextField
+                      variant={'outlined'}
+                      label={'Description'}
+                      value={selectedRecipe.description}
+                      onChange={handleRecipeDescriptionOnChangeEvent}
+                      size={'small'}
+                      multiline
+                      fullWidth
+                      rows={4}
+                      InputLabelProps={selectedRecipe.description.trim().length === 0 && recipeDescriptionPlaceholderFromFirstOutput.length > 0
+                        ? { shrink: true }
+                        : undefined}
+                      placeholder={selectedRecipe.description.trim().length === 0 && recipeDescriptionPlaceholderFromFirstOutput.length > 0
+                        ? recipeDescriptionPlaceholderFromFirstOutput
+                        : undefined}
+                    />
+                  </Grid>
+
+                  <Grid size={4}>
+                    <Autocomplete<Category, true>
+                      multiple
+                      size={'small'}
+                      options={categoryPickerOptions}
+                      value={categoryPickerValue}
+                      onChange={(_, newValue) =>
+                      {
+                        const sorted = newValue.map((c) => c.key).sort();
+                        setApplicableCategories(sorted);
+                        patchSelectedRecipe({ categoryKeys: sorted });
                       }}
+                      disableCloseOnSelect
+                      groupBy={(option) => option.key.split('-')[ 0 ]}
                       getOptionKey={(option) => option.key}
                       getOptionLabel={(option) => option.name}
-                      renderOption={(
-                        props,
-                        option
-                      ) =>
-                      {
-                        const {
-                          key,
-                          style,
-                          ...optionProps
-                        } = props;
-
-                        if (option === null || option.name === '' || option.name.startsWith('=='))
-                        {
-                          return <li key={key} {...optionProps} style={{ display: 'none' }}/>;
-                        }
-
-                        const mergedStyle = {
-                          ...(typeof style === 'object' && style !== null && !Array.isArray(style)
-                            ? style
-                            : {}),
-                          height: 32,
-                        };
-
-                        return (
-                          <li key={key} {...optionProps} style={mergedStyle}>
-                            <ListItem
-                              component="div"
-                              disableGutters
-                              disablePadding
-                              sx={{ height: 32 }}
-                            >
-                              <ListItemIcon sx={{ height: 32 }}>
-                                <Checkbox
-                                  checked={applicableCategories.includes(option.key)}
-                                  onChange={() => handleRecipeCategoryKeyToggle(option.key)}/>
-                                <EntryText
-                                  primary={`${option.key}: ${option.name}`}
-                                  disableTypography={true}
-                                />
-                              </ListItemIcon>
-                            </ListItem>
-                          </li>
-                        );
+                      isOptionEqualToValue={(a, b) => a.key === b.key}
+                      slotProps={{
+                        listbox: { sx: { maxHeight: '400px' } },
                       }}
-                      renderInput={(params) =>
-                      {
-                        return (<TextField
+                      renderTags={(value, getTagProps) =>
+                        value.map((option, index) => (
+                          <Chip
+                            {...getTagProps({ index })}
+                            key={option.key}
+                            label={option.name}
+                            size={'small'}
+                          />
+                        ))
+                      }
+                      renderInput={(params) => (
+                        <TextField
                           {...params}
                           size={'small'}
-                          label={'Choose Categories'}
-                          placeholder="Category key..."/>);
-                      }}
+                          label={'Categories'}
+                          placeholder={applicableCategories.length === 0
+                            ? 'None assigned'
+                            : ''}
+                        />
+                      )}
                     />
-                  </Stack>
+                  </Grid>
                 </Grid>
+              </BoardSectionCard>
 
-                <Box
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                    gap: 2,
-                    width: '100%',
-                    alignItems: 'stretch',
-                  }}
-                >
-                  <CraftingComponentList
-                    type={CraftingListType.Ingredients}
-                    updateRecipeFunc={updateCraftingComponentList}
-                    components={currentIngredients}
-                    handleSnack={handleSnack}
-                  />
-                  <CraftingComponentList
-                    type={CraftingListType.Tools}
-                    updateRecipeFunc={updateCraftingComponentList}
-                    components={currentTools}
-                    handleSnack={handleSnack}
-                  />
-                  <CraftingComponentList
-                    type={CraftingListType.Outputs}
-                    updateRecipeFunc={updateCraftingComponentList}
-                    components={currentOutputs}
-                    handleSnack={handleSnack}
-                  />
-                </Box>
-              </Grid>
-            </>}
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                  gap: 2,
+                  width: '100%',
+                  alignItems: 'stretch',
+                }}
+              >
+                <CraftingComponentList
+                  type={CraftingListType.Ingredients}
+                  updateRecipeFunc={updateCraftingComponentList}
+                  components={currentIngredients}
+                  handleSnack={handleSnack}
+                />
+                <CraftingComponentList
+                  type={CraftingListType.Tools}
+                  updateRecipeFunc={updateCraftingComponentList}
+                  components={currentTools}
+                  handleSnack={handleSnack}
+                />
+                <CraftingComponentList
+                  type={CraftingListType.Outputs}
+                  updateRecipeFunc={updateCraftingComponentList}
+                  components={currentOutputs}
+                  handleSnack={handleSnack}
+                />
+              </Box>
+            </Stack>
+          )
+      )}
 
-      </EditorBoardSplitLayout>
-    </Box>
+      {tabIndex === 1 && (
+        <Grid container rowSpacing={2} columnSpacing={2} sx={{ height: '100%' }}>
+          <Grid size={4}>
+            <BoardSectionCard title={'Categories'} density={'compact'}>
+              <div onContextMenu={handleCategoryListContextMenu} style={{ cursor: 'context-menu' }}>
+                <List dense>
+                  {categories.map((category, index) => renderCategoryListItem(category, index))}
+                </List>
+              </div>
+            </BoardSectionCard>
+          </Grid>
 
-      {/*region not-grid-related elements */}
-      {/* This is over-arching save button- it will save all recipes to disk. */}
-      <SaveButton
-        extraSaveText={'Recipes'}
-        canSave={canSave && !loading}
-        handleSave={async () =>
-        {
-          setCanSave(false);
-          await save({
-            recipes,
-            categories
-          } as Configuration);
-          handleSnack('Crafting data has been saved successfully.');
-        }}
-      />
-      <ReloadButton
-        handleReload={handleReloadButtonOnClickEvent}
-        canReload={!loading}
-        extraReloadText={'Crafting Data'}
-      />
+          <Grid size={8}>
+            {selectedCategory !== null
+              ? (
+                <BoardSectionCard title={'Category'}>
+                  <Grid container rowSpacing={2} columnSpacing={2} alignItems={'flex-start'}>
+                    <Grid size={6}>
+                      <TextField
+                        required
+                        variant={'outlined'}
+                        label={'Key'}
+                        value={selectedCategory.key}
+                        onChange={handleCategoryKeyOnChangeEvent}
+                        size={'small'}
+                        fullWidth
+                        slotProps={{
+                          input: {
+                            startAdornment: (
+                              <InputAdornment position={'start'}>
+                                <Key/>
+                              </InputAdornment>
+                            ),
+                          },
+                        }}
+                      />
+                    </Grid>
+
+                    <Grid size={6}>
+                      <TextField
+                        variant={'outlined'}
+                        label={'Name'}
+                        value={selectedCategory.name}
+                        onChange={handleCategoryNameOnChangeEvent}
+                        size={'small'}
+                        fullWidth
+                      />
+                    </Grid>
+
+                    <Grid size={12}>
+                      <Stack direction={'row'} spacing={3} alignItems={'flex-start'}>
+                        <Stack spacing={0.5}>
+                          <FormControlLabel
+                            control={
+                              <Switch
+                                size={'small'}
+                                checked={selectedCategory.iconIndex === -1}
+                                onChange={(e) => handleCategoryIconIndexOnChangeEvent(e.target.checked
+                                  ? -1
+                                  : 0)}
+                              />
+                            }
+                            label={'Auto icon'}
+                          />
+                          {selectedCategory.iconIndex !== -1 && (
+                            <IconIndexField
+                              value={selectedCategory.iconIndex}
+                              onChange={handleCategoryIconIndexOnChangeEvent}
+                            />
+                          )}
+                        </Stack>
+
+                        <FormControlLabel
+                          control={
+                            <Checkbox
+                              checked={selectedCategory.unlockedByDefault}
+                              checkedIcon={<LockOpen/>}
+                              icon={<Lock/>}
+                              onChange={handleCategoryUnlockedByDefaultOnCheckEvent}
+                            />
+                          }
+                          label={selectedCategory.unlockedByDefault
+                            ? 'Unlocked by default'
+                            : 'Locked by default'}
+                        />
+                      </Stack>
+                    </Grid>
+
+                    <Grid size={12}>
+                      <TextField
+                        variant={'outlined'}
+                        label={'Description'}
+                        value={selectedCategory.description}
+                        onChange={handleCategoryDescriptionOnChangeEvent}
+                        size={'small'}
+                        multiline
+                        fullWidth
+                        rows={4}
+                      />
+                    </Grid>
+                  </Grid>
+                </BoardSectionCard>
+              )
+              : (
+                <BoardEmptyState
+                  icon={<DonutLarge sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }}/>}
+                  message={'Select a category from the list, or right-click to add one.'}
+                />
+              )}
+          </Grid>
+        </Grid>
+      )}
+    </EditorBoardSplitLayout>
 
       <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
         <Alert
@@ -989,7 +1053,7 @@ const CraftingBoard = () =>
       <Menu
         open={recipeListContextMenu !== null}
         onClose={handleRecipeListContextMenuOnCloseEvent}
-        anchorReference="anchorPosition"
+        anchorReference={'anchorPosition'}
         anchorPosition={recipeListContextMenu !== null
           ? {
             top: recipeListContextMenu.mouseY,
@@ -1045,110 +1109,10 @@ const CraftingBoard = () =>
         </MenuItem>
       </Menu>
 
-      <Dialog
-        open={categoryDialogOpen}
-        onClose={() => setCategoryDialogOpen(false)}
-        maxWidth={'lg'}
-        fullWidth
-      >
-        <DialogTitle>
-          Category Management
-        </DialogTitle>
-        <DialogContent>
-          <Grid container rowSpacing={2} columnSpacing={2}>
-            {/* list of categories */}
-            <Grid size={4}>
-              <div onContextMenu={handleCategoryListContextMenu} style={{ cursor: 'context-menu' }}>
-                <List>
-                  {categories.map((
-                    category,
-                    index
-                  ) => renderCategoryListItem(category, index))}
-                </List>
-              </div>
-            </Grid>
-
-            {/* category modification */}
-            <Grid size={8}>
-              <Stack spacing={2}>
-                {/* Key */}
-                <TextField
-                  required
-                  variant={'outlined'}
-                  label={'Key'}
-                  value={selectedCategory?.key}
-                  onChange={handleCategoryKeyOnChangeEvent}
-                  size={'small'}
-                  slotProps={{
-                    input: {
-                      startAdornment: <InputAdornment position={'start'}>
-                        <Key/>
-                      </InputAdornment>
-                    }
-                  }}
-                />
-
-                {/* Name */}
-                <TextField
-                  variant={'outlined'}
-                  label={'Name'}
-                  value={selectedCategory?.name}
-                  onChange={handleCategoryNameOnChangeEvent}
-                  size={'small'}
-                />
-
-                {/* Icon */}
-                <TextField
-                  type={'number'}
-                  label={'Icon Index'}
-                  value={selectedCategory?.iconIndex ?? -1}
-                  sx={{ width: '80px' }}
-                  onChange={(event) => handleCategoryIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
-                />
-
-                {/* Initial visibility checkboxes */}
-                <FormControlLabel
-                  control={<Checkbox
-                    checked={selectedCategory?.unlockedByDefault}
-                    checkedIcon={<LockOpen/>}
-                    icon={<Lock/>}
-                    onChange={handleCategoryUnlockedByDefaultOnCheckEvent}
-                  />}
-                  label="Unlocked By Default"
-                  labelPlacement={'end'}
-                />
-
-                {/* Description */}
-                <TextField
-                  variant={'outlined'}
-                  label={'Description'}
-                  value={selectedCategory?.description}
-                  onChange={handleCategoryDescriptionOnChangeEvent}
-                  size={'small'}
-                  multiline
-                  fullWidth
-                  rows={4}
-                />
-              </Stack>
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button
-            variant={'contained'}
-            startIcon={<Check/>}
-            color={'success'}
-            onClick={() => setCategoryDialogOpen(false)}
-          >
-            <Typography>Done Modifying Categories</Typography>
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       <Menu
         open={categoryListContextMenu !== null}
         onClose={handleCategoryListContextMenuOnCloseEvent}
-        anchorReference="anchorPosition"
+        anchorReference={'anchorPosition'}
         anchorPosition={categoryListContextMenu !== null
           ? {
             top: categoryListContextMenu.mouseY,
@@ -1203,7 +1167,6 @@ const CraftingBoard = () =>
           <Typography>Remove Selected</Typography>
         </MenuItem>
       </Menu>
-      {/*endregion not-grid-related elements */}
   </>;
 };
 

@@ -1,8 +1,5 @@
 import type { ReactNode } from 'react';
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Box,
   Checkbox,
   FormControlLabel,
@@ -13,7 +10,6 @@ import {
   Badge,
   BadgeSharp,
   DirectionsRun,
-  ExpandMore,
   Favorite,
   HeartBroken,
   NoEncryption,
@@ -21,6 +17,7 @@ import {
   Visibility,
   VisibilityOff
 } from '@mui/icons-material';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import { blue, green, grey, orange, purple, red } from '@mui/material/colors';
 import { JabsConfig, JabsConfigsData } from '@core/domain/valueObjects/jabs-configs.ts';
 import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
@@ -29,13 +26,6 @@ type EnemyJabsConfigsProps = {
   selectedEnemy: RPG_EnemyDomainModel;
   updateEnemy: (enemy: RPG_EnemyDomainModel) => void;
 };
-
-const accordionShellSx = {
-  border: '1px solid',
-  borderColor: 'divider',
-  borderRadius: 1,
-  '&:before': { display: 'none' },
-} as const;
 
 const EnemyJabsConfigs = ({
   selectedEnemy,
@@ -97,25 +87,14 @@ const EnemyJabsConfigs = ({
   );
 
   return (
-    <Accordion
+    <BoardSectionCard
+      title={'JABS behavior'}
+      subtitle={activeJabsOptionCount === 0
+        ? 'No JABS flags on — defaults apply in-game.'
+        : `${activeJabsOptionCount} option${activeJabsOptionCount === 1 ? '' : 's'} on`}
+      collapsible
       defaultExpanded={false}
-      disableGutters={true}
-      elevation={0}
-      sx={accordionShellSx}
     >
-      <AccordionSummary expandIcon={<ExpandMore/>}>
-        <Stack spacing={0.25}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            JABS behavior
-          </Typography>
-          <Typography variant={'caption'} color={'text.secondary'}>
-            {activeJabsOptionCount === 0
-              ? 'No JABS flags on — defaults apply in-game.'
-              : `${activeJabsOptionCount} option${activeJabsOptionCount === 1 ? '' : 's'} on`}
-          </Typography>
-        </Stack>
-      </AccordionSummary>
-      <AccordionDetails>
         <Box sx={{
           display: 'flex',
           flexDirection: 'column',
@@ -216,8 +195,7 @@ const EnemyJabsConfigs = ({
         </Stack>
         </Box>
         </Box>
-      </AccordionDetails>
-    </Accordion>
+    </BoardSectionCard>
   );
 };
 

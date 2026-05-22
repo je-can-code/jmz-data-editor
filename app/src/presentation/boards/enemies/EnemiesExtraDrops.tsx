@@ -50,6 +50,7 @@ import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Armor = Rmmz.Implementations.RPG_Armor;
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
 import RPG_Item = Rmmz.Implementations.RPG_Item;
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 
 type EnemiesExtraDropProps = {
   selectedEnemy: RPG_EnemyDomainModel;
@@ -649,16 +650,14 @@ const EnemiesExtraDrops = ({
   }
 
   return <>
-    <Stack spacing={2}>
-      <Typography
-        variant={'h4'}
-        align={'center'}
-        color={'primary'}
-        sx={{ paddingTop: 2 }}
-      >
-        Extra Drops
-      </Typography>
-
+    <BoardSectionCard
+      title={'Extra Drops'}
+      subtitle={selectedEnemy.extraDrops.length === 0
+        ? 'No extra drops configured'
+        : `${selectedEnemy.extraDrops.length} extra drop${selectedEnemy.extraDrops.length === 1 ? '' : 's'}`}
+      collapsible
+      defaultExpanded={false}
+    >
       <div onContextMenu={handleDropItemContextMenu} style={{ cursor: 'context-menu' }}>
         <List dense>
           {selectedEnemy.extraDrops.length > 0
@@ -673,7 +672,7 @@ const EnemiesExtraDrops = ({
             </>}
         </List>
       </div>
-    </Stack>
+    </BoardSectionCard>
 
     {/*region not-grid-related elements */}
     <Dialog

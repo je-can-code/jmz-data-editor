@@ -9,9 +9,6 @@ import React, {
 } from 'react';
 import { FixedSizeList } from 'react-window';
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Alert,
   Autocomplete,
   Box,
@@ -31,10 +28,9 @@ import {
   Tooltip,
   Typography
 } from '@mui/material';
-import { ContentCopy, ExpandMore, KeyboardArrowLeft, KeyboardArrowRight } from '@mui/icons-material';
+import { ContentCopy, KeyboardArrowLeft, KeyboardArrowRight } from '@mui/icons-material';
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
-import SaveButton from '../../../components/core/SaveButton.tsx';
-import ReloadButton from '../../../components/core/ReloadButton.tsx';
+import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { useStates } from '@presentation/context/resources/states.context.tsx';
@@ -85,28 +81,8 @@ import {
 } from '@presentation/components/usableItem/UsableItemDamageSection.tsx';
 import { type IdLabelRow, UsableEffectsEditor } from '@presentation/components/usableItem/UsableEffectsEditor.tsx';
 import { SystemService } from '@services/SystemService.ts';
-import {
-  SKILL_JABS_ACCORDION_INITIAL_EXPANDED,
-  type SkillJabsAccordionId,
-  SkillJabsExtensionsPanel,
-} from '@presentation/boards/skills/SkillJabsExtensionsPanel.tsx';
-
-/**
- * Default expanded/collapsed state for skill editor accordions on first paint.
- * Keys match {@code accordion} ids in the skills board layout.
- */
-const SKILL_EDITOR_ACCORDION_INITIAL_EXPANDED: Record<string, boolean> = {
-  'editor-general': true,
-  'editor-usage': true,
-  'editor-execution': true,
-  'editor-bonus-hits': true,
-  'editor-messages': true,
-  'editor-damage': true,
-  'editor-effects': true,
-  'editor-skill-extend': true,
-  'editor-sks': true,
-  'editor-costs': true,
-};
+import { SkillJabsExtensionsPanel } from '@presentation/boards/skills/SkillJabsExtensionsPanel.tsx';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 
 /**
  * MUI {@code sx} for formula and note fields that should render in a monospace font.
@@ -212,68 +188,6 @@ const SkillsBoard = () =>
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
 
   const [ skillEditorTab, setSkillEditorTab ] = useState<number>(0);
-
-  const [ skillEditorAccordionExpanded, setSkillEditorAccordionExpanded ] = useState<Record<string, boolean>>(
-    () => ({ ...SKILL_EDITOR_ACCORDION_INITIAL_EXPANDED })
-  );
-
-  const [ jabsAccordionExpanded, setJabsAccordionExpanded ] = useState<Record<string, boolean>>(
-    () => ({ ...SKILL_JABS_ACCORDION_INITIAL_EXPANDED })
-  );
-
-  /**
-   * Expands or collapses a skill editor accordion section.
-   *
-   * @param id Accordion key aligned with {@link SKILL_EDITOR_ACCORDION_INITIAL_EXPANDED}.
-   * @param expanded Next expanded flag from MUI {@link Accordion}.
-   * @returns {void}
-   */
-  const handleSkillEditorAccordionChange = useCallback((
-    id: string,
-    expanded: boolean
-  ) =>
-  {
-    setSkillEditorAccordionExpanded((prev) => ({
-      ...prev,
-      [ id ]: expanded
-    }));
-  }, []);
-
-  /**
-   * Expands or collapses a JABS extensions accordion section.
-   *
-   * @param id Accordion id from {@link SkillJabsAccordionId}.
-   * @param expanded Next expanded flag from MUI {@link Accordion}.
-   * @returns {void}
-   */
-  const handleJabsAccordionChange = useCallback((
-    id: SkillJabsAccordionId,
-    expanded: boolean
-  ) =>
-  {
-    setJabsAccordionExpanded((prev) => ({
-      ...prev,
-      [ id ]: expanded
-    }));
-  }, []);
-
-  /**
-   * Supplies {@code expanded} and {@code onChange} for a skill editor accordion.
-   *
-   * @param id Accordion section id.
-   * @returns Partial accordion props wired to local expanded state.
-   */
-  const editorAccordionProps = (id: string) =>
-    ({
-      expanded: skillEditorAccordionExpanded[ id ] ?? false,
-      onChange: (
-        _e: SyntheticEvent,
-        expanded: boolean
-      ) =>
-      {
-        handleSkillEditorAccordionChange(id, expanded);
-      },
-    });
 
   /**
    * Read-only note text for the Note tab (serialized RMMZ skill note).
@@ -446,7 +360,6 @@ const SkillsBoard = () =>
     'skillId',
     skills,
     (s) => s.id,
-    selectedSkillIndex,
     (index) => handleSkillListItemOnClickEventRef.current(index, false),
     (index) => listRef.current?.scrollToItem(index, 'smart')
   );
@@ -493,6 +406,9 @@ const SkillsBoard = () =>
       setSelectedSkill(null);
       return;
     }
+
+    const params = new URLSearchParams(window.location.search);
+    if (selectedSkill === null && params.get('skillId')) return;
 
     const idx = Math.min(Math.max(0, selectedSkillIndex), skills.length - 1);
     let next: RPG_SkillDomainModel = skills[idx];
@@ -1693,6 +1609,26 @@ const SkillsBoard = () =>
     };
   }, [ skills ]);
 
+  useBoardActions({
+    onSave: async () =>
+    {
+      setIsSaving(true);
+      try
+      {
+        await handleSaveButtonOnClickEvent();
+        setCanSave(false);
+      }
+      finally
+      {
+        setIsSaving(false);
+      }
+    },
+    canSave,
+    isSaving,
+    onReload: handleReloadButtonOnClickEvent,
+    canReload: !loading,
+  });
+
   return <>
     <Box sx={{
       flex: 1,
@@ -1816,23 +1752,7 @@ const SkillsBoard = () =>
                     <Grid container spacing={2} alignItems={'flex-start'}>
                       <Grid size={6}>
                         <Stack spacing={2}>
-                          <Accordion
-                            {...editorAccordionProps('editor-general')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                General
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'General'} collapsible>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography
                                   variant={'caption'}
@@ -1872,26 +1792,9 @@ const SkillsBoard = () =>
                                   minRows={4}
                                 />
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-usage')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Usage
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Usage'} collapsible>
                               <Stack spacing={2}>
                                 <Typography variant={'caption'} color={'text.secondary'}>
                                   Details about targeting, usability, and requirements.
@@ -2144,26 +2047,9 @@ const SkillsBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-execution')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Execution
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Execution'} collapsible defaultExpanded={false}>
                               <Stack spacing={2}>
                                 <Typography variant={'caption'} color={'text.secondary'}>
                                   Details about how the skill lands and how the target interprets it.
@@ -2301,26 +2187,9 @@ const SkillsBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-bonus-hits')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Additional Hits
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Additional Hits'} collapsible defaultExpanded={false}>
                               <Stack spacing={2}>
                                 <Typography variant={'caption'} color={'text.secondary'}>
                                   Details about how many times this skill lands on targets.
@@ -2457,26 +2326,9 @@ const SkillsBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-messages')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Messages
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Messages'} collapsible defaultExpanded={false}>
                               <Stack spacing={2}>
                                 <Typography variant={'caption'} color={'text.secondary'}>
                                   Battle log lines when the skill is used. %1 = user name, %2 = skill name.
@@ -2499,31 +2351,14 @@ const SkillsBoard = () =>
                                   fullWidth
                                 />
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
                         </Stack>
                       </Grid>
 
                       <Grid size={6}>
                         <Stack spacing={2}>
-                          <Accordion
-                            {...editorAccordionProps('editor-damage')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Damage
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Damage'} collapsible>
                               <Typography variant={'caption'} color={'text.secondary'} sx={{
                                 display: 'block',
                                 mb: 1.5
@@ -2547,26 +2382,9 @@ const SkillsBoard = () =>
                                 onChange={handleUsableItemDamageChange}
                                 elementNames={SystemService.elements ?? []}
                               />
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-effects')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Effects
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Effects'} collapsible>
                               <Typography variant={'caption'} color={'text.secondary'} sx={{
                                 display: 'block',
                                 mb: 1.5
@@ -2580,26 +2398,9 @@ const SkillsBoard = () =>
                                 skillRows={skillEffectPickerRows}
                                 commonEventRows={commonEventPickerRows}
                               />
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-skill-extend')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Skill extend
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Skill extend'} collapsible defaultExpanded={false}>
                               <Stack spacing={1.5}>
                                 <Typography variant={'caption'} color={'text.secondary'}>
                                   The list of skills that this skill will functionally extend.
@@ -2705,26 +2506,9 @@ const SkillsBoard = () =>
                                     </Box>
                                   )}
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-sks')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Skill slots
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Skill slots'} collapsible defaultExpanded={false}>
                               <Stack spacing={1.5}>
                                 <Typography variant={'caption'} color={'text.secondary'}>
                                   Details about the slot cost of this skill. Does not apply if this skillType is not
@@ -2770,26 +2554,9 @@ const SkillsBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
 
-                          <Accordion
-                            {...editorAccordionProps('editor-costs')}
-                            disableGutters
-                            elevation={0}
-                            sx={{
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              borderRadius: 1,
-                              '&:before': { display: 'none' },
-                            }}
-                          >
-                            <AccordionSummary expandIcon={<ExpandMore/>}>
-                              <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-                                Resources (costs/gains)
-                              </Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
+                            <BoardSectionCard title={'Resources (costs/gains)'} collapsible defaultExpanded={false}>
                               <Typography variant={'caption'} color={'text.secondary'}>
                                 Details about the costs and gains of various resources when this skill is used.
                               </Typography>
@@ -3099,8 +2866,7 @@ const SkillsBoard = () =>
                                   </Grid>
                                 </Grid>
                               </Stack>
-                            </AccordionDetails>
-                          </Accordion>
+                          </BoardSectionCard>
                         </Stack>
                       </Grid>
                     </Grid>
@@ -3128,8 +2894,6 @@ const SkillsBoard = () =>
                     skillPickerOptions={skillEffectPickerRows}
                     editingSkillId={selectedSkill.id}
                     contextSkillAnimationId={selectedSkill.animationId}
-                    accordionExpandedById={jabsAccordionExpanded}
-                    onAccordionExpandedChange={handleJabsAccordionChange}
                   />
                 </Box>
 
@@ -3188,40 +2952,6 @@ const SkillsBoard = () =>
               </Stack>
             )}
       </EditorBoardSplitLayout>
-    </Box>
-
-    {/*region not-grid-related elements */}
-    <Box sx={{
-      display: 'flex',
-      gap: 2
-    }}>
-      <SaveButton
-        extraSaveText={'Skills Data'}
-        canSave={canSave}
-        isSaving={isSaving}
-        handleSave={async () =>
-        {
-          setIsSaving(true);
-          try
-          {
-            await handleSaveButtonOnClickEvent();
-            setCanSave(false);
-          }
-          finally
-          {
-            setIsSaving(false);
-          }
-        }}
-      />
-
-      <ReloadButton
-        handleReload={async () =>
-        {
-          await handleReloadButtonOnClickEvent();
-        }}
-        canReload={!loading}
-        extraReloadText={'Skills Data'}
-      />
     </Box>
 
     <Snackbar

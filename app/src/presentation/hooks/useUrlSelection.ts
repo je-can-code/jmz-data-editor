@@ -6,7 +6,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
  * @param {string} paramKey The key of the query parameter (e.g., 'enemyId', 'sdpKey').
  * @param {T[]} dataList The list of items to search through.
  * @param {(item: T) => string | number} idAccessor A function to get the unique ID from an item.
- * @param {number} selectedIndex The currently selected index in the component state.
  * @param {(index: number) => void} onSelect A callback to trigger when a new selection is detected in the URL.
  * @param {(index: number) => void} onScroll A callback to trigger scrolling to the selected item.
  */
@@ -14,7 +13,6 @@ export function useUrlSelection<T>(
   paramKey: string,
   dataList: T[],
   idAccessor: (item: T) => string | number,
-  selectedIndex: number,
   onSelect: (index: number) => void,
   onScroll: (index: number) => void
 )
@@ -34,10 +32,10 @@ export function useUrlSelection<T>(
     {
       const index = dataList.findIndex(item => item && String(idAccessor(item)) === String(targetId));
 
-      if (index !== -1 && index !== selectedIndex)
+      if (index !== -1)
       {
         onSelect(index);
-        onScroll(index);
+        requestAnimationFrame(() => onScroll(index));
       }
     }
   }, [ location.search, dataList.length ]);

@@ -51,6 +51,7 @@ import { RPG_ArmorDomainModel } from '@core/domain/entities/RPG_ArmorDomainModel
 import { RPG_ItemDomainModel } from '@core/domain/entities/RPG_ItemDomainModel.ts';
 import { RPG_WeaponDomainModel } from '@core/domain/entities/RPG_WeaponDomainModel.ts';
 import { IconSetSprite } from '@presentation/components/icons/IconSetSprite.tsx';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 
 /**
  * Mirrors J-Base {@code IconManager.rewardParam}: {@code rewardParam(1)} gold → 2048, {@code rewardParam(4)} SDP → 445.
@@ -519,6 +520,50 @@ const CraftingComponentList = (props: CraftingListProps) =>
     const dbDescription = readDatabaseDescription(ingredientData);
     const hasDescriptionTooltip = dbDescription.trim() !== '';
 
+    const actionStack = (
+      <Stack
+        direction="row"
+        spacing={0}
+        alignItems="center"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <IconButton
+          size="small"
+          aria-label="Move component up"
+          disabled={index === 0}
+          onClick={() => handleReorderComponent(index, -1)}
+        >
+          <KeyboardArrowUp fontSize="small"/>
+        </IconButton>
+        <IconButton
+          size="small"
+          aria-label="Move component down"
+          disabled={index >= currentComponents.length - 1}
+          onClick={() => handleReorderComponent(index, 1)}
+        >
+          <KeyboardArrowDown fontSize="small"/>
+        </IconButton>
+        <IconButton
+          size="small"
+          aria-label="Edit component"
+          onClick={() =>
+          {
+            handleRecipeComponentListItemOnClickEvent(index);
+            handleOpenComponentModifierDialogOnClick();
+          }}
+        >
+          <Edit fontSize="small"/>
+        </IconButton>
+        <IconButton
+          size="small"
+          aria-label="Remove component"
+          onClick={() => handleDeleteTargetComponent(index)}
+        >
+          <Clear fontSize="small"/>
+        </IconButton>
+      </Stack>
+    );
+
     const rowButton = (
       <ListItemButton
         selected={selectedComponentIndex === index}
@@ -535,6 +580,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
           disableTypography
           sx={{ width: '100%' }}
         />
+        {actionStack}
       </ListItemButton>
     );
 
@@ -542,48 +588,6 @@ const CraftingComponentList = (props: CraftingListProps) =>
       <ListItem
         key={`${index}-${ingredient.type}-${ingredient.id}`}
         disableGutters
-        secondaryAction={
-          <Stack
-            direction="row"
-            spacing={0}
-            alignItems="center"
-          >
-            <IconButton
-              size="small"
-              aria-label="Move component up"
-              disabled={index === 0}
-              onClick={() => handleReorderComponent(index, -1)}
-            >
-              <KeyboardArrowUp fontSize="small"/>
-            </IconButton>
-            <IconButton
-              size="small"
-              aria-label="Move component down"
-              disabled={index >= currentComponents.length - 1}
-              onClick={() => handleReorderComponent(index, 1)}
-            >
-              <KeyboardArrowDown fontSize="small"/>
-            </IconButton>
-            <IconButton
-              size="small"
-              aria-label="Edit component"
-              onClick={() =>
-              {
-                handleRecipeComponentListItemOnClickEvent(index);
-                handleOpenComponentModifierDialogOnClick();
-              }}
-            >
-              <Edit fontSize="small"/>
-            </IconButton>
-            <IconButton
-              size="small"
-              aria-label="Remove component"
-              onClick={() => handleDeleteTargetComponent(index)}
-            >
-              <Clear fontSize="small"/>
-            </IconButton>
-          </Stack>
-        }
       >
         {hasDescriptionTooltip
           ? (
@@ -877,41 +881,21 @@ const CraftingComponentList = (props: CraftingListProps) =>
   }
 
   return <>
-    <Box
-      sx={{
-        minWidth: 0,
-        width: '100%',
-        height: '100%',
-        boxSizing: 'border-box',
-        p: 1.5,
-        border: 1,
-        borderColor: 'divider',
-        borderRadius: 1,
-        bgcolor: 'action.hover',
-      }}
-    >
-      <Stack spacing={1}>
-        <Typography variant={'subtitle1'} align={'center'} fontWeight={600}>
-          {props.type}
-        </Typography>
-        <div onContextMenu={handleComponentListContextMenu} style={{ cursor: 'context-menu' }}>
-          <List dense>
-            {currentComponents.length > 0
-              ? currentComponents.map((
-                ingredient,
-                index
-              ) => renderRecipeComponent(ingredient, index))
-              : (
-                <Button
-                  fullWidth
-                  startIcon={<Add/>}
-                  onClick={() => handleAddNewComponent(null)}
-                  variant={'contained'}/>
-              )}
-          </List>
-        </div>
-      </Stack>
-    </Box>
+    <BoardSectionCard title={props.type} density={'compact'}>
+      <div onContextMenu={handleComponentListContextMenu} style={{ cursor: 'context-menu' }}>
+        <List dense>
+          {currentComponents.length > 0
+            ? currentComponents.map((ingredient, index) => renderRecipeComponent(ingredient, index))
+            : (
+              <Button
+                fullWidth
+                startIcon={<Add/>}
+                onClick={() => handleAddNewComponent(null)}
+                variant={'contained'}/>
+            )}
+        </List>
+      </div>
+    </BoardSectionCard>
     <Menu
       open={componentListContextMenu !== null}
       onClose={handleComponentListContextMenuOnCloseEvent}

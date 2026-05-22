@@ -1,52 +1,45 @@
-import React, { ChangeEvent, MouseEvent, useCallback, useEffect, useRef, useState } from 'react';
+import React, { MouseEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Autocomplete,
-  Avatar,
   Box,
   Button,
-  Checkbox,
-  Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogContentText,
-  DialogTitle,
   Divider,
-  Grid,
+  IconButton,
   InputAdornment,
   List,
   ListItem,
   ListItemButton,
   ListItemIcon,
   ListItemText,
-  ListSubheader,
   Menu,
   MenuItem,
   Snackbar,
-  SpeedDial,
-  SpeedDialAction,
   Stack,
   Switch,
   TextField,
-  Typography
+  Tooltip,
+  Typography,
 } from '@mui/material';
 import {
   Add,
+  ArrowDownward,
+  ArrowUpward,
   ContentCopy,
+  DeleteOutline,
+  ExpandMore,
   Key,
+  OpenInNew,
   Person,
   PlaylistRemove,
-  PriceCheck,
-  RadioButtonUnchecked,
-  Remove,
-  TaskAlt
 } from '@mui/icons-material';
-import styled from 'styled-components';
 
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
-import SaveButton from '../../../components/core/SaveButton.tsx';
-import ReloadButton from '../../../components/core/ReloadButton.tsx';
+import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import { useActors } from '@presentation/context/resources/actors.context.tsx';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { RPG_SkillDomainModel } from '@core/domain/entities/RPG_SkillDomainModel.ts';
@@ -61,27 +54,10 @@ import {
   VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT,
 } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import type { VirtualizedSidebarRow } from '@presentation/components/board/VirtualizedSidebarList.tsx';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
+import { IconSetSprite } from '@presentation/components/icons/IconSetSprite.tsx';
 import Conditional = Proficiency.Conditional;
 import Requirement = Proficiency.Requirement;
-
-//region setup
-const EntryText = styled(ListItemText)`
-  font-family: monospace;
-  overflow: hidden;
-
-  .MuiListItemText-primary {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .MuiListItemText-secondary {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-`;
-//endregion setup
 
 const proficiencyBoardListColumnWidth = virtualizedSidebarColumnWidth(
   VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
@@ -90,29 +66,22 @@ const proficiencyBoardListColumnWidth = virtualizedSidebarColumnWidth(
 
 const ProficiencyBoard = () =>
 {
-  // Consume global contexts with aliasing
   const {
     conditionals,
     setConditionals,
     save,
     reload,
-    loading: proficiencyLoading
+    loading: proficiencyLoading,
   } = useProficiency();
 
-  const {
-    data: actors,
-    loading: actorsLoading
-  } = useActors();
-
-  const {
-    skills,
-    byId: skillsById,
-    loading: skillsLoading
-  } = useSkills();
+  const { data: actors, loading: actorsLoading } = useActors();
+  const { skills, byId: skillsById, loading: skillsLoading } = useSkills();
+  const navigate = useNavigate();
 
   //region state
   const listRef = useRef<any>(null);
   const listWrapperRef = useRef<HTMLDivElement>(null);
+
   const [ selectedConditional, setSelectedConditional ] = useState<Conditional | null>(null);
   const [ selectedConditionalIndex, setSelectedConditionalIndex ] = useState<number>(0);
   const [ conditionalsContextMenu, setConditionalsContextMenu ] = useState<{
@@ -121,22 +90,10 @@ const ProficiencyBoard = () =>
   } | null>(null);
 
   const [ currentRequirements, setCurrentRequirements ] = useState<Requirement[]>([]);
-  const [ selectedRequirement, setSelectedRequirement ] = useState<Requirement | null>(null);
-  const [ selectedRequirementIndex, setSelectedRequirementIndex ] = useState<number>(0);
-  const [ requirementsContextMenu, setRequirementsContextMenu ] = useState<{
-    mouseX: number;
-    mouseY: number;
-  } | null>(null);
-
-  const [ requirementSkill, setRequirementSkill ] = useState<RPG_SkillDomainModel | null>(null);
-  const [ requirementSkillText, setRequirementSkillText ] = useState<string | undefined>(undefined);
-  const [ requirementSecondarySkillIds, setRequirementSecondarySkillIds ] = useState<number[]>([]);
+  const [ expandedRequirementIdx, setExpandedRequirementIdx ] = useState<number | null>(null);
 
   const [ actorIdChecked, setActorIdsChecked ] = useState<number[]>([]);
   const [ skillIdRewardEarned, setSkillIdRewardEarned ] = useState<number[]>([]);
-
-  const [ clickedSkill, setClickedSkill ] = useState<number>(0);
-  const [ isSkillDialogOpen, setIsSkillDialogOpen ] = useState<boolean>(false);
 
   const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
@@ -153,18 +110,9 @@ const ProficiencyBoard = () =>
 
   useEffect(() =>
   {
-    // auto-select the first entry when opening the board.
-    if (selectedConditional !== null)
-    {
-      return;
-    }
-
+    if (selectedConditional !== null) return;
     const first = conditionals.at(0) ?? null;
-    if (first === null)
-    {
-      return;
-    }
-
+    if (first === null) return;
     setSelectedConditionalIndex(0);
     syncSelectionWithConditional(first);
   }, [ conditionals, selectedConditional ]);
@@ -175,200 +123,66 @@ const ProficiencyBoard = () =>
     setActorIdsChecked(conditional?.actorIds ?? []);
     setSkillIdRewardEarned(conditional?.skillRewards ?? []);
     setCurrentRequirements(conditional?.requirements ?? []);
-
-    // Also sync the first requirement of the newly selected conditional.
-    const firstReq = conditional?.requirements?.at(0) ?? null;
-    syncSelectionWithRequirement(firstReq, 0);
+    setExpandedRequirementIdx(null);
   };
 
-  const syncSelectionWithRequirement = (
-    requirement: Requirement | null,
-    index: number
-  ) =>
+  const moveItem = <T,>(arr: T[], idx: number, dir: 1 | -1): T[] =>
   {
-    setSelectedRequirementIndex(index);
-    setSelectedRequirement(requirement);
-    setRequirementSecondarySkillIds(requirement?.secondarySkillIds ?? []);
-
-    // Lookup the skill domain model for the requirement's primary skill.
-    const skillId = requirement?.skillId ?? 0;
-    const skillModel = skillId > 0
-      ? skillsById.get(skillId) ?? null
-      : null;
-
-    setRequirementSkill(skillModel);
-    setRequirementSkillText(skillModel?.name ?? '');
+    const next = idx + dir;
+    if (next < 0 || next >= arr.length) return arr;
+    const copy = [ ...arr ];
+    [ copy[idx], copy[next] ] = [ copy[next], copy[idx] ];
+    return copy;
   };
 
   //region updates
-  /**
-   * The update logic for updating the key of the selected entry.
-   * @param event The input event that triggered this update.
-   */
-  const handleConditionalKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  const patchRequirement = (idx: number, patch: Partial<Requirement>) =>
   {
-    const updatedValue = event.target.value;
-    if (!selectedConditional)
-    {
-      return;
-    }
-
-    const updatedConditional = {
-      ...selectedConditional,
-      key: updatedValue
-    } as Conditional;
+    const updated = currentRequirements.with(idx, { ...currentRequirements[idx], ...patch } as Requirement);
+    setCurrentRequirements(updated);
+    const updatedConditional = { ...selectedConditional, requirements: updated } as Conditional;
     setSelectedConditional(updatedConditional);
+    applyConditionals(conditionals.with(selectedConditionalIndex, updatedConditional));
+  };
 
-    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
-    applyConditionals(updatedConditionals);
+  const handleConditionalSkillRewardsChange = (newIds: number[]) =>
+  {
+    setSkillIdRewardEarned(newIds);
+    const updatedConditional = { ...selectedConditional, skillRewards: newIds } as Conditional;
+    setSelectedConditional(updatedConditional);
+    applyConditionals(conditionals.with(selectedConditionalIndex, updatedConditional));
+  };
 
-    // TODO: can this update be optimized in some way?
-    // consider extracting recipe view to single component, and only update whole list when entries change.
+  const handleReorderRequirement = (idx: number, dir: 1 | -1) =>
+  {
+    const updated = moveItem(currentRequirements, idx, dir);
+    if (updated === currentRequirements) return;
+    setCurrentRequirements(updated);
+    if (expandedRequirementIdx === idx) setExpandedRequirementIdx(idx + dir);
+    else if (expandedRequirementIdx === idx + dir) setExpandedRequirementIdx(idx);
+    const updatedConditional = { ...selectedConditional, requirements: updated } as Conditional;
+    setSelectedConditional(updatedConditional);
+    applyConditionals(conditionals.with(selectedConditionalIndex, updatedConditional));
   };
 
   const handleConditionalApplicableActorIdToggle = (value: number) =>
   {
     const currentIndex = actorIdChecked.indexOf(value);
     const newChecked = [ ...actorIdChecked ];
-
-    if (currentIndex === -1)
-    {
-      newChecked.push(value);
-    }
-    else
-    {
-      newChecked.splice(currentIndex, 1);
-    }
-
-    setActorIdsChecked(newChecked.sort());
-
-    const updatedConditional = {
-      ...selectedConditional,
-      actorIds: newChecked
-    } as Conditional;
-    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
-    applyConditionals(updatedConditionals);
-  };
-
-  const handleConditionalSkillIdRewardToggle = (value: number) =>
-  {
-    const currentIndex = skillIdRewardEarned.indexOf(value);
-    const newChecked = [ ...skillIdRewardEarned ];
-
-    if (currentIndex === -1)
-    {
-      newChecked.push(value);
-    }
-    else
-    {
-      newChecked.splice(currentIndex, 1);
-    }
-
-    setSkillIdRewardEarned(newChecked.sort());
-
-    const updatedConditional = {
-      ...selectedConditional,
-      skillRewards: newChecked
-    } as Conditional;
-    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
-    applyConditionals(updatedConditionals);
-  };
-
-  const handleRequirementSecondarySkillIdToggle = (value: number) =>
-  {
-    const currentIndex = requirementSecondarySkillIds.indexOf(value);
-    const newChecked = [ ...requirementSecondarySkillIds ];
-
-    if (currentIndex === -1)
-    {
-      newChecked.push(value);
-    }
-    else
-    {
-      newChecked.splice(currentIndex, 1);
-    }
-
-    setRequirementSecondarySkillIds(newChecked);
-
-    const updatedRequirement = {
-      ...selectedRequirement,
-      secondarySkillIds: newChecked,
-    } as Requirement;
-    setSelectedRequirement(updatedRequirement);
-
-    const updatedRequirements = currentRequirements.with(selectedRequirementIndex, updatedRequirement);
-    setCurrentRequirements(updatedRequirements);
-
-    const updatedConditional = {
-      ...selectedConditional,
-      requirements: updatedRequirements,
-    } as Conditional;
+    if (currentIndex === -1) newChecked.push(value);
+    else newChecked.splice(currentIndex, 1);
+    newChecked.sort();
+    setActorIdsChecked(newChecked);
+    const updatedConditional = { ...selectedConditional, actorIds: newChecked } as Conditional;
     setSelectedConditional(updatedConditional);
-
-    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
-    applyConditionals(updatedConditionals);
-  };
-
-  const handleRequirementProficiencyOnChangeEvent = (value: number) =>
-  {
-    const updatedRequirement = {
-      ...selectedRequirement,
-      proficiency: value,
-    } as Requirement;
-    setSelectedRequirement(updatedRequirement);
-
-    const updatedRequirements = currentRequirements.with(selectedRequirementIndex, updatedRequirement);
-    setCurrentRequirements(updatedRequirements);
-
-    const updatedConditional = {
-      ...selectedConditional,
-      requirements: updatedRequirements,
-    } as Conditional;
-    setSelectedConditional(updatedConditional);
-
-    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
-    applyConditionals(updatedConditionals);
-  };
-
-  const handleRequirementPrimarySkillOnChangeEvent = (value: RPG_SkillDomainModel | null) =>
-  {
-    if (value === null)
-    {
-      return;
-    }
-
-    setRequirementSkill(value);
-    setRequirementSkillText(value.name);
-    const updatedRequirement = {
-      ...selectedRequirement,
-      skillId: value.id ?? 0,
-    } as Requirement;
-    setSelectedRequirement(updatedRequirement);
-
-    const updatedRequirements = currentRequirements.with(selectedRequirementIndex, updatedRequirement);
-    setCurrentRequirements(updatedRequirements);
-
-    const updatedConditional = {
-      ...selectedConditional,
-      requirements: updatedRequirements,
-    } as Conditional;
-    setSelectedConditional(updatedConditional);
-
-    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
-    applyConditionals(updatedConditionals);
+    applyConditionals(conditionals.with(selectedConditionalIndex, updatedConditional));
   };
 
   const handleConditionalJsRewardsOnChangeEvent = (event: any) =>
   {
-    const updatedJsRewards = event.target.value;
-    const updatedConditional = {
-      ...selectedConditional,
-      jsRewards: updatedJsRewards,
-    } as Conditional;
+    const updatedConditional = { ...selectedConditional, jsRewards: event.target.value } as Conditional;
     setSelectedConditional(updatedConditional);
-
-    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
-    applyConditionals(updatedConditionals);
+    applyConditionals(conditionals.with(selectedConditionalIndex, updatedConditional));
   };
 
   const handleSnack = (
@@ -387,277 +201,131 @@ const ProficiencyBoard = () =>
   {
     try
     {
-      // drop in-memory selection state before the reload so the auto-select effect re-binds the form
-      // to the freshly-loaded conditionals once they land. without this, selectedConditional would
-      // keep pointing at the stale pre-reload object and the form would not visually refresh.
       setSelectedConditional(null);
       setSelectedConditionalIndex(0);
       setCurrentRequirements([]);
-      setSelectedRequirement(null);
-      setSelectedRequirementIndex(0);
+      setExpandedRequirementIdx(null);
       setActorIdsChecked([]);
       setSkillIdRewardEarned([]);
-      setRequirementSecondarySkillIds([]);
-      setRequirementSkill(null);
-      setRequirementSkillText('');
-      // any pending unsaved diff is discarded by reload; reset the dirty flag too.
       setCanSave(false);
-
       await reload();
-
       handleSnack('Proficiency data has been reloaded successfully.', MuiSnackbarSeverity.Success);
     }
     catch (error)
     {
       console.error('Failed to reload proficiency data:', error);
-      const message = error instanceof Error
-        ? error.message
-        : 'Unknown error.';
+      const message = error instanceof Error ? error.message : 'Unknown error.';
       handleSnack(`Failed to reload proficiency data: ${message}`, MuiSnackbarSeverity.Error);
     }
   };
   //endregion updates
 
   //region selections
-  const handleRequirementListItemOnClickEvent = (
-    _: any,
-    index: number
-  ) =>
-  {
-    const requirement = currentRequirements.at(index) ?? null;
-    syncSelectionWithRequirement(requirement, index);
-  };
-
-  const handleConditionalListItemOnClickEvent = (
-    _: any,
-    index: number,
-  ) =>
+  const handleConditionalListItemOnClickEvent = (_: any, index: number) =>
   {
     setSelectedConditionalIndex(index);
-    const conditional = conditionals.at(index) ?? null;
-    syncSelectionWithConditional(conditional);
+    syncSelectionWithConditional(conditionals.at(index) ?? null);
   };
 
-  const handleSnackClose = (
-    _: any,
-    reason?: string
-  ) =>
+  const handleSnackClose = (_: any, reason?: string) =>
   {
-    if (reason === 'clickaway')
-    {
-      return;
-    }
-
+    if (reason === 'clickaway') return;
     setSnackOpen(false);
   };
 
   const handleConditionalContextMenu = (event: MouseEvent) =>
   {
     event.preventDefault();
-
-    const newConditionalsContextMenuState = conditionalsContextMenu === null
-      ? {
-        mouseX: event.clientX + 2,
-        mouseY: event.clientY - 6,
-      }
-      : null;
-
-    setConditionalsContextMenu(newConditionalsContextMenuState);
+    setConditionalsContextMenu(prev =>
+      prev === null
+        ? { mouseX: event.clientX + 2, mouseY: event.clientY - 6 }
+        : null
+    );
   };
 
-  const handleConditionalContextMenuOnCloseEvent = () =>
-  {
-    setConditionalsContextMenu(null);
-  };
-
-  const handleRequirementsContextMenu = (event: MouseEvent) =>
-  {
-    event.preventDefault();
-
-    const newConditionalsContextMenuState = requirementsContextMenu === null
-      ? {
-        mouseX: event.clientX + 2,
-        mouseY: event.clientY - 6,
-      }
-      : null;
-
-    setRequirementsContextMenu(newConditionalsContextMenuState);
-  };
-
-  const handleRequirementsContextMenuOnCloseEvent = () =>
-  {
-    setRequirementsContextMenu(null);
-  };
+  const handleConditionalContextMenuClose = () => setConditionalsContextMenu(null);
 
   const handleAddNewConditional = (index: number) =>
   {
-    const initialRequirement = {
-      skillId: 1,
-      proficiency: 10,
-      secondarySkillIds: []
-    } as Requirement;
     const newConditional = {
-      key: 'NEW-CONDITIONAL-0',
-      requirements: [ initialRequirement ],
+      key:          'NEW-CONDITIONAL-0',
+      requirements: [ { skillId: 1, proficiency: 10, secondarySkillIds: [] } as Requirement ],
       skillRewards: [],
-      actorIds: [],
-      jsRewards: ''
+      actorIds:     [],
+      jsRewards:    '',
     } as Conditional;
-    const updatedConditionals = conditionals.toSpliced(index, 0, newConditional);
-    applyConditionals(updatedConditionals);
-
-    handleSnack('Conditional has been added successfully.', MuiSnackbarSeverity.Success);
+    applyConditionals(conditionals.toSpliced(index, 0, newConditional));
+    handleSnack('Conditional added.', MuiSnackbarSeverity.Success);
   };
 
   const handleCloneConditional = (index: number) =>
   {
-    // TODO: error snack for unable to clone without selecting a conditional to be cloned.
-    if (selectedConditional === null)
-    {
-      return;
-    }
-
-    const clonedRequirements = selectedConditional.requirements.toSpliced(0, 0);
-    const clonedSkillIdRewards = selectedConditional.skillRewards.toSpliced(0, 0);
-    const clonedActorIds = selectedConditional.actorIds.toSpliced(0, 0);
-    const clonedConditional = {
-      key: `${selectedConditional.key}-COPY`,
-      skillRewards: clonedSkillIdRewards,
-      requirements: clonedRequirements,
-      actorIds: clonedActorIds,
-      jsRewards: selectedConditional.jsRewards
+    if (!selectedConditional) return;
+    const cloned = {
+      key:          `${selectedConditional.key}-COPY`,
+      skillRewards: [ ...selectedConditional.skillRewards ],
+      requirements: selectedConditional.requirements.map(r => ({ ...r, secondarySkillIds: [ ...r.secondarySkillIds ] })),
+      actorIds:     [ ...selectedConditional.actorIds ],
+      jsRewards:    selectedConditional.jsRewards,
     } as Conditional;
-
-    const updatedConditionals = conditionals.toSpliced(index, 0, clonedConditional);
-    applyConditionals(updatedConditionals);
-
-    handleSnack('Conditional has been cloned successfully.', MuiSnackbarSeverity.Success);
+    applyConditionals(conditionals.toSpliced(index, 0, cloned));
+    handleSnack('Conditional cloned.', MuiSnackbarSeverity.Success);
   };
 
   const handleDeleteConditional = (index: number) =>
   {
-    // TODO: error snack for unable to delete without selecting a conditional to be deleted.
-    if (selectedConditional === null)
-    {
-      return;
-    }
-
-    // TODO: "are you sure?" popup dialog maybe?
-    const updatedConditionals = conditionals.toSpliced(index, 1);
-    applyConditionals(updatedConditionals);
-
-    handleSnack('Conditional has been deleted successfully.', MuiSnackbarSeverity.Success);
+    if (!selectedConditional) return;
+    applyConditionals(conditionals.toSpliced(index, 1));
+    handleSnack('Conditional deleted.', MuiSnackbarSeverity.Success);
   };
 
-  const handleAddNewRequirement = (index: number) =>
+  const handleAddNewRequirement = () =>
   {
-    const newRequirement = {
-      skillId: 1,
-      proficiency: 10,
-      secondarySkillIds: []
-    } as Requirement;
-
-    const updatedRequirements = currentRequirements.toSpliced(index, 0, newRequirement);
-    setCurrentRequirements(updatedRequirements);
-
-    const updatedConditional = {
-      ...selectedConditional,
-      requirements: updatedRequirements,
-    } as Conditional;
+    if (!selectedConditional) return;
+    const newReq = { skillId: 1, proficiency: 10, secondarySkillIds: [] } as Requirement;
+    const updated = [ ...currentRequirements, newReq ];
+    setCurrentRequirements(updated);
+    const updatedConditional = { ...selectedConditional, requirements: updated } as Conditional;
     setSelectedConditional(updatedConditional);
-
-    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
-    applyConditionals(updatedConditionals);
-
-    handleSnack('Requirement has been added successfully.', MuiSnackbarSeverity.Success);
+    applyConditionals(conditionals.with(selectedConditionalIndex, updatedConditional));
+    setExpandedRequirementIdx(updated.length - 1);
+    handleSnack('Requirement added.', MuiSnackbarSeverity.Success);
   };
 
   const handleCloneRequirement = (index: number) =>
   {
-    // TODO: error snack for unable to clone without selecting a requirement to be cloned.
-    if (selectedRequirement === null)
-    {
-      return;
-    }
-
-    const clonedSecondarySkillIds = selectedRequirement.secondarySkillIds.toSpliced(0, 0);
-    const clonedRequirement = {
-      skillId: selectedRequirement.skillId,
-      proficiency: selectedRequirement.proficiency,
-      secondarySkillIds: clonedSecondarySkillIds
-    } as Requirement;
-
-    const updatedRequirements = currentRequirements.toSpliced(index, 0, clonedRequirement);
-    setCurrentRequirements(updatedRequirements);
-
-    const updatedConditional = {
-      ...selectedConditional,
-      requirements: updatedRequirements,
-    } as Conditional;
+    const req = currentRequirements[index];
+    if (!req || !selectedConditional) return;
+    const cloned = { ...req, secondarySkillIds: [ ...req.secondarySkillIds ] } as Requirement;
+    const updated = currentRequirements.toSpliced(index + 1, 0, cloned);
+    setCurrentRequirements(updated);
+    const updatedConditional = { ...selectedConditional, requirements: updated } as Conditional;
     setSelectedConditional(updatedConditional);
-
-    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
-    applyConditionals(updatedConditionals);
-
-    handleSnack('Requirement has been cloned successfully.', MuiSnackbarSeverity.Success);
+    applyConditionals(conditionals.with(selectedConditionalIndex, updatedConditional));
+    setExpandedRequirementIdx(index + 1);
+    handleSnack('Requirement cloned.', MuiSnackbarSeverity.Success);
   };
 
   const handleDeleteRequirement = (index: number) =>
   {
-    // TODO: error snack for unable to delete without selecting a conditional to be deleted.
-    if (selectedRequirement === null)
-    {
-      return;
-    }
-
+    if (!selectedConditional) return;
     if (currentRequirements.length === 1)
     {
-      handleSnack('Cannot delete last skill requirement; consider updating it instead.', MuiSnackbarSeverity.Error);
+      handleSnack('Cannot delete last requirement; update it instead.', MuiSnackbarSeverity.Error);
       return;
     }
-
-    // TODO: "are you sure?" popup dialog maybe?
-    const updatedRequirements = currentRequirements.toSpliced(index, 1);
-    setCurrentRequirements(updatedRequirements);
-
-    const updatedConditional = {
-      ...selectedConditional,
-      requirements: updatedRequirements,
-    } as Conditional;
+    const updated = currentRequirements.toSpliced(index, 1);
+    setCurrentRequirements(updated);
+    const updatedConditional = { ...selectedConditional, requirements: updated } as Conditional;
     setSelectedConditional(updatedConditional);
-
-    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
-    applyConditionals(updatedConditionals);
-
-    handleSnack('Requirement has been deleted successfully.', MuiSnackbarSeverity.Success);
-  };
-
-  const handleClearSecondarySkillIdsForRequirement = (index: number) =>
-  {
-    if (selectedRequirement === null)
+    applyConditionals(conditionals.with(selectedConditionalIndex, updatedConditional));
+    setExpandedRequirementIdx(prev =>
     {
-      return;
-    }
-
-    const secondarySkillIdFreeRequirement = {
-      skillId: selectedRequirement.skillId,
-      proficiency: selectedRequirement.proficiency,
-      secondarySkillIds: []
-    } as Requirement;
-
-    const updatedRequirements = currentRequirements.with(index, secondarySkillIdFreeRequirement);
-    setCurrentRequirements(updatedRequirements);
-
-    const updatedConditional = {
-      ...selectedConditional,
-      requirements: updatedRequirements,
-    } as Conditional;
-    setSelectedConditional(updatedConditional);
-
-    const updatedConditionals = conditionals.with(selectedConditionalIndex, updatedConditional);
-    applyConditionals(updatedConditionals);
-
-    handleSnack('Requirement\'s secondary skill ids have been purged successfully.');
+      if (prev === null || prev < index) return prev;
+      if (prev === index) return null;
+      return prev - 1;
+    });
+    handleSnack('Requirement deleted.', MuiSnackbarSeverity.Success);
   };
   //endregion selections
 
@@ -665,50 +333,28 @@ const ProficiencyBoard = () =>
   const getConditionalSidebarRow = useCallback((index: number): VirtualizedSidebarRow =>
   {
     const conditional = conditionals.at(index);
-    if (!conditional)
-    {
-      return { type: 'spacer' };
-    }
-
+    if (!conditional) return { type: 'spacer' };
     const iconSkillId = conditional.skillRewards?.at(0) ?? 0;
-    const iconIndex = iconSkillId > 0
-      ? skillsById.get(iconSkillId)?.iconIndex
-      : undefined;
-
-    return {
-      type: 'item',
-      label: conditional.key,
-      title: conditional.key,
-      iconIndex,
-    };
+    const iconIndex   = iconSkillId > 0 ? skillsById.get(iconSkillId)?.iconIndex : undefined;
+    return { type: 'item', label: conditional.key, title: conditional.key, iconIndex };
   }, [ conditionals, skillsById ]);
 
-  /**
-   * A mapping function for creating an entry in the actor list.
-   */
-  const renderActorListItem = (
-    actor: RPG_ActorDomainModel,
-    index: number
-  ) =>
+  const renderActorListItem = (actor: RPG_ActorDomainModel, index: number) =>
   {
     if (!actor || actor.name === '' || actor.name.startsWith('=='))
     {
-      // Hide placeholders/invalids, but DO render id=1 (index 0) if valid.
-      return <React.Fragment key={`${index}-hidden`}></React.Fragment>;
+      return <React.Fragment key={`${index}-hidden`}/>;
     }
 
     return (
-      <ListItem key={`${actor.id}-${actor.name}`} sx={{
-        paddingTop: 0,
-        paddingBottom: 0
-      }}>
+      <ListItem key={`${actor.id}-${actor.name}`} sx={{ paddingTop: 0, paddingBottom: 0 }}>
         <ListItemButton sx={{ height: 30 }}>
           <ListItemIcon>
             <Person/>
           </ListItemIcon>
           <ListItemText primary={actor.name}/>
           <Switch
-            edge="end"
+            edge={'end'}
             onChange={() => handleConditionalApplicableActorIdToggle(actor.id)}
             checked={actorIdChecked.includes(actor.id)}
           />
@@ -716,100 +362,38 @@ const ProficiencyBoard = () =>
       </ListItem>
     );
   };
-
-  const renderSkillIdRewards = (skillId: number) =>
-  {
-    const skill = skillsById.get(skillId);
-    if (!skill)
-    {
-      return <React.Fragment key={skillId}></React.Fragment>;
-    }
-
-    return (
-      <Chip
-        key={`${skillId}-${skill.name}`}
-        avatar={<Avatar>{skill.id}</Avatar>}
-        label={skill.name}
-        variant={'outlined'}
-        onClick={() =>
-        {
-          setClickedSkill(skill.id);
-          setIsSkillDialogOpen(true);
-        }}
-        onDelete={() => handleConditionalSkillIdRewardToggle(skill.id)}
-      />
-    );
-  };
-
-  const renderConditionalRequirement = (
-    requirement: Requirement,
-    index: number
-  ) =>
-  {
-    if (!requirement)
-    {
-      return <React.Fragment key={index}></React.Fragment>;
-    }
-
-    const skill = skillsById.get(requirement.skillId);
-    if (!skill)
-    {
-      return <React.Fragment key={index}></React.Fragment>;
-    }
-
-    const secondarySkillText = requirement.secondarySkillIds
-      .slice()
-      .sort((a, b) => a - b)
-      .map(skillId =>
-      {
-        const name = skillsById.get(skillId)?.name ?? `Unknown Skill (id:${skillId})`;
-        return `${name}(${skillId})`;
-      })
-      .join(', ');
-
-    return (
-      <ListItem key={`${index}-${skill.id}`}>
-        <ListItemButton
-          selected={selectedRequirementIndex === index}
-          onClick={event => handleRequirementListItemOnClickEvent(event, index)}
-        >
-          <ListItemIcon>
-            {(selectedRequirementIndex === index)
-              ? <TaskAlt color={'success'}/>
-              : <RadioButtonUnchecked color={'info'}/>}
-          </ListItemIcon>
-          <EntryText
-            primary={`${skill.id}: ${skill.name}`}
-            secondary={secondarySkillText}
-          />
-        </ListItemButton>
-
-      </ListItem>
-    );
-  };
   //endregion render
+
+  useBoardActions({
+    onSave: async () =>
+    {
+      setCanSave(false);
+      await save(conditionals);
+      handleSnack('Proficiency data saved successfully!', MuiSnackbarSeverity.Success);
+    },
+    canSave: canSave && !proficiencyLoading,
+    onReload: handleReloadButtonOnClickEvent,
+    canReload: !proficiencyLoading,
+  });
 
   if (actorsLoading || skillsLoading || proficiencyLoading)
   {
     return (
-      <Box sx={{
-        flex: 1,
-        minHeight: 0,
-        overflow: 'auto',
-        p: 2,
-      }}>
+      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
         <Typography>Loading database and proficiency resources...</Typography>
       </Box>
     );
   }
 
+  const validSkills = skills.filter(s => s.name && !s.name.startsWith('=='));
+
   return <>
     <Box sx={{
-      flex: 1,
-      minHeight: 0,
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
+      flex:            1,
+      minHeight:       0,
+      display:         'flex',
+      flexDirection:   'column',
+      overflow:        'hidden',
     }}>
       <EditorBoardSplitLayout
         sidebarColumnWidth={proficiencyBoardListColumnWidth}
@@ -823,495 +407,405 @@ const ProficiencyBoard = () =>
             labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
             selectedIndex={selectedConditionalIndex}
             getRow={getConditionalSidebarRow}
-            onSelectIndex={(index) =>
-            {
-              handleConditionalListItemOnClickEvent(null, index);
-            }}
+            onSelectIndex={(index) => handleConditionalListItemOnClickEvent(null, index)}
             onContextMenu={handleConditionalContextMenu}
             listWrapperRef={listWrapperRef}
           />
         }
       >
-          {(selectedConditional === null)
-            ? <Typography>
-              Please select a conditional on the left.<br/>
-              If there are no conditionals, then consider making one.
+        {selectedConditional === null
+          ? <Typography sx={{ p: 2 }}>
+              Please select a conditional on the left.
             </Typography>
 
-            : <Grid container rowSpacing={2} columnSpacing={4}>
-              {/* Conditional inputs. */}
-              <Grid size={4}>
+          : <Box sx={{ overflow: 'auto', p: 2 }}>
+              <Stack spacing={2}>
+
+                {/* Key */}
                 <TextField
                   required
                   variant={'outlined'}
                   label={'Key'}
                   value={selectedConditional.key}
-                  onChange={handleConditionalKeyOnChangeEvent}
+                  onChange={e =>
+                  {
+                    const updated = { ...selectedConditional, key: e.target.value } as Conditional;
+                    setSelectedConditional(updated);
+                    applyConditionals(conditionals.with(selectedConditionalIndex, updated));
+                  }}
                   size={'small'}
                   fullWidth
                   slotProps={{
                     input: {
-                      startAdornment: <InputAdornment position={'start'}>
-                        <Key/>
-                      </InputAdornment>
-                    }
-                  }}
-                />
-              </Grid>
-
-              <Grid size={4}>
-                <List dense sx={{
-                  paddingTop: 0,
-                  border: '1px solid',
-                  borderRadius: '6px',
-                  borderColor: '#bfbfbf'
-                }}>
-                  <ListSubheader sx={{
-                    height: '30px',
-                    fontWeight: 'bold',
-                    marginBottom: '10px'
-                  }}>
-                    Applicable Actors
-                  </ListSubheader>
-                  {actors.map(renderActorListItem)}
-                </List>
-              </Grid>
-
-              <Grid size={4}>
-                <Autocomplete
-                  size={'small'}
-                  options={[ ...skills ].sort((
-                    a,
-                    b
-                  ) =>
-                  {
-                    if (a === null || b === null)
-                    {
-                      return (a as any) - (b as any);
-                    }
-
-                    // Display the selected labels first.
-                    let ai = skillIdRewardEarned.indexOf(a.id);
-                    ai = ai === -1
-                      ? skills.length + skills.indexOf(a)
-                      : ai;
-                    let bi = skillIdRewardEarned.indexOf(b.id);
-                    bi = bi === -1
-                      ? skills.length + skills.indexOf(b)
-                      : bi;
-                    return ai - bi;
-                  })}
-                  disableCloseOnSelect
-                  slotProps={{
-                    listbox: {
-                      style: {
-                        maxHeight: '170px'
-                      }
-                    }
-                  }}
-                  getOptionKey={(option) => option?.id ?? 'no-key'}
-                  getOptionLabel={(option) => option?.name ?? ''}
-                  renderOption={(
-                    props,
-                    option,
-                    { index }
-                  ) =>
-                  {
-                    if (option === null || option.name === '' || option.name.startsWith('=='))
-                    {
-                      return <li {...props} style={{ display: 'none' }}/>;
-                    }
-
-                    return (
-                      <li {...props} key={props.key ?? option.id} style={{ height: 32 }}>
-                        <ListItem disableGutters disablePadding sx={{ height: 32 }}>
-                          <ListItemIcon sx={{ height: 32 }}>
-                            <Checkbox
-                              checked={skillIdRewardEarned.includes(option.id)}
-                              onChange={() => handleConditionalSkillIdRewardToggle(option.id)}/>
-                            <EntryText
-                              primary={`${option.id}: ${option.name}`}
-                              disableTypography={true}
-                            />
-                          </ListItemIcon>
-                        </ListItem>
-                      </li>
-                    );
-                  }}
-                  renderInput={(params) =>
-                  {
-                    return (<TextField
-                      {...params}
-                      size={'small'}
-                      label={'Choose Skill Rewards'}
-                      placeholder="Skill name..."/>);
-                  }}
-                />
-              </Grid>
-
-              <Grid size={8}>
-                <TextField
-                  label={'Javascript-based Rewards'}
-                  placeholder={'Raw javascript to be executed upon completing this conditional...'}
-                  value={selectedConditional.jsRewards}
-                  onChange={handleConditionalJsRewardsOnChangeEvent}
-                  multiline
-                  fullWidth
-                  rows={6}
-                  variant={'standard'}
-                  sx={{
-                    // Root class for the input field
-                    '& .MuiInput-root': {
-                      fontFamily: 'monospace',
-                    }, // Class for the label of the input field
-                    '& .MuiInputLabel-standard': {
-                      color: '#2e2e2e',
-                      fontFamily: 'monospace',
+                      startAdornment: (
+                        <InputAdornment position={'start'}>
+                          <Key/>
+                        </InputAdornment>
+                      ),
                     },
                   }}
                 />
-              </Grid>
 
-              <Grid size={4}>
-                <Box>
-                  {skillIdRewardEarned.map(renderSkillIdRewards)}
-                </Box>
-              </Grid>
+                {/* Actors + Skill Rewards */}
+                <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
+                  <Box sx={{ width: 260, flexShrink: 0 }}>
+                    <BoardSectionCard title={'Applicable Actors'} density={'compact'}>
+                      <List dense disablePadding>
+                        {actors.map(renderActorListItem)}
+                      </List>
+                    </BoardSectionCard>
+                  </Box>
 
-              <Grid size={4}>
-                <div onContextMenu={handleRequirementsContextMenu} style={{ cursor: 'context-menu' }}>
-                  <List dense>
-                    <ListSubheader sx={{
-                      height: '30px',
-                      fontWeight: 'bold'
-                    }}>
-                      Skills Required to Develop Proficiency In
-                    </ListSubheader>
-                    {currentRequirements.map((
-                      requirement,
-                      index
-                    ) => renderConditionalRequirement(requirement, index))}
-                  </List>
-                </div>
-              </Grid>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <BoardSectionCard title={'Skill Rewards'}>
+                      <Stack spacing={1.5}>
+                        <Autocomplete
+                          size={'small'}
+                          options={validSkills.filter(s => !skillIdRewardEarned.includes(s.id))}
+                          value={null}
+                          onChange={(_, val) =>
+                          {
+                            if (!val) return;
+                            handleConditionalSkillRewardsChange(
+                              [ ...skillIdRewardEarned, val.id ].sort((a, b) => a - b)
+                            );
+                          }}
+                          getOptionLabel={opt => `[${opt.id}] ${opt.name}`}
+                          isOptionEqualToValue={(a, b) => a.id === b.id}
+                          renderOption={(props, option) => (
+                            <li {...props} key={props.key ?? option.id}>
+                              <Stack direction={'row'} spacing={1} alignItems={'center'}>
+                                <IconSetSprite iconIndex={option.iconIndex ?? 0} sizePx={20}/>
+                                <Typography variant={'body2'}>[{option.id}] {option.name}</Typography>
+                              </Stack>
+                            </li>
+                          )}
+                          renderInput={(params) => (
+                            <TextField {...params} label={'Add Skill Reward'} variant={'outlined'}/>
+                          )}
+                        />
 
-              <Grid size={4}>
-                <Stack spacing={2}>
-                  <TextField
-                    type={'number'}
-                    label={'Proficiency Required'}
-                    value={selectedRequirement?.proficiency ?? 0}
-                    sx={{ width: '100px' }}
-                    onChange={(event) => handleRequirementProficiencyOnChangeEvent(parseInt(event.target.value) ?? 0)}
-                  />
-                  <Autocomplete
-                    size={'small'}
-                    options={skills}
-                    value={requirementSkill}
-                    onChange={(
-                      event,
-                      newValue: RPG_SkillDomainModel | null
-                    ) =>
-                    {
-                      handleRequirementPrimarySkillOnChangeEvent(newValue);
-                    }}
-                    inputValue={requirementSkillText}
-                    onInputChange={(
-                      event,
-                      newInputValue: string | undefined
-                    ) =>
-                    {
-                      console.log(newInputValue);
-                      setRequirementSkillText(newInputValue);
-                    }}
-                    getOptionLabel={(option) => option?.name ?? ''}
-                    getOptionKey={(option) => option?.id ?? 'no-key'}
-                    renderOption={(
-                      props,
-                      option,
-                      { index }
-                    ) =>
-                    {
-                      if (option === null || option.name === '' || option.name.startsWith('=='))
-                      {
-                        return <li {...props} style={{ display: 'none' }}/>;
+                        {skillIdRewardEarned.length > 0 && (
+                          <Stack spacing={0.5}>
+                            {skillIdRewardEarned.map((skillId, rewardIdx) =>
+                            {
+                              const skill = skillsById.get(skillId);
+                              if (!skill) return null;
+                              return (
+                                <Stack
+                                  key={skillId}
+                                  direction={'row'}
+                                  alignItems={'center'}
+                                  spacing={1.5}
+                                  sx={{
+                                    px:          1,
+                                    py:          0.5,
+                                    borderRadius: 1,
+                                    border:      '1px solid',
+                                    borderColor: 'divider',
+                                  }}
+                                >
+                                  <IconSetSprite iconIndex={skill.iconIndex ?? 0} sizePx={24}/>
+                                  <Typography variant={'body2'} sx={{ flex: 1 }}>
+                                    [{skill.id}] {skill.name}
+                                  </Typography>
+                                  <Tooltip title={'Move up'}>
+                                    <span>
+                                      <IconButton
+                                        size={'small'}
+                                        disabled={rewardIdx === 0}
+                                        onClick={() => handleConditionalSkillRewardsChange(moveItem(skillIdRewardEarned, rewardIdx, -1))}
+                                      >
+                                        <ArrowUpward fontSize={'small'}/>
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                  <Tooltip title={'Move down'}>
+                                    <span>
+                                      <IconButton
+                                        size={'small'}
+                                        disabled={rewardIdx === skillIdRewardEarned.length - 1}
+                                        onClick={() => handleConditionalSkillRewardsChange(moveItem(skillIdRewardEarned, rewardIdx, 1))}
+                                      >
+                                        <ArrowDownward fontSize={'small'}/>
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                  <Tooltip title={'Go to skill'}>
+                                    <IconButton
+                                      size={'small'}
+                                      onClick={() => navigate(`/skills?skillId=${skill.id}`)}
+                                    >
+                                      <OpenInNew fontSize={'small'}/>
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title={'Remove'}>
+                                    <IconButton
+                                      size={'small'}
+                                      onClick={() =>
+                                        handleConditionalSkillRewardsChange(
+                                          skillIdRewardEarned.filter(id => id !== skillId)
+                                        )}
+                                    >
+                                      <DeleteOutline fontSize={'small'}/>
+                                    </IconButton>
+                                  </Tooltip>
+                                </Stack>
+                              );
+                            })}
+                          </Stack>
+                        )}
+                      </Stack>
+                    </BoardSectionCard>
+                  </Box>
+
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <BoardSectionCard
+                      title={'Skill Requirements'}
+                      subtitle={'Skills that must reach the specified proficiency level'}
+                      actions={
+                        <Tooltip title={'Add requirement'}>
+                          <IconButton size={'small'} onClick={handleAddNewRequirement}>
+                            <Add fontSize={'small'}/>
+                          </IconButton>
+                        </Tooltip>
                       }
+                    >
+                      <Stack spacing={0.5}>
+                        {currentRequirements.map((req, idx) =>
+                        {
+                          const primarySkill       = skillsById.get(req.skillId);
+                          const secondarySkillObjs = req.secondarySkillIds
+                            .map(id => skillsById.get(id))
+                            .filter((s): s is RPG_SkillDomainModel => !!s);
 
-                      return (
-                        <li {...props} key={props.key ?? `${option.id}-${option.name}`} style={{ height: 32 }}>
-                          <ListItem disableGutters disablePadding sx={{ height: 32 }}>
-                            <ListItemButton onClick={() => handleRequirementPrimarySkillOnChangeEvent(option)}>
-                              <ListItemIcon sx={{ height: 32 }}>
-                                <EntryText
-                                  primary={`${option.id}: ${option.name}`}
-                                  disableTypography
-                                />
-                              </ListItemIcon>
-                            </ListItemButton>
-                          </ListItem>
-                        </li>
-                      );
-                    }}
-                    renderInput={(params) =>
-                    {
-                      return (<TextField
-                        {...params}
-                        size={'small'}
-                        label={'Requirement Skill'}
-                        placeholder="Skill name..."/>);
-                    }}
-                  />
-                  <Autocomplete
-                    size={'small'}
-                    options={skills}
-                    disableCloseOnSelect
-                    slotProps={{
-                      listbox: {
-                        sx: { maxHeight: '170px' }
-                      }
-                    }}
-                    getOptionKey={(option) => option?.id ?? 'no-key'}
-                    getOptionLabel={(option) => option?.name ?? ''}
-                    renderOption={(
-                      props,
-                      option,
-                      { index }
-                    ) =>
-                    {
-                      if (option === null || option.name === '' || option.name.startsWith('=='))
-                      {
-                        return <li {...props} style={{ display: 'none' }}/>;
-                      }
+                          return (
+                            <Accordion
+                              key={idx}
+                              expanded={expandedRequirementIdx === idx}
+                              onChange={(_, expanded) => setExpandedRequirementIdx(expanded ? idx : null)}
+                              disableGutters
+                              sx={{ '&:before': { display: 'none' } }}
+                            >
+                              <AccordionSummary expandIcon={<ExpandMore/>}>
+                                <Stack
+                                  direction={'row'}
+                                  alignItems={'center'}
+                                  spacing={1.5}
+                                  sx={{ flex: 1, minWidth: 0, mr: 1 }}
+                                >
+                                  <IconSetSprite iconIndex={primarySkill?.iconIndex ?? 0} sizePx={24}/>
+                                  <Typography variant={'body2'} noWrap sx={{ flex: 1, minWidth: 0 }}>
+                                    {primarySkill
+                                      ? `[${primarySkill.id}] ${primarySkill.name}`
+                                      : `Skill #${req.skillId}`}
+                                  </Typography>
+                                  <Typography variant={'caption'} color={'text.secondary'} sx={{ flexShrink: 0 }}>
+                                    ×{req.proficiency}
+                                  </Typography>
+                                  {req.secondarySkillIds.length > 0 && (
+                                    <Typography variant={'caption'} color={'text.secondary'} sx={{ flexShrink: 0 }}>
+                                      +{req.secondarySkillIds.length} secondary
+                                    </Typography>
+                                  )}
+                                </Stack>
+                                <Stack direction={'row'} spacing={0.5} onClick={e => e.stopPropagation()}>
+                                  <Tooltip title={'Move up'}>
+                                    <span>
+                                      <IconButton size={'small'} disabled={idx === 0} onClick={() => handleReorderRequirement(idx, -1)}>
+                                        <ArrowUpward fontSize={'small'}/>
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                  <Tooltip title={'Move down'}>
+                                    <span>
+                                      <IconButton size={'small'} disabled={idx === currentRequirements.length - 1} onClick={() => handleReorderRequirement(idx, 1)}>
+                                        <ArrowDownward fontSize={'small'}/>
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                  <Tooltip title={'Clone'}>
+                                    <IconButton size={'small'} onClick={() => handleCloneRequirement(idx)}>
+                                      <ContentCopy fontSize={'small'}/>
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title={'Delete'}>
+                                    <IconButton size={'small'} onClick={() => handleDeleteRequirement(idx)}>
+                                      <DeleteOutline fontSize={'small'}/>
+                                    </IconButton>
+                                  </Tooltip>
+                                </Stack>
+                              </AccordionSummary>
 
-                      return (
-                        <li {...props} key={props.key ?? option.id} style={{ height: 32 }}>
-                          <ListItem disableGutters disablePadding sx={{ height: 32 }}>
-                            <ListItemIcon sx={{ height: 32 }}>
-                              <Checkbox
-                                checked={requirementSecondarySkillIds.includes(option.id)}
-                                onChange={() => handleRequirementSecondarySkillIdToggle(option.id)}/>
-                              <EntryText
-                                primary={`${option.id}: ${option.name}`}
-                                disableTypography
-                              />
-                            </ListItemIcon>
-                          </ListItem>
-                        </li>
-                      );
-                    }}
-                    renderInput={(params) =>
-                    {
-                      return (<TextField
-                        {...params}
-                        size={'small'}
-                        label={'Secondary Skills'}
-                        placeholder="Skill name..."/>);
-                    }}
-                  />
+                              <AccordionDetails>
+                                <Stack spacing={1.5}>
+                                  <TextField
+                                    type={'number'}
+                                    label={'Proficiency Required'}
+                                    variant={'outlined'}
+                                    size={'small'}
+                                    sx={{ width: 180 }}
+                                    value={req.proficiency}
+                                    onChange={e =>
+                                      patchRequirement(idx, { proficiency: parseInt(e.target.value) || 0 })}
+                                    slotProps={{ htmlInput: { min: '0', step: '1' } }}
+                                  />
+
+                                  <Autocomplete
+                                    size={'small'}
+                                    options={validSkills}
+                                    value={skillsById.get(req.skillId) ?? null}
+                                    onChange={(_, val) => val && patchRequirement(idx, { skillId: val.id })}
+                                    getOptionLabel={opt => `[${opt.id}] ${opt.name}`}
+                                    isOptionEqualToValue={(a, b) => a.id === b.id}
+                                    renderOption={(props, option) => (
+                                      <li {...props} key={props.key ?? option.id}>
+                                        <Stack direction={'row'} spacing={1} alignItems={'center'}>
+                                          <IconSetSprite iconIndex={option.iconIndex ?? 0} sizePx={20}/>
+                                          <Typography variant={'body2'}>[{option.id}] {option.name}</Typography>
+                                        </Stack>
+                                      </li>
+                                    )}
+                                    renderInput={(params) => (
+                                      <TextField {...params} label={'Primary Skill'} variant={'outlined'}/>
+                                    )}
+                                  />
+
+                                  <Autocomplete<RPG_SkillDomainModel, true>
+                                    multiple
+                                    size={'small'}
+                                    options={validSkills}
+                                    value={secondarySkillObjs}
+                                    onChange={(_, val) =>
+                                      patchRequirement(idx, { secondarySkillIds: val.map(s => s.id) })}
+                                    getOptionLabel={opt => `[${opt.id}] ${opt.name}`}
+                                    isOptionEqualToValue={(a, b) => a.id === b.id}
+                                    slotProps={{ chip: { size: 'small' } }}
+                                    renderOption={(props, option) => (
+                                      <li {...props} key={props.key ?? option.id}>
+                                        <Stack direction={'row'} spacing={1} alignItems={'center'}>
+                                          <IconSetSprite iconIndex={option.iconIndex ?? 0} sizePx={20}/>
+                                          <Typography variant={'body2'}>[{option.id}] {option.name}</Typography>
+                                        </Stack>
+                                      </li>
+                                    )}
+                                    renderInput={(params) => (
+                                      <TextField {...params} label={'Secondary Skills'} variant={'outlined'}/>
+                                    )}
+                                  />
+
+                                  {req.secondarySkillIds.length > 0 && (
+                                    <Box>
+                                      <Button
+                                        size={'small'}
+                                        variant={'outlined'}
+                                        color={'inherit'}
+                                        startIcon={<PlaylistRemove/>}
+                                        onClick={() => patchRequirement(idx, { secondarySkillIds: [] })}
+                                      >
+                                        Clear Secondary Skills
+                                      </Button>
+                                    </Box>
+                                  )}
+                                </Stack>
+                              </AccordionDetails>
+                            </Accordion>
+                          );
+                        })}
+                      </Stack>
+                    </BoardSectionCard>
+                  </Box>
                 </Stack>
-              </Grid>
-            </Grid>}
+
+                {/* JS Rewards */}
+                <BoardSectionCard title={'Javascript Rewards'} collapsible defaultExpanded={false}>
+                  <TextField
+                    label={'Javascript-based Rewards'}
+                    placeholder={'Raw javascript to be executed upon completing this conditional...'}
+                    value={selectedConditional.jsRewards}
+                    onChange={handleConditionalJsRewardsOnChangeEvent}
+                    multiline
+                    fullWidth
+                    rows={6}
+                    variant={'outlined'}
+                    size={'small'}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        fontFamily: 'monospace',
+                        fontSize:   13,
+                      },
+                    }}
+                  />
+                </BoardSectionCard>
+
+              </Stack>
+            </Box>}
       </EditorBoardSplitLayout>
     </Box>
 
-      {/*region not-grid-related elements */}
-      {/* This dialog contains skill detail for the user to understand more about their skill rewards. */}
-      <Dialog
-        open={isSkillDialogOpen}
-        onClose={() => setIsSkillDialogOpen(false)}
+    <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
+      <Alert
+        onClose={handleSnackClose}
+        severity={snackSeverity}
+        variant={snackVariant}
+        sx={{ width: '100%' }}
       >
-        <DialogTitle>
-          {`Skill Detail: ${skillsById.get(clickedSkill)?.name}`}
-        </DialogTitle>
-        <DialogContent
-          sx={{ height: '200px' }}
-        >
-          <DialogContentText>
-            {skillsById.get(clickedSkill)?.description}
-          </DialogContentText>
-          <SpeedDial
-            ariaLabel={'skill-speed-dial'}
-            icon={<PriceCheck/>}
-            sx={{
-              position: 'absolute',
-              left: 16,
-              bottom: 16
-            }}
-          >
-            <SpeedDialAction
-              key={'mp-cost'}
-              icon={'MP'}
-              sx={{ color: 'pink' }}
-              tooltipTitle={skillsById.get(clickedSkill)?.mpCost}
-              tooltipOpen
-              tooltipPlacement={'right'}
-            />
-            <SpeedDialAction
-              key={'tp-cost'}
-              icon={'TP'}
-              tooltipTitle={skillsById.get(clickedSkill)?.tpCost}
-              tooltipOpen
-              tooltipPlacement={'right'}
-            />
-          </SpeedDial>
+        {snackMessage}
+      </Alert>
+    </Snackbar>
 
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setIsSkillDialogOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* This is over-arching save button- it will save all data to disk. */}
-      <SaveButton
-        extraSaveText={'Proficiencies'}
-        canSave={canSave && !proficiencyLoading}
-        handleSave={async () =>
-        {
-          setCanSave(false);
-          await save(conditionals);
-          handleSnack('Proficiency data saved successfully!', MuiSnackbarSeverity.Success);
-        }}
-      />
-
-      <ReloadButton
-        handleReload={handleReloadButtonOnClickEvent}
-        canReload={!proficiencyLoading}
-        extraReloadText={'Proficiencies'}
-      />
-
-      {/* The snackbar for conveying useful messages. */}
-      <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
-        <Alert
-          onClose={handleSnackClose}
-          severity={snackSeverity}
-          variant={snackVariant}
-          sx={{ width: '100%' }}
-        >
-          {snackMessage}
-        </Alert>
-      </Snackbar>
-
-      {/* The context menu on the conditionals list. */}
-      <Menu
-        open={conditionalsContextMenu !== null}
-        onClose={handleConditionalContextMenuOnCloseEvent}
-        anchorReference="anchorPosition"
-        anchorPosition={conditionalsContextMenu !== null
-          ? {
-            top: conditionalsContextMenu.mouseY,
-            left: conditionalsContextMenu.mouseX
-          }
-          : undefined}
-      >
-        <MenuItem onClick={() =>
-        {
-          handleAddNewConditional(selectedConditionalIndex);
-          handleConditionalContextMenuOnCloseEvent();
-        }}>
-          <ListItemIcon><Add/></ListItemIcon>
-          <Typography>Add new above</Typography>
-        </MenuItem>
-        <MenuItem onClick={() =>
-        {
-          handleAddNewConditional(selectedConditionalIndex + 1);
-          handleConditionalContextMenuOnCloseEvent();
-        }}>
-          <ListItemIcon><Add/></ListItemIcon>
-          <Typography>Add new below</Typography>
-        </MenuItem>
-        <Divider/>
-        <MenuItem onClick={() =>
-        {
-          handleCloneConditional(selectedConditionalIndex);
-          handleConditionalContextMenuOnCloseEvent();
-        }}>
-          <ListItemIcon><ContentCopy/></ListItemIcon>
-          <Typography>Clone above</Typography>
-        </MenuItem>
-        <MenuItem onClick={() =>
-        {
-          handleCloneConditional(selectedConditionalIndex + 1);
-          handleConditionalContextMenuOnCloseEvent();
-        }}>
-          <ListItemIcon><ContentCopy/></ListItemIcon>
-          <Typography>Clone below</Typography>
-        </MenuItem>
-        <Divider/>
-        <MenuItem dense onClick={() =>
-        {
-          handleDeleteConditional(selectedConditionalIndex);
-          handleConditionalContextMenuOnCloseEvent();
-        }}>
-          <ListItemIcon><Remove/></ListItemIcon>
-          <Typography>Remove Selected</Typography>
-        </MenuItem>
-      </Menu>
-
-      {/* The context menu on the requirements list. */}
-      <Menu
-        open={requirementsContextMenu !== null}
-        onClose={handleRequirementsContextMenuOnCloseEvent}
-        anchorReference="anchorPosition"
-        anchorPosition={requirementsContextMenu !== null
-          ? {
-            top: requirementsContextMenu.mouseY,
-            left: requirementsContextMenu.mouseX
-          }
-          : undefined}
-      >
-        <MenuItem onClick={() =>
-        {
-          handleAddNewRequirement(selectedRequirementIndex);
-          handleRequirementsContextMenuOnCloseEvent();
-        }}>
-          <ListItemIcon><Add/></ListItemIcon>
-          <Typography>Add new above</Typography>
-        </MenuItem>
-        <MenuItem onClick={() =>
-        {
-          handleAddNewRequirement(selectedRequirementIndex + 1);
-          handleRequirementsContextMenuOnCloseEvent();
-        }}>
-          <ListItemIcon><Add/></ListItemIcon>
-          <Typography>Add new below</Typography>
-        </MenuItem>
-        <Divider/>
-        <MenuItem onClick={() =>
-        {
-          handleCloneRequirement(selectedRequirementIndex);
-          handleRequirementsContextMenuOnCloseEvent();
-        }}>
-          <ListItemIcon><ContentCopy/></ListItemIcon>
-          <Typography>Clone above</Typography>
-        </MenuItem>
-        <MenuItem onClick={() =>
-        {
-          handleCloneRequirement(selectedRequirementIndex + 1);
-          handleRequirementsContextMenuOnCloseEvent();
-        }}>
-          <ListItemIcon><ContentCopy/></ListItemIcon>
-          <Typography>Clone below</Typography>
-        </MenuItem>
-        <Divider/>
-        <MenuItem onClick={() =>
-        {
-          handleClearSecondarySkillIdsForRequirement(selectedRequirementIndex);
-          handleRequirementsContextMenuOnCloseEvent();
-        }}>
-          <ListItemIcon><PlaylistRemove/></ListItemIcon>
-          <Typography>Remove all secondary skill ids</Typography>
-        </MenuItem>
-        <Divider/>
-        <MenuItem dense onClick={() =>
-        {
-          handleDeleteRequirement(selectedRequirementIndex);
-          handleRequirementsContextMenuOnCloseEvent();
-        }}>
-          <ListItemIcon><Remove/></ListItemIcon>
-          <Typography>Remove Selected</Typography>
-        </MenuItem>
-      </Menu>
-      {/*endregion not-grid-related elements */}
+    {/* Conditionals context menu */}
+    <Menu
+      open={conditionalsContextMenu !== null}
+      onClose={handleConditionalContextMenuClose}
+      anchorReference={'anchorPosition'}
+      anchorPosition={conditionalsContextMenu !== null
+        ? { top: conditionalsContextMenu.mouseY, left: conditionalsContextMenu.mouseX }
+        : undefined}
+    >
+      <MenuItem onClick={() =>
+      {
+        handleAddNewConditional(selectedConditionalIndex);
+        handleConditionalContextMenuClose();
+      }}>
+        <ListItemIcon><Add/></ListItemIcon>
+        <Typography>Add new above</Typography>
+      </MenuItem>
+      <MenuItem onClick={() =>
+      {
+        handleAddNewConditional(selectedConditionalIndex + 1);
+        handleConditionalContextMenuClose();
+      }}>
+        <ListItemIcon><Add/></ListItemIcon>
+        <Typography>Add new below</Typography>
+      </MenuItem>
+      <Divider/>
+      <MenuItem onClick={() =>
+      {
+        handleCloneConditional(selectedConditionalIndex);
+        handleConditionalContextMenuClose();
+      }}>
+        <ListItemIcon><ContentCopy/></ListItemIcon>
+        <Typography>Clone above</Typography>
+      </MenuItem>
+      <MenuItem onClick={() =>
+      {
+        handleCloneConditional(selectedConditionalIndex + 1);
+        handleConditionalContextMenuClose();
+      }}>
+        <ListItemIcon><ContentCopy/></ListItemIcon>
+        <Typography>Clone below</Typography>
+      </MenuItem>
+      <Divider/>
+      <MenuItem dense onClick={() =>
+      {
+        handleDeleteConditional(selectedConditionalIndex);
+        handleConditionalContextMenuClose();
+      }}>
+        <ListItemIcon><DeleteOutline/></ListItemIcon>
+        <Typography>Remove Selected</Typography>
+      </MenuItem>
+    </Menu>
   </>;
 };
 

@@ -56,29 +56,14 @@ function normalizeApiBase(s)
   return String(s).trim().replace(/\/$/, '');
 }
 
-function httpGetJson(url, timeoutMs)
+function httpGet(url, timeoutMs)
 {
   return new Promise((resolve, reject) =>
   {
     const req = http.get(url, { timeout: timeoutMs }, (res) =>
     {
-      let body = '';
-      res.setEncoding('utf-8');
-      res.on('data', (chunk) => (body += chunk));
-      res.on('end', () =>
-      {
-        try
-        {
-          resolve({
-            statusCode: res.statusCode || 0,
-            json: JSON.parse(body),
-          });
-        }
-        catch (e)
-        {
-          reject(e);
-        }
-      });
+      res.resume();
+      res.on('end', () => resolve(res.statusCode || 0));
     });
     req.on('error', reject);
     req.on('timeout', () =>
@@ -95,7 +80,7 @@ async function waitForUrlOk(url, timeoutMs)
   {
     try
     {
-      const { statusCode } = await httpGetJson(url, 400);
+      const statusCode = await httpGet(url, 400);
       if (statusCode >= 200 && statusCode < 500)
       {
         return true;
@@ -220,7 +205,10 @@ async function main()
   const uiUrl = cfg.uiUrl || DEFAULT_UI_URL;
   const ok = await waitForUrlOk(uiUrl, 10_000);
 
-  nw.Window.open(uiUrl, { width: 1400, height: 900 }, (win) =>
+  const nwManifest = readJsonFileSafe(path.join(__dirname, 'package.json')) || {};
+  const { width = 1400, height = 900 } = nwManifest.window || {};
+
+  nw.Window.open(uiUrl, { width, height }, (win) =>
   {
     win.on('close', () =>
     {

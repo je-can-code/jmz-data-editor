@@ -1,5 +1,6 @@
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 import { FormControl, InputLabel, MenuItem, Select, Stack, Typography } from "@mui/material";
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import { RPG_EnemyDomainModel } from "@core/domain/entities/RPG_EnemyDomainModel.ts";
 import { useJabs } from "@presentation/context/resources/jabs.context.tsx";
 import type { JabsTeamDefinition } from "@core/domain/valueObjects/jabs-config.ts";
@@ -47,24 +48,19 @@ const EnemyJabsTeam = ({
   };
 
   return (
-    <>
-      <Typography
-        variant={"h4"}
-        gutterBottom={true}
-        color={"primary"}
-        align={"center"}
-        sx={{ paddingTop: 2 }}
-      >
-        JABS Team
-      </Typography>
-
-      <Stack spacing={1}>
-        <FormControl fullWidth={true}>
-          <InputLabel id={"enemy-jabs-team-select-label"}>Team</InputLabel>
+    <BoardSectionCard title={'Team'}>
+      <Stack spacing={1.5}>
+        <Typography variant={'body2'} color={'text.secondary'}>
+          Battlers on the same team won't engage each other. Use Default unless this enemy
+          needs to belong to a specific team defined in the JABS config.
+        </Typography>
+        <FormControl fullWidth={true} size={'small'}>
+          <InputLabel id={"enemy-jabs-team-select-label"} shrink>Team</InputLabel>
           <Select
             labelId={"enemy-jabs-team-select-label"}
             label={"Team"}
             value={value}
+            displayEmpty
             onChange={(e) => handleChange(String(e.target.value))}
           >
             <MenuItem value={""}>
@@ -81,7 +77,7 @@ const EnemyJabsTeam = ({
           </Select>
         </FormControl>
       </Stack>
-    </>
+    </BoardSectionCard>
   );
 };
 
