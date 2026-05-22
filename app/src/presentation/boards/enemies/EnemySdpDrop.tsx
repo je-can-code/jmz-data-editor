@@ -1,5 +1,6 @@
-import React, { useMemo, } from 'react';
-import { Autocomplete, Button, Checkbox, FormControlLabel, TextField } from '@mui/material';
+import { type ChangeEvent, useMemo } from 'react';
+import { Autocomplete, Button, Checkbox, FormControlLabel, Stack, TextField } from '@mui/material';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import { OpenInNew } from '@mui/icons-material';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
@@ -30,7 +31,7 @@ const EnemySdpDrop = ({
 
   const canOpenInSdp = isEnabled && currentSdpDrop.key !== '' && sdps.length > 0;
 
-  const handleToggleFields = (event: React.ChangeEvent<HTMLInputElement>) =>
+  const handleToggleFields = (event: ChangeEvent<HTMLInputElement>) =>
   {
     const checked = event.target.checked;
 
@@ -73,11 +74,18 @@ const EnemySdpDrop = ({
   };
 
   return (
-    <>
+    <BoardSectionCard
+      title={'SDP Drop'}
+      subtitle={isEnabled
+        ? (currentSdpDrop.key !== '' ? currentSdpDrop.key : 'Forced open')
+        : 'Not configured'}
+      collapsible
+      defaultExpanded={false}
+    >
+      <Stack spacing={1}>
       <FormControlLabel
         control={<Checkbox checked={isEnabled} onChange={handleToggleFields}/>}
         label="Enable SDP Drop"
-        labelPlacement="end"
       />
 
       <Autocomplete
@@ -123,7 +131,8 @@ const EnemySdpDrop = ({
         onChangeEventHandler={(e) => handleUpdateDropChance(parseInt(e.target.value) || 0)}
         disabled={!isEnabled}
       />
-    </>
+      </Stack>
+    </BoardSectionCard>
   );
 };
 

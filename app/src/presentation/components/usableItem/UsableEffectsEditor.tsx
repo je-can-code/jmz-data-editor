@@ -68,18 +68,6 @@ const USABLE_EFFECTS_NUMBER_INPUT_PX = 128;
  */
 const USABLE_EFFECTS_STACKED_PARAMETER_SPACING = 1;
 
-/**
- * Fixed parameters column height (typical outlined {@code dataId} + {@link USABLE_EFFECTS_STACKED_PARAMETER_SPACING} + number row).
- * Locks row height when reordering so one-line and two-line effects do not change grid band size.
- */
-const USABLE_EFFECTS_PARAMETERS_CELL_HEIGHT_PX = 112;
-
-/**
- * Fixed-height parameters cell so every effect row uses the same vertical band (reorder-stable).
- *
- * @param content Parameters cell body.
- * @returns Wrapped content.
- */
 function wrapUsableEffectParameters(content: ReactNode): ReactNode
 {
   return (
@@ -89,12 +77,8 @@ function wrapUsableEffectParameters(content: ReactNode): ReactNode
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
-        height: USABLE_EFFECTS_PARAMETERS_CELL_HEIGHT_PX,
-        minHeight: USABLE_EFFECTS_PARAMETERS_CELL_HEIGHT_PX,
         minWidth: 0,
         width: '100%',
-        overflowX: 'hidden',
-        overflowY: 'auto',
       }}
     >
       {content}
@@ -290,7 +274,7 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
           }}>
             <NumberInputWithLabel
               label={'Code'}
-              variant={'standard'}
+              variant={'outlined'}
               size={'small'}
               value={effect.code}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
@@ -307,7 +291,7 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
             />
             <NumberInputWithLabel
               label={'dataId'}
-              variant={'standard'}
+              variant={'outlined'}
               size={'small'}
               value={effect.dataId}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
@@ -324,7 +308,7 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
             />
             <NumberInputWithLabel
               label={'value1'}
-              variant={'standard'}
+              variant={'outlined'}
               size={'small'}
               value={effect.value1}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
@@ -341,7 +325,7 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
             />
             <NumberInputWithLabel
               label={'value2'}
-              variant={'standard'}
+              variant={'outlined'}
               size={'small'}
               value={effect.value2}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
@@ -582,7 +566,7 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
           return (
             <NumberInputWithLabel
               label={'% max'}
-              variant={'standard'}
+              variant={'outlined'}
               size={'small'}
               value={recoverPercentFromStored(effect.value1)}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
@@ -608,7 +592,7 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
           return (
             <NumberInputWithLabel
               label={'TP amount'}
-              variant={'standard'}
+              variant={'outlined'}
               size={'small'}
               value={clampFinite(Math.trunc(effect.value1), -9999, 9999)}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
@@ -634,7 +618,7 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
           return (
             <NumberInputWithLabel
               label={'Chance'}
-              variant={'standard'}
+              variant={'outlined'}
               size={'small'}
               value={stateChancePercentFromStored(effect.value1)}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
@@ -662,7 +646,7 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
           return (
             <NumberInputWithLabel
               label={'Turns'}
-              variant={'standard'}
+              variant={'outlined'}
               size={'small'}
               value={clampFinite(Math.trunc(effect.value1), 0, 9999)}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
@@ -688,7 +672,7 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
           return (
             <NumberInputWithLabel
               label={'Amount'}
-              variant={'standard'}
+              variant={'outlined'}
               size={'small'}
               value={Math.trunc(effect.value1)}
               sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}
@@ -723,7 +707,7 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
         return (
           <NumberInputWithLabel
             label={'+ flat'}
-            variant={'standard'}
+            variant={'outlined'}
             size={'small'}
             value={clampFinite(Math.trunc(effect.value2), -999999, 999999)}
             sx={{ width: USABLE_EFFECTS_NUMBER_INPUT_PX }}

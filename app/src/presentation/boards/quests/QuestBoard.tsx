@@ -1,66 +1,65 @@
-import React, { ChangeEvent, MouseEvent, useEffect, useRef, useState, } from 'react';
+import { ChangeEvent, MouseEvent, useEffect, useRef, useState } from 'react';
 import type { FixedSizeList } from 'react-window';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Autocomplete,
   Box,
-  Button,
-  Checkbox,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
+  Chip,
   Divider,
   FormControl,
-  FormControlLabel,
-  Grid,
   IconButton,
   InputAdornment,
   InputLabel,
   List,
   ListItem,
   ListItemButton,
-  ListItemIcon,
   ListItemText,
   Menu,
   MenuItem,
   Select,
   Snackbar,
   Stack,
+  Tab,
+  Tabs,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
-  Typography
+  Typography,
 } from '@mui/material';
 import {
   Add,
   AddTask,
+  ArrowDownward,
+  ArrowUpward,
   Block,
   Category,
-  Check,
   ContentCopy,
-  DoubleArrow,
+  DeleteOutline,
   Edit,
+  ExpandMore,
   Key,
-  KeyboardArrowRight,
-  Remove,
   Style,
   Visibility,
-  VisibilityOff
+  VisibilityOff,
 } from '@mui/icons-material';
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 
-import SaveButton from '../../../components/core/SaveButton.tsx';
-import ReloadButton from '../../../components/core/ReloadButton.tsx';
+import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import KeyTextField from '../../../components/core/KeyTextField.tsx';
 import { OmniObjectiveType } from '@core/enums/OmniObjectiveType.ts';
 import ObjectiveLogs from './ObjectiveLogs.tsx';
 import ObjectiveFulfillmentData from './ObjectiveFulfillmentData.tsx';
 import OmniObjectiveFetchType from './OmniObjectiveFetchType.ts';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
+import { IconIndexField } from '@presentation/components/icons/IconIndexField.tsx';
 
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
 import { useQuests } from '@presentation/context/resources/quests.context.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
-import { useLocation, useNavigate } from 'react-router-dom';
 import {
   VirtualizedSidebarList,
   virtualizedSidebarColumnWidth,
@@ -73,18 +72,14 @@ import OmniQuest = Questopedia.OmniQuest;
 import OmniTag = Questopedia.OmniTag;
 import OmniCategory = Questopedia.OmniCategory;
 import OmniObjective = Questopedia.OmniObjective;
-import OmniObjectiveLogs = Questopedia.OmniObjectiveLogs;
 import IndiscriminateData = Questopedia.IndiscriminateData;
 import DestinationData = Questopedia.DestinationData;
 import FetchData = Questopedia.FetchData;
 import SlayData = Questopedia.SlayData;
 import QuestData = Questopedia.QuestData;
-import OmniFulfillmentData = Questopedia.OmniFulfillmentData;
 
 const QuestBoard = () =>
 {
-  const navigate = useNavigate(); // Get navigate from its own hook
-  const location = useLocation(); // Get location object for path information
   const {
     quests,
     tags,
@@ -97,9 +92,10 @@ const QuestBoard = () =>
     loading,
   } = useQuests();
 
-  //region state
   const listRef = useRef<FixedSizeList>(null);
   const listWrapperRef = useRef<HTMLDivElement>(null);
+
+  const [ tabIndex, setTabIndex ] = useState(0);
 
   const [ selectedQuest, setSelectedQuest ] = useState<OmniQuest | null>(null);
   const [ selectedQuestIndex, setSelectedQuestIndex ] = useState<number>(0);
@@ -109,98 +105,23 @@ const QuestBoard = () =>
   } | null>(null);
 
   const [ objectives, setObjectives ] = useState<OmniObjective[]>([]);
-  const [ selectedObjective, setSelectedObjective ] = useState<OmniObjective | null>(null);
-  const [ selectedObjectiveIndex, setSelectedObjectiveIndex ] = useState<number>(0);
-  const [ objectiveListContextMenu, setObjectiveListContextMenu ] = useState<{
-    mouseX: number;
-    mouseY: number;
-  } | null>(null);
+  const [ expandedObjectiveIdx, setExpandedObjectiveIdx ] = useState<number | null>(0);
 
   const [ selectedCategory, setSelectedCategory ] = useState<OmniCategory | null>(null);
   const [ selectedCategoryIndex, setSelectedCategoryIndex ] = useState<number>(0);
-  const [ categoryDialogOpen, setCategoryDialogOpen ] = useState<boolean>(false);
-  const [ categoryListContextMenu, setCategoryListContextMenu ] = useState<{
-    mouseX: number;
-    mouseY: number;
-  } | null>(null);
 
   const [ applicableTags, setApplicableTags ] = useState<string[]>([]);
   const [ selectedTag, setSelectedTag ] = useState<OmniTag | null>(null);
   const [ selectedTagIndex, setSelectedTagIndex ] = useState<number>(0);
-  const [ tagDialogOpen, setTagDialogOpen ] = useState<boolean>(false);
-  const [ tagListContextMenu, setTagListContextMenu ] = useState<{
-    mouseX: number;
-    mouseY: number;
-  } | null>(null);
 
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
   const [ snackMessage, setSnackMessage ] = useState<string>('');
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
 
-  //endregion state
-
-  //region actions
-  const handleQuestListItemOnClickEvent = (index: number) =>
+  const handleSnackClose = (_: any, reason?: string) =>
   {
-    setSelectedQuestIndex(index);
-
-    if (quests.length > 0)
-    {
-      const quest = quests.at(index)!;
-      setSelectedQuest(quest);
-      setApplicableTags(quest.tagKeys);
-
-      const questObjectives = quest.objectives;
-      setObjectives(questObjectives);
-      setSelectedObjective(questObjectives.at(0)!);
-      setSelectedObjectiveIndex(0);
-
-      updateUrl(quest);
-    }
-  };
-
-  const handleObjectiveListItemOnClickEvent = (index: number) =>
-  {
-    setSelectedObjectiveIndex(index);
-
-    if (objectives.length > 0)
-    {
-      const objective = objectives.at(index)!;
-      setSelectedObjective(objective);
-    }
-  };
-
-  const handleCategoryDialogListItemOnClickEvent = (index: number) =>
-  {
-    setSelectedCategoryIndex(index);
-    if (categories.length > 0)
-    {
-      const category = categories.at(index)!;
-      setSelectedCategory(category);
-    }
-  };
-
-  const handleTagDialogListItemOnClickEvent = (index: number) =>
-  {
-    setSelectedTagIndex(index);
-    if (tags.length > 0)
-    {
-      const tag = tags.at(index)!;
-      setSelectedTag(tag);
-    }
-  };
-
-  const handleSnackClose = (
-    _: any,
-    reason?: string
-  ) =>
-  {
-    if (reason === 'clickaway')
-    {
-      return;
-    }
-
+    if (reason === 'clickaway') return;
     setSnackOpen(false);
   };
 
@@ -220,22 +141,14 @@ const QuestBoard = () =>
   {
     try
     {
-      // drop the in-memory selection before triggering reload — the auto-select effect at the end of
-      // the component (deps: [quests.length]) re-fires once the fresh quests array lands, so the form
-      // re-binds to the first quest from disk instead of dangling on a stale pre-reload reference.
       setSelectedQuest(null);
-      setSelectedObjective(null);
-      setSelectedObjectiveIndex(0);
-
+      setObjectives([]);
       await reload();
-
       handleSnack('Quests data has been reloaded successfully.', MuiSnackbarSeverity.Success);
     }
     catch (error)
     {
-      const message = error instanceof Error
-        ? error.message
-        : 'Unknown error.';
+      const message = error instanceof Error ? error.message : 'Unknown error.';
       handleSnack(`Failed to reload quests data: ${message}`, MuiSnackbarSeverity.Error);
     }
   };
@@ -243,545 +156,73 @@ const QuestBoard = () =>
   const handleQuestListContextMenu = (event: MouseEvent) =>
   {
     event.preventDefault();
-
-    const newContextMenuState = questListContextMenu === null
-      ? {
-        mouseX: event.clientX + 2,
-        mouseY: event.clientY - 6,
-      }
-      : null;
-
-    setQuestListContextMenu(newContextMenuState);
+    setQuestListContextMenu(prev =>
+      prev === null
+        ? { mouseX: event.clientX + 2, mouseY: event.clientY - 6 }
+        : null
+    );
   };
 
-  const handleObjectiveListContextMenu = (event: MouseEvent) =>
-  {
-    event.preventDefault();
-
-    const newContextMenuState = objectiveListContextMenu === null
-      ? {
-        mouseX: event.clientX + 2,
-        mouseY: event.clientY - 6,
-      }
-      : null;
-
-    setObjectiveListContextMenu(newContextMenuState);
-  };
-
-  const handleCategoryListContextMenu = (event: MouseEvent) =>
-  {
-    event.preventDefault();
-
-    const newContextMenuState = categoryListContextMenu === null
-      ? {
-        mouseX: event.clientX + 2,
-        mouseY: event.clientY - 6,
-      }
-      : null;
-
-    setCategoryListContextMenu(newContextMenuState);
-  };
-
-  const handleTagListContextMenu = (event: MouseEvent) =>
-  {
-    event.preventDefault();
-
-    const newContextMenuState = tagListContextMenu === null
-      ? {
-        mouseX: event.clientX + 2,
-        mouseY: event.clientY - 6,
-      }
-      : null;
-
-    setTagListContextMenu(newContextMenuState);
-  };
-  //endregion actions
-
-  //region updates
-  const handleQuestKeyOnChangeEvent = (input: string) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedQuest)
-    {
-      return;
-    }
-
-    // update the entry.
-    const updatedQuest = {
-      ...selectedQuest,
-      key: input
-    } as OmniQuest;
-    updateQuest(updatedQuest, selectedQuestIndex);
-  };
-
-  const handleQuestNameOnChangeEvent = (input: string) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedQuest)
-    {
-      return;
-    }
-
-    // update the entry.
-    const updatedQuest = {
-      ...selectedQuest,
-      name: input
-    } as OmniQuest;
-    updateQuest(updatedQuest, selectedQuestIndex);
-  };
-
-  const handleQuestRecommendedLevelOnChangeEvent = (input: number) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedQuest)
-    {
-      return;
-    }
-
-    const updatedRecommendedLevel = input < 0
-      ? 0
-      : input;
-
-    // update the entry.
-    const updatedQuest = {
-      ...selectedQuest,
-      recommendedLevel: updatedRecommendedLevel
-    } as OmniQuest;
-    updateQuest(updatedQuest, selectedQuestIndex);
-  };
-
-  const handleQuestUnknownHintOnChangeEvent = (input: string) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedQuest)
-    {
-      return;
-    }
-
-    // update the entry.
-    const updatedQuest = {
-      ...selectedQuest,
-      unknownHint: input
-    } as OmniQuest;
-    updateQuest(updatedQuest, selectedQuestIndex);
-  };
-
-  const handleQuestOverviewOnChangeEvent = (input: string) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedQuest)
-    {
-      return;
-    }
-
-    // update the entry.
-    const updatedQuest = {
-      ...selectedQuest,
-      overview: input
-    } as OmniQuest;
-    updateQuest(updatedQuest, selectedQuestIndex);
-  };
-
-  const handleQuestCategoryOnChangeEvent = (input: string) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedQuest)
-    {
-      return;
-    }
-
-    // update the entry.
-    const updatedQuest = {
-      ...selectedQuest,
-      categoryKey: input
-    } as OmniQuest;
-    updateQuest(updatedQuest, selectedQuestIndex);
-  };
-
-  const handleQuestTagToggle = (value: string) =>
-  {
-    const currentIndex = applicableTags.indexOf(value);
-    const newChecked = [ ...applicableTags ];
-
-    if (currentIndex === -1)
-    {
-      newChecked.push(value);
-    }
-    else
-    {
-      newChecked.splice(currentIndex, 1);
-    }
-
-    setApplicableTags(newChecked.sort());
-
-    const updatedQuest = {
-      ...selectedQuest,
-      tagKeys: newChecked
-    } as OmniQuest;
-    updateQuest(updatedQuest, selectedQuestIndex);
-  };
-
-  const handleObjectiveTypeOnChangeEvent = (input: string) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedObjective)
-    {
-      return;
-    }
-
-    const updatedObjective = {
-      ...selectedObjective,
-      type: input
-    } as OmniObjective;
-
-    updateObjective(updatedObjective, selectedObjectiveIndex);
-  };
-
-  const handleObjectiveHiddenByDefaultOnChangeEvent = (newState: boolean) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedObjective)
-    {
-      return;
-    }
-
-    const updatedObjective = {
-      ...selectedObjective,
-      hiddenByDefault: newState
-    } as OmniObjective;
-
-    updateObjective(updatedObjective, selectedObjectiveIndex);
-  };
-
-  const handleObjectiveIsOptionalOnChangeEvent = (newState: boolean) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedObjective)
-    {
-      return;
-    }
-
-    const updatedObjective = {
-      ...selectedObjective,
-      isOptional: newState
-    } as OmniObjective;
-
-    updateObjective(updatedObjective, selectedObjectiveIndex);
-  };
-
-  const handleObjectiveDescriptionOnChangeEvent = (input: string) =>
-  {
-    if (!selectedObjective)
-    {
-      return;
-    }
-
-    const updatedObjective = {
-      ...selectedObjective,
-      description: input
-    } as OmniObjective;
-
-    updateObjective(updatedObjective, selectedObjectiveIndex);
-  };
-
-  const handleObjectiveLogsOnChangeEvent = (updatedObjectiveLogs: OmniObjectiveLogs) =>
-  {
-    if (!selectedObjective)
-    {
-      return;
-    }
-
-    const updatedObjective = {
-      ...selectedObjective,
-      logs: updatedObjectiveLogs
-    } as OmniObjective;
-
-    updateObjective(updatedObjective, selectedObjectiveIndex);
-  };
-
-  const handleObjectiveFulfillmentIndiscriminateOnChangeEvent = (updatedData: IndiscriminateData) =>
-  {
-    if (!selectedObjective)
-    {
-      return;
-    }
-
-    const updatedObjective = {
-      ...selectedObjective
-    } as OmniObjective;
-    updatedObjective.fulfillment.indiscriminate = updatedData;
-
-    updateObjective(updatedObjective, selectedObjectiveIndex);
-  };
-
-  const handleObjectiveFulfillmentDestinationOnChangeEvent = (updatedData: DestinationData) =>
-  {
-    if (!selectedObjective)
-    {
-      return;
-    }
-
-    const updatedObjective = {
-      ...selectedObjective
-    } as OmniObjective;
-    updatedObjective.fulfillment.destination = updatedData;
-
-    updateObjective(updatedObjective, selectedObjectiveIndex);
-  };
-
-  const handleObjectiveFulfillmentFetchOnChangeEvent = (updatedData: FetchData) =>
-  {
-    if (!selectedObjective)
-    {
-      return;
-    }
-
-    const updatedObjective = {
-      ...selectedObjective
-    } as OmniObjective;
-    updatedObjective.fulfillment.fetch = updatedData;
-
-    updateObjective(updatedObjective, selectedObjectiveIndex);
-  };
-
-  const handleObjectiveFulfillmentSlayOnChangeEvent = (updatedData: SlayData) =>
-  {
-    if (!selectedObjective)
-    {
-      return;
-    }
-
-    const updatedObjective = {
-      ...selectedObjective
-    } as OmniObjective;
-    updatedObjective.fulfillment.slay = updatedData;
-
-    updateObjective(updatedObjective, selectedObjectiveIndex);
-  };
-
-  const handleObjectiveFulfillmentQuestOnChangeEvent = (updatedData: QuestData) =>
-  {
-    if (!selectedObjective)
-    {
-      return;
-    }
-
-    const updatedObjective = {
-      ...selectedObjective
-    } as OmniObjective;
-    updatedObjective.fulfillment.quest = updatedData;
-
-    updateObjective(updatedObjective, selectedObjectiveIndex);
-  };
-
-  const handleCategoryKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedCategory)
-    {
-      return;
-    }
-
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
-
-    // update the entry.
-    const updatedCategory = {
-      ...selectedCategory,
-      key: updatedValue
-    } as OmniCategory;
-    setSelectedCategory(updatedCategory);
-
-    // rebuild the updated list of entries with the updated entry.
-    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
-    setCategories(updatedCategories);
-  };
-
-  const handleCategoryNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedCategory)
-    {
-      return;
-    }
-
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
-
-    // update the entry.
-    const updatedCategory = {
-      ...selectedCategory,
-      name: updatedValue
-    } as OmniCategory;
-    setSelectedCategory(updatedCategory);
-
-    // rebuild the updated list of entries with the updated entry.
-    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
-    setCategories(updatedCategories);
-  };
-
-  const handleCategoryIconIndexOnChangeEvent = (value: number) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedCategory)
-    {
-      return;
-    }
-
-    const updatedValue = value < -1
-      ? -1
-      : value;
-
-    // update the entry.
-    const updatedCategory = {
-      ...selectedCategory,
-      iconIndex: updatedValue
-    } as OmniCategory;
-    setSelectedCategory(updatedCategory);
-
-    // rebuild the updated list of entries with the updated entry.
-    const updatedCategories = categories.with(selectedCategoryIndex, updatedCategory);
-    setCategories(updatedCategories);
-  };
-
-  const handleTagKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedTag)
-    {
-      return;
-    }
-
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
-
-    // update the entry.
-    const updatedTag = {
-      ...selectedTag,
-      key: updatedValue
-    } as OmniTag;
-    setSelectedTag(updatedTag);
-
-    // rebuild the updated list of entries with the updated entry.
-    const updatedTags = tags.with(selectedTagIndex, updatedTag);
-    setTags(updatedTags);
-  };
-
-  const handleTagNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedTag)
-    {
-      return;
-    }
-
-    // grab the updated value from the input.
-    const updatedValue = event.target.value;
-
-    // update the entry.
-    const updatedTag = {
-      ...selectedTag,
-      name: updatedValue
-    } as OmniTag;
-    setSelectedTag(updatedTag);
-
-    // rebuild the updated list of entries with the updated entry.
-    const updatedTags = tags.with(selectedTagIndex, updatedTag);
-    setTags(updatedTags);
-  };
-
-  const handleTagIconIndexOnChangeEvent = (value: number) =>
-  {
-    // if there is no entry, stop processing.
-    if (!selectedTag)
-    {
-      return;
-    }
-
-    const updatedValue = value < -1
-      ? -1
-      : value;
-
-    // update the entry.
-    const updatedTag = {
-      ...selectedTag,
-      iconIndex: updatedValue
-    } as OmniTag;
-    setSelectedTag(updatedTag);
-
-    // rebuild the updated list of entries with the updated entry.
-    const updatedTags = tags.with(selectedTagIndex, updatedTag);
-    setTags(updatedTags);
-  };
-
-  const updateObjective = (
-    updatedObjective: OmniObjective,
-    objectiveIndex: number
-  ) =>
-  {
-    setSelectedObjective(updatedObjective);
-
-    const updatedObjectives = objectives.with(objectiveIndex, updatedObjective);
-    setObjectives(updatedObjectives);
-
-    // update the entry.
-    const updatedQuest = {
-      ...selectedQuest,
-      objectives: updatedObjectives,
-    } as OmniQuest;
-    updateQuest(updatedQuest, selectedQuestIndex);
-  };
-
-  const updateQuest = (
-    updatedQuest: OmniQuest,
-    questIndex: number
-  ) =>
+  const updateQuest = (updatedQuest: OmniQuest, questIndex: number) =>
   {
     setSelectedQuest(updatedQuest);
+    setQuests(quests.with(questIndex, updatedQuest));
+  };
 
-    const updatedQuests = quests.with(questIndex, updatedQuest);
-    setQuests(updatedQuests);
+  const updateObjective = (updatedObjective: OmniObjective, objectiveIndex: number) =>
+  {
+    if (!selectedQuest) return;
+    const updatedObjectives = objectives.with(objectiveIndex, updatedObjective);
+    setObjectives(updatedObjectives);
+    updateQuest({ ...selectedQuest, objectives: updatedObjectives } as OmniQuest, selectedQuestIndex);
+  };
+
+  const patchObjective = (idx: number, patch: Partial<OmniObjective>) =>
+  {
+    updateObjective({ ...objectives[idx], ...patch }, idx);
+  };
+
+  const handleQuestListItemOnClickEvent = (index: number) =>
+  {
+    setSelectedQuestIndex(index);
+    if (quests.length > 0)
+    {
+      const quest = quests.at(index)!;
+      setSelectedQuest(quest);
+      setApplicableTags(quest.tagKeys);
+      setObjectives(quest.objectives);
+      setExpandedObjectiveIdx(quest.objectives.length > 0 ? 0 : null);
+      updateUrl(quest);
+    }
+  };
+
+  const patchQuest = (patch: Partial<OmniQuest>) =>
+  {
+    if (!selectedQuest) return;
+    updateQuest({ ...selectedQuest, ...patch } as OmniQuest, selectedQuestIndex);
+  };
+
+  const handleTagsChange = (newTagObjects: OmniTag[]) =>
+  {
+    const sorted = newTagObjects.map(t => t.key).sort();
+    setApplicableTags(sorted);
+    patchQuest({ tagKeys: sorted });
   };
 
   const buildNewObjective = (id: number): OmniObjective =>
   {
-    const newFulfillmentData = {
-      indiscriminate: {
-        hint: '',
-      } as IndiscriminateData,
-      destination: {
-        mapId: -1,
-        x1: -1,
-        x2: -1,
-        y1: -1,
-        y2: -1,
-      } as DestinationData,
-      fetch: {
-        id: -1,
-        type: OmniObjectiveFetchType.Unset,
-        amount: -1
-      } as FetchData,
-      slay: {
-        id: -1,
-        amount: -1
-      } as SlayData,
-      quest: {
-        keys: []
-      } as QuestData,
-    } as OmniFulfillmentData;
-    const newLogs = {
-      inactive: '',
-      active: '',
-      completed: '',
-      failed: '',
-      missed: ''
-    } as OmniObjectiveLogs;
     return {
-      id: id,
+      id,
       type: OmniObjectiveType.Indiscriminate,
       description: 'Do the needful.',
-      logs: newLogs,
-      fulfillment: newFulfillmentData,
+      logs: { inactive: '', active: '', completed: '', failed: '', missed: '' },
+      fulfillment: {
+        indiscriminate: { hint: '' } as IndiscriminateData,
+        destination: { mapId: -1, x1: -1, x2: -1, y1: -1, y2: -1 } as DestinationData,
+        fetch: { id: -1, type: OmniObjectiveFetchType.Unset, amount: -1 } as FetchData,
+        slay: { id: -1, amount: -1 } as SlayData,
+        quest: { keys: [] } as QuestData,
+      },
       hiddenByDefault: true,
       isOptional: false,
     } as OmniObjective;
@@ -789,7 +230,6 @@ const QuestBoard = () =>
 
   const buildNewQuest = (): OmniQuest =>
   {
-    const newObjective = buildNewObjective(0);
     return {
       key: 'neo-9999',
       name: 'The New Quest!',
@@ -798,245 +238,228 @@ const QuestBoard = () =>
       categoryKey: categories.at(0)?.key ?? '',
       recommendedLevel: 0,
       unknownHint: '',
-      objectives: [ newObjective ],
+      objectives: [ buildNewObjective(0) ],
     } as OmniQuest;
   };
 
   const handleAddNewQuest = (index: number) =>
   {
-    if (!selectedQuest)
-    {
-      return;
-    }
-
-    const newQuest = buildNewQuest();
-
-    const updatedQuests = quests.toSpliced(index, 0, newQuest);
-    setQuests(updatedQuests);
+    setQuests(quests.toSpliced(index, 0, buildNewQuest()));
   };
 
   const handleCloneQuest = (index: number) =>
   {
-    if (!selectedQuest)
-    {
-      return;
-    }
-
-    const clonedObjectives = selectedQuest.objectives.toSpliced(0, 0);
+    if (!selectedQuest) return;
     const newQuest = {
       ...selectedQuest,
-      objectives: clonedObjectives,
+      objectives: selectedQuest.objectives.toSpliced(0, 0),
     } as OmniQuest;
-
-    const updatedQuests = quests.toSpliced(index, 0, newQuest);
-    setQuests(updatedQuests);
+    setQuests(quests.toSpliced(index, 0, newQuest));
   };
 
   const handleDeleteQuest = (index: number) =>
   {
-    if (!selectedQuest)
-    {
-      return;
-    }
-
-    const updatedQuests = quests.toSpliced(index, 1);
-    setQuests(updatedQuests);
+    setQuests(quests.toSpliced(index, 1));
   };
 
-  const handleAddNewObjective = (index: number) =>
+  const handleAddNewObjective = (insertAt: number, newId: number) =>
   {
-    if (!selectedQuest || !selectedObjective)
-    {
-      return;
-    }
-
-    const targetId = selectedObjectiveIndex === index
-      // if "add new above"
-      ? selectedObjective.id
-      // if "add new below"
-      : selectedObjective.id + 1;
-
-    const newObjective = buildNewObjective(targetId);
-
-    const updatedObjectives = objectives.toSpliced(index, 0, newObjective);
-    setObjectives(updatedObjectives);
-
-    // update the entry.
-    const updatedQuest = {
-      ...selectedQuest,
-      objectives: updatedObjectives,
-    } as OmniQuest;
-    updateQuest(updatedQuest, selectedQuestIndex);
+    if (!selectedQuest) return;
+    const newObjective = buildNewObjective(newId);
+    const updatedObjectives = objectives.toSpliced(insertAt, 0, newObjective);
+    const renumbered = updatedObjectives.map((obj, i) => ({ ...obj, id: i }));
+    setObjectives(renumbered);
+    updateQuest({ ...selectedQuest, objectives: renumbered } as OmniQuest, selectedQuestIndex);
+    setExpandedObjectiveIdx(insertAt);
   };
 
-  const handleCloneObjective = (index: number) =>
+  const handleCloneObjective = (idx: number) =>
   {
-    if (!selectedQuest || !selectedObjective)
-    {
-      return;
-    }
-
-    const targetId = selectedObjectiveIndex === index
-      // if "add new above"
-      ? selectedObjective.id
-      // if "add new below"
-      : selectedObjective.id + 1;
-
-    const clonedObjective = {
-      ...selectedObjective,
-      description: `${selectedObjective.description} (COPY)`,
-      id: targetId
+    if (!selectedQuest) return;
+    const original = objectives[idx];
+    const cloned = {
+      ...original,
+      description: `${original.description} (COPY)`,
     } as OmniObjective;
-
-    const updatedObjectives = objectives.toSpliced(index, 0, clonedObjective);
-    setObjectives(updatedObjectives);
-
-    // update the entry.
-    const updatedQuest = {
-      ...selectedQuest,
-      objectives: updatedObjectives,
-    } as OmniQuest;
-    updateQuest(updatedQuest, selectedQuestIndex);
+    const updatedObjectives = objectives.toSpliced(idx + 1, 0, cloned);
+    const renumbered = updatedObjectives.map((obj, i) => ({ ...obj, id: i }));
+    setObjectives(renumbered);
+    updateQuest({ ...selectedQuest, objectives: renumbered } as OmniQuest, selectedQuestIndex);
+    setExpandedObjectiveIdx(idx + 1);
   };
 
-  const handleDeleteObjective = (index: number) =>
+  const handleDeleteObjective = (idx: number) =>
   {
-    if (!selectedQuest || !selectedObjective)
-    {
-      return;
-    }
-
+    if (!selectedQuest) return;
     if (objectives.length <= 1)
     {
       handleSnack('Cannot delete last objective, consider modifying it instead.', MuiSnackbarSeverity.Error);
       return;
     }
-
-    const updatedObjectives = objectives.toSpliced(index, 1);
-    setObjectives(updatedObjectives);
-
-    // update the entry.
-    const updatedQuest = {
-      ...selectedQuest,
-      objectives: updatedObjectives,
-    } as OmniQuest;
-    updateQuest(updatedQuest, selectedQuestIndex);
+    const updatedObjectives = objectives.toSpliced(idx, 1);
+    const renumbered = updatedObjectives.map((obj, i) => ({ ...obj, id: i }));
+    setObjectives(renumbered);
+    updateQuest({ ...selectedQuest, objectives: renumbered } as OmniQuest, selectedQuestIndex);
+    if (expandedObjectiveIdx !== null && expandedObjectiveIdx >= renumbered.length)
+    {
+      setExpandedObjectiveIdx(Math.max(0, renumbered.length - 1));
+    }
   };
 
-  const handleAddNewCategory = (index: number) =>
+  const handleMoveObjectiveUp = (idx: number) =>
   {
-    if (!selectedCategory)
-    {
-      return;
-    }
+    if (!selectedQuest || idx === 0) return;
+    const updated = [...objectives];
+    [ updated[idx - 1], updated[idx] ] = [ updated[idx], updated[idx - 1] ];
+    const renumbered = updated.map((obj, i) => ({ ...obj, id: i }));
+    setObjectives(renumbered);
+    updateQuest({ ...selectedQuest, objectives: renumbered } as OmniQuest, selectedQuestIndex);
+    setExpandedObjectiveIdx(idx - 1);
+  };
 
+  const handleMoveObjectiveDown = (idx: number) =>
+  {
+    if (!selectedQuest || idx >= objectives.length - 1) return;
+    const updated = [...objectives];
+    [ updated[idx], updated[idx + 1] ] = [ updated[idx + 1], updated[idx] ];
+    const renumbered = updated.map((obj, i) => ({ ...obj, id: i }));
+    setObjectives(renumbered);
+    updateQuest({ ...selectedQuest, objectives: renumbered } as OmniQuest, selectedQuestIndex);
+    setExpandedObjectiveIdx(idx + 1);
+  };
+
+  const handleCategoryListItemOnClickEvent = (index: number) =>
+  {
+    setSelectedCategoryIndex(index);
+    if (categories.length > 0) setSelectedCategory(categories.at(index)!);
+  };
+
+  const handleCategoryKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    if (!selectedCategory) return;
+    const updated = { ...selectedCategory, key: event.target.value } as OmniCategory;
+    setSelectedCategory(updated);
+    setCategories(categories.with(selectedCategoryIndex, updated));
+  };
+
+  const handleCategoryNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    if (!selectedCategory) return;
+    const updated = { ...selectedCategory, name: event.target.value } as OmniCategory;
+    setSelectedCategory(updated);
+    setCategories(categories.with(selectedCategoryIndex, updated));
+  };
+
+  const handleCategoryIconIndexOnChangeEvent = (value: number) =>
+  {
+    if (!selectedCategory) return;
+    const updated = { ...selectedCategory, iconIndex: value < -1 ? -1 : value } as OmniCategory;
+    setSelectedCategory(updated);
+    setCategories(categories.with(selectedCategoryIndex, updated));
+  };
+
+  const handleAddNewCategory = () =>
+  {
     const newCategory = {
       key: `new-category-${categories.length}`,
       name: 'NEW',
       iconIndex: -1,
     } as OmniCategory;
-
-    const updatedCategories = categories.toSpliced(index, 0, newCategory);
+    const updatedCategories = categories.toSpliced(selectedCategoryIndex, 0, newCategory);
     setCategories(updatedCategories);
   };
 
   const handleCloneCategory = (index: number) =>
   {
-    if (!selectedCategory)
-    {
-      return;
-    }
-
-    const clonedCategory = {
+    if (!selectedCategory) return;
+    const cloned = {
       key: `${selectedCategory.key}-COPY`,
       name: selectedCategory.name,
       iconIndex: selectedCategory.iconIndex,
     } as OmniCategory;
-
-    const updatedCategories = categories.toSpliced(index, 0, clonedCategory);
-    setCategories(updatedCategories);
+    setCategories(categories.toSpliced(index + 1, 0, cloned));
   };
 
   const handleDeleteCategory = (index: number) =>
   {
-    if (!selectedCategory)
-    {
-      return;
-    }
-
     if (categories.length === 1)
     {
-      const errorMessage = `Cannot delete last category; consider modifying it instead.`;
-      handleSnack(errorMessage, MuiSnackbarSeverity.Error);
+      handleSnack('Cannot delete last category; consider modifying it instead.', MuiSnackbarSeverity.Error);
       return;
     }
-
-    const affectedQuests = quests.filter(quest => quest.categoryKey === selectedCategory.key);
+    const affectedQuests = quests.filter(quest => quest.categoryKey === categories[index].key);
     if (affectedQuests.length > 0)
     {
-      const errorMessage = `${affectedQuests.length} quests had this category applied.`;
-      handleSnack(errorMessage, MuiSnackbarSeverity.Warning);
+      handleSnack(`${affectedQuests.length} quests had this category applied.`, MuiSnackbarSeverity.Warning);
     }
-
     const updatedCategories = categories.toSpliced(index, 1);
     setCategories(updatedCategories);
+    const nextIdx = Math.min(selectedCategoryIndex, updatedCategories.length - 1);
+    setSelectedCategoryIndex(nextIdx);
+    setSelectedCategory(updatedCategories.at(nextIdx) ?? null);
   };
 
-  const handleAddNewTag = (index: number) =>
+  const handleTagListItemOnClickEvent = (index: number) =>
   {
-    if (!selectedTag)
-    {
-      return;
-    }
+    setSelectedTagIndex(index);
+    if (tags.length > 0) setSelectedTag(tags.at(index)!);
+  };
 
-    const newTag = {
-      key: `new-tag-${tags.length}`,
-      name: 'NEW',
-      iconIndex: -1,
-    } as OmniTag;
+  const handleTagKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    if (!selectedTag) return;
+    const updated = { ...selectedTag, key: event.target.value } as OmniTag;
+    setSelectedTag(updated);
+    setTags(tags.with(selectedTagIndex, updated));
+  };
 
-    const updatedTags = tags.toSpliced(index, 0, newTag);
-    setTags(updatedTags);
+  const handleTagNameOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    if (!selectedTag) return;
+    const updated = { ...selectedTag, name: event.target.value } as OmniTag;
+    setSelectedTag(updated);
+    setTags(tags.with(selectedTagIndex, updated));
+  };
+
+  const handleTagIconIndexOnChangeEvent = (value: number) =>
+  {
+    if (!selectedTag) return;
+    const updated = { ...selectedTag, iconIndex: value < -1 ? -1 : value } as OmniTag;
+    setSelectedTag(updated);
+    setTags(tags.with(selectedTagIndex, updated));
+  };
+
+  const handleAddNewTag = () =>
+  {
+    const newTag = { key: `new-tag-${tags.length}`, name: 'NEW', iconIndex: -1 } as OmniTag;
+    setTags(tags.toSpliced(selectedTagIndex, 0, newTag));
   };
 
   const handleCloneTag = (index: number) =>
   {
-    if (!selectedTag)
-    {
-      return;
-    }
-
-    const clonedTag = {
+    if (!selectedTag) return;
+    const cloned = {
       key: `${selectedTag.key}-COPY`,
       name: selectedTag.name,
       iconIndex: selectedTag.iconIndex,
     } as OmniTag;
-
-    const updatedTags = tags.toSpliced(index, 0, clonedTag);
-    setTags(updatedTags);
+    setTags(tags.toSpliced(index + 1, 0, cloned));
   };
 
   const handleDeleteTag = (index: number) =>
   {
-    if (!selectedTag)
-    {
-      return;
-    }
-
-    const affectedQuests = quests.filter(quest => quest.tagKeys.includes(selectedTag.key));
+    const affectedQuests = quests.filter(quest => quest.tagKeys.includes(tags[index].key));
     if (affectedQuests.length > 0)
     {
-      const errorMessage = `${affectedQuests.length} quests had this tag applied.`;
-      handleSnack(errorMessage, MuiSnackbarSeverity.Warning);
+      handleSnack(`${affectedQuests.length} quests had this tag applied.`, MuiSnackbarSeverity.Warning);
     }
-
     const updatedTags = tags.toSpliced(index, 1);
     setTags(updatedTags);
+    const nextIdx = Math.min(selectedTagIndex, updatedTags.length - 1);
+    setSelectedTagIndex(nextIdx);
+    setSelectedTag(updatedTags.at(nextIdx) ?? null);
   };
 
-  //endregion updates
-
-  //region render
   const QUEST_LABEL_MIN_CH = 40;
   const questBoardListColumnWidth = virtualizedSidebarColumnWidth(
     VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
@@ -1046,12 +469,7 @@ const QuestBoard = () =>
   const getQuestSidebarRow = (index: number): VirtualizedSidebarRow =>
   {
     const omniQuest = quests.at(index);
-
-    if (!omniQuest)
-    {
-      return { type: 'spacer' };
-    }
-
+    if (!omniQuest) return { type: 'spacer' };
     const label = `[${omniQuest.key}]: ${omniQuest.name}`;
     const categoryIconIndex = categories.find(c => c.key === omniQuest.categoryKey)?.iconIndex;
     return {
@@ -1059,151 +477,60 @@ const QuestBoard = () =>
       label,
       title: label,
       iconIndex: categoryIconIndex,
-      labelSx: {
-        fontFamily: 'monospace',
-      },
+      labelSx: { fontFamily: 'monospace' },
     };
   };
 
-  const renderCategoryListItem = (
-    category: OmniCategory,
-    index: number
-  ) =>
-  {
-    return <MenuItem
-      key={`${category.key}-${index}`}
-      value={category.key}
-    >
-      {`[${category.key}]: ${category.name}`}
-    </MenuItem>;
-  };
-
-  const renderCategoryDialogListItem = (
-    category: OmniCategory,
-    index: number
-  ) =>
-  {
-    const isSelected = selectedCategoryIndex === index;
-    const icon = isSelected
-      ? <DoubleArrow color={'success'}/>
-      : <KeyboardArrowRight color={'warning'}/>;
-
-    return <ListItem key={`${category.key}-${index}`}>
-      <ListItemButton
-        selected={isSelected}
-        onClick={() => handleCategoryDialogListItemOnClickEvent(index)}
-      >
-        <ListItemIcon>{icon}</ListItemIcon>
-        <ListItemText
-          primary={category.name}
-          secondary={category.key}
-        />
-      </ListItemButton>
-    </ListItem>;
-  };
-
-  const renderTagListItem = (
-    tag: OmniTag,
-    index: number
-  ) =>
-  {
-    const isSelected = selectedTagIndex === index;
-    const icon = isSelected
-      ? <DoubleArrow color={'success'}/>
-      : <KeyboardArrowRight color={'warning'}/>;
-
-    return <ListItem key={`${tag.key}-${index}`}>
-      <ListItemButton
-        selected={isSelected}
-        onClick={() => handleTagDialogListItemOnClickEvent(index)}
-      >
-        <ListItemIcon>{icon}</ListItemIcon>
-        <ListItemText
-          primary={tag.name}
-          secondary={tag.key}
-        />
-      </ListItemButton>
-    </ListItem>;
-  };
-
-  const renderObjectiveListItem = (
-    objective: OmniObjective,
-    index: number
-  ) =>
-  {
-    const icon = (selectedObjectiveIndex === index)
-      ? <DoubleArrow color={'success'}/>
-      : <KeyboardArrowRight color={'warning'}/>;
-
-    return <ListItem key={`${objective.id}-${objective.description}-${index}`}>
-      <ListItemButton
-        selected={selectedObjectiveIndex === index}
-        onClick={() => handleObjectiveListItemOnClickEvent(index)}
-      >
-        <ListItemIcon>{icon}</ListItemIcon>
-        <ListItemText
-          primary={index}
-          sx={{ fontFamily: 'monospace' }}
-          disableTypography
-        />
-      </ListItemButton>
-    </ListItem>;
-  };
-
-  const renderObjectiveType = (
-    objectiveTypeKey: string,
-    index: number
-  ) =>
-  {
-    return <MenuItem
-      key={`${objectiveTypeKey}-${index}`}
-      value={objectiveTypeKey}
-    >
-      {objectiveTypeKey}
-    </MenuItem>;
-  };
-  //endregion render
+  const selectedTagObjects = tags.filter(t => applicableTags.includes(t.key));
 
   const { updateUrl } = useUrlSelection(
     'questKey',
     quests,
     (q) => q.key,
-    selectedQuestIndex,
     (index) => handleQuestListItemOnClickEvent(index),
     (index) => listRef.current?.scrollToItem(index, 'smart')
   );
 
   useEffect(() =>
   {
-    // Auto-select the first quest when landing on the board (unless URL selection already chose one).
-    // depend on the quests array reference rather than just length so that a reload that returns the
-    // same number of quests still re-fires this effect and the form rebinds to fresh data.
-    if (quests.length === 0)
-    {
-      return;
-    }
-
+    if (quests.length === 0) return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('questKey'))
-    {
-      return;
-    }
-
-    if (selectedQuest === null)
-    {
-      handleQuestListItemOnClickEvent(0);
-    }
+    if (params.get('questKey')) return;
+    if (selectedQuest === null) handleQuestListItemOnClickEvent(0);
   }, [ quests ]);
+
+  useEffect(() =>
+  {
+    if (categories.length > 0 && selectedCategory === null)
+    {
+      setSelectedCategory(categories[0]);
+      setSelectedCategoryIndex(0);
+    }
+  }, [ categories ]);
+
+  useEffect(() =>
+  {
+    if (tags.length > 0 && selectedTag === null)
+    {
+      setSelectedTag(tags[0]);
+      setSelectedTagIndex(0);
+    }
+  }, [ tags ]);
+
+  useBoardActions({
+    onSave: async () =>
+    {
+      await save({ quests, tags, categories } as Configuration);
+    },
+    canSave: !loading,
+    onReload: handleReloadButtonOnClickEvent,
+    canReload: !loading,
+  });
 
   if (loading)
   {
     return (
-      <Box sx={{
-        flex: 1,
-        minHeight: 0,
-        overflow: 'auto',
-        p: 2,
-      }}>
+      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
         <Typography>Loading quests configuration…</Typography>
       </Box>
     );
@@ -1229,307 +556,539 @@ const QuestBoard = () =>
             labelMinCh={QUEST_LABEL_MIN_CH}
             selectedIndex={selectedQuestIndex}
             getRow={getQuestSidebarRow}
-            onSelectIndex={(index) =>
-            {
-              handleQuestListItemOnClickEvent(index);
-            }}
+            onSelectIndex={(index) => handleQuestListItemOnClickEvent(index)}
             onContextMenu={handleQuestListContextMenu}
             listWrapperRef={listWrapperRef}
           />
         }
       >
-          {(selectedQuest === null)
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+          <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
+            <Tab label={'Quest'} id={'quest-tab-0'} aria-controls={'quest-tabpanel-0'}/>
+            <Tab label={'Categories'} id={'quest-tab-1'} aria-controls={'quest-tabpanel-1'}/>
+            <Tab label={'Tags'} id={'quest-tab-2'} aria-controls={'quest-tabpanel-2'}/>
+          </Tabs>
+        </Box>
+
+        {tabIndex === 0 && (
+          selectedQuest === null
             ? <Typography>
-              Please select a quest on the left.<br/>
-              If there are no quests, then consider making one.
-            </Typography>
-            : <>
-              <Grid container rowSpacing={3} columnSpacing={4}>
-                {/* ROW 1 */}
-                {/* key */}
-                <Grid size={2}>
-                  <KeyTextField
-                    value={selectedQuest.key}
-                    onChange={handleQuestKeyOnChangeEvent}
-                  />
-                </Grid>
+                Please select a quest on the left.<br/>
+                If there are no quests, then consider making one.
+              </Typography>
+            : <Stack spacing={2}>
 
-                {/* name */}
-                <Grid size={6}>
-                  <TextField
-                    variant={'filled'}
-                    label={'Name'}
-                    value={selectedQuest.name}
-                    onChange={event => handleQuestNameOnChangeEvent(event.target.value)}
-                    size={'small'}
-                    fullWidth
-                  />
-                </Grid>
-
-                {/* category */}
-                <Grid size={3}>
-                  <FormControl fullWidth>
-                    <InputLabel>Quest Category</InputLabel>
-                    <Select
-                      value={selectedQuest.categoryKey}
-                      label="Quest Category"
-                      onChange={event => handleQuestCategoryOnChangeEvent(event.target.value)}
-                    >
-                      {categories.map((
-                        category,
-                        index
-                      ) => renderCategoryListItem(category, index))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                {/* category editor */}
-                <Grid size={1}>
-                  <IconButton
-                    color={'success'}
-                    onClick={() =>
-                    {
-                      const firstCategory = categories.at(0)!;
-                      setSelectedCategory(firstCategory);
-                      setSelectedCategoryIndex(0);
-                      setCategoryDialogOpen(true);
-                    }}
-                  >
-                    <Edit/>
-                    <Category/>
-                  </IconButton>
-                </Grid>
-
-                {/* ROW 2 */}
-                {/* recommended level */}
-                <Grid size={2}>
-                  <TextField
-                    type={'number'}
-                    label={'Level'}
-                    variant={'outlined'}
-                    value={selectedQuest.recommendedLevel ?? -1}
-                    onChange={(event) => handleQuestRecommendedLevelOnChangeEvent(parseInt(event.target.value) ?? -1)}
-                    sx={{ width: '80px' }}
-                  />
-                </Grid>
-
-                {/* horizontal spacer */}
-                <Grid size={6}></Grid>
-
-                {/* tags */}
-                <Grid size={3}>
-                  <Autocomplete
-                    size={'small'}
-                    options={[ ...tags ]}
-                    disableCloseOnSelect
-                    slotProps={{
-                      listbox: {
-                        sx: { maxHeight: '170px' }
-                      }
-                    }}
-                    getOptionKey={(option) => option?.key ?? 'no-key'}
-                    getOptionLabel={(option) => option?.name ?? ''}
-                    renderOption={(
-                      props,
-                      option,
-                      { index }
-                    ) =>
-                    {
-                      if (option === null || option.name === '' || option.name.startsWith('=='))
-                      {
-                        return <li {...props} style={{ display: 'none' }}/>;
-                      }
-
-                      return (
-                        <li {...props} key={props.key ?? option.key} style={{ height: 32 }}>
-                          <ListItem disableGutters disablePadding sx={{ height: 32 }}>
-                            <ListItemIcon sx={{ height: 32 }}>
-                              <Checkbox
-                                checked={applicableTags.includes(option.key)}
-                                onChange={() => handleQuestTagToggle(option.key)}/>
-                              <ListItemText
-                                primary={`${option.key}: ${option.name}`}
-                                disableTypography
-                              />
-                            </ListItemIcon>
-                          </ListItem>
-                        </li>
-                      );
-                    }}
-                    renderInput={(params) =>
-                    {
-                      return (<TextField
-                        {...params}
-                        size={'small'}
-                        label={'Choose Applicable Tags'}
-                        placeholder="Tags..."/>);
-                    }}
-                  />
-                </Grid>
-
-                {/* tag editor */}
-                <Grid size={1}>
-                  <IconButton
-                    color={'secondary'}
-                    onClick={() =>
-                    {
-                      const firstTag = tags.at(0)!;
-                      setSelectedTag(firstTag);
-                      setSelectedTagIndex(0);
-                      setTagDialogOpen(true);
-                    }}
-                  >
-                    <Edit/>
-                    <Style/>
-                  </IconButton>
-                </Grid>
-
-                {/* ROW 3 */}
-                {/* unknown hint */}
-                <Grid size={12}>
-                  <TextField
-                    variant={'standard'}
-                    label={'Unknown Hint'}
-                    value={selectedQuest.unknownHint}
-                    onChange={event => handleQuestUnknownHintOnChangeEvent(event.target.value)}
-                    size={'small'}
-                    fullWidth
-                  />
-                </Grid>
-
-                {/* ROW 4 */}
-                {/* description */}
-                <Grid size={12}>
-                  <TextField
-                    variant={'outlined'}
-                    label={'Overview'}
-                    value={selectedQuest.overview}
-                    onChange={event => handleQuestOverviewOnChangeEvent(event.target.value)}
-                    size={'small'}
-                    multiline
-                    fullWidth
-                    rows={8}
-                  />
-                </Grid>
-
-                {/* ROW 5 */}
-                {/* objective id list */}
-                <Grid size={2}>
-                  <div
-                    onContextMenu={handleObjectiveListContextMenu}
-                    style={{ cursor: 'context-menu' }}
-                  >
-                    <List dense>
-                      {objectives.map(renderObjectiveListItem)}
-                    </List>
-                  </div>
-                </Grid>
-
-                {/* selected objective data */}
-                <Grid size={10}>
-                  <Grid container spacing={2}>
-                    {/* objective type */}
-                    <Grid size={4}>
-                      <FormControl fullWidth>
-                        <InputLabel>Objective Type</InputLabel>
-                        <Select
-                          value={selectedObjective?.type ?? OmniObjectiveType.Indiscriminate}
-                          label="Objective Type"
-                          onChange={event => handleObjectiveTypeOnChangeEvent(event.target.value)}
-                        >
-                          {Object.keys(OmniObjectiveType)
-                            .map(renderObjectiveType)}
-                        </Select>
-                      </FormControl>
-                    </Grid>
-
-                    {/* objective toggles */}
-                    <Grid size={8}>
-                      <FormControlLabel
-                        control={<Checkbox
-                          checked={selectedObjective?.hiddenByDefault}
-                          checkedIcon={<VisibilityOff color={'error'}/>}
-                          icon={<Visibility color={'primary'}/>}
-                          onChange={event => handleObjectiveHiddenByDefaultOnChangeEvent(event.target.checked)}
-                        />}
-                        label={selectedObjective?.hiddenByDefault
-                          ? 'Hidden By Default'
-                          : 'Visible by Default'}
-                        labelPlacement={'end'}
-                      />
-
-                      <FormControlLabel
-                        control={<Checkbox
-                          checked={selectedObjective?.isOptional}
-                          checkedIcon={<AddTask color={'success'}/>}
-                          icon={<Block color={'error'}/>}
-                          onChange={event => handleObjectiveIsOptionalOnChangeEvent(event.target.checked)}
-                        />}
-                        label={selectedObjective?.isOptional
-                          ? 'Is Optional'
-                          : 'Is Required'}
-                        labelPlacement={'end'}
-                      />
-                    </Grid>
-
-                    <Grid size={12}>
+                {/* Quest Identity */}
+                <BoardSectionCard title={'Quest'}>
+                  <Stack spacing={1.5}>
+                    <Stack direction={'row'} spacing={1.5} alignItems={'flex-start'}>
+                      <Box sx={{ width: 180, flexShrink: 0 }}>
+                        <KeyTextField
+                          value={selectedQuest.key}
+                          onChange={(input) => patchQuest({ key: input })}
+                        />
+                      </Box>
                       <TextField
-                        variant={'filled'}
-                        label={'Description'}
+                        variant={'outlined'}
+                        label={'Name'}
+                        value={selectedQuest.name}
+                        onChange={event => patchQuest({ name: event.target.value })}
                         size={'small'}
                         fullWidth
-                        value={selectedObjective?.description}
-                        onChange={event => handleObjectiveDescriptionOnChangeEvent(event.target.value)}
                       />
-                    </Grid>
+                    </Stack>
+                    <TextField
+                      variant={'outlined'}
+                      label={'Unknown Hint'}
+                      value={selectedQuest.unknownHint}
+                      onChange={event => patchQuest({ unknownHint: event.target.value })}
+                      size={'small'}
+                      fullWidth
+                    />
+                    <TextField
+                      variant={'outlined'}
+                      label={'Overview'}
+                      value={selectedQuest.overview}
+                      onChange={event => patchQuest({ overview: event.target.value })}
+                      size={'small'}
+                      multiline
+                      fullWidth
+                      rows={6}
+                    />
+                  </Stack>
+                </BoardSectionCard>
 
-                    {/* objective logs */}
-                    <Grid size={12}>
-                      <ObjectiveLogs
-                        logs={selectedObjective?.logs}
-                        updateObjectiveLogsFunc={handleObjectiveLogsOnChangeEvent}
+                {/* Classification */}
+                <BoardSectionCard title={'Classification'}>
+                  <Stack spacing={1.5}>
+                    <Stack direction={'row'} spacing={1.5} alignItems={'flex-start'} flexWrap={'wrap'} useFlexGap>
+                      <FormControl size={'small'} sx={{ minWidth: 200 }}>
+                        <InputLabel>Category</InputLabel>
+                        <Select
+                          value={selectedQuest.categoryKey}
+                          label={'Category'}
+                          onChange={event => patchQuest({ categoryKey: event.target.value })}
+                        >
+                          {categories.map((category, index) => (
+                            <MenuItem key={`${category.key}-${index}`} value={category.key}>
+                              {`[${category.key}]: ${category.name}`}
+                            </MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      <TextField
+                        type={'number'}
+                        label={'Rec. Level'}
+                        variant={'outlined'}
+                        size={'small'}
+                        value={selectedQuest.recommendedLevel ?? 0}
+                        onChange={event => patchQuest({ recommendedLevel: Math.max(0, parseInt(event.target.value) || 0) })}
+                        sx={{ width: 110 }}
                       />
-                    </Grid>
-                  </Grid>
-                </Grid>
+                      <Tooltip title={'Manage categories'}>
+                        <IconButton
+                          size={'small'}
+                          color={'success'}
+                          onClick={() => setTabIndex(1)}
+                        >
+                          <Edit fontSize={'small'}/>
+                          <Category fontSize={'small'}/>
+                        </IconButton>
+                      </Tooltip>
+                    </Stack>
 
-                {/* selected objective fulfillment */}
-                <Grid size={10}>
-                  <ObjectiveFulfillmentData
-                    fulfillmentData={selectedObjective?.fulfillment}
-                    fulfillmentType={selectedObjective?.type}
-                    updateIndiscriminateFunc={handleObjectiveFulfillmentIndiscriminateOnChangeEvent}
-                    updateDestinationFunc={handleObjectiveFulfillmentDestinationOnChangeEvent}
-                    updateFetchFunc={handleObjectiveFulfillmentFetchOnChangeEvent}
-                    updateSlayFunc={handleObjectiveFulfillmentSlayOnChangeEvent}
-                    updateQuestFunc={handleObjectiveFulfillmentQuestOnChangeEvent}
-                  />
-                </Grid>
+                    <Stack direction={'row'} spacing={1.5} alignItems={'flex-start'}>
+                      <Autocomplete<OmniTag, true>
+                        multiple
+                        size={'small'}
+                        fullWidth
+                        options={tags.filter(t => t.name !== '' && !t.name.startsWith('=='))}
+                        getOptionKey={(option) => option.key}
+                        getOptionLabel={(option) => `${option.key}: ${option.name}`}
+                        isOptionEqualToValue={(a, b) => a.key === b.key}
+                        value={selectedTagObjects}
+                        onChange={(_, newValue) => handleTagsChange(newValue)}
+                        disableCloseOnSelect
+                        slotProps={{ chip: { size: 'small' } }}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            size={'small'}
+                            label={'Tags'}
+                            placeholder={applicableTags.length === 0 ? 'None assigned' : ''}
+                          />
+                        )}
+                      />
+                      <Tooltip title={'Manage tags'}>
+                        <IconButton
+                          size={'small'}
+                          color={'secondary'}
+                          onClick={() => setTabIndex(2)}
+                        >
+                          <Edit fontSize={'small'}/>
+                          <Style fontSize={'small'}/>
+                        </IconButton>
+                      </Tooltip>
+                    </Stack>
+                  </Stack>
+                </BoardSectionCard>
 
-              </Grid>
-            </>}
+                {/* Objectives */}
+                <BoardSectionCard
+                  title={'Objectives'}
+                  actions={
+                    <Tooltip title={'Add objective'}>
+                      <IconButton
+                        size={'small'}
+                        color={'success'}
+                        onClick={() => handleAddNewObjective(objectives.length, objectives.length)}
+                      >
+                        <Add/>
+                      </IconButton>
+                    </Tooltip>
+                  }
+                >
+                  <Stack spacing={0}>
+                    {objectives.map((objective, idx) =>
+                    {
+                      const isExpanded = expandedObjectiveIdx === idx;
+
+                      return (
+                        <Accordion
+                          key={idx}
+                          expanded={isExpanded}
+                          onChange={() => setExpandedObjectiveIdx(isExpanded ? null : idx)}
+                          disableGutters
+                          elevation={0}
+                          sx={{
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            '&:not(:first-of-type)': { borderTop: 0 },
+                            '&::before': { display: 'none' },
+                          }}
+                        >
+                          <AccordionSummary
+                            expandIcon={<ExpandMore/>}
+                            sx={{ minHeight: 44 }}
+                          >
+                            <Stack
+                              direction={'row'}
+                              spacing={0.75}
+                              alignItems={'center'}
+                              sx={{ flex: 1, minWidth: 0, mr: 1 }}
+                            >
+                              <Typography
+                                variant={'body2'}
+                                color={'text.secondary'}
+                                sx={{ fontFamily: 'monospace', flexShrink: 0 }}
+                              >
+                                #{idx}
+                              </Typography>
+                              <Typography variant={'body2'} noWrap sx={{ flex: 1, minWidth: 0 }}>
+                                {objective.description}
+                              </Typography>
+                              <Chip
+                                label={objective.type}
+                                size={'small'}
+                                variant={'outlined'}
+                                sx={{ flexShrink: 0 }}
+                              />
+                              <Tooltip title={'Move up'}>
+                                <span>
+                                  <IconButton
+                                    size={'small'}
+                                    disabled={idx === 0}
+                                    onClick={e =>
+                                    {
+                                      e.stopPropagation();
+                                      handleMoveObjectiveUp(idx);
+                                    }}
+                                  >
+                                    <ArrowUpward fontSize={'small'}/>
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                              <Tooltip title={'Move down'}>
+                                <span>
+                                  <IconButton
+                                    size={'small'}
+                                    disabled={idx === objectives.length - 1}
+                                    onClick={e =>
+                                    {
+                                      e.stopPropagation();
+                                      handleMoveObjectiveDown(idx);
+                                    }}
+                                  >
+                                    <ArrowDownward fontSize={'small'}/>
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                              <Tooltip title={'Clone objective'}>
+                                <IconButton
+                                  size={'small'}
+                                  onClick={e =>
+                                  {
+                                    e.stopPropagation();
+                                    handleCloneObjective(idx);
+                                  }}
+                                >
+                                  <ContentCopy fontSize={'small'}/>
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title={'Delete objective'}>
+                                <IconButton
+                                  size={'small'}
+                                  color={'error'}
+                                  onClick={e =>
+                                  {
+                                    e.stopPropagation();
+                                    handleDeleteObjective(idx);
+                                  }}
+                                >
+                                  <DeleteOutline fontSize={'small'}/>
+                                </IconButton>
+                              </Tooltip>
+                            </Stack>
+                          </AccordionSummary>
+
+                          <AccordionDetails sx={{ pt: 1.5, pb: 2, px: 2 }}>
+                            <Stack spacing={2}>
+                              <Stack direction={'row'} spacing={2} alignItems={'center'} flexWrap={'wrap'} useFlexGap>
+                                <FormControl size={'small'} sx={{ minWidth: 160 }}>
+                                  <InputLabel>Objective Type</InputLabel>
+                                  <Select
+                                    value={objective.type}
+                                    label={'Objective Type'}
+                                    onChange={event =>
+                                      patchObjective(idx, { type: event.target.value as OmniObjectiveType })
+                                    }
+                                  >
+                                    {Object.keys(OmniObjectiveType).map(k => (
+                                      <MenuItem key={k} value={k}>{k}</MenuItem>
+                                    ))}
+                                  </Select>
+                                </FormControl>
+
+                                <ToggleButtonGroup
+                                  exclusive
+                                  size={'small'}
+                                  value={objective.hiddenByDefault ? 'hidden' : 'visible'}
+                                  onChange={(_, val) =>
+                                  {
+                                    if (val !== null) patchObjective(idx, { hiddenByDefault: val === 'hidden' });
+                                  }}
+                                >
+                                  <ToggleButton value={'visible'} color={'success'}>
+                                    <Visibility fontSize={'small'}/>
+                                    <Typography variant={'caption'} sx={{ ml: 0.5 }}>Visible</Typography>
+                                  </ToggleButton>
+                                  <ToggleButton value={'hidden'} color={'error'}>
+                                    <VisibilityOff fontSize={'small'}/>
+                                    <Typography variant={'caption'} sx={{ ml: 0.5 }}>Hidden</Typography>
+                                  </ToggleButton>
+                                </ToggleButtonGroup>
+
+                                <ToggleButtonGroup
+                                  exclusive
+                                  size={'small'}
+                                  value={objective.isOptional ? 'optional' : 'required'}
+                                  onChange={(_, val) =>
+                                  {
+                                    if (val !== null) patchObjective(idx, { isOptional: val === 'optional' });
+                                  }}
+                                >
+                                  <ToggleButton value={'required'} color={'warning'}>
+                                    <Block fontSize={'small'}/>
+                                    <Typography variant={'caption'} sx={{ ml: 0.5 }}>Required</Typography>
+                                  </ToggleButton>
+                                  <ToggleButton value={'optional'} color={'success'}>
+                                    <AddTask fontSize={'small'}/>
+                                    <Typography variant={'caption'} sx={{ ml: 0.5 }}>Optional</Typography>
+                                  </ToggleButton>
+                                </ToggleButtonGroup>
+                              </Stack>
+
+                              <TextField
+                                variant={'outlined'}
+                                label={'Description'}
+                                size={'small'}
+                                fullWidth
+                                value={objective.description}
+                                onChange={event => patchObjective(idx, { description: event.target.value })}
+                              />
+
+                              <BoardSectionCard title={'State Logs'} collapsible defaultExpanded={false} density={'compact'}>
+                                <ObjectiveLogs
+                                  logs={objective.logs}
+                                  updateObjectiveLogsFunc={(updatedLogs) => patchObjective(idx, { logs: updatedLogs })}
+                                />
+                              </BoardSectionCard>
+
+                              <BoardSectionCard title={'Fulfillment Data'} density={'compact'}>
+                                <ObjectiveFulfillmentData
+                                  fulfillmentData={objective.fulfillment}
+                                  fulfillmentType={objective.type}
+                                  updateIndiscriminateFunc={(data) =>
+                                    patchObjective(idx, { fulfillment: { ...objective.fulfillment, indiscriminate: data } })
+                                  }
+                                  updateDestinationFunc={(data) =>
+                                    patchObjective(idx, { fulfillment: { ...objective.fulfillment, destination: data } })
+                                  }
+                                  updateFetchFunc={(data) =>
+                                    patchObjective(idx, { fulfillment: { ...objective.fulfillment, fetch: data } })
+                                  }
+                                  updateSlayFunc={(data) =>
+                                    patchObjective(idx, { fulfillment: { ...objective.fulfillment, slay: data } })
+                                  }
+                                  updateQuestFunc={(data) =>
+                                    patchObjective(idx, { fulfillment: { ...objective.fulfillment, quest: data } })
+                                  }
+                                />
+                              </BoardSectionCard>
+                            </Stack>
+                          </AccordionDetails>
+                        </Accordion>
+                      );
+                    })}
+                  </Stack>
+                </BoardSectionCard>
+
+              </Stack>
+        )}
+
+        {tabIndex === 1 && (
+          <Stack direction={'row'} spacing={2} sx={{ height: '100%' }}>
+            <Box sx={{ width: 280, flexShrink: 0 }}>
+              <BoardSectionCard
+                title={'Categories'}
+                density={'compact'}
+                actions={
+                  <Tooltip title={'Add category'}>
+                    <IconButton size={'small'} color={'success'} onClick={handleAddNewCategory}>
+                      <Add fontSize={'small'}/>
+                    </IconButton>
+                  </Tooltip>
+                }
+              >
+                <List dense disablePadding>
+                  {categories.map((category, index) => (
+                    <ListItem
+                      key={`${category.key}-${index}`}
+                      disablePadding
+                      secondaryAction={
+                        <Stack direction={'row'} spacing={0}>
+                          <Tooltip title={'Clone'}>
+                            <IconButton size={'small'} onClick={() => handleCloneCategory(index)}>
+                              <ContentCopy fontSize={'small'}/>
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title={'Delete'}>
+                            <IconButton size={'small'} color={'error'} onClick={() => handleDeleteCategory(index)}>
+                              <DeleteOutline fontSize={'small'}/>
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                      }
+                    >
+                      <ListItemButton
+                        selected={selectedCategoryIndex === index}
+                        onClick={() => handleCategoryListItemOnClickEvent(index)}
+                        sx={{ pr: 8 }}
+                      >
+                        <ListItemText primary={category.name} secondary={category.key}/>
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              </BoardSectionCard>
+            </Box>
+
+            {selectedCategory !== null && (
+              <Stack spacing={2} sx={{ flex: 1 }}>
+                <BoardSectionCard title={'Category'}>
+                  <Stack spacing={2}>
+                    <Tooltip title={'Modifying the key will require updating quests associated with this category.'}>
+                      <TextField
+                        required
+                        variant={'outlined'}
+                        label={'Key'}
+                        value={selectedCategory.key}
+                        onChange={handleCategoryKeyOnChangeEvent}
+                        size={'small'}
+                        fullWidth
+                        slotProps={{
+                          input: {
+                            startAdornment: <InputAdornment position={'start'}><Key/></InputAdornment>
+                          }
+                        }}
+                      />
+                    </Tooltip>
+                    <TextField
+                      variant={'outlined'}
+                      label={'Name'}
+                      value={selectedCategory.name}
+                      onChange={handleCategoryNameOnChangeEvent}
+                      size={'small'}
+                      fullWidth
+                    />
+                    <IconIndexField
+                      value={selectedCategory.iconIndex ?? 0}
+                      onChange={handleCategoryIconIndexOnChangeEvent}
+                    />
+                  </Stack>
+                </BoardSectionCard>
+              </Stack>
+            )}
+          </Stack>
+        )}
+
+        {tabIndex === 2 && (
+          <Stack direction={'row'} spacing={2} sx={{ height: '100%' }}>
+            <Box sx={{ width: 280, flexShrink: 0 }}>
+              <BoardSectionCard
+                title={'Tags'}
+                density={'compact'}
+                actions={
+                  <Tooltip title={'Add tag'}>
+                    <IconButton size={'small'} color={'success'} onClick={handleAddNewTag}>
+                      <Add fontSize={'small'}/>
+                    </IconButton>
+                  </Tooltip>
+                }
+              >
+                <List dense disablePadding>
+                  {tags.map((tag, index) => (
+                    <ListItem
+                      key={`${tag.key}-${index}`}
+                      disablePadding
+                      secondaryAction={
+                        <Stack direction={'row'} spacing={0}>
+                          <Tooltip title={'Clone'}>
+                            <IconButton size={'small'} onClick={() => handleCloneTag(index)}>
+                              <ContentCopy fontSize={'small'}/>
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title={'Delete'}>
+                            <IconButton size={'small'} color={'error'} onClick={() => handleDeleteTag(index)}>
+                              <DeleteOutline fontSize={'small'}/>
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                      }
+                    >
+                      <ListItemButton
+                        selected={selectedTagIndex === index}
+                        onClick={() => handleTagListItemOnClickEvent(index)}
+                        sx={{ pr: 8 }}
+                      >
+                        <ListItemText primary={tag.name} secondary={tag.key}/>
+                      </ListItemButton>
+                    </ListItem>
+                  ))}
+                </List>
+              </BoardSectionCard>
+            </Box>
+
+            {selectedTag !== null && (
+              <Stack spacing={2} sx={{ flex: 1 }}>
+                <BoardSectionCard title={'Tag'}>
+                  <Stack spacing={2}>
+                    <Tooltip title={'Modifying the key will require updating quests associated with this tag.'}>
+                      <TextField
+                        required
+                        variant={'outlined'}
+                        label={'Key'}
+                        value={selectedTag.key}
+                        onChange={handleTagKeyOnChangeEvent}
+                        size={'small'}
+                        fullWidth
+                        slotProps={{
+                          input: {
+                            startAdornment: <InputAdornment position={'start'}><Key/></InputAdornment>
+                          }
+                        }}
+                      />
+                    </Tooltip>
+                    <TextField
+                      variant={'outlined'}
+                      label={'Name'}
+                      value={selectedTag.name}
+                      onChange={handleTagNameOnChangeEvent}
+                      size={'small'}
+                      fullWidth
+                    />
+                    <IconIndexField
+                      value={selectedTag.iconIndex ?? 0}
+                      onChange={handleTagIconIndexOnChangeEvent}
+                    />
+                  </Stack>
+                </BoardSectionCard>
+              </Stack>
+            )}
+          </Stack>
+        )}
       </EditorBoardSplitLayout>
     </Box>
-
-    {/*region not-grid-related elements */}
-    <SaveButton
-      extraSaveText={'Quests'}
-      canSave={!loading}
-      handleSave={async () =>
-      {
-        await save({
-          quests,
-          tags,
-          categories,
-        } as Configuration);
-      }}
-    />
-
-    <ReloadButton
-      handleReload={handleReloadButtonOnClickEvent}
-      canReload={!loading}
-      extraReloadText={'Quests'}
-    />
 
     <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
       <Alert
@@ -1545,12 +1104,9 @@ const QuestBoard = () =>
     <Menu
       open={questListContextMenu !== null}
       onClose={() => setQuestListContextMenu(null)}
-      anchorReference="anchorPosition"
+      anchorReference={'anchorPosition'}
       anchorPosition={questListContextMenu !== null
-        ? {
-          top: questListContextMenu.mouseY,
-          left: questListContextMenu.mouseX
-        }
+        ? { top: questListContextMenu.mouseY, left: questListContextMenu.mouseX }
         : undefined}
     >
       <MenuItem onClick={() =>
@@ -1558,392 +1114,44 @@ const QuestBoard = () =>
         handleAddNewQuest(selectedQuestIndex);
         setQuestListContextMenu(null);
       }}>
-        <ListItemIcon><Add/></ListItemIcon>
+        <Add sx={{ mr: 1 }}/>
         <Typography>Add new above</Typography>
       </MenuItem>
-
       <MenuItem onClick={() =>
       {
         handleAddNewQuest(selectedQuestIndex + 1);
         setQuestListContextMenu(null);
       }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
+        <Add sx={{ mr: 1 }}/>
         <Typography>Add new below</Typography>
       </MenuItem>
-
       <Divider/>
-
       <MenuItem onClick={() =>
       {
         handleCloneQuest(selectedQuestIndex);
         setQuestListContextMenu(null);
       }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
+        <ContentCopy sx={{ mr: 1 }}/>
         <Typography>Clone above</Typography>
       </MenuItem>
-
       <MenuItem onClick={() =>
       {
         handleCloneQuest(selectedQuestIndex + 1);
         setQuestListContextMenu(null);
       }}>
-        <ListItemIcon><Add/></ListItemIcon>
+        <ContentCopy sx={{ mr: 1 }}/>
         <Typography>Clone below</Typography>
       </MenuItem>
-
       <Divider/>
-
       <MenuItem onClick={() =>
       {
         handleDeleteQuest(selectedQuestIndex);
         setQuestListContextMenu(null);
       }}>
-        <ListItemIcon><Remove/></ListItemIcon>
+        <DeleteOutline sx={{ mr: 1 }}/>
         <Typography>Remove selected</Typography>
       </MenuItem>
     </Menu>
-
-    <Menu
-      open={objectiveListContextMenu !== null}
-      onClose={() => setObjectiveListContextMenu(null)}
-      anchorReference="anchorPosition"
-      anchorPosition={objectiveListContextMenu !== null
-        ? {
-          top: objectiveListContextMenu.mouseY,
-          left: objectiveListContextMenu.mouseX
-        }
-        : undefined}
-    >
-      <MenuItem onClick={() =>
-      {
-        handleAddNewObjective(selectedObjectiveIndex);
-        setObjectiveListContextMenu(null);
-      }}>
-        <ListItemIcon><Add/></ListItemIcon>
-        <Typography>Add new above</Typography>
-      </MenuItem>
-
-      <MenuItem onClick={() =>
-      {
-        handleAddNewObjective(selectedObjectiveIndex + 1);
-        setObjectiveListContextMenu(null);
-      }}>
-        <ListItemIcon><Add/></ListItemIcon>
-        <Typography>Add new below</Typography>
-      </MenuItem>
-
-      <Divider/>
-
-      <MenuItem onClick={() =>
-      {
-        handleCloneObjective(selectedObjectiveIndex);
-        setObjectiveListContextMenu(null);
-      }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
-        <Typography>Clone above</Typography>
-      </MenuItem>
-
-      <MenuItem onClick={() =>
-      {
-        handleCloneObjective(selectedObjectiveIndex + 1);
-        setObjectiveListContextMenu(null);
-      }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
-        <Typography>Clone below</Typography>
-      </MenuItem>
-
-      <Divider/>
-
-      <MenuItem onClick={() =>
-      {
-        handleDeleteObjective(selectedObjectiveIndex);
-        setObjectiveListContextMenu(null);
-      }}>
-        <ListItemIcon><Remove/></ListItemIcon>
-        <Typography>Remove selected</Typography>
-      </MenuItem>
-    </Menu>
-
-    <Dialog
-      open={categoryDialogOpen}
-      onClose={() => setCategoryDialogOpen(false)}
-      maxWidth={'md'}
-      fullWidth
-    >
-      <DialogTitle>
-        Category Management
-      </DialogTitle>
-      <DialogContent>
-        <Grid container rowSpacing={2} columnSpacing={2}>
-          {/* list of categories */}
-          <Grid size={4}>
-            <div onContextMenu={handleCategoryListContextMenu} style={{ cursor: 'context-menu' }}>
-              <List>
-                {categories.map((
-                  category,
-                  index
-                ) => renderCategoryDialogListItem(category, index))}
-              </List>
-            </div>
-          </Grid>
-
-          {/* category modification */}
-          <Grid size={8}>
-            <Stack spacing={4}>
-              {/* Key */}
-              <Tooltip title={'Modifying the key will require updating quests associated with this category.'}>
-                <TextField
-                  required
-                  variant={'filled'}
-                  label={'Key'}
-                  value={selectedCategory?.key}
-                  onChange={handleCategoryKeyOnChangeEvent}
-                  size={'small'}
-                  slotProps={{
-                    input: {
-                      startAdornment: <InputAdornment position={'start'}>
-                        <Key/>
-                      </InputAdornment>
-                    }
-                  }}
-                />
-              </Tooltip>
-
-
-              {/* Name */}
-              <TextField
-                variant={'filled'}
-                label={'Name'}
-                value={selectedCategory?.name}
-                onChange={handleCategoryNameOnChangeEvent}
-                size={'small'}
-              />
-
-              {/* Icon */}
-              <TextField
-                type={'number'}
-                label={'Icon Index'}
-                value={selectedCategory?.iconIndex ?? -1}
-                sx={{ width: '100px' }}
-                onChange={(event) => handleCategoryIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
-              />
-            </Stack>
-          </Grid>
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <Button
-          variant={'contained'}
-          startIcon={<Check/>}
-          color={'success'}
-          onClick={() => setCategoryDialogOpen(false)}
-        >
-          <Typography>Done Modifying Categories</Typography>
-        </Button>
-      </DialogActions>
-    </Dialog>
-
-    <Menu
-      open={categoryListContextMenu !== null}
-      onClose={() => setCategoryListContextMenu(null)}
-      anchorReference="anchorPosition"
-      anchorPosition={categoryListContextMenu !== null
-        ? {
-          top: categoryListContextMenu.mouseY,
-          left: categoryListContextMenu.mouseX
-        }
-        : undefined}
-    >
-      <MenuItem onClick={() =>
-      {
-        handleAddNewCategory(selectedCategoryIndex);
-        setCategoryListContextMenu(null);
-      }}>
-        <ListItemIcon><Add/></ListItemIcon>
-        <Typography>Add new above</Typography>
-      </MenuItem>
-
-      <MenuItem onClick={() =>
-      {
-        handleAddNewCategory(selectedCategoryIndex + 1);
-        setCategoryListContextMenu(null);
-      }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
-        <Typography>Add new below</Typography>
-      </MenuItem>
-
-      <Divider/>
-
-      <MenuItem onClick={() =>
-      {
-        handleCloneCategory(selectedCategoryIndex);
-        setCategoryListContextMenu(null);
-      }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
-        <Typography>Clone above</Typography>
-      </MenuItem>
-
-      <MenuItem onClick={() =>
-      {
-        handleCloneCategory(selectedCategoryIndex + 1);
-        setCategoryListContextMenu(null);
-      }}>
-        <ListItemIcon><Add/></ListItemIcon>
-        <Typography>Clone below</Typography>
-      </MenuItem>
-
-      <Divider/>
-
-      <MenuItem onClick={() =>
-      {
-        handleDeleteCategory(selectedCategoryIndex);
-        setCategoryListContextMenu(null);
-      }}>
-        <ListItemIcon><Remove/></ListItemIcon>
-        <Typography>Remove selected</Typography>
-      </MenuItem>
-    </Menu>
-
-    <Dialog
-      open={tagDialogOpen}
-      onClose={() => setTagDialogOpen(false)}
-      maxWidth={'md'}
-      fullWidth
-    >
-      <DialogTitle>
-        Tag Management
-      </DialogTitle>
-      <DialogContent>
-        <Grid container rowSpacing={2} columnSpacing={2}>
-          {/* list of tags */}
-          <Grid size={4}>
-            <div onContextMenu={handleTagListContextMenu} style={{ cursor: 'context-menu' }}>
-              <List>
-                {tags.map((
-                  tag,
-                  index
-                ) => renderTagListItem(tag, index))}
-              </List>
-            </div>
-          </Grid>
-
-          {/* tag modification */}
-          <Grid size={8}>
-            <Stack spacing={4}>
-              {/* Key */}
-              <Tooltip title={'Modifying the key will require updating quests associated with this category.'}>
-                <TextField
-                  required
-                  variant={'filled'}
-                  label={'Key'}
-                  value={selectedTag?.key}
-                  onChange={handleTagKeyOnChangeEvent}
-                  size={'small'}
-                  slotProps={{
-                    input: {
-                      startAdornment: <InputAdornment position={'start'}>
-                        <Key/>
-                      </InputAdornment>
-                    }
-                  }}
-                />
-              </Tooltip>
-
-              {/* Name */}
-              <TextField
-                variant={'filled'}
-                label={'Name'}
-                value={selectedTag?.name}
-                onChange={handleTagNameOnChangeEvent}
-                size={'small'}
-              />
-
-              {/* Icon */}
-              <TextField
-                type={'number'}
-                label={'Icon Index'}
-                value={selectedTag?.iconIndex ?? -1}
-                sx={{ width: '100px' }}
-                onChange={(event) => handleTagIconIndexOnChangeEvent(parseInt(event.target.value) ?? -1)}
-              />
-            </Stack>
-          </Grid>
-        </Grid>
-      </DialogContent>
-      <DialogActions>
-        <Button
-          variant={'contained'}
-          startIcon={<Check/>}
-          color={'success'}
-          onClick={() => setTagDialogOpen(false)}
-        >
-          <Typography>Done Modifying Tags</Typography>
-        </Button>
-      </DialogActions>
-    </Dialog>
-
-    <Menu
-      open={tagListContextMenu !== null}
-      onClose={() => setTagListContextMenu(null)}
-      anchorReference="anchorPosition"
-      anchorPosition={tagListContextMenu !== null
-        ? {
-          top: tagListContextMenu.mouseY,
-          left: tagListContextMenu.mouseX
-        }
-        : undefined}
-    >
-      <MenuItem onClick={() =>
-      {
-        handleAddNewTag(selectedTagIndex);
-        setTagListContextMenu(null);
-      }}>
-        <ListItemIcon><Add/></ListItemIcon>
-        <Typography>Add new above</Typography>
-      </MenuItem>
-
-      <MenuItem onClick={() =>
-      {
-        handleAddNewTag(selectedTagIndex + 1);
-        setTagListContextMenu(null);
-      }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
-        <Typography>Add new below</Typography>
-      </MenuItem>
-
-      <Divider/>
-
-      <MenuItem onClick={() =>
-      {
-        handleCloneTag(selectedTagIndex);
-        setTagListContextMenu(null);
-      }}>
-        <ListItemIcon><ContentCopy/></ListItemIcon>
-        <Typography>Clone above</Typography>
-      </MenuItem>
-
-      <MenuItem onClick={() =>
-      {
-        handleCloneTag(selectedTagIndex + 1);
-        setTagListContextMenu(null);
-      }}>
-        <ListItemIcon><Add/></ListItemIcon>
-        <Typography>Clone below</Typography>
-      </MenuItem>
-
-      <Divider/>
-
-      <MenuItem onClick={() =>
-      {
-        handleDeleteTag(selectedTagIndex);
-        setTagListContextMenu(null);
-      }}>
-        <ListItemIcon><Remove/></ListItemIcon>
-        <Typography>Remove selected</Typography>
-      </MenuItem>
-    </Menu>
-
-    {/*endregion not-grid-related elements */}
   </>;
 };
 

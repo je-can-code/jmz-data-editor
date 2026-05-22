@@ -1,8 +1,5 @@
-import React, { ChangeEvent, type SyntheticEvent, useEffect, useMemo, useState } from 'react';
+import React, { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Alert,
   Autocomplete,
   Box,
@@ -15,7 +12,6 @@ import {
   TextField,
   Typography
 } from '@mui/material';
-import { ExpandMore } from '@mui/icons-material';
 import {
   type RmmzSkillAnimationOption,
   skillAnimationAutocompleteOptionsForSkill,
@@ -37,6 +33,7 @@ import {
   type JuiceProfileOption,
   pickSelectedJuiceProfileOption
 } from '@boards/skills/jabsJuiceProfileOptions.ts';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 
 const noteFormulaFieldSx = {
   '& .MuiInputBase-input': {
@@ -44,31 +41,6 @@ const noteFormulaFieldSx = {
     fontSize: 13
   }
 };
-
-const accordionBoxSx = {
-  border: '1px solid',
-  borderColor: 'divider',
-  borderRadius: 1,
-  '&:before': { display: 'none' },
-};
-
-export const SKILL_JABS_ACCORDION_INITIAL_EXPANDED = {
-  'jabs-action-map': true,
-  'jabs-cast-execution': true,
-  'jabs-post-execution': false,
-  'jabs-hitbox': false,
-  'jabs-visual': false,
-  'jabs-juice': false,
-  'jabs-learning': false,
-  'jabs-aggro': false,
-  'jabs-hits': false,
-  'jabs-guarding': false,
-  'jabs-dodge': false,
-} as const satisfies Record<string, boolean>;
-
-type SkillJabsAccordionId = keyof typeof SKILL_JABS_ACCORDION_INITIAL_EXPANDED;
-
-export type { SkillJabsAccordionId };
 
 const HITBOX_SHAPES = [
   'circle',
@@ -415,11 +387,6 @@ type SkillJabsExtensionsPanelProps = {
   skillPickerOptions: JabsSkillPickerRow[];
   editingSkillId: number | null;
   contextSkillAnimationId: number | null;
-  accordionExpandedById: Record<string, boolean>;
-  onAccordionExpandedChange: (
-    id: SkillJabsAccordionId,
-    expanded: boolean
-  ) => void;
 };
 
 type JabsPatch = Partial<SkillJabsExtension>;
@@ -441,8 +408,6 @@ function SkillJabsExtensionsPanel(
     skillPickerOptions,
     editingSkillId,
     contextSkillAnimationId,
-    accordionExpandedById,
-    onAccordionExpandedChange,
   }: SkillJabsExtensionsPanelProps
 )
 {
@@ -450,18 +415,6 @@ function SkillJabsExtensionsPanel(
   {
     onJabsChange(jabs.clone(p));
   };
-
-  const jabsAccordionProps = (id: SkillJabsAccordionId) =>
-    ({
-      expanded: accordionExpandedById[ id ] ?? false,
-      onChange: (
-        _e: SyntheticEvent,
-        expanded: boolean
-      ) =>
-      {
-        onAccordionExpandedChange(id, expanded);
-      },
-    });
 
   const patchVisIntPair = (
     key: VisOffsetRawKey,
@@ -1122,13 +1075,7 @@ function SkillJabsExtensionsPanel(
         JABS settings for this skill. Values are saved with the skill automatically.
       </Typography>
 
-      <Accordion {...jabsAccordionProps('jabs-action-map')} disableGutters elevation={0} sx={accordionBoxSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Action map & menu
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      <BoardSectionCard title={'Action map & menu'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
             <Typography variant={'caption'} color={'text.secondary'}>
               JABS does not build map actions from the skill database alone. Each skill points at an event on a
@@ -1244,16 +1191,9 @@ function SkillJabsExtensionsPanel(
               Still usable from AI, common events, or other scripts — only the player-facing menu is affected.
             </Typography>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion {...jabsAccordionProps('jabs-cast-execution')} disableGutters elevation={0} sx={accordionBoxSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            {'Casting, map execution & spawn animations'}
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      <BoardSectionCard title={'Casting, map execution & spawn animations'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
             <Typography variant={'caption'} color={'text.secondary'}>
               One accordion for the full pipeline: Phase 1 cast time, optional map spawn flashes, then wind-up animation
@@ -1756,16 +1696,9 @@ function SkillJabsExtensionsPanel(
               </Grid>
             </Grid>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion {...jabsAccordionProps('jabs-post-execution')} disableGutters elevation={0} sx={accordionBoxSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Post-execution (cooldown & combos)
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      <BoardSectionCard title={'Post-execution (cooldown & combos)'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
             <Typography variant={'caption'} color={'text.secondary'}>
               After the skill executes, JABS blocks it again until the cooldown elapses (same frame clock as cast time).
@@ -1994,16 +1927,9 @@ function SkillJabsExtensionsPanel(
               reachable through the chain, not pulled at random.
             </Typography>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion {...jabsAccordionProps('jabs-hitbox')} disableGutters elevation={0} sx={accordionBoxSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Action size, shape & projectile
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      <BoardSectionCard title={'Action size, shape & projectile'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
             <Typography variant={'caption'} color={'text.secondary'}>
               Tune how far the action reaches and what shape it uses in tile space. Choose hitbox shape first — arc and
@@ -2158,16 +2084,9 @@ function SkillJabsExtensionsPanel(
               </Grid>
             </Grid>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion {...jabsAccordionProps('jabs-visual')} disableGutters elevation={0} sx={accordionBoxSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Visual metadata (sprites)
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      <BoardSectionCard title={'Visual metadata (sprites)'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
             <Typography variant={'caption'} color={'text.secondary'}>
               Adjusts how the action event sprite draws on the map only. Hitboxes and combat math are unchanged.
@@ -2413,16 +2332,9 @@ function SkillJabsExtensionsPanel(
               })}
             </Grid>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion {...jabsAccordionProps('jabs-juice')} disableGutters elevation={0} sx={accordionBoxSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Juice motion
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      <BoardSectionCard title={'Juice motion'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
             <Typography variant={'caption'} color={'text.secondary'}>
               Procedural motion polish layered onto the caster when this skill fires: weapon swing icon overlay, body
@@ -2648,16 +2560,9 @@ function SkillJabsExtensionsPanel(
               upside-down. Up / down still use ±90° rotation — pure side-view art cannot read as true top-down aim.
             </Typography>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion {...jabsAccordionProps('jabs-learning')} disableGutters elevation={0} sx={accordionBoxSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Learning & upgrades
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      <BoardSectionCard title={'Learning & upgrades'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
             <Typography variant={'caption'} color={'text.secondary'}>
               JABS can auto-fill the quick bar when actors learn skills, and replace older versions when a skill is
@@ -2753,16 +2658,9 @@ function SkillJabsExtensionsPanel(
                 )}
             />
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion {...jabsAccordionProps('jabs-aggro')} disableGutters elevation={0} sx={accordionBoxSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Aggro
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      <BoardSectionCard title={'Aggro'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
             <Typography variant={'caption'} color={'text.secondary'}>
               AI picks targets by highest aggro toward them. Base values come from plugin parameters and combat events;
@@ -2794,16 +2692,9 @@ function SkillJabsExtensionsPanel(
               </Grid>
             </Grid>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion {...jabsAccordionProps('jabs-hits')} disableGutters elevation={0} sx={accordionBoxSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Hits
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      <BoardSectionCard title={'Hits'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
             <Typography variant={'caption'} color={'text.secondary'}>
               Unparryable skips defender parry for this skill. Database repeats, per-skill bonus hits (
@@ -2829,16 +2720,9 @@ function SkillJabsExtensionsPanel(
               Other skills can still be parried normally; this tag only affects this skill.
             </Typography>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion {...jabsAccordionProps('jabs-guarding')} disableGutters elevation={0} sx={accordionBoxSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Guarding & counters
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      <BoardSectionCard title={'Guarding & counters'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
             <Typography variant={'caption'} color={'text.secondary'}>
               Guard uses flat and percent reduction in
@@ -3037,16 +2921,9 @@ function SkillJabsExtensionsPanel(
               </Grid>
             </Grid>
           </Stack>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
 
-      <Accordion {...jabsAccordionProps('jabs-dodge')} disableGutters elevation={0} sx={accordionBoxSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant={'subtitle1'} sx={{ fontWeight: 600 }}>
-            Dodge
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
+      <BoardSectionCard title={'Dodge'} collapsible defaultExpanded={false}>
           <Grid container spacing={2}>
             <Grid size={12}>
               <Typography variant={'caption'} color={'text.secondary'}>
@@ -3260,8 +3137,7 @@ function SkillJabsExtensionsPanel(
               />
             </Grid>
           </Grid>
-        </AccordionDetails>
-      </Accordion>
+      </BoardSectionCard>
     </Stack>
   );
 }

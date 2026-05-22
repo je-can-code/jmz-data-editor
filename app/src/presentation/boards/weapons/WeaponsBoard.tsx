@@ -1,14 +1,9 @@
-import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Autocomplete,
   Box,
-  FormControl,
   Grid,
-  InputLabel,
-  MenuItem,
-  Select,
-  type SelectChangeEvent,
   Snackbar,
   Stack,
   Tab,
@@ -19,9 +14,9 @@ import {
 import { FixedSizeList } from 'react-window';
 import { Build } from '@mui/icons-material';
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
-import SaveButton from '../../../components/core/SaveButton.tsx';
-import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
+import { BoardEmptyState } from '@presentation/components/board/BoardEmptyState.tsx';
+import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import { useWeapons } from '@presentation/context/resources/weapons.context.tsx';
 import { RPG_WeaponDomainModel } from '@core/domain/entities/RPG_WeaponDomainModel.ts';
 import {
@@ -52,8 +47,6 @@ import { SystemService } from '@services/SystemService.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 const noteFieldSx = { '& .MuiInputBase-input': { fontFamily: 'monospace' } };
-
-const PARAM_LABELS = [ 'Max HP', 'Max MP', 'ATK', 'DEF', 'MAT', 'MDF', 'AGI', 'LUK' ];
 
 const listColumnWidth = virtualizedSidebarColumnWidth(
   VIRTUALIZED_SIDEBAR_DEFAULT_ICON_ROW_PX,
@@ -185,27 +178,27 @@ function WeaponsBoard()
       onSelectIndex={setSelectedIndex}
       listWrapperRef={listWrapperRef}
       fillContainer
+      searchable
+      searchLabel={'Search weapons'}
     />
   );
+
+  useBoardActions({ onSave: handleSave, canSave, isSaving, onReload: handleReload, canReload: canSave });
 
   if (!selectedWeapon)
   {
     return (
       <EditorBoardSplitLayout sidebarColumnWidth={listColumnWidth} sidebar={sidebar}>
-        <SaveButton handleSave={handleSave} canSave={canSave} isSaving={isSaving} extraSaveText={'Weapon Data'}/>
-        <ReloadButton handleReload={handleReload} canReload={canSave}/>
-        <Box sx={{ p: 4, textAlign: 'center' }}>
-          <Build sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }}/>
-          <Typography color={'text.secondary'}>Select a weapon from the list.</Typography>
-        </Box>
+        <BoardEmptyState
+          icon={<Build sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }}/>}
+          message={'Select a weapon from the list.'}
+        />
       </EditorBoardSplitLayout>
     );
   }
 
   return (
     <EditorBoardSplitLayout sidebarColumnWidth={listColumnWidth} sidebar={sidebar}>
-      <SaveButton handleSave={handleSave} canSave={canSave} isSaving={isSaving} extraSaveText={'Weapon Data'}/>
-      <ReloadButton handleReload={handleReload} canReload={canSave}/>
 
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
         <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
@@ -215,120 +208,183 @@ function WeaponsBoard()
       </Box>
 
       {tabIndex === 0 && (
-        <Stack spacing={2} sx={{ p: 2 }}>
-          <BoardSectionCard title={'Identity'}>
-            <Grid container spacing={2} alignItems={'flex-start'}>
-              <Grid size={1}>
-                <IconIndexField
-                  value={selectedWeapon.iconIndex}
-                  onChange={(v) => patch({ iconIndex: v })}
-                />
-              </Grid>
-              <Grid size={5}>
-                <TextField
-                  label={'Name'}
-                  value={selectedWeapon.name}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => patch({ name: e.target.value })}
-                  size={'small'}
-                  fullWidth
-                />
-              </Grid>
-              <Grid size={6}>
-                <TextField
-                  label={'Description'}
-                  value={selectedWeapon.description}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => patch({ description: e.target.value })}
-                  size={'small'}
-                  fullWidth
-                  multiline
-                  minRows={2}
-                />
-              </Grid>
-            </Grid>
-          </BoardSectionCard>
+        <Grid container spacing={2} sx={{ p: 2 }} alignItems={'flex-start'}>
 
-          <BoardSectionCard title={'Weapon'}>
-            <Grid container spacing={2} alignItems={'flex-start'}>
-              <Grid size={4}>
-                <Autocomplete<RmmzWeaponTypeOption>
-                  options={weaponTypeOptions}
-                  groupBy={(o) => o.group}
-                  getOptionLabel={(o) => o.label}
-                  isOptionEqualToValue={(a, b) => a.value === b.value}
-                  value={weaponTypeValue}
-                  onChange={(_, o) => patch({ wtypeId: o?.value ?? 0 })}
-                  size={'small'}
-                  renderInput={(params) => (
-                    <TextField {...params} label={'Weapon Type'}/>
-                  )}
-                />
-              </Grid>
-              <Grid size={5}>
-                <Autocomplete<RmmzSkillAnimationOption>
-                  options={animationOptions}
-                  groupBy={(o) => o.group}
-                  getOptionLabel={(o) => o.label}
-                  isOptionEqualToValue={(a, b) => a.value === b.value}
-                  value={animationValue}
-                  onChange={(_, o) => patch({ animationId: o?.value ?? 0 })}
-                  size={'small'}
-                  renderInput={(params) => (
-                    <TextField {...params} label={'Attack Animation'}/>
-                  )}
-                />
-              </Grid>
-              <Grid size={3}>
-                <NumberInputWithLabel
-                  label={'Price'}
-                  value={selectedWeapon.price}
-                  onChangeEventHandler={(e) => patch({ price: parseIntInput(e.target.value, 0) })}
-                  variant={'outlined'}
-                  size={'small'}
-                  fullWidth
-                />
-              </Grid>
-            </Grid>
-          </BoardSectionCard>
-
-          <BoardSectionCard title={'Parameters'}>
-            <Grid container spacing={1.5} alignItems={'flex-start'}>
-              {PARAM_LABELS.map((label, i) => (
-                <Grid size={3} key={i}>
-                  <NumberInputWithLabel
-                    label={label}
-                    value={selectedWeapon.params[ i ] ?? 0}
-                    onChangeEventHandler={(e) =>
-                    {
-                      const next = [ ...selectedWeapon.params ];
-                      next[ i ] = parseIntInput(e.target.value, 0);
-                      patch({ params: next });
-                    }}
-                    variant={'outlined'}
+          {/* Left column — identity + weapon + parameter modifiers */}
+          <Grid size={7}>
+            <Stack spacing={2}>
+              <BoardSectionCard title={'Identity'}>
+                <Stack spacing={2}>
+                  <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
+                    <Box sx={{ flexShrink: 0 }}>
+                      <IconIndexField
+                        value={selectedWeapon.iconIndex}
+                        onChange={(v) => patch({ iconIndex: v })}
+                      />
+                    </Box>
+                    <TextField
+                      label={'Name'}
+                      value={selectedWeapon.name}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => patch({ name: e.target.value })}
+                      size={'small'}
+                      fullWidth
+                    />
+                  </Stack>
+                  <TextField
+                    label={'Description'}
+                    value={selectedWeapon.description}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => patch({ description: e.target.value })}
                     size={'small'}
                     fullWidth
+                    multiline
+                    minRows={2}
                   />
-                </Grid>
-              ))}
-              <Grid size={3}>
-                <NumberInputWithLabel
-                  label={'Max TP'}
-                  value={selectedWeapon.maxTp}
-                  onChangeEventHandler={(e) => patch({ maxTp: parseIntInput(e.target.value, 0) })}
-                  variant={'outlined'}
-                  size={'small'}
-                  fullWidth
-                />
-              </Grid>
-            </Grid>
-          </BoardSectionCard>
+                </Stack>
+              </BoardSectionCard>
 
-          <BoardSectionCard title={'Traits'}>
-            <TraitEditor
-              selectedTraits={selectedWeapon.traits}
-              updateEnemyTraits={(traits: RPG_Trait[]) => patch({ traits })}
-            />
-          </BoardSectionCard>
-        </Stack>
+              <BoardSectionCard title={'Weapon'}>
+                <Grid container spacing={2} alignItems={'flex-start'}>
+                  <Grid size={4}>
+                    <Autocomplete<RmmzWeaponTypeOption>
+                      options={weaponTypeOptions}
+                      groupBy={(o) => o.group}
+                      getOptionLabel={(o) => o.label}
+                      isOptionEqualToValue={(a, b) => a.value === b.value}
+                      value={weaponTypeValue}
+                      onChange={(_, o) => patch({ wtypeId: o?.value ?? 0 })}
+                      size={'small'}
+                      renderInput={(params) => (
+                        <TextField {...params} label={'Weapon Type'}/>
+                      )}
+                    />
+                  </Grid>
+                  <Grid size={5}>
+                    <Autocomplete<RmmzSkillAnimationOption>
+                      options={animationOptions}
+                      groupBy={(o) => o.group}
+                      getOptionLabel={(o) => o.label}
+                      isOptionEqualToValue={(a, b) => a.value === b.value}
+                      value={animationValue}
+                      onChange={(_, o) => patch({ animationId: o?.value ?? 0 })}
+                      size={'small'}
+                      renderInput={(params) => (
+                        <TextField {...params} label={'Attack Animation'}/>
+                      )}
+                    />
+                  </Grid>
+                  <Grid size={3}>
+                    <NumberInputWithLabel
+                      label={'Price'}
+                      floatingLabel
+                      value={selectedWeapon.price}
+                      onChangeEventHandler={(e) => patch({ price: parseIntInput(e.target.value, 0) })}
+                      variant={'outlined'}
+                      size={'small'}
+                      fullWidth
+                    />
+                  </Grid>
+                </Grid>
+              </BoardSectionCard>
+
+              <BoardSectionCard title={'Parameter Modifiers'}>
+                <Grid container spacing={1.5} alignItems={'flex-start'}>
+                  <Grid size={4}>
+                    <Stack spacing={1.5}>
+                      <Typography variant={'caption'} color={'text.secondary'} fontWeight={600} textTransform={'uppercase'}>
+                        Resources
+                      </Typography>
+                      {([ [ 'Max HP', 0 ], [ 'Max MP', 1 ], [ 'Max TP', -1 ] ] as const).map(([ label, idx ]) => (
+                        <NumberInputWithLabel
+                          key={label}
+                          label={label}
+                          floatingLabel
+                          value={idx === -1 ? selectedWeapon.maxTp : (selectedWeapon.params[ idx ] ?? 0)}
+                          onChangeEventHandler={(e) =>
+                          {
+                            if (idx === -1)
+                            {
+                              patch({ maxTp: parseIntInput(e.target.value, 0) });
+                            }
+                            else
+                            {
+                              const next = [ ...selectedWeapon.params ];
+                              next[ idx ] = parseIntInput(e.target.value, 0);
+                              patch({ params: next });
+                            }
+                          }}
+                          variant={'outlined'}
+                          size={'small'}
+                          fullWidth
+                        />
+                      ))}
+                    </Stack>
+                  </Grid>
+                  <Grid size={4}>
+                    <Stack spacing={1.5}>
+                      <Typography variant={'caption'} color={'text.secondary'} fontWeight={600} textTransform={'uppercase'}>
+                        Offense
+                      </Typography>
+                      {([ [ 'ATK', 2 ], [ 'MAT', 4 ], [ 'AGI', 6 ] ] as const).map(([ label, idx ]) => (
+                        <NumberInputWithLabel
+                          key={label}
+                          label={label}
+                          floatingLabel
+                          value={selectedWeapon.params[ idx ] ?? 0}
+                          onChangeEventHandler={(e) =>
+                          {
+                            const next = [ ...selectedWeapon.params ];
+                            next[ idx ] = parseIntInput(e.target.value, 0);
+                            patch({ params: next });
+                          }}
+                          variant={'outlined'}
+                          size={'small'}
+                          fullWidth
+                        />
+                      ))}
+                    </Stack>
+                  </Grid>
+                  <Grid size={4}>
+                    <Stack spacing={1.5}>
+                      <Typography variant={'caption'} color={'text.secondary'} fontWeight={600} textTransform={'uppercase'}>
+                        Defense
+                      </Typography>
+                      {([ [ 'DEF', 3 ], [ 'MDF', 5 ], [ 'LUK', 7 ] ] as const).map(([ label, idx ]) => (
+                        <NumberInputWithLabel
+                          key={label}
+                          label={label}
+                          floatingLabel
+                          value={selectedWeapon.params[ idx ] ?? 0}
+                          onChangeEventHandler={(e) =>
+                          {
+                            const next = [ ...selectedWeapon.params ];
+                            next[ idx ] = parseIntInput(e.target.value, 0);
+                            patch({ params: next });
+                          }}
+                          variant={'outlined'}
+                          size={'small'}
+                          fullWidth
+                        />
+                      ))}
+                    </Stack>
+                  </Grid>
+                </Grid>
+              </BoardSectionCard>
+            </Stack>
+          </Grid>
+
+          {/* Right column — traits */}
+          <Grid size={5}>
+            <Stack spacing={2}>
+              <BoardSectionCard title={'Traits'}>
+                <TraitEditor
+                  selectedTraits={selectedWeapon.traits}
+                  updateEnemyTraits={(traits: RPG_Trait[]) => patch({ traits })}
+                />
+              </BoardSectionCard>
+            </Stack>
+          </Grid>
+
+        </Grid>
       )}
 
       {tabIndex === 1 && (

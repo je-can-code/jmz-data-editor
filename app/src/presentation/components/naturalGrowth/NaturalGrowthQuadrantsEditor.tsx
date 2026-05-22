@@ -1,5 +1,4 @@
-import { ExpandMore } from '@mui/icons-material';
-import { Accordion, AccordionDetails, AccordionSummary, Box, Stack, Tab, Tabs, Typography, } from '@mui/material';
+import { Box, Stack, Tab, Tabs, Typography, } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import {
   NATURAL_GROWTH_QUADRANT_ORDER,
@@ -9,6 +8,7 @@ import { type ReactNode, useEffect, useMemo, useState, } from 'react';
 import { knownParamByLongId, type KnownParameter, } from '../../../mappers/ParameterIdMapper.ts';
 import { NaturalGrowthQuadrantsParser } from '@services/parsers/NaturalGrowthQuadrantsParser.ts';
 import { NaturalFormulaWithGraphRow } from './NaturalFormulaWithGraphRow.tsx';
+import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 
 /**
  * Same titles and longParamId groupings as enemy growth UI (`parameterCategories` in
@@ -94,13 +94,6 @@ function normalizeVisibleNaturalGrowthQuadrants(
   }
   return out;
 }
-
-const accordionShellSx = {
-  border: '1px solid',
-  borderColor: 'divider',
-  borderRadius: 1,
-  '&:before': { display: 'none' },
-} as const;
 
 type NaturalGrowthQuadrantsEditorProps = {
   note: string;
@@ -220,18 +213,11 @@ function NaturalGrowthQuadrantsEditor({
   {
     const params = paramsForLongIds(longIds);
     return (
-      <Accordion key={title} defaultExpanded disableGutters sx={accordionShellSx}>
-        <AccordionSummary expandIcon={<ExpandMore/>}>
-          <Typography variant="subtitle1" fontWeight="bold">
-            {title}
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Stack spacing={2}>
-            {params.map((p) => renderParamRow(p))}
-          </Stack>
-        </AccordionDetails>
-      </Accordion>
+      <BoardSectionCard key={title} title={title} collapsible>
+        <Stack spacing={2}>
+          {params.map((p) => renderParamRow(p))}
+        </Stack>
+      </BoardSectionCard>
     );
   };
 

@@ -257,7 +257,7 @@ function IconIndexField(props: IconIndexFieldProps)
           }}
         />
         <NumberInputWithLabel
-          label={'index'}
+          label={'Icon #'}
           variant={'outlined'}
           size={'small'}
           value={Math.max(0, Math.trunc(value))}

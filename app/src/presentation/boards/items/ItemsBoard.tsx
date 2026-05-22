@@ -1,28 +1,23 @@
 import React, { ChangeEvent, useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Autocomplete,
   Box,
-  FormControl,
   FormControlLabel,
   Grid,
-  InputLabel,
-  MenuItem,
-  Select,
-  type SelectChangeEvent,
   Snackbar,
   Stack,
   Switch,
   Tab,
   Tabs,
   TextField,
-  Typography,
 } from '@mui/material';
 import { FixedSizeList } from 'react-window';
 import { Inventory2 } from '@mui/icons-material';
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
-import SaveButton from '../../../components/core/SaveButton.tsx';
-import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
+import { BoardEmptyState } from '@presentation/components/board/BoardEmptyState.tsx';
+import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import { useItems } from '@presentation/context/resources/items.context.tsx';
 import { useStates } from '@presentation/context/resources/states.context.tsx';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
@@ -121,6 +116,11 @@ function ItemsBoard()
     [],
   );
 
+  const itemTypeValue = useMemo(
+    () => ITEM_TYPE_OPTIONS.find((o) => o.value === selectedItem?.itypeId) ?? ITEM_TYPE_OPTIONS[0],
+    [ selectedItem?.itypeId ],
+  );
+
   const getRow = useCallback((index: number): VirtualizedSidebarRow =>
   {
     const it = items[ index ];
@@ -186,19 +186,21 @@ function ItemsBoard()
       onSelectIndex={setSelectedIndex}
       listWrapperRef={listWrapperRef}
       fillContainer
+      searchable
+      searchLabel={'Search items'}
     />
   );
+
+  useBoardActions({ onSave: handleSave, canSave, isSaving, onReload: handleReload, canReload: canSave });
 
   if (!selectedItem)
   {
     return (
       <EditorBoardSplitLayout sidebarColumnWidth={listColumnWidth} sidebar={sidebar}>
-        <SaveButton handleSave={handleSave} canSave={canSave} isSaving={isSaving} extraSaveText={'Item Data'}/>
-        <ReloadButton handleReload={handleReload} canReload={canSave}/>
-        <Box sx={{ p: 4, textAlign: 'center' }}>
-          <Inventory2 sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }}/>
-          <Typography color={'text.secondary'}>Select an item from the list.</Typography>
-        </Box>
+        <BoardEmptyState
+          icon={<Inventory2 sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }}/>}
+          message={'Select an item from the list.'}
+        />
       </EditorBoardSplitLayout>
     );
   }
@@ -227,8 +229,6 @@ function ItemsBoard()
 
   return (
     <EditorBoardSplitLayout sidebarColumnWidth={listColumnWidth} sidebar={sidebar}>
-      <SaveButton handleSave={handleSave} canSave={canSave} isSaving={isSaving} extraSaveText={'Item Data'}/>
-      <ReloadButton handleReload={handleReload} canReload={canSave}/>
 
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
         <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
@@ -238,129 +238,129 @@ function ItemsBoard()
       </Box>
 
       {tabIndex === 0 && (
-        <Stack spacing={2} sx={{ p: 2 }}>
-          <BoardSectionCard title={'Identity'}>
-            <Grid container spacing={2} alignItems={'flex-start'}>
-              <Grid size={1}>
-                <IconIndexField
-                  value={selectedItem.iconIndex}
-                  onChange={(v) => patch({ iconIndex: v })}
-                />
-              </Grid>
-              <Grid size={5}>
-                <TextField
-                  label={'Name'}
-                  value={selectedItem.name}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => patch({ name: e.target.value })}
-                  size={'small'}
-                  fullWidth
-                />
-              </Grid>
-              <Grid size={6}>
-                <TextField
-                  label={'Description'}
-                  value={selectedItem.description}
-                  onChange={(e: ChangeEvent<HTMLInputElement>) => patch({ description: e.target.value })}
-                  size={'small'}
-                  fullWidth
-                  multiline
-                  minRows={2}
-                />
-              </Grid>
-            </Grid>
-          </BoardSectionCard>
+        <Grid container spacing={2} sx={{ p: 2 }} alignItems={'flex-start'}>
 
-          <BoardSectionCard title={'Item'}>
-            <Grid container spacing={2} alignItems={'center'}>
-              <Grid size={4}>
-                <FormControl size={'small'} fullWidth>
-                  <InputLabel id={'item-itype-label'}>Item Type</InputLabel>
-                  <Select<number>
-                    labelId={'item-itype-label'}
-                    label={'Item Type'}
-                    value={selectedItem.itypeId}
-                    onChange={(e: SelectChangeEvent<number>) =>
-                    {
-                      const v = typeof e.target.value === 'string'
-                        ? parseInt(e.target.value, 10)
-                        : e.target.value;
-                      patch({ itypeId: v });
-                    }}
-                  >
-                    {ITEM_TYPE_OPTIONS.map((o) => (
-                      <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid size={4}>
-                <NumberInputWithLabel
-                  label={'Price'}
-                  value={selectedItem.price}
-                  onChangeEventHandler={(e) => patch({ price: Math.max(0, parseIntInput(e.target.value, 0)) })}
-                  variant={'outlined'}
-                  size={'small'}
-                  fullWidth
-                />
-              </Grid>
-              <Grid size={4}>
-                <FormControlLabel
-                  label={'Consumable'}
-                  control={
-                    <Switch
-                      size={'small'}
-                      checked={selectedItem.consumable}
-                      onChange={(e) => patch({ consumable: e.target.checked })}
-                    />
-                  }
-                />
-              </Grid>
-            </Grid>
-          </BoardSectionCard>
-
-          <BoardSectionCard title={'Invocation'}>
-            <UsableItemInvocationSection
-              value={invocationValue}
-              onChange={(next) => patch({
-                scope: next.scope,
-                occasion: next.occasion,
-                speed: next.speed,
-                successRate: next.successRate,
-                repeats: next.repeats,
-                tpGain: next.tpGain,
-                hitType: next.hitType,
-              })}
-            />
-          </BoardSectionCard>
-
-          <BoardSectionCard title={'Damage & Effects'}>
+          {/* Left column — identity + item + invocation */}
+          <Grid size={5}>
             <Stack spacing={2}>
-              <UsableItemDamageSection
-                value={damageValue}
-                onChange={(next) => patch({
-                  damageType: next.damageType,
-                  damageElementId: next.damageElementId,
-                  damageFormula: next.damageFormula,
-                  damageVariance: next.damageVariance,
-                  damageCritical: next.damageCritical,
-                  attackElementIds: next.attackElementIds,
-                  thisCritChanceFormula: next.thisCritChanceFormula,
-                  thisCritDamageMultiplierFormula: next.thisCritDamageMultiplierFormula,
-                  thisCritsAlways: next.thisCritsAlways,
-                })}
-                elementNames={SystemService.elements ?? []}
-                embedded
-              />
-              <UsableEffectsEditor
-                value={selectedItem.effects}
-                onChange={(effects: RPG_UsableEffect[]) => patch({ effects })}
-                stateRows={stateEffectPickerRows}
-                skillRows={skillEffectPickerRows}
-                commonEventRows={commonEventPickerRows}
-              />
+              <BoardSectionCard title={'Identity'}>
+                <Stack spacing={2}>
+                  <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
+                    <Box sx={{ flexShrink: 0 }}>
+                      <IconIndexField
+                        value={selectedItem.iconIndex}
+                        onChange={(v) => patch({ iconIndex: v })}
+                      />
+                    </Box>
+                    <TextField
+                      label={'Name'}
+                      value={selectedItem.name}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => patch({ name: e.target.value })}
+                      size={'small'}
+                      fullWidth
+                    />
+                  </Stack>
+                  <TextField
+                    label={'Description'}
+                    value={selectedItem.description}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => patch({ description: e.target.value })}
+                    size={'small'}
+                    fullWidth
+                    multiline
+                    minRows={2}
+                  />
+                </Stack>
+              </BoardSectionCard>
+
+              <BoardSectionCard title={'Item'}>
+                <Stack spacing={2}>
+                  <Autocomplete<{ value: number; label: string }>
+                    options={ITEM_TYPE_OPTIONS}
+                    getOptionLabel={(o) => o.label}
+                    isOptionEqualToValue={(a, b) => a.value === b.value}
+                    value={itemTypeValue}
+                    onChange={(_, o) => patch({ itypeId: o?.value ?? ITEM_TYPE_OPTIONS[0].value })}
+                    size={'small'}
+
+                    renderInput={(params) => (
+                      <TextField {...params} label={'Item Type'}/>
+                    )}
+                  />
+                  <Stack direction={'row'} spacing={2} alignItems={'center'}>
+                    <NumberInputWithLabel
+                      label={'Price'}
+                      floatingLabel
+                      value={selectedItem.price}
+                      onChangeEventHandler={(e) => patch({ price: Math.max(0, parseIntInput(e.target.value, 0)) })}
+                      variant={'outlined'}
+                      size={'small'}
+                      fullWidth
+                    />
+                    <FormControlLabel
+                      label={'Consumable'}
+                      control={
+                        <Switch
+                          size={'small'}
+                          checked={selectedItem.consumable}
+                          onChange={(e) => patch({ consumable: e.target.checked })}
+                        />
+                      }
+                    />
+                  </Stack>
+                </Stack>
+              </BoardSectionCard>
+
+              <BoardSectionCard title={'Invocation'}>
+                <UsableItemInvocationSection
+                  value={invocationValue}
+                  onChange={(next) => patch({
+                    scope: next.scope,
+                    occasion: next.occasion,
+                    speed: next.speed,
+                    successRate: next.successRate,
+                    repeats: next.repeats,
+                    tpGain: next.tpGain,
+                    hitType: next.hitType,
+                  })}
+                />
+              </BoardSectionCard>
             </Stack>
-          </BoardSectionCard>
-        </Stack>
+          </Grid>
+
+          {/* Right column — damage + effects */}
+          <Grid size={7}>
+            <Stack spacing={2}>
+              <BoardSectionCard title={'Damage'}>
+                <UsableItemDamageSection
+                  value={damageValue}
+                  onChange={(next) => patch({
+                    damageType: next.damageType,
+                    damageElementId: next.damageElementId,
+                    damageFormula: next.damageFormula,
+                    damageVariance: next.damageVariance,
+                    damageCritical: next.damageCritical,
+                    attackElementIds: next.attackElementIds,
+                    thisCritChanceFormula: next.thisCritChanceFormula,
+                    thisCritDamageMultiplierFormula: next.thisCritDamageMultiplierFormula,
+                    thisCritsAlways: next.thisCritsAlways,
+                  })}
+                  elementNames={SystemService.elements ?? []}
+                  embedded
+                />
+              </BoardSectionCard>
+              <BoardSectionCard title={'Effects'}>
+                <UsableEffectsEditor
+                  value={selectedItem.effects}
+                  onChange={(effects: RPG_UsableEffect[]) => patch({ effects })}
+                  stateRows={stateEffectPickerRows}
+                  skillRows={skillEffectPickerRows}
+                  commonEventRows={commonEventPickerRows}
+                />
+              </BoardSectionCard>
+            </Stack>
+          </Grid>
+
+        </Grid>
       )}
 
       {tabIndex === 1 && (
