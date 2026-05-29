@@ -1,4 +1,4 @@
-import { MouseEvent, useEffect, useRef, useState } from 'react';
+import { MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import { resolveSdpEffectiveRankUpParts } from '../../../constants/sdpRarityCostDefaults';
 import { FixedSizeList } from 'react-window';
@@ -31,6 +31,8 @@ import {
   Snackbar,
   Stack,
   Switch,
+  Tab,
+  Tabs,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -76,16 +78,26 @@ import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar
 import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import KeyTextField from '../../../components/core/KeyTextField.tsx';
 
-import { fromLongParameterIdToName } from '../../../mappers/ParameterIdMapper.ts';
+import { knownLongParams } from '../../../mappers/ParameterIdMapper.ts';
 import {
   sdpRarityToMuiColor,
   sdpRarityMenuLabel,
   SDP_RARITY_VALUES
 } from '@services/sdp/sdpPanelRarity.ts';
 import { useSdps } from '@presentation/context/resources/sdps.context.tsx';
+import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import { IconIndexField } from '@presentation/components/icons/IconIndexField.tsx';
 import { SdpRewardEffectEditor } from './SdpRewardEffectEditor.tsx';
+import SdpSubgroupsSection from './SdpSubgroupsSection.tsx';
+import SdpFamiliesSection from './SdpFamiliesSection.tsx';
+import {
+  createBlankSdpPanel,
+  emptyPanelMastery,
+  patchPanelIdentity,
+  patchPanelMastery,
+  patchPanelProgression,
+} from '@services/sdp/sdpPanelShape.ts';
 import { parseRewardEffect, rawEffectSummary } from '@services/sdp/sdpRewardEffect.ts';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
@@ -104,6 +116,8 @@ import PanelParameter = Sdp.SdpParameter;
 import PanelReward = Sdp.SdpReward;
 
 type RankMode = 'every' | 'mastery' | 'specific';
+
+type BoardTab = 'panels' | 'subgroups' | 'families';
 
 const rankModeFromRequired = (rankRequired: number): RankMode =>
 {
@@ -186,11 +200,23 @@ const SdpBoard = () =>
 {
   const {
     sdps,
-    setData: setSdps,
+    subgroups,
+    families,
+    setSdps,
+    setSubgroups,
+    setFamilies,
     loading,
     save,
-    reload
+    reload,
+    config,
   } = useSdps();
+
+  const { skills, byId: skillsById } = useSkills();
+
+  const subgroupKeySet = useMemo(
+    () => new Set(subgroups.map(subgroup => subgroup.key)),
+    [ subgroups ]
+  );
 
 
   //region state
@@ -203,8 +229,12 @@ const SdpBoard = () =>
     mouseX: number;
     mouseY: number;
   } | null>(null);
-  const [ searchTerm, setSearchTerm ] = useState<string>('');
+  const [ boardTab, setBoardTab ] = useState<BoardTab>('panels');
+  const [ selectedSubgroupIndex, setSelectedSubgroupIndex ] = useState<number>(0);
+  const [ selectedFamilyIndex, setSelectedFamilyIndex ] = useState<number>(0);
 
+
+  const [ searchTerm, setSearchTerm ] = useState<string>('');
 
   const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ manualAutoNameOff, setManualAutoNameOff ] = useState<Set<number>>(new Set());
@@ -220,6 +250,22 @@ const SdpBoard = () =>
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
   //endregion state
+
+  const selectedMasterySubgroupKey = selectedPanel?.mastery.subgroupKey ?? '';
+  const masterySubgroupKeyIsOrphan = selectedMasterySubgroupKey !== ''
+    && subgroupKeySet.has(selectedMasterySubgroupKey) === false;
+  const selectedMasterySubgroup = selectedMasterySubgroupKey === ''
+    ? null
+    : subgroups.find(subgroup => subgroup.key === selectedMasterySubgroupKey) ?? null;
+  const selectedPanelFamily = selectedMasterySubgroupKey === ''
+    ? null
+    : families.find(family => family.subgroupKeys.includes(selectedMasterySubgroupKey)) ?? null;
+  const masteryIsBlank = selectedPanel === null
+    || (
+      selectedPanel.mastery.subgroupKey === ''
+      && selectedPanel.mastery.subgroupTier === 0
+      && selectedPanel.mastery.masterySkillId === 0
+    );
 
   //region setup
   /**
@@ -382,7 +428,7 @@ const SdpBoard = () =>
       const keyMatches = panel.key.toLowerCase()
         .includes(term.toLowerCase());
       const nameMatches = (
-        panel.name ?? ''
+        panel.identity.name ?? ''
       )
         .toLowerCase()
         .includes(term.toLowerCase());
@@ -435,12 +481,12 @@ const SdpBoard = () =>
 
   //region validators
   const topFlavorMaxLine = selectedPanel
-    ? maxVisibleLineLength(selectedPanel.topFlavorText)
+    ? maxVisibleLineLength(selectedPanel.identity.topFlavorText)
     : 0;
   const topFlavorTooLong = topFlavorMaxLine > SDP_MONO_CAP_CH;
 
   const descriptionMaxLine = selectedPanel
-    ? maxVisibleLineLength(selectedPanel.description)
+    ? maxVisibleLineLength(selectedPanel.identity.description)
     : 0;
   const descriptionTooLong = descriptionMaxLine > SDP_MONO_CAP_CH;
   //endregion validators
@@ -456,113 +502,141 @@ const SdpBoard = () =>
     setCanSave(true);
   };
 
+  const applySubgroups = (updatedSubgroups: Sdp.PanelSubgroup[]) =>
+  {
+    setSubgroups(updatedSubgroups);
+    setCanSave(true);
+  };
+
+  const applyFamilies = (updatedFamilies: Sdp.PanelFamily[]) =>
+  {
+    setFamilies(updatedFamilies);
+    setCanSave(true);
+  };
+
   const handlePanelKeyChange = (input: string) =>
   {
-    const updatedPanel = {
-      ...selectedPanel,
+    updatePanel({
+      ...selectedPanel!,
       key: input,
-    } as Panel;
-
-    updatePanel(updatedPanel, selectedPanelIndex);
+    }, selectedPanelIndex);
   };
 
   const handlePanelNameChange = (input: string) =>
   {
-    const updatedPanel = {
-      ...selectedPanel,
-      name: input,
-    } as Panel;
-
-    updatePanel(updatedPanel, selectedPanelIndex);
+    updatePanel(
+      patchPanelIdentity(selectedPanel!, { name: input }),
+      selectedPanelIndex
+    );
   };
 
   const handlePanelIconIndexChange = (input: number) =>
   {
-    const updatedPanel = {
-      ...selectedPanel,
-      iconIndex: input,
-    } as Panel;
-
-    updatePanel(updatedPanel, selectedPanelIndex);
+    updatePanel(
+      patchPanelIdentity(selectedPanel!, { iconIndex: input }),
+      selectedPanelIndex
+    );
   };
 
   const handlePanelUnlockedByDefaultChange = (input: boolean) =>
   {
-    const updatedPanel = {
-      ...selectedPanel,
-      unlockedByDefault: input,
-    } as Panel;
-
-    updatePanel(updatedPanel, selectedPanelIndex);
+    updatePanel(
+      patchPanelIdentity(selectedPanel!, { unlockedByDefault: input }),
+      selectedPanelIndex
+    );
   };
 
   const handlePanelRarityChange = (input: number) =>
   {
-    const updatedPanel = {
-      ...selectedPanel,
-      rarity: input,
-    } as Panel;
-    updatePanel(updatedPanel, selectedPanelIndex);
+    updatePanel(
+      patchPanelProgression(selectedPanel!, { rarity: input }),
+      selectedPanelIndex
+    );
   };
 
   const handlePanelMaxRankChange = (input: number) =>
   {
-    const updatedPanel = {
-      ...selectedPanel,
-      maxRank: input,
-    } as Panel;
-
-    updatePanel(updatedPanel, selectedPanelIndex);
+    updatePanel(
+      patchPanelProgression(selectedPanel!, { maxRank: input }),
+      selectedPanelIndex
+    );
   };
 
   const handlePanelBaseCostChange = (input: number) =>
   {
-    const updatedPanel = {
-      ...selectedPanel,
-      baseCost: input,
-    } as Panel;
-
-    updatePanel(updatedPanel, selectedPanelIndex);
+    updatePanel(
+      patchPanelProgression(selectedPanel!, { baseCost: input }),
+      selectedPanelIndex
+    );
   };
 
   const handlePanelFlatGrowthCostChange = (input: number) =>
   {
-    const updatedPanel = {
-      ...selectedPanel,
-      flatGrowthCost: input,
-    } as Panel;
-
-    updatePanel(updatedPanel, selectedPanelIndex);
+    updatePanel(
+      patchPanelProgression(selectedPanel!, { flatGrowthCost: input }),
+      selectedPanelIndex
+    );
   };
 
   const handlePanelMultGrowthCostChange = (input: number) =>
   {
-    const updatedPanel = {
-      ...selectedPanel,
-      multGrowthCost: input,
-    } as Panel;
-
-    updatePanel(updatedPanel, selectedPanelIndex);
+    updatePanel(
+      patchPanelProgression(selectedPanel!, { multGrowthCost: input }),
+      selectedPanelIndex
+    );
   };
 
   const handlePanelTopFlavorTextChange = (input: string) =>
   {
-    const updatedPanel = {
-      ...selectedPanel,
-      topFlavorText: input,
-    } as Panel;
-
-    updatePanel(updatedPanel, selectedPanelIndex);
+    updatePanel(
+      patchPanelIdentity(selectedPanel!, { topFlavorText: input }),
+      selectedPanelIndex
+    );
   };
 
   const handlePanelDescriptionChange = (input: string) =>
   {
-    const updatedPanel = {
-      ...selectedPanel,
-      description: input,
-    } as Panel;
+    updatePanel(
+      patchPanelIdentity(selectedPanel!, { description: input }),
+      selectedPanelIndex
+    );
+  };
 
-    updatePanel(updatedPanel, selectedPanelIndex);
+  const handlePanelMasterySubgroupKeyChange = (input: string) =>
+  {
+    updatePanel(
+      patchPanelMastery(selectedPanel!, { subgroupKey: input }),
+      selectedPanelIndex
+    );
+  };
+
+  const handlePanelMasterySubgroupTierChange = (input: number) =>
+  {
+    updatePanel(
+      patchPanelMastery(selectedPanel!, { subgroupTier: input }),
+      selectedPanelIndex
+    );
+  };
+
+  const handlePanelMasterySkillIdChange = (input: number) =>
+  {
+    updatePanel(
+      patchPanelMastery(selectedPanel!, { masterySkillId: input }),
+      selectedPanelIndex
+    );
+  };
+
+  const handleClearPanelMastery = () =>
+  {
+    if (!selectedPanel)
+    {
+      return;
+    }
+
+    updatePanel(
+      patchPanelMastery(selectedPanel, emptyPanelMastery()),
+      selectedPanelIndex
+    );
   };
 
   /**
@@ -627,21 +701,10 @@ const SdpBoard = () =>
 
   const handleAddNewPanel = (index: number | null) =>
   {
-    const newPanel = {
-      key: `NEO-${sdps.length}`,
-      name: `New Panel # ${sdps.length}`,
-      iconIndex: -1,
-      unlockedByDefault: false,
-      description: 'The best panel ever, hands down. You only need to acquire it somehow!',
-      topFlavorText: 'Get this panel, you will not regret it.',
-      maxRank: 10,
-      baseCost: 0,
-      flatGrowthCost: 0,
-      multGrowthCost: 1,
-      panelParameters: [],
-      panelRewards: [],
-      rarity: 0,
-    } as Panel;
+    const newPanel = createBlankSdpPanel(
+      `NEO-${sdps.length}`,
+      `New Panel # ${sdps.length}`
+    );
 
     const updatedsdps = (index === null)
       ? [ newPanel ]
@@ -692,7 +755,7 @@ const SdpBoard = () =>
     }
 
     const newParameter = {
-      parameterId: 0,
+      parameterKey: 'mhp',
       isCore: false,
       isFlat: true,
       perRank: 3,
@@ -902,14 +965,14 @@ const SdpBoard = () =>
     const next = sdps.at(index + 1);
     const isNextHeader = next !== undefined && next.key.endsWith('___');
     const nextHeaderColor = isNextHeader
-      ? sdpRarityToMuiColor(next.rarity)
+      ? sdpRarityToMuiColor(next.progression.rarity)
       : undefined;
 
     const labelSx = {
       fontWeight: isHeader
         ? 'bold'
         : 'normal',
-      color: sdpRarityToMuiColor(sdp.rarity),
+      color: sdpRarityToMuiColor(sdp.progression.rarity),
     };
 
     const listItemButtonSx = (
@@ -928,9 +991,9 @@ const SdpBoard = () =>
 
     return {
       type: 'item',
-      label: `[${sdp.key}]: ${sdp.name}`,
-      title: `[${sdp.key}]: ${sdp.name}`,
-      iconIndex: sdp.iconIndex,
+      label: `[${sdp.key}]: ${sdp.identity.name}`,
+      title: `[${sdp.key}]: ${sdp.identity.name}`,
+      iconIndex: sdp.identity.iconIndex,
       labelSx,
       listItemButtonSx,
     };
@@ -989,77 +1052,87 @@ const SdpBoard = () =>
     }
   };
 
+  const fromParameterKeyToIconElement = (
+    parameterKey: string,
+    selected: boolean
+  ) =>
+  {
+    const known = knownLongParams().find(param => param.key === parameterKey);
+    const longParamId = known?.longParamId ?? 0;
+    return fromParameterIdToIconElement(longParamId, selected);
+  };
+
+  const fromParameterKeyToName = (parameterKey: string): string =>
+  {
+    const known = knownLongParams().find(param => param.key === parameterKey);
+    if (known)
+    {
+      return known.name;
+    }
+
+    return parameterKey;
+  };
+
   const mapParametersToSelectMenuItems = () =>
   {
     const parameterItems = [];
-    const bParamIds = [ 0, 1, 2, 3, 4, 5, 6, 7 ];
-    const exParamIds = [ 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ];
-    const spParamIds = [ 18, 19, 20, 21, 22, 23, 24, 25, 26, 27 ];
-    const cParamIds = [ 28, 29, 30 ];
+    const baseKeys = knownLongParams().filter(param => param.longParamId <= 7);
+    const exKeys = knownLongParams().filter(param => param.longParamId >= 8 && param.longParamId <= 17);
+    const spKeys = knownLongParams().filter(param => param.longParamId >= 18 && param.longParamId <= 27);
+    const customKeys = knownLongParams().filter(param => param.longParamId >= 28 && param.longParamId <= 30);
 
     parameterItems.push(<ListSubheader key={0}>Base Parameters</ListSubheader>);
-    bParamIds.map((
-      parameterId,
-      index
-    ) =>
+    baseKeys.forEach(param =>
     {
       parameterItems.push(
         <MenuItem
-          key={`${index}-${parameterId}`}
-          value={parameterId}
+          key={`base-${param.key}`}
+          value={param.key}
         >
-          {fromParameterIdToIconElement(parameterId, false)}
-          {fromLongParameterIdToName(parameterId)}
+          {fromParameterKeyToIconElement(param.key, false)}
+          {param.name}
         </MenuItem>
       );
     });
 
     parameterItems.push(<ListSubheader key={1}>Ex Parameters</ListSubheader>);
-    exParamIds.map((
-      parameterId,
-      index
-    ) =>
+    exKeys.forEach(param =>
     {
       parameterItems.push(
         <MenuItem
-          key={`${index}-${parameterId + 8}`}
-          value={parameterId}
+          key={`ex-${param.key}`}
+          value={param.key}
         >
-          {fromParameterIdToIconElement(parameterId, false)}
-          {fromLongParameterIdToName(parameterId)}
+          {fromParameterKeyToIconElement(param.key, false)}
+          {param.name}
         </MenuItem>
       );
     });
 
     parameterItems.push(<ListSubheader key={2}>Sp Parameters</ListSubheader>);
-    spParamIds.map((
-      parameterId,
-      index
-    ) =>
+    spKeys.forEach(param =>
     {
       parameterItems.push(
         <MenuItem
-          key={`${index}-${parameterId + 18}`}
-          value={parameterId}
+          key={`sp-${param.key}`}
+          value={param.key}
         >
-          {fromParameterIdToIconElement(parameterId, false)}
-          {fromLongParameterIdToName(parameterId)}
+          {fromParameterKeyToIconElement(param.key, false)}
+          {param.name}
         </MenuItem>
       );
     });
 
     parameterItems.push(<ListSubheader key={3}>Custom Parameters</ListSubheader>);
-    cParamIds.map((
-      parameterId,
-      index
-    ) =>
+    customKeys.forEach(param =>
     {
       parameterItems.push(
         <MenuItem
-          key={`${index}-${parameterId + 28}`}
-          value={parameterId}>
-          {fromParameterIdToIconElement(parameterId, false)}
-          {fromLongParameterIdToName(parameterId)}
+          key={`custom-${param.key}`}
+          value={param.key}
+        >
+          {fromParameterKeyToIconElement(param.key, false)}
+          {param.name}
         </MenuItem>
       );
     });
@@ -1082,7 +1155,7 @@ const SdpBoard = () =>
       flatGrowthCost,
       maxRank,
       rarity
-    } = selectedPanel;
+    } = selectedPanel.progression;
     const parts = resolveSdpEffectiveRankUpParts(rarity, baseCost, flatGrowthCost, multGrowthCost);
     let accumulatedCost = 0;
 
@@ -1129,7 +1202,7 @@ const SdpBoard = () =>
       flatGrowthCost,
       maxRank,
       rarity
-    } = selectedPanel;
+    } = selectedPanel.progression;
     const parts = resolveSdpEffectiveRankUpParts(rarity, baseCost, flatGrowthCost, multGrowthCost);
     let accumulatedCost = 0;
 
@@ -1146,8 +1219,13 @@ const SdpBoard = () =>
   useBoardActions({
     onSave: async () =>
     {
+      if (!config)
+      {
+        return;
+      }
+
       setCanSave(false);
-      const resolved = sdps.map(panel => ({
+      const resolvedSdps = sdps.map(panel => ({
         ...panel,
         panelRewards: panel.panelRewards.map(reward =>
           reward.rewardName === ''
@@ -1155,7 +1233,12 @@ const SdpBoard = () =>
             : reward
         ),
       }));
-      await save(resolved as typeof sdps);
+      await save({
+        ...config,
+        sdps: resolvedSdps,
+        subgroups,
+        families,
+      });
       handleSnack('SDP data has been saved successfully.', MuiSnackbarSeverity.Success);
     },
     canSave: canSave && !loading,
@@ -1185,6 +1268,49 @@ const SdpBoard = () =>
       flexDirection: 'column',
       overflow: 'hidden',
     }}>
+      <Tabs
+        value={boardTab}
+        onChange={(_, value: BoardTab) => setBoardTab(value)}
+        sx={{ px: 2, pt: 1, flexShrink: 0 }}
+      >
+        <Tab label={'Panels'} value={'panels'}/>
+        <Tab label={'Subgroups'} value={'subgroups'}/>
+        <Tab label={'Families'} value={'families'}/>
+      </Tabs>
+      {boardTab === 'subgroups'
+        ? (
+          <Box sx={{
+            flex: 1,
+            minHeight: 0,
+            overflow: 'auto',
+            p: 2,
+          }}>
+            <SdpSubgroupsSection
+              subgroups={subgroups}
+              selectedIndex={selectedSubgroupIndex}
+              onSelectIndex={setSelectedSubgroupIndex}
+              onChange={applySubgroups}
+            />
+          </Box>
+        )
+        : boardTab === 'families'
+          ? (
+            <Box sx={{
+              flex: 1,
+              minHeight: 0,
+              overflow: 'auto',
+              p: 2,
+            }}>
+              <SdpFamiliesSection
+                families={families}
+                subgroups={subgroups}
+                selectedIndex={selectedFamilyIndex}
+                onSelectIndex={setSelectedFamilyIndex}
+                onChange={applyFamilies}
+              />
+            </Box>
+          )
+        : (
       <EditorBoardSplitLayout
         sidebarColumnWidth={sdpBoardListColumnWidth}
         sidebar={
@@ -1274,7 +1400,7 @@ const SdpBoard = () =>
                           <TextField
                             variant={'outlined'}
                             label={'Name'}
-                            value={selectedPanel.name}
+                            value={selectedPanel.identity.name}
                             onChange={event => handlePanelNameChange(event.target.value)}
                             size={'small'}
                             fullWidth
@@ -1285,17 +1411,17 @@ const SdpBoard = () =>
                             control={
                               <Switch
                                 size={'small'}
-                                checked={selectedPanel.unlockedByDefault}
+                                checked={selectedPanel.identity.unlockedByDefault}
                                 onChange={event => handlePanelUnlockedByDefaultChange(event.target.checked)}
                               />
                             }
                             label={
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                {selectedPanel.unlockedByDefault
+                                {selectedPanel.identity.unlockedByDefault
                                   ? <LockOpen color={'success'} fontSize={'small'}/>
                                   : <Lock color={'error'} fontSize={'small'}/>}
                                 <Typography variant={'body2'}>
-                                  {selectedPanel.unlockedByDefault ? 'Unlocked' : 'Locked'}
+                                  {selectedPanel.identity.unlockedByDefault ? 'Unlocked' : 'Locked'}
                                 </Typography>
                               </Box>
                             }
@@ -1303,22 +1429,9 @@ const SdpBoard = () =>
                         </Grid>
                         <Grid size={5}>
                           <IconIndexField
-                            value={selectedPanel.iconIndex}
+                            value={selectedPanel.identity.iconIndex}
                             onChange={handlePanelIconIndexChange}
                           />
-                        </Grid>
-                        <Grid size={7}>
-                          <FormControl size={'small'} fullWidth>
-                            <InputLabel id={'sdp-rarity-label'}>Rarity</InputLabel>
-                            <Select
-                              labelId={'sdp-rarity-label'}
-                              label={'Rarity'}
-                              value={selectedPanel.rarity}
-                              onChange={event => handlePanelRarityChange(parseInt(event.target.value.toString()))}
-                            >
-                              {renderSdpRarities()}
-                            </Select>
-                          </FormControl>
                         </Grid>
                         <Grid size={12}>
                           <TextField
@@ -1326,7 +1439,7 @@ const SdpBoard = () =>
                             size={'small'}
                             variant={'outlined'}
                             label={'Top Flavor Text'}
-                            value={selectedPanel.topFlavorText}
+                            value={selectedPanel.identity.topFlavorText}
                             onChange={event => handlePanelTopFlavorTextChange(event.target.value)}
                             error={topFlavorTooLong}
                             helperText={topFlavorTooLong
@@ -1342,7 +1455,7 @@ const SdpBoard = () =>
                             label={'Description'}
                             multiline
                             rows={4}
-                            value={selectedPanel.description}
+                            value={selectedPanel.identity.description}
                             onChange={event => handlePanelDescriptionChange(event.target.value)}
                             error={descriptionTooLong}
                             helperText={descriptionTooLong
@@ -1369,7 +1482,7 @@ const SdpBoard = () =>
                           const pct = parameter.isFlat ? '' : '%';
                           const sign = isPositive ? '+' : '';
                           const perRankText = `${sign}${parameter.perRank}${pct} / rank`;
-                          const totalText = `${sign}${parameter.perRank * selectedPanel.maxRank}${pct} total`;
+                          const totalText = `${sign}${parameter.perRank * selectedPanel.progression.maxRank}${pct} total`;
                           return (
                             <Accordion
                               key={idx}
@@ -1388,11 +1501,11 @@ const SdpBoard = () =>
                                   sx={{ flex: 1, mr: 1 }}
                                 >
                                   <Stack direction={'row'} alignItems={'center'} spacing={1}>
-                                    {fromParameterIdToIconElement(parameter.parameterId, parameter.isCore)}
+                                    {fromParameterKeyToIconElement(parameter.parameterKey, parameter.isCore)}
                                     <Stack>
                                       <Stack direction={'row'} alignItems={'center'} spacing={0.5}>
                                         <Typography variant={'body2'}>
-                                          {fromLongParameterIdToName(parameter.parameterId)}
+                                          {fromParameterKeyToName(parameter.parameterKey)}
                                         </Typography>
                                         {parameter.isCore && (
                                           <PlayCircleFilled sx={{ fontSize: 14, color: 'warning.main' }}/>
@@ -1456,9 +1569,9 @@ const SdpBoard = () =>
                                     <Select
                                       labelId={`sdp-param-type-label-${idx}`}
                                       label={'Parameter Type'}
-                                      value={parameter.parameterId}
+                                      value={parameter.parameterKey}
                                       onChange={event => updatePanelParameters(
-                                        { ...parameter, parameterId: parseInt(event.target.value.toString()) },
+                                        { ...parameter, parameterKey: event.target.value.toString() },
                                         idx
                                       )}
                                     >
@@ -1571,49 +1684,62 @@ const SdpBoard = () =>
                 {/* Right column: Rank-Up Cost + Rank Rewards */}
                 <Grid size={6}>
                   <Stack spacing={2}>
-                    <BoardSectionCard title={'Rank-Up Cost'}>
+                    <BoardSectionCard title={'Progression'}>
                       <Grid container spacing={1.5} alignItems={'center'}>
-                        <Grid size={3}>
+                        <Grid size={4}>
+                          <FormControl size={'small'} fullWidth>
+                            <InputLabel id={'sdp-rarity-label'}>Rarity</InputLabel>
+                            <Select
+                              labelId={'sdp-rarity-label'}
+                              label={'Rarity'}
+                              value={selectedPanel.progression.rarity}
+                              onChange={event => handlePanelRarityChange(parseInt(event.target.value.toString()))}
+                            >
+                              {renderSdpRarities()}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid size={4}>
                           <TextField
                             type={'number'}
                             label={'Max Rank'}
                             variant={'outlined'}
                             size={'small'}
                             fullWidth
-                            value={selectedPanel.maxRank}
+                            value={selectedPanel.progression.maxRank}
                             onChange={event => handlePanelMaxRankChange(parseInt(event.target.value) ?? 1)}
                           />
                         </Grid>
-                        <Grid size={3}>
+                        <Grid size={4}>
                           <TextField
                             type={'number'}
                             label={'Base offset'}
                             variant={'outlined'}
                             size={'small'}
                             fullWidth
-                            value={selectedPanel.baseCost}
+                            value={selectedPanel.progression.baseCost}
                             onChange={event => handlePanelBaseCostChange(parseInt(event.target.value) ?? 0)}
                           />
                         </Grid>
-                        <Grid size={3}>
+                        <Grid size={4}>
                           <TextField
                             type={'number'}
                             label={'Flat offset'}
                             variant={'outlined'}
                             size={'small'}
                             fullWidth
-                            value={selectedPanel.flatGrowthCost}
+                            value={selectedPanel.progression.flatGrowthCost}
                             onChange={event => handlePanelFlatGrowthCostChange(parseInt(event.target.value) ?? 0)}
                           />
                         </Grid>
-                        <Grid size={3}>
+                        <Grid size={4}>
                           <TextField
                             type={'number'}
                             label={'Mult scale'}
                             variant={'outlined'}
                             size={'small'}
                             fullWidth
-                            value={selectedPanel.multGrowthCost}
+                            value={selectedPanel.progression.multGrowthCost}
                             onChange={event => handlePanelMultGrowthCostChange(parseFloat(event.target.value) ?? 0.01)}
                             slotProps={{ htmlInput: { min: '0.01', step: '0.01' } }}
                           />
@@ -1638,6 +1764,110 @@ const SdpBoard = () =>
                       </Grid>
                     </BoardSectionCard>
 
+                    <BoardSectionCard
+                      title={'Mastery'}
+                      actions={
+                        <Button
+                          size={'small'}
+                          variant={'outlined'}
+                          disabled={masteryIsBlank}
+                          onClick={handleClearPanelMastery}
+                        >
+                          Clear
+                        </Button>
+                      }
+                    >
+                      <Stack
+                        direction={'row'}
+                        spacing={1.5}
+                        alignItems={'flex-start'}
+                        useFlexGap
+                        flexWrap={'wrap'}
+                      >
+                        <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
+                          <Autocomplete
+                            size={'small'}
+                            fullWidth
+                            disabled={subgroups.length === 0}
+                            options={subgroups}
+                            getOptionLabel={(subgroup) =>
+                              subgroup.name
+                                ? `[${subgroup.key}] ${subgroup.name}`
+                                : subgroup.key}
+                            isOptionEqualToValue={(left, right) => left.key === right.key}
+                            value={selectedMasterySubgroup}
+                            onChange={(_, subgroup) =>
+                            {
+                              handlePanelMasterySubgroupKeyChange(subgroup?.key ?? '');
+                            }}
+                            renderInput={(params) =>
+                              <TextField
+                                {...params}
+                                fullWidth
+                                label={'Subgroup'}
+                                error={masterySubgroupKeyIsOrphan}
+                                helperText={
+                                  masterySubgroupKeyIsOrphan
+                                    ? `Unknown subgroup [${selectedMasterySubgroupKey}].`
+                                    : undefined
+                                }
+                              />}
+                          />
+                        </Box>
+                        <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
+                          <TextField
+                            fullWidth
+                            size={'small'}
+                            label={'Family (derived)'}
+                            value={
+                              selectedPanelFamily === null
+                                ? selectedMasterySubgroupKey === ''
+                                  ? ''
+                                  : 'Unknown'
+                                : selectedPanelFamily.name
+                                  ? `[${selectedPanelFamily.key}] ${selectedPanelFamily.name}`
+                                  : selectedPanelFamily.key
+                            }
+                            slotProps={{ input: { readOnly: true } }}
+                            helperText={'Set on the Families tab via subgroup membership.'}
+                          />
+                        </Box>
+                        <Box sx={{ flex: '0 0 88px' }}>
+                          <TextField
+                            type={'number'}
+                            label={'Tier'}
+                            variant={'outlined'}
+                            size={'small'}
+                            fullWidth
+                            value={selectedPanel.mastery.subgroupTier}
+                            onChange={event => handlePanelMasterySubgroupTierChange(
+                              Math.max(0, parseInt(event.target.value, 10) || 0)
+                            )}
+                            slotProps={{ htmlInput: { min: '0', step: '1' } }}
+                          />
+                        </Box>
+                        <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
+                          <Autocomplete
+                            size={'small'}
+                            fullWidth
+                            options={skills}
+                            getOptionLabel={(skill) => `${skill.id}: ${skill.name}`}
+                            value={skillsById.get(selectedPanel.mastery.masterySkillId) ?? null}
+                            onChange={(_, skill) =>
+                            {
+                              handlePanelMasterySkillIdChange(skill?.id ?? 0);
+                            }}
+                            renderInput={(params) =>
+                              <TextField
+                                {...params}
+                                fullWidth
+                                label={'Mastery Skill'}
+                              />}
+                          />
+                        </Box>
+                      </Stack>
+                    </BoardSectionCard>
+
                     <BoardSectionCard title={'Rank Rewards'}>
                       <Stack spacing={1}>
                         <Button
@@ -1650,7 +1880,7 @@ const SdpBoard = () =>
                         </Button>
                         {selectedPanel.panelRewards.map((reward, idx) =>
                         {
-                          const rewardRankLabel = rankLabel(reward.rankRequired, selectedPanel.maxRank);
+                          const rewardRankLabel = rankLabel(reward.rankRequired, selectedPanel.progression.maxRank);
                           const derivedName = deriveRewardName(reward.effect);
                           const isAutoName = !manualAutoNameOff.has(idx)
                             && (reward.rewardName === '' || reward.rewardName === derivedName);
@@ -1859,6 +2089,7 @@ const SdpBoard = () =>
             </>
           }
       </EditorBoardSplitLayout>
+        )}
     </Box>
 
     <Snackbar open={snackOpen} autoHideDuration={2500} onClose={handleSnackClose}>
@@ -2002,7 +2233,7 @@ const SdpBoard = () =>
             size={'small'}
             options={sdps}
             getOptionKey={(option) => option?.key ?? 'no-key'}
-            getOptionLabel={(option) => option?.name ?? ''}
+            getOptionLabel={(option) => option?.identity?.name ?? ''}
             isOptionEqualToValue={(
               a,
               b
@@ -2031,7 +2262,7 @@ const SdpBoard = () =>
 
           {cloneFromSelectedPanel &&
             <Typography variant={'body2'}>
-              {`Selected: ${cloneFromSelectedPanel.key} — ${cloneFromSelectedPanel.name}`}
+              {`Selected: ${cloneFromSelectedPanel.key} — ${cloneFromSelectedPanel.identity.name}`}
             </Typography>}
         </Stack>
       </DialogContent>
