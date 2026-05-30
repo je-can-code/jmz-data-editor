@@ -48,6 +48,77 @@ export const LEGACY_LONG_PARAM_TO_KEY: Record<number, string> = {
   43: "hcr",
 };
 
+/**
+ * Display names for registry-backed SDP panel keys (long-param ids 31+).
+ * Keep aligned with in-game TextManager labels where applicable.
+ */
+export const SDP_REGISTRY_PARAMETER_NAMES: Record<string, string> = {
+  msb: "Move Speed Boost",
+  prof: "Proficiency Boost",
+  sdr: "SDP Multiplier",
+  lst: "Lifesteal",
+  mst: "Manasteal",
+  tst: "Techsteal",
+  sar: "Shield Amplification",
+  ser: "Shield Effectiveness",
+  apr: "AP Multiplier",
+  gdr: "Gold Rate",
+  dor: "Drop Rate",
+  hcr: "HP Cost Reduction",
+};
+
+/** Long-param ids offered in the SDP panel parameter picker beyond vanilla custom (28–30). */
+export const SDP_REGISTRY_PARAMETER_LONG_IDS = [
+  31,
+  32,
+  33,
+  35,
+  36,
+  37,
+  38,
+  39,
+  40,
+  41,
+  42,
+  43,
+] as const;
+
+export type SdpPanelParameterOption = {
+  key: string;
+  name: string;
+  longParamId: number;
+};
+
+/**
+ * Registry-backed panel parameter rows for the SDP board picker.
+ *
+ * @returns Options sorted by legacy long-param id.
+ */
+export function knownSdpRegistryParameterOptions(): SdpPanelParameterOption[]
+{
+  return SDP_REGISTRY_PARAMETER_LONG_IDS.map((longParamId) =>
+  {
+    const key = LEGACY_LONG_PARAM_TO_KEY[longParamId];
+
+    return {
+      key,
+      name: SDP_REGISTRY_PARAMETER_NAMES[key] ?? key,
+      longParamId,
+    };
+  });
+}
+
+/**
+ * Resolves a friendly label for an SDP panel parameter key.
+ *
+ * @param parameterKey Registry key from panel JSON.
+ * @returns Display name for UI chrome.
+ */
+export function sdpParameterDisplayName(parameterKey: string): string
+{
+  return SDP_REGISTRY_PARAMETER_NAMES[parameterKey] ?? parameterKey;
+}
+
 type RawSdpParameter = {
   parameterKey?: string;
   parameterId?: number;

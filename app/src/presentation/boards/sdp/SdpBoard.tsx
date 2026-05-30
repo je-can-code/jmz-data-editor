@@ -98,6 +98,10 @@ import {
   patchPanelMastery,
   patchPanelProgression,
 } from '@services/sdp/sdpPanelShape.ts';
+import {
+  knownSdpRegistryParameterOptions,
+  sdpParameterDisplayName,
+} from '@services/sdp/sdpParameterKeys.ts';
 import { parseRewardEffect, rawEffectSummary } from '@services/sdp/sdpRewardEffect.ts';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
@@ -1070,7 +1074,7 @@ const SdpBoard = () =>
       return known.name;
     }
 
-    return parameterKey;
+    return sdpParameterDisplayName(parameterKey);
   };
 
   const mapParametersToSelectMenuItems = () =>
@@ -1080,6 +1084,7 @@ const SdpBoard = () =>
     const exKeys = knownLongParams().filter(param => param.longParamId >= 8 && param.longParamId <= 17);
     const spKeys = knownLongParams().filter(param => param.longParamId >= 18 && param.longParamId <= 27);
     const customKeys = knownLongParams().filter(param => param.longParamId >= 28 && param.longParamId <= 30);
+    const registryKeys = knownSdpRegistryParameterOptions();
 
     parameterItems.push(<ListSubheader key={0}>Base Parameters</ListSubheader>);
     baseKeys.forEach(param =>
@@ -1129,6 +1134,20 @@ const SdpBoard = () =>
       parameterItems.push(
         <MenuItem
           key={`custom-${param.key}`}
+          value={param.key}
+        >
+          {fromParameterKeyToIconElement(param.key, false)}
+          {param.name}
+        </MenuItem>
+      );
+    });
+
+    parameterItems.push(<ListSubheader key={4}>Registry Parameters</ListSubheader>);
+    registryKeys.forEach(param =>
+    {
+      parameterItems.push(
+        <MenuItem
+          key={`registry-${param.key}`}
           value={param.key}
         >
           {fromParameterKeyToIconElement(param.key, false)}
