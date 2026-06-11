@@ -8,6 +8,7 @@ import { StateProfExtension } from '@core/domain/entities/state/StateProfExtensi
 import { StateResourcesExtension } from '@core/domain/entities/state/StateResourcesExtension.ts';
 import { StateSdpExtension } from '@core/domain/entities/state/StateSdpExtension.ts';
 import { StatePassiveAbsExtension } from '@core/domain/entities/state/StatePassiveAbsExtension.ts';
+import { StatePassiveConditionalExtension } from '@core/domain/entities/state/StatePassiveConditionalExtension.ts';
 import { StateSksExtension } from '@core/domain/entities/state/StateSksExtension.ts';
 import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 import RPG_State = Rmmz.Implementations.RPG_State;
@@ -142,6 +143,8 @@ class RPG_StateDomainModel
 
   public passiveAbs: StatePassiveAbsExtension = new StatePassiveAbsExtension();
 
+  public passiveConditional: StatePassiveConditionalExtension = new StatePassiveConditionalExtension();
+
   constructor(rmmz: RPG_State)
   {
     super(rmmz);
@@ -177,6 +180,7 @@ class RPG_StateDomainModel
     this.sdp = StateSdpExtension.fromStateNote(note);
     this.sks = StateSksExtension.fromStateNote(note);
     this.passiveAbs = StatePassiveAbsExtension.fromStateNote(note);
+    this.passiveConditional = StatePassiveConditionalExtension.fromStateNote(note);
   }
 
   /**
@@ -229,6 +233,7 @@ class RPG_StateDomainModel
     n = this.sdp.applyToNote(n);
     n = this.sks.applyToNote(n);
     n = this.passiveAbs.applyToNote(n);
+    n = this.passiveConditional.applyToNote(n);
     n = this.jabs.applyToNote(n);
     return NoteNormalizer.normalize(n);
   }

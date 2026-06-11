@@ -110,8 +110,79 @@ function skillStypeOptionForValue(
   return opts[ 0 ];
 }
 
+/**
+ * Options for {@code skillHistoryBonus} TYPE_ID: {@code 0} is {@code Any}; {@code 1+} match {@code skillTypes} indices.
+ *
+ * @param typeId Current filter id from the state note.
+ * @param names From {@code SystemService.skillTypes}.
+ */
+function skillHistoryTypeFilterAutocompleteOptions(
+  typeId: number,
+  names: readonly string[] | undefined
+): RmmzSkillStypeOption[]
+{
+  const list = effectiveSkillTypeNames(names);
+  const options: RmmzSkillStypeOption[] = [
+    {
+      value: 0,
+      label: 'Any',
+      group: 'Filter',
+    },
+  ];
+
+  for (let index = 1; index < list.length; index += 1)
+  {
+    const raw = list[ index ].trim();
+    const display = raw === ''
+      ? `Type ${index}`
+      : list[ index ];
+    options.push({
+      value: index,
+      label: display,
+      group: 'Skill types',
+    });
+  }
+
+  if (Number.isInteger(typeId) && typeId > 0 && typeId >= list.length)
+  {
+    options.push({
+      value: typeId,
+      label: `#${typeId} (not in System.json)`,
+      group: 'Invalid',
+    });
+  }
+
+  return options;
+}
+
+/**
+ * Controlled Autocomplete value for skill-history TYPE_ID; {@code null} when the field is unset.
+ *
+ * @param typeId Filter id, or {@code null} when skill-history bonus is incomplete.
+ * @param names From {@code SystemService.skillTypes}.
+ */
+function skillHistoryTypeFilterOptionForValue(
+  typeId: number | null,
+  names: readonly string[] | undefined
+): RmmzSkillStypeOption | null
+{
+  if (typeId === null)
+  {
+    return null;
+  }
+  const opts = skillHistoryTypeFilterAutocompleteOptions(typeId, names);
+  const found = opts.find((o) => o.value === typeId);
+  if (found !== undefined)
+  {
+    return found;
+  }
+  return opts[ 0 ];
+}
+
 export {
   normalizeSkillStypeId,
+  skillHistoryTypeFilterAutocompleteOptions,
+  skillHistoryTypeFilterOptionForValue,
   skillStypeAutocompleteOptions,
   skillStypeOptionForValue,
   skillStypeOptionsFromNames,

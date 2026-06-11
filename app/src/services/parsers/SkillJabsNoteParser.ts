@@ -23,8 +23,6 @@ class SkillJabsNoteParser
 
   static readonly #RE_GLOBAL_COOLDOWN_FRAMES = /<gcd:[ ]?(\d+)>/gi;
 
-  static readonly #RE_SIZE = /<size:[ ]?(\d+)>/gi;
-
   static readonly #RE_DEGREES = /<degrees:[ ]?(\d+)>/gi;
 
   static readonly #RE_RADIUS = /<radius:[ ]?((0|([1-9][0-9]*))(\.[0-9]+)?)>/gi;
@@ -163,7 +161,6 @@ class SkillJabsNoteParser
     SkillJabsNoteParser.#RE_UNIQUE_COOLDOWN,
     SkillJabsNoteParser.#RE_OGCD,
     SkillJabsNoteParser.#RE_GLOBAL_COOLDOWN_FRAMES,
-    SkillJabsNoteParser.#RE_SIZE,
     SkillJabsNoteParser.#RE_DEGREES,
     SkillJabsNoteParser.#RE_RADIUS,
     SkillJabsNoteParser.#RE_HITBOX,
@@ -266,7 +263,6 @@ class SkillJabsNoteParser
       SkillJabsNoteParser.#RE_GLOBAL_COOLDOWN_FRAMES
     );
 
-    ext.sizeInPixels = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_SIZE);
     ext.degrees = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_DEGREES);
     ext.rangeRadius = SkillJabsNoteParser.#readFloat(note, SkillJabsNoteParser.#RE_RADIUS);
     ext.hitboxShape = SkillJabsNoteParser.#readCapture(note, SkillJabsNoteParser.#RE_HITBOX);
@@ -460,10 +456,6 @@ class SkillJabsNoteParser
       parts.push(`<gcd:${Math.trunc(ext.globalCooldownOverride)}>`);
     }
 
-    if (ext.sizeInPixels !== null)
-    {
-      parts.push(`<size:${Math.trunc(ext.sizeInPixels)}>`);
-    }
     if (ext.degrees !== null)
     {
       parts.push(`<degrees:${Math.trunc(ext.degrees)}>`);

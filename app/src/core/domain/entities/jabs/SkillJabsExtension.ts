@@ -29,8 +29,6 @@ class SkillJabsExtension
    */
   public globalCooldownOverride: number | null = null;
 
-  public sizeInPixels: number | null = null;
-
   public degrees: number | null = null;
 
   public rangeRadius: number | null = null;

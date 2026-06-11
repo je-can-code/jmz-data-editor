@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   normalizeSkillStypeId,
+  skillHistoryTypeFilterAutocompleteOptions,
+  skillHistoryTypeFilterOptionForValue,
   skillStypeAutocompleteOptions,
   skillStypeOptionForValue,
-  skillStypeOptionsFromNames
+  skillStypeOptionsFromNames,
 } from '@core/enums/RmmzSkillStype.ts';
 
 describe('RmmzSkillStype', () =>
@@ -72,5 +74,27 @@ describe('RmmzSkillStype', () =>
       .toBe('Magic');
     expect(skillStypeOptionForValue(9, [ 'None', 'Magic' ]).value)
       .toBe(9);
+  });
+
+  it('skillHistoryTypeFilterAutocompleteOptions uses Any at 0 and skips system index 0', () =>
+  {
+    const names = [ '', 'Techniques', 'Magecraft' ];
+    const o = skillHistoryTypeFilterAutocompleteOptions(0, names);
+    expect(o[ 0 ])
+      .toEqual({ value: 0, label: 'Any', group: 'Filter' });
+    expect(o.map((x) => x.value))
+      .toEqual([ 0, 1, 2 ]);
+    expect(o[ 1 ].label)
+      .toBe('Techniques');
+  });
+
+  it('skillHistoryTypeFilterOptionForValue returns null when unset', () =>
+  {
+    expect(skillHistoryTypeFilterOptionForValue(null, [ 'None', 'Magic' ]))
+      .toBe(null);
+    expect(skillHistoryTypeFilterOptionForValue(0, [ 'None', 'Magic' ])?.label)
+      .toBe('Any');
+    expect(skillHistoryTypeFilterOptionForValue(1, [ 'None', 'Magic' ])?.label)
+      .toBe('Magic');
   });
 });

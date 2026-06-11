@@ -1985,17 +1985,6 @@ function SkillJabsExtensionsPanel(
               </Grid>
               <Grid size={6}>
                 {intField(
-                  'Pixel radius override (optional)',
-                  jabs.sizeInPixels,
-                  'sizeInPixels',
-                  {
-                    helperText:
-                      'Documented tag for a pixel-based reach override. Runtime may still use tile radius until wired — keep tile radius authoritative for now.',
-                  }
-                )}
-              </Grid>
-              <Grid size={6}>
-                {intField(
                   'Arc / sweep (degrees)',
                   jabs.degrees,
                   'degrees',
