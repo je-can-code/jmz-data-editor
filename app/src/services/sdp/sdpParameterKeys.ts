@@ -46,6 +46,7 @@ export const LEGACY_LONG_PARAM_TO_KEY: Record<number, string> = {
   41: "gdr",
   42: "dor",
   43: "hcr",
+  46: "har",
 };
 
 /**
@@ -65,6 +66,7 @@ export const SDP_REGISTRY_PARAMETER_NAMES: Record<string, string> = {
   gdr: "Gold Rate",
   dor: "Drop Rate",
   hcr: "HP Cost Reduction",
+  har: "Healing Rate",
 };
 
 /** Long-param ids offered in the SDP panel parameter picker beyond vanilla custom (28–30). */
@@ -81,6 +83,7 @@ export const SDP_REGISTRY_PARAMETER_LONG_IDS = [
   41,
   42,
   43,
+  46,
 ] as const;
 
 export type SdpPanelParameterOption = {
