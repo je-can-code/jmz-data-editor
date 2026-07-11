@@ -6,13 +6,14 @@ import CraftingBoard from '../../presentation/boards/crafting/CraftingBoard.tsx'
 import ProficiencyBoard from '../../presentation/boards/proficiency/ProficiencyBoard.tsx';
 import EnemiesBoard from '../../presentation/boards/enemies/EnemiesBoard.tsx';
 import JabsConfigBoard from '@boards/jabs/JabsConfigBoard.tsx';
-import { AccountTree, Android, Build, Construction, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, } from '@mui/icons-material';
+import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, } from '@mui/icons-material';
 import IndexBoard from '@boards/_index/IndexBoard.tsx';
 import SkillsBoard from '@boards/skills/SkillsBoard.tsx';
 import StatesBoard from '@boards/states/StatesBoard.tsx';
 import WeaponsBoard from '@boards/weapons/WeaponsBoard.tsx';
 import ArmorsBoard from '@boards/armors/ArmorsBoard.tsx';
 import ItemsBoard from '@boards/items/ItemsBoard.tsx';
+import ClassesBoard from '@boards/classes/ClassesBoard.tsx';
 
 const indexBoard: BoardDefinition = {
   id: 'root',
@@ -62,6 +63,16 @@ const sdpBoard: BoardDefinition = {
   guard: () => true,
   icon: <Rule fontSize={'small'}/>,
   featureFlag: 'sdp',
+};
+
+const classesBoard: BoardDefinition = {
+  id: 'classes',
+  title: 'Classes',
+  path: '/classes',
+  component: ClassesBoard,
+  guard: () => true,
+  icon: <Diversity3 fontSize={'small'}/>,
+  featureFlag: 'db.classes',
 };
 
 const questBoard: BoardDefinition = {
@@ -136,6 +147,7 @@ const itemsBoard: BoardDefinition = {
 
 const APP_ROUTES: BoardDefinition[] = [
   indexBoard,
+  classesBoard,
   enemyBoard,
   skillsBoard,
   statesBoard,

@@ -70,6 +70,10 @@ function IconSetSprite(props: IconSetSpriteProps)
       backgroundRepeat: 'no-repeat' as const,
       backgroundSize: `${imgWidth * scale}px ${imgHeight * scale}px`,
       backgroundPosition: `${-col * sizePx}px ${-row * sizePx}px`,
+      // measure background-position from the true outer edge, not the padding-box- otherwise the
+      // 1px border (box-sizing: border-box via CssBaseline) shifts the visible window inward and
+      // bleeds a sliver of the neighboring icon in from the far edge.
+      backgroundOrigin: 'border-box' as const,
       border: '1px solid',
       borderColor: 'divider',
       borderRadius: 1,

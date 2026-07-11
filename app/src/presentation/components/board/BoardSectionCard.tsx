@@ -11,6 +11,13 @@ type BoardSectionCardProps = {
   actions?: React.ReactNode;
   collapsible?: boolean;
   defaultExpanded?: boolean;
+  /**
+   * Controlled expanded state. When provided (with {@link onExpandedChange}), the card no longer
+   * tracks its own expanded/collapsed state internally — pass this up to whatever should own it
+   * (e.g. a parent board, so it survives tab switches / remounts of the card itself).
+   */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
   density?: BoardSectionCardDensity;
   accent?: BoardSectionCardAccent;
   children: React.ReactNode;
@@ -29,12 +36,16 @@ function BoardSectionCard({
   actions,
   collapsible = false,
   defaultExpanded = true,
+  expanded: controlledExpanded,
+  onExpandedChange,
   density = 'comfortable',
   accent = 'neutral',
   children,
 }: BoardSectionCardProps)
 {
-  const [ expanded, setExpanded ] = useState(defaultExpanded);
+  const isControlled = controlledExpanded !== undefined;
+  const [ internalExpanded, setInternalExpanded ] = useState(defaultExpanded);
+  const expanded = isControlled ? controlledExpanded : internalExpanded;
 
   const headerPy = density === 'compact' ? 0.75 : 1;
   const contentPx = density === 'compact' ? 1.5 : 2;
@@ -45,7 +56,19 @@ function BoardSectionCard({
 
   const handleToggle = () =>
   {
-    if (collapsible) setExpanded((prev) => !prev);
+    if (!collapsible)
+    {
+      return;
+    }
+
+    if (isControlled)
+    {
+      onExpandedChange?.(!expanded);
+    }
+    else
+    {
+      setInternalExpanded((prev) => !prev);
+    }
   };
 
   return (

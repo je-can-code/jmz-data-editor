@@ -210,6 +210,8 @@ function IconIndexField(props: IconIndexFieldProps)
       backgroundRepeat: 'no-repeat' as const,
       backgroundSize: `${imgSize.w * scale}px ${imgSize.h * scale}px`,
       backgroundPosition: `${-col * PREVIEW_PX}px ${-row * PREVIEW_PX}px`,
+      // see IconSetSprite.tsx- keeps the border from shifting the visible window inward.
+      backgroundOrigin: 'border-box' as const,
       border: '1px solid',
       borderColor: 'divider',
       borderRadius: 1,
@@ -412,6 +414,9 @@ function IconIndexField(props: IconIndexFieldProps)
                             backgroundRepeat: 'no-repeat',
                             backgroundSize: `${imgSize.w * scale}px ${imgSize.h * scale}px`,
                             backgroundPosition: `${-col * DIALOG_CELL_PX}px ${-row * DIALOG_CELL_PX}px`,
+                            // see IconSetSprite.tsx- keeps the border (2px on the selected cell)
+                            // from shifting the visible window inward and bleeding the neighbor in.
+                            backgroundOrigin: 'border-box',
                             border: '1px solid',
                             borderColor: 'divider',
                             cursor: 'pointer',
