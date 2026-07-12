@@ -6,7 +6,8 @@ import CraftingBoard from '../../presentation/boards/crafting/CraftingBoard.tsx'
 import ProficiencyBoard from '../../presentation/boards/proficiency/ProficiencyBoard.tsx';
 import EnemiesBoard from '../../presentation/boards/enemies/EnemiesBoard.tsx';
 import JabsConfigBoard from '@boards/jabs/JabsConfigBoard.tsx';
-import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, } from '@mui/icons-material';
+import LevelConfigBoard from '@boards/level/LevelConfigBoard.tsx';
+import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, TrendingUp, } from '@mui/icons-material';
 import IndexBoard from '@boards/_index/IndexBoard.tsx';
 import SkillsBoard from '@boards/skills/SkillsBoard.tsx';
 import StatesBoard from '@boards/states/StatesBoard.tsx';
@@ -115,6 +116,16 @@ const jabsConfigBoard: BoardDefinition = {
   featureFlag: 'jabs',
 };
 
+const levelConfigBoard: BoardDefinition = {
+  id: 'level-config',
+  title: 'Level',
+  path: '/level',
+  component: LevelConfigBoard,
+  guard: () => true,
+  icon: <TrendingUp fontSize={'small'}/>,
+  featureFlag: 'level',
+};
+
 const weaponsBoard: BoardDefinition = {
   id: 'weapons',
   title: 'Weapons',
@@ -159,6 +170,7 @@ const APP_ROUTES: BoardDefinition[] = [
   craftingBoard,
   proficiencyBoard,
   jabsConfigBoard,
+  levelConfigBoard,
 ];
 
 export { APP_ROUTES };

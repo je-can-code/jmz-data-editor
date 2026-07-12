@@ -3271,7 +3271,11 @@ const StatesBoard = () =>
                                       }}
                                       size={'small'}
                                       fullWidth
-                                      displayEmpty
+                                      slotProps={{
+                                        select: {
+                                          displayEmpty: true,
+                                        },
+                                      }}
                                     >
                                       <MenuItem value={''}>
                                         {'—'}

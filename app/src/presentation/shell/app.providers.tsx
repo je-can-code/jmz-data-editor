@@ -16,6 +16,7 @@ import { ProficiencyProvider } from '@presentation/context/resources/proficiency
 import { QuestsProvider } from '@presentation/context/resources/quests.context.tsx';
 import { CraftingProvider } from '@presentation/context/resources/crafting.context.tsx';
 import { JabsProvider } from '@presentation/context/resources/jabs.context.tsx';
+import { LevelProvider } from '@presentation/context/resources/level.context.tsx';
 
 const AppProviders = ({ children }: { children: React.ReactNode }) =>
 {
@@ -30,6 +31,7 @@ const AppProviders = ({ children }: { children: React.ReactNode }) =>
         QuestsProvider,
         CraftingProvider,
         JabsProvider,
+        LevelProvider,
         ItemsProvider,
         WeaponsProvider,
         ArmorsProvider,

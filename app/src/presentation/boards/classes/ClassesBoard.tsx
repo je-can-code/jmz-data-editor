@@ -23,6 +23,7 @@ import { BoardSectionCard } from '@presentation/components/board/BoardSectionCar
 import { ClassLearningsEditor } from '@presentation/components/classLearnings/ClassLearningsEditor.tsx';
 import { AptitudeTeachingsEditor } from '@presentation/components/aptitude/AptitudeTeachingsEditor.tsx';
 import { NaturalGrowthQuadrantsEditor } from '@presentation/components/naturalGrowth/NaturalGrowthQuadrantsEditor.tsx';
+import { ClassParamsGrowthEditor } from '@presentation/components/classParams/ClassParamsGrowthEditor.tsx';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 import RPG_ClassLearning = Rmmz.Data.RPG_ClassLearning;
 
@@ -169,6 +170,16 @@ function ClassesBoard()
                 updateEnemyTraits={(traits: RPG_Trait[]) => patch({ traits })}
               />
             </BoardSectionCard>
+
+            <ClassParamsGrowthEditor
+              params={selectedClass.params}
+              onParamsChange={(paramId: number, values: number[]) =>
+              {
+                const nextParams = selectedClass.params.map((row) => [ ...row ]);
+                nextParams[ paramId ] = values;
+                patch({ params: nextParams });
+              }}
+            />
           </Stack>
         </Box>
       )}
