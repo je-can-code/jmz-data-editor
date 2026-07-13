@@ -13,7 +13,10 @@ import { normalizeRequiredWtypeId } from '@core/enums/RmmzWeaponType.ts';
 import { parseRmmzSkillScope, RmmzSkillScope } from '@core/enums/RmmzSkillScope.ts';
 import { parseRmmzUsableHitType, RmmzUsableHitType } from '@core/enums/RmmzUsableHitType.ts';
 import { SkillJabsExtension } from '@core/domain/entities/jabs/SkillJabsExtension.ts';
+import { ApplyStateParser, type RPG_ApplyStateRow } from '@services/parsers/ApplyStateParser.ts';
+import { PassiveGrantParser } from '@services/parsers/PassiveGrantParser.ts';
 import { SkillExtendParser } from '@services/parsers/SkillExtendParser.ts';
+import { ToggleOnExecuteParser } from '@services/parsers/ToggleOnExecuteParser.ts';
 import { SkillSksSkillNoteParser } from '@services/parsers/SkillSksSkillNoteParser.ts';
 import { SkillOnAttackGainParser } from '@services/parsers/SkillOnAttackGainParser.ts';
 import { SkillResourceCostParser } from '@services/parsers/SkillResourceCostParser.ts';
@@ -192,6 +195,30 @@ class RPG_SkillDomainModel
   public effects: RPG_UsableEffect[] = [];
 
   /**
+   * J-Extend on-hit state application ({@code <applyState:[...]>} / {@code <thisApplyState:[...]>}); each row
+   * can override the target state's duration/stack count independently of its database defaults.
+   */
+  public applyStates: RPG_ApplyStateRow[] = [];
+
+  /**
+   * J-Passive {@code <passive:[id,...]>}: state ids always granted while this battler knows this skill
+   * (learned, not necessarily equipped/used). Stacks once per source that declares the same id.
+   */
+  public passiveStateIds: number[] = [];
+
+  /**
+   * J-Passive {@code <uniquePassive:[id,...]>}: same as {@link passiveStateIds}, but applies once even
+   * if multiple known sources declare the same state id.
+   */
+  public uniquePassiveStateIds: number[] = [];
+
+  /**
+   * J-Extend {@code <toggleOnExecute:STATE_ID>}: fires once at press-time, removing the state from
+   * the caster if present or adding it if absent. Repeatable — used for "stance" skills.
+   */
+  public toggleOnExecuteStateIds: number[] = [];
+
+  /**
    * JABS-related tags on this skill (see {@link SkillJabsExtension}).
    */
   public jabs!: SkillJabsExtension;
@@ -316,6 +343,11 @@ class RPG_SkillDomainModel
 
     this.effects = cloneUsableEffectsFromRmmz(rmmz.effects);
 
+    this.applyStates = ApplyStateParser.read(this.note);
+    this.toggleOnExecuteStateIds = ToggleOnExecuteParser.read(this.note);
+    this.passiveStateIds = PassiveGrantParser.readPassiveStateIds(this.note);
+    this.uniquePassiveStateIds = PassiveGrantParser.readUniquePassiveStateIds(this.note);
+
     this.jabs = SkillJabsExtension.fromSkillNote(this.note);
   }
 
@@ -412,6 +444,10 @@ class RPG_SkillDomainModel
       this.thisCritDamageMultiplierFormula
     );
     n = UsableItemThisCritParser.writeThisCritsAlways(n, this.thisCritsAlways);
+
+    n = ApplyStateParser.write(n, this.applyStates);
+    n = ToggleOnExecuteParser.write(n, this.toggleOnExecuteStateIds);
+    n = PassiveGrantParser.write(n, this.passiveStateIds, this.uniquePassiveStateIds);
 
     n = this.jabs.applyToNote(n);
 

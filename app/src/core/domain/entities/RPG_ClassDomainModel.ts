@@ -1,4 +1,5 @@
 import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
+import { StealParser } from '@services/parsers/StealParser.ts';
 import RPG_Class = Rmmz.Implementations.RPG_Class;
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 import RPG_ClassLearning = Rmmz.Data.RPG_ClassLearning;
@@ -19,12 +20,26 @@ class RPG_ClassDomainModel
    */
   public params: number[][];
 
+  /** J-Resources-ABS {@code <lst:N>} — integer percent life steal; signed. */
+  public lst: number;
+
+  /** J-Resources-ABS {@code <mst:N>} — integer percent magi steal; signed. */
+  public mst: number;
+
+  /** J-Resources-ABS {@code <tst:N>} — integer percent tech steal; signed. */
+  public tst: number;
+
   constructor(rmmz: RPG_Class)
   {
     super(rmmz);
     this.traits = rmmz.traits.map((t) => ({ ...t }));
     this.learnings = rmmz.learnings.map((l) => ({ ...l }));
     this.params = rmmz.params.map((row) => [ ...row ]);
+
+    const steal = StealParser.read(rmmz.note);
+    this.lst = steal.lst;
+    this.mst = steal.mst;
+    this.tst = steal.tst;
   }
 
   public toRmmz(): RPG_Class
@@ -42,7 +57,11 @@ class RPG_ClassDomainModel
 
   protected syncNote(): string
   {
-    return this.note;
+    return StealParser.write(this.note, {
+      lst: this.lst,
+      mst: this.mst,
+      tst: this.tst,
+    });
   }
 }
 

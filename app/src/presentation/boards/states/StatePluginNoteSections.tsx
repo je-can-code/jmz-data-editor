@@ -24,6 +24,8 @@ import type { StatePassiveAbsExtension } from '@core/domain/entities/state/State
 import type { StateLevelExtension } from '@core/domain/entities/state/StateLevelExtension.ts';
 import type { StateProfExtension } from '@core/domain/entities/state/StateProfExtension.ts';
 import type { StateResourcesExtension } from '@core/domain/entities/state/StateResourcesExtension.ts';
+import type { StateStealExtension } from '@core/domain/entities/state/StateStealExtension.ts';
+import { StealRatesFields } from '@presentation/components/resources/StealRatesFields.tsx';
 import type { StateSdpExtension } from '@core/domain/entities/state/StateSdpExtension.ts';
 import type { StateSksExtension } from '@core/domain/entities/state/StateSksExtension.ts';
 import type { IdLabelRow } from '@presentation/components/usableItem/UsableEffectsEditor.tsx';
@@ -134,6 +136,7 @@ type StatePluginNoteSectionsProps = {
   patchLevel: (partial: Partial<StateLevelExtension>) => void;
   patchProf: (partial: Partial<StateProfExtension>) => void;
   patchResources: (partial: Partial<StateResourcesExtension>) => void;
+  patchSteal: (partial: Partial<StateStealExtension>) => void;
   patchSdp: (partial: Partial<StateSdpExtension>) => void;
   patchSks: (partial: Partial<StateSksExtension>) => void;
   patchPassiveAbs: (partial: Partial<StatePassiveAbsExtension>) => void;
@@ -163,6 +166,7 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
     patchLevel,
     patchProf,
     patchResources,
+    patchSteal,
     patchSdp,
     patchSks,
     patchPassiveAbs,
@@ -791,6 +795,27 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
               size={'small'}
               fullWidth
               placeholder={'e.g. a.mhp * 0.01'}
+            />
+          </Stack>
+      </BoardSectionCard>
+
+        <BoardSectionCard title={'Life/Magi/Tech steal'} collapsible defaultExpanded={false}>
+          <Stack spacing={2} alignItems={'stretch'}>
+            <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
+              Percent of on-hit HP damage converted to HP/MP/TP gained by the caster in JABS combat.
+              Caster-wide: sums with the same tags on the actor, class, equips, and every other active
+              state. Negative values drain the caster instead of stealing.
+            </Typography>
+            <StealRatesFields
+              value={{
+                lst: selectedState.steal.lst,
+                mst: selectedState.steal.mst,
+                tst: selectedState.steal.tst,
+              }}
+              onChange={(next) =>
+              {
+                patchSteal(next);
+              }}
             />
           </Stack>
       </BoardSectionCard>

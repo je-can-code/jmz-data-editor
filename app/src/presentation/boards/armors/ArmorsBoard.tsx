@@ -33,6 +33,7 @@ import {
 } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import TraitEditor from '@presentation/components/traits/TraitEditor.tsx';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
+import { StealRatesFields } from '@presentation/components/resources/StealRatesFields.tsx';
 import { SystemService } from '@services/SystemService.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
@@ -360,6 +361,28 @@ function ArmorsBoard()
                     </Stack>
                   </Grid>
                 </Grid>
+              </BoardSectionCard>
+
+              <BoardSectionCard title={'Life/Magi/Tech steal'} collapsible defaultExpanded={false}>
+                <Typography variant={'caption'} color={'text.secondary'} sx={{
+                  display: 'block',
+                  mb: 1.5
+                }}>
+                  Percent of on-hit HP damage converted to HP/MP/TP gained by the wearer in JABS combat.
+                  Caster-wide: sums with the same tags on the actor, class, other equips, and every active
+                  state. Negative values drain the wearer instead of stealing.
+                </Typography>
+                <StealRatesFields
+                  value={{
+                    lst: selectedArmor.lst,
+                    mst: selectedArmor.mst,
+                    tst: selectedArmor.tst,
+                  }}
+                  onChange={(next) =>
+                  {
+                    patch(next);
+                  }}
+                />
               </BoardSectionCard>
             </Stack>
           </Grid>

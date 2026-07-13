@@ -42,6 +42,7 @@ import type { StateSdpExtension } from '@core/domain/entities/state/StateSdpExte
 import type { StatePassiveAbsExtension } from '@core/domain/entities/state/StatePassiveAbsExtension.ts';
 import type { StatePassiveConditionalExtension } from '@core/domain/entities/state/StatePassiveConditionalExtension.ts';
 import type { StateSksExtension } from '@core/domain/entities/state/StateSksExtension.ts';
+import type { StateStealExtension } from '@core/domain/entities/state/StateStealExtension.ts';
 import { StatePluginNoteSections } from '@presentation/boards/states/StatePluginNoteSections.tsx';
 import { StatePassiveConditionalPanel } from '@presentation/boards/states/StatePassiveConditionalPanel.tsx';
 import { NaturalGrowthQuadrantsEditor } from '@presentation/components/naturalGrowth/NaturalGrowthQuadrantsEditor.tsx';
@@ -1174,6 +1175,23 @@ const StatesBoard = () =>
       return;
     }
     selectedState.resources = selectedState.resources.clone(partial);
+    selectedState.rebuildNoteFromExtensions();
+    updateState(selectedState);
+  };
+
+  /**
+   * Merges fields into the J-Resources-ABS steal extension and rebuilds the note.
+   *
+   * @param partial Subset of steal extension fields to apply.
+   * @returns {void}
+   */
+  const patchStateSteal = (partial: Partial<StateStealExtension>) =>
+  {
+    if (selectedState === null)
+    {
+      return;
+    }
+    selectedState.steal = selectedState.steal.clone(partial);
     selectedState.rebuildNoteFromExtensions();
     updateState(selectedState);
   };
@@ -2725,6 +2743,7 @@ const StatesBoard = () =>
                             patchLevel={patchStateLevel}
                             patchProf={patchStateProf}
                             patchResources={patchStateResources}
+                            patchSteal={patchStateSteal}
                             patchSdp={patchStateSdp}
                             patchSks={patchStateSks}
                             patchPassiveAbs={patchStatePassiveAbs}

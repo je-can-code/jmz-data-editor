@@ -36,6 +36,12 @@ type FormulaVisualizerProps = {
    * reach at least 99 (the preview is derived from levels 94-99) — pick a "Max Level" of 100+ to see it.
    */
   trueMaxLevel?: number;
+  /**
+   * The class's currently-saved `params[paramId]` array (sparse, 1-indexed by level), overlaid as a
+   * third comparison line so you can see how a newly-typed formula differs from what's already saved
+   * before overwriting it via Apply.
+   */
+  currentValues?: number[];
 };
 
 const presetFormulas = {
@@ -76,7 +82,8 @@ export default function FormulaVisualizer({
   paramName,
   onUpdateFormula,
   suggestedLevel,
-  trueMaxLevel
+  trueMaxLevel,
+  currentValues = []
 }: FormulaVisualizerProps)
 {
   const [ open, setOpen ] = useState(false);
@@ -130,74 +137,110 @@ export default function FormulaVisualizer({
     [ localFormula, maxLevel, open ]
   );
 
-  // Derives J-LevelMaster's actual beyond-99 extrapolation from the currently-typed formula's own
-  // chart data (not the class's currently-saved params — this previews what WOULD happen if the
-  // formula is applied). Requires chartData to actually reach level 99 (levels 94-99 drive the slope);
-  // a "Max Level" selection below 99 yields no preview rather than a misleading one.
+  // Derives the OLD engine fallback's beyond-99 slope-extrapolation from the class's currently-saved
+  // params (not the typed formula). This is only relevant when there's no saved GrowthCurve tag for
+  // this param yet — once a formula is saved (via Apply), J-LevelMaster evaluates it directly at every
+  // level instead of guessing a slope, so `chartData`'s own solid line already IS the accurate
+  // beyond-99 preview in that case (it's evaluated per-level whenever `maxLevel` exceeds 99). Requires
+  // the saved values to actually reach level 99 (levels 94-99 drive the slope); anything short of that
+  // yields no preview rather than a misleading one.
   const extrapolationPreview = useMemo(
     () =>
     {
-      if (typeof trueMaxLevel !== 'number' || chartData.length === 0)
+      if (typeof trueMaxLevel !== 'number' || currentValues.length === 0)
       {
         return [];
       }
 
-      const lastLevel = chartData[ chartData.length - 1 ]!.level;
-      if (lastLevel < 99)
+      const lastLevel = currentValues.length - 1;
+      if (lastLevel < 99 || typeof currentValues[ 99 ] !== 'number')
       {
         return [];
       }
 
-      const values: number[] = [];
-      for (const point of chartData)
-      {
-        values[ point.level ] = point.value;
-      }
-
-      return computeBeyondMaxPreview(values, trueMaxLevel);
+      return computeBeyondMaxPreview(currentValues, trueMaxLevel);
     },
-    [ chartData, trueMaxLevel ]
+    [ currentValues, trueMaxLevel ]
   );
 
   const hasExtrapolationPreview = extrapolationPreview.length > 0;
 
-  // Merges the authored curve with the optional beyond-max preview into one level-sorted series for a
-  // single Recharts LineChart. The last authored point is duplicated onto `extrapolatedValue` too, so
-  // the dashed preview line starts exactly where the solid authored line ends instead of leaving a gap.
+  // Currently-saved curve, capped to the chart's selected max level, so it can be overlaid as a
+  // comparison line against whatever formula is typed — this is what's actually in
+  // params[paramId] right now, before any Apply.
+  const savedValuePoints = useMemo(
+    () =>
+    {
+      if (!open || !currentValues || currentValues.length === 0)
+      {
+        return [];
+      }
+
+      const points: Array<{ level: number, value: number }> = [];
+      for (let level = 1; level <= maxLevel; level++)
+      {
+        const value = currentValues[ level ];
+        if (typeof value === 'number')
+        {
+          points.push({ level, value });
+        }
+      }
+      return points;
+    },
+    [ open, currentValues, maxLevel ]
+  );
+
+  const hasSavedValues = savedValuePoints.length > 0;
+
+  // Merges the authored curve, the optional beyond-max preview, and the currently-saved curve into one
+  // level-sorted series for a single Recharts LineChart. Level 99's saved value is duplicated onto
+  // `extrapolatedValue` too, so the dashed preview line starts exactly where the saved-value line ends
+  // instead of leaving a gap (it continues the SAVED curve's fallback slope, not the typed formula's).
   const combinedChartData = useMemo(
     () =>
     {
-      if (!hasExtrapolationPreview || chartData.length === 0)
+      if (!hasExtrapolationPreview && !hasSavedValues)
       {
         return chartData;
       }
 
-      const byLevel = new Map<number, { level: number, value?: number, extrapolatedValue?: number }>();
+      const byLevel = new Map<number, { level: number, value?: number, extrapolatedValue?: number, savedValue?: number }>();
 
       for (const point of chartData)
       {
         byLevel.set(point.level, { level: point.level, value: point.value });
       }
 
-      const lastAuthored = chartData[ chartData.length - 1 ]!;
-      byLevel.set(lastAuthored.level, {
-        ...byLevel.get(lastAuthored.level),
-        level: lastAuthored.level,
-        extrapolatedValue: lastAuthored.value,
-      });
+      if (hasExtrapolationPreview)
+      {
+        byLevel.set(99, {
+          ...byLevel.get(99),
+          level: 99,
+          extrapolatedValue: currentValues[ 99 ],
+        });
 
-      for (const point of extrapolationPreview)
+        for (const point of extrapolationPreview)
+        {
+          byLevel.set(point.level, {
+            ...byLevel.get(point.level),
+            level: point.level,
+            extrapolatedValue: point.value,
+          });
+        }
+      }
+
+      for (const point of savedValuePoints)
       {
         byLevel.set(point.level, {
           ...byLevel.get(point.level),
           level: point.level,
-          extrapolatedValue: point.value,
+          savedValue: point.value,
         });
       }
 
       return [ ...byLevel.values() ].sort((a, b) => a.level - b.level);
     },
-    [ chartData, extrapolationPreview, hasExtrapolationPreview ]
+    [ chartData, extrapolationPreview, hasExtrapolationPreview, savedValuePoints, hasSavedValues, currentValues ]
   );
 
   const handlePresetSelect = (value: string) =>
@@ -372,6 +415,17 @@ export default function FormulaVisualizer({
                 labelFormatter={(label) => `Level ${label}`}
               />
               <Legend/>
+              {hasSavedValues && (
+                <Line
+                  type="monotone"
+                  dataKey="savedValue"
+                  name={`${paramName} (currently saved)`}
+                  stroke="#82ca9d"
+                  dot={false}
+                  activeDot={{ r: 6 }}
+                  connectNulls={false}
+                />
+              )}
               <Line
                 type="monotone"
                 dataKey="value"
@@ -384,8 +438,8 @@ export default function FormulaVisualizer({
                 <Line
                   type="monotone"
                   dataKey="extrapolatedValue"
-                  name={`${paramName} (beyond level 99, preview)`}
-                  stroke="#8884d8"
+                  name={`${paramName} (old slope fallback if no formula is saved)`}
+                  stroke="#82ca9d"
                   strokeDasharray="6 4"
                   dot={false}
                   activeDot={{ r: 6 }}
