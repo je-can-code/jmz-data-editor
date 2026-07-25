@@ -7,6 +7,7 @@ import {
   Button,
   Checkbox,
   Chip,
+  Divider,
   FormControlLabel,
   Grid,
   IconButton,
@@ -27,7 +28,10 @@ import { useStates } from '@presentation/context/resources/states.context.tsx';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
 import { RPG_StateDomainModel } from '@core/domain/entities/RPG_StateDomainModel.ts';
-import { StateJabsExtension } from '@core/domain/entities/jabs/StateJabsExtension.ts';
+import {
+  type SkillHistoryBonusCountMode,
+  StateJabsExtension,
+} from '@core/domain/entities/jabs/StateJabsExtension.ts';
 import type { StateCritExtension } from '@core/domain/entities/state/StateCritExtension.ts';
 import type { StateDropsExtension } from '@core/domain/entities/state/StateDropsExtension.ts';
 import type { StateElemExtension } from '@core/domain/entities/state/StateElemExtension.ts';
@@ -36,8 +40,11 @@ import type { StateProfExtension } from '@core/domain/entities/state/StateProfEx
 import type { StateResourcesExtension } from '@core/domain/entities/state/StateResourcesExtension.ts';
 import type { StateSdpExtension } from '@core/domain/entities/state/StateSdpExtension.ts';
 import type { StatePassiveAbsExtension } from '@core/domain/entities/state/StatePassiveAbsExtension.ts';
+import type { StatePassiveConditionalExtension } from '@core/domain/entities/state/StatePassiveConditionalExtension.ts';
 import type { StateSksExtension } from '@core/domain/entities/state/StateSksExtension.ts';
+import type { StateStealExtension } from '@core/domain/entities/state/StateStealExtension.ts';
 import { StatePluginNoteSections } from '@presentation/boards/states/StatePluginNoteSections.tsx';
+import { StatePassiveConditionalPanel } from '@presentation/boards/states/StatePassiveConditionalPanel.tsx';
 import { NaturalGrowthQuadrantsEditor } from '@presentation/components/naturalGrowth/NaturalGrowthQuadrantsEditor.tsx';
 import { IconIndexField } from '@presentation/components/icons/IconIndexField.tsx';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
@@ -53,6 +60,11 @@ import {
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import { RMMZ_STATE_MOTION_OPTIONS, } from '@core/enums/RmmzStateMotion.ts';
 import { RMMZ_STATE_OVERLAY_OPTIONS, } from '@core/enums/RmmzStateOverlay.ts';
+import {
+  type RmmzSkillStypeOption,
+  skillHistoryTypeFilterAutocompleteOptions,
+  skillHistoryTypeFilterOptionForValue,
+} from '@core/enums/RmmzSkillStype.ts';
 import { RMMZ_STATE_RESTRICTION_OPTIONS, } from '@core/enums/RmmzStateRestriction.ts';
 import { RMMZ_STATE_AUTO_REMOVAL_TIMING_OPTIONS, } from '@core/enums/RmmzStateAutoRemovalTiming.ts';
 import TraitEditor from '../../components/traits/TraitEditor.tsx';
@@ -81,6 +93,61 @@ const formatApproxSecondsLabelFromFrames = (frames: number): string =>
   const sec = Math.round((frames / 60) * 100) / 100;
   const display = parseFloat(sec.toFixed(2));
   return `(~${display}s)`;
+};
+
+/**
+ * Resolves this state's map timer in frames (matches J-ABS {@code jabsStateDurationFrames} tag priority).
+ *
+ * @param jabs Hydrated JABS extension for the state row.
+ * @returns Tag-derived frame count, or {@code null} when no map-duration tags are set.
+ */
+const resolveStateMapDurationFramesFromJabs = (jabs: StateJabsExtension): number | null =>
+{
+  if (jabs.stateDurationFrames !== null && jabs.stateDurationFrames > 0)
+  {
+    return Math.trunc(jabs.stateDurationFrames);
+  }
+  if (jabs.stateDurationSeconds !== null && jabs.stateDurationSeconds > 0)
+  {
+    return Math.trunc(jabs.stateDurationSeconds) * 60;
+  }
+  return null;
+};
+
+/**
+ * Whether J-ABS runs a finite map timer for this row (mirrors {@code jabsStateHasMapTimer}).
+ *
+ * @param jabs Hydrated JABS extension for the state row.
+ * @returns True when a positive duration tag is set and {@code indefiniteState} is false.
+ */
+const stateJabsHasMapTimer = (jabs: StateJabsExtension): boolean =>
+{
+  if (jabs.indefiniteState)
+  {
+    return false;
+  }
+  return resolveStateMapDurationFramesFromJabs(jabs) !== null;
+};
+
+const SKILL_HISTORY_COUNT_MODE_OPTIONS: { value: SkillHistoryBonusCountMode; label: string }[] = [
+  { value: 'unique', label: 'Different skills' },
+  { value: 'all', label: 'Every cast' },
+  { value: 'streak', label: 'Same skill repeated' },
+  { value: 'distinct_types', label: 'Different skill types' },
+];
+
+/**
+ * Whether a skill-history bonus row is complete enough to emit a note tag.
+ *
+ * @param jabs Hydrated JABS extension for the state row.
+ * @returns True when all four skill-history fields are set.
+ */
+const stateJabsHasSkillHistoryBonus = (jabs: StateJabsExtension): boolean =>
+{
+  return jabs.skillHistoryBonusTypeId !== null
+    && jabs.skillHistoryBonusWindowSeconds !== null
+    && jabs.skillHistoryBonusPctPerCount !== null
+    && jabs.skillHistoryBonusCountMode !== null;
 };
 
 /**
@@ -311,6 +378,36 @@ const StatesBoard = () =>
    * @returns Id and display label for each selectable skill.
    */
   const shieldBreakSkillPickerRows = useMemo((): IdLabelRow[] =>
+  {
+    return skills
+      .filter((s) => s.name.startsWith('===') === false)
+      .map((s) => ({
+        id: s.id,
+        label: `${s.id}: ${s.name}`,
+      }));
+  }, [ skills ]);
+
+  /**
+   * States for passive auto-apply picker, excluding list section headers.
+   *
+   * @returns Id and display label for each selectable state.
+   */
+  const passiveStatePickerRows = useMemo((): IdLabelRow[] =>
+  {
+    return states
+      .filter((s) => s.name.startsWith('===') === false)
+      .map((s) => ({
+        id: s.id,
+        label: `${s.id}: ${s.name}`,
+      }));
+  }, [ states ]);
+
+  /**
+   * Skills for passive auto-execute picker, excluding list section headers.
+   *
+   * @returns Id and display label for each selectable skill.
+   */
+  const passiveSkillPickerRows = useMemo((): IdLabelRow[] =>
   {
     return skills
       .filter((s) => s.name.startsWith('===') === false)
@@ -878,43 +975,6 @@ const StatesBoard = () =>
   };
 
   /**
-   * Toggles remove-by-walking from the checkbox.
-   *
-   * @param event Change event from the checkbox.
-   * @returns {void}
-   */
-  const handleStateRemoveByWalkingChange = (event: ChangeEvent<HTMLInputElement>) =>
-  {
-    if (selectedState === null)
-    {
-      return;
-    }
-
-    selectedState.removeByWalking = event.target.checked;
-    updateState(selectedState);
-  };
-
-  /**
-   * Parses steps-to-remove; invalid input becomes {@code 0}, negative clamps to {@code 0}.
-   *
-   * @param event Change event from the steps field.
-   * @returns {void}
-   */
-  const handleStateStepsToRemoveOnChangeEvent = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-  {
-    if (selectedState === null)
-    {
-      return;
-    }
-
-    const parsed = parseInt(event.target.value, 10);
-    selectedState.stepsToRemove = Number.isNaN(parsed)
-      ? 0
-      : Math.max(0, parsed);
-    updateState(selectedState);
-  };
-
-  /**
    * Writes battle log message line 1.
    *
    * @param event Change event from the message field.
@@ -1120,6 +1180,23 @@ const StatesBoard = () =>
   };
 
   /**
+   * Merges fields into the J-Resources-ABS steal extension and rebuilds the note.
+   *
+   * @param partial Subset of steal extension fields to apply.
+   * @returns {void}
+   */
+  const patchStateSteal = (partial: Partial<StateStealExtension>) =>
+  {
+    if (selectedState === null)
+    {
+      return;
+    }
+    selectedState.steal = selectedState.steal.clone(partial);
+    selectedState.rebuildNoteFromExtensions();
+    updateState(selectedState);
+  };
+
+  /**
    * Merges fields into the J-SDP extension and rebuilds the note.
    *
    * @param partial Subset of SDP extension fields to apply.
@@ -1166,6 +1243,23 @@ const StatesBoard = () =>
       return;
     }
     selectedState.passiveAbs = selectedState.passiveAbs.clone(partial);
+    selectedState.rebuildNoteFromExtensions();
+    updateState(selectedState);
+  };
+
+  /**
+   * Merges fields into the J-Passive-Conditional extension and rebuilds the note.
+   *
+   * @param partial Subset of passive-conditional extension fields to apply.
+   * @returns {void}
+   */
+  const patchStatePassiveConditional = (partial: Partial<StatePassiveConditionalExtension>) =>
+  {
+    if (selectedState === null)
+    {
+      return;
+    }
+    selectedState.passiveConditional = selectedState.passiveConditional.clone(partial);
     selectedState.rebuildNoteFromExtensions();
     updateState(selectedState);
   };
@@ -1246,6 +1340,179 @@ const StatesBoard = () =>
       return;
     }
     patchStateJabs({ [ key ]: n });
+  };
+
+  /**
+   * Clears legacy MZ duration fields so only J-ABS note tags author map timers.
+   *
+   * @param state State row being edited.
+   * @returns {void}
+   */
+  const clearMzMapDurationFields = (state: RPG_StateDomainModel) =>
+  {
+    state.removeByWalking = false;
+    state.stepsToRemove = 0;
+  };
+
+  /**
+   * Merges map-duration JABS tags, clears MZ fields, rebuilds the note.
+   *
+   * @param partial {@code stateDurationFrames} and/or {@code stateDurationSeconds}.
+   * @returns {void}
+   */
+  const patchStateJabsMapDuration = (
+    partial: Pick<Partial<StateJabsExtension>, 'stateDurationFrames' | 'stateDurationSeconds' | 'indefiniteState'>
+  ) =>
+  {
+    if (selectedState === null)
+    {
+      return;
+    }
+
+    const nextPartial = { ...partial };
+    const frames = partial.stateDurationFrames;
+    const seconds = partial.stateDurationSeconds;
+    if (
+      (frames !== undefined && frames !== null && frames > 0)
+      || (seconds !== undefined && seconds !== null && seconds > 0)
+    )
+    {
+      nextPartial.indefiniteState = false;
+    }
+
+    selectedState.jabs = selectedState.jabs.clone(nextPartial);
+    clearMzMapDurationFields(selectedState);
+    selectedState.rebuildNoteFromExtensions();
+    updateState(selectedState);
+  };
+
+  /**
+   * Toggles {@code <indefiniteState>} and clears finite map-duration tags when enabled.
+   *
+   * @param event Change event from the checkbox.
+   * @returns {void}
+   */
+  /**
+   * Merges skill-history bonus fields and rebuilds the note.
+   *
+   * @param partial Skill-history bonus subset.
+   * @returns {void}
+   */
+  const patchStateJabsSkillHistoryBonus = (
+    partial: Pick<
+      Partial<StateJabsExtension>,
+      | 'skillHistoryBonusTypeId'
+      | 'skillHistoryBonusWindowSeconds'
+      | 'skillHistoryBonusPctPerCount'
+      | 'skillHistoryBonusCountMode'
+    >
+  ) =>
+  {
+    patchStateJabs(partial);
+  };
+
+  /**
+   * Parses a non-negative integer for skill-history fields; empty clears to {@code null}.
+   *
+   * @param raw Raw text from the input.
+   * @returns Parsed integer or {@code null}.
+   */
+  const parseStateJabsNonNegativeIntOrNull = (raw: string): number | null =>
+  {
+    const t = raw.trim();
+    if (t === '')
+    {
+      return null;
+    }
+    const n = parseInt(t, 10);
+    if (Number.isNaN(n) || n < 0)
+    {
+      return null;
+    }
+    return n;
+  };
+
+  const handleStateJabsIndefiniteChange = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    if (selectedState === null)
+    {
+      return;
+    }
+
+    const checked = event.target.checked;
+    if (checked)
+    {
+      patchStateJabsMapDuration({
+        indefiniteState: true,
+        stateDurationFrames: null,
+        stateDurationSeconds: null,
+      });
+      return;
+    }
+    selectedState.jabs = selectedState.jabs.clone({ indefiniteState: false });
+    clearMzMapDurationFields(selectedState);
+    selectedState.rebuildNoteFromExtensions();
+    updateState(selectedState);
+  };
+
+  /**
+   * Parses {@code <stateDuration:FRAMES>}; clears seconds when a positive frame count is saved.
+   *
+   * @param raw Raw text from the frames field.
+   * @returns {void}
+   */
+  const patchStateJabsMapDurationFrames = (raw: string) =>
+  {
+    const t = raw.trim();
+    if (t === '')
+    {
+      patchStateJabsMapDuration({ stateDurationFrames: null });
+      return;
+    }
+    const n = parseInt(t, 10);
+    if (Number.isNaN(n))
+    {
+      return;
+    }
+    if (n > 0)
+    {
+      patchStateJabsMapDuration({
+        stateDurationFrames: n,
+        stateDurationSeconds: null,
+      });
+      return;
+    }
+    patchStateJabsMapDuration({ stateDurationFrames: null });
+  };
+
+  /**
+   * Parses {@code <stateDurationSec:SECONDS>}; clears frames when a positive second count is saved.
+   *
+   * @param raw Raw text from the seconds field.
+   * @returns {void}
+   */
+  const patchStateJabsMapDurationSeconds = (raw: string) =>
+  {
+    const t = raw.trim();
+    if (t === '')
+    {
+      patchStateJabsMapDuration({ stateDurationSeconds: null });
+      return;
+    }
+    const n = parseInt(t, 10);
+    if (Number.isNaN(n))
+    {
+      return;
+    }
+    if (n > 0)
+    {
+      patchStateJabsMapDuration({
+        stateDurationSeconds: n,
+        stateDurationFrames: null,
+      });
+      return;
+    }
+    patchStateJabsMapDuration({ stateDurationSeconds: null });
   };
 
   /**
@@ -2476,6 +2743,7 @@ const StatesBoard = () =>
                             patchLevel={patchStateLevel}
                             patchProf={patchStateProf}
                             patchResources={patchStateResources}
+                            patchSteal={patchStateSteal}
                             patchSdp={patchStateSdp}
                             patchSks={patchStateSks}
                             patchPassiveAbs={patchStatePassiveAbs}
@@ -2490,6 +2758,151 @@ const StatesBoard = () =>
                         md: 5
                       }}>
                         <Stack spacing={2}>
+                            <BoardSectionCard title={'State duration'} collapsible defaultExpanded={true}>
+                              <Stack spacing={2} alignItems={'stretch'}>
+                                <Typography variant={'body2'} color={'text.secondary'}>
+                                  {'How long this state lasts on the map.'}
+                                </Typography>
+                                <Grid container spacing={2} alignItems={'flex-start'}>
+                                  <Grid size={12}>
+                                    <FormControlLabel
+                                      control={(
+                                        <Checkbox
+                                          checked={selectedState.jabs.indefiniteState}
+                                          onChange={handleStateJabsIndefiniteChange}
+                                          size={'small'}
+                                        />
+                                      )}
+                                      label={'Never expires on the map'}
+                                    />
+                                  </Grid>
+                                  <Grid size={6}>
+                                    <TextField
+                                      type={'number'}
+                                      variant={'outlined'}
+                                      label={'Duration (frames)'}
+                                      value={selectedState.jabs.stateDurationFrames === null
+                                        ? ''
+                                        : String(selectedState.jabs.stateDurationFrames)}
+                                      onChange={(e) =>
+                                      {
+                                        patchStateJabsMapDurationFrames(e.target.value);
+                                      }}
+                                      size={'small'}
+                                      fullWidth
+                                      disabled={selectedState.jabs.indefiniteState}
+                                      slotProps={{
+                                        htmlInput: {
+                                          min: 0,
+                                        },
+                                      }}
+                                    />
+                                  </Grid>
+                                  <Grid size={6}>
+                                    <TextField
+                                      type={'number'}
+                                      variant={'outlined'}
+                                      label={'Duration (seconds)'}
+                                      value={selectedState.jabs.stateDurationSeconds === null
+                                        ? ''
+                                        : String(selectedState.jabs.stateDurationSeconds)}
+                                      onChange={(e) =>
+                                      {
+                                        patchStateJabsMapDurationSeconds(e.target.value);
+                                      }}
+                                      size={'small'}
+                                      fullWidth
+                                      disabled={selectedState.jabs.indefiniteState}
+                                      slotProps={{
+                                        htmlInput: {
+                                          min: 0,
+                                        },
+                                      }}
+                                    />
+                                  </Grid>
+                                  <Grid size={12}>
+                                    {(() =>
+                                    {
+                                      if (selectedState.jabs.indefiniteState)
+                                      {
+                                        return (
+                                          <Typography variant={'body2'} color={'text.secondary'}>
+                                            {'Does not expire on the map.'}
+                                          </Typography>
+                                        );
+                                      }
+                                      const tagFrames = resolveStateMapDurationFramesFromJabs(selectedState.jabs);
+                                      if (stateJabsHasMapTimer(selectedState.jabs) && tagFrames !== null)
+                                      {
+                                        return (
+                                          <Typography variant={'body2'} color={'text.secondary'}>
+                                            {`Expires on the map ${formatApproxSecondsLabelFromFrames(tagFrames).replace(/[()]/g, '')}.`}
+                                          </Typography>
+                                        );
+                                      }
+                                      return (
+                                        <Typography variant={'body2'} color={'text.secondary'}>
+                                          {'No duration set.'}
+                                        </Typography>
+                                      );
+                                    })()}
+                                  </Grid>
+                                </Grid>
+                                <Divider />
+                                <Typography variant={'subtitle2'}>
+                                  {'Outgoing duration'}
+                                </Typography>
+                                <Typography variant={'body2'} color={'text.secondary'}>
+                                  {'Adjusts how long states this unit applies to others last on the map.'}
+                                </Typography>
+                                <Grid container spacing={2} alignItems={'flex-start'}>
+                                  <Grid size={6}>
+                                    <TextField
+                                      variant={'outlined'}
+                                      label={'Flat bonus (frames)'}
+                                      value={selectedState.jabs.stateDurationFlat === null
+                                        ? ''
+                                        : String(selectedState.jabs.stateDurationFlat)}
+                                      onChange={(e) =>
+                                      {
+                                        patchStateJabsDurationInt('stateDurationFlat', e.target.value);
+                                      }}
+                                      size={'small'}
+                                      fullWidth
+                                    />
+                                  </Grid>
+                                  <Grid size={6}>
+                                    <TextField
+                                      variant={'outlined'}
+                                      label={'Percent bonus'}
+                                      value={selectedState.jabs.stateDurationPercent === null
+                                        ? ''
+                                        : String(selectedState.jabs.stateDurationPercent)}
+                                      onChange={(e) =>
+                                      {
+                                        patchStateJabsDurationInt('stateDurationPercent', e.target.value);
+                                      }}
+                                      size={'small'}
+                                      fullWidth
+                                    />
+                                  </Grid>
+                                  <Grid size={12}>
+                                    <TextField
+                                      variant={'outlined'}
+                                      label={'Formula bonus (frames)'}
+                                      value={selectedState.jabs.stateDurationFormula}
+                                      onChange={handleStateJabsDurationFormulaChangeEvent}
+                                      size={'small'}
+                                      fullWidth
+                                      multiline
+                                      minRows={2}
+                                      placeholder={'e.g. a.atk * 2'}
+                                    />
+                                  </Grid>
+                                </Grid>
+                              </Stack>
+                          </BoardSectionCard>
+
                             <BoardSectionCard title={'Traits'} collapsible>
                               <TraitEditor
                                 selectedTraits={selectedState.traits}
@@ -2679,112 +3092,6 @@ const StatesBoard = () =>
                               </Stack>
                           </BoardSectionCard>
 
-                            <BoardSectionCard title={'State duration'} collapsible defaultExpanded={false}>
-                              <Stack spacing={2} alignItems={'stretch'}>
-                                <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
-                                  Details on how OTHER state durations are impacted for the battler afflicted with this
-                                  state.
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'center'}>
-                                  <Grid size={12}>
-                                    <Stack
-                                      direction={'row'}
-                                      spacing={1.5}
-                                      alignItems={'center'}
-                                      flexWrap={'wrap'}
-                                      useFlexGap
-                                    >
-                                      <FormControlLabel
-                                        control={(
-                                          <Checkbox
-                                            checked={selectedState.removeByWalking}
-                                            onChange={handleStateRemoveByWalkingChange}
-                                            size={'small'}
-                                          />
-                                        )}
-                                        label={'Has duration'}
-                                      />
-                                      <TextField
-                                        type={'number'}
-                                        variant={'outlined'}
-                                        label={'Duration in frames'}
-                                        value={selectedState.stepsToRemove}
-                                        onChange={handleStateStepsToRemoveOnChangeEvent}
-                                        size={'small'}
-                                        disabled={selectedState.removeByWalking === false}
-                                        sx={{ width: 160 }}
-                                        slotProps={{
-                                          htmlInput: {
-                                            min: 0,
-                                          },
-                                        }}
-                                      />
-                                      {selectedState.removeByWalking === true && (
-                                        <Typography
-                                          variant={'body2'}
-                                          color={'text.secondary'}
-                                          sx={{ alignSelf: 'center' }}
-                                          component={'span'}
-                                        >
-                                          {formatApproxSecondsLabelFromFrames(selectedState.stepsToRemove)}
-                                        </Typography>
-                                      )}
-                                    </Stack>
-                                  </Grid>
-                                </Grid>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  While this state is afflicted, the states this battler applies to others will have
-                                  their duration modified by the following factors. All bonuses apply in the unit of
-                                  "frames", against the base "duration in frames" value.
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Flat duration boost'}
-                                      value={selectedState.jabs.stateDurationFlat === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateDurationFlat)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsDurationInt('stateDurationFlat', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Percent duration boost'}
-                                      value={selectedState.jabs.stateDurationPercent === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateDurationPercent)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsDurationInt('stateDurationPercent', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={12}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Formula duration boost'}
-                                      value={selectedState.jabs.stateDurationFormula}
-                                      onChange={handleStateJabsDurationFormulaChangeEvent}
-                                      size={'small'}
-                                      fullWidth
-                                      multiline
-                                      minRows={2}
-                                      placeholder={'e.g. a.atk * 2'}
-                                    />
-                                  </Grid>
-                                </Grid>
-                              </Stack>
-                          </BoardSectionCard>
-
                             <BoardSectionCard title={'Aggro Generation'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>
                                 <Typography variant={'body2'} color={'text.secondary'}>
@@ -2849,6 +3156,192 @@ const StatesBoard = () =>
                                 </Grid>
                               </Stack>
                           </BoardSectionCard>
+
+                            <BoardSectionCard title={'Recent skills'} collapsible defaultExpanded={false}>
+                              <Stack spacing={2} alignItems={'stretch'}>
+                                <Typography variant={'body2'} color={'text.secondary'}>
+                                  {'Extra damage based on which skills this unit used recently.'}
+                                </Typography>
+                                <Grid container spacing={2} alignItems={'flex-start'}>
+                                  <Grid size={6}>
+                                    <Autocomplete<RmmzSkillStypeOption, false, false, false>
+                                      fullWidth
+                                      size={'small'}
+                                      options={skillHistoryTypeFilterAutocompleteOptions(
+                                        selectedState.jabs.skillHistoryBonusTypeId ?? 0,
+                                        SystemService.skillTypes ?? []
+                                      )}
+                                      groupBy={(option) => option.group}
+                                      getOptionLabel={(option) => option.label}
+                                      isOptionEqualToValue={(
+                                        a,
+                                        b
+                                      ) => a.value === b.value}
+                                      value={skillHistoryTypeFilterOptionForValue(
+                                        selectedState.jabs.skillHistoryBonusTypeId,
+                                        SystemService.skillTypes ?? []
+                                      )}
+                                      onChange={(
+                                        _event,
+                                        option
+                                      ) =>
+                                      {
+                                        patchStateJabsSkillHistoryBonus({
+                                          skillHistoryBonusTypeId: option === null
+                                            ? null
+                                            : option.value,
+                                        });
+                                      }}
+                                      filterOptions={(
+                                        options,
+                                        state
+                                      ) =>
+                                      {
+                                        const q = state.inputValue.trim()
+                                          .toLowerCase();
+                                        if (q === '')
+                                        {
+                                          return options;
+                                        }
+                                        return options.filter((o) =>
+                                          o.label.toLowerCase()
+                                            .includes(q)
+                                          || o.group.toLowerCase()
+                                            .includes(q)
+                                          || String(o.value)
+                                            .includes(q));
+                                      }}
+                                      slotProps={{
+                                        listbox: { style: { maxHeight: 240 } },
+                                      }}
+                                      renderInput={(params) => (
+                                        <TextField
+                                          {...params}
+                                          variant={'outlined'}
+                                          label={'Skill type filter'}
+                                          placeholder={'Any, Techniques, …'}
+                                        />
+                                      )}
+                                    />
+                                  </Grid>
+                                  <Grid size={6}>
+                                    <TextField
+                                      type={'number'}
+                                      variant={'outlined'}
+                                      label={'Lookback (seconds)'}
+                                      value={selectedState.jabs.skillHistoryBonusWindowSeconds === null
+                                        ? ''
+                                        : String(selectedState.jabs.skillHistoryBonusWindowSeconds)}
+                                      onChange={(e) =>
+                                      {
+                                        patchStateJabsSkillHistoryBonus({
+                                          skillHistoryBonusWindowSeconds: parseStateJabsNonNegativeIntOrNull(e.target.value),
+                                        });
+                                      }}
+                                      size={'small'}
+                                      fullWidth
+                                      slotProps={{
+                                        htmlInput: {
+                                          min: 0,
+                                        },
+                                      }}
+                                    />
+                                  </Grid>
+                                  <Grid size={6}>
+                                    <TextField
+                                      type={'number'}
+                                      variant={'outlined'}
+                                      label={'Bonus per count (%)'}
+                                      value={selectedState.jabs.skillHistoryBonusPctPerCount === null
+                                        ? ''
+                                        : String(selectedState.jabs.skillHistoryBonusPctPerCount)}
+                                      onChange={(e) =>
+                                      {
+                                        patchStateJabsSkillHistoryBonus({
+                                          skillHistoryBonusPctPerCount: parseStateJabsNonNegativeIntOrNull(e.target.value),
+                                        });
+                                      }}
+                                      size={'small'}
+                                      fullWidth
+                                      slotProps={{
+                                        htmlInput: {
+                                          min: 0,
+                                        },
+                                      }}
+                                    />
+                                  </Grid>
+                                  <Grid size={6}>
+                                    <TextField
+                                      select
+                                      variant={'outlined'}
+                                      label={'What to count'}
+                                      value={selectedState.jabs.skillHistoryBonusCountMode ?? ''}
+                                      onChange={(e) =>
+                                      {
+                                        const v = e.target.value;
+                                        if (v === '')
+                                        {
+                                          patchStateJabsSkillHistoryBonus({ skillHistoryBonusCountMode: null });
+                                          return;
+                                        }
+                                        patchStateJabsSkillHistoryBonus({
+                                          skillHistoryBonusCountMode: v as SkillHistoryBonusCountMode,
+                                        });
+                                      }}
+                                      size={'small'}
+                                      fullWidth
+                                      slotProps={{
+                                        select: {
+                                          displayEmpty: true,
+                                        },
+                                      }}
+                                    >
+                                      <MenuItem value={''}>
+                                        {'—'}
+                                      </MenuItem>
+                                      {SKILL_HISTORY_COUNT_MODE_OPTIONS.map((option) => (
+                                        <MenuItem
+                                          key={option.value}
+                                          value={option.value}
+                                        >
+                                          {option.label}
+                                        </MenuItem>
+                                      ))}
+                                    </TextField>
+                                  </Grid>
+                                  <Grid size={12}>
+                                    {stateJabsHasSkillHistoryBonus(selectedState.jabs)
+                                      ? (
+                                        <Typography variant={'body2'} color={'text.secondary'}>
+                                          {`+${selectedState.jabs.skillHistoryBonusPctPerCount}% damage per ${
+                                            SKILL_HISTORY_COUNT_MODE_OPTIONS.find((o) =>
+                                            {
+                                              return o.value === selectedState.jabs.skillHistoryBonusCountMode;
+                                            })?.label.toLowerCase() ?? 'entry'
+                                          } in the last ${selectedState.jabs.skillHistoryBonusWindowSeconds}s (${
+                                            skillHistoryTypeFilterOptionForValue(
+                                              selectedState.jabs.skillHistoryBonusTypeId,
+                                              SystemService.skillTypes ?? []
+                                            )?.label ?? 'Any'
+                                          } only).`}
+                                        </Typography>
+                                      )
+                                      : (
+                                        <Typography variant={'body2'} color={'text.secondary'}>
+                                          {'Not configured.'}
+                                        </Typography>
+                                      )}
+                                  </Grid>
+                                </Grid>
+                              </Stack>
+                          </BoardSectionCard>
+
+                            <StatePassiveConditionalPanel
+                              ext={selectedState.passiveConditional}
+                              onChange={patchStatePassiveConditional}
+                              statePickerRows={passiveStatePickerRows}
+                              skillPickerRows={passiveSkillPickerRows}
+                            />
 
                             <BoardSectionCard title={'Walk speed'} collapsible defaultExpanded={false}>
                               <Stack spacing={2} alignItems={'stretch'}>

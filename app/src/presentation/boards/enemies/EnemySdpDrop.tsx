@@ -98,7 +98,7 @@ const EnemySdpDrop = ({
           val
         ) => opt.key === val.key}
         getOptionLabel={(option) => option
-          ? `[${option.key}] ${option.name}`
+          ? `[${option.key}] ${option.identity.name}`
           : ''}
         onChange={(
           _,
@@ -110,7 +110,7 @@ const EnemySdpDrop = ({
           option
         ) => (
           <li {...props} key={option.key} style={{ height: 32 }}>
-            {`[${option.key}] ${option.name}`}
+            {`[${option.key}] ${option.identity.name}`}
           </li>
         )}
       />

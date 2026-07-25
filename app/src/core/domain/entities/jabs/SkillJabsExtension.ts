@@ -29,8 +29,6 @@ class SkillJabsExtension
    */
   public globalCooldownOverride: number | null = null;
 
-  public sizeInPixels: number | null = null;
-
   public degrees: number | null = null;
 
   public rangeRadius: number | null = null;
@@ -175,20 +173,24 @@ class SkillJabsExtension
 
   /**
    * {@code <juiceMotion:NAME>} — preset weapon swing motion (kebab-case). Canonical keys:
-   * {@code arc}, {@code arc-reverse}, {@code bash}, {@code present}, {@code recoil}, {@code spin},
-   * {@code spin-reverse}, {@code stab-forward}. Legacy aliases (e.g. {@code swing-top-down}) are mapped at runtime.
+   * {@code arc}, {@code arc-oscillate}, {@code arc-reverse}, {@code bash}, {@code present}, {@code recoil},
+   * {@code spin}, {@code spin-reverse}, {@code stab-forward}. Legacy aliases (e.g. {@code swing-top-down}) are
+   * mapped at runtime.
    */
   public juiceMotion: string | null = null;
 
   /**
-   * {@code <juiceSpan:N>} — arc span in degrees for {@code arc} / {@code arc-reverse} (plugin default 120; typical 30–300).
+   * {@code <juiceSpan:N>} — arc span in degrees for {@code arc} / {@code arc-reverse} / {@code arc-oscillate}
+   * (plugin default 120; typical 30–300).
    */
   public juiceArcSpanDegrees: number | null = null;
 
   /**
-   * {@code <juiceSpinCount:N>} — full rotations for {@code spin} / {@code spin-reverse} (plugin default 1; clamped 1–8).
+   * {@code <juiceRepeatCount:N>} — number of repeats within the swing (plugin default 1; clamped 1–8). Applies to
+   * every preset: full rotations for {@code spin} / {@code spin-reverse}, alternating sweeps for
+   * {@code arc-oscillate}, replays for the rest.
    */
-  public juiceSpinCount: number | null = null;
+  public juiceRepeatCount: number | null = null;
 
   /**
    * {@code <juiceStabTipDegrees:N>} — tip / bore bearing from Pixi +x at rotation 0, in degrees (signed; see plugin help).

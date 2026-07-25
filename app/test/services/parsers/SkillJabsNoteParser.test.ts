@@ -194,14 +194,14 @@ describe('SkillJabsNoteParser', () =>
       .toMatch(/iframes/i);
   });
 
-  it('round-trips J-ABS-Juice tags (icon, weapon style, motion, span, spin, stab tip, profile gun)', () =>
+  it('round-trips J-ABS-Juice tags (icon, weapon style, motion, span, repeat count, stab tip, profile gun)', () =>
   {
     const note = [
       '<jabsJuiceIcon:97>',
       '<jabsJuiceWeaponStyle:sword_a>',
       '<juiceMotion:arc-reverse>',
       '<juiceSpan:90>',
-      '<juiceSpinCount:3>',
+      '<juiceRepeatCount:3>',
       '<juiceStabTipDegrees:-45>',
       '<juiceProfileGun>',
       '<hp-cost:5>',
@@ -215,7 +215,7 @@ describe('SkillJabsNoteParser', () =>
       .toBe('arc-reverse');
     expect(j.juiceArcSpanDegrees)
       .toBe(90);
-    expect(j.juiceSpinCount)
+    expect(j.juiceRepeatCount)
       .toBe(3);
     expect(j.juiceStabTipDegrees)
       .toBe(-45);
@@ -232,7 +232,7 @@ describe('SkillJabsNoteParser', () =>
     expect(out)
       .toContain('<juiceSpan:90>');
     expect(out)
-      .toContain('<juiceSpinCount:3>');
+      .toContain('<juiceRepeatCount:3>');
     expect(out)
       .toContain('<juiceStabTipDegrees:-45>');
     expect(out)
@@ -245,7 +245,7 @@ describe('SkillJabsNoteParser', () =>
   {
     const stripped = SkillJabsNoteParser.stripSkillTags(
       '<jabsJuiceIcon:12><jabsJuiceWeaponStyle:bow_a><juiceMotion:spin>'
-      + '<juiceSpan:120><juiceSpinCount:2><juiceStabTipDegrees:30><juiceProfileGun>keep'
+      + '<juiceSpan:120><juiceRepeatCount:2><juiceStabTipDegrees:30><juiceProfileGun>keep'
     );
     expect(stripped)
       .toContain('keep');
@@ -254,14 +254,14 @@ describe('SkillJabsNoteParser', () =>
       .toMatch(/juice/i);
   });
 
-  it('write clamps spin count above 8 and drops disabled / blank juice fields', () =>
+  it('write clamps repeat count above 8 and drops disabled / blank juice fields', () =>
   {
     const j = new SkillJabsExtension();
     j.juiceIconIndex = -1;
     j.juiceWeaponStyle = '   ';
     j.juiceMotion = '';
     j.juiceArcSpanDegrees = null;
-    j.juiceSpinCount = 99;
+    j.juiceRepeatCount = 99;
     j.juiceStabTipDegrees = null;
     j.juiceProfileGun = false;
 
@@ -285,7 +285,7 @@ describe('SkillJabsNoteParser', () =>
       .not
       .toMatch(/juiceProfileGun/i);
     expect(out)
-      .toContain('<juiceSpinCount:8>');
+      .toContain('<juiceRepeatCount:8>');
   });
 
   it('write normalizes juiceMotion casing to kebab-case lowercase', () =>

@@ -71,6 +71,7 @@ const MOVE_TYPES = [
 // (e.g. swing-top-down -> arc) at runtime; we surface only the canonical kebab-case keys here.
 const JUICE_MOTIONS = [
   'arc',
+  'arc-oscillate',
   'arc-reverse',
   'bash',
   'present',
@@ -1985,17 +1986,6 @@ function SkillJabsExtensionsPanel(
               </Grid>
               <Grid size={6}>
                 {intField(
-                  'Pixel radius override (optional)',
-                  jabs.sizeInPixels,
-                  'sizeInPixels',
-                  {
-                    helperText:
-                      'Documented tag for a pixel-based reach override. Runtime may still use tile radius until wired — keep tile radius authoritative for now.',
-                  }
-                )}
-              </Grid>
-              <Grid size={6}>
-                {intField(
                   'Arc / sweep (degrees)',
                   jabs.degrees,
                   'degrees',
@@ -2460,8 +2450,8 @@ function SkillJabsExtensionsPanel(
             </Typography>
             <Typography variant={'caption'} color={'text.secondary'}>
               Picks the weapon overlay motion. On healing skills, omitting this keeps the caster-only support squish;
-              any motion here opts the skill into the full strike juice. Span / spin / stab tip below only apply to the
-              relevant presets.
+              any motion here opts the skill into the full strike juice. Span / stab tip below only apply to the
+              relevant presets; repeat count applies to every preset.
             </Typography>
             <Autocomplete<(typeof JUICE_MOTIONS)[number], false, false, false>
               fullWidth
@@ -2487,7 +2477,7 @@ function SkillJabsExtensionsPanel(
                     label={'Motion preset'}
                     placeholder={'Inherit default'}
                     helperText={
-                      'arc / arc-reverse use span; spin / spin-reverse use spin count; bash / recoil / stab-forward use stab tip degrees; present lifts the icon upward on screen.'
+                      'arc / arc-reverse / arc-oscillate use span; bash / recoil / stab-forward use stab tip degrees; present lifts the icon upward on screen; repeat count applies to every preset (rotations for spin, sweeps for arc-oscillate, replays for the rest).'
                     }
                   />
                 )}
@@ -2501,27 +2491,26 @@ function SkillJabsExtensionsPanel(
                   {
                     disabled:
                       jabs.juiceMotion !== 'arc'
-                      && jabs.juiceMotion !== 'arc-reverse',
+                      && jabs.juiceMotion !== 'arc-reverse'
+                      && jabs.juiceMotion !== 'arc-oscillate',
                     helperText:
-                      jabs.juiceMotion === 'arc' || jabs.juiceMotion === 'arc-reverse'
+                      jabs.juiceMotion === 'arc'
+                      || jabs.juiceMotion === 'arc-reverse'
+                      || jabs.juiceMotion === 'arc-oscillate'
                         ? 'Default 120; typical 30–300.'
-                        : 'Only arc / arc-reverse use this.',
+                        : 'Only arc / arc-reverse / arc-oscillate use this.',
                   }
                 )}
               </Grid>
               <Grid size={4}>
                 {intField(
-                  'Spin count (rotations)',
-                  jabs.juiceSpinCount,
-                  'juiceSpinCount',
+                  'Repeat count',
+                  jabs.juiceRepeatCount,
+                  'juiceRepeatCount',
                   {
-                    disabled:
-                      jabs.juiceMotion !== 'spin'
-                      && jabs.juiceMotion !== 'spin-reverse',
                     helperText:
-                      jabs.juiceMotion === 'spin' || jabs.juiceMotion === 'spin-reverse'
-                        ? 'Full rotations; clamped to 1–8.'
-                        : 'Only spin / spin-reverse use this.',
+                      'Number of repeats within the swing (1–8): rotations for spin / spin-reverse, alternating '
+                      + 'sweeps for arc-oscillate, replays for every other preset.',
                   }
                 )}
               </Grid>
@@ -3142,4 +3131,12 @@ function SkillJabsExtensionsPanel(
   );
 }
 
-export { SkillJabsExtensionsPanel };
+/**
+ * Memoized so editing an unrelated field elsewhere on the Skills board (name, description, damage
+ * formula, etc.) doesn't force this large panel through a full render pass- its own props (`jabs`,
+ * `skillPickerOptions`, etc.) stay referentially stable across those edits, so a shallow prop
+ * comparison correctly skips re-rendering it entirely.
+ */
+const MemoizedSkillJabsExtensionsPanel = React.memo(SkillJabsExtensionsPanel);
+
+export { MemoizedSkillJabsExtensionsPanel as SkillJabsExtensionsPanel };

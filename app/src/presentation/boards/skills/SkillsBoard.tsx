@@ -8,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import { FixedSizeList } from 'react-window';
+import { debounce } from 'lodash';
 import {
   Alert,
   Autocomplete,
@@ -80,6 +81,8 @@ import {
   UsableItemDamageSection
 } from '@presentation/components/usableItem/UsableItemDamageSection.tsx';
 import { type IdLabelRow, UsableEffectsEditor } from '@presentation/components/usableItem/UsableEffectsEditor.tsx';
+import { ApplyStateEditor } from '@presentation/components/usableItem/ApplyStateEditor.tsx';
+import { type RPG_ApplyStateRow } from '@services/parsers/ApplyStateParser.ts';
 import { SystemService } from '@services/SystemService.ts';
 import { SkillJabsExtensionsPanel } from '@presentation/boards/skills/SkillJabsExtensionsPanel.tsx';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
@@ -147,6 +150,17 @@ const SkillsBoard = () =>
     }
     return rows;
   }, [ states ]);
+
+  /**
+   * States available as apply-state targets (id and display name); unlike {@link stateEffectPickerRows}, this
+   * excludes the "0: Normal attack states" sentinel since applyState always targets a real state.
+   *
+   * @returns Rows for the apply-state editor's state picker.
+   */
+  const applyStatePickerRows = useMemo((): IdLabelRow[] =>
+  {
+    return stateEffectPickerRows.filter((row) => row.id > 0);
+  }, [ stateEffectPickerRows ]);
 
   /**
    * Skills available as effect or extend targets (id and display name).
@@ -239,7 +253,114 @@ const SkillsBoard = () =>
   };
 
   /**
-   * Clones the given skill into selection and list slot, and enables save.
+   * The most recent not-yet-committed edit (if any), keyed by the list index it belongs to.
+   *
+   * `skills` (2600+ entries) gets a brand-new array reference every time it's written to, which
+   * cascades into a full context `byId` rebuild, several skill-picker {@link useMemo}s, and the
+   * cross-database search index in {@link GlobalBottomBar} — cheap for a few dozen classes, but
+   * visibly laggy per keystroke at this list size. This ref plus {@link commitPendingSkillEdit} let
+   * that expensive commit be debounced while {@link selectedSkill} (what the fields actually read
+   * from) still updates every keystroke, so typing itself stays instant.
+   */
+  const pendingSkillEditRef = useRef<{ index: number, skill: RPG_SkillDomainModel } | null>(null);
+
+  /**
+   * Writes the pending edit (if any) into {@code skills} immediately and clears it.
+   *
+   * Uses the {@code setSkills} updater form so it's correct regardless of whether this runs from the
+   * debounce timer or from an explicit flush- it never depends on a possibly-stale closure over
+   * {@code skills}.
+   *
+   * @returns {void}
+   */
+  const commitPendingSkillEdit = useCallback(
+    () =>
+    {
+      const pending = pendingSkillEditRef.current;
+      if (!pending)
+      {
+        return;
+      }
+
+      pendingSkillEditRef.current = null;
+
+      setSkills((prevSkills) =>
+      {
+        if (!prevSkills)
+        {
+          return prevSkills;
+        }
+        return prevSkills.with(pending.index, pending.skill);
+      });
+    },
+    [ setSkills ]
+  );
+
+  /**
+   * Debounced trailing-edge wrapper around {@link commitPendingSkillEdit}. Stable across renders
+   * (memoized on the stable {@link commitPendingSkillEdit}) so rapid keystrokes keep resetting the
+   * same timer instead of each spawning an independent one.
+   */
+  const debouncedCommitPendingSkillEdit = useMemo(
+    () => debounce(commitPendingSkillEdit, 300),
+    [ commitPendingSkillEdit ]
+  );
+
+  /**
+   * Cancels any in-flight debounce timer and synchronously flushes a pending edit into {@code skills}.
+   *
+   * Called anywhere the app is about to read {@code skills} or unmount this board- switching the
+   * selected skill and component teardown- so an edit is never silently lost to the debounce window.
+   * Callers that need the flushed array *immediately* (e.g. Save, which must not read a stale `skills`
+   * closure while the `setSkills` update from this flush is still pending) should use
+   * {@link skillsWithPendingEditApplied} instead, since `setSkills` is asynchronous.
+   *
+   * @returns {void}
+   */
+  const flushPendingSkillEdit = useCallback(
+    () =>
+    {
+      debouncedCommitPendingSkillEdit.cancel();
+      commitPendingSkillEdit();
+    },
+    [ debouncedCommitPendingSkillEdit, commitPendingSkillEdit ]
+  );
+
+  /**
+   * Cancels any in-flight debounce timer and synchronously returns what {@code skills} should be,
+   * including any not-yet-committed edit- without waiting on React to apply a `setSkills` update.
+   * Also pushes that same array into state so the two stay in sync going forward.
+   *
+   * @returns The up-to-date skills array, safe to use immediately (e.g. passed straight to `save`).
+   */
+  const skillsWithPendingEditApplied = useCallback(
+    (): RPG_SkillDomainModel[] =>
+    {
+      debouncedCommitPendingSkillEdit.cancel();
+
+      const pending = pendingSkillEditRef.current;
+      if (!pending)
+      {
+        return skills;
+      }
+
+      pendingSkillEditRef.current = null;
+      const merged = skills.with(pending.index, pending.skill);
+      setSkills(() => merged);
+      return merged;
+    },
+    [ debouncedCommitPendingSkillEdit, skills, setSkills ]
+  );
+
+  useEffect(
+    () => () => flushPendingSkillEdit(),
+    [ flushPendingSkillEdit ]
+  );
+
+  /**
+   * Clones the given skill into selection immediately, and schedules the (expensive, array-wide)
+   * list-slot write to be debounced so rapid typing doesn't re-render everything downstream of
+   * {@code skills} on every keystroke.
    *
    * @param updatedSkill Domain model after in-place edits (typically current selection).
    * @returns {void}
@@ -255,16 +376,15 @@ const SkillsBoard = () =>
       setSelectedSkill(clonedSkill);
       setCanSave(true);
 
-      setSkills((prevSkills) =>
+      if (selectedSkillIndex < 0)
       {
-        if (!prevSkills || selectedSkillIndex < 0)
-        {
-          return prevSkills;
-        }
-        return prevSkills.with(selectedSkillIndex, clonedSkill);
-      });
+        return;
+      }
+
+      pendingSkillEditRef.current = { index: selectedSkillIndex, skill: clonedSkill };
+      debouncedCommitPendingSkillEdit();
     },
-    [ selectedSkillIndex, setSkills ]
+    [ selectedSkillIndex, debouncedCommitPendingSkillEdit ]
   );
 
   /**
@@ -308,6 +428,84 @@ const SkillsBoard = () =>
       };
     });
   }, [ skillEffectPickerRows, selectedSkill ]);
+
+  /**
+   * Selected rows for the {@code toggleOnExecuteStateIds} multi-select, resolved to display labels.
+   *
+   * @returns Picker rows for the currently selected skill's toggle states.
+   */
+  const selectedToggleOnExecutePickerValues = useMemo((): IdLabelRow[] =>
+  {
+    if (selectedSkill === null)
+    {
+      return [];
+    }
+    const byId = new Map(applyStatePickerRows.map((o) => [ o.id, o ]));
+    return selectedSkill.toggleOnExecuteStateIds.map((id) =>
+    {
+      const row = byId.get(id);
+      if (row !== undefined)
+      {
+        return row;
+      }
+      return {
+        id,
+        label: `${id}: (unset)`,
+      };
+    });
+  }, [ applyStatePickerRows, selectedSkill ]);
+
+  /**
+   * Selected rows for the {@code passiveStateIds} multi-select, resolved to display labels.
+   *
+   * @returns Picker rows for the currently selected skill's granted passive states.
+   */
+  const selectedPassiveStatePickerValues = useMemo((): IdLabelRow[] =>
+  {
+    if (selectedSkill === null)
+    {
+      return [];
+    }
+    const byId = new Map(applyStatePickerRows.map((o) => [ o.id, o ]));
+    return selectedSkill.passiveStateIds.map((id) =>
+    {
+      const row = byId.get(id);
+      if (row !== undefined)
+      {
+        return row;
+      }
+      return {
+        id,
+        label: `${id}: (unset)`,
+      };
+    });
+  }, [ applyStatePickerRows, selectedSkill ]);
+
+  /**
+   * Selected rows for the {@code uniquePassiveStateIds} multi-select, resolved to display labels.
+   *
+   * @returns Picker rows for the currently selected skill's granted unique passive states.
+   */
+  const selectedUniquePassiveStatePickerValues = useMemo((): IdLabelRow[] =>
+  {
+    if (selectedSkill === null)
+    {
+      return [];
+    }
+    const byId = new Map(applyStatePickerRows.map((o) => [ o.id, o ]));
+    return selectedSkill.uniquePassiveStateIds.map((id) =>
+    {
+      const row = byId.get(id);
+      if (row !== undefined)
+      {
+        return row;
+      }
+      return {
+        id,
+        label: `${id}: (unset)`,
+      };
+    });
+  }, [ applyStatePickerRows, selectedSkill ]);
 
   const selectedSkillIdForExtendReverse =
     selectedSkill === null
@@ -376,6 +574,9 @@ const SkillsBoard = () =>
     keepListFocus: boolean = true
   ) =>
   {
+    // commit any pending edit for the skill we're switching away from before losing focus on it.
+    flushPendingSkillEdit();
+
     setSelectedSkillIndex(index);
 
     if (skills.length > 0)
@@ -396,8 +597,18 @@ const SkillsBoard = () =>
   const updateUrlRef = useRef(updateUrl);
   updateUrlRef.current = updateUrl;
 
+  const selectedSkillRef = useRef(selectedSkill);
+  selectedSkillRef.current = selectedSkill;
+
   /**
    * Rebinds {@code selectedSkill} when {@code skills} is replaced (reload / project switch) so the editor matches disk.
+   *
+   * Deliberately reads {@link selectedSkillRef} instead of depending on {@code selectedSkill} directly-
+   * {@code updateSkill} debounces its (expensive, array-wide) write to {@code skills}, so there's a window
+   * after every keystroke where {@code selectedSkill} has already moved on but {@code skills} hasn't caught
+   * up yet. Depending on {@code selectedSkill} here would re-run this effect on every keystroke, find the
+   * *stale* pre-edit entry still sitting in {@code skills}, and snap the field's value back to it until the
+   * debounce commits- visible as the edit "backpedalling" while typing.
    */
   useEffect(() =>
   {
@@ -408,11 +619,11 @@ const SkillsBoard = () =>
     }
 
     const params = new URLSearchParams(window.location.search);
-    if (selectedSkill === null && params.get('skillId')) return;
+    if (selectedSkillRef.current === null && params.get('skillId')) return;
 
     const idx = Math.min(Math.max(0, selectedSkillIndex), skills.length - 1);
     let next: RPG_SkillDomainModel = skills[idx];
-    const priorId = selectedSkill?.id;
+    const priorId = selectedSkillRef.current?.id;
     if (typeof priorId === 'number' && priorId >= 1)
     {
       const found = skillsById.get(priorId);
@@ -422,12 +633,12 @@ const SkillsBoard = () =>
       }
     }
 
-    if (next !== selectedSkill)
+    if (next !== selectedSkillRef.current)
     {
       setSelectedSkill(next);
       updateUrlRef.current(next);
     }
-  }, [ skills, selectedSkillIndex, selectedSkill ]);
+  }, [ skills, selectedSkillIndex ]);
 
   useEffect(() =>
   {
@@ -606,7 +817,10 @@ const SkillsBoard = () =>
    */
   const handleSaveButtonOnClickEvent = async () =>
   {
-    await save(skills);
+    // resolve any edit still sitting in the debounce window synchronously so Save never persists
+    // stale data (setSkills alone wouldn't be visible to the `skills` read below in time).
+    const skillsToSave = skillsWithPendingEditApplied();
+    await save(skillsToSave);
     handleSnack('Skills data has been saved successfully.');
   };
 
@@ -1481,6 +1695,59 @@ const SkillsBoard = () =>
     updateSkill(selectedSkill);
   };
 
+  const handleApplyStatesChange = (next: RPG_ApplyStateRow[]) =>
+  {
+    if (!selectedSkill)
+    {
+      return;
+    }
+
+    selectedSkill.applyStates = next;
+    updateSkill(selectedSkill);
+  };
+
+  const handleToggleOnExecuteStateIdsChange = (
+    _event: SyntheticEvent,
+    options: IdLabelRow[]
+  ) =>
+  {
+    if (!selectedSkill)
+    {
+      return;
+    }
+
+    selectedSkill.toggleOnExecuteStateIds = options.map((o) => o.id);
+    updateSkill(selectedSkill);
+  };
+
+  const handlePassiveStateIdsChange = (
+    _event: SyntheticEvent,
+    options: IdLabelRow[]
+  ) =>
+  {
+    if (!selectedSkill)
+    {
+      return;
+    }
+
+    selectedSkill.passiveStateIds = options.map((o) => o.id);
+    updateSkill(selectedSkill);
+  };
+
+  const handleUniquePassiveStateIdsChange = (
+    _event: SyntheticEvent,
+    options: IdLabelRow[]
+  ) =>
+  {
+    if (!selectedSkill)
+    {
+      return;
+    }
+
+    selectedSkill.uniquePassiveStateIds = options.map((o) => o.id);
+    updateSkill(selectedSkill);
+  };
+
   /**
    * Persists extend-base skill ids from the multi-select {@link Autocomplete}.
    *
@@ -1553,36 +1820,52 @@ const SkillsBoard = () =>
   /**
    * Replaces the whole JABS extension from {@link SkillJabsExtensionsPanel}.
    *
+   * Reads {@link selectedSkillRef} (not {@code selectedSkill} directly) and is wrapped in
+   * {@code useCallback} with a stable dependency list so this stays referentially stable across
+   * keystrokes on unrelated fields- required for {@code SkillJabsExtensionsPanel}'s {@code React.memo}
+   * to actually skip re-rendering that (large) panel instead of getting a "new" callback prop every
+   * render and re-rendering anyway.
+   *
    * @param next Cloned extension snapshot from the panel.
    * @returns {void}
    */
-  const handleJabsChange = (next: SkillJabsExtension) =>
-  {
-    if (!selectedSkill)
+  const handleJabsChange = useCallback(
+    (next: SkillJabsExtension) =>
     {
-      return;
-    }
+      const current = selectedSkillRef.current;
+      if (!current)
+      {
+        return;
+      }
 
-    selectedSkill.jabs = next;
-    updateSkill(selectedSkill);
-  };
+      current.jabs = next;
+      updateSkill(current);
+    },
+    [ updateSkill ]
+  );
 
   /**
    * Merges a partial JABS update without replacing unrelated fields.
    *
+   * Same stability rationale as {@link handleJabsChange}.
+   *
    * @param partial Subset of {@link SkillJabsExtension} fields to apply.
    * @returns {void}
    */
-  const patchSkillJabs = (partial: Partial<SkillJabsExtension>): void =>
-  {
-    if (!selectedSkill)
+  const patchSkillJabs = useCallback(
+    (partial: Partial<SkillJabsExtension>): void =>
     {
-      return;
-    }
+      const current = selectedSkillRef.current;
+      if (!current)
+      {
+        return;
+      }
 
-    selectedSkill.jabs = selectedSkill.jabs.clone(partial);
-    updateSkill(selectedSkill);
-  };
+      current.jabs = current.jabs.clone(partial);
+      updateSkill(current);
+    },
+    [ updateSkill ]
+  );
 
   /**
    * Maps a skill array index to a virtualized sidebar row (spacer for gaps/headers).
@@ -2398,6 +2681,101 @@ const SkillsBoard = () =>
                                 skillRows={skillEffectPickerRows}
                                 commonEventRows={commonEventPickerRows}
                               />
+                          </BoardSectionCard>
+
+                            <BoardSectionCard title={'Apply state (on hit)'} collapsible defaultExpanded={false}>
+                              <ApplyStateEditor
+                                value={selectedSkill.applyStates}
+                                onChange={handleApplyStatesChange}
+                                stateRows={applyStatePickerRows}
+                              />
+                          </BoardSectionCard>
+
+                            <BoardSectionCard title={'Toggle state (stance)'} collapsible defaultExpanded={false}>
+                              <Stack spacing={1.5}>
+                                <Typography variant={'caption'} color={'text.secondary'}>
+                                  Executing this skill toggles each selected state on the caster: removes it if
+                                  already present, adds it if absent. Fires once at press-time, regardless of hit —
+                                  intended for stance skills that flip on/off with the same skill.
+                                </Typography>
+                                <Autocomplete<IdLabelRow, true, false, false>
+                                  multiple
+                                  size={'small'}
+                                  options={applyStatePickerRows}
+                                  getOptionLabel={(o) => o.label}
+                                  isOptionEqualToValue={(
+                                    a,
+                                    b
+                                  ) => a.id === b.id}
+                                  value={selectedToggleOnExecutePickerValues}
+                                  onChange={handleToggleOnExecuteStateIdsChange}
+                                  sx={{ width: '100%' }}
+                                  renderInput={(params) =>
+                                    (
+                                      <TextField
+                                        {...params}
+                                        variant={'outlined'}
+                                        label={'Toggle states'}
+                                        placeholder={'Search states…'}
+                                      />
+                                    )}
+                                />
+                              </Stack>
+                          </BoardSectionCard>
+
+                            <BoardSectionCard title={'Passive states (always granted)'} collapsible defaultExpanded={false}>
+                              <Stack spacing={1.5}>
+                                <Typography variant={'caption'} color={'text.secondary'}>
+                                  States granted for as long as the battler knows this skill — learned, not
+                                  necessarily equipped or used. "Unique" states apply once even if multiple known
+                                  sources (skills, equips, states, actor/class data) declare the same state id;
+                                  plain states stack once per declaring source.
+                                </Typography>
+                                <Autocomplete<IdLabelRow, true, false, false>
+                                  multiple
+                                  size={'small'}
+                                  options={applyStatePickerRows}
+                                  getOptionLabel={(o) => o.label}
+                                  isOptionEqualToValue={(
+                                    a,
+                                    b
+                                  ) => a.id === b.id}
+                                  value={selectedPassiveStatePickerValues}
+                                  onChange={handlePassiveStateIdsChange}
+                                  sx={{ width: '100%' }}
+                                  renderInput={(params) =>
+                                    (
+                                      <TextField
+                                        {...params}
+                                        variant={'outlined'}
+                                        label={'Passive states'}
+                                        placeholder={'Search states…'}
+                                      />
+                                    )}
+                                />
+                                <Autocomplete<IdLabelRow, true, false, false>
+                                  multiple
+                                  size={'small'}
+                                  options={applyStatePickerRows}
+                                  getOptionLabel={(o) => o.label}
+                                  isOptionEqualToValue={(
+                                    a,
+                                    b
+                                  ) => a.id === b.id}
+                                  value={selectedUniquePassiveStatePickerValues}
+                                  onChange={handleUniquePassiveStateIdsChange}
+                                  sx={{ width: '100%' }}
+                                  renderInput={(params) =>
+                                    (
+                                      <TextField
+                                        {...params}
+                                        variant={'outlined'}
+                                        label={'Passive states (unique)'}
+                                        placeholder={'Search states…'}
+                                      />
+                                    )}
+                                />
+                              </Stack>
                           </BoardSectionCard>
 
                             <BoardSectionCard title={'Skill extend'} collapsible defaultExpanded={false}>

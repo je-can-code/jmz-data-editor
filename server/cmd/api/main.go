@@ -72,6 +72,9 @@ func main() {
 
 	mux.HandleFunc("GET /api/config/jabs", api.Load[plugins.JabsConfiguration]("data/config.jabs.json"))
 	mux.HandleFunc("POST /api/config/jabs", api.Save[plugins.JabsConfiguration]("data/config.jabs.json"))
+
+	mux.HandleFunc("GET /api/config/level", api.Load[plugins.LevelConfiguration]("data/config.level.json"))
+	mux.HandleFunc("POST /api/config/level", api.Save[plugins.LevelConfiguration]("data/config.level.json"))
 	//endregion plugin config endpoints
 
 	fmt.Println("Server running on http://localhost:8080")

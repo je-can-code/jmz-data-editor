@@ -238,6 +238,34 @@ const knownBaseParams = (): KnownParameter[] =>
   ];
 };
 
+/**
+ * The 8 base params plus MTP ("Max Tech"), each tagged with the `GrowthCurve` suffix instead of the
+ * default `BuffPlus` — dedicated to the Classes board's per-level growth-curve formulas (persisted via
+ * `<paramGrowthCurve:[formula]>` note tags), kept separate from {@link knownBaseParams} so this doesn't
+ * collide with the Enemies board's unrelated `BuffPlus` usage of the same 8 base params.
+ *
+ * MTP has no `params[paramId]` array in Classes.json (it's a J-Base/J-NaturalGrowth note-tag-only
+ * concept), so its `longParamId` reuses the existing "long param" slot (30) rather than a `params[]`
+ * index — callers must not assume `param.id` indexes into `RPG_ClassDomainModel.params` for this entry.
+ */
+const knownGrowthCurveParams = (): KnownParameter[] =>
+{
+  const [ mhp, mmp, ...restBaseParams ] = knownBaseParams().map((param) => ({ ...param, regex: 'GrowthCurve' }));
+
+  return [
+    mhp,
+    mmp,
+    {
+      id: 8,
+      name: maxTpName(),
+      key: 'mtp',
+      longParamId: 30,
+      regex: 'GrowthCurve'
+    },
+    ...restBaseParams,
+  ];
+};
+
 const knownExParams = (): KnownParameter[] =>
 {
   return [
@@ -635,6 +663,7 @@ export {
   fromSParamIdToName,
   fromLongParameterIdToName,
   knownBaseParams,
+  knownGrowthCurveParams,
   knownExParams,
   knownSpParams,
   knownRewardParams,

@@ -1,5 +1,6 @@
 import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
 import { MaxTpParser } from '@services/parsers/MaxTpParser.ts';
+import { StealParser } from '@services/parsers/StealParser.ts';
 import RPG_Weapon = Rmmz.Implementations.RPG_Weapon;
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
@@ -16,6 +17,15 @@ class RPG_WeaponDomainModel
   public maxTp: number;
   public etypeId: number;
 
+  /** J-Resources-ABS {@code <lst:N>} — integer percent life steal; signed. */
+  public lst: number;
+
+  /** J-Resources-ABS {@code <mst:N>} — integer percent magi steal; signed. */
+  public mst: number;
+
+  /** J-Resources-ABS {@code <tst:N>} — integer percent tech steal; signed. */
+  public tst: number;
+
   constructor(rmmz: RPG_Weapon)
   {
     super(rmmz);
@@ -28,6 +38,11 @@ class RPG_WeaponDomainModel
     this.traits = rmmz.traits.map((t) => ({ ...t }));
     this.maxTp = MaxTpParser.read(rmmz.note);
     this.etypeId = rmmz.etypeId;
+
+    const steal = StealParser.read(rmmz.note);
+    this.lst = steal.lst;
+    this.mst = steal.mst;
+    this.tst = steal.tst;
   }
 
   public toRmmz(): RPG_Weapon
@@ -50,7 +65,13 @@ class RPG_WeaponDomainModel
 
   protected syncNote(): string
   {
-    return MaxTpParser.write(this.note, this.maxTp);
+    let n = MaxTpParser.write(this.note, this.maxTp);
+    n = StealParser.write(n, {
+      lst: this.lst,
+      mst: this.mst,
+      tst: this.tst,
+    });
+    return n;
   }
 }
 

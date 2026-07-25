@@ -55,18 +55,32 @@ export function normalizeSdpRarityFromDisk(raw: number): number
 }
 
 /**
- * Applies {@link normalizeSdpRarityFromDisk} to every panel's `rarity`.
+ * Applies {@link normalizeSdpRarityFromDisk} to every panel's progression rarity.
  *
  * @param panels Loaded `sdps` array.
  * @returns Updated panel list.
+ * @deprecated Prefer {@link normalizeSdpPanelList} from sdpPanelShape.ts.
  */
-export function normalizeSdpPanelList<T extends { rarity: number }>(panels: T[]): T[]
+export function normalizeSdpPanelList<T extends { progression?: { rarity: number }, rarity?: number }>(panels: T[]): T[]
 {
   return panels.map(panel =>
-    ({
+  {
+    if (panel.progression)
+    {
+      return {
+        ...panel,
+        progression: {
+          ...panel.progression,
+          rarity: normalizeSdpRarityFromDisk(panel.progression.rarity),
+        },
+      };
+    }
+
+    return {
       ...panel,
-      rarity: normalizeSdpRarityFromDisk(panel.rarity),
-    }));
+      rarity: normalizeSdpRarityFromDisk(panel.rarity ?? 0),
+    };
+  });
 }
 
 /**

@@ -3,6 +3,7 @@ import RPG_Trait = Rmmz.Data.RPG_Trait;
 import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import { LevelParser } from '@services/parsers/LevelParser.ts';
 import { SdpParser } from '@services/parsers/SdpParser.ts';
+import { ApParser } from '@services/parsers/ApParser.ts';
 import { ExtraDropManager } from '@services/parsers/ExtraDropParser.ts';
 import { JabsDataParser } from '@services/parsers/JabsDataParser.ts';
 import { MaxTpParser } from '@services/parsers/MaxTpParser.ts';
@@ -33,6 +34,7 @@ class RPG_EnemyDomainModel
   public level: number;
   public maxTp: number;
   public sdpPoints: number;
+  public apReward: number;
   public extraDrops: RPG_DropItem[];
   public jabsAiTraits: JabsAiTraits;
   public jabsBattlerRoles: JabsBattlerRoles;
@@ -79,6 +81,7 @@ class RPG_EnemyDomainModel
     });
     this.maxTp = MaxTpParser.read(this.note);
     this.sdpPoints = SdpParser.readPoints(this.note) ?? 0;
+    this.apReward = ApParser.readAp(this.note) ?? 0;
 
     const parsedDrop = SdpParser.readDrop(this.note);
     this.sdpDrop = new EnemySdpDropModel(
@@ -148,6 +151,15 @@ class RPG_EnemyDomainModel
     else
     {
       updatedNote = SdpParser.deletePoints(updatedNote);
+    }
+
+    if (this.apReward > 0)
+    {
+      updatedNote = ApParser.writeAp(updatedNote, this.apReward);
+    }
+    else
+    {
+      updatedNote = ApParser.deleteAp(updatedNote);
     }
 
     if (this.sdpDrop.key.trim() !== '')

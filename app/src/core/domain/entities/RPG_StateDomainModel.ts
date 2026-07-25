@@ -8,7 +8,9 @@ import { StateProfExtension } from '@core/domain/entities/state/StateProfExtensi
 import { StateResourcesExtension } from '@core/domain/entities/state/StateResourcesExtension.ts';
 import { StateSdpExtension } from '@core/domain/entities/state/StateSdpExtension.ts';
 import { StatePassiveAbsExtension } from '@core/domain/entities/state/StatePassiveAbsExtension.ts';
+import { StatePassiveConditionalExtension } from '@core/domain/entities/state/StatePassiveConditionalExtension.ts';
 import { StateSksExtension } from '@core/domain/entities/state/StateSksExtension.ts';
+import { StateStealExtension } from '@core/domain/entities/state/StateStealExtension.ts';
 import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 import RPG_State = Rmmz.Implementations.RPG_State;
 import RPG_Trait = Rmmz.Data.RPG_Trait;
@@ -140,7 +142,11 @@ class RPG_StateDomainModel
 
   public sks: StateSksExtension = new StateSksExtension();
 
+  public steal: StateStealExtension = new StateStealExtension();
+
   public passiveAbs: StatePassiveAbsExtension = new StatePassiveAbsExtension();
+
+  public passiveConditional: StatePassiveConditionalExtension = new StatePassiveConditionalExtension();
 
   constructor(rmmz: RPG_State)
   {
@@ -176,7 +182,9 @@ class RPG_StateDomainModel
     this.resources = StateResourcesExtension.fromStateNote(note);
     this.sdp = StateSdpExtension.fromStateNote(note);
     this.sks = StateSksExtension.fromStateNote(note);
+    this.steal = StateStealExtension.fromStateNote(note);
     this.passiveAbs = StatePassiveAbsExtension.fromStateNote(note);
+    this.passiveConditional = StatePassiveConditionalExtension.fromStateNote(note);
   }
 
   /**
@@ -228,7 +236,9 @@ class RPG_StateDomainModel
     n = this.resources.applyToNote(n);
     n = this.sdp.applyToNote(n);
     n = this.sks.applyToNote(n);
+    n = this.steal.applyToNote(n);
     n = this.passiveAbs.applyToNote(n);
+    n = this.passiveConditional.applyToNote(n);
     n = this.jabs.applyToNote(n);
     return NoteNormalizer.normalize(n);
   }

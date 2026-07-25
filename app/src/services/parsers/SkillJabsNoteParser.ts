@@ -23,8 +23,6 @@ class SkillJabsNoteParser
 
   static readonly #RE_GLOBAL_COOLDOWN_FRAMES = /<gcd:[ ]?(\d+)>/gi;
 
-  static readonly #RE_SIZE = /<size:[ ]?(\d+)>/gi;
-
   static readonly #RE_DEGREES = /<degrees:[ ]?(\d+)>/gi;
 
   static readonly #RE_RADIUS = /<radius:[ ]?((0|([1-9][0-9]*))(\.[0-9]+)?)>/gi;
@@ -148,7 +146,7 @@ class SkillJabsNoteParser
 
   static readonly #RE_JUICE_SPAN = /<juiceSpan:[ ]?(\d+)>/gi;
 
-  static readonly #RE_JUICE_SPIN_COUNT = /<juiceSpinCount:[ ]?(\d+)>/gi;
+  static readonly #RE_JUICE_REPEAT_COUNT = /<juiceRepeatCount:[ ]?(\d+)>/gi;
 
   static readonly #RE_JUICE_STAB_TIP_DEGREES = /<juiceStabTipDegrees:[ ]?(-?\d+)>/gi;
 
@@ -163,7 +161,6 @@ class SkillJabsNoteParser
     SkillJabsNoteParser.#RE_UNIQUE_COOLDOWN,
     SkillJabsNoteParser.#RE_OGCD,
     SkillJabsNoteParser.#RE_GLOBAL_COOLDOWN_FRAMES,
-    SkillJabsNoteParser.#RE_SIZE,
     SkillJabsNoteParser.#RE_DEGREES,
     SkillJabsNoteParser.#RE_RADIUS,
     SkillJabsNoteParser.#RE_HITBOX,
@@ -224,7 +221,7 @@ class SkillJabsNoteParser
     SkillJabsNoteParser.#RE_JUICE_WEAPON_STYLE,
     SkillJabsNoteParser.#RE_JUICE_MOTION,
     SkillJabsNoteParser.#RE_JUICE_SPAN,
-    SkillJabsNoteParser.#RE_JUICE_SPIN_COUNT,
+    SkillJabsNoteParser.#RE_JUICE_REPEAT_COUNT,
     SkillJabsNoteParser.#RE_JUICE_STAB_TIP_DEGREES,
     SkillJabsNoteParser.#RE_JUICE_PROFILE_GUN,
   ];
@@ -266,7 +263,6 @@ class SkillJabsNoteParser
       SkillJabsNoteParser.#RE_GLOBAL_COOLDOWN_FRAMES
     );
 
-    ext.sizeInPixels = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_SIZE);
     ext.degrees = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_DEGREES);
     ext.rangeRadius = SkillJabsNoteParser.#readFloat(note, SkillJabsNoteParser.#RE_RADIUS);
     ext.hitboxShape = SkillJabsNoteParser.#readCapture(note, SkillJabsNoteParser.#RE_HITBOX);
@@ -409,7 +405,7 @@ class SkillJabsNoteParser
     ext.juiceWeaponStyle = SkillJabsNoteParser.#readCapture(note, SkillJabsNoteParser.#RE_JUICE_WEAPON_STYLE);
     ext.juiceMotion = SkillJabsNoteParser.#readCapture(note, SkillJabsNoteParser.#RE_JUICE_MOTION);
     ext.juiceArcSpanDegrees = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_JUICE_SPAN);
-    ext.juiceSpinCount = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_JUICE_SPIN_COUNT);
+    ext.juiceRepeatCount = SkillJabsNoteParser.#readNonNegInt(note, SkillJabsNoteParser.#RE_JUICE_REPEAT_COUNT);
     // stab-tip degrees is signed: arc 0 points at Pixi +x; negative bearings rotate the bore clockwise.
     ext.juiceStabTipDegrees = SkillJabsNoteParser.#readInt(note, SkillJabsNoteParser.#RE_JUICE_STAB_TIP_DEGREES);
     ext.juiceProfileGun = SkillJabsNoteParser.#testAny(note, SkillJabsNoteParser.#RE_JUICE_PROFILE_GUN);
@@ -460,10 +456,6 @@ class SkillJabsNoteParser
       parts.push(`<gcd:${Math.trunc(ext.globalCooldownOverride)}>`);
     }
 
-    if (ext.sizeInPixels !== null)
-    {
-      parts.push(`<size:${Math.trunc(ext.sizeInPixels)}>`);
-    }
     if (ext.degrees !== null)
     {
       parts.push(`<degrees:${Math.trunc(ext.degrees)}>`);
@@ -783,19 +775,19 @@ class SkillJabsNoteParser
     {
       parts.push(`<juiceSpan:${Math.trunc(ext.juiceArcSpanDegrees)}>`);
     }
-    if (ext.juiceSpinCount !== null && ext.juiceSpinCount >= 1)
+    if (ext.juiceRepeatCount !== null && ext.juiceRepeatCount >= 1)
     {
       // plugin clamps 1–8 at runtime; mirror the upper bound so saved notes never read as "unsafe".
-      let spin = Math.trunc(ext.juiceSpinCount);
-      if (spin < 1)
+      let repeatCount = Math.trunc(ext.juiceRepeatCount);
+      if (repeatCount < 1)
       {
-        spin = 1;
+        repeatCount = 1;
       }
-      if (spin > 8)
+      if (repeatCount > 8)
       {
-        spin = 8;
+        repeatCount = 8;
       }
-      parts.push(`<juiceSpinCount:${spin}>`);
+      parts.push(`<juiceRepeatCount:${repeatCount}>`);
     }
     if (ext.juiceStabTipDegrees !== null)
     {

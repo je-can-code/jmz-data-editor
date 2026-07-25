@@ -52,6 +52,8 @@ function apiPathnameForBasename(baseName: string): string | null
       return '/api/config/sdp';
     case 'config.jabs.json':
       return '/api/config/jabs';
+    case 'config.level.json':
+      return '/api/config/level';
     default:
       break;
   }

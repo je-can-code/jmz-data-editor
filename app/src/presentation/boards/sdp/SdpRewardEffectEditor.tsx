@@ -64,7 +64,7 @@ function SdpRewardEffectEditor(props: SdpRewardEffectEditorProps)
             fullWidth
             disabled={disabled}
             options={sdps}
-            getOptionLabel={(opt) => `[${opt.key}] ${opt.name}`}
+            getOptionLabel={(opt) => `[${opt.key}] ${opt.identity.name}`}
             isOptionEqualToValue={(a, b) => a.key === b.key}
             value={sdps.find(s => s.key === parsed.key) ?? null}
             onChange={(_e, val) =>

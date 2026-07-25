@@ -1,4 +1,7 @@
-import type { StateJabsExtension } from '@core/domain/entities/jabs/StateJabsExtension.ts';
+import type {
+  SkillHistoryBonusCountMode,
+  StateJabsExtension,
+} from '@core/domain/entities/jabs/StateJabsExtension.ts';
 import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 
 /**
@@ -21,6 +24,12 @@ class StateJabsNoteParser
   static readonly #RE_AGGRO_OUT = /<aggroOutAmp:[ ]?((0|([1-9][0-9]*))(\.[0-9]+)?)>/gi;
 
   static readonly #RE_AGGRO_IN = /<aggroInAmp:[ ]?((0|([1-9][0-9]*))(\.[0-9]+)?)>/gi;
+
+  static readonly #RE_STATE_DURATION = /<stateDuration:[ ]?(\d+)>/gi;
+
+  static readonly #RE_STATE_DURATION_SEC = /<stateDurationSec:[ ]?(\d+)>/gi;
+
+  static readonly #RE_INDEFINITE_STATE = /<indefiniteState>/gi;
 
   static readonly #RE_STATE_DURATION_FLAT = /<stateDurationFlat:[ ]?([-+]?\d+)>/gi;
 
@@ -55,6 +64,8 @@ class StateJabsNoteParser
   static readonly #RE_TIMING_FCD_RATE = /<fastCooldownRate:\[([+\-*/ ().\w]+)]>/gi;
 
   static readonly #RE_GAP_CLOSE_TARGET = /<gapCloseTarget>/gi;
+
+  static readonly #RE_SKILL_HISTORY_BONUS = /<skillHistoryBonus:[ ]?(\[\d+,[ ]?\d+,[ ]?\d+,[ ]?[a-z_]+])>/gi;
 
   static readonly #RE_STACK_TYPE = /<stackType:[ ]?(refresh|extend|stack)>/gi;
 
@@ -116,6 +127,9 @@ class StateJabsNoteParser
     StateJabsNoteParser.#RE_SLIP_HP_FORMULA,
     StateJabsNoteParser.#RE_SLIP_MP_FORMULA,
     StateJabsNoteParser.#RE_SLIP_TP_FORMULA,
+    StateJabsNoteParser.#RE_STATE_DURATION,
+    StateJabsNoteParser.#RE_STATE_DURATION_SEC,
+    StateJabsNoteParser.#RE_INDEFINITE_STATE,
     StateJabsNoteParser.#RE_STATE_DURATION_FLAT,
     StateJabsNoteParser.#RE_STATE_DURATION_PERC,
     StateJabsNoteParser.#RE_STATE_DURATION_FORMULA,
@@ -133,6 +147,7 @@ class StateJabsNoteParser
     StateJabsNoteParser.#RE_TIMING_FCD_FLAT,
     StateJabsNoteParser.#RE_TIMING_FCD_RATE,
     StateJabsNoteParser.#RE_GAP_CLOSE_TARGET,
+    StateJabsNoteParser.#RE_SKILL_HISTORY_BONUS,
   ];
 
   /**
@@ -212,6 +227,9 @@ class StateJabsNoteParser
         : cap;
     }
 
+    ext.stateDurationFrames = StateJabsNoteParser.#readNonNegInt(note, StateJabsNoteParser.#RE_STATE_DURATION);
+    ext.stateDurationSeconds = StateJabsNoteParser.#readNonNegInt(note, StateJabsNoteParser.#RE_STATE_DURATION_SEC);
+    ext.indefiniteState = StateJabsNoteParser.#testAny(note, StateJabsNoteParser.#RE_INDEFINITE_STATE);
     ext.stateDurationFlat = StateJabsNoteParser.#readSignedInt(note, StateJabsNoteParser.#RE_STATE_DURATION_FLAT);
     ext.stateDurationPercent = StateJabsNoteParser.#readSignedInt(
       note,
@@ -287,6 +305,24 @@ class StateJabsNoteParser
     }
 
     ext.gapCloseTarget = StateJabsNoteParser.#testAny(note, StateJabsNoteParser.#RE_GAP_CLOSE_TARGET);
+
+    {
+      const parsed = StateJabsNoteParser.#readSkillHistoryBonus(note);
+      if (parsed === null)
+      {
+        ext.skillHistoryBonusTypeId = null;
+        ext.skillHistoryBonusWindowSeconds = null;
+        ext.skillHistoryBonusPctPerCount = null;
+        ext.skillHistoryBonusCountMode = null;
+      }
+      else
+      {
+        ext.skillHistoryBonusTypeId = parsed.typeId;
+        ext.skillHistoryBonusWindowSeconds = parsed.windowSeconds;
+        ext.skillHistoryBonusPctPerCount = parsed.pctPerCount;
+        ext.skillHistoryBonusCountMode = parsed.countMode;
+      }
+    }
   }
 
   /**
@@ -402,6 +438,18 @@ class StateJabsNoteParser
       parts.push(`<tpFormula:[${ext.slipTpFormula.trim()}]>`);
     }
 
+    if (ext.indefiniteState)
+    {
+      parts.push('<indefiniteState>');
+    }
+    if (ext.stateDurationFrames !== null && ext.stateDurationFrames > 0)
+    {
+      parts.push(`<stateDuration:${Math.trunc(ext.stateDurationFrames)}>`);
+    }
+    else if (ext.stateDurationSeconds !== null && ext.stateDurationSeconds > 0)
+    {
+      parts.push(`<stateDurationSec:${Math.trunc(ext.stateDurationSeconds)}>`);
+    }
     if (ext.stateDurationFlat !== null)
     {
       parts.push(`<stateDurationFlat:${Math.trunc(ext.stateDurationFlat)}>`);
@@ -479,6 +527,14 @@ class StateJabsNoteParser
     if (ext.gapCloseTarget)
     {
       parts.push('<gapCloseTarget>');
+    }
+
+    {
+      const tag = StateJabsNoteParser.#formatSkillHistoryBonusTag(ext);
+      if (tag !== null)
+      {
+        parts.push(tag);
+      }
     }
 
     const head = parts.length > 0
@@ -627,6 +683,91 @@ class StateJabsNoteParser
       return String(n);
     }
     return String(n);
+  }
+
+  static #readSkillHistoryBonus(note: string): {
+    typeId: number;
+    windowSeconds: number;
+    pctPerCount: number;
+    countMode: SkillHistoryBonusCountMode;
+  } | null
+  {
+    const cap = StateJabsNoteParser.#readCapture(note, StateJabsNoteParser.#RE_SKILL_HISTORY_BONUS);
+    if (cap === null)
+    {
+      return null;
+    }
+    return StateJabsNoteParser.#parseSkillHistoryBracket(cap);
+  }
+
+  static #parseSkillHistoryBracket(bracket: string): {
+    typeId: number;
+    windowSeconds: number;
+    pctPerCount: number;
+    countMode: SkillHistoryBonusCountMode;
+  } | null
+  {
+    const inner = bracket.trim();
+    const stripped = inner.startsWith('[') && inner.endsWith(']')
+      ? inner.slice(1, -1)
+      : inner;
+    const parts = stripped.split(',')
+      .map((p) => p.trim());
+    if (parts.length !== 4)
+    {
+      return null;
+    }
+    const typeId = parseInt(parts[ 0 ], 10);
+    const windowSeconds = parseInt(parts[ 1 ], 10);
+    const pctPerCount = parseInt(parts[ 2 ], 10);
+    const modeRaw = parts[ 3 ].toLowerCase();
+    if (
+      Number.isNaN(typeId)
+      || Number.isNaN(windowSeconds)
+      || Number.isNaN(pctPerCount)
+    )
+    {
+      return null;
+    }
+    if (
+      modeRaw !== 'all'
+      && modeRaw !== 'unique'
+      && modeRaw !== 'streak'
+      && modeRaw !== 'distinct_types'
+    )
+    {
+      return null;
+    }
+    return {
+      typeId,
+      windowSeconds,
+      pctPerCount,
+      countMode: modeRaw,
+    };
+  }
+
+  static #formatSkillHistoryBonusTag(ext: StateJabsExtension): string | null
+  {
+    const {
+      skillHistoryBonusTypeId: typeId,
+      skillHistoryBonusWindowSeconds: windowSeconds,
+      skillHistoryBonusPctPerCount: pctPerCount,
+      skillHistoryBonusCountMode: countMode,
+    } = ext;
+    if (
+      typeId === null
+      || windowSeconds === null
+      || pctPerCount === null
+      || countMode === null
+    )
+    {
+      return null;
+    }
+    if (windowSeconds < 0 || pctPerCount < 0 || typeId < 0)
+    {
+      return null;
+    }
+    return `<skillHistoryBonus:[${Math.trunc(typeId)}, ${Math.trunc(windowSeconds)}, ${Math.trunc(pctPerCount)}, ${countMode}]>`;
   }
 }
 

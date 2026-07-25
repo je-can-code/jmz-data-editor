@@ -172,7 +172,7 @@ export const useGlobalSearch = () =>
 
     sdps.forEach(s => results.push({
       id: s.key,
-      name: s.name,
+      name: s.identity.name,
       type: 'sdpKey',
       path: '/sdp',
       category: 'SDP'
