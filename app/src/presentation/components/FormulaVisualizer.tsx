@@ -143,7 +143,10 @@ export default function FormulaVisualizer({
   // level instead of guessing a slope, so `chartData`'s own solid line already IS the accurate
   // beyond-99 preview in that case (it's evaluated per-level whenever `maxLevel` exceeds 99). Requires
   // the saved values to actually reach level 99 (levels 94-99 drive the slope); anything short of that
-  // yields no preview rather than a misleading one.
+  // yields no preview rather than a misleading one. Capped to the chart's own selected `maxLevel`
+  // (not just `trueMaxLevel`) so this line never stretches the X axis past what's actually being
+  // viewed- previewing all the way to the engine's true ceiling is only useful when that's also what
+  // the dropdown is showing.
   const extrapolationPreview = useMemo(
     () =>
     {
@@ -158,9 +161,9 @@ export default function FormulaVisualizer({
         return [];
       }
 
-      return computeBeyondMaxPreview(currentValues, trueMaxLevel);
+      return computeBeyondMaxPreview(currentValues, Math.min(trueMaxLevel, maxLevel));
     },
-    [ currentValues, trueMaxLevel ]
+    [ currentValues, trueMaxLevel, maxLevel ]
   );
 
   const hasExtrapolationPreview = extrapolationPreview.length > 0;

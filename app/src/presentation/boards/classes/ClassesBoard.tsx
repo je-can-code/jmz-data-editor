@@ -23,6 +23,7 @@ import { BoardSectionCard } from '@presentation/components/board/BoardSectionCar
 import { StealRatesFields } from '@presentation/components/resources/StealRatesFields.tsx';
 import { ClassLearningsEditor } from '@presentation/components/classLearnings/ClassLearningsEditor.tsx';
 import { AptitudeTeachingsEditor } from '@presentation/components/aptitude/AptitudeTeachingsEditor.tsx';
+import { UnslottedSkillsEditor } from '@presentation/components/unslottedSkills/UnslottedSkillsEditor.tsx';
 import { NaturalGrowthQuadrantsEditor } from '@presentation/components/naturalGrowth/NaturalGrowthQuadrantsEditor.tsx';
 import { ClassParamsGrowthEditor } from '@presentation/components/classParams/ClassParamsGrowthEditor.tsx';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
@@ -58,6 +59,7 @@ function ClassesBoard()
   const [ tabIndex, setTabIndex ] = useState(0);
   const [ aptitudeExpanded, setAptitudeExpanded ] = useState(false);
   const [ learningsExpanded, setLearningsExpanded ] = useState(true);
+  const [ unslottedSkillsExpanded, setUnslottedSkillsExpanded ] = useState(false);
   const [ traitsExpanded, setTraitsExpanded ] = useState(readTraitsExpandedFromLocalStorage);
   const [ isSaving, setIsSaving ] = useState(false);
   const [ snackbar, setSnackbar ] = useState<{
@@ -250,6 +252,13 @@ function ClassesBoard()
               onNoteChange={(note: string) => patch({ note })}
               expanded={aptitudeExpanded}
               onExpandedChange={setAptitudeExpanded}
+            />
+
+            <UnslottedSkillsEditor
+              note={selectedClass.note}
+              onNoteChange={(note: string) => patch({ note })}
+              expanded={unslottedSkillsExpanded}
+              onExpandedChange={setUnslottedSkillsExpanded}
             />
           </Stack>
         </Box>

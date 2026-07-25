@@ -4,6 +4,7 @@ import { Check, PlayArrow } from '@mui/icons-material';
 import { GrowthParser } from '@services/parsers/GrowthParser.ts';
 import FormulaVisualizer from '@presentation/components/FormulaVisualizer.tsx';
 import { ParamCurveSparkline } from '@presentation/components/classParams/ParamCurveSparkline.tsx';
+import { ParamCurveCheckpoints } from '@presentation/components/classParams/ParamCurveCheckpoints.tsx';
 import type { KnownParameter } from '../../../mappers/ParameterIdMapper.ts';
 
 const monocodeSx = {
@@ -90,9 +91,9 @@ function ClassParamRow({
 
   return (
     <Stack spacing={0.5} sx={{ width: '100%' }}>
-      <ParamCurveSparkline values={currentValues}/>
-
       <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%' }}>
+        <ParamCurveSparkline values={currentValues}/>
+
         <TextField
           label={param.name}
           variant="outlined"
@@ -136,6 +137,12 @@ function ClassParamRow({
           Apply
         </Button>
       </Stack>
+
+      {/* 148px = the sparkline's 140px width + the row's 8px (spacing={1}) gap, so the checkpoints
+          line up under the formula input rather than under the sparkline. */}
+      <Box sx={{ pl: '148px' }}>
+        <ParamCurveCheckpoints values={currentValues}/>
+      </Box>
     </Stack>
   );
 }

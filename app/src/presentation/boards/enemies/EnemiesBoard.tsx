@@ -19,6 +19,7 @@ import {
 } from '@mui/material';
 import {
   Addchart,
+  AutoAwesome,
   DoubleArrow,
   KeyboardArrowLeft,
   KeyboardArrowRight,
@@ -884,6 +885,17 @@ const EnemiesBoard = () =>
                                 updateEnemy(selectedEnemy);
                               },
                               formula: selectedEnemy.growths.get(33) ?? '',
+                            },
+                            {
+                              label: 'AP',
+                              icon: <AutoAwesome sx={{ color: cyan[ 600 ] }}/>,
+                              value: selectedEnemy.apReward,
+                              onChange: (v: number) =>
+                              {
+                                selectedEnemy.apReward = v;
+                                updateEnemy(selectedEnemy);
+                              },
+                              formula: '',
                             },
                           ].map(({ label, icon, value, onChange, formula }) => (
                             <>
