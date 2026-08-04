@@ -1,7 +1,7 @@
 import { Box, Card, CardContent, FormControlLabel, IconButton, MenuItem, Stack, Switch, TextField, Tooltip, Typography } from '@mui/material';
 import { Delete } from '@mui/icons-material';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
-import type { BossStep } from '@core/domain/valueObjects/boss-config.ts';
+import { type BossStep, withSkillSelection } from '@core/domain/valueObjects/boss-config.ts';
 
 /**
  * The label shown for each verb a step can perform. Authors think in terms of what the boss does, not
@@ -26,18 +26,12 @@ const BossStepCard = ({ step, index, onChange, onRemove }: BossStepCardProps) =>
 {
   const { skills, byId } = useSkills();
 
-  // the recorded name has to come from the same place the game checks it against, or the safety net
-  // starts failing on configurations that are perfectly correct.
   const handleSkillChange = (skillId: number) =>
   {
     const selected = byId.get(skillId);
     const name = selected ? selected.name : '';
 
-    onChange({
-      ...step,
-      skill: skillId,
-      expect: name,
-    });
+    onChange(withSkillSelection(step, skillId, name));
   };
 
   const selectableSkills = skills.filter(skill => skill.name.trim() !== '');

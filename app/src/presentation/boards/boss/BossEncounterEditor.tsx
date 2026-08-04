@@ -13,6 +13,7 @@ import {
   type BossRoutine,
   createBossParticipant,
   createBossRoutine,
+  withEnemySelection,
 } from '@core/domain/valueObjects/boss-config.ts';
 
 /**
@@ -105,14 +106,12 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
     onChange({ ...encounter, participants });
   };
 
-  // the recorded name has to come from the same place the game checks it against, or the drift
-  // safety net starts failing on configurations that are perfectly correct.
   const handleEnemyChange = (index: number, enemyId: number) =>
   {
     const selected = enemiesById.get(enemyId);
     const name = selected ? selected.name : '';
 
-    patchParticipant(index, { ...encounter.participants[ index ], enemyId, expect: name });
+    patchParticipant(index, withEnemySelection(encounter.participants[ index ], enemyId, name));
   };
 
   const patchRoutine = (index: number, updated: BossRoutine) =>

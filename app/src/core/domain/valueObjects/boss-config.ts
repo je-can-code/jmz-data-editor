@@ -259,6 +259,46 @@ function hydrateBossConfig(rawRoot: unknown): BossConfigRoot
 }
 
 /**
+ * Points a step at a different skill, recording the name that skill carries right now.
+ *
+ * The recorded name is the whole point: J-ABS-Boss compares it against the live database before a
+ * fight starts and refuses to run on a mismatch. That check is only worth anything if the name written
+ * here came from the same row the plugin will look at, so selection and recording happen together
+ * rather than being left to whoever wired up the dropdown.
+ * @param {BossStep} step The step being retargeted.
+ * @param {number} skillId The id of the newly chosen skill.
+ * @param {string} skillName The name that skill carries in the database, or empty when unresolved.
+ * @returns {BossStep} A new step aimed at the chosen skill.
+ */
+function withSkillSelection(step: BossStep, skillId: number, skillName: string): BossStep
+{
+  return {
+    ...step,
+    skill: skillId,
+    expect: skillName,
+  };
+}
+
+/**
+ * Points a participant at a different enemy, recording the name that enemy carries right now.
+ *
+ * Same contract as {@link withSkillSelection}: the id and the name it was chosen under travel together
+ * so the runtime drift check has something truthful to compare against.
+ * @param {BossParticipant} participant The participant being retargeted.
+ * @param {number} enemyId The id of the newly chosen enemy.
+ * @param {string} enemyName The name that enemy carries in the database, or empty when unresolved.
+ * @returns {BossParticipant} A new participant aimed at the chosen enemy.
+ */
+function withEnemySelection(participant: BossParticipant, enemyId: number, enemyName: string): BossParticipant
+{
+  return {
+    ...participant,
+    enemyId,
+    expect: enemyName,
+  };
+}
+
+/**
  * Builds a blank step for an author to fill in.
  * @returns {BossStep} A new step.
  */
@@ -323,5 +363,7 @@ export {
   createBossRoutine,
   createBossStep,
   hydrateBossConfig,
+  withEnemySelection,
+  withSkillSelection,
 };
 export type { AiControlMode, BossConfigRoot, BossEncounter, BossParticipant, BossRoutine, BossStep, BossStepVerb };
