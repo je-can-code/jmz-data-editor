@@ -55,12 +55,18 @@ Inside `app/src`:
 | `components/`, `constants/`, `platform/`, `styles/`, `types/` | Shared surfaces |
 
 **The app is organized into "boards"** — one per editor type, under `app/src/presentation/boards/`:
-`armors`, `classes`, `crafting`, `enemies`, `items`, `jabs`, `level`, `proficiency`, `quests`, `sdp`,
-`skills`, `states`, `weapons`, plus `_index`.
+`armors`, `boss`, `classes`, `crafting`, `enemies`, `items`, `jabs`, `level`, `proficiency`, `quests`,
+`sdp`, `skills`, `states`, `weapons`, plus `_index`.
 
 Boards cover both stock RMMZ data and Jeremy's own plugin data — crafting recipes, SDP (stat
-distribution panels), skill proficiency, quests, enemy parameter growth, enemy levels, and extra enemy
-drop management.
+distribution panels), skill proficiency, quests, enemy parameter growth, enemy levels, boss encounters,
+and extra enemy drop management.
+
+**Adding a config-driven board touches five places**, and missing one fails quietly: a Go model under
+`server/internal/models/plugins/`, its two routes in `server/cmd/api/main.go`, an entry in
+`app/src/core/enums/ConfigFilenames.ts`, a `case` in `jsonApiRoutes.ts`, and a `BoardDefinition` in
+`app/src/platform/compositionRoot/routing.config.tsx`. Most also want a resource context under
+`presentation/context/resources/` mounted in `shell/app.providers.tsx`.
 
 **Data flow:** read from the RMMZ project's `/data` directory (or Jeremy's custom data files), edit in
 the UI, write back to the original files. A large share of that work is parsing and rewriting the `note`
@@ -80,11 +86,41 @@ Inside `app/`: `bun run typecheck` (`tsc --noEmit`), `bun run test`, `bun run te
 
 **Bun is the package manager and the runtime.** Never `npm`, never `yarn`, never Python.
 
-**There are currently zero test files** in `app/src`, though Vitest and `@testing-library/react` are
-both installed and configured. There is no existing suite to match and no convention established here
-yet — if you are about to write the first tests, **ask Jeremy what he wants** rather than importing the
-`rmmz-plugins` conventions by default. React component tests may reasonably want a different shape than
-plugin logic tests.
+## Testing
+
+**Tests live in `app/test/`, not beside the source.** That tree mirrors `app/src/` —
+`test/services/parsers/`, `test/core/domain/valueObjects/`, `test/components/core/`, and so on. Looking
+only inside `app/src` will find nothing and give you the wrong impression: there is an established
+suite here covering services, parsers, mappers, enums, domain entities, value objects, and hooks, plus
+several of the shared core components. **Match it. This repo is not greenfield.**
+
+```bash
+bun run test        # from app/; coverage is on by default
+bun run test:watch
+bun run coverage
+```
+
+Coverage is enabled inside `vitest.config.ts` itself, so even a single-file run prints the whole
+coverage table and buries the result. Pass `--coverage.enabled=false` while iterating.
+
+Conventions:
+
+- A block comment above the top-level `describe` states the contract the module owes its callers, and
+  why that contract matters. It is the most valuable part of the file — write it first.
+- One `describe` per exported function; `it` names read as behavior.
+- **Every test body carries inline `// Arrange` / `// Act` / `// Assert` comments.** This is Jeremy's
+  convention in every repo he writes in, and it holds here regardless of what any older test file in
+  this tree happens to look like. A test with nothing to arrange still gets the comment, with a line
+  saying what the empty setup means.
+- Assertions chain onto their own line — `expect(actual)` then `.toBe(expected);`.
+- The default environment is `node`. A test needing the DOM opts in per file with a
+  `@vitest-environment jsdom` docblock, then uses `@testing-library/react` and
+  `@testing-library/jest-dom`.
+- `test/setupTests.ts` is deliberately empty; there are no global hooks to inherit or work around.
+
+**Boards are largely untested, and that is the pattern rather than a gap.** When logic worth testing
+turns up inside a board — anything deciding what gets written to disk — extract it to a value object or
+service and cover it there, rather than reaching for a component test.
 
 ---
 

@@ -34,6 +34,7 @@ const enemyBoard: BoardDefinition = {
   guard: () => true,
   icon: <Android fontSize={'small'}/>,
   featureFlag: 'db.enemies',
+  group: 'Database',
 };
 
 const skillsBoard: BoardDefinition = {
@@ -44,6 +45,7 @@ const skillsBoard: BoardDefinition = {
   guard: () => true,
   icon: <School fontSize={'small'}/>,
   featureFlag: 'db.skills',
+  group: 'Database',
 };
 
 const statesBoard: BoardDefinition = {
@@ -54,6 +56,7 @@ const statesBoard: BoardDefinition = {
   guard: () => true,
   icon: <LocalHospital fontSize={'small'}/>,
   featureFlag: 'db.states',
+  group: 'Database',
 };
 
 const sdpBoard: BoardDefinition = {
@@ -64,6 +67,7 @@ const sdpBoard: BoardDefinition = {
   guard: () => true,
   icon: <Rule fontSize={'small'}/>,
   featureFlag: 'sdp',
+  group: 'Systems',
 };
 
 const classesBoard: BoardDefinition = {
@@ -74,6 +78,7 @@ const classesBoard: BoardDefinition = {
   guard: () => true,
   icon: <Diversity3 fontSize={'small'}/>,
   featureFlag: 'db.classes',
+  group: 'Database',
 };
 
 const questBoard: BoardDefinition = {
@@ -84,6 +89,7 @@ const questBoard: BoardDefinition = {
   guard: () => true,
   icon: <Hub fontSize={'small'}/>,
   featureFlag: 'quests',
+  group: 'Systems',
 };
 
 const craftingBoard: BoardDefinition = {
@@ -94,6 +100,7 @@ const craftingBoard: BoardDefinition = {
   guard: () => true,
   icon: <Construction fontSize={'small'}/>,
   featureFlag: 'crafting',
+  group: 'Systems',
 };
 
 const proficiencyBoard: BoardDefinition = {
@@ -104,6 +111,7 @@ const proficiencyBoard: BoardDefinition = {
   guard: () => true,
   icon: <AccountTree fontSize={'small'}/>,
   featureFlag: 'proficiency',
+  group: 'Systems',
 };
 
 const jabsConfigBoard: BoardDefinition = {
@@ -114,6 +122,7 @@ const jabsConfigBoard: BoardDefinition = {
   guard: () => true,
   icon: <Groups fontSize={'small'}/>,
   featureFlag: 'jabs',
+  group: 'Systems',
 };
 
 const levelConfigBoard: BoardDefinition = {
@@ -124,6 +133,7 @@ const levelConfigBoard: BoardDefinition = {
   guard: () => true,
   icon: <TrendingUp fontSize={'small'}/>,
   featureFlag: 'level',
+  group: 'Systems',
 };
 
 const weaponsBoard: BoardDefinition = {
@@ -134,6 +144,7 @@ const weaponsBoard: BoardDefinition = {
   guard: () => true,
   icon: <Build fontSize={'small'}/>,
   featureFlag: 'db.weapons',
+  group: 'Database',
 };
 
 const armorsBoard: BoardDefinition = {
@@ -144,6 +155,7 @@ const armorsBoard: BoardDefinition = {
   guard: () => true,
   icon: <Shield fontSize={'small'}/>,
   featureFlag: 'db.armors',
+  group: 'Database',
 };
 
 const itemsBoard: BoardDefinition = {
@@ -154,6 +166,7 @@ const itemsBoard: BoardDefinition = {
   guard: () => true,
   icon: <Inventory2 fontSize={'small'}/>,
   featureFlag: 'db.items',
+  group: 'Database',
 };
 
 const APP_ROUTES: BoardDefinition[] = [

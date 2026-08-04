@@ -4,19 +4,20 @@ import { useBoardActions } from "@presentation/context/board-actions.context.tsx
 import { useJabs } from "@presentation/context/resources/jabs.context.tsx";
 import JabsTeamsTab from "@boards/jabs/JabsTeamsTab.tsx";
 import JabsJuiceTab from "@boards/jabs/JabsJuiceTab.tsx";
+import JabsBossesTab from "@boards/jabs/boss/JabsBossesTab.tsx";
 
-type JabsConfigTab = "teams" | "juice";
+type JabsConfigTab = "teams" | "juice" | "bosses";
 
 /**
- * Single editor board for everything in `config.jabs.json`. The board wraps two horizontal sub-tabs:
+ * Single editor board for everything JABS owns. The board wraps three horizontal sub-tabs:
  *
  *   - **Teams** — the original per-team editor (id / key / name / opposes).
  *   - **Juice** — profiles table + target / caster / casting tuning accordions.
+ *   - **Bosses** — boss encounters, one per fight, with their participants and routines.
  *
- * Save and reload affordances are owned here (not on individual tabs) so the whole config root is
- * persisted in one shot regardless of which tab the user touched. The sidebar entry's title is still
- * "JABS"; the route id moved from {@code jabs-teams} to {@code jabs-config} to reflect the widened
- * scope.
+ * All three blocks live in the same `config.jabs.json`, one per plugin in the JABS family, so save and
+ * reload are owned here rather than by individual tabs: one write persists the whole config root
+ * regardless of which tab the user touched.
  */
 const JabsConfigBoard = () =>
 {
@@ -81,13 +82,14 @@ const JabsConfigBoard = () =>
         <Tabs value={activeTab} onChange={handleTabChange} aria-label={"JABS config sections"}>
           <Tab label={"Teams"} value={"teams"}/>
           <Tab label={"Juice"} value={"juice"}/>
+          <Tab label={"Bosses"} value={"bosses"}/>
         </Tabs>
       </Box>
 
-      <Box sx={{ flexGrow: 1, minHeight: 0 }}>
-        {activeTab === "teams"
-          ? <JabsTeamsTab/>
-          : <JabsJuiceTab/>}
+      <Box sx={{ flexGrow: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        {activeTab === "teams" && <JabsTeamsTab/>}
+        {activeTab === "juice" && <JabsJuiceTab/>}
+        {activeTab === "bosses" && <JabsBossesTab/>}
       </Box>
     </Box>
   );

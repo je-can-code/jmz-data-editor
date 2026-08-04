@@ -119,9 +119,11 @@ const JabsTeamsTab = () =>
       {
         // initial state guard — only reached if the user types into the form before the file load
         // completes; treat as a fresh authoring session.
+        // spread the loaded config rather than naming its blocks: listing them by hand means this
+        // silently drops any block added to the file later.
         return {
+          ...jabsConfig!,
           teams: nextTeams,
-          juice: jabsConfig!.juice,
         };
       }
 
@@ -152,9 +154,11 @@ const JabsTeamsTab = () =>
     {
       if (prev === null)
       {
+        // spread the loaded config rather than naming its blocks: listing them by hand means this
+        // silently drops any block added to the file later.
         return {
+          ...jabsConfig!,
           teams: nextTeams,
-          juice: jabsConfig!.juice,
         };
       }
 
@@ -179,9 +183,11 @@ const JabsTeamsTab = () =>
     {
       if (prev === null)
       {
+        // spread the loaded config rather than naming its blocks: listing them by hand means this
+        // silently drops any block added to the file later.
         return {
+          ...jabsConfig!,
           teams: nextTeams,
-          juice: jabsConfig!.juice,
         };
       }
 
