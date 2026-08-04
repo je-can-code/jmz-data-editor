@@ -1,72 +1,75 @@
 import { useState } from 'react';
 import { Box, Button, Divider, List, ListItemButton, ListItemText, Paper, Stack, Typography } from '@mui/material';
 import { Add } from '@mui/icons-material';
-import { useBossConfig } from '@presentation/context/resources/boss.context.tsx';
+import { useJabs } from '@presentation/context/resources/jabs.context.tsx';
 import BossEncounterEditor from './BossEncounterEditor.tsx';
-import { type BossConfigRoot, type BossEncounter, createBossEncounter } from '@core/domain/valueObjects/boss-config.ts';
+import { type BossEncounter, createBossEncounter } from '@core/domain/valueObjects/boss-config.ts';
+import type { JabsConfigRoot } from '@core/domain/valueObjects/jabs-config.ts';
 
 /**
- * The Bosses tab of the JABS board — the boss fights J-ABS-Boss runs, out of `config.boss.json`.
+ * The Bosses tab of the JABS board — the boss fights J-ABS-Boss runs.
+ *
+ * Encounters live in the `bosses` block of `config.jabs.json`, sharing the file with `teams` and
+ * `juice`, so this tab reads and writes the same config root as its sibling tabs.
  *
  * A fight authored here is data rather than a chain of event commands, which is what makes retiming a
  * routine or swapping a skill a one-field change instead of an afternoon.
  *
  * Saving and reloading belong to the parent board rather than to this tab, matching how the other JABS
- * tabs behave: one save persists everything the board is holding, so switching tabs can never strand
- * an edit the author thought they had written.
+ * tabs behave: one save persists the whole config root regardless of which tab was touched.
  */
 const JabsBossesTab = () =>
 {
   const {
-    bossConfig,
+    jabsConfig,
     setConfig,
-  } = useBossConfig();
+  } = useJabs();
 
   const [ selectedIndex, setSelectedIndex ] = useState(0);
 
-  if (bossConfig === null)
+  if (jabsConfig === null)
   {
     return null;
   }
 
-  const patch = (partial: Partial<BossConfigRoot>) =>
+  const patchBosses = (bosses: BossEncounter[]) =>
   {
     setConfig(prev => (prev === null
       ? prev
-      : { ...prev, ...partial }) as BossConfigRoot);
+      : { ...prev, bosses }) as JabsConfigRoot);
   };
 
   const patchEncounter = (index: number, updated: BossEncounter) =>
   {
-    const encounters = bossConfig.encounters.map((encounter, at) => (at === index
+    const bosses = jabsConfig.bosses.map((encounter, at) => (at === index
       ? updated
       : encounter));
 
-    patch({ encounters });
+    patchBosses(bosses);
   };
 
   const addEncounter = () =>
   {
-    const encounters = [ ...bossConfig.encounters, createBossEncounter() ];
+    const bosses = [ ...jabsConfig.bosses, createBossEncounter() ];
 
-    patch({ encounters });
+    patchBosses(bosses);
 
     // drop the author straight into the thing they just made.
-    setSelectedIndex(encounters.length - 1);
+    setSelectedIndex(bosses.length - 1);
   };
 
   const removeEncounter = (index: number) =>
   {
-    const encounters = bossConfig.encounters.filter((_encounter, at) => at !== index);
+    const bosses = jabsConfig.bosses.filter((_encounter, at) => at !== index);
 
-    patch({ encounters });
+    patchBosses(bosses);
 
     // keep the selection inside the list after whatever it pointed at goes away.
-    const lastIndex = Math.max(0, encounters.length - 1);
+    const lastIndex = Math.max(0, bosses.length - 1);
     setSelectedIndex(Math.min(selectedIndex, lastIndex));
   };
 
-  const selected = bossConfig.encounters[ selectedIndex ];
+  const selected = jabsConfig.bosses[ selectedIndex ];
 
   return (
     <Box sx={{ display: 'flex', flex: 1, minHeight: 0, gap: 2, p: 2 }}>
@@ -76,7 +79,7 @@ const JabsBossesTab = () =>
         </Typography>
         <Divider/>
         <List dense sx={{ flex: 1, overflow: 'auto' }}>
-          {bossConfig.encounters.map((encounter, index) => (
+          {jabsConfig.bosses.map((encounter, index) => (
             <ListItemButton
               key={index}
               selected={index === selectedIndex}

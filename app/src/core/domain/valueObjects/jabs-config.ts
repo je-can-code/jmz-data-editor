@@ -1,11 +1,17 @@
 /**
  * Typed view of `data/config.jabs.json` for the editor. Mirrors the strict schema enforced by J-ABS
- * and J-ABS-Juice at game runtime — see `rmmz-plugins/src/plugins/abs/ext/juice/_metadata/_pluginMetadata.js`.
+ * and its extensions at game runtime — see `rmmz-plugins/src/plugins/abs/ext/juice/_metadata/_pluginMetadata.js`.
  *
- * The plugin throws when the `juice` block (or any required sub-key) is missing. The editor is more
- * forgiving: when a `config.jabs.json` lacks `juice` (or has partial sections), {@link hydrateJabsConfig}
- * fills in the gaps from {@link JUICE_DEFAULTS} so the user can still edit and re-save a complete file.
+ * The file carries one top-level block per plugin in the family: `teams` for J-ABS core, `juice` for
+ * J-ABS-Juice, `bosses` for J-ABS-Boss. **Every block on disk must appear on {@link JabsConfigRoot}**,
+ * because {@link hydrateJabsConfig} drops keys it does not know about and the result is what gets
+ * saved back — an unmodeled block is erased from the file rather than merely ignored.
+ *
+ * The plugins throw when a block (or any required sub-key) is missing. The editor is more forgiving:
+ * when a `config.jabs.json` lacks `juice` (or has partial sections), {@link hydrateJabsConfig} fills
+ * in the gaps from {@link JUICE_DEFAULTS} so the user can still edit and re-save a complete file.
  */
+import { type BossEncounter, hydrateBossEncounters } from '@core/domain/valueObjects/boss-config.ts';
 
 type JabsTeamDefinition = {
   id: number;
@@ -57,6 +63,7 @@ type JuiceConfig = {
 type JabsConfigRoot = {
   teams: JabsTeamDefinition[];
   juice: JuiceConfig;
+  bosses: BossEncounter[];
 };
 
 /**
@@ -256,9 +263,14 @@ function hydrateJabsConfig(rawRoot: unknown): JabsConfigRoot
     ? undefined
     : rootRecord[ "juice" ]);
 
+  const bosses = hydrateBossEncounters(rootRecord === null
+    ? undefined
+    : rootRecord[ "bosses" ]);
+
   return {
     teams,
     juice,
+    bosses,
   };
 }
 

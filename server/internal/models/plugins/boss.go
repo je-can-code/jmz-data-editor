@@ -1,14 +1,12 @@
 package plugins
 
-// BossConfiguration is the root shape of data/config.boss.json, consumed at runtime by J-ABS-Boss
-// (rmmz-plugins/src/plugins/abs/ext/boss/_metadata/_pluginMetadata.js). A boss fight authored here
-// replaces what used to be long chains of hand-written event commands on the map.
-type BossConfiguration struct {
-	Encounters []BossEncounter `json:"encounters"`
-}
-
 // BossEncounter is one whole boss fight: who is fighting, who is allowed to drive them, and what
 // recurs for the duration.
+//
+// Encounters live in the "bosses" block of data/config.jabs.json rather than a file of their own,
+// alongside "teams" and "juice" — one config file per plugin family, one block per plugin. They are
+// consumed at runtime by J-ABS-Boss
+// (rmmz-plugins/src/plugins/abs/ext/boss/_metadata/_pluginMetadata.js).
 type BossEncounter struct {
 	Key          string            `json:"key"`
 	Map          int               `json:"map"`

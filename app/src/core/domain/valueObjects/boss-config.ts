@@ -1,11 +1,14 @@
 /**
- * Typed view of `data/config.boss.json` for the editor. Mirrors the schema consumed by J-ABS-Boss at
- * game runtime — see `rmmz-plugins/src/plugins/abs/ext/boss/_metadata/_pluginMetadata.js`.
+ * Typed view of the `bosses` block inside `data/config.jabs.json`, mirroring the schema consumed by
+ * J-ABS-Boss at game runtime — see
+ * `rmmz-plugins/src/plugins/abs/ext/boss/_metadata/_pluginMetadata.js`.
  *
- * The plugin throws when this file is missing or malformed, the same convention every other
- * config-driven plugin follows. The editor is more forgiving on load: {@link hydrateBossConfig} fills
- * in whatever a partial or freshly-created file left out, so the board always has a complete shape to
- * render.
+ * Encounters share the JABS config file rather than owning one, alongside `teams` and `juice`: one
+ * config file per plugin family, one top-level block per plugin. J-ABS core loads the file and each
+ * extension reads its own block off it.
+ *
+ * The editor is forgiving on load — {@link hydrateBossEncounters} fills in whatever a partial or
+ * freshly-created block left out, so the board always has a complete shape to render.
  */
 
 /**
@@ -60,17 +63,6 @@ type BossEncounter = {
   participants: BossParticipant[];
   aiControl: AiControlMode;
   routines: BossRoutine[];
-};
-
-type BossConfigRoot = {
-  encounters: BossEncounter[];
-};
-
-/**
- * An empty configuration, used when the file does not exist yet.
- */
-const BOSS_CONFIG_DEFAULTS: BossConfigRoot = {
-  encounters: [],
 };
 
 /**
@@ -240,22 +232,19 @@ function hydrateEncounter(rawEncounter: unknown): BossEncounter
 }
 
 /**
- * Builds a fully populated {@link BossConfigRoot} from the raw file payload, so the Boss board always
- * has a valid shape to render even against a missing or partial `config.boss.json`.
- * @param {unknown} rawRoot Whatever the data loader returned; may be null for "file not found".
- * @returns {BossConfigRoot} A complete configuration.
+ * Builds the full encounter list from the raw `bosses` block, so the Bosses tab always has a valid
+ * shape to render even against a config file that has never held one.
+ * @param {unknown} rawBosses The `bosses` block as it came off disk; may be undefined entirely.
+ * @returns {BossEncounter[]} Every encounter, each one complete.
  */
-function hydrateBossConfig(rawRoot: unknown): BossConfigRoot
+function hydrateBossEncounters(rawBosses: unknown): BossEncounter[]
 {
-  if (isPlainObject(rawRoot) === false)
+  if (Array.isArray(rawBosses) === false)
   {
-    return { encounters: [] };
+    return [];
   }
 
-  return {
-    encounters: pickArray(rawRoot, 'encounters')
-      .map(hydrateEncounter),
-  };
+  return rawBosses.map(hydrateEncounter);
 }
 
 /**
@@ -356,14 +345,13 @@ function createBossEncounter(): BossEncounter
 
 export {
   AI_CONTROL_MODES,
-  BOSS_CONFIG_DEFAULTS,
   BOSS_STEP_VERBS,
   createBossEncounter,
   createBossParticipant,
   createBossRoutine,
   createBossStep,
-  hydrateBossConfig,
+  hydrateBossEncounters,
   withEnemySelection,
   withSkillSelection,
 };
-export type { AiControlMode, BossConfigRoot, BossEncounter, BossParticipant, BossRoutine, BossStep, BossStepVerb };
+export type { AiControlMode, BossEncounter, BossParticipant, BossRoutine, BossStep, BossStepVerb };

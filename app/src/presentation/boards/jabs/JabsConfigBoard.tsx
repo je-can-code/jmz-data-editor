@@ -2,7 +2,6 @@ import { type SyntheticEvent, useState } from "react";
 import { Box, Tab, Tabs } from "@mui/material";
 import { useBoardActions } from "@presentation/context/board-actions.context.tsx";
 import { useJabs } from "@presentation/context/resources/jabs.context.tsx";
-import { useBossConfig } from "@presentation/context/resources/boss.context.tsx";
 import JabsTeamsTab from "@boards/jabs/JabsTeamsTab.tsx";
 import JabsJuiceTab from "@boards/jabs/JabsJuiceTab.tsx";
 import JabsBossesTab from "@boards/jabs/boss/JabsBossesTab.tsx";
@@ -16,10 +15,9 @@ type JabsConfigTab = "teams" | "juice" | "bosses";
  *   - **Juice** — profiles table + target / caster / casting tuning accordions.
  *   - **Bosses** — boss encounters, which live in their own `config.boss.json`.
  *
- * Save and reload affordances are owned here (not on individual tabs) so everything the board is
- * holding is persisted in one shot regardless of which tab the user touched. That now spans two files:
- * saving only the active tab's file would let an author edit Teams, switch to Bosses, hit save, and
- * silently lose the Teams work.
+ * All three blocks live in the same `config.jabs.json`, one per plugin in the JABS family, so save and
+ * reload are owned here rather than by individual tabs: one write persists the whole config root
+ * regardless of which tab the user touched.
  */
 const JabsConfigBoard = () =>
 {
@@ -29,13 +27,6 @@ const JabsConfigBoard = () =>
     reload,
     loading,
   } = useJabs();
-
-  const {
-    bossConfig,
-    save: saveBossConfig,
-    reload: reloadBossConfig,
-    loading: bossLoading,
-  } = useBossConfig();
 
   const [ activeTab, setActiveTab ] = useState<JabsConfigTab>("teams");
   const [ isSaving, setIsSaving ] = useState(false);
@@ -47,18 +38,15 @@ const JabsConfigBoard = () =>
 
   const handleSave = async () =>
   {
+    if (jabsConfig === null)
+    {
+      return;
+    }
+
     setIsSaving(true);
     try
     {
-      if (jabsConfig !== null)
-      {
-        await save(jabsConfig);
-      }
-
-      if (bossConfig !== null)
-      {
-        await saveBossConfig(bossConfig);
-      }
+      await save(jabsConfig);
     }
     finally
     {
@@ -69,11 +57,10 @@ const JabsConfigBoard = () =>
   const handleReload = async () =>
   {
     await reload();
-    await reloadBossConfig();
   };
 
-  const canSave = loading === false && bossLoading === false && jabsConfig !== null;
-  const canReload = loading === false && bossLoading === false;
+  const canSave = loading === false && jabsConfig !== null;
+  const canReload = loading === false;
 
   useBoardActions({
     onSave: handleSave,

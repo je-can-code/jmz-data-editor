@@ -4,125 +4,111 @@ import {
   createBossParticipant,
   createBossRoutine,
   createBossStep,
-  hydrateBossConfig,
+  hydrateBossEncounters,
   withEnemySelection,
   withSkillSelection,
 } from "@core/domain/valueObjects/boss-config.ts";
 
 /**
- * Editor-side counterpart to J-ABS-Boss's configuration loader. The editor must:
+ * Editor-side counterpart to J-ABS-Boss's configuration loader. Encounters are the `bosses` block of
+ * `config.jabs.json`, so this hydrates a block rather than a file root. It must:
  *
- *   - turn a missing or malformed {@code config.boss.json} into an empty-but-valid configuration,
- *     because the editor is the thing that creates the file in the first place
+ *   - turn a missing or malformed block into an empty list, because a JABS config that predates this
+ *     feature simply has no `bosses` key at all
  *   - round-trip a complete encounter without dropping or renaming anything, since whatever this
  *     writes is what the plugin reads back at game load
  *   - default a step to observing its cast time, matching the plugin, so a telegraph is never
  *     removed by omission
  */
-describe("hydrateBossConfig", () =>
+describe("hydrateBossEncounters", () =>
 {
-  it("returns an empty configuration when the payload is null", () =>
+  it("returns an empty list when the block is null", () =>
   {
     // Arrange
-    const missingFile = null;
+    const absentBlock = null;
 
     // Act
-    const hydrated = hydrateBossConfig(missingFile);
+    const hydrated = hydrateBossEncounters(absentBlock);
 
     // Assert
     expect(hydrated)
-      .toEqual({ encounters: [] });
+      .toEqual([]);
   });
 
-  it("returns an empty configuration when the payload is undefined", () =>
+  it("returns an empty list when the block is undefined, as in a config predating this feature", () =>
   {
     // Arrange
-    const missingFile = undefined;
+    const absentBlock = undefined;
 
     // Act
-    const hydrated = hydrateBossConfig(missingFile);
+    const hydrated = hydrateBossEncounters(absentBlock);
 
     // Assert
     expect(hydrated)
-      .toEqual({ encounters: [] });
+      .toEqual([]);
   });
 
-  it("returns an empty configuration when the payload is an array rather than an object", () =>
+  it("returns an empty list when the block is an object rather than an array", () =>
   {
     // Arrange
-    const wrongShape: unknown = [];
+    const wrongShape: unknown = { encounters: [] };
 
     // Act
-    const hydrated = hydrateBossConfig(wrongShape);
+    const hydrated = hydrateBossEncounters(wrongShape);
 
     // Assert
     expect(hydrated)
-      .toEqual({ encounters: [] });
+      .toEqual([]);
   });
 
-  it("returns an empty configuration when the encounters key is missing entirely", () =>
+  it("returns an empty list when the block is some other type entirely", () =>
   {
     // Arrange
-    const emptyObject = {};
+    const wrongType: unknown = "nope";
 
     // Act
-    const hydrated = hydrateBossConfig(emptyObject);
+    const hydrated = hydrateBossEncounters(wrongType);
 
     // Assert
     expect(hydrated)
-      .toEqual({ encounters: [] });
-  });
-
-  it("returns an empty configuration when encounters is not an array", () =>
-  {
-    // Arrange
-    const wrongType = { encounters: "nope" };
-
-    // Act
-    const hydrated = hydrateBossConfig(wrongType);
-
-    // Assert
-    expect(hydrated)
-      .toEqual({ encounters: [] });
+      .toEqual([]);
   });
 
   it("round-trips a complete encounter without altering it", () =>
   {
     // Arrange
-    const authored = {
-      encounters: [
-        {
-          key: "gluttonwolf",
-          map: 75,
-          participants: [
-            {
-              key: "mayor",
-              eventId: 4,
-              enemyId: 581,
-              expect: "Gluttonwolf Mayor",
-            },
-          ],
-          aiControl: "shared",
-          routines: [
-            {
-              key: "devour",
-              cadence: 20,
-              steps: [
-                {
-                  verb: "forceSkill",
-                  skill: 2584,
-                  expect: "Devour",
-                  cast: true,
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    };
+    const authored = [
+      {
+        key: "gluttonwolf",
+        map: 75,
+        participants: [
+          {
+            key: "mayor",
+            eventId: 4,
+            enemyId: 581,
+            expect: "Gluttonwolf Mayor",
+          },
+        ],
+        aiControl: "shared",
+        routines: [
+          {
+            key: "devour",
+            cadence: 20,
+            steps: [
+              {
+                verb: "forceSkill",
+                skill: 2584,
+                expect: "Devour",
+                cast: true,
+              },
+            ],
+          },
+        ],
+      },
+    ];
 
     // Act
-    const hydrated = hydrateBossConfig(authored);
+    const hydrated = hydrateBossEncounters(authored);
 
     // Assert
     expect(hydrated)
@@ -132,13 +118,13 @@ describe("hydrateBossConfig", () =>
   it("fills participants and routines with empty lists when an encounter omits them", () =>
   {
     // Arrange
-    const sparse = { encounters: [ { key: "bare", map: 1 } ] };
+    const sparse = [ { key: "bare", map: 1 } ];
 
     // Act
-    const hydrated = hydrateBossConfig(sparse);
+    const hydrated = hydrateBossEncounters(sparse);
 
     // Assert
-    expect(hydrated.encounters[ 0 ])
+    expect(hydrated[ 0 ])
       .toEqual({
         key: "bare",
         map: 1,
@@ -151,118 +137,110 @@ describe("hydrateBossConfig", () =>
   it("falls back to shared control when the authored mode is not one this editor knows", () =>
   {
     // Arrange
-    const unknownMode = { encounters: [ { key: "x", aiControl: "telepathic" } ] };
+    const unknownMode = [ { key: "x", aiControl: "telepathic" } ];
 
     // Act
-    const hydrated = hydrateBossConfig(unknownMode);
+    const hydrated = hydrateBossEncounters(unknownMode);
 
     // Assert
-    expect(hydrated.encounters[ 0 ].aiControl)
+    expect(hydrated[ 0 ].aiControl)
       .toBe("shared");
   });
 
   it("preserves scripted control when it is authored", () =>
   {
     // Arrange
-    const scripted = { encounters: [ { key: "x", aiControl: "scripted" } ] };
+    const scripted = [ { key: "x", aiControl: "scripted" } ];
 
     // Act
-    const hydrated = hydrateBossConfig(scripted);
+    const hydrated = hydrateBossEncounters(scripted);
 
     // Assert
-    expect(hydrated.encounters[ 0 ].aiControl)
+    expect(hydrated[ 0 ].aiControl)
       .toBe("scripted");
   });
 
-  it("gives a routine the default cadence when the file omits it", () =>
+  it("gives a routine the default cadence when the block omits it", () =>
   {
     // Arrange
-    const noCadence = { encounters: [ { key: "x", routines: [ { key: "r" } ] } ] };
+    const noCadence = [ { key: "x", routines: [ { key: "r" } ] } ];
 
     // Act
-    const hydrated = hydrateBossConfig(noCadence);
+    const hydrated = hydrateBossEncounters(noCadence);
 
     // Assert
-    expect(hydrated.encounters[ 0 ].routines[ 0 ].cadence)
+    expect(hydrated[ 0 ].routines[ 0 ].cadence)
       .toBe(20);
-    expect(hydrated.encounters[ 0 ].routines[ 0 ].steps)
+    expect(hydrated[ 0 ].routines[ 0 ].steps)
       .toEqual([]);
   });
 
   it("defaults a step to observing its cast time, so a telegraph is never lost by omission", () =>
   {
     // Arrange
-    const noCastFlag = {
-      encounters: [ { key: "x", routines: [ { key: "r", steps: [ { skill: 5 } ] } ] } ],
-    };
+    const noCastFlag = [ { key: "x", routines: [ { key: "r", steps: [ { skill: 5 } ] } ] } ];
 
     // Act
-    const hydrated = hydrateBossConfig(noCastFlag);
+    const hydrated = hydrateBossEncounters(noCastFlag);
 
     // Assert
-    expect(hydrated.encounters[ 0 ].routines[ 0 ].steps[ 0 ].cast)
+    expect(hydrated[ 0 ].routines[ 0 ].steps[ 0 ].cast)
       .toBe(true);
   });
 
   it("preserves an authored instant step rather than re-adding its wind-up", () =>
   {
     // Arrange
-    const instant = {
-      encounters: [ { key: "x", routines: [ { key: "r", steps: [ { skill: 5, cast: false } ] } ] } ],
-    };
+    const instant = [ { key: "x", routines: [ { key: "r", steps: [ { skill: 5, cast: false } ] } ] } ];
 
     // Act
-    const hydrated = hydrateBossConfig(instant);
+    const hydrated = hydrateBossEncounters(instant);
 
     // Assert
-    expect(hydrated.encounters[ 0 ].routines[ 0 ].steps[ 0 ].cast)
+    expect(hydrated[ 0 ].routines[ 0 ].steps[ 0 ].cast)
       .toBe(false);
   });
 
   it("falls back to the only implemented verb when the authored verb is unknown", () =>
   {
     // Arrange
-    const unknownVerb = {
-      encounters: [ { key: "x", routines: [ { key: "r", steps: [ { verb: "teleport" } ] } ] } ],
-    };
+    const unknownVerb = [ { key: "x", routines: [ { key: "r", steps: [ { verb: "teleport" } ] } ] } ];
 
     // Act
-    const hydrated = hydrateBossConfig(unknownVerb);
+    const hydrated = hydrateBossEncounters(unknownVerb);
 
     // Assert
-    expect(hydrated.encounters[ 0 ].routines[ 0 ].steps[ 0 ].verb)
+    expect(hydrated[ 0 ].routines[ 0 ].steps[ 0 ].verb)
       .toBe("forceSkill");
   });
 
   it("leaves the recorded name blank rather than inventing one when a step omits it", () =>
   {
     // Arrange
-    const noExpect = {
-      encounters: [ { key: "x", routines: [ { key: "r", steps: [ { skill: 5 } ] } ] } ],
-    };
+    const noExpect = [ { key: "x", routines: [ { key: "r", steps: [ { skill: 5 } ] } ] } ];
 
     // Act
-    const hydrated = hydrateBossConfig(noExpect);
+    const hydrated = hydrateBossEncounters(noExpect);
 
     // Assert
-    expect(hydrated.encounters[ 0 ].routines[ 0 ].steps[ 0 ].expect)
+    expect(hydrated[ 0 ].routines[ 0 ].steps[ 0 ].expect)
       .toBe("");
   });
 
-  it("replaces a non-object entry in a list with a fully defaulted one", () =>
+  it("replaces a non-object entry in the list with a fully defaulted one", () =>
   {
     // Arrange
-    const junkEntries = { encounters: [ null, 42 ] };
+    const junkEntries = [ null, 42 ];
 
     // Act
-    const hydrated = hydrateBossConfig(junkEntries);
+    const hydrated = hydrateBossEncounters(junkEntries);
 
     // Assert
-    expect(hydrated.encounters)
+    expect(hydrated)
       .toHaveLength(2);
-    expect(hydrated.encounters[ 0 ].key)
+    expect(hydrated[ 0 ].key)
       .toBe("");
-    expect(hydrated.encounters[ 1 ].participants)
+    expect(hydrated[ 1 ].participants)
       .toEqual([]);
   });
 });
@@ -472,10 +450,10 @@ describe("boss config factories", () =>
     const encounter = createBossEncounter();
 
     // Act
-    const hydrated = hydrateBossConfig({ encounters: [ encounter ] });
+    const hydrated = hydrateBossEncounters([ encounter ]);
 
     // Assert
-    expect(hydrated.encounters[ 0 ])
+    expect(hydrated[ 0 ])
       .toEqual(encounter);
   });
 });

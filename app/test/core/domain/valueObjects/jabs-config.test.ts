@@ -183,17 +183,56 @@ describe("hydrateJabsConfig", () =>
 
   it("drops unrelated top-level keys so saved files stay clean", () =>
   {
-    const hydrated = hydrateJabsConfig({
+    // Arrange
+    const withJunk = {
       teams: [],
       extraneous: "should not appear",
-    });
+    };
 
+    // Act
+    const hydrated = hydrateJabsConfig(withJunk);
+
+    // Assert- this list is every block the file is allowed to carry. Dropping unknown keys is the
+    // point of the hydrator, but it also means a real block missing from JabsConfigRoot would be
+    // erased from disk on the next save, so this assertion is what keeps that from going unnoticed.
     expect(Object.keys(hydrated)
       .sort())
       .toEqual([
+        "bosses",
         "juice",
         "teams",
       ]);
+  });
+
+  it("preserves an authored bosses block rather than discarding it", () =>
+  {
+    // Arrange
+    const withBosses = {
+      teams: [],
+      bosses: [ { key: "gluttonwolf", map: 75 } ],
+    };
+
+    // Act
+    const hydrated = hydrateJabsConfig(withBosses);
+
+    // Assert
+    expect(hydrated.bosses)
+      .toHaveLength(1);
+    expect(hydrated.bosses[ 0 ].key)
+      .toBe("gluttonwolf");
+  });
+
+  it("yields an empty bosses block for a config authored before boss fights existed", () =>
+  {
+    // Arrange
+    const legacyConfig = { teams: [] };
+
+    // Act
+    const hydrated = hydrateJabsConfig(legacyConfig);
+
+    // Assert
+    expect(hydrated.bosses)
+      .toEqual([]);
   });
 });
 
