@@ -103,12 +103,15 @@ bun run coverage
 Coverage is enabled inside `vitest.config.ts` itself, so even a single-file run prints the whole
 coverage table and buries the result. Pass `--coverage.enabled=false` while iterating.
 
-The conventions here are **not** the `rmmz-plugins` ones. Do not import those by default:
+Conventions:
 
 - A block comment above the top-level `describe` states the contract the module owes its callers, and
   why that contract matters. It is the most valuable part of the file — write it first.
 - One `describe` per exported function; `it` names read as behavior.
-- **No inline Arrange/Act/Assert comments.** That is the plugin repo's habit, not this one.
+- **Every test body carries inline `// Arrange` / `// Act` / `// Assert` comments.** This is Jeremy's
+  convention in every repo he writes in, and it holds here regardless of what any older test file in
+  this tree happens to look like. A test with nothing to arrange still gets the comment, with a line
+  saying what the empty setup means.
 - Assertions chain onto their own line — `expect(actual)` then `.toBe(expected);`.
 - The default environment is `node`. A test needing the DOM opts in per file with a
   `@vitest-environment jsdom` docblock, then uses `@testing-library/react` and
