@@ -1,63 +1,28 @@
 import { useState } from 'react';
 import { Box, Button, Divider, List, ListItemButton, ListItemText, Paper, Stack, Typography } from '@mui/material';
 import { Add } from '@mui/icons-material';
-import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import { useBossConfig } from '@presentation/context/resources/boss.context.tsx';
 import BossEncounterEditor from './BossEncounterEditor.tsx';
 import { type BossConfigRoot, type BossEncounter, createBossEncounter } from '@core/domain/valueObjects/boss-config.ts';
 
 /**
- * Editor board for `config.boss.json` — the boss fights J-ABS-Boss runs.
+ * The Bosses tab of the JABS board — the boss fights J-ABS-Boss runs, out of `config.boss.json`.
  *
  * A fight authored here is data rather than a chain of event commands, which is what makes retiming a
  * routine or swapping a skill a one-field change instead of an afternoon.
+ *
+ * Saving and reloading belong to the parent board rather than to this tab, matching how the other JABS
+ * tabs behave: one save persists everything the board is holding, so switching tabs can never strand
+ * an edit the author thought they had written.
  */
-const BossBoard = () =>
+const JabsBossesTab = () =>
 {
   const {
     bossConfig,
     setConfig,
-    save,
-    reload,
-    loading,
   } = useBossConfig();
 
-  const [ isSaving, setIsSaving ] = useState(false);
   const [ selectedIndex, setSelectedIndex ] = useState(0);
-
-  const handleSave = async () =>
-  {
-    if (bossConfig === null)
-    {
-      return;
-    }
-
-    setIsSaving(true);
-    try
-    {
-      await save(bossConfig);
-    }
-    finally
-    {
-      setIsSaving(false);
-    }
-  };
-
-  const handleReload = async () =>
-  {
-    await reload();
-  };
-
-  const canSave = loading === false && bossConfig !== null;
-  const canReload = loading === false;
-
-  useBoardActions({
-    onSave: handleSave,
-    canSave,
-    isSaving,
-    onReload: handleReload,
-    canReload,
-  });
 
   if (bossConfig === null)
   {
@@ -165,4 +130,4 @@ const BossBoard = () =>
   );
 };
 
-export default BossBoard;
+export default JabsBossesTab;
