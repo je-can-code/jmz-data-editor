@@ -6,6 +6,7 @@ enum ConfigFilenames
   Sdps = 'config.sdp.json',
   Jabs = 'config.jabs.json',
   Level = 'config.level.json',
+  Bosses = 'config.boss.json',
   System = 'System.json',
 }
 

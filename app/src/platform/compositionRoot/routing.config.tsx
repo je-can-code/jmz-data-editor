@@ -7,7 +7,8 @@ import ProficiencyBoard from '../../presentation/boards/proficiency/ProficiencyB
 import EnemiesBoard from '../../presentation/boards/enemies/EnemiesBoard.tsx';
 import JabsConfigBoard from '@boards/jabs/JabsConfigBoard.tsx';
 import LevelConfigBoard from '@boards/level/LevelConfigBoard.tsx';
-import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, TrendingUp, } from '@mui/icons-material';
+import BossBoard from '@boards/boss/BossBoard.tsx';
+import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, TrendingUp, Whatshot, } from '@mui/icons-material';
 import IndexBoard from '@boards/_index/IndexBoard.tsx';
 import SkillsBoard from '@boards/skills/SkillsBoard.tsx';
 import StatesBoard from '@boards/states/StatesBoard.tsx';
@@ -156,6 +157,16 @@ const itemsBoard: BoardDefinition = {
   featureFlag: 'db.items',
 };
 
+const bossBoard: BoardDefinition = {
+  id: 'boss',
+  title: 'Boss Fights',
+  path: '/boss',
+  component: BossBoard,
+  guard: () => true,
+  icon: <Whatshot fontSize={'small'}/>,
+  featureFlag: 'config.boss',
+};
+
 const APP_ROUTES: BoardDefinition[] = [
   indexBoard,
   classesBoard,
@@ -171,6 +182,7 @@ const APP_ROUTES: BoardDefinition[] = [
   proficiencyBoard,
   jabsConfigBoard,
   levelConfigBoard,
+  bossBoard,
 ];
 
 export { APP_ROUTES };
