@@ -4,6 +4,7 @@ declare namespace Crafting
   {
     recipes: Recipe[];
     categories: Category[];
+    ingredientTypes?: IngredientType[];
   }
 
   interface Recipe
@@ -26,6 +27,26 @@ declare namespace Crafting
     // Inline import type – this does NOT make the file a module
     type: import('../../core/enums/CraftingComponentType.ts').CraftingComponentType;
     count: number;
+    /**
+     * Ingredient slots only. When present, the slot is satisfied by anything in the player's inventory carrying
+     * every one of these types, rather than by the one row named in {@link id}.
+     */
+    categories?: string[];
+  }
+
+  /**
+   * One authored ingredient classification, such as "protein" or "flank".
+   *
+   * These are a flat vocabulary rather than a hierarchy. An entry carries whatever set of them its author decides,
+   * and a recipe slot is satisfied by anything carrying every type it asks for - so a narrower slot matches fewer
+   * things, which is the whole difference between a common dish and a signature one.
+   */
+  interface IngredientType
+  {
+    key: string;
+    name: string;
+    iconIndex: number;
+    description: string;
   }
 
   interface Category

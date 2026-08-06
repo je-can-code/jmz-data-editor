@@ -28,6 +28,7 @@ export function useCrafting()
 
   const recipes = config?.recipes ?? [];
   const categories = config?.categories ?? [];
+  const ingredientTypes = config?.ingredientTypes ?? [];
 
   const setRecipes = (updated: Crafting.Recipe[]) =>
   {
@@ -55,14 +56,33 @@ export function useCrafting()
     });
   };
 
+  /**
+   * Replaces the authored ingredient type vocabulary.
+   * @param {Crafting.IngredientType[]} updated The full list of types, in display order.
+   */
+  const setIngredientTypes = (updated: Crafting.IngredientType[]) =>
+  {
+    if (!config)
+    {
+      return;
+    }
+
+    setConfig({
+      ...config,
+      ingredientTypes: updated,
+    });
+  };
+
   return {
     // data
     recipes,
     categories,
+    ingredientTypes,
 
     // setters
     setRecipes,
     setCategories,
+    setIngredientTypes,
 
     // base controls
     save,

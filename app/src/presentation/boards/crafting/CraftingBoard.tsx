@@ -51,6 +51,7 @@ import CraftingComponentList, {
   readDatabaseDescription,
   readDatabaseIconIndex,
 } from './CraftingComponentList.tsx';
+import { IngredientTypesTab } from './IngredientTypesTab.tsx';
 
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import CraftingComponentType from '@core/enums/CraftingComponentType.ts';
@@ -148,8 +149,10 @@ const CraftingBoard = () =>
   const {
     recipes,
     categories,
+    ingredientTypes,
     setRecipes,
     setCategories,
+    setIngredientTypes,
     save,
     reload,
     loading
@@ -354,6 +357,12 @@ const CraftingBoard = () =>
   const applyCategories = (updatedCategories: Category[]) =>
   {
     setCategories(updatedCategories);
+    setCanSave(true);
+  };
+
+  const applyIngredientTypes = (updatedTypes: Crafting.IngredientType[]) =>
+  {
+    setIngredientTypes(updatedTypes);
     setCanSave(true);
   };
 
@@ -680,7 +689,10 @@ const CraftingBoard = () =>
     onSave: async () =>
     {
       setCanSave(false);
-      await save({ recipes, categories } as Configuration);
+
+      // every block of the configuration has to be named here. anything left out is not merely unsaved - it is
+      // written away, because this replaces the file rather than patching it.
+      await save({ recipes, categories, ingredientTypes } as Configuration);
       handleSnack('Crafting data has been saved successfully.');
     },
     canSave: canSave && !loading,
@@ -736,6 +748,7 @@ const CraftingBoard = () =>
         <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
           <Tab label={'Recipes'} id={'crafting-tab-0'} aria-controls={'crafting-tabpanel-0'}/>
           <Tab label={'Categories'} id={'crafting-tab-1'} aria-controls={'crafting-tabpanel-1'}/>
+          <Tab label={'Ingredient Types'} id={'crafting-tab-2'} aria-controls={'crafting-tabpanel-2'}/>
         </Tabs>
       </Box>
 
@@ -1036,6 +1049,13 @@ const CraftingBoard = () =>
               )}
           </Grid>
         </Grid>
+      )}
+
+      {tabIndex === 2 && (
+        <IngredientTypesTab
+          types={ingredientTypes}
+          onChange={applyIngredientTypes}
+        />
       )}
     </EditorBoardSplitLayout>
 
