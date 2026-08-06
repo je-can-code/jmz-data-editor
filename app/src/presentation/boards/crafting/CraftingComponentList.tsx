@@ -8,6 +8,7 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControlLabel,
   Grid,
   IconButton,
   List,
@@ -18,6 +19,7 @@ import {
   Menu,
   MenuItem,
   Stack,
+  Switch,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -44,6 +46,8 @@ import { brown } from '@mui/material/colors';
 import React, { MouseEvent, useEffect, useMemo, useState } from 'react';
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import CraftingListType from '@core/enums/CraftingListType.ts';
+import { IngredientTypeChips } from '@presentation/components/crafting/IngredientTypeChips.tsx';
+import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 import { useItems } from '@presentation/context/resources/items.context.tsx';
 import { useWeapons } from '@presentation/context/resources/weapons.context.tsx';
 import { useArmors } from '@presentation/context/resources/armors.context.tsx';
@@ -125,12 +129,19 @@ export function readDatabaseDescription(
 
 const CraftingComponentList = (props: CraftingListProps) =>
 {
+  // the vocabulary is authored on this board's own Ingredient Types tab.
+  const { ingredientTypes } = useCrafting();
+
   //region state
   const [ currentComponents, setCurrentComponents ] = useState<Crafting.CraftingComponent[]>([]);
   const [ selectedComponent, setSelectedComponent ] = useState<Crafting.CraftingComponent | null>(null);
   const [ selectedComponentType, setSelectedComponentType ] = useState<CraftingComponentType | null>(null);
   const [ selectedComponentIndex, setSelectedComponentIndex ] = useState<number>(0);
   const [ pendingComponent, setPendingComponent ] = useState<Crafting.CraftingComponent | null>(null);
+
+  // a slot is categorical exactly when it carries a categories array; the absence of one is what makes a slot
+  // point at a specific row instead.
+  const pendingSlotIsCategorical = pendingComponent?.categories !== undefined;
 
   const {
     data: items,
@@ -315,6 +326,54 @@ const CraftingComponentList = (props: CraftingListProps) =>
     } as Crafting.CraftingComponent;
 
     setPendingComponent(updatedSelectedIngredient);
+  };
+
+  /**
+   * Switches the pending slot between naming one exact row and naming the kinds of thing it will accept.
+   *
+   * The two are mutually exclusive by design: a slot filled from inventory has no single row to point at, and a slot
+   * naming a row has nothing to match against. So turning one on clears the other rather than leaving both set and
+   * letting the game decide which it believed.
+   * @param {boolean} categorical Whether the slot should match by ingredient type.
+   */
+  const handlePendingComponentCategoricalOnChangeEvent = (categorical: boolean) =>
+  {
+    if (!pendingComponent)
+    {
+      return;
+    }
+
+    if (categorical)
+    {
+      setPendingComponent({
+        ...pendingComponent,
+        id: 0,
+        categories: pendingComponent.categories ?? [],
+      } as Crafting.CraftingComponent);
+
+      return;
+    }
+
+    const { categories, ...withoutCategories } = pendingComponent;
+
+    setPendingComponent(withoutCategories as Crafting.CraftingComponent);
+  };
+
+  /**
+   * Replaces the ingredient types the pending slot will accept.
+   * @param {string[]} keys The chosen type keys.
+   */
+  const handlePendingComponentCategoriesOnChangeEvent = (keys: string[]) =>
+  {
+    if (!pendingComponent)
+    {
+      return;
+    }
+
+    setPendingComponent({
+      ...pendingComponent,
+      categories: keys,
+    } as Crafting.CraftingComponent);
   };
 
   const handleRecipeComponentTypeOnChangeEvent = (
@@ -962,6 +1021,21 @@ const CraftingComponentList = (props: CraftingListProps) =>
         <Grid container spacing={4}>
           <Grid size={7}>
             <Stack>
+              {props.type === CraftingListType.Ingredients && (
+                <FormControlLabel
+                  control={
+                    <Switch
+                      size={'small'}
+                      checked={pendingSlotIsCategorical}
+                      onChange={(event) => handlePendingComponentCategoricalOnChangeEvent(event.target.checked)}
+                    />
+                  }
+                  label={pendingSlotIsCategorical
+                    ? 'Accepts any matching ingredient'
+                    : 'Requires one specific thing'}
+                />
+              )}
+
               <ToggleButtonGroup
                 exclusive
                 color={'primary'}
@@ -969,6 +1043,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
                 defaultValue={CraftingComponentType.Item}
                 onChange={handleRecipeComponentTypeOnChangeEvent}
                 fullWidth
+                disabled={pendingSlotIsCategorical}
                 sx={{ flexWrap: 'wrap', gap: 0.5 }}
               >
                 <ToggleButton
@@ -998,7 +1073,18 @@ const CraftingComponentList = (props: CraftingListProps) =>
                 </ToggleButton>
               </ToggleButtonGroup>
 
-              {renderRelevantRecipeComponentDropdown()}
+              {pendingSlotIsCategorical
+                ? (
+                  <IngredientTypeChips
+                    options={ingredientTypes}
+                    value={pendingComponent?.categories ?? []}
+                    onChange={handlePendingComponentCategoriesOnChangeEvent}
+                    label={'Accepts'}
+                    placeholder={'Any ingredient'}
+                    helperText={'Anything carrying all of these will fill the slot.'}
+                  />
+                )
+                : renderRelevantRecipeComponentDropdown()}
             </Stack>
           </Grid>
           <Grid size={5}>
