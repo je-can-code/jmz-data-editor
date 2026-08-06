@@ -1,6 +1,7 @@
 import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
 import { MaxTpParser } from '@services/parsers/MaxTpParser.ts';
 import { StealParser } from '@services/parsers/StealParser.ts';
+import { IngredientTypeParser } from '@services/parsers/IngredientTypeParser.ts';
 import RPG_Armor = Rmmz.Implementations.RPG_Armor;
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
@@ -15,6 +16,9 @@ class RPG_ArmorDomainModel
   public params: number[];
   public traits: RPG_Trait[];
   public maxTp: number;
+
+  /** The ingredient types this counts as when a recipe slot asks for them. */
+  public ingredientTypeKeys: string[];
 
   /** J-Resources-ABS {@code <lst:N>} — integer percent life steal; signed. */
   public lst: number;
@@ -41,6 +45,7 @@ class RPG_ArmorDomainModel
     this.lst = steal.lst;
     this.mst = steal.mst;
     this.tst = steal.tst;
+    this.ingredientTypeKeys = IngredientTypeParser.readIngredientTypes(this.note);
   }
 
   public toRmmz(): RPG_Armor
@@ -68,6 +73,7 @@ class RPG_ArmorDomainModel
       mst: this.mst,
       tst: this.tst,
     });
+    n = IngredientTypeParser.writeIngredientTypes(n, this.ingredientTypeKeys);
     return n;
   }
 }

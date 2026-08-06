@@ -44,6 +44,8 @@ import {
 import TraitEditor from '@presentation/components/traits/TraitEditor.tsx';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import { StealRatesFields } from '@presentation/components/resources/StealRatesFields.tsx';
+import { IngredientTypeChips } from '@presentation/components/crafting/IngredientTypeChips.tsx';
+import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 import { SystemService } from '@services/SystemService.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
@@ -66,6 +68,9 @@ function WeaponsBoard()
 {
   const { data: weapons, setData, save, reload, loading } = useWeapons();
   const { rmmzDataPath } = useProjectPath();
+
+  // the vocabulary is authored on the crafting board; this only offers what has been defined.
+  const { ingredientTypes } = useCrafting();
 
   const [ selectedIndex, setSelectedIndex ] = useState<number>(0);
   const [ tabIndex, setTabIndex ] = useState(0);
@@ -390,6 +395,17 @@ function WeaponsBoard()
                   {
                     patch(next);
                   }}
+                />
+              </BoardSectionCard>
+
+              <BoardSectionCard title={'Cooking'} collapsible defaultExpanded={false}>
+                <IngredientTypeChips
+                  options={ingredientTypes}
+                  value={selectedWeapon.ingredientTypeKeys}
+                  onChange={(keys) => patch({ ingredientTypeKeys: keys })}
+                  label={'Counts as'}
+                  placeholder={'Not an ingredient'}
+                  helperText={'Recipes asking for any of these will accept this.'}
                 />
               </BoardSectionCard>
             </Stack>

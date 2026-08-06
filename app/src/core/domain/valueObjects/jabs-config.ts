@@ -60,10 +60,23 @@ type JuiceConfig = {
   profiles: JuiceProfilesMap;
 };
 
+/**
+ * One food group a consumable can belong to.
+ *
+ * The keys are the same ones the chain states carry, so this list is the vocabulary an author picks from rather than
+ * a second opinion about what the groups are.
+ */
+type JabsFoodTypeDefinition = {
+  key: string;
+  name: string;
+  iconIndex: number;
+};
+
 type JabsConfigRoot = {
   teams: JabsTeamDefinition[];
   juice: JuiceConfig;
   bosses: BossEncounter[];
+  foodTypes: JabsFoodTypeDefinition[];
 };
 
 /**
@@ -267,10 +280,17 @@ function hydrateJabsConfig(rawRoot: unknown): JabsConfigRoot
     ? undefined
     : rootRecord[ "bosses" ]);
 
+  // anything omitted here is not merely unread - it is written away the next time the board saves, because the save
+  // replaces the file with whatever this returned.
+  const foodTypes = rootRecord !== null && Array.isArray(rootRecord[ "foodTypes" ])
+    ? (rootRecord[ "foodTypes" ] as JabsFoodTypeDefinition[])
+    : [];
+
   return {
     teams,
     juice,
     bosses,
+    foodTypes,
   };
 }
 
@@ -283,6 +303,7 @@ export {
 };
 export type {
   JabsConfigRoot,
+  JabsFoodTypeDefinition,
   JabsTeamDefinition,
   JuiceCasterConfig,
   JuiceCastingConfig,

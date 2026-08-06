@@ -45,6 +45,10 @@ import {
 } from '@presentation/components/usableItem/UsableItemInvocationSection.tsx';
 import { type IdLabelRow, UsableEffectsEditor } from '@presentation/components/usableItem/UsableEffectsEditor.tsx';
 import { SystemService } from '@services/SystemService.ts';
+import { IngredientTypeChips } from '@presentation/components/crafting/IngredientTypeChips.tsx';
+import { FoodTypeSelect } from '@presentation/components/crafting/FoodTypeSelect.tsx';
+import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
+import { useJabs } from '@presentation/context/resources/jabs.context.tsx';
 import RPG_UsableEffect = Rmmz.Data.RPG_UsableEffect;
 
 const noteFieldSx = { '& .MuiInputBase-input': { fontFamily: 'monospace' } };
@@ -75,6 +79,11 @@ function ItemsBoard()
   const { states } = useStates();
   const { skills } = useSkills();
   const { rmmzDataPath } = useProjectPath();
+
+  // both vocabularies are authored elsewhere; this board only offers what has been defined.
+  const { ingredientTypes } = useCrafting();
+  const { jabsConfig } = useJabs();
+  const foodTypes = jabsConfig?.foodTypes ?? [];
 
   const [ selectedIndex, setSelectedIndex ] = useState<number>(0);
   const [ tabIndex, setTabIndex ] = useState(0);
@@ -356,6 +365,25 @@ function ItemsBoard()
                   skillRows={skillEffectPickerRows}
                   commonEventRows={commonEventPickerRows}
                 />
+              </BoardSectionCard>
+
+              <BoardSectionCard title={'Cooking'} collapsible defaultExpanded={false}>
+                <Stack spacing={2}>
+                  <IngredientTypeChips
+                    options={ingredientTypes}
+                    value={selectedItem.ingredientTypeKeys}
+                    onChange={(keys) => patch({ ingredientTypeKeys: keys })}
+                    label={'Counts as'}
+                    placeholder={'Not an ingredient'}
+                    helperText={'Recipes asking for any of these will accept this item.'}
+                  />
+
+                  <FoodTypeSelect
+                    options={foodTypes}
+                    value={selectedItem.foodTypeKey}
+                    onChange={(key) => patch({ foodTypeKey: key })}
+                  />
+                </Stack>
               </BoardSectionCard>
             </Stack>
           </Grid>
