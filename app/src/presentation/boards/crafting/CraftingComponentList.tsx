@@ -8,7 +8,6 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  Grid,
   IconButton,
   List,
   ListItem,
@@ -604,6 +603,14 @@ const CraftingComponentList = (props: CraftingListProps) =>
    * @param {string[]} categories The keys the slot asks for.
    * @returns {string} Guidance naming the current match count.
    */
+  // whether the vocabulary is in use at all yet, which decides how to read a count of zero.
+  const anythingIsTagged = useMemo(
+    () => items.some(row => row.ingredientTypeKeys.length > 0)
+      || weapons.some(row => row.ingredientTypeKeys.length > 0)
+      || armors.some(row => row.ingredientTypeKeys.length > 0),
+    [ items, weapons, armors ]
+  );
+
   const describeCategoricalMatches = (categories: string[]): string =>
   {
     if (categories.length === 0)
@@ -615,7 +622,12 @@ const CraftingComponentList = (props: CraftingListProps) =>
 
     if (matches === 0)
     {
-      return 'Nothing carries all of these, so this slot can never be filled. Try fewer, or a broader type.';
+      // "nothing matches" means two very different things, and saying the alarming one while a database is still
+      // being tagged would fire on every slot until the work is finished - which teaches the reader to ignore it
+      // before it ever means anything.
+      return anythingIsTagged
+        ? 'Nothing carries all of these, so this slot can never be filled. Try fewer, or a broader type.'
+        : 'Needs one thing carrying all of these. Nothing is tagged with ingredient types yet.';
     }
 
     return `Needs one thing carrying all of these. ${matches} currently qualify.`;
@@ -928,49 +940,37 @@ const CraftingComponentList = (props: CraftingListProps) =>
     }
   };
 
-  const renderSelectedComponentChip = () =>
-  {
-    if (!selectedComponent)
-    {
-      return <></>;
-    }
-    if (selectedComponentIndex < 0)
-    {
-      return <></>;
-    }
-
-    return <Stack spacing={4}>
-      {'Current Component:'}
-      {buildComponentChip(selectedComponent, 'outlined')}
-    </Stack>;
-  };
-
-  const renderPendingComponentChip = () =>
+  /**
+   * Shows what the slot will become, and what it was only when that differs.
+   *
+   * Showing both unconditionally meant the dialog opened displaying the same chip twice, which reads as a diff
+   * view of the form rather than as an edit of a recipe. The row behind the dialog already states the current
+   * value, so repeating it earns its space only once the two have parted ways.
+   */
+  const renderPendingComponentPreview = () =>
   {
     if (!pendingComponent)
     {
       return <></>;
     }
 
+    const changed = selectedComponent !== null
+      && JSON.stringify(selectedComponent) !== JSON.stringify(pendingComponent);
+
     return (
-      <Stack
-        spacing={4}
-        sx={{
-          border: '1px solid',
-          borderRadius: '10px',
-          padding: '10px',
-          borderColor: 'grey'
-        }}
-      >
-        {'Pending Component Update:'}
-        {buildComponentChip(pendingComponent)}
-        <TextField
-          type={'number'}
-          label={'Count'}
-          value={pendingComponent.count}
-          fullWidth
-          onChange={(event) => handlePendingComponentCountOnChangeEvent(parseInt(event.target.value) ?? 1)}
-        />
+      <Stack spacing={1}>
+        <Typography variant={'caption'} color={'text.secondary'}>
+          {changed
+            ? 'Result'
+            : 'Unchanged'}
+        </Typography>
+        <Stack direction={'row'} spacing={1} alignItems={'center'} flexWrap={'wrap'} useFlexGap>
+          {changed && (<>
+            {buildComponentChip(selectedComponent, 'outlined')}
+            <Typography variant={'body2'} color={'text.secondary'}>{'>'}</Typography>
+          </>)}
+          {buildComponentChip(pendingComponent)}
+        </Stack>
       </Stack>
     );
   };
@@ -1140,72 +1140,74 @@ const CraftingComponentList = (props: CraftingListProps) =>
         </Typography>
       </DialogTitle>
       <DialogContent>
-        <Grid container spacing={4}>
-          <Grid size={7}>
-            <Stack>
-              <Typography variant={'caption'} color={'text.secondary'} sx={{ mb: 0.5 }}>
-                Slot kind
-              </Typography>
-              <ToggleButtonGroup
-                exclusive
-                size={'small'}
-                color={'primary'}
-                value={pendingSlotIsCategorical
-                  ? CATEGORICAL_SLOT_KIND
-                  : selectedComponentType}
-                onChange={handleSlotKindOnChangeEvent}
-                sx={{ flexWrap: 'wrap', gap: 0.5, mb: 2 }}
-              >
-                <ToggleButton value={CraftingComponentType.Item}>
-                  <BusinessCenter sx={{ color: brown[ 500 ], mr: 0.5 }} fontSize={'small'}/>
-                  Item
+        <Stack spacing={2} sx={{ pt: 1 }}>
+          <Stack>
+            <Typography variant={'caption'} color={'text.secondary'} sx={{ mb: 0.5 }}>
+              Slot kind
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              size={'small'}
+              color={'primary'}
+              value={pendingSlotIsCategorical
+                ? CATEGORICAL_SLOT_KIND
+                : selectedComponentType}
+              onChange={handleSlotKindOnChangeEvent}
+              sx={{ flexWrap: 'wrap', gap: 0.5 }}
+            >
+              <ToggleButton value={CraftingComponentType.Item}>
+                <BusinessCenter sx={{ color: brown[ 500 ], mr: 0.5 }} fontSize={'small'}/>
+                Item
+              </ToggleButton>
+              <ToggleButton value={CraftingComponentType.Weapon}>
+                <LocalDining color={'error'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                Weapon
+              </ToggleButton>
+              <ToggleButton value={CraftingComponentType.Armor}>
+                <Shield color={'info'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                Armor
+              </ToggleButton>
+              <ToggleButton value={CraftingComponentType.Gold}>
+                <AttachMoney color={'warning'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                Gold
+              </ToggleButton>
+              <ToggleButton value={CraftingComponentType.Sdp}>
+                <AutoAwesome color={'secondary'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                SDP
+              </ToggleButton>
+              {props.type === CraftingListType.Ingredients && (
+                <ToggleButton value={CATEGORICAL_SLOT_KIND}>
+                  <Category color={'success'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                  Any type
                 </ToggleButton>
-                <ToggleButton value={CraftingComponentType.Weapon}>
-                  <LocalDining color={'error'} sx={{ mr: 0.5 }} fontSize={'small'}/>
-                  Weapon
-                </ToggleButton>
-                <ToggleButton value={CraftingComponentType.Armor}>
-                  <Shield color={'info'} sx={{ mr: 0.5 }} fontSize={'small'}/>
-                  Armor
-                </ToggleButton>
-                <ToggleButton value={CraftingComponentType.Gold}>
-                  <AttachMoney color={'warning'} sx={{ mr: 0.5 }} fontSize={'small'}/>
-                  Gold
-                </ToggleButton>
-                <ToggleButton value={CraftingComponentType.Sdp}>
-                  <AutoAwesome color={'secondary'} sx={{ mr: 0.5 }} fontSize={'small'}/>
-                  SDP
-                </ToggleButton>
-                {props.type === CraftingListType.Ingredients && (
-                  <ToggleButton value={CATEGORICAL_SLOT_KIND}>
-                    <Category color={'success'} sx={{ mr: 0.5 }} fontSize={'small'}/>
-                    Any type
-                  </ToggleButton>
-                )}
-              </ToggleButtonGroup>
+              )}
+            </ToggleButtonGroup>
+          </Stack>
 
-              {pendingSlotIsCategorical
-                ? (
-                  <IngredientTypeChips
-                    options={ingredientTypes}
-                    value={pendingComponent?.categories ?? []}
-                    onChange={handlePendingComponentCategoriesOnChangeEvent}
-                    label={'Accepts'}
-                    placeholder={'Any ingredient'}
-                    helperText={describeCategoricalMatches(pendingComponent?.categories ?? [])}
-                  />
-                )
-                : renderRelevantRecipeComponentDropdown()}
-            </Stack>
-          </Grid>
-          <Grid size={5}>
-            <Stack spacing={2}>
-              {renderSelectedComponentChip()}
+          {pendingSlotIsCategorical
+            ? (
+              <IngredientTypeChips
+                options={ingredientTypes}
+                value={pendingComponent?.categories ?? []}
+                onChange={handlePendingComponentCategoriesOnChangeEvent}
+                label={'Accepts'}
+                placeholder={'Any ingredient'}
+                helperText={describeCategoricalMatches(pendingComponent?.categories ?? [])}
+              />
+            )
+            : renderRelevantRecipeComponentDropdown()}
 
-              {renderPendingComponentChip()}
-            </Stack>
-          </Grid>
-        </Grid>
+          <TextField
+            type={'number'}
+            size={'small'}
+            label={'Count'}
+            value={pendingComponent?.count ?? 1}
+            sx={{ maxWidth: 160 }}
+            onChange={(event) => handlePendingComponentCountOnChangeEvent(parseInt(event.target.value) ?? 1)}
+          />
+
+          {renderPendingComponentPreview()}
+        </Stack>
       </DialogContent>
       <DialogActions>
         <Button
