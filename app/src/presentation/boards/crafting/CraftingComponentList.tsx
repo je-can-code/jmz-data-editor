@@ -525,6 +525,63 @@ const CraftingComponentList = (props: CraftingListProps) =>
   //endregion list updates
 
   //region render
+  /**
+   * Resolves the type keys a slot accepts into their authored definitions, dropping any that no longer exist.
+   * @param {string[]} categories The keys the slot was authored with.
+   * @returns {Crafting.IngredientType[]} The definitions behind them, in the order chosen.
+   */
+  const resolveCategories = (categories: string[]): Crafting.IngredientType[] =>
+  {
+    return categories
+      .map(key => ingredientTypes.find(type => type.key === key))
+      .filter((type): type is Crafting.IngredientType => type !== undefined);
+  };
+
+  /**
+   * Labels a slot that matches by type rather than naming a row.
+   *
+   * Wrapped in angle brackets and set in monospace so it cannot be mistaken for an item. "Any Gel" is a perfectly
+   * plausible name for a real item in a game that already has Big Gelatin and Jelli Pilaf, whereas nothing in the
+   * database is ever named with brackets - and they are the same brackets the underlying note tag uses, so the row
+   * reads in the same language as the data behind it.
+   * @param {string[]} categories The keys the slot accepts.
+   * @param {number} count How many the slot consumes.
+   */
+  const renderCategoricalLabel = (
+    categories: string[],
+    count: number
+  ) =>
+  {
+    const named = resolveCategories(categories);
+    const inner = named.length === 0
+      ? 'any ingredient'
+      : `any ${named.map(type => type.name)
+        .join(' + ')}`;
+
+    return (
+      <>
+        <Box component={'span'} sx={{ fontFamily: 'monospace' }}>
+          {`<${inner}>`}
+        </Box>
+        {` (${count})`}
+      </>
+    );
+  };
+
+  /**
+   * The icon a categorical slot borrows: the first type it accepts, so the row is still recognisable at a glance.
+   * @param {string[]} categories The keys the slot accepts.
+   * @returns {number} An icon index, or zero when nothing resolves.
+   */
+  const categoricalIconIndex = (categories: string[]): number =>
+  {
+    const named = resolveCategories(categories);
+
+    return named.length > 0
+      ? named[ 0 ].iconIndex
+      : 0;
+  };
+
   const renderRecipeComponent = (
     craftingComponent: Crafting.CraftingComponent,
     index: number
@@ -543,23 +600,14 @@ const CraftingComponentList = (props: CraftingListProps) =>
 
     let ingredientData = null;
     let spriteIndex = 0;
-    let primaryLine = '';
+    let primaryLine: React.ReactNode = '';
 
     // a categorical slot has no row to name, so describing it by id would render as "0: ?" - which reads as a
     // broken row rather than a deliberate one.
     if (ingredient.categories !== undefined)
     {
-      const named = ingredient.categories
-        .map(key => ingredientTypes.find(type => type.key === key))
-        .filter((type): type is Crafting.IngredientType => type !== undefined);
-
-      spriteIndex = named.length > 0
-        ? named[ 0 ].iconIndex
-        : 0;
-      primaryLine = named.length === 0
-        ? `Any ingredient (${ingredient.count})`
-        : `Any ${named.map(type => type.name)
-          .join(' + ')} (${ingredient.count})`;
+      spriteIndex = categoricalIconIndex(ingredient.categories);
+      primaryLine = renderCategoricalLabel(ingredient.categories, ingredient.count);
     }
     else
     {
@@ -903,26 +951,15 @@ const CraftingComponentList = (props: CraftingListProps) =>
     // borrowing the icon of the first type so the chip is still recognisable at a glance.
     if (craftingComponent.categories !== undefined)
     {
-      const chosen = craftingComponent.categories;
-      const named = chosen
-        .map(key => ingredientTypes.find(type => type.key === key))
-        .filter((type): type is Crafting.IngredientType => type !== undefined);
-      const description = chosen.length === 0
-        ? 'Any ingredient'
-        : `Any ${named.map(type => type.name)
-          .join(' + ')}`;
-
       return (
         <Chip
           icon={
             <IconSetSprite
-              iconIndex={named.length > 0
-                ? named[ 0 ].iconIndex
-                : 0}
+              iconIndex={categoricalIconIndex(craftingComponent.categories)}
               sizePx={22}
             />
           }
-          label={`${description} (${craftingComponent.count})`}
+          label={renderCategoricalLabel(craftingComponent.categories, craftingComponent.count)}
           variant={variant}
           color={'primary'}
         />
