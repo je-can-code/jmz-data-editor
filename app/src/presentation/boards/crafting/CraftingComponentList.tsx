@@ -580,6 +580,46 @@ const CraftingComponentList = (props: CraftingListProps) =>
       : 0;
   };
 
+  /**
+   * Counts the database entries that would currently satisfy a set of ingredient types.
+   *
+   * The runtime requires an entry to carry *every* type a slot asks for, which is easy to read as "any of these"
+   * when the chips sit side by side. Asking for egg, eyeball and blood together looks reasonable and matches
+   * nothing, because no single ingredient is all three. A count says so immediately, where prose does not.
+   * @param {string[]} categories The keys the slot asks for.
+   * @returns {number} How many items, weapons and armors carry all of them.
+   */
+  const countMatchingEntries = (categories: string[]): number =>
+  {
+    const carriesAll = (entry: { ingredientTypeKeys: string[] }) =>
+      categories.every(key => entry.ingredientTypeKeys.includes(key));
+
+    return items.filter(carriesAll).length
+      + weapons.filter(carriesAll).length
+      + armors.filter(carriesAll).length;
+  };
+
+  /**
+   * Reports what a slot would accept, so an impossible combination announces itself while it is being authored.
+   * @param {string[]} categories The keys the slot asks for.
+   * @returns {string} Guidance naming the current match count.
+   */
+  const describeCategoricalMatches = (categories: string[]): string =>
+  {
+    if (categories.length === 0)
+    {
+      return 'Pick the types this slot accepts.';
+    }
+
+    const matches = countMatchingEntries(categories);
+
+    if (matches === 0)
+    {
+      return 'Nothing carries all of these, so this slot can never be filled. Try fewer, or a broader type.';
+    }
+
+    return `Needs one thing carrying all of these. ${matches} currently qualify.`;
+  };
   const renderRecipeComponent = (
     craftingComponent: Crafting.CraftingComponent,
     index: number
@@ -1152,7 +1192,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
                     onChange={handlePendingComponentCategoriesOnChangeEvent}
                     label={'Accepts'}
                     placeholder={'Any ingredient'}
-                    helperText={'Anything carrying all of these will fill the slot.'}
+                    helperText={describeCategoricalMatches(pendingComponent?.categories ?? [])}
                   />
                 )
                 : renderRelevantRecipeComponentDropdown()}
