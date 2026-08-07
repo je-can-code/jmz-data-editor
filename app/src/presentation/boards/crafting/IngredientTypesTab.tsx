@@ -1,5 +1,6 @@
 import { type ChangeEvent, type MouseEvent, useState } from 'react';
 import {
+  Box,
   Divider,
   Grid,
   InputAdornment,
@@ -266,15 +267,35 @@ const IngredientTypesTab = ({ types, onChange }: IngredientTypesTabProps) =>
     <Grid container rowSpacing={2} columnSpacing={2} sx={{ height: '100%' }}>
       <Grid size={4}>
         <BoardSectionCard title={'Ingredient Types'} density={'compact'}>
-          <div onContextMenu={handleListContextMenu} style={{ cursor: 'context-menu' }}>
+          {/*
+            the list scrolls inside itself rather than growing the page. a vocabulary runs to dozens of entries, and
+            an unbounded list pushes the editor below the fold - so picking something near the bottom meant scrolling
+            back up to see what you had picked.
+          */}
+          <Box
+            onContextMenu={handleListContextMenu}
+            sx={{
+              cursor: 'context-menu',
+              maxHeight: '70vh',
+              overflowY: 'auto',
+            }}
+          >
             <List dense>
               {types.map((type, index) => renderListItem(type, index))}
             </List>
-          </div>
+          </Box>
         </BoardSectionCard>
       </Grid>
 
-      <Grid size={8}>
+      {/* pinned so the editor stays in view no matter how far down the list the selection is. */}
+      <Grid
+        size={8}
+        sx={{
+          position: 'sticky',
+          top: 0,
+          alignSelf: 'flex-start',
+        }}
+      >
         {selectedType !== null
           ? (
             <BoardSectionCard title={'Ingredient Type'}>
