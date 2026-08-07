@@ -8,7 +8,6 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  FormControlLabel,
   Grid,
   IconButton,
   List,
@@ -19,7 +18,6 @@ import {
   Menu,
   MenuItem,
   Stack,
-  Switch,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -32,6 +30,7 @@ import {
   AttachMoney,
   AutoAwesome,
   BusinessCenter,
+  Category,
   Clear,
   Close,
   ContentCopy,
@@ -64,6 +63,13 @@ import { BoardSectionCard } from '@presentation/components/board/BoardSectionCar
  */
 const EDITOR_REWARD_PARAM_ICON_GOLD = 2048;
 const EDITOR_REWARD_PARAM_ICON_SDP = 445;
+
+/**
+ * Stands beside the datastore types in the slot-kind picker, for a slot that matches by ingredient type instead of
+ * naming a row. Deliberately not a {@link CraftingComponentType}: nothing is ever written to disk under this value,
+ * it only exists so one exclusive control can cover every kind of slot.
+ */
+const CATEGORICAL_SLOT_KIND = "categorical";
 
 type CraftingListProps = {
   type: CraftingListType;
@@ -329,37 +335,6 @@ const CraftingComponentList = (props: CraftingListProps) =>
   };
 
   /**
-   * Switches the pending slot between naming one exact row and naming the kinds of thing it will accept.
-   *
-   * The two are mutually exclusive by design: a slot filled from inventory has no single row to point at, and a slot
-   * naming a row has nothing to match against. So turning one on clears the other rather than leaving both set and
-   * letting the game decide which it believed.
-   * @param {boolean} categorical Whether the slot should match by ingredient type.
-   */
-  const handlePendingComponentCategoricalOnChangeEvent = (categorical: boolean) =>
-  {
-    if (!pendingComponent)
-    {
-      return;
-    }
-
-    if (categorical)
-    {
-      setPendingComponent({
-        ...pendingComponent,
-        id: 0,
-        categories: pendingComponent.categories ?? [],
-      } as Crafting.CraftingComponent);
-
-      return;
-    }
-
-    const { categories, ...withoutCategories } = pendingComponent;
-
-    setPendingComponent(withoutCategories as Crafting.CraftingComponent);
-  };
-
-  /**
    * Replaces the ingredient types the pending slot will accept.
    * @param {string[]} keys The chosen type keys.
    */
@@ -376,17 +351,40 @@ const CraftingComponentList = (props: CraftingListProps) =>
     } as Crafting.CraftingComponent);
   };
 
-  const handleRecipeComponentTypeOnChangeEvent = (
+  /**
+   * Answers the single question the slot editor asks: what kind of thing is this slot.
+   *
+   * Naming a datastore row and matching by type used to be two controls, and the second one silently disabled the
+   * first - which read as the dialog breaking rather than as a choice. They are one decision with six answers, so
+   * they are one control, and picking any of them clears whatever the other kind left behind.
+   * @param {unknown} _ The originating event, which carries nothing this needs.
+   * @param {string | null} newValue The chosen slot kind, or null when the current one is clicked again.
+   */
+  const handleSlotKindOnChangeEvent = (
     _: unknown,
-    newValue: CraftingComponentType | null
+    newValue: string | null
   ) =>
   {
+    // an exclusive group reports null when the active button is clicked again; there is no "no kind" slot.
     if (newValue === null)
     {
       return;
     }
 
-    setSelectedComponentType(newValue);
+    if (newValue === CATEGORICAL_SLOT_KIND)
+    {
+      setPendingComponent((prev) => ({
+        ...(prev ?? { type: CraftingComponentType.Item, count: 1 }),
+        id: 0,
+        categories: prev?.categories ?? [],
+      }) as Crafting.CraftingComponent);
+
+      return;
+    }
+
+    const chosenType = newValue as CraftingComponentType;
+
+    setSelectedComponentType(chosenType);
 
     setPendingComponent((prev) =>
     {
@@ -394,23 +392,23 @@ const CraftingComponentList = (props: CraftingListProps) =>
       {
         return {
           id: 0,
-          type: newValue,
+          type: chosenType,
           count: 1,
         } as Crafting.CraftingComponent;
       }
 
-      if (newValue === CraftingComponentType.Gold || newValue === CraftingComponentType.Sdp)
-      {
-        return {
-          ...prev,
-          type: newValue,
-          id: 0,
-        } as Crafting.CraftingComponent;
-      }
+      // dropping the types is what makes this exclusive: a slot carrying both would leave the game to decide.
+      const { categories, ...withoutCategories } = prev;
+
+      // gold and panel points are quantities rather than rows, so any id left over would be meaningless.
+      const keepsItsRow = chosenType !== CraftingComponentType.Gold && chosenType !== CraftingComponentType.Sdp;
 
       return {
-        ...prev,
-        type: newValue,
+        ...withoutCategories,
+        type: chosenType,
+        id: keepsItsRow
+          ? withoutCategories.id
+          : 0,
       } as Crafting.CraftingComponent;
     });
   };
@@ -1105,58 +1103,46 @@ const CraftingComponentList = (props: CraftingListProps) =>
         <Grid container spacing={4}>
           <Grid size={7}>
             <Stack>
-              {props.type === CraftingListType.Ingredients && (
-                <FormControlLabel
-                  control={
-                    <Switch
-                      size={'small'}
-                      checked={pendingSlotIsCategorical}
-                      onChange={(event) => handlePendingComponentCategoricalOnChangeEvent(event.target.checked)}
-                    />
-                  }
-                  label={pendingSlotIsCategorical
-                    ? 'Accepts any matching ingredient'
-                    : 'Requires one specific thing'}
-                />
-              )}
-
-              {!pendingSlotIsCategorical && (
+              <Typography variant={'caption'} color={'text.secondary'} sx={{ mb: 0.5 }}>
+                Slot kind
+              </Typography>
               <ToggleButtonGroup
                 exclusive
+                size={'small'}
                 color={'primary'}
-                value={selectedComponentType}
-                defaultValue={CraftingComponentType.Item}
-                onChange={handleRecipeComponentTypeOnChangeEvent}
-                fullWidth
-                sx={{ flexWrap: 'wrap', gap: 0.5 }}
+                value={pendingSlotIsCategorical
+                  ? CATEGORICAL_SLOT_KIND
+                  : selectedComponentType}
+                onChange={handleSlotKindOnChangeEvent}
+                sx={{ flexWrap: 'wrap', gap: 0.5, mb: 2 }}
               >
-                <ToggleButton
-                  selected={selectedComponentType === CraftingComponentType.Item}
-                  value={CraftingComponentType.Item}>
-                  <BusinessCenter sx={{ color: brown[ 500 ] }}/>
+                <ToggleButton value={CraftingComponentType.Item}>
+                  <BusinessCenter sx={{ color: brown[ 500 ], mr: 0.5 }} fontSize={'small'}/>
+                  Item
                 </ToggleButton>
-                <ToggleButton
-                  selected={selectedComponentType === CraftingComponentType.Weapon}
-                  value={CraftingComponentType.Weapon}>
-                  <LocalDining color={'error'}/>
+                <ToggleButton value={CraftingComponentType.Weapon}>
+                  <LocalDining color={'error'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                  Weapon
                 </ToggleButton>
-                <ToggleButton
-                  selected={selectedComponentType === CraftingComponentType.Armor}
-                  value={CraftingComponentType.Armor}>
-                  <Shield color={'info'}/>
+                <ToggleButton value={CraftingComponentType.Armor}>
+                  <Shield color={'info'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                  Armor
                 </ToggleButton>
-                <ToggleButton
-                  selected={selectedComponentType === CraftingComponentType.Gold}
-                  value={CraftingComponentType.Gold}>
-                  <AttachMoney color={'warning'}/>
+                <ToggleButton value={CraftingComponentType.Gold}>
+                  <AttachMoney color={'warning'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                  Gold
                 </ToggleButton>
-                <ToggleButton
-                  selected={selectedComponentType === CraftingComponentType.Sdp}
-                  value={CraftingComponentType.Sdp}>
-                  <AutoAwesome color={'secondary'}/>
+                <ToggleButton value={CraftingComponentType.Sdp}>
+                  <AutoAwesome color={'secondary'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                  SDP
                 </ToggleButton>
+                {props.type === CraftingListType.Ingredients && (
+                  <ToggleButton value={CATEGORICAL_SLOT_KIND}>
+                    <Category color={'success'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                    Any type
+                  </ToggleButton>
+                )}
               </ToggleButtonGroup>
-              )}
 
               {pendingSlotIsCategorical
                 ? (
