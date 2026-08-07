@@ -372,11 +372,17 @@ const CraftingComponentList = (props: CraftingListProps) =>
 
     if (newValue === CATEGORICAL_SLOT_KIND)
     {
+      // the type letter is written but never read for a categorical slot - whatever fills it decides its own kind at
+      // craft time. Carrying over whichever datastore was last selected leaves a slot claiming to be gold or panel
+      // points, which is meaningless in the file and answers yes to predicates that ask.
       setPendingComponent((prev) => ({
-        ...(prev ?? { type: CraftingComponentType.Item, count: 1 }),
+        ...(prev ?? { count: 1 }),
+        type: CraftingComponentType.Item,
         id: 0,
         categories: prev?.categories ?? [],
       }) as Crafting.CraftingComponent);
+
+      setSelectedComponentType(CraftingComponentType.Item);
 
       return;
     }
