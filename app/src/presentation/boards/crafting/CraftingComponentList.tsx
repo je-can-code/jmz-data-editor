@@ -460,11 +460,9 @@ const CraftingComponentList = (props: CraftingListProps) =>
       return;
     }
 
-    const updatedSelectedIngredient = {
-      type: pendingComponent.type,
-      id: pendingComponent.id,
-      count: pendingComponent.count
-    } as Crafting.CraftingComponent;
+    // spread the pending component rather than naming its fields: listing them by hand is what silently drops any
+    // field added to a slot later, and the change simply appears not to have taken.
+    const updatedSelectedIngredient = { ...pendingComponent } as Crafting.CraftingComponent;
 
     setSelectedComponent(updatedSelectedIngredient);
 
@@ -547,33 +545,52 @@ const CraftingComponentList = (props: CraftingListProps) =>
     let spriteIndex = 0;
     let primaryLine = '';
 
-    switch (ingredient.type)
+    // a categorical slot has no row to name, so describing it by id would render as "0: ?" - which reads as a
+    // broken row rather than a deliberate one.
+    if (ingredient.categories !== undefined)
     {
-      case CraftingComponentType.Item:
-        ingredientData = itemsById.get(ingredient.id) ?? null;
-        spriteIndex = readDatabaseIconIndex(ingredientData);
-        primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
-        break;
-      case CraftingComponentType.Weapon:
-        ingredientData = weaponsById.get(ingredient.id) ?? null;
-        spriteIndex = readDatabaseIconIndex(ingredientData);
-        primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
-        break;
-      case CraftingComponentType.Armor:
-        ingredientData = armorsById.get(ingredient.id) ?? null;
-        spriteIndex = readDatabaseIconIndex(ingredientData);
-        primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
-        break;
-      case CraftingComponentType.Gold:
-        spriteIndex = EDITOR_REWARD_PARAM_ICON_GOLD;
-        primaryLine = `Gold (${ingredient.count})`;
-        break;
-      case CraftingComponentType.Sdp:
-        spriteIndex = EDITOR_REWARD_PARAM_ICON_SDP;
-        primaryLine = `SDP (${ingredient.count})`;
-        break;
-      default:
-        throw new Error(`unknown ingredient type detected: ${ingredient.type}`);
+      const named = ingredient.categories
+        .map(key => ingredientTypes.find(type => type.key === key))
+        .filter((type): type is Crafting.IngredientType => type !== undefined);
+
+      spriteIndex = named.length > 0
+        ? named[ 0 ].iconIndex
+        : 0;
+      primaryLine = named.length === 0
+        ? `Any ingredient (${ingredient.count})`
+        : `Any ${named.map(type => type.name)
+          .join(' + ')} (${ingredient.count})`;
+    }
+    else
+    {
+      switch (ingredient.type)
+      {
+        case CraftingComponentType.Item:
+          ingredientData = itemsById.get(ingredient.id) ?? null;
+          spriteIndex = readDatabaseIconIndex(ingredientData);
+          primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
+          break;
+        case CraftingComponentType.Weapon:
+          ingredientData = weaponsById.get(ingredient.id) ?? null;
+          spriteIndex = readDatabaseIconIndex(ingredientData);
+          primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
+          break;
+        case CraftingComponentType.Armor:
+          ingredientData = armorsById.get(ingredient.id) ?? null;
+          spriteIndex = readDatabaseIconIndex(ingredientData);
+          primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
+          break;
+        case CraftingComponentType.Gold:
+          spriteIndex = EDITOR_REWARD_PARAM_ICON_GOLD;
+          primaryLine = `Gold (${ingredient.count})`;
+          break;
+        case CraftingComponentType.Sdp:
+          spriteIndex = EDITOR_REWARD_PARAM_ICON_SDP;
+          primaryLine = `SDP (${ingredient.count})`;
+          break;
+        default:
+          throw new Error(`unknown ingredient type detected: ${ingredient.type}`);
+      }
     }
 
     const dbDescription = readDatabaseDescription(ingredientData);
@@ -882,6 +899,36 @@ const CraftingComponentList = (props: CraftingListProps) =>
     let chipLabel = '';
     let chipIconIndex = 0;
 
+    // a categorical slot names no row, so the switch below has nothing to look up. describe what it accepts instead,
+    // borrowing the icon of the first type so the chip is still recognisable at a glance.
+    if (craftingComponent.categories !== undefined)
+    {
+      const chosen = craftingComponent.categories;
+      const named = chosen
+        .map(key => ingredientTypes.find(type => type.key === key))
+        .filter((type): type is Crafting.IngredientType => type !== undefined);
+      const description = chosen.length === 0
+        ? 'Any ingredient'
+        : `Any ${named.map(type => type.name)
+          .join(' + ')}`;
+
+      return (
+        <Chip
+          icon={
+            <IconSetSprite
+              iconIndex={named.length > 0
+                ? named[ 0 ].iconIndex
+                : 0}
+              sizePx={22}
+            />
+          }
+          label={`${description} (${craftingComponent.count})`}
+          variant={variant}
+          color={'primary'}
+        />
+      );
+    }
+
     switch (craftingComponent.type)
     {
       case CraftingComponentType.Item:
@@ -1036,6 +1083,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
                 />
               )}
 
+              {!pendingSlotIsCategorical && (
               <ToggleButtonGroup
                 exclusive
                 color={'primary'}
@@ -1043,7 +1091,6 @@ const CraftingComponentList = (props: CraftingListProps) =>
                 defaultValue={CraftingComponentType.Item}
                 onChange={handleRecipeComponentTypeOnChangeEvent}
                 fullWidth
-                disabled={pendingSlotIsCategorical}
                 sx={{ flexWrap: 'wrap', gap: 0.5 }}
               >
                 <ToggleButton
@@ -1072,6 +1119,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
                   <AutoAwesome color={'secondary'}/>
                 </ToggleButton>
               </ToggleButtonGroup>
+              )}
 
               {pendingSlotIsCategorical
                 ? (
