@@ -420,7 +420,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
   //endregion component updates
 
   //region list updates
-  const handleAddNewComponent = (index: number | null) =>
+  const handleAddNewComponent = (index: number) =>
   {
     const newComponent = {
       id: 1,
@@ -428,9 +428,8 @@ const CraftingComponentList = (props: CraftingListProps) =>
       count: 1,
     } as Crafting.CraftingComponent;
 
-    const updatedComponents = (index === null)
-      ? [ newComponent ]
-      : currentComponents.toSpliced(index, 0, newComponent);
+    // splicing covers the empty list too, where it lands the new slot at position zero.
+    const updatedComponents = currentComponents.toSpliced(index, 0, newComponent);
 
     setCurrentComponents(updatedComponents);
     props.updateRecipeFunc(updatedComponents, props.type);
@@ -1060,6 +1059,24 @@ const CraftingComponentList = (props: CraftingListProps) =>
       />
     );
   };
+
+  /**
+   * Names the add button after the one thing it adds, rather than after the list it adds to.
+   */
+  const renderAddComponentLabel = (): string =>
+  {
+    switch (props.type)
+    {
+      case CraftingListType.Ingredients:
+        return 'Add ingredient';
+      case CraftingListType.Tools:
+        return 'Add tool';
+      case CraftingListType.Outputs:
+        return 'Add output';
+      default:
+        throw new Error(`unknown crafting list type detected: ${props.type}`);
+    }
+  };
   //endregion render
 
   if (itemsLoading || weaponsLoading || armorsLoading)
@@ -1071,16 +1088,20 @@ const CraftingComponentList = (props: CraftingListProps) =>
     <BoardSectionCard title={props.type} density={'compact'}>
       <div onContextMenu={handleComponentListContextMenu} style={{ cursor: 'context-menu' }}>
         <List dense>
-          {currentComponents.length > 0
-            ? currentComponents.map((ingredient, index) => renderRecipeComponent(ingredient, index))
-            : (
-              <Button
-                fullWidth
-                startIcon={<Add/>}
-                onClick={() => handleAddNewComponent(null)}
-                variant={'contained'}/>
-            )}
+          {currentComponents.map((ingredient, index) => renderRecipeComponent(ingredient, index))}
         </List>
+        {/* always offered, not only while the list is empty. the right-click menu can place a slot precisely, but
+            nothing on screen says it exists, so a recipe that already had one slot appeared to be finished. */}
+        <Button
+          fullWidth
+          startIcon={<Add/>}
+          onClick={() => handleAddNewComponent(currentComponents.length)}
+          variant={currentComponents.length > 0
+            ? 'outlined'
+            : 'contained'}
+        >
+          {renderAddComponentLabel()}
+        </Button>
       </div>
     </BoardSectionCard>
     <Menu
