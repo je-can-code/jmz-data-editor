@@ -19,6 +19,10 @@ declare namespace Crafting
     tools: CraftingComponent[];
     ingredients: CraftingComponent[];
     outputs: CraftingComponent[];
+
+    // what a shop charges to teach this recipe, paid once. optional to match the omitempty on the Go
+    // struct, and because a recipe with no cost is not free - it is simply not for sale.
+    cost?: CraftingComponent[];
   }
 
   interface CraftingComponent

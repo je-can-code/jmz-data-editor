@@ -19,6 +19,10 @@ type CraftingRecipe struct {
 	Tools              []CraftingComponent `json:"tools"`
 	Ingredients        []CraftingComponent `json:"ingredients"`
 	Outputs            []CraftingComponent `json:"outputs"`
+	// Cost is what a shop charges to teach this recipe, paid once. It is omitted when empty so that
+	// the thousand-odd recipes authored before recipes could be bought keep the shape they were
+	// written with - and because a null here would be handed to the plugin, which iterates it.
+	Cost []CraftingComponent `json:"cost,omitempty"`
 }
 
 // CraftingComponent is a single tool, ingredient, or output slot.

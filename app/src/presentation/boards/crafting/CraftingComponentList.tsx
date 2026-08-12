@@ -1073,6 +1073,8 @@ const CraftingComponentList = (props: CraftingListProps) =>
         return 'Add tool';
       case CraftingListType.Outputs:
         return 'Add output';
+      case CraftingListType.Cost:
+        return 'Add to price';
       default:
         throw new Error(`unknown crafting list type detected: ${props.type}`);
     }

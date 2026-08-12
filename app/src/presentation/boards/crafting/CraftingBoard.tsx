@@ -180,6 +180,7 @@ const CraftingBoard = () =>
   const [ currentIngredients, setCurrentIngredients ] = useState<CraftingComponent[]>([]);
   const [ currentTools, setCurrentTools ] = useState<CraftingComponent[]>([]);
   const [ currentOutputs, setCurrentOutputs ] = useState<CraftingComponent[]>([]);
+  const [ currentCost, setCurrentCost ] = useState<CraftingComponent[]>([]);
 
   const [ selectedCategory, setSelectedCategory ] = useState<Category | null>(null);
   const [ selectedCategoryIndex, setSelectedCategoryIndex ] = useState<number>(0);
@@ -259,6 +260,10 @@ const CraftingBoard = () =>
       setCurrentIngredients(recipe.ingredients);
       setCurrentTools(recipe.tools);
       setCurrentOutputs(recipe.outputs);
+
+      // a recipe authored before recipes could be bought carries no cost at all, which reads as
+      // "not for sale" rather than as free.
+      setCurrentCost(recipe.cost ?? []);
     }
   }, [ recipes ]);
 
@@ -485,6 +490,10 @@ const CraftingBoard = () =>
         setCurrentOutputs(craftingComponents);
         patchSelectedRecipe({ outputs: craftingComponents });
         break;
+      case CraftingListType.Cost:
+        setCurrentCost(craftingComponents);
+        patchSelectedRecipe({ cost: craftingComponents });
+        break;
     }
   };
 
@@ -500,7 +509,12 @@ const CraftingBoard = () =>
       categoryKeys: [],
       ingredients: [],
       tools: [],
-      outputs: []
+      outputs: [],
+
+      // a new recipe is not for sale until somebody prices it. note that these constructors name every
+      // field by hand and end in `as Recipe`, so a field forgotten here is dropped with no compile
+      // error at all - a passing typecheck proves nothing about this object.
+      cost: []
     } as Recipe;
 
     applyRecipes(recipes.toSpliced(index, 0, newRecipe));
@@ -517,6 +531,7 @@ const CraftingBoard = () =>
     const clonedIngredients = selectedRecipe.ingredients.toSpliced(0, 0);
     const clonedTools = selectedRecipe.tools.toSpliced(0, 0);
     const clonedOutputs = selectedRecipe.outputs.toSpliced(0, 0);
+    const clonedCost = (selectedRecipe.cost ?? []).toSpliced(0, 0);
 
     const clonedRecipe = {
       key: `${selectedRecipe.key}-COPY`,
@@ -528,7 +543,8 @@ const CraftingBoard = () =>
       categoryKeys: clonedKeys,
       ingredients: clonedIngredients,
       tools: clonedTools,
-      outputs: clonedOutputs
+      outputs: clonedOutputs,
+      cost: clonedCost
     } as Recipe;
 
     applyRecipes(recipes.toSpliced(index, 0, clonedRecipe));
@@ -909,7 +925,7 @@ const CraftingBoard = () =>
               <Box
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
                   gap: 2,
                   width: '100%',
                   alignItems: 'stretch',
@@ -931,6 +947,12 @@ const CraftingBoard = () =>
                   type={CraftingListType.Outputs}
                   updateRecipeFunc={updateCraftingComponentList}
                   components={currentOutputs}
+                  handleSnack={handleSnack}
+                />
+                <CraftingComponentList
+                  type={CraftingListType.Cost}
+                  updateRecipeFunc={updateCraftingComponentList}
+                  components={currentCost}
                   handleSnack={handleSnack}
                 />
               </Box>
