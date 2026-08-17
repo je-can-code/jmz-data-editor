@@ -23,6 +23,11 @@ declare namespace Crafting
     // what a shop charges to teach this recipe, paid once. optional to match the omitempty on the Go
     // struct, and because a recipe with no cost is not free - it is simply not for sale.
     cost?: CraftingComponent[];
+
+    // how far up its family this recipe sits, which the plugin turns into a scrap price through a
+    // table of its own. cost still wins where it is set, so the tier is the rule and the cost is the
+    // exception. zero, or absent, means untiered.
+    tier?: number;
   }
 
   interface CraftingComponent

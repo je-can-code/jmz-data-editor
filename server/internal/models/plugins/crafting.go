@@ -23,6 +23,12 @@ type CraftingRecipe struct {
 	// the thousand-odd recipes authored before recipes could be bought keep the shape they were
 	// written with - and because a null here would be handed to the plugin, which iterates it.
 	Cost []CraftingComponent `json:"cost,omitempty"`
+	// Tier is how far up its family a recipe sits, and it exists so that a price does not have to be
+	// written five hundred times. The plugin turns a tier into a scrap cost through a table of its
+	// own, which is why no currency appears here. Cost still wins where it is set: the tier is the
+	// rule and the cost is the exception. Zero means untiered, and an untiered recipe with no cost is
+	// simply not for sale.
+	Tier int `json:"tier,omitempty"`
 }
 
 // CraftingComponent is a single tool, ingredient, or output slot.

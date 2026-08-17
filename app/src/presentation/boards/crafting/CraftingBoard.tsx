@@ -437,6 +437,14 @@ const CraftingBoard = () =>
     patchSelectedRecipe({ unlockedByDefault: event.target.checked });
   };
 
+  const handleRecipeTierOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
+  {
+    // a blank box is untiered rather than zero-priced, and both read as 0 to the plugin.
+    const parsed = Number.parseInt(event.target.value, 10);
+
+    patchSelectedRecipe({ tier: Number.isNaN(parsed) ? 0 : parsed });
+  };
+
   const handleCategoryKeyOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     patchSelectedCategory({ key: event.target.value });
@@ -854,6 +862,17 @@ const CraftingBoard = () =>
                         label={selectedRecipe.maskedUntilCrafted
                           ? 'Masked until crafted'
                           : 'Visible immediately'}
+                      />
+                      <TextField
+                        variant={'outlined'}
+                        label={'Tier'}
+                        type={'number'}
+                        value={selectedRecipe.tier ?? 0}
+                        onChange={handleRecipeTierOnChangeEvent}
+                        size={'small'}
+                        helperText={(selectedRecipe.cost?.length ?? 0) > 0
+                          ? 'Overridden by the cost below'
+                          : 'Sets the scrap price; 0 is not for sale'}
                       />
                     </Stack>
                   </Grid>
