@@ -4,8 +4,8 @@ declare namespace Crafting
   {
     recipes: Recipe[];
     categories: Category[];
-    ingredientTypes?: IngredientType[];
-    professions?: Profession[];
+    ingredientTypes: IngredientType[];
+    professions: Profession[];
   }
 
   /**
@@ -28,7 +28,7 @@ declare namespace Crafting
     scrapItemId: number;
 
     // how much scrap each tier costs, the first entry being tier 1.
-    tierPrices?: number[];
+    tierPrices: number[];
   }
 
   interface Recipe
@@ -44,14 +44,14 @@ declare namespace Crafting
     ingredients: CraftingComponent[];
     outputs: CraftingComponent[];
 
-    // what a shop charges to teach this recipe, paid once. optional to match the omitempty on the Go
-    // struct, and because a recipe with no cost is not free - it is simply not for sale.
-    cost?: CraftingComponent[];
+    // what a shop charges to teach this recipe, paid once. an empty cost takes whatever the recipe's
+    // profession charges for its tier; naming one here opts out of that entirely.
+    cost: CraftingComponent[];
 
     // how far up its family this recipe sits, which the plugin turns into a scrap price through a
     // table of its own. cost still wins where it is set, so the tier is the rule and the cost is the
-    // exception. zero, or absent, means untiered.
-    tier?: number;
+    // exception. zero means untiered.
+    tier: number;
   }
 
   interface CraftingComponent
@@ -61,10 +61,10 @@ declare namespace Crafting
     type: import('../../core/enums/CraftingComponentType.ts').CraftingComponentType;
     count: number;
     /**
-     * Ingredient slots only. When present, the slot is satisfied by anything in the player's inventory carrying
+     * Ingredient slots only. When non-empty, the slot is satisfied by anything in the player's inventory carrying
      * every one of these types, rather than by the one row named in {@link id}.
      */
-    categories?: string[];
+    categories: string[];
   }
 
   /**
@@ -92,9 +92,9 @@ declare namespace Crafting
 
     /**
      * Names the {@link Profession} this category belongs to, which decides the scrap its recipes are
-     * bought with and the price ladder their tiers read from. Optional to match the omitempty on the Go
-     * struct, and because a category naming no profession is simply not for sale.
+     * bought with and the price ladder their tiers read from. An empty key means this category joins no
+     * profession, so nothing in it is for sale.
      */
-    professionKey?: string;
+    professionKey: string;
   }
 }

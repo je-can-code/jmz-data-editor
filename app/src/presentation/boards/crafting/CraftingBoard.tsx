@@ -540,10 +540,11 @@ const CraftingBoard = () =>
       tools: [],
       outputs: [],
 
-      // a new recipe is not for sale until somebody prices it. note that these constructors name every
-      // field by hand and end in `as Recipe`, so a field forgotten here is dropped with no compile
-      // error at all - a passing typecheck proves nothing about this object.
-      cost: []
+      // a new recipe is untiered and not for sale until somebody prices it. now that no field on Recipe
+      // is optional, `as Recipe` refuses a literal that forgets one - so this object is checked rather
+      // than merely asserted.
+      cost: [],
+      tier: 0
     } as Recipe;
 
     applyRecipes(recipes.toSpliced(index, 0, newRecipe));
