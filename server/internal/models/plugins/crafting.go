@@ -5,6 +5,31 @@ type CraftingConfiguration struct {
 	Recipes         []CraftingRecipe         `json:"recipes"`
 	Categories      []CraftingCategory       `json:"categories"`
 	IngredientTypes []CraftingIngredientType `json:"ingredientTypes,omitempty"`
+	Professions     []CraftingProfession     `json:"professions,omitempty"`
+}
+
+// CraftingProfession is a family of categories that share a currency and a price ladder.
+//
+// A profession is what a scrap buys and what a tier costs, which are the two questions a category alone
+// could never answer. Before this existed the plugin decided both by matching category keys against
+// hardcoded prefixes, so the answer lived in code, keyed off a string that could be renamed at any time,
+// and could not express a line whose materials belong to a different craft than its prefix suggests.
+//
+// TierPrices is indexed by tier, lowest first, so its length is the profession's depth: cooking declares
+// four, survival declares ten, and neither needs to know the other exists. A tier past the end of the
+// table simply has no price, which is how a roster can grow past its economy without pricing itself by
+// accident. A profession with no prices at all is not for sale - which is correct for one whose recipes
+// are placed by hand in the world rather than taught by a shop.
+type CraftingProfession struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	IconIndex   int    `json:"iconIndex"`
+	Description string `json:"description"`
+	// ScrapItemId is the item spent to learn any recipe in this profession, or 0 when nothing here is
+	// bought at all.
+	ScrapItemId int `json:"scrapItemId"`
+	// TierPrices is how much scrap each tier costs, the first entry being tier 1.
+	TierPrices []int `json:"tierPrices,omitempty"`
 }
 
 // CraftingRecipe is one craftable row in the configuration.
@@ -62,4 +87,9 @@ type CraftingCategory struct {
 	IconIndex         int    `json:"iconIndex"`
 	Description       string `json:"description"`
 	UnlockedByDefault bool   `json:"unlockedByDefault"`
+	// ProfessionKey names the CraftingProfession this category belongs to, which is what decides the
+	// scrap its recipes are bought with and the price ladder their tiers read from. It is omitted when
+	// empty so that categories authored before professions existed keep the shape they were written
+	// with; a category naming no profession simply is not for sale.
+	ProfessionKey string `json:"professionKey,omitempty"`
 }

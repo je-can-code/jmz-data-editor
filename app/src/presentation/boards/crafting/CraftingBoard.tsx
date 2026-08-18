@@ -52,6 +52,7 @@ import CraftingComponentList, {
   readDatabaseIconIndex,
 } from './CraftingComponentList.tsx';
 import { IngredientTypesTab } from './IngredientTypesTab.tsx';
+import { ProfessionsTab } from './ProfessionsTab.tsx';
 
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import CraftingComponentType from '@core/enums/CraftingComponentType.ts';
@@ -150,9 +151,11 @@ const CraftingBoard = () =>
     recipes,
     categories,
     ingredientTypes,
+    professions,
     setRecipes,
     setCategories,
     setIngredientTypes,
+    setProfessions,
     save,
     reload,
     loading
@@ -371,6 +374,12 @@ const CraftingBoard = () =>
     setCanSave(true);
   };
 
+  const applyProfessions = (updatedProfessions: Crafting.Profession[]) =>
+  {
+    setProfessions(updatedProfessions);
+    setCanSave(true);
+  };
+
   const patchSelectedRecipe = (patch: Partial<Recipe>) =>
   {
     if (selectedRecipe === null)
@@ -472,6 +481,18 @@ const CraftingBoard = () =>
   const handleCategoryDescriptionOnChangeEvent = (event: ChangeEvent<HTMLInputElement>) =>
   {
     patchSelectedCategory({ description: event.target.value });
+  };
+
+  /**
+   * Files this category under a profession, which is what decides the scrap its recipes are bought with and the
+   * price ladder their tiers read from.
+   * @param {Crafting.Profession | null} profession The chosen profession, or null when cleared.
+   */
+  const handleCategoryProfessionOnChangeEvent = (profession: Crafting.Profession | null) =>
+  {
+    // clearing the picker has to write an empty key rather than dropping the field, or the change would look
+    // applied here while the previous profession survived in the saved file.
+    patchSelectedCategory({ professionKey: profession === null ? '' : profession.key });
   };
 
   const updateCraftingComponentList = (
@@ -716,7 +737,7 @@ const CraftingBoard = () =>
 
       // every block of the configuration has to be named here. anything left out is not merely unsaved - it is
       // written away, because this replaces the file rather than patching it.
-      await save({ recipes, categories, ingredientTypes } as Configuration);
+      await save({ recipes, categories, ingredientTypes, professions } as Configuration);
       handleSnack('Crafting data has been saved successfully.');
     },
     canSave: canSave && !loading,
@@ -773,6 +794,7 @@ const CraftingBoard = () =>
           <Tab label={'Recipes'} id={'crafting-tab-0'} aria-controls={'crafting-tabpanel-0'}/>
           <Tab label={'Categories'} id={'crafting-tab-1'} aria-controls={'crafting-tabpanel-1'}/>
           <Tab label={'Ingredient Types'} id={'crafting-tab-2'} aria-controls={'crafting-tabpanel-2'}/>
+          <Tab label={'Professions'} id={'crafting-tab-3'} aria-controls={'crafting-tabpanel-3'}/>
         </Tabs>
       </Box>
 
@@ -1068,6 +1090,26 @@ const CraftingBoard = () =>
                     </Grid>
 
                     <Grid size={12}>
+                      <Autocomplete
+                        options={professions}
+                        value={professions.find((p) => p.key === selectedCategory.professionKey) ?? null}
+                        onChange={(_, newValue) => handleCategoryProfessionOnChangeEvent(newValue)}
+                        getOptionLabel={(profession) => `${profession.key}: ${profession.name}`}
+                        isOptionEqualToValue={(option, value) => option.key === value.key}
+                        size={'small'}
+                        fullWidth
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            variant={'outlined'}
+                            label={'Profession'}
+                            helperText={'Which craft this belongs to. Decides the scrap and the tier prices.'}
+                          />
+                        )}
+                      />
+                    </Grid>
+
+                    <Grid size={12}>
                       <TextField
                         variant={'outlined'}
                         label={'Description'}
@@ -1096,6 +1138,13 @@ const CraftingBoard = () =>
         <IngredientTypesTab
           types={ingredientTypes}
           onChange={applyIngredientTypes}
+        />
+      )}
+
+      {tabIndex === 3 && (
+        <ProfessionsTab
+          professions={professions}
+          onChange={applyProfessions}
         />
       )}
     </EditorBoardSplitLayout>

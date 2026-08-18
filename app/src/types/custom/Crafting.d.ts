@@ -5,6 +5,30 @@ declare namespace Crafting
     recipes: Recipe[];
     categories: Category[];
     ingredientTypes?: IngredientType[];
+    professions?: Profession[];
+  }
+
+  /**
+   * A family of categories that share a currency and a price ladder.
+   *
+   * A profession answers the two questions a category cannot: which scrap buys its recipes, and what a
+   * tier costs. {@link tierPrices} is indexed by tier with the lowest first, so its length is the
+   * profession's depth - cooking declares four, survival declares ten, and neither needs to know the
+   * other exists. A tier past the end of the table has no price, and a profession with no prices at all
+   * is simply not for sale, which is correct for one whose recipes are placed by hand in the world.
+   */
+  interface Profession
+  {
+    key: string;
+    name: string;
+    iconIndex: number;
+    description: string;
+
+    // the item spent to learn any recipe in this profession, or 0 when nothing here is bought at all.
+    scrapItemId: number;
+
+    // how much scrap each tier costs, the first entry being tier 1.
+    tierPrices?: number[];
   }
 
   interface Recipe
@@ -65,5 +89,12 @@ declare namespace Crafting
     iconIndex: number;
     description: string;
     unlockedByDefault: boolean;
+
+    /**
+     * Names the {@link Profession} this category belongs to, which decides the scrap its recipes are
+     * bought with and the price ladder their tiers read from. Optional to match the omitempty on the Go
+     * struct, and because a category naming no profession is simply not for sale.
+     */
+    professionKey?: string;
   }
 }
