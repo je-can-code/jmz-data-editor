@@ -1143,6 +1143,250 @@ function SkillJabsExtensionsPanel(
   }
 
   /**
+   * What happens once the skill resolves: how long the slot is locked, and what it can chain into.
+   *
+   * The combo window is bounded by the cooldown -- JABS never opens a follow-up that outlives the
+   * lockout -- so the link field validates against the cooldown above it and says what the ceiling is.
+   * A combo tag that does not parse falls back to editing the raw tag, since the two pickers cannot
+   * represent something they could not read.
+   */
+  const renderPostExecutionSection = () =>
+  {
+    const hasExplicitCooldown = jabs.cooldown !== null && jabs.cooldown > 0;
+    const maxUsableLinkFrames = hasExplicitCooldown
+      ? (jabs.cooldown as number) - 1
+      : undefined;
+    const linkFramesHelperText = hasExplicitCooldown
+      ? `Must stay below cooldown (${jabs.cooldown} frames); max usable link is ${maxUsableLinkFrames}.`
+      : 'Set an explicit cooldown above to validate against JABS (link must be shorter than cooldown).';
+    const comboRawIsBlank = jabs.comboRaw === null || jabs.comboRaw.trim() === '';
+
+    return (
+      <BoardSectionCard title={'Post-execution (cooldown & combos)'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            After the skill executes, JABS blocks it again until the cooldown elapses (same frame clock as cast time).
+            This is separate from MP/TP costs — it is the JABS “you just used this” gate on the skill slot(s). Combo
+            link
+            timing is validated against this cooldown: the follow-up window must finish before the cooldown does, or
+            the
+            chain never becomes reachable in-game. Global cooldown (GCD) is a separate battler-wide timer when enabled
+            in
+            JABS plugin parameters and for whitelisted skill types; oGCD and per-skill GCD length apply only in that
+            system.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={6}>
+              <TextField
+                label={'Cooldown (frames)'}
+                size={'small'}
+                fullWidth
+                value={jabs.cooldown === null
+                  ? ''
+                  : String(jabs.cooldown)}
+                onChange={onCooldownChange}
+                helperText={'Empty uses the JABS default. Higher = longer lockout. Lowering cooldown may auto-reduce combo link frames to stay valid.'}
+                slotProps={{
+                  htmlInput: {
+                    inputMode: 'numeric',
+                    min: 0,
+                    step: 1
+                  }
+                }}
+              />
+            </Grid>
+            <Grid size={6}>
+              <Stack spacing={0.5}>
+                {boolSwitch(
+                  'Per-slot cooldown (unique)',
+                  jabs.uniqueCooldown,
+                  'uniqueCooldown'
+                )}
+                <Typography variant={'caption'} color={'text.secondary'}>
+                  On: only the slot you fired goes on cooldown. Off: every quick-slot that holds this same skill id
+                  shares one cooldown (fire from one key, they all wait).
+                </Typography>
+              </Stack>
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                label={'GCD length override (frames)'}
+                size={'small'}
+                fullWidth
+                value={jabs.globalCooldownOverride === null
+                  ? ''
+                  : String(jabs.globalCooldownOverride)}
+                onChange={onGlobalCooldownOverrideChange}
+                helperText={'Empty uses the JABS default GCD length when this skill is subject to GCD. Enter a positive number to override.'}
+                slotProps={{
+                  htmlInput: {
+                    inputMode: 'numeric',
+                    min: 1,
+                    step: 1
+                  }
+                }}
+              />
+            </Grid>
+            <Grid size={6}>
+              <Stack spacing={0.5}>
+                {boolSwitch('oGCD (off-global cooldown)', jabs.ogcd, 'ogcd')}
+                <Typography variant={'caption'} color={'text.secondary'}>
+                  On: this skill does not start or respect the battler-wide GCD (when GCD is enabled and the skill
+                  type is
+                  whitelisted).
+                </Typography>
+              </Stack>
+            </Grid>
+          </Grid>
+
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Combo chain
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            After this skill resolves, the battler may chain into the follow-up skill after the link window (frames)
+            has
+            passed — but only if this skill’s cooldown is longer than that link time (JABS requirement). Each step in
+            a
+            chain can extend remaining cooldown by its own link time. By default the follow-up only opens if this
+            skill
+            hit something; use free combo below to open the window on whiff.
+          </Typography>
+          {comboLinkPastCooldown && (
+            <Alert severity={'warning'}>
+              Link frames are not shorter than this skill’s cooldown. In-game the combo window will never open —
+              raise cooldown or lower link frames.
+            </Alert>
+          )}
+          {comboNoteInvalid
+            ? (
+              <>
+                <Alert severity={'warning'}>
+                  This note does not match the expected combo shape
+                  {' '}
+                  <Typography component={'span'} variant={'body2'} sx={{ fontFamily: 'monospace' }}>
+                    [followUpSkillId, linkFrames]
+                  </Typography>
+                  . Edit the raw tag or clear it.
+                </Alert>
+                {rawField('Combo tag (raw)', jabs.comboRaw, 'comboRaw')}
+              </>
+            )
+            : (
+              <Grid container spacing={2}>
+                <Grid size={6}>
+                  <Autocomplete<JabsSkillPickerRow, false, false, false>
+                    fullWidth
+                    size={'small'}
+                    options={comboSkillOptions}
+                    getOptionLabel={(o) => o.label}
+                    isOptionEqualToValue={(
+                      a,
+                      b
+                    ) => a.id === b.id}
+                    value={selectedComboSkillOption}
+                    onChange={(
+                      _e,
+                      option
+                    ) =>
+                    {
+                      const link =
+                        comboParsed === null
+                          ? ''
+                          : String(comboParsed.linkFrames);
+                      if (option === null)
+                      {
+                        patchComboFromFields(null, link);
+                        return;
+                      }
+                      patchComboFromFields(option.id, link);
+                    }}
+                    filterOptions={(
+                      options,
+                      state
+                    ) =>
+                    {
+                      const q = state.inputValue.trim()
+                        .toLowerCase();
+                      if (q === '')
+                      {
+                        return options;
+                      }
+                      return options.filter((o) =>
+                        o.label.toLowerCase()
+                          .includes(q)
+                        || String(o.id)
+                          .includes(q));
+                    }}
+                    renderInput={(params) =>
+                      (
+                        <TextField
+                          {...params}
+                          variant={'outlined'}
+                          label={'Follow-up skill'}
+                          placeholder={'No combo…'}
+                          helperText={'Skill id that can replace this one on the same slot after the link elapses. Clear to remove the combo tag.'}
+                        />
+                      )}
+                  />
+                </Grid>
+                <Grid size={6}>
+                  <TextField
+                    label={'Link frames (until follow-up is available)'}
+                    size={'small'}
+                    fullWidth
+                    disabled={comboParsed === null && comboRawIsBlank}
+                    value={comboParsed === null
+                      ? ''
+                      : String(comboParsed.linkFrames)}
+                    onChange={(e) =>
+                    {
+                      const sid =
+                        comboParsed === null
+                          ? null
+                          : comboParsed.skillId;
+                      patchComboFromFields(sid, e.target.value);
+                    }}
+                    helperText={linkFramesHelperText}
+                    slotProps={{
+                      htmlInput: {
+                        inputMode: 'numeric',
+                        min: 0,
+                        max: maxUsableLinkFrames,
+                        step: 1,
+                      },
+                    }}
+                  />
+                </Grid>
+              </Grid>
+            )}
+          <Stack direction={'row'} spacing={2} flexWrap={'wrap'}>
+            {boolSwitch(
+              'Combo starter (AI may open this chain)',
+              jabs.comboStarter,
+              'comboStarter'
+            )}
+            {boolSwitch(
+              'Free combo (open window even on miss)',
+              jabs.freeCombo,
+              'freeCombo'
+            )}
+            {boolSwitch(
+              'Exclude from random AI skill pick',
+              jabs.aiSkillExclusion,
+              'aiSkillExclusion'
+            )}
+          </Stack>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            AI normally skips tagged combo skills unless combo starter is set. Use exclusion on enders that should
+            only be
+            reachable through the chain, not pulled at random.
+          </Typography>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
    * Which action-map event this skill copies onto the battlefield, and whether it shows in the menu.
    *
    * A skill's hitbox, visuals and movement are authored as an event on a dedicated action map rather
@@ -2209,236 +2453,7 @@ function SkillJabsExtensionsPanel(
           </Stack>
       </BoardSectionCard>
 
-      <BoardSectionCard title={'Post-execution (cooldown & combos)'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              After the skill executes, JABS blocks it again until the cooldown elapses (same frame clock as cast time).
-              This is separate from MP/TP costs — it is the JABS “you just used this” gate on the skill slot(s). Combo
-              link
-              timing is validated against this cooldown: the follow-up window must finish before the cooldown does, or
-              the
-              chain never becomes reachable in-game. Global cooldown (GCD) is a separate battler-wide timer when enabled
-              in
-              JABS plugin parameters and for whitelisted skill types; oGCD and per-skill GCD length apply only in that
-              system.
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={6}>
-                <TextField
-                  label={'Cooldown (frames)'}
-                  size={'small'}
-                  fullWidth
-                  value={jabs.cooldown === null
-                    ? ''
-                    : String(jabs.cooldown)}
-                  onChange={onCooldownChange}
-                  helperText={'Empty uses the JABS default. Higher = longer lockout. Lowering cooldown may auto-reduce combo link frames to stay valid.'}
-                  slotProps={{
-                    htmlInput: {
-                      inputMode: 'numeric',
-                      min: 0,
-                      step: 1
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid size={6}>
-                <Stack spacing={0.5}>
-                  {boolSwitch(
-                    'Per-slot cooldown (unique)',
-                    jabs.uniqueCooldown,
-                    'uniqueCooldown'
-                  )}
-                  <Typography variant={'caption'} color={'text.secondary'}>
-                    On: only the slot you fired goes on cooldown. Off: every quick-slot that holds this same skill id
-                    shares one cooldown (fire from one key, they all wait).
-                  </Typography>
-                </Stack>
-              </Grid>
-              <Grid size={6}>
-                <TextField
-                  label={'GCD length override (frames)'}
-                  size={'small'}
-                  fullWidth
-                  value={jabs.globalCooldownOverride === null
-                    ? ''
-                    : String(jabs.globalCooldownOverride)}
-                  onChange={onGlobalCooldownOverrideChange}
-                  helperText={'Empty uses the JABS default GCD length when this skill is subject to GCD. Enter a positive number to override.'}
-                  slotProps={{
-                    htmlInput: {
-                      inputMode: 'numeric',
-                      min: 1,
-                      step: 1
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid size={6}>
-                <Stack spacing={0.5}>
-                  {boolSwitch('oGCD (off-global cooldown)', jabs.ogcd, 'ogcd')}
-                  <Typography variant={'caption'} color={'text.secondary'}>
-                    On: this skill does not start or respect the battler-wide GCD (when GCD is enabled and the skill
-                    type is
-                    whitelisted).
-                  </Typography>
-                </Stack>
-              </Grid>
-            </Grid>
-
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Combo chain
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              After this skill resolves, the battler may chain into the follow-up skill after the link window (frames)
-              has
-              passed — but only if this skill’s cooldown is longer than that link time (JABS requirement). Each step in
-              a
-              chain can extend remaining cooldown by its own link time. By default the follow-up only opens if this
-              skill
-              hit something; use free combo below to open the window on whiff.
-            </Typography>
-            {comboLinkPastCooldown
-              ? (
-                <Alert severity={'warning'}>
-                  Link frames are not shorter than this skill’s cooldown. In-game the combo window will never open —
-                  raise cooldown or lower link frames.
-                </Alert>
-              )
-              : null}
-            {comboNoteInvalid
-              ? (
-                <>
-                  <Alert severity={'warning'}>
-                    This note does not match the expected combo shape
-                    {' '}
-                    <Typography component={'span'} variant={'body2'} sx={{ fontFamily: 'monospace' }}>
-                      [followUpSkillId, linkFrames]
-                    </Typography>
-                    . Edit the raw tag or clear it.
-                  </Alert>
-                  {rawField('Combo tag (raw)', jabs.comboRaw, 'comboRaw')}
-                </>
-              )
-              : (
-                <Grid container spacing={2}>
-                  <Grid size={6}>
-                    <Autocomplete<JabsSkillPickerRow, false, false, false>
-                      fullWidth
-                      size={'small'}
-                      options={comboSkillOptions}
-                      getOptionLabel={(o) => o.label}
-                      isOptionEqualToValue={(
-                        a,
-                        b
-                      ) => a.id === b.id}
-                      value={selectedComboSkillOption}
-                      onChange={(
-                        _e,
-                        option
-                      ) =>
-                      {
-                        const link =
-                          comboParsed === null
-                            ? ''
-                            : String(comboParsed.linkFrames);
-                        if (option === null)
-                        {
-                          patchComboFromFields(null, link);
-                          return;
-                        }
-                        patchComboFromFields(option.id, link);
-                      }}
-                      filterOptions={(
-                        options,
-                        state
-                      ) =>
-                      {
-                        const q = state.inputValue.trim()
-                          .toLowerCase();
-                        if (q === '')
-                        {
-                          return options;
-                        }
-                        return options.filter((o) =>
-                          o.label.toLowerCase()
-                            .includes(q)
-                          || String(o.id)
-                            .includes(q));
-                      }}
-                      renderInput={(params) =>
-                        (
-                          <TextField
-                            {...params}
-                            variant={'outlined'}
-                            label={'Follow-up skill'}
-                            placeholder={'No combo…'}
-                            helperText={'Skill id that can replace this one on the same slot after the link elapses. Clear to remove the combo tag.'}
-                          />
-                        )}
-                    />
-                  </Grid>
-                  <Grid size={6}>
-                    <TextField
-                      label={'Link frames (until follow-up is available)'}
-                      size={'small'}
-                      fullWidth
-                      disabled={comboParsed === null && (jabs.comboRaw === null || jabs.comboRaw.trim() === '')}
-                      value={comboParsed === null
-                        ? ''
-                        : String(comboParsed.linkFrames)}
-                      onChange={(e) =>
-                      {
-                        const sid =
-                          comboParsed === null
-                            ? null
-                            : comboParsed.skillId;
-                        patchComboFromFields(sid, e.target.value);
-                      }}
-                      helperText={
-                        jabs.cooldown !== null && jabs.cooldown > 0
-                          ? `Must stay below cooldown (${jabs.cooldown} frames); max usable link is ${jabs.cooldown - 1}.`
-                          : 'Set an explicit cooldown above to validate against JABS (link must be shorter than cooldown).'
-                      }
-                      slotProps={{
-                        htmlInput: {
-                          inputMode: 'numeric',
-                          min: 0,
-                          max:
-                            jabs.cooldown !== null && jabs.cooldown > 0
-                              ? jabs.cooldown - 1
-                              : undefined,
-                          step: 1,
-                        },
-                      }}
-                    />
-                  </Grid>
-                </Grid>
-              )}
-            <Stack direction={'row'} spacing={2} flexWrap={'wrap'}>
-              {boolSwitch(
-                'Combo starter (AI may open this chain)',
-                jabs.comboStarter,
-                'comboStarter'
-              )}
-              {boolSwitch(
-                'Free combo (open window even on miss)',
-                jabs.freeCombo,
-                'freeCombo'
-              )}
-              {boolSwitch(
-                'Exclude from random AI skill pick',
-                jabs.aiSkillExclusion,
-                'aiSkillExclusion'
-              )}
-            </Stack>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              AI normally skips tagged combo skills unless combo starter is set. Use exclusion on enders that should
-              only be
-              reachable through the chain, not pulled at random.
-            </Typography>
-          </Stack>
-      </BoardSectionCard>
+      {renderPostExecutionSection()}
 
       <BoardSectionCard title={'Action size, shape & projectile'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
