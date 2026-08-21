@@ -51,13 +51,13 @@ async function readJabsActionMapIdFromPluginsJs(_projectRoot: string): Promise<n
       {
         continue;
       }
-      const name = entry[ 'name' ];
+      const { name } = entry;
       // Core plugin path in plugins.js is still "abs/J-ABS" (hyphenated filename).
       if (typeof name !== 'string' || name.includes('J-ABS') === false)
       {
         continue;
       }
-      const parameters = entry[ 'parameters' ];
+      const { parameters } = entry;
       if (!isRecord(parameters))
       {
         continue;
@@ -94,7 +94,7 @@ async function readJabsActionMapIdFromPluginsJs(_projectRoot: string): Promise<n
  */
 function buildActionMapEventRows(map: RmmzMapJson): { id: number; label: string }[]
 {
-  const events = map.events;
+  const { events } = map;
   if (!Array.isArray(events))
   {
     return [];

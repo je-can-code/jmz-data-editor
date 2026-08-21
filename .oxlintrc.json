@@ -1,0 +1,72 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "off",
+    "pedantic": "off",
+    "perf": "off",
+    "style": "off",
+    "restriction": "off"
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/build/**",
+    "**/coverage/**",
+    "**/.coverage/**",
+    "**/dist/**",
+    "**/*.d.ts",
+    "bin/**"
+  ],
+  "env": {
+    "browser": true
+  },
+  "rules": {
+    "preserve-caught-error": "off",
+    "no-case-declarations": "off",
+    "no-empty-function": "off",
+    "no-undef": "off",
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^(_$|_.+)$"
+      }
+    ],
+    "no-useless-call": "off",
+    "no-prototype-builtins": "off",
+    "eqeqeq": "error",
+    "complexity": [
+      "error",
+      20
+    ],
+    "no-eq-null": "error",
+    "no-lone-blocks": "error",
+    "no-multi-assign": "error",
+    "no-multi-str": "error",
+    "no-nested-ternary": "error",
+    "no-new": "error",
+    "no-new-wrappers": "error",
+    "no-param-reassign": "error",
+    "no-promise-executor-return": "error",
+    "no-shadow": "error",
+    "no-unexpected-multiline": "error",
+    "no-void": "error",
+    "prefer-arrow-callback": "error",
+    "prefer-const": "error",
+    "no-var": "error",
+    "prefer-destructuring": "error",
+    "no-eval": "error",
+    "no-unused-expressions": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "scripts/**/*.ts",
+        "nw-app/**/*.js"
+      ],
+      "env": {
+        "node": true
+      }
+    }
+  ]
+}

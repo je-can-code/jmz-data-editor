@@ -162,7 +162,7 @@ class RPG_ItemDomainModel
 
   protected syncNote(): string
   {
-    let note = this.note;
+    let { note } = this;
     note = UsableItemAttackElementsParser.writeAttackElements(note, this.attackElementIds);
     note = UsableItemThisCritParser.writeThisCritChance(note, this.thisCritChanceFormula);
     note = UsableItemThisCritParser.writeThisCritDamageMultiplier(note, this.thisCritDamageMultiplierFormula);

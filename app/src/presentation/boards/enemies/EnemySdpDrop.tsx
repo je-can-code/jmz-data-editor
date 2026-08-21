@@ -33,7 +33,7 @@ const EnemySdpDrop = ({
 
   const handleToggleFields = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    const checked = event.target.checked;
+    const { checked } = event.target;
 
     // Track state directly on the model
     selectedEnemy.sdpDrop.isForcedOpen = checked;

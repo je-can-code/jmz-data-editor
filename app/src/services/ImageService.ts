@@ -16,13 +16,13 @@ function pathSegments(pathStr: string): string[]
  */
 function normalizeProjectDataPathForFilesystem(projectDataPath: string): string
 {
-  let s = projectDataPath.trim();
+  const s = projectDataPath.trim();
   const lower = s.toLowerCase();
   if (lower.startsWith('file://'))
   {
     try
     {
-      const pathname = new URL(s).pathname;
+      const { pathname } = new URL(s);
       if (/^\/[a-z]:\//iu.test(pathname))
       {
         return pathname.slice(1)

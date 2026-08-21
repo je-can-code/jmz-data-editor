@@ -431,7 +431,7 @@ function JuiceSectionAccordion<TSection>(props: JuiceSectionAccordionProps<TSect
         <Grid container spacing={2}>
           {fields.map((spec) =>
           {
-            const fieldKey = spec.fieldKey;
+            const { fieldKey } = spec;
             const current = values[ fieldKey ] as unknown as number;
             return (
               <Grid key={String(fieldKey)} size={6}>

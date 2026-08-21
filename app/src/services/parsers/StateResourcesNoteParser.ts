@@ -10,7 +10,7 @@ class StateResourcesNoteParser
 
   static strip(note: string): string
   {
-    let n = note.replace(StateResourcesNoteParser.#ensureGlobal(StateResourcesNoteParser.#RE_HRC), '');
+    const n = note.replace(StateResourcesNoteParser.#ensureGlobal(StateResourcesNoteParser.#RE_HRC), '');
     return NoteNormalizer.normalize(n);
   }
 

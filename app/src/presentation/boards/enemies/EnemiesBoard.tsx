@@ -264,7 +264,7 @@ const EnemiesBoard = () =>
       return -1;
     }
 
-    const length = enemies.length;
+    const { length } = enemies;
     if (length === 0)
     {
       return -1;
@@ -371,7 +371,7 @@ const EnemiesBoard = () =>
     direction: 1 | -1
   ) =>
   {
-    const length = enemies.length;
+    const { length } = enemies;
     if (length === 0)
     {
       return startIndex;

@@ -1439,7 +1439,7 @@ const StatesBoard = () =>
       return;
     }
 
-    const checked = event.target.checked;
+    const { checked } = event.target;
     if (checked)
     {
       patchStateJabsMapDuration({
@@ -1925,7 +1925,7 @@ const StatesBoard = () =>
       return -1;
     }
 
-    const length = states.length;
+    const { length } = states;
     if (length === 0)
     {
       return -1;
@@ -2031,7 +2031,7 @@ const StatesBoard = () =>
    */
   const handleIterateNext = () =>
   {
-    const length = states.length;
+    const { length } = states;
     if (length === 0)
     {
       return;
@@ -2053,7 +2053,7 @@ const StatesBoard = () =>
    */
   const handleIteratePrev = () =>
   {
-    const length = states.length;
+    const { length } = states;
     if (length === 0)
     {
       return;

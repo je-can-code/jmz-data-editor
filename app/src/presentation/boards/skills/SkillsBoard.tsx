@@ -742,7 +742,7 @@ const SkillsBoard = () =>
       return -1;
     }
 
-    const length = skills.length;
+    const { length } = skills;
     if (length === 0)
     {
       return -1;
@@ -851,7 +851,7 @@ const SkillsBoard = () =>
    */
   const handleIterateNext = () =>
   {
-    const length = skills.length;
+    const { length } = skills;
     if (length === 0)
     {
       return;
@@ -873,7 +873,7 @@ const SkillsBoard = () =>
    */
   const handleIteratePrev = () =>
   {
-    const length = skills.length;
+    const { length } = skills;
     if (length === 0)
     {
       return;
@@ -1832,7 +1832,7 @@ const SkillsBoard = () =>
   const handleJabsChange = useCallback(
     (next: SkillJabsExtension) =>
     {
-      const current = selectedSkillRef.current;
+      const { current } = selectedSkillRef;
       if (!current)
       {
         return;
@@ -1855,7 +1855,7 @@ const SkillsBoard = () =>
   const patchSkillJabs = useCallback(
     (partial: Partial<SkillJabsExtension>): void =>
     {
-      const current = selectedSkillRef.current;
+      const { current } = selectedSkillRef;
       if (!current)
       {
         return;

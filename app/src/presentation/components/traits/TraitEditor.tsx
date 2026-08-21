@@ -108,7 +108,7 @@ const TraitEditor = ({
 
   const determineInitialTraitBeingEdited = (newCode: number): RPG_Trait =>
   {
-    let initialTrait: RPG_Trait = {
+    const initialTrait: RPG_Trait = {
       code: newCode,
       dataId: 0,
       value: 0

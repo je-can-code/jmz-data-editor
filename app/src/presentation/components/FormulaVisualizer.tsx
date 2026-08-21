@@ -283,7 +283,7 @@ export default function FormulaVisualizer({
             value={displayFormula}
             onChange={(e) =>
             {
-              const value = e.target.value;
+              const { value } = e.target;
               setDisplayFormula(value);
               debouncedUpdateFormula(value);
             }}

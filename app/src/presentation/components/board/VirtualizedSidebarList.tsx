@@ -109,7 +109,7 @@ type VirtualizedSidebarListProps = {
 };
 
 const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListProps>(
-  function VirtualizedSidebarList(props, ref)
+  (props, ref) =>
   {
     const {
       itemCount,

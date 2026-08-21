@@ -56,7 +56,7 @@ class UsableItemAttackElementsParser
     ids: number[]
   ): string
   {
-    let n = NoteNormalizer.removeLinesMatching(
+    const n = NoteNormalizer.removeLinesMatching(
       note,
       UsableItemAttackElementsParser.#line
     );
