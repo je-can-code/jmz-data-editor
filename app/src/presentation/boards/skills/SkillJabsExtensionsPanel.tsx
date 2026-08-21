@@ -1142,6 +1142,234 @@ function SkillJabsExtensionsPanel(
     degreesHelperText = 'Circle hitbox is a full 360° ring in JABS — pick arc if you want a partial wedge.';
   }
 
+  /**
+   * The cosmetic motion layered onto the caster when the skill fires: which icon swings, how hard the
+   * body leans, and which of the motion presets plays.
+   *
+   * Two of the numeric fields only apply to a subset of the presets, and each says which subset rather
+   * than sitting greyed out with no explanation.
+   */
+  const renderJuiceMotionSection = () =>
+  {
+    // span belongs to the arc family and stab tip to the thrust family; the rest of the presets read
+    // neither, which is what both fields fall back to saying.
+    const usesArcSpan =
+      jabs.juiceMotion === 'arc'
+      || jabs.juiceMotion === 'arc-reverse'
+      || jabs.juiceMotion === 'arc-oscillate';
+    const usesStabTip =
+      jabs.juiceMotion === 'bash'
+      || jabs.juiceMotion === 'recoil'
+      || jabs.juiceMotion === 'stab-forward';
+
+    const motionPresetValue =
+      jabs.juiceMotion !== null
+      && JUICE_MOTIONS.includes(jabs.juiceMotion as (typeof JUICE_MOTIONS)[number])
+        ? jabs.juiceMotion as (typeof JUICE_MOTIONS)[number]
+        : null;
+
+    return (
+      <BoardSectionCard title={'Juice motion'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Procedural motion polish layered onto the caster when this skill fires: weapon swing icon overlay, body
+            tilt, and squish. All fields are optional — leave them empty to use the inferred icon from equipment and
+            the built-in defaults. These are pure cosmetics; combat math is unchanged.
+          </Typography>
+
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Weapon swing icon
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            The IconSet icon shown briefly over the caster during the swing. When no override is set, the swing uses
+            the icon from the caster's equipped weapon (or the offhand armor / orb for shield-style strikes).
+          </Typography>
+          <Stack direction={'column'} spacing={1}>
+            <FormControlLabel
+              control={
+                <Switch
+                  size={'small'}
+                  checked={jabs.juiceIconIndex !== null && jabs.juiceIconIndex >= 0}
+                  onChange={(e) =>
+                  {
+                    if (e.target.checked === true)
+                    {
+                      patch({ juiceIconIndex: juiceIconPickerIndex });
+                      return;
+                    }
+                    patch({ juiceIconIndex: null });
+                  }}
+                />
+              }
+              label={'Override the swing icon for this skill'}
+            />
+            <IconIndexField
+              disabled={jabs.juiceIconIndex === null}
+              value={juiceIconPickerIndex}
+              onChange={(next) =>
+              {
+                const safe = Math.max(0, Math.trunc(next));
+                setJuiceIconPickerIndex(safe);
+                if (jabs.juiceIconIndex !== null)
+                {
+                  patch({ juiceIconIndex: safe });
+                }
+              }}
+            />
+          </Stack>
+
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Swing intensity profile
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Picks a named tilt-and-swing multiplier row. Each profile pairs a tilt multiplier (how hard the
+            caster's body leans on impact) with a swing multiplier (how wide the swing icon sweeps) so heavy
+            weapons can read beefier while daggers stay flicky. Profiles are authored on the JABS config
+            board's Juice tab; pick "None" here to let the plugin infer the row from the caster's weapon
+            type (or offhand armor for shield-style strikes).
+          </Typography>
+          <Autocomplete<JuiceProfileOption, false, true, false>
+            fullWidth
+            size={'small'}
+            options={juiceProfileOptions}
+            value={selectedJuiceProfileOption}
+            disableClearable={true}
+            isOptionEqualToValue={(opt, val) => opt.value === val.value}
+            getOptionLabel={(opt) => opt.label}
+            renderOption={(props, opt) =>
+            {
+              const { key, ...rest } = props as typeof props & { key?: React.Key };
+              return (
+                <li key={String(key ?? opt.label)} {...rest}>
+                  <Stack>
+                    <Typography variant={'body2'}>
+                      {opt.label}
+                    </Typography>
+                    {opt.value === null && (
+                      <Typography variant={'caption'} color={'text.secondary'}>
+                        clears the skill's tag; plugin infers from gear at strike time.
+                      </Typography>
+                    )}
+                    {opt.value !== null && opt.isOrphan && (
+                      <Typography variant={'caption'} color={'warning.main'}>
+                        authored on this skill but not present in config.jabs.json -&gt; juice.profiles.
+                      </Typography>
+                    )}
+                  </Stack>
+                </li>
+              );
+            }}
+            onChange={(_e, v) =>
+            {
+              patch({ juiceWeaponStyle: v.value });
+            }}
+            renderInput={(params) =>
+              (
+                <TextField
+                  {...params}
+                  label={'Profile key'}
+                  helperText={juiceProfileHelperText}
+                />
+              )}
+          />
+          {jabsConfig === null && (
+            <Alert severity={'info'} variant={'outlined'} sx={{ mt: 1 }}>
+              config.jabs.json hasn't finished loading yet — the profile list will populate once it does.
+            </Alert>
+          )}
+
+          <Divider sx={{ my: 1 }}/>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Motion preset
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Picks the weapon overlay motion. On healing skills, omitting this keeps the caster-only support squish;
+            any motion here opts the skill into the full strike juice. Span / stab tip below only apply to the
+            relevant presets; repeat count applies to every preset.
+          </Typography>
+          <Autocomplete<(typeof JUICE_MOTIONS)[number], false, false, false>
+            fullWidth
+            size={'small'}
+            options={[ ...JUICE_MOTIONS ]}
+            value={motionPresetValue}
+            onChange={(
+              _e,
+              v
+            ) =>
+            {
+              patch({ juiceMotion: v ?? null });
+            }}
+            renderInput={(params) =>
+              (
+                <TextField
+                  {...params}
+                  label={'Motion preset'}
+                  placeholder={'Inherit default'}
+                  helperText={
+                    'arc / arc-reverse / arc-oscillate use span; bash / recoil / stab-forward use stab tip degrees; present lifts the icon upward on screen; repeat count applies to every preset (rotations for spin, sweeps for arc-oscillate, replays for the rest).'
+                  }
+                />
+              )}
+          />
+          <Grid container spacing={2}>
+            <Grid size={4}>
+              {intField(
+                'Arc span (degrees)',
+                jabs.juiceArcSpanDegrees,
+                'juiceArcSpanDegrees',
+                {
+                  disabled: usesArcSpan === false,
+                  helperText: usesArcSpan
+                    ? 'Default 120; typical 30–300.'
+                    : 'Only arc / arc-reverse / arc-oscillate use this.',
+                }
+              )}
+            </Grid>
+            <Grid size={4}>
+              {intField(
+                'Repeat count',
+                jabs.juiceRepeatCount,
+                'juiceRepeatCount',
+                {
+                  helperText:
+                    'Number of repeats within the swing (1–8): rotations for spin / spin-reverse, alternating '
+                    + 'sweeps for arc-oscillate, replays for every other preset.',
+                }
+              )}
+            </Grid>
+            <Grid size={4}>
+              {intField(
+                'Stab tip degrees',
+                jabs.juiceStabTipDegrees,
+                'juiceStabTipDegrees',
+                {
+                  disabled: usesStabTip === false,
+                  helperText: usesStabTip
+                    ? 'Tip bearing from Pixi +x at rotation 0 (signed). Empty = preset default (sword diagonal for stab; barrel toward −x for bash / recoil).'
+                    : 'Only bash / recoil / stab-forward use this.',
+                }
+              )}
+            </Grid>
+          </Grid>
+
+          <Divider sx={{ my: 1 }}/>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Overlay flags
+          </Typography>
+          {boolSwitch(
+            'Profile gun (flip horizontally for east/west aim)',
+            jabs.juiceProfileGun,
+            'juiceProfileGun'
+          )}
+          <Typography variant={'caption'} color={'text.secondary'}>
+            For side-profile firearm icons: mirror left/right instead of rotating ~180°, so the grip never reads
+            upside-down. Up / down still use ±90° rotation — pure side-view art cannot read as true top-down aim.
+          </Typography>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
   return (
     <Stack spacing={1}>
       <Typography variant={'body2'} color={'text.secondary'}>
@@ -2373,223 +2601,7 @@ function SkillJabsExtensionsPanel(
           </Stack>
       </BoardSectionCard>
 
-      <BoardSectionCard title={'Juice motion'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Procedural motion polish layered onto the caster when this skill fires: weapon swing icon overlay, body
-              tilt, and squish. All fields are optional — leave them empty to use the inferred icon from equipment and
-              the built-in defaults. These are pure cosmetics; combat math is unchanged.
-            </Typography>
-
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Weapon swing icon
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              The IconSet icon shown briefly over the caster during the swing. When no override is set, the swing uses
-              the icon from the caster's equipped weapon (or the offhand armor / orb for shield-style strikes).
-            </Typography>
-            <Stack direction={'column'} spacing={1}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    size={'small'}
-                    checked={jabs.juiceIconIndex !== null && jabs.juiceIconIndex >= 0}
-                    onChange={(e) =>
-                    {
-                      if (e.target.checked === true)
-                      {
-                        patch({ juiceIconIndex: juiceIconPickerIndex });
-                        return;
-                      }
-                      patch({ juiceIconIndex: null });
-                    }}
-                  />
-                }
-                label={'Override the swing icon for this skill'}
-              />
-              <IconIndexField
-                disabled={jabs.juiceIconIndex === null}
-                value={juiceIconPickerIndex}
-                onChange={(next) =>
-                {
-                  const safe = Math.max(0, Math.trunc(next));
-                  setJuiceIconPickerIndex(safe);
-                  if (jabs.juiceIconIndex !== null)
-                  {
-                    patch({ juiceIconIndex: safe });
-                  }
-                }}
-              />
-            </Stack>
-
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Swing intensity profile
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Picks a named tilt-and-swing multiplier row. Each profile pairs a tilt multiplier (how hard the
-              caster's body leans on impact) with a swing multiplier (how wide the swing icon sweeps) so heavy
-              weapons can read beefier while daggers stay flicky. Profiles are authored on the JABS config
-              board's Juice tab; pick "None" here to let the plugin infer the row from the caster's weapon
-              type (or offhand armor for shield-style strikes).
-            </Typography>
-            <Autocomplete<JuiceProfileOption, false, true, false>
-              fullWidth
-              size={'small'}
-              options={juiceProfileOptions}
-              value={selectedJuiceProfileOption}
-              disableClearable={true}
-              isOptionEqualToValue={(opt, val) => opt.value === val.value}
-              getOptionLabel={(opt) => opt.label}
-              renderOption={(props, opt) =>
-              {
-                const { key, ...rest } = props as typeof props & { key?: React.Key };
-                return (
-                  <li key={String(key ?? opt.label)} {...rest}>
-                    <Stack>
-                      <Typography variant={'body2'}>
-                        {opt.label}
-                      </Typography>
-                      {opt.value === null && (
-                        <Typography variant={'caption'} color={'text.secondary'}>
-                          clears the skill's tag; plugin infers from gear at strike time.
-                        </Typography>
-                      )}
-                      {opt.value !== null && opt.isOrphan && (
-                        <Typography variant={'caption'} color={'warning.main'}>
-                          authored on this skill but not present in config.jabs.json -&gt; juice.profiles.
-                        </Typography>
-                      )}
-                    </Stack>
-                  </li>
-                );
-              }}
-              onChange={(_e, v) =>
-              {
-                patch({ juiceWeaponStyle: v.value });
-              }}
-              renderInput={(params) =>
-                (
-                  <TextField
-                    {...params}
-                    label={'Profile key'}
-                    helperText={juiceProfileHelperText}
-                  />
-                )}
-            />
-            {jabsConfig === null
-              ? (
-                <Alert severity={'info'} variant={'outlined'} sx={{ mt: 1 }}>
-                  config.jabs.json hasn't finished loading yet — the profile list will populate once it does.
-                </Alert>
-              )
-              : null}
-
-            <Divider sx={{ my: 1 }}/>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Motion preset
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Picks the weapon overlay motion. On healing skills, omitting this keeps the caster-only support squish;
-              any motion here opts the skill into the full strike juice. Span / stab tip below only apply to the
-              relevant presets; repeat count applies to every preset.
-            </Typography>
-            <Autocomplete<(typeof JUICE_MOTIONS)[number], false, false, false>
-              fullWidth
-              size={'small'}
-              options={[ ...JUICE_MOTIONS ]}
-              value={
-                jabs.juiceMotion !== null
-                && JUICE_MOTIONS.includes(jabs.juiceMotion as (typeof JUICE_MOTIONS)[number])
-                  ? jabs.juiceMotion as (typeof JUICE_MOTIONS)[number]
-                  : null
-              }
-              onChange={(
-                _e,
-                v
-              ) =>
-              {
-                patch({ juiceMotion: v ?? null });
-              }}
-              renderInput={(params) =>
-                (
-                  <TextField
-                    {...params}
-                    label={'Motion preset'}
-                    placeholder={'Inherit default'}
-                    helperText={
-                      'arc / arc-reverse / arc-oscillate use span; bash / recoil / stab-forward use stab tip degrees; present lifts the icon upward on screen; repeat count applies to every preset (rotations for spin, sweeps for arc-oscillate, replays for the rest).'
-                    }
-                  />
-                )}
-            />
-            <Grid container spacing={2}>
-              <Grid size={4}>
-                {intField(
-                  'Arc span (degrees)',
-                  jabs.juiceArcSpanDegrees,
-                  'juiceArcSpanDegrees',
-                  {
-                    disabled:
-                      jabs.juiceMotion !== 'arc'
-                      && jabs.juiceMotion !== 'arc-reverse'
-                      && jabs.juiceMotion !== 'arc-oscillate',
-                    helperText:
-                      jabs.juiceMotion === 'arc'
-                      || jabs.juiceMotion === 'arc-reverse'
-                      || jabs.juiceMotion === 'arc-oscillate'
-                        ? 'Default 120; typical 30–300.'
-                        : 'Only arc / arc-reverse / arc-oscillate use this.',
-                  }
-                )}
-              </Grid>
-              <Grid size={4}>
-                {intField(
-                  'Repeat count',
-                  jabs.juiceRepeatCount,
-                  'juiceRepeatCount',
-                  {
-                    helperText:
-                      'Number of repeats within the swing (1–8): rotations for spin / spin-reverse, alternating '
-                      + 'sweeps for arc-oscillate, replays for every other preset.',
-                  }
-                )}
-              </Grid>
-              <Grid size={4}>
-                {intField(
-                  'Stab tip degrees',
-                  jabs.juiceStabTipDegrees,
-                  'juiceStabTipDegrees',
-                  {
-                    disabled:
-                      jabs.juiceMotion !== 'bash'
-                      && jabs.juiceMotion !== 'recoil'
-                      && jabs.juiceMotion !== 'stab-forward',
-                    helperText:
-                      jabs.juiceMotion === 'bash'
-                      || jabs.juiceMotion === 'recoil'
-                      || jabs.juiceMotion === 'stab-forward'
-                        ? 'Tip bearing from Pixi +x at rotation 0 (signed). Empty = preset default (sword diagonal for stab; barrel toward −x for bash / recoil).'
-                        : 'Only bash / recoil / stab-forward use this.',
-                  }
-                )}
-              </Grid>
-            </Grid>
-
-            <Divider sx={{ my: 1 }}/>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Overlay flags
-            </Typography>
-            {boolSwitch(
-              'Profile gun (flip horizontally for east/west aim)',
-              jabs.juiceProfileGun,
-              'juiceProfileGun'
-            )}
-            <Typography variant={'caption'} color={'text.secondary'}>
-              For side-profile firearm icons: mirror left/right instead of rotating ~180°, so the grip never reads
-              upside-down. Up / down still use ±90° rotation — pure side-view art cannot read as true top-down aim.
-            </Typography>
-          </Stack>
-      </BoardSectionCard>
+      {renderJuiceMotionSection()}
 
       <BoardSectionCard title={'Learning & upgrades'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
