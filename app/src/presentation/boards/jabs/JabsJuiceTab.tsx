@@ -431,7 +431,7 @@ function JuiceSectionAccordion<TSection>(props: JuiceSectionAccordionProps<TSect
         <Grid container spacing={2}>
           {fields.map((spec) =>
           {
-            const fieldKey = spec.fieldKey;
+            const { fieldKey } = spec;
             const current = values[ fieldKey ] as unknown as number;
             return (
               <Grid key={String(fieldKey)} size={6}>
@@ -649,6 +649,17 @@ function ProfileRow({ profileKey, profile, onRename, onPatch, onDelete }: Profil
 
   const keyOk = JUICE_PROFILE_KEY_PATTERN.test(keyDraft.trim());
 
+  // the default row explains why its name is locked; every other row only speaks up when the key is unusable.
+  let keyHelperText: string | undefined = undefined;
+  if (isDefault)
+  {
+    keyHelperText = "Required fallback row — name is locked.";
+  }
+  else if (keyOk === false)
+  {
+    keyHelperText = "Plugin will reject this key at load (regex [A-Za-z0-9_-]+).";
+  }
+
   return (
     <TableRow>
       <TableCell sx={{ width: "30%" }}>
@@ -667,11 +678,7 @@ function ProfileRow({ profileKey, profile, onRename, onPatch, onDelete }: Profil
             }
             onRename(keyDraft.trim());
           }}
-          helperText={isDefault
-            ? "Required fallback row — name is locked."
-            : keyOk
-              ? undefined
-              : "Plugin will reject this key at load (regex [A-Za-z0-9_-]+)."}
+          helperText={keyHelperText}
           error={isDefault === false && keyOk === false}
         />
       </TableCell>

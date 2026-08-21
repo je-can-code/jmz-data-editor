@@ -339,6 +339,34 @@ const shieldElementRowsFromSystem = (names: readonly string[] | undefined): IdLa
 };
 
 /**
+ * The props that show exactly one editor tab panel and hide the rest.
+ *
+ * Panels stay mounted and are hidden rather than unmounted, so a half-typed field survives a trip to
+ * another tab and back. That means every panel needs both the {@code hidden} attribute, for assistive
+ * technology, and the display rule, for layout.
+ *
+ * @param {number} activeTab The tab index currently selected.
+ * @param {number} panelIndex The index of the panel being drawn.
+ * @returns {object}
+ */
+const stateEditorTabPanelProps = (
+  activeTab: number,
+  panelIndex: number
+) =>
+{
+  const isActive = activeTab === panelIndex;
+
+  return {
+    hidden: isActive === false,
+    sx: {
+      display: isActive
+        ? 'block'
+        : 'none',
+    },
+  };
+};
+
+/**
  * Board for editing project states: list selection, RMMZ fields, JABS, plugins, traits, natural growth, note.
  *
  * @returns States editor grid layout.
@@ -1439,7 +1467,7 @@ const StatesBoard = () =>
       return;
     }
 
-    const checked = event.target.checked;
+    const { checked } = event.target;
     if (checked)
     {
       patchStateJabsMapDuration({
@@ -1666,6 +1694,829 @@ const StatesBoard = () =>
       return;
     }
     patchStateJabs({ [ key ]: String(n) });
+  };
+
+  /**
+   * One of the unsigned stacking counters. All five are the same text field over a different key, and
+   * all five read blank when unset so the plugin's own default applies rather than a written zero.
+   *
+   * @param fieldKey The stacking field being edited.
+   * @param label The caption shown on the field.
+   */
+  const renderStackingCounterField = (
+    fieldKey:
+      | 'stateRefreshReset'
+      | 'stackExtendAmount'
+      | 'stackExtendMax'
+      | 'stackMax'
+      | 'applyStacks',
+    label: string
+  ) =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const value = selectedState.jabs[ fieldKey ];
+
+    return (
+      <TextField
+        variant={'outlined'}
+        label={label}
+        value={value === null
+          ? ''
+          : String(value)}
+        onChange={(e) =>
+        {
+          patchStateJabsStackingUnsigned(fieldKey, e.target.value);
+        }}
+        size={'small'}
+        fullWidth
+      />
+    );
+  };
+
+  /**
+   * What happens when the state is applied to a battler that already has it: refresh, extend or stack.
+   *
+   * Each strategy gets its own group of settings, all of them shown at once rather than switched on the
+   * chosen strategy, because the strategy itself can be left on the plugin default.
+   */
+  const renderStackingSection = () =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const { jabs } = selectedState;
+
+    return (
+      <BoardSectionCard title={'Stacking & reapply'} collapsible defaultExpanded={false}>
+        <Stack spacing={2} alignItems={'stretch'}>
+          <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
+            How this state behaves when reapplied while already active—refresh, extend, or
+            stack—vs
+            global defaults unless you override below. Times are in frames (~60/s at normal
+            speed).
+          </Typography>
+          <TextField
+            select
+            variant={'outlined'}
+            label={'Reapply strategy'}
+            value={jabs.stackType ?? ''}
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+            {
+              const v = event.target.value;
+              patchStateJabs({
+                stackType: v === ''
+                  ? null
+                  : (v as 'extend' | 'refresh' | 'stack'),
+              });
+            }}
+            size={'small'}
+            fullWidth
+          >
+            <MenuItem value={''}>Default (parameters)</MenuItem>
+            <MenuItem value={'refresh'}>Refresh (restart duration from full)</MenuItem>
+            <MenuItem value={'extend'}>Extend (add to remaining time)</MenuItem>
+            <MenuItem value={'stack'}>Stack (build stack count)</MenuItem>
+          </TextField>
+          <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
+            Refresh
+          </Typography>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            Diminish shaves a few frames off each repeat refresh until the reset window passes,
+            then counts from zero again.
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={6}>
+              <TextField
+                variant={'outlined'}
+                label={'Diminish per reapply'}
+                value={jabs.stateRefreshDiminish === null
+                  ? ''
+                  : String(jabs.stateRefreshDiminish)}
+                onChange={(e) =>
+                {
+                  patchStateJabsRefreshDiminish(e.target.value);
+                }}
+                size={'small'}
+                fullWidth
+              />
+            </Grid>
+            <Grid size={6}>
+              {renderStackingCounterField('stateRefreshReset', 'Diminish reset timer')}
+            </Grid>
+          </Grid>
+          <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
+            Extend
+          </Typography>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            Reapply adds duration up to the extend cap.
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={6}>
+              {renderStackingCounterField('stackExtendAmount', 'Added duration per extend')}
+            </Grid>
+            <Grid size={6}>
+              {renderStackingCounterField('stackExtendMax', 'Maximum total duration')}
+            </Grid>
+          </Grid>
+          <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
+            Stack
+          </Typography>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            Stack ceiling, stacks gained per application, and whether expiry clears one layer or
+            the
+            whole pile.
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={6}>
+              {renderStackingCounterField('stackMax', 'Maximum stacks')}
+            </Grid>
+            <Grid size={6}>
+              {renderStackingCounterField('applyStacks', 'Stacks gained per application')}
+            </Grid>
+          </Grid>
+          <FormControlLabel
+            control={(
+              <Checkbox
+                checked={jabs.loseAllStacksAtOnce}
+                onChange={(e) =>
+                {
+                  patchStateJabs({ loseAllStacksAtOnce: e.target.checked });
+                }}
+                size={'small'}
+              />
+            )}
+            label={(
+              <Box>
+                <Typography variant={'body2'} component={'span'}>
+                  Lose all stacks when duration ends
+                </Typography>
+                <Typography variant={'caption'} color={'text.secondary'} display={'block'}>
+                  Off: one stack per tick-out. On: all stacks removed together.
+                </Typography>
+              </Box>
+            )}
+          />
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * How long the state lasts on the map, and how it lengthens states this unit applies to others.
+   *
+   * Frames and seconds are two spellings of the same duration, so both stay editable and the status
+   * line below reports whichever one actually resolved.
+   */
+  const renderStateDurationSection = () =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const { jabs } = selectedState;
+
+    return (
+      <BoardSectionCard title={'State duration'} collapsible defaultExpanded={true}>
+        <Stack spacing={2} alignItems={'stretch'}>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            {'How long this state lasts on the map.'}
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={12}>
+              <FormControlLabel
+                control={(
+                  <Checkbox
+                    checked={jabs.indefiniteState}
+                    onChange={handleStateJabsIndefiniteChange}
+                    size={'small'}
+                  />
+                )}
+                label={'Never expires on the map'}
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                type={'number'}
+                variant={'outlined'}
+                label={'Duration (frames)'}
+                value={jabs.stateDurationFrames === null
+                  ? ''
+                  : String(jabs.stateDurationFrames)}
+                onChange={(e) =>
+                {
+                  patchStateJabsMapDurationFrames(e.target.value);
+                }}
+                size={'small'}
+                fullWidth
+                disabled={jabs.indefiniteState}
+                slotProps={{
+                  htmlInput: {
+                    min: 0,
+                  },
+                }}
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                type={'number'}
+                variant={'outlined'}
+                label={'Duration (seconds)'}
+                value={jabs.stateDurationSeconds === null
+                  ? ''
+                  : String(jabs.stateDurationSeconds)}
+                onChange={(e) =>
+                {
+                  patchStateJabsMapDurationSeconds(e.target.value);
+                }}
+                size={'small'}
+                fullWidth
+                disabled={jabs.indefiniteState}
+                slotProps={{
+                  htmlInput: {
+                    min: 0,
+                  },
+                }}
+              />
+            </Grid>
+            <Grid size={12}>
+              {renderStateDurationStatus()}
+            </Grid>
+          </Grid>
+          <Divider />
+          <Typography variant={'subtitle2'}>
+            {'Outgoing duration'}
+          </Typography>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            {'Adjusts how long states this unit applies to others last on the map.'}
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={6}>
+              <TextField
+                variant={'outlined'}
+                label={'Flat bonus (frames)'}
+                value={jabs.stateDurationFlat === null
+                  ? ''
+                  : String(jabs.stateDurationFlat)}
+                onChange={(e) =>
+                {
+                  patchStateJabsDurationInt('stateDurationFlat', e.target.value);
+                }}
+                size={'small'}
+                fullWidth
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                variant={'outlined'}
+                label={'Percent bonus'}
+                value={jabs.stateDurationPercent === null
+                  ? ''
+                  : String(jabs.stateDurationPercent)}
+                onChange={(e) =>
+                {
+                  patchStateJabsDurationInt('stateDurationPercent', e.target.value);
+                }}
+                size={'small'}
+                fullWidth
+              />
+            </Grid>
+            <Grid size={12}>
+              <TextField
+                variant={'outlined'}
+                label={'Formula bonus (frames)'}
+                value={jabs.stateDurationFormula}
+                onChange={handleStateJabsDurationFormulaChangeEvent}
+                size={'small'}
+                fullWidth
+                multiline
+                minRows={2}
+                placeholder={'e.g. a.atk * 2'}
+              />
+            </Grid>
+          </Grid>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * Reports the map lifetime as an outcome rather than as the fields that produced it.
+   */
+  const renderStateDurationStatus = () =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const { jabs } = selectedState;
+
+    if (jabs.indefiniteState)
+    {
+      return (
+        <Typography variant={'body2'} color={'text.secondary'}>
+          {'Does not expire on the map.'}
+        </Typography>
+      );
+    }
+
+    const tagFrames = resolveStateMapDurationFramesFromJabs(jabs);
+    if (stateJabsHasMapTimer(jabs) && tagFrames !== null)
+    {
+      return (
+        <Typography variant={'body2'} color={'text.secondary'}>
+          {`Expires on the map ${formatApproxSecondsLabelFromFrames(tagFrames).replace(/[()]/g, '')}.`}
+        </Typography>
+      );
+    }
+
+    return (
+      <Typography variant={'body2'} color={'text.secondary'}>
+        {'No duration set.'}
+      </Typography>
+    );
+  };
+
+  /**
+   * The recent-skills damage bonus: which skills count, how far back to look, and what each is worth.
+   *
+   * The summary line at the bottom restates the whole rule as a sentence, because four fields spread
+   * across a grid do not read as one rule until they are put back together.
+   */
+  const renderRecentSkillsSection = () =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const { jabs } = selectedState;
+    const skillTypes = SystemService.skillTypes ?? [];
+
+    return (
+      <BoardSectionCard title={'Recent skills'} collapsible defaultExpanded={false}>
+        <Stack spacing={2} alignItems={'stretch'}>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            {'Extra damage based on which skills this unit used recently.'}
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={6}>
+              <Autocomplete<RmmzSkillStypeOption, false, false, false>
+                fullWidth
+                size={'small'}
+                options={skillHistoryTypeFilterAutocompleteOptions(
+                  jabs.skillHistoryBonusTypeId ?? 0,
+                  skillTypes
+                )}
+                groupBy={(option) => option.group}
+                getOptionLabel={(option) => option.label}
+                isOptionEqualToValue={(
+                  a,
+                  b
+                ) => a.value === b.value}
+                value={skillHistoryTypeFilterOptionForValue(
+                  jabs.skillHistoryBonusTypeId,
+                  skillTypes
+                )}
+                onChange={(
+                  _event,
+                  option
+                ) =>
+                {
+                  patchStateJabsSkillHistoryBonus({
+                    skillHistoryBonusTypeId: option === null
+                      ? null
+                      : option.value,
+                  });
+                }}
+                filterOptions={(
+                  options,
+                  state
+                ) =>
+                {
+                  const q = state.inputValue.trim()
+                    .toLowerCase();
+                  if (q === '')
+                  {
+                    return options;
+                  }
+                  return options.filter((o) =>
+                    o.label.toLowerCase()
+                      .includes(q)
+                    || o.group.toLowerCase()
+                      .includes(q)
+                    || String(o.value)
+                      .includes(q));
+                }}
+                slotProps={{
+                  listbox: { style: { maxHeight: 240 } },
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    variant={'outlined'}
+                    label={'Skill type filter'}
+                    placeholder={'Any, Techniques, …'}
+                  />
+                )}
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                type={'number'}
+                variant={'outlined'}
+                label={'Lookback (seconds)'}
+                value={jabs.skillHistoryBonusWindowSeconds === null
+                  ? ''
+                  : String(jabs.skillHistoryBonusWindowSeconds)}
+                onChange={(e) =>
+                {
+                  patchStateJabsSkillHistoryBonus({
+                    skillHistoryBonusWindowSeconds: parseStateJabsNonNegativeIntOrNull(e.target.value),
+                  });
+                }}
+                size={'small'}
+                fullWidth
+                slotProps={{
+                  htmlInput: {
+                    min: 0,
+                  },
+                }}
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                type={'number'}
+                variant={'outlined'}
+                label={'Bonus per count (%)'}
+                value={jabs.skillHistoryBonusPctPerCount === null
+                  ? ''
+                  : String(jabs.skillHistoryBonusPctPerCount)}
+                onChange={(e) =>
+                {
+                  patchStateJabsSkillHistoryBonus({
+                    skillHistoryBonusPctPerCount: parseStateJabsNonNegativeIntOrNull(e.target.value),
+                  });
+                }}
+                size={'small'}
+                fullWidth
+                slotProps={{
+                  htmlInput: {
+                    min: 0,
+                  },
+                }}
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                select
+                variant={'outlined'}
+                label={'What to count'}
+                value={jabs.skillHistoryBonusCountMode ?? ''}
+                onChange={(e) =>
+                {
+                  const v = e.target.value;
+                  if (v === '')
+                  {
+                    patchStateJabsSkillHistoryBonus({ skillHistoryBonusCountMode: null });
+                    return;
+                  }
+                  patchStateJabsSkillHistoryBonus({
+                    skillHistoryBonusCountMode: v as SkillHistoryBonusCountMode,
+                  });
+                }}
+                size={'small'}
+                fullWidth
+                slotProps={{
+                  select: {
+                    displayEmpty: true,
+                  },
+                }}
+              >
+                <MenuItem value={''}>
+                  {'—'}
+                </MenuItem>
+                {SKILL_HISTORY_COUNT_MODE_OPTIONS.map((option) => (
+                  <MenuItem
+                    key={option.value}
+                    value={option.value}
+                  >
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid size={12}>
+              {renderRecentSkillsSummary()}
+            </Grid>
+          </Grid>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * Restates the recent-skills bonus as one sentence, or says it is off.
+   */
+  const renderRecentSkillsSummary = () =>
+  {
+    if (selectedState === null || stateJabsHasSkillHistoryBonus(selectedState.jabs) === false)
+    {
+      return (
+        <Typography variant={'body2'} color={'text.secondary'}>
+          {'Not configured.'}
+        </Typography>
+      );
+    }
+
+    const { jabs } = selectedState;
+
+    const countedThing = SKILL_HISTORY_COUNT_MODE_OPTIONS.find((o) =>
+    {
+      return o.value === jabs.skillHistoryBonusCountMode;
+    })?.label.toLowerCase() ?? 'entry';
+
+    const typeFilter = skillHistoryTypeFilterOptionForValue(
+      jabs.skillHistoryBonusTypeId,
+      SystemService.skillTypes ?? []
+    )?.label ?? 'Any';
+
+    return (
+      <Typography variant={'body2'} color={'text.secondary'}>
+        {`+${jabs.skillHistoryBonusPctPerCount}% damage per ${countedThing} in the last ${jabs.skillHistoryBonusWindowSeconds}s (${typeFilter} only).`}
+      </Typography>
+    );
+  };
+
+  /**
+   * The three ways one resource can slip: a flat total, a percentage of the pool, and a formula.
+   *
+   * HP, MP and TP each offer the same trio and differ only in which fields they write, so the grid is
+   * described once. Negative values drain the pool and positive values replenish it, which is why the
+   * numeric fields are signed rather than clamped at zero.
+   *
+   * @param resource The resource whose slip fields are being drawn.
+   * @param percentLabel What the percentage field is called for this resource.
+   * @param formulaPlaceholder An example formula appropriate to this resource.
+   */
+  const renderSlipResourceGrid = (
+    resource: 'Hp' | 'Mp' | 'Tp',
+    percentLabel: string,
+    formulaPlaceholder: string
+  ) =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const flatKey = `slip${resource}Flat` as const;
+    const percentKey = `slip${resource}Percent` as const;
+    const formulaKey = `slip${resource}Formula` as const;
+
+    const flat = selectedState.jabs[ flatKey ];
+    const percent = selectedState.jabs[ percentKey ];
+
+    return (
+      <Grid container spacing={2} alignItems={'flex-start'}>
+        <Grid size={6}>
+          <TextField
+            type={'number'}
+            variant={'outlined'}
+            label={'Flat'}
+            value={flat === null
+              ? ''
+              : String(flat)}
+            onChange={(e) =>
+            {
+              patchStateJabsSlipSigned(flatKey, e.target.value);
+            }}
+            size={'small'}
+            fullWidth
+            slotProps={{
+              htmlInput: {
+                step: 1,
+              },
+            }}
+          />
+        </Grid>
+        <Grid size={6}>
+          <TextField
+            type={'number'}
+            variant={'outlined'}
+            label={percentLabel}
+            value={percent === null
+              ? ''
+              : String(percent)}
+            onChange={(e) =>
+            {
+              patchStateJabsSlipSigned(percentKey, e.target.value);
+            }}
+            size={'small'}
+            fullWidth
+            slotProps={{
+              htmlInput: {
+                step: 1,
+              },
+            }}
+          />
+        </Grid>
+        <Grid size={12}>
+          <TextField
+            variant={'outlined'}
+            label={'Formula'}
+            value={selectedState.jabs[ formulaKey ]}
+            onChange={(e) =>
+            {
+              handleStateJabsSlipFormulaChangeEvent(formulaKey, e);
+            }}
+            size={'small'}
+            fullWidth
+            placeholder={formulaPlaceholder}
+          />
+        </Grid>
+      </Grid>
+    );
+  };
+
+  /**
+   * A JABS timing field that takes either a plain frame count or a formula.
+   *
+   * Both spellings are stored as the same bracket interior, so which editor appears follows what is
+   * already written there: an author who typed a formula keeps the formula box, and one who typed a
+   * number keeps the stepper. The four fields differ only in what they write and what they are called.
+   *
+   * @param fieldKey The JABS timing field being edited.
+   * @param label The caption shown on the field.
+   */
+  const renderTimingFrameField = (
+    fieldKey:
+      | 'timingBaseCastTime'
+      | 'timingCastTimeFlat'
+      | 'timingBaseFastCooldown'
+      | 'timingFastCooldownFlat',
+    label: string
+  ) =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const raw = selectedState.jabs[ fieldKey ];
+
+    if (isPlainNumberBracketInterior(raw) === false)
+    {
+      return (
+        <TextField
+          variant={'outlined'}
+          label={`${label} (formula)`}
+          value={raw}
+          onChange={(e) =>
+          {
+            handleStateJabsBracketInteriorChangeEvent(fieldKey, e);
+          }}
+          size={'small'}
+          fullWidth
+          multiline
+          minRows={2}
+          helperText={'Plain number only to use frame input.'}
+        />
+      );
+    }
+
+    return (
+      <TextField
+        type={'number'}
+        variant={'outlined'}
+        label={label}
+        value={raw.trim() === ''
+          ? ''
+          : raw}
+        onChange={(e) =>
+        {
+          handleStateJabsTimingNumberInteriorChange(fieldKey, e);
+        }}
+        size={'small'}
+        fullWidth
+        slotProps={{
+          htmlInput: {
+            step: 1,
+          },
+        }}
+      />
+    );
+  };
+
+  /**
+   * A JABS timing percentage, shown as a slider when it holds a plain integer and as a formula box
+   * otherwise. Clearing the formula is what hands control back to the slider, which is why the
+   * formula variant says so and the slider carries a reset back to 1x.
+   *
+   * @param fieldKey The JABS percent field being edited.
+   * @param sliderCaption What the slider calls the thing it scales.
+   * @param formulaLabel The caption on the formula box.
+   * @param sliderAriaLabel The accessible name for the slider.
+   */
+  const renderTimingPercentField = (
+    fieldKey: 'timingCastTimePercent' | 'timingFastCooldownRate',
+    sliderCaption: string,
+    formulaLabel: string,
+    sliderAriaLabel: string
+  ) =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const raw = selectedState.jabs[ fieldKey ];
+
+    if (isPlainIntegerBracketInterior(raw) === false)
+    {
+      return (
+        <TextField
+          variant={'outlined'}
+          label={formulaLabel}
+          value={raw}
+          onChange={(e) =>
+          {
+            handleStateJabsBracketInteriorChangeEvent(fieldKey, e);
+          }}
+          size={'small'}
+          fullWidth
+          helperText={'Clear to use the slider, or keep a custom formula.'}
+        />
+      );
+    }
+
+    return (
+      <Stack spacing={0.75} sx={{ width: '100%' }}>
+        <Stack
+          direction={'row'}
+          alignItems={'center'}
+          spacing={1}
+          sx={{ minHeight: 32 }}
+        >
+          <Typography
+            variant={'body2'}
+            color={'text.secondary'}
+            component={'div'}
+            sx={{
+              flex: 1,
+              minWidth: 0
+            }}
+          >
+            {timingPercentSliderCaption(sliderCaption, raw)}
+          </Typography>
+          <Tooltip title={'Set to 100% speed (1×)'}>
+            <Button
+              variant={'text'}
+              size={'small'}
+              onClick={() =>
+              {
+                resetTimingPercentModifier(fieldKey);
+              }}
+              sx={{
+                flexShrink: 0,
+                minWidth: 'auto',
+                px: 1,
+              }}
+            >
+              1×
+            </Button>
+          </Tooltip>
+        </Stack>
+        <Slider
+          size={'small'}
+          value={timingPercentSliderValueFromInterior(raw)}
+          onChange={(
+            e,
+            v
+          ) =>
+          {
+            handleStateJabsTimingPercentSliderChange(fieldKey, e, v);
+          }}
+          min={TIMING_PERCENT_SLIDER_MIN}
+          max={TIMING_PERCENT_SLIDER_MAX}
+          step={1}
+          marks={TIMING_PERCENT_SLIDER_MARKS}
+          valueLabelDisplay={'auto'}
+          valueLabelFormat={(x) => timingPercentMultiplierLabel(x)}
+          getAriaValueText={(x) =>
+            `${timingPercentMultiplierLabel(x)}, modifier ${x} percent`}
+          aria-label={sliderAriaLabel}
+          sx={{ width: '100%' }}
+        />
+      </Stack>
+    );
   };
 
   /**
@@ -1925,7 +2776,7 @@ const StatesBoard = () =>
       return -1;
     }
 
-    const length = states.length;
+    const { length } = states;
     if (length === 0)
     {
       return -1;
@@ -2031,7 +2882,7 @@ const StatesBoard = () =>
    */
   const handleIterateNext = () =>
   {
-    const length = states.length;
+    const { length } = states;
     if (length === 0)
     {
       return;
@@ -2053,7 +2904,7 @@ const StatesBoard = () =>
    */
   const handleIteratePrev = () =>
   {
-    const length = states.length;
+    const { length } = states;
     if (length === 0)
     {
       return;
@@ -2259,12 +3110,7 @@ const StatesBoard = () =>
                   id={'state-editor-tabpanel-0'}
                   role={'tabpanel'}
                   aria-labelledby={'state-editor-tab-0'}
-                  hidden={stateEditorTab !== 0}
-                  sx={{
-                    display: stateEditorTab === 0
-                      ? 'block'
-                      : 'none',
-                  }}
+                  {...stateEditorTabPanelProps(stateEditorTab, 0)}
                 >
                   <Stack spacing={3}>
                     <Grid container spacing={2} alignItems={'flex-start'}>
@@ -2547,186 +3393,15 @@ const StatesBoard = () =>
                                 <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
                                   HP
                                 </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Flat'}
-                                      value={selectedState.jabs.slipHpFlat === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipHpFlat)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipHpFlat', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Percent of max'}
-                                      value={selectedState.jabs.slipHpPercent === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipHpPercent)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipHpPercent', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={12}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Formula'}
-                                      value={selectedState.jabs.slipHpFormula}
-                                      onChange={(e) =>
-                                      {
-                                        handleStateJabsSlipFormulaChangeEvent('slipHpFormula', e);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      placeholder={'e.g. a.mdf * -1'}
-                                    />
-                                  </Grid>
-                                </Grid>
+                                {renderSlipResourceGrid('Hp', 'Percent of max', 'e.g. a.mdf * -1')}
                                 <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
                                   MP
                                 </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Flat'}
-                                      value={selectedState.jabs.slipMpFlat === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipMpFlat)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipMpFlat', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Percent'}
-                                      value={selectedState.jabs.slipMpPercent === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipMpPercent)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipMpPercent', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={12}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Formula'}
-                                      value={selectedState.jabs.slipMpFormula}
-                                      onChange={(e) =>
-                                      {
-                                        handleStateJabsSlipFormulaChangeEvent('slipMpFormula', e);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      placeholder={'e.g. a.mat * -0.5'}
-                                    />
-                                  </Grid>
-                                </Grid>
+                                {renderSlipResourceGrid('Mp', 'Percent', 'e.g. a.mat * -0.5')}
                                 <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
                                   TP
                                 </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Flat'}
-                                      value={selectedState.jabs.slipTpFlat === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipTpFlat)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipTpFlat', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Percent'}
-                                      value={selectedState.jabs.slipTpPercent === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipTpPercent)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipTpPercent', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={12}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Formula'}
-                                      value={selectedState.jabs.slipTpFormula}
-                                      onChange={(e) =>
-                                      {
-                                        handleStateJabsSlipFormulaChangeEvent('slipTpFormula', e);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      placeholder={'e.g. a.atk * 2'}
-                                    />
-                                  </Grid>
-                                </Grid>
+                                {renderSlipResourceGrid('Tp', 'Percent', 'e.g. a.atk * 2')}
                               </Stack>
                           </BoardSectionCard>
 
@@ -2758,150 +3433,7 @@ const StatesBoard = () =>
                         md: 5
                       }}>
                         <Stack spacing={2}>
-                            <BoardSectionCard title={'State duration'} collapsible defaultExpanded={true}>
-                              <Stack spacing={2} alignItems={'stretch'}>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  {'How long this state lasts on the map.'}
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={12}>
-                                    <FormControlLabel
-                                      control={(
-                                        <Checkbox
-                                          checked={selectedState.jabs.indefiniteState}
-                                          onChange={handleStateJabsIndefiniteChange}
-                                          size={'small'}
-                                        />
-                                      )}
-                                      label={'Never expires on the map'}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Duration (frames)'}
-                                      value={selectedState.jabs.stateDurationFrames === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateDurationFrames)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsMapDurationFrames(e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      disabled={selectedState.jabs.indefiniteState}
-                                      slotProps={{
-                                        htmlInput: {
-                                          min: 0,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Duration (seconds)'}
-                                      value={selectedState.jabs.stateDurationSeconds === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateDurationSeconds)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsMapDurationSeconds(e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      disabled={selectedState.jabs.indefiniteState}
-                                      slotProps={{
-                                        htmlInput: {
-                                          min: 0,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={12}>
-                                    {(() =>
-                                    {
-                                      if (selectedState.jabs.indefiniteState)
-                                      {
-                                        return (
-                                          <Typography variant={'body2'} color={'text.secondary'}>
-                                            {'Does not expire on the map.'}
-                                          </Typography>
-                                        );
-                                      }
-                                      const tagFrames = resolveStateMapDurationFramesFromJabs(selectedState.jabs);
-                                      if (stateJabsHasMapTimer(selectedState.jabs) && tagFrames !== null)
-                                      {
-                                        return (
-                                          <Typography variant={'body2'} color={'text.secondary'}>
-                                            {`Expires on the map ${formatApproxSecondsLabelFromFrames(tagFrames).replace(/[()]/g, '')}.`}
-                                          </Typography>
-                                        );
-                                      }
-                                      return (
-                                        <Typography variant={'body2'} color={'text.secondary'}>
-                                          {'No duration set.'}
-                                        </Typography>
-                                      );
-                                    })()}
-                                  </Grid>
-                                </Grid>
-                                <Divider />
-                                <Typography variant={'subtitle2'}>
-                                  {'Outgoing duration'}
-                                </Typography>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  {'Adjusts how long states this unit applies to others last on the map.'}
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Flat bonus (frames)'}
-                                      value={selectedState.jabs.stateDurationFlat === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateDurationFlat)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsDurationInt('stateDurationFlat', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Percent bonus'}
-                                      value={selectedState.jabs.stateDurationPercent === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateDurationPercent)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsDurationInt('stateDurationPercent', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={12}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Formula bonus (frames)'}
-                                      value={selectedState.jabs.stateDurationFormula}
-                                      onChange={handleStateJabsDurationFormulaChangeEvent}
-                                      size={'small'}
-                                      fullWidth
-                                      multiline
-                                      minRows={2}
-                                      placeholder={'e.g. a.atk * 2'}
-                                    />
-                                  </Grid>
-                                </Grid>
-                              </Stack>
-                          </BoardSectionCard>
+                            {renderStateDurationSection()}
 
                             <BoardSectionCard title={'Traits'} collapsible>
                               <TraitEditor
@@ -3157,184 +3689,7 @@ const StatesBoard = () =>
                               </Stack>
                           </BoardSectionCard>
 
-                            <BoardSectionCard title={'Recent skills'} collapsible defaultExpanded={false}>
-                              <Stack spacing={2} alignItems={'stretch'}>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  {'Extra damage based on which skills this unit used recently.'}
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <Autocomplete<RmmzSkillStypeOption, false, false, false>
-                                      fullWidth
-                                      size={'small'}
-                                      options={skillHistoryTypeFilterAutocompleteOptions(
-                                        selectedState.jabs.skillHistoryBonusTypeId ?? 0,
-                                        SystemService.skillTypes ?? []
-                                      )}
-                                      groupBy={(option) => option.group}
-                                      getOptionLabel={(option) => option.label}
-                                      isOptionEqualToValue={(
-                                        a,
-                                        b
-                                      ) => a.value === b.value}
-                                      value={skillHistoryTypeFilterOptionForValue(
-                                        selectedState.jabs.skillHistoryBonusTypeId,
-                                        SystemService.skillTypes ?? []
-                                      )}
-                                      onChange={(
-                                        _event,
-                                        option
-                                      ) =>
-                                      {
-                                        patchStateJabsSkillHistoryBonus({
-                                          skillHistoryBonusTypeId: option === null
-                                            ? null
-                                            : option.value,
-                                        });
-                                      }}
-                                      filterOptions={(
-                                        options,
-                                        state
-                                      ) =>
-                                      {
-                                        const q = state.inputValue.trim()
-                                          .toLowerCase();
-                                        if (q === '')
-                                        {
-                                          return options;
-                                        }
-                                        return options.filter((o) =>
-                                          o.label.toLowerCase()
-                                            .includes(q)
-                                          || o.group.toLowerCase()
-                                            .includes(q)
-                                          || String(o.value)
-                                            .includes(q));
-                                      }}
-                                      slotProps={{
-                                        listbox: { style: { maxHeight: 240 } },
-                                      }}
-                                      renderInput={(params) => (
-                                        <TextField
-                                          {...params}
-                                          variant={'outlined'}
-                                          label={'Skill type filter'}
-                                          placeholder={'Any, Techniques, …'}
-                                        />
-                                      )}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Lookback (seconds)'}
-                                      value={selectedState.jabs.skillHistoryBonusWindowSeconds === null
-                                        ? ''
-                                        : String(selectedState.jabs.skillHistoryBonusWindowSeconds)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSkillHistoryBonus({
-                                          skillHistoryBonusWindowSeconds: parseStateJabsNonNegativeIntOrNull(e.target.value),
-                                        });
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          min: 0,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Bonus per count (%)'}
-                                      value={selectedState.jabs.skillHistoryBonusPctPerCount === null
-                                        ? ''
-                                        : String(selectedState.jabs.skillHistoryBonusPctPerCount)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSkillHistoryBonus({
-                                          skillHistoryBonusPctPerCount: parseStateJabsNonNegativeIntOrNull(e.target.value),
-                                        });
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          min: 0,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      select
-                                      variant={'outlined'}
-                                      label={'What to count'}
-                                      value={selectedState.jabs.skillHistoryBonusCountMode ?? ''}
-                                      onChange={(e) =>
-                                      {
-                                        const v = e.target.value;
-                                        if (v === '')
-                                        {
-                                          patchStateJabsSkillHistoryBonus({ skillHistoryBonusCountMode: null });
-                                          return;
-                                        }
-                                        patchStateJabsSkillHistoryBonus({
-                                          skillHistoryBonusCountMode: v as SkillHistoryBonusCountMode,
-                                        });
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        select: {
-                                          displayEmpty: true,
-                                        },
-                                      }}
-                                    >
-                                      <MenuItem value={''}>
-                                        {'—'}
-                                      </MenuItem>
-                                      {SKILL_HISTORY_COUNT_MODE_OPTIONS.map((option) => (
-                                        <MenuItem
-                                          key={option.value}
-                                          value={option.value}
-                                        >
-                                          {option.label}
-                                        </MenuItem>
-                                      ))}
-                                    </TextField>
-                                  </Grid>
-                                  <Grid size={12}>
-                                    {stateJabsHasSkillHistoryBonus(selectedState.jabs)
-                                      ? (
-                                        <Typography variant={'body2'} color={'text.secondary'}>
-                                          {`+${selectedState.jabs.skillHistoryBonusPctPerCount}% damage per ${
-                                            SKILL_HISTORY_COUNT_MODE_OPTIONS.find((o) =>
-                                            {
-                                              return o.value === selectedState.jabs.skillHistoryBonusCountMode;
-                                            })?.label.toLowerCase() ?? 'entry'
-                                          } in the last ${selectedState.jabs.skillHistoryBonusWindowSeconds}s (${
-                                            skillHistoryTypeFilterOptionForValue(
-                                              selectedState.jabs.skillHistoryBonusTypeId,
-                                              SystemService.skillTypes ?? []
-                                            )?.label ?? 'Any'
-                                          } only).`}
-                                        </Typography>
-                                      )
-                                      : (
-                                        <Typography variant={'body2'} color={'text.secondary'}>
-                                          {'Not configured.'}
-                                        </Typography>
-                                      )}
-                                  </Grid>
-                                </Grid>
-                              </Stack>
-                          </BoardSectionCard>
+                            {renderRecentSkillsSection()}
 
                             <StatePassiveConditionalPanel
                               ext={selectedState.passiveConditional}
@@ -3615,170 +3970,18 @@ const StatesBoard = () =>
                                 </Typography>
                                 <Grid container spacing={2}>
                                   <Grid size={6}>
-                                    {isPlainNumberBracketInterior(selectedState.jabs.timingBaseCastTime) === true
-                                      ? (
-                                        <TextField
-                                          type={'number'}
-                                          variant={'outlined'}
-                                          label={'Base'}
-                                          value={selectedState.jabs.timingBaseCastTime.trim() === ''
-                                            ? ''
-                                            : selectedState.jabs.timingBaseCastTime}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsTimingNumberInteriorChange('timingBaseCastTime', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          slotProps={{
-                                            htmlInput: {
-                                              step: 1,
-                                            },
-                                          }}
-                                        />
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Base (formula)'}
-                                          value={selectedState.jabs.timingBaseCastTime}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent('timingBaseCastTime', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          multiline
-                                          minRows={2}
-                                          helperText={'Plain number only to use frame input.'}
-                                        />
-                                      )}
+                                    {renderTimingFrameField('timingBaseCastTime', 'Base')}
                                   </Grid>
                                   <Grid size={6}>
-                                    {isPlainNumberBracketInterior(selectedState.jabs.timingCastTimeFlat) === true
-                                      ? (
-                                        <TextField
-                                          type={'number'}
-                                          variant={'outlined'}
-                                          label={'Flat'}
-                                          value={selectedState.jabs.timingCastTimeFlat.trim() === ''
-                                            ? ''
-                                            : selectedState.jabs.timingCastTimeFlat}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsTimingNumberInteriorChange('timingCastTimeFlat', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          slotProps={{
-                                            htmlInput: {
-                                              step: 1,
-                                            },
-                                          }}
-                                        />
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Flat (formula)'}
-                                          value={selectedState.jabs.timingCastTimeFlat}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent('timingCastTimeFlat', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          multiline
-                                          minRows={2}
-                                          helperText={'Plain number only to use frame input.'}
-                                        />
-                                      )}
+                                    {renderTimingFrameField('timingCastTimeFlat', 'Flat')}
                                   </Grid>
                                   <Grid size={12}>
-                                    {isPlainIntegerBracketInterior(selectedState.jabs.timingCastTimePercent) === true
-                                      ? (
-                                        <Stack spacing={0.75} sx={{ width: '100%' }}>
-                                          <Stack
-                                            direction={'row'}
-                                            alignItems={'center'}
-                                            spacing={1}
-                                            sx={{ minHeight: 32 }}
-                                          >
-                                            <Typography
-                                              variant={'body2'}
-                                              color={'text.secondary'}
-                                              component={'div'}
-                                              sx={{
-                                                flex: 1,
-                                                minWidth: 0
-                                              }}
-                                            >
-                                              {timingPercentSliderCaption(
-                                                'Cast scale',
-                                                selectedState.jabs.timingCastTimePercent
-                                              )}
-                                            </Typography>
-                                            <Tooltip title={'Set to 100% speed (1×)'}>
-                                              <Button
-                                                variant={'text'}
-                                                size={'small'}
-                                                onClick={() =>
-                                                {
-                                                  resetTimingPercentModifier('timingCastTimePercent');
-                                                }}
-                                                sx={{
-                                                  flexShrink: 0,
-                                                  minWidth: 'auto',
-                                                  px: 1,
-                                                }}
-                                              >
-                                                1×
-                                              </Button>
-                                            </Tooltip>
-                                          </Stack>
-                                          <Slider
-                                            size={'small'}
-                                            value={timingPercentSliderValueFromInterior(
-                                              selectedState.jabs.timingCastTimePercent
-                                            )}
-                                            onChange={(
-                                              e,
-                                              v
-                                            ) =>
-                                            {
-                                              handleStateJabsTimingPercentSliderChange(
-                                                'timingCastTimePercent',
-                                                e,
-                                                v
-                                              );
-                                            }}
-                                            min={TIMING_PERCENT_SLIDER_MIN}
-                                            max={TIMING_PERCENT_SLIDER_MAX}
-                                            step={1}
-                                            marks={TIMING_PERCENT_SLIDER_MARKS}
-                                            valueLabelDisplay={'auto'}
-                                            valueLabelFormat={(x) => timingPercentMultiplierLabel(x)}
-                                            getAriaValueText={(x) =>
-                                              `${timingPercentMultiplierLabel(x)}, modifier ${x} percent`}
-                                            aria-label={'Cast time percent modifier'}
-                                            sx={{ width: '100%' }}
-                                          />
-                                        </Stack>
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Percent (formula)'}
-                                          value={selectedState.jabs.timingCastTimePercent}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent('timingCastTimePercent', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          helperText={'Clear to use the slider, or keep a custom formula.'}
-                                        />
-                                      )}
+                                    {renderTimingPercentField(
+                                      'timingCastTimePercent',
+                                      'Cast scale',
+                                      'Percent (formula)',
+                                      'Cast time percent modifier'
+                                    )}
                                   </Grid>
                                 </Grid>
                                 <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
@@ -3786,367 +3989,24 @@ const StatesBoard = () =>
                                 </Typography>
                                 <Grid container spacing={2}>
                                   <Grid size={6}>
-                                    {isPlainNumberBracketInterior(selectedState.jabs.timingBaseFastCooldown) === true
-                                      ? (
-                                        <TextField
-                                          type={'number'}
-                                          variant={'outlined'}
-                                          label={'Base'}
-                                          value={selectedState.jabs.timingBaseFastCooldown.trim() === ''
-                                            ? ''
-                                            : selectedState.jabs.timingBaseFastCooldown}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsTimingNumberInteriorChange(
-                                              'timingBaseFastCooldown',
-                                              e
-                                            );
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          slotProps={{
-                                            htmlInput: {
-                                              step: 1,
-                                            },
-                                          }}
-                                        />
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Base (formula)'}
-                                          value={selectedState.jabs.timingBaseFastCooldown}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent(
-                                              'timingBaseFastCooldown',
-                                              e
-                                            );
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          multiline
-                                          minRows={2}
-                                          helperText={'Plain number only to use frame input.'}
-                                        />
-                                      )}
+                                    {renderTimingFrameField('timingBaseFastCooldown', 'Base')}
                                   </Grid>
                                   <Grid size={6}>
-                                    {isPlainNumberBracketInterior(selectedState.jabs.timingFastCooldownFlat) === true
-                                      ? (
-                                        <TextField
-                                          type={'number'}
-                                          variant={'outlined'}
-                                          label={'Flat'}
-                                          value={selectedState.jabs.timingFastCooldownFlat.trim() === ''
-                                            ? ''
-                                            : selectedState.jabs.timingFastCooldownFlat}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsTimingNumberInteriorChange(
-                                              'timingFastCooldownFlat',
-                                              e
-                                            );
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          slotProps={{
-                                            htmlInput: {
-                                              step: 1,
-                                            },
-                                          }}
-                                        />
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Flat (formula)'}
-                                          value={selectedState.jabs.timingFastCooldownFlat}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent(
-                                              'timingFastCooldownFlat',
-                                              e
-                                            );
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          multiline
-                                          minRows={2}
-                                          helperText={'Plain number only to use frame input.'}
-                                        />
-                                      )}
+                                    {renderTimingFrameField('timingFastCooldownFlat', 'Flat')}
                                   </Grid>
                                   <Grid size={12}>
-                                    {isPlainIntegerBracketInterior(selectedState.jabs.timingFastCooldownRate) === true
-                                      ? (
-                                        <Stack spacing={0.75} sx={{ width: '100%' }}>
-                                          <Stack
-                                            direction={'row'}
-                                            alignItems={'center'}
-                                            spacing={1}
-                                            sx={{ minHeight: 32 }}
-                                          >
-                                            <Typography
-                                              variant={'body2'}
-                                              color={'text.secondary'}
-                                              component={'div'}
-                                              sx={{
-                                                flex: 1,
-                                                minWidth: 0
-                                              }}
-                                            >
-                                              {timingPercentSliderCaption(
-                                                'Cooldown scale',
-                                                selectedState.jabs.timingFastCooldownRate
-                                              )}
-                                            </Typography>
-                                            <Tooltip title={'Set to 100% speed (1×)'}>
-                                              <Button
-                                                variant={'text'}
-                                                size={'small'}
-                                                onClick={() =>
-                                                {
-                                                  resetTimingPercentModifier('timingFastCooldownRate');
-                                                }}
-                                                sx={{
-                                                  flexShrink: 0,
-                                                  minWidth: 'auto',
-                                                  px: 1,
-                                                }}
-                                              >
-                                                1×
-                                              </Button>
-                                            </Tooltip>
-                                          </Stack>
-                                          <Slider
-                                            size={'small'}
-                                            value={timingPercentSliderValueFromInterior(
-                                              selectedState.jabs.timingFastCooldownRate
-                                            )}
-                                            onChange={(
-                                              e,
-                                              v
-                                            ) =>
-                                            {
-                                              handleStateJabsTimingPercentSliderChange(
-                                                'timingFastCooldownRate',
-                                                e,
-                                                v
-                                              );
-                                            }}
-                                            min={TIMING_PERCENT_SLIDER_MIN}
-                                            max={TIMING_PERCENT_SLIDER_MAX}
-                                            step={1}
-                                            marks={TIMING_PERCENT_SLIDER_MARKS}
-                                            valueLabelDisplay={'auto'}
-                                            valueLabelFormat={(x) => timingPercentMultiplierLabel(x)}
-                                            getAriaValueText={(x) =>
-                                              `${timingPercentMultiplierLabel(x)}, modifier ${x} percent`}
-                                            aria-label={'Fast cooldown percent modifier'}
-                                            sx={{ width: '100%' }}
-                                          />
-                                        </Stack>
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Rate (formula)'}
-                                          value={selectedState.jabs.timingFastCooldownRate}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent('timingFastCooldownRate', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          helperText={'Clear to use the slider, or keep a custom formula.'}
-                                        />
-                                      )}
+                                    {renderTimingPercentField(
+                                      'timingFastCooldownRate',
+                                      'Cooldown scale',
+                                      'Rate (formula)',
+                                      'Fast cooldown percent modifier'
+                                    )}
                                   </Grid>
                                 </Grid>
                               </Stack>
                           </BoardSectionCard>
 
-                            <BoardSectionCard title={'Stacking & reapply'} collapsible defaultExpanded={false}>
-                              <Stack spacing={2} alignItems={'stretch'}>
-                                <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
-                                  How this state behaves when reapplied while already active—refresh, extend, or
-                                  stack—vs
-                                  global defaults unless you override below. Times are in frames (~60/s at normal
-                                  speed).
-                                </Typography>
-                                <TextField
-                                  select
-                                  variant={'outlined'}
-                                  label={'Reapply strategy'}
-                                  value={selectedState.jabs.stackType ?? ''}
-                                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                  {
-                                    const v = event.target.value;
-                                    patchStateJabs({
-                                      stackType: v === ''
-                                        ? null
-                                        : (v as 'extend' | 'refresh' | 'stack'),
-                                    });
-                                  }}
-                                  size={'small'}
-                                  fullWidth
-                                >
-                                  <MenuItem value={''}>Default (parameters)</MenuItem>
-                                  <MenuItem value={'refresh'}>Refresh (restart duration from full)</MenuItem>
-                                  <MenuItem value={'extend'}>Extend (add to remaining time)</MenuItem>
-                                  <MenuItem value={'stack'}>Stack (build stack count)</MenuItem>
-                                </TextField>
-                                <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
-                                  Refresh
-                                </Typography>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  Diminish shaves a few frames off each repeat refresh until the reset window passes,
-                                  then counts from zero again.
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Diminish per reapply'}
-                                      value={selectedState.jabs.stateRefreshDiminish === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateRefreshDiminish)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsRefreshDiminish(e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Diminish reset timer'}
-                                      value={selectedState.jabs.stateRefreshReset === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateRefreshReset)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsStackingUnsigned(
-                                          'stateRefreshReset',
-                                          e.target.value
-                                        );
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                </Grid>
-                                <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
-                                  Extend
-                                </Typography>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  Reapply adds duration up to the extend cap.
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Added duration per extend'}
-                                      value={selectedState.jabs.stackExtendAmount === null
-                                        ? ''
-                                        : String(selectedState.jabs.stackExtendAmount)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsStackingUnsigned(
-                                          'stackExtendAmount',
-                                          e.target.value
-                                        );
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Maximum total duration'}
-                                      value={selectedState.jabs.stackExtendMax === null
-                                        ? ''
-                                        : String(selectedState.jabs.stackExtendMax)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsStackingUnsigned(
-                                          'stackExtendMax',
-                                          e.target.value
-                                        );
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                </Grid>
-                                <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
-                                  Stack
-                                </Typography>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  Stack ceiling, stacks gained per application, and whether expiry clears one layer or
-                                  the
-                                  whole pile.
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Maximum stacks'}
-                                      value={selectedState.jabs.stackMax === null
-                                        ? ''
-                                        : String(selectedState.jabs.stackMax)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsStackingUnsigned('stackMax', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Stacks gained per application'}
-                                      value={selectedState.jabs.applyStacks === null
-                                        ? ''
-                                        : String(selectedState.jabs.applyStacks)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsStackingUnsigned('applyStacks', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                </Grid>
-                                <FormControlLabel
-                                  control={(
-                                    <Checkbox
-                                      checked={selectedState.jabs.loseAllStacksAtOnce}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabs({ loseAllStacksAtOnce: e.target.checked });
-                                      }}
-                                      size={'small'}
-                                    />
-                                  )}
-                                  label={(
-                                    <Box>
-                                      <Typography variant={'body2'} component={'span'}>
-                                        Lose all stacks when duration ends
-                                      </Typography>
-                                      <Typography variant={'caption'} color={'text.secondary'} display={'block'}>
-                                        Off: one stack per tick-out. On: all stacks removed together.
-                                      </Typography>
-                                    </Box>
-                                  )}
-                                />
-                              </Stack>
-                          </BoardSectionCard>
+                            {renderStackingSection()}
                         </Stack>
                       </Grid>
                     </Grid>
@@ -4157,12 +4017,7 @@ const StatesBoard = () =>
                   id={'state-editor-tabpanel-1'}
                   role={'tabpanel'}
                   aria-labelledby={'state-editor-tab-1'}
-                  hidden={stateEditorTab !== 1}
-                  sx={{
-                    display: stateEditorTab === 1
-                      ? 'block'
-                      : 'none',
-                  }}
+                  {...stateEditorTabPanelProps(stateEditorTab, 1)}
                 >
                   <Stack spacing={2}>
                     <Typography variant={'body2'} color={'text.secondary'}>
@@ -4180,12 +4035,7 @@ const StatesBoard = () =>
                   id={'state-editor-tabpanel-2'}
                   role={'tabpanel'}
                   aria-labelledby={'state-editor-tab-2'}
-                  hidden={stateEditorTab !== 2}
-                  sx={{
-                    display: stateEditorTab === 2
-                      ? 'block'
-                      : 'none',
-                  }}
+                  {...stateEditorTabPanelProps(stateEditorTab, 2)}
                 >
                   <Stack spacing={2}>
                     <Stack
@@ -4204,7 +4054,8 @@ const StatesBoard = () =>
                         startIcon={<ContentCopy/>}
                         onClick={() =>
                         {
-                          void navigator.clipboard.writeText(selectedState.note);
+                          // the copy is fire and forget; nothing reports its outcome.
+                          navigator.clipboard.writeText(selectedState.note);
                         }}
                       >
                         Copy

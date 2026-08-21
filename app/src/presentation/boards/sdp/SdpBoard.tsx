@@ -255,22 +255,6 @@ const SdpBoard = () =>
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
   //endregion state
 
-  const selectedMasterySubgroupKey = selectedPanel?.mastery.subgroupKey ?? '';
-  const masterySubgroupKeyIsOrphan = selectedMasterySubgroupKey !== ''
-    && subgroupKeySet.has(selectedMasterySubgroupKey) === false;
-  const selectedMasterySubgroup = selectedMasterySubgroupKey === ''
-    ? null
-    : subgroups.find(subgroup => subgroup.key === selectedMasterySubgroupKey) ?? null;
-  const selectedPanelFamily = selectedMasterySubgroupKey === ''
-    ? null
-    : families.find(family => family.subgroupKeys.includes(selectedMasterySubgroupKey)) ?? null;
-  const masteryIsBlank = selectedPanel === null
-    || (
-      selectedPanel.mastery.subgroupKey === ''
-      && selectedPanel.mastery.subgroupTier === 0
-      && selectedPanel.mastery.masterySkillId === 0
-    );
-
   //region setup
   /**
    * Initializes the board selection when data is loaded.
@@ -1265,75 +1249,241 @@ const SdpBoard = () =>
     canReload: !loading,
   });
 
-  if (loading)
+  /**
+   * One parameter row on the panel: what it boosts, whether it is the panel's core stat, whether the
+   * boost is flat or a percentage, and how much of it each rank buys.
+   *
+   * @param parameter The parameter being drawn.
+   * @param idx Its position in the panel, which the reorder and delete actions address it by.
+   */
+  const renderPanelParameterRow = (
+    parameter: Sdp.SdpParameter,
+    idx: number
+  ) =>
+  {
+    if (selectedPanel === null)
+    {
+      return <></>;
+    }
+
+    const isPositive = parameter.perRank > 0;
+    const pct = parameter.isFlat
+      ? ''
+      : '%';
+    const sign = isPositive
+      ? '+'
+      : '';
+    const perRankText = `${sign}${parameter.perRank}${pct} / rank`;
+    const totalText = `${sign}${parameter.perRank * selectedPanel.progression.maxRank}${pct} total`;
+
+    return (
+      <Accordion
+        key={idx}
+        disableGutters
+        sx={{
+          border: '1px solid',
+          borderColor: parameter.isCore
+            ? 'warning.dark'
+            : 'divider',
+          '&:before': { display: 'none' },
+        }}
+      >
+        <AccordionSummary expandIcon={<ExpandMore/>}>
+          <Stack
+            direction={'row'}
+            alignItems={'center'}
+            justifyContent={'space-between'}
+            sx={{ flex: 1, mr: 1 }}
+          >
+            <Stack direction={'row'} alignItems={'center'} spacing={1}>
+              {fromParameterKeyToIconElement(parameter.parameterKey, parameter.isCore)}
+              <Stack>
+                <Stack direction={'row'} alignItems={'center'} spacing={0.5}>
+                  <Typography variant={'body2'}>
+                    {fromParameterKeyToName(parameter.parameterKey)}
+                  </Typography>
+                  {parameter.isCore && (
+                    <PlayCircleFilled sx={{ fontSize: 14, color: 'warning.main' }}/>
+                  )}
+                </Stack>
+                <Typography variant={'caption'} color={'text.secondary'}>
+                  {perRankText} — {totalText}
+                </Typography>
+              </Stack>
+            </Stack>
+            <Stack direction={'row'} spacing={0.5}>
+              <IconButton
+                size={'small'}
+                disabled={idx === 0}
+                onClick={e =>
+                {
+                  e.stopPropagation();
+                  handleMoveParameter(idx, idx - 1);
+                }}
+              >
+                <ArrowUpward fontSize={'small'}/>
+              </IconButton>
+              <IconButton
+                size={'small'}
+                disabled={idx === selectedPanel.panelParameters.length - 1}
+                onClick={e =>
+                {
+                  e.stopPropagation();
+                  handleMoveParameter(idx, idx + 1);
+                }}
+              >
+                <ArrowDownward fontSize={'small'}/>
+              </IconButton>
+              <IconButton
+                size={'small'}
+                onClick={e =>
+                {
+                  e.stopPropagation();
+                  handleClonePanelParameter(idx + 1, parameter);
+                }}
+              >
+                <ContentCopy fontSize={'small'}/>
+              </IconButton>
+              <IconButton
+                size={'small'}
+                onClick={e =>
+                {
+                  e.stopPropagation();
+                  handleDeletePanelParameter(idx);
+                }}
+              >
+                <DeleteOutline fontSize={'small'}/>
+              </IconButton>
+            </Stack>
+          </Stack>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={1.5}>
+            <FormControl size={'small'} fullWidth>
+              <InputLabel id={`sdp-param-type-label-${idx}`}>Parameter Type</InputLabel>
+              <Select
+                labelId={`sdp-param-type-label-${idx}`}
+                label={'Parameter Type'}
+                value={parameter.parameterKey}
+                onChange={event => updatePanelParameters(
+                  { ...parameter, parameterKey: event.target.value.toString() },
+                  idx
+                )}
+              >
+                {mapParametersToSelectMenuItems()}
+              </Select>
+            </FormControl>
+            <Stack direction={'row'} spacing={1.5} flexWrap={'wrap'} useFlexGap>
+              <ToggleButtonGroup
+                exclusive
+                size={'small'}
+                value={parameter.isCore
+                  ? 'core'
+                  : 'standard'}
+                onChange={(_e, val: string | null) =>
+                {
+                  if (!val) return;
+                  updatePanelParameters({ ...parameter, isCore: val === 'core' }, idx);
+                }}
+              >
+                <ToggleButton
+                  value={'standard'}
+                  sx={(theme) => ({
+                    '&.Mui-selected': {
+                      backgroundColor: alpha(theme.palette.info.main, 0.16),
+                      borderColor: theme.palette.info.main,
+                      color: theme.palette.info.main,
+                      '&:hover': { backgroundColor: alpha(theme.palette.info.main, 0.24) },
+                    },
+                  })}
+                >
+                  <KeyboardArrowRight fontSize={'small'} sx={{ mr: 0.75 }}/>
+                  Standard
+                </ToggleButton>
+                <ToggleButton
+                  value={'core'}
+                  sx={(theme) => ({
+                    '&.Mui-selected': {
+                      backgroundColor: alpha(theme.palette.warning.main, 0.16),
+                      borderColor: theme.palette.warning.main,
+                      color: theme.palette.warning.main,
+                      '&:hover': { backgroundColor: alpha(theme.palette.warning.main, 0.24) },
+                    },
+                  })}
+                >
+                  <PlayCircleFilled fontSize={'small'} sx={{ mr: 0.75 }}/>
+                  Core
+                </ToggleButton>
+              </ToggleButtonGroup>
+              <ToggleButtonGroup
+                exclusive
+                size={'small'}
+                value={parameter.isFlat
+                  ? 'flat'
+                  : 'percent'}
+                onChange={(_e, val: string | null) =>
+                {
+                  if (!val) return;
+                  updatePanelParameters({ ...parameter, isFlat: val === 'flat' }, idx);
+                }}
+              >
+                <ToggleButton
+                  value={'flat'}
+                  sx={(theme) => ({
+                    '&.Mui-selected': {
+                      backgroundColor: alpha(theme.palette.success.main, 0.16),
+                      borderColor: theme.palette.success.main,
+                      color: theme.palette.success.main,
+                      '&:hover': { backgroundColor: alpha(theme.palette.success.main, 0.24) },
+                    },
+                  })}
+                >
+                  <TrendingFlat fontSize={'small'} sx={{ mr: 0.75 }}/>
+                  Flat
+                </ToggleButton>
+                <ToggleButton
+                  value={'percent'}
+                  sx={(theme) => ({
+                    '&.Mui-selected': {
+                      backgroundColor: alpha(theme.palette.secondary.main, 0.16),
+                      borderColor: theme.palette.secondary.main,
+                      color: theme.palette.secondary.main,
+                      '&:hover': { backgroundColor: alpha(theme.palette.secondary.main, 0.24) },
+                    },
+                  })}
+                >
+                  <Percent fontSize={'small'} sx={{ mr: 0.75 }}/>
+                  % Growth
+                </ToggleButton>
+              </ToggleButtonGroup>
+            </Stack>
+            <TextField
+              type={'number'}
+              label={'Per Rank'}
+              variant={'outlined'}
+              size={'small'}
+              value={parameter.perRank}
+              onChange={event => updatePanelParameters(
+                { ...parameter, perRank: parseFloat(event.target.value) || 0.01 },
+                idx
+              )}
+              slotProps={{ htmlInput: { step: '0.1' } }}
+              sx={{ width: '120px' }}
+            />
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+    );
+  };
+
+  /**
+   * The panel list and its search box. With no panels loaded at all the list is replaced by the button
+   * that creates the first one, since an empty virtualized list gives an author nothing to act on.
+   */
+  const renderPanelSidebar = () =>
   {
     return (
-      <Box sx={{
-        flex: 1,
-        minHeight: 0,
-        overflow: 'auto',
-        p: 2,
-      }}>
-        <Typography>Loading SDP configuration...</Typography>
-      </Box>
-    );
-  }
-
-  return <>
-    <Box sx={{
-      flex: 1,
-      minHeight: 0,
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-    }}>
-      <Tabs
-        value={boardTab}
-        onChange={(_, value: BoardTab) => setBoardTab(value)}
-        sx={{ px: 2, pt: 1, flexShrink: 0 }}
-      >
-        <Tab label={'Panels'} value={'panels'}/>
-        <Tab label={'Subgroups'} value={'subgroups'}/>
-        <Tab label={'Families'} value={'families'}/>
-      </Tabs>
-      {boardTab === 'subgroups'
-        ? (
-          <Box sx={{
-            flex: 1,
-            minHeight: 0,
-            overflow: 'auto',
-            p: 2,
-          }}>
-            <SdpSubgroupsSection
-              subgroups={subgroups}
-              selectedIndex={selectedSubgroupIndex}
-              onSelectIndex={setSelectedSubgroupIndex}
-              onChange={applySubgroups}
-            />
-          </Box>
-        )
-        : boardTab === 'families'
-          ? (
-            <Box sx={{
-              flex: 1,
-              minHeight: 0,
-              overflow: 'auto',
-              p: 2,
-            }}>
-              <SdpFamiliesSection
-                families={families}
-                subgroups={subgroups}
-                selectedIndex={selectedFamilyIndex}
-                onSelectIndex={setSelectedFamilyIndex}
-                onChange={applyFamilies}
-              />
-            </Box>
-          )
-        : (
-      <EditorBoardSplitLayout
-        sidebarColumnWidth={sdpBoardListColumnWidth}
-        sidebar={
-          <>
+      <>
         {/* Search bar for SDPs */}
         <TextField
           variant={'outlined'}
@@ -1392,8 +1542,314 @@ const SdpBoard = () =>
               />
             )}
         </VirtualizedSidebarListRegion>
-          </>
+      </>
+    );
+  };
+
+  /**
+   * Where this panel sits in the subgroup hierarchy, and what mastering it teaches.
+   *
+   * Family is not stored on the panel: it is derived by finding which family claims the chosen
+   * subgroup. That makes two states worth reporting distinctly -- no subgroup chosen at all, which
+   * reads blank, and a subgroup that no family claims, which reads Unknown and is worth noticing.
+   */
+  const renderPanelMasterySection = () =>
+  {
+    if (selectedPanel === null)
+    {
+      return <></>;
+    }
+
+    const { subgroupKey } = selectedPanel.mastery;
+    const subgroupIsOrphan = subgroupKey !== '' && subgroupKeySet.has(subgroupKey) === false;
+    const selectedSubgroup = subgroupKey === ''
+      ? null
+      : subgroups.find(subgroup => subgroup.key === subgroupKey) ?? null;
+    const owningFamily = subgroupKey === ''
+      ? null
+      : families.find(family => family.subgroupKeys.includes(subgroupKey)) ?? null;
+
+    let familyDisplay = '';
+    if (owningFamily !== null)
+    {
+      familyDisplay = owningFamily.name
+        ? `[${owningFamily.key}] ${owningFamily.name}`
+        : owningFamily.key;
+    }
+    else if (subgroupKey !== '')
+    {
+      familyDisplay = 'Unknown';
+    }
+
+    // "clear" has nothing to clear when all three mastery fields already sit at their empty values.
+    const masteryIsBlank =
+      subgroupKey === ''
+      && selectedPanel.mastery.subgroupTier === 0
+      && selectedPanel.mastery.masterySkillId === 0;
+
+    return (
+      <BoardSectionCard
+        title={'Mastery'}
+        actions={
+          <Button
+            size={'small'}
+            variant={'outlined'}
+            disabled={masteryIsBlank}
+            onClick={handleClearPanelMastery}
+          >
+            Clear
+          </Button>
         }
+      >
+        <Stack
+          direction={'row'}
+          spacing={1.5}
+          alignItems={'flex-start'}
+          useFlexGap
+          flexWrap={'wrap'}
+        >
+          <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
+            <Autocomplete
+              size={'small'}
+              fullWidth
+              disabled={subgroups.length === 0}
+              options={subgroups}
+              getOptionLabel={(subgroup) =>
+                subgroup.name
+                  ? `[${subgroup.key}] ${subgroup.name}`
+                  : subgroup.key}
+              isOptionEqualToValue={(left, right) => left.key === right.key}
+              value={selectedSubgroup}
+              onChange={(_, subgroup) =>
+              {
+                handlePanelMasterySubgroupKeyChange(subgroup?.key ?? '');
+              }}
+              renderInput={(params) =>
+                <TextField
+                  {...params}
+                  fullWidth
+                  label={'Subgroup'}
+                  error={subgroupIsOrphan}
+                  helperText={
+                    subgroupIsOrphan
+                      ? `Unknown subgroup [${subgroupKey}].`
+                      : undefined
+                  }
+                />}
+            />
+          </Box>
+          <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
+            <TextField
+              fullWidth
+              size={'small'}
+              label={'Family (derived)'}
+              value={familyDisplay}
+              slotProps={{ input: { readOnly: true } }}
+              helperText={'Set on the Families tab via subgroup membership.'}
+            />
+          </Box>
+          <Box sx={{ flex: '0 0 88px' }}>
+            <TextField
+              type={'number'}
+              label={'Tier'}
+              variant={'outlined'}
+              size={'small'}
+              fullWidth
+              value={selectedPanel.mastery.subgroupTier}
+              onChange={event => handlePanelMasterySubgroupTierChange(
+                Math.max(0, parseInt(event.target.value, 10) || 0)
+              )}
+              slotProps={{ htmlInput: { min: '0', step: '1' } }}
+            />
+          </Box>
+          <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
+            <Autocomplete
+              size={'small'}
+              fullWidth
+              options={skills}
+              getOptionLabel={(skill) => `${skill.id}: ${skill.name}`}
+              value={skillsById.get(selectedPanel.mastery.masterySkillId) ?? null}
+              onChange={(_, skill) =>
+              {
+                handlePanelMasterySkillIdChange(skill?.id ?? 0);
+              }}
+              renderInput={(params) =>
+                <TextField
+                  {...params}
+                  fullWidth
+                  label={'Mastery Skill'}
+                />}
+            />
+          </Box>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * The panel's own identity: what it is called, what it looks like, and the two blocks of flavor text
+   * the game renders in a fixed-width font. Both text fields warn when a line outruns that width,
+   * because the game clips rather than wraps.
+   */
+  const renderPanelIdentitySection = () =>
+  {
+    if (selectedPanel === null)
+    {
+      return <></>;
+    }
+
+    const { identity } = selectedPanel;
+
+    return (
+      <BoardSectionCard title={'Identity'}>
+        <Grid container spacing={1.5} alignItems={'center'}>
+          <Grid size={3}>
+            <KeyTextField
+              value={selectedPanel.key}
+              onChange={handlePanelKeyChange}
+            />
+          </Grid>
+          <Grid size={6}>
+            <TextField
+              variant={'outlined'}
+              label={'Name'}
+              value={identity.name}
+              onChange={event => handlePanelNameChange(event.target.value)}
+              size={'small'}
+              fullWidth
+            />
+          </Grid>
+          <Grid size={3}>
+            <FormControlLabel
+              control={
+                <Switch
+                  size={'small'}
+                  checked={identity.unlockedByDefault}
+                  onChange={event => handlePanelUnlockedByDefaultChange(event.target.checked)}
+                />
+              }
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  {identity.unlockedByDefault
+                    ? <LockOpen color={'success'} fontSize={'small'}/>
+                    : <Lock color={'error'} fontSize={'small'}/>}
+                  <Typography variant={'body2'}>
+                    {identity.unlockedByDefault
+                      ? 'Unlocked'
+                      : 'Locked'}
+                  </Typography>
+                </Box>
+              }
+            />
+          </Grid>
+          <Grid size={5}>
+            <IconIndexField
+              value={identity.iconIndex}
+              onChange={handlePanelIconIndexChange}
+            />
+          </Grid>
+          <Grid size={12}>
+            <TextField
+              fullWidth
+              size={'small'}
+              variant={'outlined'}
+              label={'Top Flavor Text'}
+              value={identity.topFlavorText}
+              onChange={event => handlePanelTopFlavorTextChange(event.target.value)}
+              error={topFlavorTooLong}
+              helperText={topFlavorTooLong
+                ? `Longest line ~${topFlavorMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
+                : undefined}
+            />
+          </Grid>
+          <Grid size={12}>
+            <TextField
+              fullWidth
+              size={'small'}
+              variant={'outlined'}
+              label={'Description'}
+              multiline
+              rows={4}
+              value={identity.description}
+              onChange={event => handlePanelDescriptionChange(event.target.value)}
+              error={descriptionTooLong}
+              helperText={descriptionTooLong
+                ? `Longest line ~${descriptionMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
+                : undefined}
+            />
+          </Grid>
+        </Grid>
+      </BoardSectionCard>
+    );
+  };
+
+  if (loading)
+  {
+    return (
+      <Box sx={{
+        flex: 1,
+        minHeight: 0,
+        overflow: 'auto',
+        p: 2,
+      }}>
+        <Typography>Loading SDP configuration...</Typography>
+      </Box>
+    );
+  }
+
+  return <>
+    <Box sx={{
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+    }}>
+      <Tabs
+        value={boardTab}
+        onChange={(_, value: BoardTab) => setBoardTab(value)}
+        sx={{ px: 2, pt: 1, flexShrink: 0 }}
+      >
+        <Tab label={'Panels'} value={'panels'}/>
+        <Tab label={'Subgroups'} value={'subgroups'}/>
+        <Tab label={'Families'} value={'families'}/>
+      </Tabs>
+      {/* one block per tab; BoardTab has exactly these three values, so exactly one renders. */}
+      {boardTab === 'subgroups' && (
+        <Box sx={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          p: 2,
+        }}>
+          <SdpSubgroupsSection
+            subgroups={subgroups}
+            selectedIndex={selectedSubgroupIndex}
+            onSelectIndex={setSelectedSubgroupIndex}
+            onChange={applySubgroups}
+          />
+        </Box>
+      )}
+      {boardTab === 'families' && (
+        <Box sx={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          p: 2,
+        }}>
+          <SdpFamiliesSection
+            families={families}
+            subgroups={subgroups}
+            selectedIndex={selectedFamilyIndex}
+            onSelectIndex={setSelectedFamilyIndex}
+            onChange={applyFamilies}
+          />
+        </Box>
+      )}
+      {boardTab === 'panels' && (
+      <EditorBoardSplitLayout
+        sidebarColumnWidth={sdpBoardListColumnWidth}
+        sidebar={renderPanelSidebar()}
       >
           {(
             selectedPanel === null
@@ -1407,83 +1863,7 @@ const SdpBoard = () =>
                 {/* Left column: Identity + Parameters */}
                 <Grid size={6}>
                   <Stack spacing={2}>
-                    <BoardSectionCard title={'Identity'}>
-                      <Grid container spacing={1.5} alignItems={'center'}>
-                        <Grid size={3}>
-                          <KeyTextField
-                            value={selectedPanel.key}
-                            onChange={handlePanelKeyChange}
-                          />
-                        </Grid>
-                        <Grid size={6}>
-                          <TextField
-                            variant={'outlined'}
-                            label={'Name'}
-                            value={selectedPanel.identity.name}
-                            onChange={event => handlePanelNameChange(event.target.value)}
-                            size={'small'}
-                            fullWidth
-                          />
-                        </Grid>
-                        <Grid size={3}>
-                          <FormControlLabel
-                            control={
-                              <Switch
-                                size={'small'}
-                                checked={selectedPanel.identity.unlockedByDefault}
-                                onChange={event => handlePanelUnlockedByDefaultChange(event.target.checked)}
-                              />
-                            }
-                            label={
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                {selectedPanel.identity.unlockedByDefault
-                                  ? <LockOpen color={'success'} fontSize={'small'}/>
-                                  : <Lock color={'error'} fontSize={'small'}/>}
-                                <Typography variant={'body2'}>
-                                  {selectedPanel.identity.unlockedByDefault ? 'Unlocked' : 'Locked'}
-                                </Typography>
-                              </Box>
-                            }
-                          />
-                        </Grid>
-                        <Grid size={5}>
-                          <IconIndexField
-                            value={selectedPanel.identity.iconIndex}
-                            onChange={handlePanelIconIndexChange}
-                          />
-                        </Grid>
-                        <Grid size={12}>
-                          <TextField
-                            fullWidth
-                            size={'small'}
-                            variant={'outlined'}
-                            label={'Top Flavor Text'}
-                            value={selectedPanel.identity.topFlavorText}
-                            onChange={event => handlePanelTopFlavorTextChange(event.target.value)}
-                            error={topFlavorTooLong}
-                            helperText={topFlavorTooLong
-                              ? `Longest line ~${topFlavorMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
-                              : undefined}
-                          />
-                        </Grid>
-                        <Grid size={12}>
-                          <TextField
-                            fullWidth
-                            size={'small'}
-                            variant={'outlined'}
-                            label={'Description'}
-                            multiline
-                            rows={4}
-                            value={selectedPanel.identity.description}
-                            onChange={event => handlePanelDescriptionChange(event.target.value)}
-                            error={descriptionTooLong}
-                            helperText={descriptionTooLong
-                              ? `Longest line ~${descriptionMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
-                              : undefined}
-                          />
-                        </Grid>
-                      </Grid>
-                    </BoardSectionCard>
+                    {renderPanelIdentitySection()}
 
                     <BoardSectionCard title={'Parameters'}>
                       <Stack spacing={1}>
@@ -1495,206 +1875,7 @@ const SdpBoard = () =>
                         >
                           Add Parameter
                         </Button>
-                        {selectedPanel.panelParameters.map((parameter, idx) =>
-                        {
-                          const isPositive = parameter.perRank > 0;
-                          const pct = parameter.isFlat ? '' : '%';
-                          const sign = isPositive ? '+' : '';
-                          const perRankText = `${sign}${parameter.perRank}${pct} / rank`;
-                          const totalText = `${sign}${parameter.perRank * selectedPanel.progression.maxRank}${pct} total`;
-                          return (
-                            <Accordion
-                              key={idx}
-                              disableGutters
-                              sx={{
-                                border: '1px solid',
-                                borderColor: parameter.isCore ? 'warning.dark' : 'divider',
-                                '&:before': { display: 'none' },
-                              }}
-                            >
-                              <AccordionSummary expandIcon={<ExpandMore/>}>
-                                <Stack
-                                  direction={'row'}
-                                  alignItems={'center'}
-                                  justifyContent={'space-between'}
-                                  sx={{ flex: 1, mr: 1 }}
-                                >
-                                  <Stack direction={'row'} alignItems={'center'} spacing={1}>
-                                    {fromParameterKeyToIconElement(parameter.parameterKey, parameter.isCore)}
-                                    <Stack>
-                                      <Stack direction={'row'} alignItems={'center'} spacing={0.5}>
-                                        <Typography variant={'body2'}>
-                                          {fromParameterKeyToName(parameter.parameterKey)}
-                                        </Typography>
-                                        {parameter.isCore && (
-                                          <PlayCircleFilled sx={{ fontSize: 14, color: 'warning.main' }}/>
-                                        )}
-                                      </Stack>
-                                      <Typography variant={'caption'} color={'text.secondary'}>
-                                        {perRankText} — {totalText}
-                                      </Typography>
-                                    </Stack>
-                                  </Stack>
-                                  <Stack direction={'row'} spacing={0.5}>
-                                    <IconButton
-                                      size={'small'}
-                                      disabled={idx === 0}
-                                      onClick={e =>
-                                      {
-                                        e.stopPropagation();
-                                        handleMoveParameter(idx, idx - 1);
-                                      }}
-                                    >
-                                      <ArrowUpward fontSize={'small'}/>
-                                    </IconButton>
-                                    <IconButton
-                                      size={'small'}
-                                      disabled={idx === selectedPanel.panelParameters.length - 1}
-                                      onClick={e =>
-                                      {
-                                        e.stopPropagation();
-                                        handleMoveParameter(idx, idx + 1);
-                                      }}
-                                    >
-                                      <ArrowDownward fontSize={'small'}/>
-                                    </IconButton>
-                                    <IconButton
-                                      size={'small'}
-                                      onClick={e =>
-                                      {
-                                        e.stopPropagation();
-                                        handleClonePanelParameter(idx + 1, parameter);
-                                      }}
-                                    >
-                                      <ContentCopy fontSize={'small'}/>
-                                    </IconButton>
-                                    <IconButton
-                                      size={'small'}
-                                      onClick={e =>
-                                      {
-                                        e.stopPropagation();
-                                        handleDeletePanelParameter(idx);
-                                      }}
-                                    >
-                                      <DeleteOutline fontSize={'small'}/>
-                                    </IconButton>
-                                  </Stack>
-                                </Stack>
-                              </AccordionSummary>
-                              <AccordionDetails>
-                                <Stack spacing={1.5}>
-                                  <FormControl size={'small'} fullWidth>
-                                    <InputLabel id={`sdp-param-type-label-${idx}`}>Parameter Type</InputLabel>
-                                    <Select
-                                      labelId={`sdp-param-type-label-${idx}`}
-                                      label={'Parameter Type'}
-                                      value={parameter.parameterKey}
-                                      onChange={event => updatePanelParameters(
-                                        { ...parameter, parameterKey: event.target.value.toString() },
-                                        idx
-                                      )}
-                                    >
-                                      {mapParametersToSelectMenuItems()}
-                                    </Select>
-                                  </FormControl>
-                                  <Stack direction={'row'} spacing={1.5} flexWrap={'wrap'} useFlexGap>
-                                    <ToggleButtonGroup
-                                      exclusive
-                                      size={'small'}
-                                      value={parameter.isCore ? 'core' : 'standard'}
-                                      onChange={(_e, val: string | null) =>
-                                      {
-                                        if (!val) return;
-                                        updatePanelParameters({ ...parameter, isCore: val === 'core' }, idx);
-                                      }}
-                                    >
-                                      <ToggleButton
-                                        value={'standard'}
-                                        sx={(theme) => ({
-                                          '&.Mui-selected': {
-                                            backgroundColor: alpha(theme.palette.info.main, 0.16),
-                                            borderColor: theme.palette.info.main,
-                                            color: theme.palette.info.main,
-                                            '&:hover': { backgroundColor: alpha(theme.palette.info.main, 0.24) },
-                                          },
-                                        })}
-                                      >
-                                        <KeyboardArrowRight fontSize={'small'} sx={{ mr: 0.75 }}/>
-                                        Standard
-                                      </ToggleButton>
-                                      <ToggleButton
-                                        value={'core'}
-                                        sx={(theme) => ({
-                                          '&.Mui-selected': {
-                                            backgroundColor: alpha(theme.palette.warning.main, 0.16),
-                                            borderColor: theme.palette.warning.main,
-                                            color: theme.palette.warning.main,
-                                            '&:hover': { backgroundColor: alpha(theme.palette.warning.main, 0.24) },
-                                          },
-                                        })}
-                                      >
-                                        <PlayCircleFilled fontSize={'small'} sx={{ mr: 0.75 }}/>
-                                        Core
-                                      </ToggleButton>
-                                    </ToggleButtonGroup>
-                                    <ToggleButtonGroup
-                                      exclusive
-                                      size={'small'}
-                                      value={parameter.isFlat ? 'flat' : 'percent'}
-                                      onChange={(_e, val: string | null) =>
-                                      {
-                                        if (!val) return;
-                                        updatePanelParameters({ ...parameter, isFlat: val === 'flat' }, idx);
-                                      }}
-                                    >
-                                      <ToggleButton
-                                        value={'flat'}
-                                        sx={(theme) => ({
-                                          '&.Mui-selected': {
-                                            backgroundColor: alpha(theme.palette.success.main, 0.16),
-                                            borderColor: theme.palette.success.main,
-                                            color: theme.palette.success.main,
-                                            '&:hover': { backgroundColor: alpha(theme.palette.success.main, 0.24) },
-                                          },
-                                        })}
-                                      >
-                                        <TrendingFlat fontSize={'small'} sx={{ mr: 0.75 }}/>
-                                        Flat
-                                      </ToggleButton>
-                                      <ToggleButton
-                                        value={'percent'}
-                                        sx={(theme) => ({
-                                          '&.Mui-selected': {
-                                            backgroundColor: alpha(theme.palette.secondary.main, 0.16),
-                                            borderColor: theme.palette.secondary.main,
-                                            color: theme.palette.secondary.main,
-                                            '&:hover': { backgroundColor: alpha(theme.palette.secondary.main, 0.24) },
-                                          },
-                                        })}
-                                      >
-                                        <Percent fontSize={'small'} sx={{ mr: 0.75 }}/>
-                                        % Growth
-                                      </ToggleButton>
-                                    </ToggleButtonGroup>
-                                  </Stack>
-                                  <TextField
-                                    type={'number'}
-                                    label={'Per Rank'}
-                                    variant={'outlined'}
-                                    size={'small'}
-                                    value={parameter.perRank}
-                                    onChange={event => updatePanelParameters(
-                                      { ...parameter, perRank: parseFloat(event.target.value) || 0.01 },
-                                      idx
-                                    )}
-                                    slotProps={{ htmlInput: { step: '0.1' } }}
-                                    sx={{ width: '120px' }}
-                                  />
-                                </Stack>
-                              </AccordionDetails>
-                            </Accordion>
-                          );
-                        })}
+                        {selectedPanel.panelParameters.map(renderPanelParameterRow)}
                       </Stack>
                     </BoardSectionCard>
                   </Stack>
@@ -1783,109 +1964,7 @@ const SdpBoard = () =>
                       </Grid>
                     </BoardSectionCard>
 
-                    <BoardSectionCard
-                      title={'Mastery'}
-                      actions={
-                        <Button
-                          size={'small'}
-                          variant={'outlined'}
-                          disabled={masteryIsBlank}
-                          onClick={handleClearPanelMastery}
-                        >
-                          Clear
-                        </Button>
-                      }
-                    >
-                      <Stack
-                        direction={'row'}
-                        spacing={1.5}
-                        alignItems={'flex-start'}
-                        useFlexGap
-                        flexWrap={'wrap'}
-                      >
-                        <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
-                          <Autocomplete
-                            size={'small'}
-                            fullWidth
-                            disabled={subgroups.length === 0}
-                            options={subgroups}
-                            getOptionLabel={(subgroup) =>
-                              subgroup.name
-                                ? `[${subgroup.key}] ${subgroup.name}`
-                                : subgroup.key}
-                            isOptionEqualToValue={(left, right) => left.key === right.key}
-                            value={selectedMasterySubgroup}
-                            onChange={(_, subgroup) =>
-                            {
-                              handlePanelMasterySubgroupKeyChange(subgroup?.key ?? '');
-                            }}
-                            renderInput={(params) =>
-                              <TextField
-                                {...params}
-                                fullWidth
-                                label={'Subgroup'}
-                                error={masterySubgroupKeyIsOrphan}
-                                helperText={
-                                  masterySubgroupKeyIsOrphan
-                                    ? `Unknown subgroup [${selectedMasterySubgroupKey}].`
-                                    : undefined
-                                }
-                              />}
-                          />
-                        </Box>
-                        <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
-                          <TextField
-                            fullWidth
-                            size={'small'}
-                            label={'Family (derived)'}
-                            value={
-                              selectedPanelFamily === null
-                                ? selectedMasterySubgroupKey === ''
-                                  ? ''
-                                  : 'Unknown'
-                                : selectedPanelFamily.name
-                                  ? `[${selectedPanelFamily.key}] ${selectedPanelFamily.name}`
-                                  : selectedPanelFamily.key
-                            }
-                            slotProps={{ input: { readOnly: true } }}
-                            helperText={'Set on the Families tab via subgroup membership.'}
-                          />
-                        </Box>
-                        <Box sx={{ flex: '0 0 88px' }}>
-                          <TextField
-                            type={'number'}
-                            label={'Tier'}
-                            variant={'outlined'}
-                            size={'small'}
-                            fullWidth
-                            value={selectedPanel.mastery.subgroupTier}
-                            onChange={event => handlePanelMasterySubgroupTierChange(
-                              Math.max(0, parseInt(event.target.value, 10) || 0)
-                            )}
-                            slotProps={{ htmlInput: { min: '0', step: '1' } }}
-                          />
-                        </Box>
-                        <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
-                          <Autocomplete
-                            size={'small'}
-                            fullWidth
-                            options={skills}
-                            getOptionLabel={(skill) => `${skill.id}: ${skill.name}`}
-                            value={skillsById.get(selectedPanel.mastery.masterySkillId) ?? null}
-                            onChange={(_, skill) =>
-                            {
-                              handlePanelMasterySkillIdChange(skill?.id ?? 0);
-                            }}
-                            renderInput={(params) =>
-                              <TextField
-                                {...params}
-                                fullWidth
-                                label={'Mastery Skill'}
-                              />}
-                          />
-                        </Box>
-                      </Stack>
-                    </BoardSectionCard>
+                    {renderPanelMasterySection()}
 
                     <BoardSectionCard title={'Rank Rewards'}>
                       <Stack spacing={1}>

@@ -143,6 +143,43 @@ const recipeListRowIconIndex = (
 };
 
 /**
+ * What a recipe is called in the sidebar, and what its tooltip says.
+ *
+ * A recipe need not be named: an unnamed one borrows the name of what it produces, and one that
+ * produces nothing recognizable falls back to its key, so a row is never blank.
+ */
+const recipeListRowLabels = (
+  recipe: Recipe,
+  itemsById: ReadonlyMap<number, RPG_ItemDomainModel>,
+  weaponsById: ReadonlyMap<number, RPG_WeaponDomainModel>,
+  armorsById: ReadonlyMap<number, RPG_ArmorDomainModel>
+): { label: string; title: string } =>
+{
+  const outputRow = recipeFirstOutputDatabaseRow(recipe, itemsById, weaponsById, armorsById);
+  const outputName = outputRow === null
+    ? ''
+    : outputRow.name;
+
+  const displayName = recipe.name.length > 0
+    ? recipe.name
+    : outputName;
+
+  // with nothing to display, the key is all the row has, and repeating it in the tooltip says nothing.
+  if (displayName.length === 0)
+  {
+    return {
+      label: recipe.key,
+      title: recipe.key,
+    };
+  }
+
+  return {
+    label: displayName,
+    title: `${recipe.key}: ${displayName}`,
+  };
+};
+
+/**
  * The main board that encapsulates all things related to crafting.
  */
 const CraftingBoard = () =>
@@ -222,6 +259,11 @@ const CraftingBoard = () =>
     if (selectedRecipe === null || selectedRecipe.description.trim().length > 0) return '';
     return readDatabaseDescription(recipeFirstOutput);
   }, [ selectedRecipe, recipeFirstOutput ]);
+
+  // both placeholder memos already blank themselves when the field is filled, so a placeholder that
+  // survived is one that should be shown. The label has to be shrunk out of its way when it is.
+  const showsRecipeNamePlaceholder = recipeNamePlaceholderFromFirstOutput.length > 0;
+  const showsRecipeDescriptionPlaceholder = recipeDescriptionPlaceholderFromFirstOutput.length > 0;
 
   //region actions
   const handleSnack = (
@@ -689,10 +731,7 @@ const CraftingBoard = () =>
       };
     }
 
-    const outputName = recipeFirstOutputDatabaseRow(recipe, itemsById, weaponsById, armorsById)?.name ?? '';
-    const displayName = recipe.name.length > 0 ? recipe.name : outputName;
-    const label = displayName.length > 0 ? displayName : recipe.key;
-    const title = displayName.length > 0 ? `${recipe.key}: ${displayName}` : recipe.key;
+    const { label, title } = recipeListRowLabels(recipe, itemsById, weaponsById, armorsById);
 
     return {
       type: 'item',
@@ -766,6 +805,216 @@ const CraftingBoard = () =>
 
   const categoryPickerValue = categoryPickerOptions.filter((c) => applicableCategories.includes(c.key));
 
+  /**
+   * The recipe editor, or a prompt to pick one when nothing is selected.
+   */
+  const renderRecipesTab = () =>
+  {
+    if (selectedRecipe === null)
+    {
+      return (
+        <BoardEmptyState
+          icon={<Construction sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }}/>}
+          message={'Select a recipe from the list, or right-click the list to add one.'}
+        />
+      );
+    }
+
+    return (
+      <Stack spacing={2}>
+        <BoardSectionCard title={'Recipe'}>
+          <Grid container rowSpacing={2} columnSpacing={2} alignItems={'flex-start'}>
+            <Grid size={3}>
+              <KeyTextField
+                value={selectedRecipe.key}
+                onChange={handleRecipeKeyOnChangeEvent}
+              />
+            </Grid>
+
+            <Grid size={4}>
+              <TextField
+                variant={'outlined'}
+                label={'Name'}
+                value={selectedRecipe.name}
+                onChange={handleRecipeNameOnChangeEvent}
+                size={'small'}
+                fullWidth
+                InputLabelProps={showsRecipeNamePlaceholder
+                  ? { shrink: true }
+                  : undefined}
+                placeholder={showsRecipeNamePlaceholder
+                  ? recipeNamePlaceholderFromFirstOutput
+                  : undefined}
+              />
+            </Grid>
+
+            <Grid size={2}>
+              <Stack spacing={0.5}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      size={'small'}
+                      checked={selectedRecipe.iconIndex === -1}
+                      onChange={(e) => handleRecipeIconIndexOnChangeEvent(e.target.checked
+                        ? -1
+                        : 0)}
+                    />
+                  }
+                  label={'Auto icon'}
+                />
+                {selectedRecipe.iconIndex !== -1 && (
+                  <IconIndexField
+                    value={selectedRecipe.iconIndex}
+                    onChange={handleRecipeIconIndexOnChangeEvent}
+                  />
+                )}
+              </Stack>
+            </Grid>
+
+            <Grid size={3}>
+              <Stack spacing={0}>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={selectedRecipe.unlockedByDefault}
+                      checkedIcon={<LockOpen/>}
+                      icon={<Lock/>}
+                      onChange={handleRecipeUnlockedByDefaultOnCheckEvent}
+                    />
+                  }
+                  label={selectedRecipe.unlockedByDefault
+                    ? 'Unlocked by default'
+                    : 'Locked by default'}
+                />
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={selectedRecipe.maskedUntilCrafted}
+                      checkedIcon={<VisibilityOff/>}
+                      icon={<Visibility/>}
+                      onChange={handleRecipeMaskedUntilCraftedOnCheckEvent}
+                    />
+                  }
+                  label={selectedRecipe.maskedUntilCrafted
+                    ? 'Masked until crafted'
+                    : 'Visible immediately'}
+                />
+                <TextField
+                  variant={'outlined'}
+                  label={'Tier'}
+                  type={'number'}
+                  value={selectedRecipe.tier ?? 0}
+                  onChange={handleRecipeTierOnChangeEvent}
+                  size={'small'}
+                  helperText={(selectedRecipe.cost?.length ?? 0) > 0
+                    ? 'Overridden by the cost below'
+                    : 'Sets the scrap price; 0 is not for sale'}
+                />
+              </Stack>
+            </Grid>
+
+            <Grid size={8}>
+              <TextField
+                variant={'outlined'}
+                label={'Description'}
+                value={selectedRecipe.description}
+                onChange={handleRecipeDescriptionOnChangeEvent}
+                size={'small'}
+                multiline
+                fullWidth
+                rows={4}
+                InputLabelProps={showsRecipeDescriptionPlaceholder
+                  ? { shrink: true }
+                  : undefined}
+                placeholder={showsRecipeDescriptionPlaceholder
+                  ? recipeDescriptionPlaceholderFromFirstOutput
+                  : undefined}
+              />
+            </Grid>
+
+            <Grid size={4}>
+              <Autocomplete<Category, true>
+                multiple
+                size={'small'}
+                options={categoryPickerOptions}
+                value={categoryPickerValue}
+                onChange={(_, newValue) =>
+                {
+                  const sorted = newValue.map((c) => c.key).sort();
+                  setApplicableCategories(sorted);
+                  patchSelectedRecipe({ categoryKeys: sorted });
+                }}
+                disableCloseOnSelect
+                groupBy={(option) => option.key.split('-')[ 0 ]}
+                getOptionKey={(option) => option.key}
+                getOptionLabel={(option) => option.name}
+                isOptionEqualToValue={(a, b) => a.key === b.key}
+                slotProps={{
+                  listbox: { sx: { maxHeight: '400px' } },
+                }}
+                renderTags={(value, getTagProps) =>
+                  value.map((option, index) => (
+                    <Chip
+                      {...getTagProps({ index })}
+                      key={option.key}
+                      label={option.name}
+                      size={'small'}
+                    />
+                  ))
+                }
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    size={'small'}
+                    label={'Categories'}
+                    placeholder={applicableCategories.length === 0
+                      ? 'None assigned'
+                      : ''}
+                  />
+                )}
+              />
+            </Grid>
+          </Grid>
+        </BoardSectionCard>
+
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+            gap: 2,
+            width: '100%',
+            alignItems: 'stretch',
+          }}
+        >
+          <CraftingComponentList
+            type={CraftingListType.Ingredients}
+            updateRecipeFunc={updateCraftingComponentList}
+            components={currentIngredients}
+            handleSnack={handleSnack}
+          />
+          <CraftingComponentList
+            type={CraftingListType.Tools}
+            updateRecipeFunc={updateCraftingComponentList}
+            components={currentTools}
+            handleSnack={handleSnack}
+          />
+          <CraftingComponentList
+            type={CraftingListType.Outputs}
+            updateRecipeFunc={updateCraftingComponentList}
+            components={currentOutputs}
+            handleSnack={handleSnack}
+          />
+          <CraftingComponentList
+            type={CraftingListType.Cost}
+            updateRecipeFunc={updateCraftingComponentList}
+            components={currentCost}
+            handleSnack={handleSnack}
+          />
+        </Box>
+      </Stack>
+    );
+  };
+
   return <>
     <EditorBoardSplitLayout
       sidebarColumnWidth={craftingBoardListColumnWidth}
@@ -799,208 +1048,7 @@ const CraftingBoard = () =>
         </Tabs>
       </Box>
 
-      {tabIndex === 0 && (
-        selectedRecipe === null
-          ? (
-            <BoardEmptyState
-              icon={<Construction sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }}/>}
-              message={'Select a recipe from the list, or right-click the list to add one.'}
-            />
-          )
-          : (
-            <Stack spacing={2}>
-              <BoardSectionCard title={'Recipe'}>
-                <Grid container rowSpacing={2} columnSpacing={2} alignItems={'flex-start'}>
-                  <Grid size={3}>
-                    <KeyTextField
-                      value={selectedRecipe.key}
-                      onChange={handleRecipeKeyOnChangeEvent}
-                    />
-                  </Grid>
-
-                  <Grid size={4}>
-                    <TextField
-                      variant={'outlined'}
-                      label={'Name'}
-                      value={selectedRecipe.name}
-                      onChange={handleRecipeNameOnChangeEvent}
-                      size={'small'}
-                      fullWidth
-                      InputLabelProps={selectedRecipe.name.trim().length === 0 && recipeNamePlaceholderFromFirstOutput.length > 0
-                        ? { shrink: true }
-                        : undefined}
-                      placeholder={selectedRecipe.name.trim().length === 0 && recipeNamePlaceholderFromFirstOutput.length > 0
-                        ? recipeNamePlaceholderFromFirstOutput
-                        : undefined}
-                    />
-                  </Grid>
-
-                  <Grid size={2}>
-                    <Stack spacing={0.5}>
-                      <FormControlLabel
-                        control={
-                          <Switch
-                            size={'small'}
-                            checked={selectedRecipe.iconIndex === -1}
-                            onChange={(e) => handleRecipeIconIndexOnChangeEvent(e.target.checked
-                              ? -1
-                              : 0)}
-                          />
-                        }
-                        label={'Auto icon'}
-                      />
-                      {selectedRecipe.iconIndex !== -1 && (
-                        <IconIndexField
-                          value={selectedRecipe.iconIndex}
-                          onChange={handleRecipeIconIndexOnChangeEvent}
-                        />
-                      )}
-                    </Stack>
-                  </Grid>
-
-                  <Grid size={3}>
-                    <Stack spacing={0}>
-                      <FormControlLabel
-                        control={
-                          <Checkbox
-                            checked={selectedRecipe.unlockedByDefault}
-                            checkedIcon={<LockOpen/>}
-                            icon={<Lock/>}
-                            onChange={handleRecipeUnlockedByDefaultOnCheckEvent}
-                          />
-                        }
-                        label={selectedRecipe.unlockedByDefault
-                          ? 'Unlocked by default'
-                          : 'Locked by default'}
-                      />
-                      <FormControlLabel
-                        control={
-                          <Checkbox
-                            checked={selectedRecipe.maskedUntilCrafted}
-                            checkedIcon={<VisibilityOff/>}
-                            icon={<Visibility/>}
-                            onChange={handleRecipeMaskedUntilCraftedOnCheckEvent}
-                          />
-                        }
-                        label={selectedRecipe.maskedUntilCrafted
-                          ? 'Masked until crafted'
-                          : 'Visible immediately'}
-                      />
-                      <TextField
-                        variant={'outlined'}
-                        label={'Tier'}
-                        type={'number'}
-                        value={selectedRecipe.tier ?? 0}
-                        onChange={handleRecipeTierOnChangeEvent}
-                        size={'small'}
-                        helperText={(selectedRecipe.cost?.length ?? 0) > 0
-                          ? 'Overridden by the cost below'
-                          : 'Sets the scrap price; 0 is not for sale'}
-                      />
-                    </Stack>
-                  </Grid>
-
-                  <Grid size={8}>
-                    <TextField
-                      variant={'outlined'}
-                      label={'Description'}
-                      value={selectedRecipe.description}
-                      onChange={handleRecipeDescriptionOnChangeEvent}
-                      size={'small'}
-                      multiline
-                      fullWidth
-                      rows={4}
-                      InputLabelProps={selectedRecipe.description.trim().length === 0 && recipeDescriptionPlaceholderFromFirstOutput.length > 0
-                        ? { shrink: true }
-                        : undefined}
-                      placeholder={selectedRecipe.description.trim().length === 0 && recipeDescriptionPlaceholderFromFirstOutput.length > 0
-                        ? recipeDescriptionPlaceholderFromFirstOutput
-                        : undefined}
-                    />
-                  </Grid>
-
-                  <Grid size={4}>
-                    <Autocomplete<Category, true>
-                      multiple
-                      size={'small'}
-                      options={categoryPickerOptions}
-                      value={categoryPickerValue}
-                      onChange={(_, newValue) =>
-                      {
-                        const sorted = newValue.map((c) => c.key).sort();
-                        setApplicableCategories(sorted);
-                        patchSelectedRecipe({ categoryKeys: sorted });
-                      }}
-                      disableCloseOnSelect
-                      groupBy={(option) => option.key.split('-')[ 0 ]}
-                      getOptionKey={(option) => option.key}
-                      getOptionLabel={(option) => option.name}
-                      isOptionEqualToValue={(a, b) => a.key === b.key}
-                      slotProps={{
-                        listbox: { sx: { maxHeight: '400px' } },
-                      }}
-                      renderTags={(value, getTagProps) =>
-                        value.map((option, index) => (
-                          <Chip
-                            {...getTagProps({ index })}
-                            key={option.key}
-                            label={option.name}
-                            size={'small'}
-                          />
-                        ))
-                      }
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          size={'small'}
-                          label={'Categories'}
-                          placeholder={applicableCategories.length === 0
-                            ? 'None assigned'
-                            : ''}
-                        />
-                      )}
-                    />
-                  </Grid>
-                </Grid>
-              </BoardSectionCard>
-
-              <Box
-                sx={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-                  gap: 2,
-                  width: '100%',
-                  alignItems: 'stretch',
-                }}
-              >
-                <CraftingComponentList
-                  type={CraftingListType.Ingredients}
-                  updateRecipeFunc={updateCraftingComponentList}
-                  components={currentIngredients}
-                  handleSnack={handleSnack}
-                />
-                <CraftingComponentList
-                  type={CraftingListType.Tools}
-                  updateRecipeFunc={updateCraftingComponentList}
-                  components={currentTools}
-                  handleSnack={handleSnack}
-                />
-                <CraftingComponentList
-                  type={CraftingListType.Outputs}
-                  updateRecipeFunc={updateCraftingComponentList}
-                  components={currentOutputs}
-                  handleSnack={handleSnack}
-                />
-                <CraftingComponentList
-                  type={CraftingListType.Cost}
-                  updateRecipeFunc={updateCraftingComponentList}
-                  components={currentCost}
-                  handleSnack={handleSnack}
-                />
-              </Box>
-            </Stack>
-          )
-      )}
+      {tabIndex === 0 && renderRecipesTab()}
 
       {tabIndex === 1 && (
         <Grid container rowSpacing={2} columnSpacing={2} sx={{ height: '100%' }}>

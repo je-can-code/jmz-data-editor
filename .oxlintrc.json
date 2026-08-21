@@ -1,0 +1,111 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "react-hooks"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "off",
+    "pedantic": "off",
+    "perf": "off",
+    "style": "off",
+    "restriction": "off"
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/build/**",
+    "**/coverage/**",
+    "**/.coverage/**",
+    "**/dist/**",
+    "**/*.d.ts",
+    "bin/**"
+  ],
+  "env": {
+    "browser": true
+  },
+  "rules": {
+    "preserve-caught-error": "off",
+    "no-case-declarations": "off",
+    "no-empty-function": "off",
+    "no-undef": "off",
+    "no-unused-vars": [
+      "error",
+      {
+        "varsIgnorePattern": "^_",
+        "argsIgnorePattern": "^(_$|_.+)$"
+      }
+    ],
+    "no-useless-call": "off",
+    "no-prototype-builtins": "off",
+    "eqeqeq": "error",
+    "complexity": [
+      "error",
+      20
+    ],
+    "no-eq-null": "error",
+    "no-lone-blocks": "error",
+    "no-multi-assign": "error",
+    "no-multi-str": "error",
+    "no-nested-ternary": "error",
+    "no-new": "error",
+    "no-new-wrappers": "error",
+    "no-param-reassign": "error",
+    "no-promise-executor-return": "error",
+    "no-shadow": "error",
+    "no-unexpected-multiline": "error",
+    "no-void": "error",
+    "prefer-arrow-callback": "error",
+    "prefer-const": "error",
+    "no-var": "error",
+    "prefer-destructuring": "error",
+    "no-eval": "error",
+    "no-unused-expressions": "off",
+
+    // Everything above this line is the rmmz-plugins ruleset and is meant to stay identical to it.
+    // Everything below is React, which that repo has no use for.
+
+    // A board mutates a hydrated domain model and hands it to its resource context -- the models are
+    // entities with behavior (rehydrateGrowthsFromNote and friends), not immutable state. Immutable
+    // updates would be a rewrite of the data layer rather than a lint fix.
+    "react/immutability": "off",
+
+    // Resource contexts read the project off disk in an effect and set state when it lands. That is
+    // the load itself, not the cascading re-render this rule is aimed at.
+    "react/set-state-in-effect": "off",
+
+    // The latest-ref idiom is deliberate here: it is what keeps the effects below it from closing over
+    // a stale handler.
+    "react/refs": "off",
+
+    // A warning rather than an error, because it and this codebase disagree about what a dependency is
+    // and the codebase is right. Boards mutate a model in place, so its reference does not change on an
+    // edit -- memos therefore depend on the specific fields they read, which do change, and the rule
+    // reads that as a missing dependency on the model. Non-reactive sources like SystemService are
+    // invalidated by a generation counter the memo body never mentions, which the rule reads as an
+    // unnecessary dependency. Both are correct as written. It stays on because the cases it gets right
+    // are worth seeing: it found an effect that never re-ran when its api base arrived late.
+    "react-hooks/exhaustive-deps": "warn"
+  },
+  "overrides": [
+    {
+      "files": [
+        "scripts/**/*.ts",
+        "nw-app/**/*.js"
+      ],
+      "env": {
+        "node": true
+      }
+    },
+    {
+      // A test reaches into a component to capture a hook's return value, which means assigning to a
+      // variable the test owns from inside the component. That is the test observing, not a component
+      // writing to module scope.
+      "files": [
+        "app/test/**/*.tsx"
+      ],
+      "rules": {
+        "react/globals": "off"
+      }
+    }
+  ]
+}

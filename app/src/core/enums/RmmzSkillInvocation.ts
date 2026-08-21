@@ -21,7 +21,7 @@ function normalizeSkillSuccessRate(raw: number): number
   {
     return 100;
   }
-  let t = Math.trunc(raw);
+  const t = Math.trunc(raw);
   if (t < 0)
   {
     return 0;

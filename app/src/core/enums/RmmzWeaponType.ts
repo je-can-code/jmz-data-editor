@@ -50,11 +50,16 @@ function weaponTypeOptionsFromNames(names: readonly string[] | undefined): RmmzW
   ) =>
   {
     const trimmed = label.trim();
-    const display = trimmed === ''
-      ? (index === 0
+
+    // a named type shows its name; a blank one falls back to its slot, where index 0 is RMMZ's empty type.
+    let display = label;
+    if (trimmed === '')
+    {
+      display = index === 0
         ? 'None'
-        : `Type ${index}`)
-      : label;
+        : `Type ${index}`;
+    }
+
     return {
       value: index,
       label: display,

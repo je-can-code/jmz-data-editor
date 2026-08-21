@@ -17,6 +17,110 @@ import {
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 /**
+ * The lookups a trait's dataId may need resolved against loaded project data.
+ * Skills and states are context-backed, so they arrive from the hook rather than a module import.
+ */
+type TraitNameLookups = {
+  skillToName: (id: number) => string;
+  stateToName: (id: number) => string;
+};
+
+/**
+ * The icon standing in for each trait code. Codes sharing a tens digit are one family of trait and
+ * deliberately share an icon, so a list of traits reads as groups at a glance.
+ */
+const TRAIT_CODE_ICONS: Record<number, React.ComponentType> = {
+  11: CandlestickChart,
+  12: CandlestickChart,
+  13: CandlestickChart,
+  14: CandlestickChart,
+  21: StackedBarChart,
+  22: StackedBarChart,
+  23: StackedBarChart,
+  31: SportsMma,
+  32: SportsMma,
+  33: SportsMma,
+  34: SportsMma,
+  35: SportsMma,
+  41: BookmarkAdd,
+  42: BookmarkAdd,
+  43: BookmarkAdd,
+  44: BookmarkAdd,
+  51: Accessibility,
+  52: Accessibility,
+  53: Accessibility,
+  54: Accessibility,
+  55: Accessibility,
+  61: Diversity2,
+  62: Diversity2,
+  63: Diversity2,
+  64: Diversity2,
+};
+
+/**
+ * The short label naming each trait code, as the trait editor presents it.
+ */
+const TRAIT_CODE_NAMES: Record<number, string> = {
+  11: 'Elemental Resistance',
+  12: 'Debuff Rate',
+  13: 'State Rate',
+  14: 'State Immunity',
+  21: 'Base Parameter',
+  22: 'EX Parameter',
+  23: 'SP Parameter',
+  31: 'On-Hit Element',
+  32: 'On-Hit State',
+  33: 'Attack Speed',
+  34: 'Attack Count',
+  35: 'Attack Skill',
+  41: 'Add Skill Category',
+  42: 'Seal Skill Category',
+  43: 'Add Skill',
+  44: 'Seal Skill',
+  51: 'Add Weapon Type',
+  52: 'Add Armor Type',
+  53: 'Lock Slot',
+  54: 'Seal Slot',
+  55: 'Enable Dual-Wield',
+  61: 'Additional Turn Chance',
+  62: 'Special Flags',
+  63: 'Collapse Effect',
+  64: 'Party Ability',
+};
+
+/**
+ * How each trait code turns its dataId into something readable. A trait's dataId means nothing on its
+ * own -- the same number is an element on one code, a skill on another -- so the code picks the reader.
+ */
+const TRAIT_DATA_NAME_RESOLVERS: Record<number, (dataId: number, lookups: TraitNameLookups) => string> = {
+  11: (dataId) => SystemService.elements[ dataId ] ?? 'None',
+  12: (dataId) => fromBParamIdToName(dataId),
+  13: (dataId, lookups) => lookups.stateToName(dataId),
+  14: (dataId, lookups) => lookups.stateToName(dataId),
+  21: (dataId) => fromBParamIdToName(dataId),
+  22: (dataId) => fromXParamIdToName(dataId),
+  23: (dataId) => fromSParamIdToName(dataId),
+  31: (dataId) => `"${SystemService.elements[ dataId ] ?? 'None'}" (id:${dataId})`,
+  32: (dataId, lookups) => lookups.stateToName(dataId),
+  33: () => 'Speed',
+  34: () => 'Count',
+  35: (dataId, lookups) => `${lookups.skillToName(dataId)} (id:${dataId})`,
+  41: (dataId) => SystemService.skillTypes[ dataId ] ?? 'None',
+  42: (dataId) => SystemService.skillTypes[ dataId ] ?? 'None',
+  43: (dataId, lookups) => `${lookups.skillToName(dataId)} (id:${dataId})`,
+  44: (dataId, lookups) => `${lookups.skillToName(dataId)} (id:${dataId})`,
+  51: (dataId) => SystemService.weaponTypes[ dataId ] ?? 'None',
+  52: (dataId) => SystemService.armorTypes[ dataId ] ?? 'None',
+  53: (dataId) => SystemService.equipTypes[ dataId ] ?? 'None',
+  54: (dataId) => SystemService.equipTypes[ dataId ] ?? 'None',
+  55: () => 'Enable Dual-Wield',
+  61: () => 'Chance',
+  62: (dataId) => SpecialFlag[ dataId ],
+  63: (dataId) => CollapseEffect[ dataId ],
+  64: (dataId) => PartyAbility[ dataId ],
+};
+
+/**
  * A custom hook providing context-aware trait mapping logic.
  * Replaces the legacy static TraitMapper class.
  */
@@ -69,42 +173,9 @@ export function useTraitMapping()
    */
   const toCodeIcon = (code: number): React.JSX.Element =>
   {
-    switch (code)
-    {
-      case 11:
-      case 12:
-      case 13:
-      case 14:
-        return React.createElement(CandlestickChart);
-      case 21:
-      case 22:
-      case 23:
-        return React.createElement(StackedBarChart);
-      case 31:
-      case 32:
-      case 33:
-      case 34:
-      case 35:
-        return React.createElement(SportsMma);
-      case 41:
-      case 42:
-      case 43:
-      case 44:
-        return React.createElement(BookmarkAdd);
-      case 51:
-      case 52:
-      case 53:
-      case 54:
-      case 55:
-        return React.createElement(Accessibility);
-      case 61:
-      case 62:
-      case 63:
-      case 64:
-        return React.createElement(Diversity2);
-      default:
-        return React.createElement(QuestionMark);
-    }
+    // an unrecognized code still gets a chip, so it draws a question mark rather than nothing.
+    const icon = TRAIT_CODE_ICONS[ code ] ?? QuestionMark;
+    return React.createElement(icon);
   };
 
   /**
@@ -142,55 +213,18 @@ export function useTraitMapping()
     dataId: number
   ): string =>
   {
-    switch (code)
+    const resolve = TRAIT_DATA_NAME_RESOLVERS[ code ];
+
+    // an unrecognized code has no dataId meaning to report, so it names nothing.
+    if (resolve === undefined)
     {
-      case 11:
-        return SystemService.elements[ dataId ] ?? 'None';
-      case 12:
-        return fromBParamIdToName(dataId);
-      case 13:
-      case 14:
-      case 32:
-        return stateToName(dataId);
-      case 21:
-        return fromBParamIdToName(dataId);
-      case 22:
-        return fromXParamIdToName(dataId);
-      case 23:
-        return fromSParamIdToName(dataId);
-      case 31:
-        return `"${SystemService.elements[ dataId ] ?? 'None'}" (id:${dataId})`;
-      case 33:
-        return 'Speed';
-      case 34:
-        return 'Count';
-      case 35:
-      case 43:
-      case 44:
-        return `${skillToName(dataId)} (id:${dataId})`;
-      case 41:
-      case 42:
-        return SystemService.skillTypes[ dataId ] ?? 'None';
-      case 51:
-        return SystemService.weaponTypes[ dataId ] ?? 'None';
-      case 52:
-        return SystemService.armorTypes[ dataId ] ?? 'None';
-      case 53:
-      case 54:
-        return SystemService.equipTypes[ dataId ] ?? 'None';
-      case 55:
-        return 'Enable Dual-Wield';
-      case 61:
-        return 'Chance';
-      case 62:
-        return SpecialFlag[ dataId ];
-      case 63:
-        return CollapseEffect[ dataId ];
-      case 64:
-        return PartyAbility[ dataId ];
-      default:
-        return '';
+      return '';
     }
+
+    return resolve(dataId, {
+      skillToName,
+      stateToName,
+    });
   };
 
   /**
@@ -219,61 +253,8 @@ export function useTraitMapping()
 
 function getTraitCodeName(code: number): string
 {
-  switch (code)
-  {
-    case 11:
-      return 'Elemental Resistance';
-    case 12:
-      return 'Debuff Rate';
-    case 13:
-      return 'State Rate';
-    case 14:
-      return 'State Immunity';
-    case 21:
-      return 'Base Parameter';
-    case 22:
-      return 'EX Parameter';
-    case 23:
-      return 'SP Parameter';
-    case 31:
-      return 'On-Hit Element';
-    case 32:
-      return 'On-Hit State';
-    case 33:
-      return 'Attack Speed';
-    case 34:
-      return 'Attack Count';
-    case 35:
-      return 'Attack Skill';
-    case 41:
-      return 'Add Skill Category';
-    case 42:
-      return 'Seal Skill Category';
-    case 43:
-      return 'Add Skill';
-    case 44:
-      return 'Seal Skill';
-    case 51:
-      return 'Add Weapon Type';
-    case 52:
-      return 'Add Armor Type';
-    case 53:
-      return 'Lock Slot';
-    case 54:
-      return 'Seal Slot';
-    case 55:
-      return 'Enable Dual-Wield';
-    case 61:
-      return 'Additional Turn Chance';
-    case 62:
-      return 'Special Flags';
-    case 63:
-      return 'Collapse Effect';
-    case 64:
-      return 'Party Ability';
-    default:
-      return '';
-  }
+  // an unrecognized code has no name to give, which the trait editor renders as a blank label.
+  return TRAIT_CODE_NAMES[ code ] ?? '';
 }
 
 function getTraitValueString(

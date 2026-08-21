@@ -580,14 +580,17 @@ function SkillJabsExtensionsPanel(
   {
     let cancelled = false;
 
-    void (async () =>
+    const loadPluginActionMapId = async () =>
     {
       const id = await readJabsActionMapIdFromPluginsJs(projectRoot);
       if (cancelled === false)
       {
         setPluginActionMapId(id);
       }
-    })();
+    };
+
+    // An effect body cannot be async, so the read is started and not awaited.
+    loadPluginActionMapId();
 
     return () =>
     {
@@ -599,7 +602,7 @@ function SkillJabsExtensionsPanel(
   {
     let cancelled = false;
 
-    void (async () =>
+    const loadActionMapEvents = async () =>
     {
       if (rmmzDataPath.trim() === '')
       {
@@ -629,7 +632,10 @@ function SkillJabsExtensionsPanel(
           );
         }
       }
-    })();
+    };
+
+    // An effect body cannot be async, so the load is started and not awaited.
+    loadActionMapEvents();
 
     return () =>
     {
@@ -1070,1011 +1076,1646 @@ function SkillJabsExtensionsPanel(
     && jabs.delayRaw.trim() !== ''
     && delayParsed === null;
 
+  /**
+   * One animation picker. The casting section offers three of them over different fields, and they
+   * differ only in what they are called and which field they write.
+   *
+   * All three search the same way -- by name, by detail, by group, or by raw id -- because an author
+   * hunting an animation may remember any of those.
+   *
+   * @param options The animations selectable for this slot.
+   * @param currentId The stored animation id, or null when unset.
+   * @param fieldKey The extension field this picker writes.
+   * @param label The caption naming when this animation plays.
+   * @param helperText The line under the picker explaining the slot.
+   * @param disabled Whether the slot is unavailable for the current settings.
+   */
+  const renderAnimationPicker = (
+    options: RmmzSkillAnimationOption[],
+    currentId: number | null,
+    fieldKey: 'selfAnimationId' | 'onCastAnimationId' | 'castAnimation',
+    label: string,
+    helperText: string,
+    disabled = false
+  ) =>
+  {
+    const currentOption = currentId === null
+      ? null
+      : skillAnimationOptionForValue(currentId, castAnimationBaseOptions);
+
+    return (
+      <Autocomplete<RmmzSkillAnimationOption, false, false, false>
+        fullWidth
+        size={'small'}
+        disabled={disabled}
+        options={options}
+        groupBy={(option) => option.group}
+        getOptionLabel={(option) => option.label}
+        isOptionEqualToValue={(
+          a,
+          b
+        ) => a.value === b.value}
+        value={currentOption}
+        onChange={(
+          _e,
+          option
+        ) =>
+        {
+          patch({
+            [ fieldKey ]: option === null
+              ? null
+              : option.value
+          });
+        }}
+        filterOptions={(
+          opts,
+          state
+        ) =>
+        {
+          const q = state.inputValue.trim()
+            .toLowerCase();
+          if (q === '')
+          {
+            return opts;
+          }
+          return opts.filter((o) =>
+            o.label.toLowerCase()
+              .includes(q)
+            || o.detail.toLowerCase()
+              .includes(q)
+            || o.group.toLowerCase()
+              .includes(q)
+            || String(o.value)
+              .includes(q));
+        }}
+        slotProps={{
+          listbox: { style: { maxHeight: 280 } },
+        }}
+        renderInput={(params) =>
+          (
+            <TextField
+              {...params}
+              variant={'outlined'}
+              label={label}
+              placeholder={'Search animations…'}
+              helperText={helperText}
+            />
+          )}
+      />
+    );
+  };
+
+  /**
+   * The whole execution pipeline: the wind-up, what plays during it, and how the spawned action behaves
+   * once it exists.
+   *
+   * Cast time gates the wind-up half -- without one there is no channel to animate or telegraph -- so
+   * those fields disable themselves and say so. The delay tag is edited through three fields when it
+   * parses and as raw text when it does not, since the fields cannot represent what they could not read.
+   */
+  const renderCastingSection = () =>
+  {
+    const hasNoCastTime = jabs.castTime === null;
+    const windUpAnimationHelperText = hasNoCastTime
+      ? 'Set cast time first — nothing plays without a wind-up.'
+      : 'Shown on the caster while cast time counts down (optional).';
+    const delayTouchable = delayParsed?.touchable ?? true;
+    const delayFramesText = delayParsed === null
+      ? ''
+      : String(delayParsed.frames);
+
+    // the radius half of the delay tag, as the field wants it. An unparsed tag and a tag carrying no
+    // radius both read as empty, since neither gives the field anything to show.
+    let delayRadiusText = '';
+    if (delayParsed !== null && delayParsed.radius !== null)
+    {
+      delayRadiusText = String(delayParsed.radius);
+    }
+
+    // the preview warning only means something once there is a cast to preview, so the helper explains
+    // which prerequisite is missing before it explains what the field does.
+    let castPreviewWarnHelperText =
+      `Must be ≤ cast time (${jabs.castTime} frames). Example: 30 = show telegraph for the last half-second of a 60-frame cast.`;
+    if (hasNoCastTime)
+    {
+      castPreviewWarnHelperText = 'Set cast time to configure preview timing.';
+    }
+    else if (jabs.noCastPreview)
+    {
+      castPreviewWarnHelperText = 'Unavailable while preview is disabled.';
+    }
+
+    return (
+      <BoardSectionCard title={'Casting, map execution & spawn animations'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            One accordion for the full pipeline: Phase 1 cast time, optional map spawn flashes, then wind-up animation
+            and
+            telegraph; Phase 2 how the action behaves on the map. Cast time is in frames (60 ≈ one second at default
+            FPS).
+            With no cast time there is no standing channel, but spawn animations and Phase 2 still apply once the
+            action
+            exists.
+          </Typography>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Phase 1 — Wind-up & cast
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={12}>
+              <TextField
+                label={'Cast time (frames)'}
+                size={'small'}
+                fullWidth
+                value={jabs.castTime === null
+                  ? ''
+                  : String(jabs.castTime)}
+                onChange={onCastTimeChange}
+                helperText={'Empty or 0 = no wind-up. Higher = longer channel before the action event is placed.'}
+                slotProps={{
+                  htmlInput: {
+                    inputMode: 'numeric',
+                    min: 0,
+                    step: 1
+                  },
+                }}
+              />
+            </Grid>
+            <Grid size={12}>
+              <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+                Map spawn animations (optional)
+              </Typography>
+              <Typography variant={'caption'} color={'text.secondary'}>
+                Separate from the Database battle animation and from wind-up below. Same picker as elsewhere;
+                weapon-type
+                entries are omitted on purpose.
+              </Typography>
+            </Grid>
+            <Grid size={6}>
+              {renderAnimationPicker(
+                selfAnimationOptions,
+                jabs.selfAnimationId,
+                'selfAnimationId',
+                'Self / owner animation',
+                'Plays on the acting battler tied to the map action (optional).'
+              )}
+            </Grid>
+            <Grid size={6}>
+              {renderAnimationPicker(
+                onCastSkillAnimationOptions,
+                jabs.onCastAnimationId,
+                'onCastAnimationId',
+                'On-cast / spawn flash',
+                'Fires when the map action is actually spawned or cast through (optional).'
+              )}
+            </Grid>
+            {contextSkillAnimationId !== null && (
+              <Grid size={12}>
+                <Typography variant={'caption'} color={'text.secondary'}>
+                  {`This skill’s database animation id is ${contextSkillAnimationId} — use that as reference if you want the map action to match battle timing.`}
+                </Typography>
+              </Grid>
+            )}
+            <Grid size={12}>
+              {renderAnimationPicker(
+                castAnimationOptions,
+                jabs.castAnimation,
+                'castAnimation',
+                'Animation during wind-up',
+                windUpAnimationHelperText,
+                hasNoCastTime
+              )}
+            </Grid>
+          </Grid>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Cast preview (telegraph)
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            While casting, JABS can preview where the action will land so players can react. Turn that off for stealth
+            or surprise skills, or shorten the warning window with “frames left” below.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={12}>
+              {boolSwitch(
+                'No cast preview (hide telegraph)',
+                jabs.noCastPreview,
+                'noCastPreview',
+                hasNoCastTime
+              )}
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                label={'Start warning this many frames before finish'}
+                size={'small'}
+                fullWidth
+                disabled={hasNoCastTime || jabs.noCastPreview}
+                value={jabs.castPreviewWarnAt === null
+                  ? ''
+                  : String(jabs.castPreviewWarnAt)}
+                onChange={onCastPreviewWarnAtChange}
+                helperText={castPreviewWarnHelperText}
+                slotProps={{
+                  htmlInput: {
+                    inputMode: 'numeric',
+                    min: 0,
+                    max: hasNoCastTime
+                      ? undefined
+                      : jabs.castTime,
+                    step: 1,
+                  },
+                }}
+              />
+            </Grid>
+          </Grid>
+
+          <Divider sx={{ my: 1 }}/>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Phase 2 — Action on the map
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Same accordion as above: after wind-up (if any), these fields control the spawned event — direct vs
+            projectile,
+            AI spacing, how long it lives, knockback, delayed detonation, linger, and on-defeat placement.
+          </Typography>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Direct targeting
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            No separate projectile event: the hit resolves toward a target in range. If both tags are present, direct
+            lock wins.
+          </Typography>
+          <Stack direction={'row'} spacing={2} flexWrap={'wrap'}>
+            {boolSwitch(
+              'Instant / direct (no map projectile)',
+              jabs.direct,
+              'direct'
+            )}
+            {boolSwitch(
+              'Snap to target at fire time (removes dodge window)',
+              jabs.directLock,
+              'directLock'
+            )}
+          </Stack>
+          <Grid container spacing={2}>
+            <Grid size={4}>
+              {floatField(
+                'AI standoff distance (tiles)',
+                jabs.proximity,
+                'proximity',
+                {
+                  helperText:
+                    'How close an AI battler tries to get before using this skill (non-user scopes).',
+                }
+              )}
+            </Grid>
+            <Grid size={4}>
+              {intField(
+                'Action lifetime (frames)',
+                jabs.duration,
+                'duration',
+                {
+                  helperText:
+                    'How long the action event stays on the map. Also ends after max hits. JABS enforces a small minimum.',
+                }
+              )}
+            </Grid>
+            <Grid size={4}>
+              {intField(
+                'Knockback distance (tiles)',
+                jabs.knockback,
+                'knockback',
+                {
+                  helperText: 'Tiles the defender is pushed when this skill connects.',
+                }
+              )}
+            </Grid>
+            <Grid size={12}>
+              <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+                Delayed detonation
+              </Typography>
+              <Typography variant={'caption'} color={'text.secondary'}>
+                Timed trap / mine: waits on the map, then fires. Use -1 frames with “touch to trigger” for touch-only
+                arming (see JABS warning if touch is off).
+              </Typography>
+            </Grid>
+            {delayNoteInvalid
+              ? (
+                <>
+                  <Grid size={12}>
+                    <Alert severity={'warning'}>
+                      This note does not match the expected delay shape
+                      {' '}
+                      <Typography component={'span'} variant={'body2'} sx={{ fontFamily: 'monospace' }}>
+                        [frames, true|false [, triggerRadius]]
+                      </Typography>
+                      . Edit the raw tag or clear it.
+                    </Alert>
+                  </Grid>
+                  <Grid size={12}>
+                    {rawField('Delay tag (raw)', jabs.delayRaw, 'delayRaw')}
+                  </Grid>
+                </>
+              )
+              : (
+                <>
+                  <Grid size={4}>
+                    <TextField
+                      label={'Frames until detonation'}
+                      size={'small'}
+                      fullWidth
+                      value={delayFramesText}
+                      onChange={(e) =>
+                      {
+                        patchDelayFromFields(
+                          e.target.value,
+                          delayTouchable,
+                          delayRadiusText
+                        );
+                      }}
+                      helperText={'-1 = never auto-detonate (needs touch).'}
+                      slotProps={{ htmlInput: { inputMode: 'numeric' } }}
+                    />
+                  </Grid>
+                  <Grid size={4}>
+                    <FormControlLabel
+                      disabled={delayParsed === null}
+                      control={
+                        <Switch
+                          size={'small'}
+                          checked={delayParsed?.touchable ?? false}
+                          onChange={(e) =>
+                          {
+                            patchDelayFromFields(
+                              delayFramesText,
+                              e.target.checked,
+                              delayRadiusText
+                            );
+                          }}
+                        />
+                      }
+                      label={'Trigger when an enemy steps on it'}
+                    />
+                  </Grid>
+                  <Grid size={4}>
+                    <TextField
+                      label={'Optional touch radius (tiles)'}
+                      size={'small'}
+                      fullWidth
+                      disabled={delayParsed === null}
+                      value={delayRadiusText}
+                      onChange={(e) =>
+                      {
+                        patchDelayFromFields(
+                          delayFramesText,
+                          delayTouchable,
+                          e.target.value
+                        );
+                      }}
+                      placeholder={'default = use action normal hitbox'}
+                      slotProps={{ htmlInput: { inputMode: 'decimal' } }}
+                    />
+                  </Grid>
+                  <Grid size={12}>
+                    <Typography variant={'caption'} color={'text.secondary'}>
+                      Set frames first to add the delay tag; then touch trigger and optional radius apply. Clear
+                      frames to remove the tag.
+                    </Typography>
+                  </Grid>
+                </>
+              )}
+            <Grid size={4}>
+              {intField(
+                'Fade-out after expire (frames)',
+                jabs.linger,
+                'linger',
+                {
+                  helperText:
+                    'Visual tail after hits/duration end; collision is off during fade. Omit tag for JABS default (~10). Use 0 to vanish instantly.',
+                }
+              )}
+            </Grid>
+            <Grid size={12}>
+              {boolSwitch(
+                'Spawn on-target-defeat FX at victim position',
+                jabs.onDefeatedTarget,
+                'onDefeatedTarget'
+              )}
+              <Typography variant={'caption'} color={'text.secondary'} sx={{
+                display: 'block',
+                mt: 0.5
+              }}>
+                Only meaningful for follow-up skills fired via battler on-target-defeat tags: places the event on the
+                defeated enemy instead of the caster.
+              </Typography>
+            </Grid>
+          </Grid>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * How far the action reaches, what shape it tests hits with, and how many projectiles it throws.
+   *
+   * The shape decides which of the numeric fields mean anything: arc and circle read degrees, line and
+   * wall read thickness. The ones that do not apply disable themselves and say which shapes would use
+   * them, rather than greying out unexplained.
+   */
+  const renderActionShapeSection = () =>
+  {
+    const usesThickness = jabs.hitboxShape === 'line' || jabs.hitboxShape === 'wall';
+    const usesDegrees = jabs.hitboxShape === 'arc' || jabs.hitboxShape === 'circle';
+
+    // both shapes read a degrees value, but they read it differently enough to say so.
+    let degreesHelperText = 'Only arc and circle read this field.';
+    if (jabs.hitboxShape === 'arc')
+    {
+      degreesHelperText = 'Wedge opening angle; also shapes the cast-preview sector.';
+    }
+    else if (jabs.hitboxShape === 'circle')
+    {
+      degreesHelperText = 'Circle hitbox is a full 360° ring in JABS — pick arc if you want a partial wedge.';
+    }
+
+    const hitboxShapeValue =
+      jabs.hitboxShape !== null
+      && HITBOX_SHAPES.includes(jabs.hitboxShape as (typeof HITBOX_SHAPES)[number])
+        ? jabs.hitboxShape as (typeof HITBOX_SHAPES)[number]
+        : undefined;
+
+    const formationValue =
+      jabs.projectileFormation !== null
+      && FORMATIONS.includes(jabs.projectileFormation as (typeof FORMATIONS)[number])
+        ? jabs.projectileFormation as (typeof FORMATIONS)[number]
+        : undefined;
+
+    return (
+      <BoardSectionCard title={'Action size, shape & projectile'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Tune how far the action reaches and what shape it uses in tile space. Choose hitbox shape first — arc and
+            circle unlock degrees; line and wall unlock thickness. Direct skills (see Casting / map execution above)
+            skip the map
+            projectile, but radius and shape still matter for range checks and previews where applicable.
+          </Typography>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Hitbox
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Geometry JABS uses to test hits. The numeric fields below gray out when they do not apply to the selected
+            shape.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={12}>
+              <Autocomplete<(typeof HITBOX_SHAPES)[number], false, true, false>
+                fullWidth
+                size={'small'}
+                options={[ ...HITBOX_SHAPES ]}
+                value={hitboxShapeValue}
+                onChange={(
+                  _e,
+                  v
+                ) =>
+                {
+                  patch({ hitboxShape: v ?? null });
+                }}
+                renderInput={(params) =>
+                  (
+                    <TextField
+                      {...params}
+                      label={'Hitbox shape'}
+                      placeholder={'Engine default if empty'}
+                    />
+                  )}
+              />
+            </Grid>
+            <Grid size={6}>
+              {floatField(
+                'Reach / radius (tiles)',
+                jabs.rangeRadius,
+                'rangeRadius',
+                {
+                  helperText: 'How far the hitbox extends from the action origin, in map tiles (not pixels).',
+                }
+              )}
+            </Grid>
+            <Grid size={6}>
+              {intField(
+                'Arc / sweep (degrees)',
+                jabs.degrees,
+                'degrees',
+                {
+                  disabled: usesDegrees === false,
+                  helperText: degreesHelperText,
+                }
+              )}
+            </Grid>
+            <Grid size={6}>
+              {floatField(
+                'Line or wall thickness (tiles)',
+                jabs.thickness,
+                'thickness',
+                {
+                  disabled: usesThickness === false,
+                  helperText: usesThickness
+                    ? 'How wide the strip is perpendicular to the line or wall axis.'
+                    : 'Only line and wall hitboxes use thickness.',
+                }
+              )}
+            </Grid>
+          </Grid>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Projectiles
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Formation chooses the firing lines (aim directions) the skill uses. Projectile count is how many map
+            actions
+            spawn on each of those lines, so totals multiply. Example: spray is a three-line “W” (straight ahead,
+            about
+            45° up, about 45° down); with count 3 you get three actions per line — nine actions total. That can
+            explode
+            quickly; that may be exactly what you want. Irrelevant for purely direct / zero-projectile setups.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={6}>
+              {intField(
+                'Projectile count (per firing line)',
+                jabs.projectileCount,
+                'projectileCount',
+                {
+                  helperText:
+                    'Each firing line from formation gets this many actions. Total on the map is (lines in that formation) × count.',
+                }
+              )}
+            </Grid>
+            <Grid size={6}>
+              <Autocomplete<(typeof FORMATIONS)[number], false, true, false>
+                fullWidth
+                size={'small'}
+                options={[ ...FORMATIONS ]}
+                value={formationValue}
+                onChange={(
+                  _e,
+                  v
+                ) =>
+                {
+                  patch({ projectileFormation: v ?? null });
+                }}
+                renderInput={(params) =>
+                  (
+                    <TextField
+                      {...params}
+                      label={'Formation (firing lines)'}
+                      placeholder={'Engine default if empty'}
+                      helperText={
+                        'Which directions count as separate lines; projectile count stacks on every line.'
+                      }
+                    />
+                  )}
+              />
+            </Grid>
+          </Grid>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * A counter skill and the chance it fires. Parry and guard offer the same pair of controls over
+   * different fields, so they share one renderer.
+   *
+   * The chance only means something once a skill is picked, so the slider stays disabled until then
+   * and the caption above it says so rather than showing a percentage for nothing. A stored chance of
+   * nothing is written as 100%, which is what the caption reports.
+   *
+   * @param trigger What the counter reacts to, as the labels name it.
+   * @param options The skills selectable as this counter.
+   * @param selectedOption The currently selected row, or null.
+   * @param skillId The stored skill id, or null when no counter is set.
+   * @param chance The stored proc chance, or null to mean 100.
+   * @param skillIdKey The extension field holding the skill id.
+   * @param chanceKey The extension field holding the chance.
+   * @param pickerHelperText What the picker says about when this counter fires.
+   */
+  const renderCounterControls = (
+    trigger: 'parry' | 'guard',
+    options: JabsSkillPickerRow[],
+    selectedOption: JabsSkillPickerRow | null,
+    skillId: number | null,
+    chance: number | null,
+    skillIdKey: 'counterParrySkillId' | 'counterGuardSkillId',
+    chanceKey: 'counterParryChance' | 'counterGuardChance',
+    pickerHelperText: string
+  ) =>
+  {
+    const hasNoCounterSkill = skillId === null;
+    const effectiveChance = Math.min(100, Math.max(1, Math.round(chance ?? 100)));
+    const chanceCaption = hasNoCounterSkill
+      ? `Pick a counter-${trigger} skill to set chance.`
+      : `Counter-${trigger} chance (${effectiveChance}%). Empty stored chance saves as 100%.`;
+
+    return (
+      <>
+        <Grid size={12}>
+          <Autocomplete<JabsSkillPickerRow, false, false, false>
+            fullWidth
+            size={'small'}
+            options={options}
+            getOptionLabel={(o) => o.label}
+            isOptionEqualToValue={(
+              a,
+              b
+            ) => a.id === b.id}
+            value={selectedOption}
+            onChange={(
+              _e,
+              option
+            ) =>
+            {
+              if (option === null)
+              {
+                patch({
+                  [ skillIdKey ]: null,
+                  [ chanceKey ]: null
+                });
+                return;
+              }
+              patch({ [ skillIdKey ]: option.id });
+            }}
+            filterOptions={(
+              opts,
+              state
+            ) =>
+            {
+              const q = state.inputValue.trim()
+                .toLowerCase();
+              if (q === '')
+              {
+                return opts;
+              }
+              return opts.filter((o) =>
+                o.label.toLowerCase()
+                  .includes(q)
+                || String(o.id)
+                  .includes(q));
+            }}
+            renderInput={(params) =>
+              (
+                <TextField
+                  {...params}
+                  variant={'outlined'}
+                  label={`Counter-${trigger} skill`}
+                  placeholder={'None…'}
+                  helperText={pickerHelperText}
+                />
+              )}
+          />
+        </Grid>
+        <Grid size={12}>
+          <Stack spacing={0.75}>
+            <Typography variant={'caption'} color={'text.secondary'}>
+              {chanceCaption}
+            </Typography>
+            <Slider
+              disabled={hasNoCounterSkill}
+              min={1}
+              max={100}
+              step={1}
+              value={effectiveChance}
+              valueLabelDisplay={'auto'}
+              valueLabelFormat={(v) => `${v}%`}
+              onChange={(
+                _e,
+                v
+              ) =>
+              {
+                const n = Array.isArray(v)
+                  ? v[ 0 ]
+                  : v;
+                patch({ [ chanceKey ]: n });
+              }}
+            />
+          </Stack>
+        </Grid>
+      </>
+    );
+  };
+
+  /**
+   * Damage reduction while guarding, and the skills a successful parry or block can fire back.
+   */
+  const renderGuardingSection = () =>
+  {
+    return (
+      <BoardSectionCard title={'Guarding & counters'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Guard uses flat and percent reduction in
+            {' '}
+            <Typography component={'span'} variant={'caption'} sx={{ fontFamily: 'monospace' }}>
+              {'<guard:[FLAT, PERCENT]>'}
+            </Typography>
+            . Counter skills use a 1–100% proc chance.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={6}>
+              {intField(
+                'Guard flat reduction',
+                jabs.guardFlat,
+                'guardFlat',
+                {
+                  helperText: 'Omit both flat and percent to remove the guard tag (0,0 is explicit).',
+                }
+              )}
+            </Grid>
+            <Grid size={6}>
+              {intField('Guard percent reduction', jabs.guardPercent, 'guardPercent')}
+            </Grid>
+            <Grid size={12}>{intField('Parry', jabs.parry, 'parry')}</Grid>
+            {renderCounterControls(
+              'parry',
+              counterParrySkillOptions,
+              selectedCounterParrySkillOption,
+              jabs.counterParrySkillId,
+              jabs.counterParryChance,
+              'counterParrySkillId',
+              'counterParryChance',
+              'Skill fired when a parry succeeds (optional).'
+            )}
+            {renderCounterControls(
+              'guard',
+              counterGuardSkillOptions,
+              selectedCounterGuardSkillOption,
+              jabs.counterGuardSkillId,
+              jabs.counterGuardChance,
+              'counterGuardSkillId',
+              'counterGuardChance',
+              'Skill fired when a guard blocks (optional).'
+            )}
+          </Grid>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * What happens once the skill resolves: how long the slot is locked, and what it can chain into.
+   *
+   * The combo window is bounded by the cooldown -- JABS never opens a follow-up that outlives the
+   * lockout -- so the link field validates against the cooldown above it and says what the ceiling is.
+   * A combo tag that does not parse falls back to editing the raw tag, since the two pickers cannot
+   * represent something they could not read.
+   */
+  const renderPostExecutionSection = () =>
+  {
+    const hasExplicitCooldown = jabs.cooldown !== null && jabs.cooldown > 0;
+    const maxUsableLinkFrames = hasExplicitCooldown
+      ? (jabs.cooldown as number) - 1
+      : undefined;
+    const linkFramesHelperText = hasExplicitCooldown
+      ? `Must stay below cooldown (${jabs.cooldown} frames); max usable link is ${maxUsableLinkFrames}.`
+      : 'Set an explicit cooldown above to validate against JABS (link must be shorter than cooldown).';
+    const comboRawIsBlank = jabs.comboRaw === null || jabs.comboRaw.trim() === '';
+
+    return (
+      <BoardSectionCard title={'Post-execution (cooldown & combos)'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            After the skill executes, JABS blocks it again until the cooldown elapses (same frame clock as cast time).
+            This is separate from MP/TP costs — it is the JABS “you just used this” gate on the skill slot(s). Combo
+            link
+            timing is validated against this cooldown: the follow-up window must finish before the cooldown does, or
+            the
+            chain never becomes reachable in-game. Global cooldown (GCD) is a separate battler-wide timer when enabled
+            in
+            JABS plugin parameters and for whitelisted skill types; oGCD and per-skill GCD length apply only in that
+            system.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={6}>
+              <TextField
+                label={'Cooldown (frames)'}
+                size={'small'}
+                fullWidth
+                value={jabs.cooldown === null
+                  ? ''
+                  : String(jabs.cooldown)}
+                onChange={onCooldownChange}
+                helperText={'Empty uses the JABS default. Higher = longer lockout. Lowering cooldown may auto-reduce combo link frames to stay valid.'}
+                slotProps={{
+                  htmlInput: {
+                    inputMode: 'numeric',
+                    min: 0,
+                    step: 1
+                  }
+                }}
+              />
+            </Grid>
+            <Grid size={6}>
+              <Stack spacing={0.5}>
+                {boolSwitch(
+                  'Per-slot cooldown (unique)',
+                  jabs.uniqueCooldown,
+                  'uniqueCooldown'
+                )}
+                <Typography variant={'caption'} color={'text.secondary'}>
+                  On: only the slot you fired goes on cooldown. Off: every quick-slot that holds this same skill id
+                  shares one cooldown (fire from one key, they all wait).
+                </Typography>
+              </Stack>
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                label={'GCD length override (frames)'}
+                size={'small'}
+                fullWidth
+                value={jabs.globalCooldownOverride === null
+                  ? ''
+                  : String(jabs.globalCooldownOverride)}
+                onChange={onGlobalCooldownOverrideChange}
+                helperText={'Empty uses the JABS default GCD length when this skill is subject to GCD. Enter a positive number to override.'}
+                slotProps={{
+                  htmlInput: {
+                    inputMode: 'numeric',
+                    min: 1,
+                    step: 1
+                  }
+                }}
+              />
+            </Grid>
+            <Grid size={6}>
+              <Stack spacing={0.5}>
+                {boolSwitch('oGCD (off-global cooldown)', jabs.ogcd, 'ogcd')}
+                <Typography variant={'caption'} color={'text.secondary'}>
+                  On: this skill does not start or respect the battler-wide GCD (when GCD is enabled and the skill
+                  type is
+                  whitelisted).
+                </Typography>
+              </Stack>
+            </Grid>
+          </Grid>
+
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Combo chain
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            After this skill resolves, the battler may chain into the follow-up skill after the link window (frames)
+            has
+            passed — but only if this skill’s cooldown is longer than that link time (JABS requirement). Each step in
+            a
+            chain can extend remaining cooldown by its own link time. By default the follow-up only opens if this
+            skill
+            hit something; use free combo below to open the window on whiff.
+          </Typography>
+          {comboLinkPastCooldown && (
+            <Alert severity={'warning'}>
+              Link frames are not shorter than this skill’s cooldown. In-game the combo window will never open —
+              raise cooldown or lower link frames.
+            </Alert>
+          )}
+          {comboNoteInvalid
+            ? (
+              <>
+                <Alert severity={'warning'}>
+                  This note does not match the expected combo shape
+                  {' '}
+                  <Typography component={'span'} variant={'body2'} sx={{ fontFamily: 'monospace' }}>
+                    [followUpSkillId, linkFrames]
+                  </Typography>
+                  . Edit the raw tag or clear it.
+                </Alert>
+                {rawField('Combo tag (raw)', jabs.comboRaw, 'comboRaw')}
+              </>
+            )
+            : (
+              <Grid container spacing={2}>
+                <Grid size={6}>
+                  <Autocomplete<JabsSkillPickerRow, false, false, false>
+                    fullWidth
+                    size={'small'}
+                    options={comboSkillOptions}
+                    getOptionLabel={(o) => o.label}
+                    isOptionEqualToValue={(
+                      a,
+                      b
+                    ) => a.id === b.id}
+                    value={selectedComboSkillOption}
+                    onChange={(
+                      _e,
+                      option
+                    ) =>
+                    {
+                      const link =
+                        comboParsed === null
+                          ? ''
+                          : String(comboParsed.linkFrames);
+                      if (option === null)
+                      {
+                        patchComboFromFields(null, link);
+                        return;
+                      }
+                      patchComboFromFields(option.id, link);
+                    }}
+                    filterOptions={(
+                      options,
+                      state
+                    ) =>
+                    {
+                      const q = state.inputValue.trim()
+                        .toLowerCase();
+                      if (q === '')
+                      {
+                        return options;
+                      }
+                      return options.filter((o) =>
+                        o.label.toLowerCase()
+                          .includes(q)
+                        || String(o.id)
+                          .includes(q));
+                    }}
+                    renderInput={(params) =>
+                      (
+                        <TextField
+                          {...params}
+                          variant={'outlined'}
+                          label={'Follow-up skill'}
+                          placeholder={'No combo…'}
+                          helperText={'Skill id that can replace this one on the same slot after the link elapses. Clear to remove the combo tag.'}
+                        />
+                      )}
+                  />
+                </Grid>
+                <Grid size={6}>
+                  <TextField
+                    label={'Link frames (until follow-up is available)'}
+                    size={'small'}
+                    fullWidth
+                    disabled={comboParsed === null && comboRawIsBlank}
+                    value={comboParsed === null
+                      ? ''
+                      : String(comboParsed.linkFrames)}
+                    onChange={(e) =>
+                    {
+                      const sid =
+                        comboParsed === null
+                          ? null
+                          : comboParsed.skillId;
+                      patchComboFromFields(sid, e.target.value);
+                    }}
+                    helperText={linkFramesHelperText}
+                    slotProps={{
+                      htmlInput: {
+                        inputMode: 'numeric',
+                        min: 0,
+                        max: maxUsableLinkFrames,
+                        step: 1,
+                      },
+                    }}
+                  />
+                </Grid>
+              </Grid>
+            )}
+          <Stack direction={'row'} spacing={2} flexWrap={'wrap'}>
+            {boolSwitch(
+              'Combo starter (AI may open this chain)',
+              jabs.comboStarter,
+              'comboStarter'
+            )}
+            {boolSwitch(
+              'Free combo (open window even on miss)',
+              jabs.freeCombo,
+              'freeCombo'
+            )}
+            {boolSwitch(
+              'Exclude from random AI skill pick',
+              jabs.aiSkillExclusion,
+              'aiSkillExclusion'
+            )}
+          </Stack>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            AI normally skips tagged combo skills unless combo starter is set. Use exclusion on enders that should
+            only be
+            reachable through the chain, not pulled at random.
+          </Typography>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * Which action-map event this skill copies onto the battlefield, and whether it shows in the menu.
+   *
+   * A skill's hitbox, visuals and movement are authored as an event on a dedicated action map rather
+   * than derived from the skill row, so this section is what ties the two together.
+   */
+  const renderActionMapSection = () =>
+  {
+    const overrodeMapId = mapIdOverride.trim() !== '';
+    const activeMapNote = overrodeMapId
+      ? '; you overrode it above'
+      : '';
+
+    return (
+      <BoardSectionCard title={'Action map & menu'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            JABS does not build map actions from the skill database alone. Each skill points at an event on a
+            dedicated
+            {' '}
+            <Typography component={'span'} variant={'caption'} sx={{ fontStyle: 'italic' }}>
+              action map
+            </Typography>
+            {' '}
+            — that event is the template copied onto the battlefield when the skill fires. Pick which template here;
+            use
+            the map override only if you are testing a different action map than the plugin default.
+          </Typography>
+          {mapError !== null && (
+            <Alert severity={'warning'}>
+              {mapError}
+            </Alert>
+          )}
+          <Typography variant={'caption'} color={'text.secondary'}>
+            {`Active action map: #${resolvedMapId} (plugin default is #${pluginActionMapId}${activeMapNote}).`}
+          </Typography>
+          <TextField
+            id={'jabs-action-map-override'}
+            variant={'outlined'}
+            size={'small'}
+            fullWidth
+            label={'Action map id override'}
+            placeholder={String(pluginActionMapId)}
+            value={mapIdOverride}
+            onChange={(e) =>
+            {
+              setMapIdOverride(e.target.value);
+            }}
+            helperText={'Leave empty to use the map id from JABS plugin parameters. Set only when this skill should pull templates from another map.'}
+            slotProps={{
+              htmlInput: {
+                inputMode: 'numeric',
+                min: 1,
+                step: 1
+              },
+            }}
+          />
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Which event is this skill?
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Event id on the action map — same id you see in the editor’s event list. This is the skill’s hitbox,
+            visuals,
+            and movement as authored on that map.
+          </Typography>
+          <Autocomplete<ActionIdPickerRow, false, false, false>
+            fullWidth
+            size={'small'}
+            options={pickerOptions}
+            getOptionLabel={(o) => o.label}
+            isOptionEqualToValue={(
+              a,
+              b
+            ) => a.id === b.id}
+            value={selectedPickerOption}
+            onChange={(
+              _e,
+              option
+            ) =>
+            {
+              if (option === null)
+              {
+                patch({ actionId: null });
+                return;
+              }
+              patch({ actionId: option.id });
+            }}
+            filterOptions={(
+              options,
+              state
+            ) =>
+            {
+              const q = state.inputValue.trim()
+                .toLowerCase();
+              if (q === '')
+              {
+                return options;
+              }
+              return options.filter((o) =>
+                o.label.toLowerCase()
+                  .includes(q)
+                || (o.id !== null && String(o.id)
+                  .includes(q)));
+            }}
+            renderInput={(params) =>
+              (
+                <TextField
+                  {...params}
+                  variant={'outlined'}
+                  label={'Action template (map event id)'}
+                  placeholder={'Search by id or name…'}
+                />
+              )}
+          />
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Skill menu
+          </Typography>
+          {boolSwitch(
+            'Hide this skill from the JABS quick menu',
+            jabs.hideFromJabsMenu,
+            'hideFromJabsMenu'
+          )}
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Still usable from AI, common events, or other scripts — only the player-facing menu is affected.
+          </Typography>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * The dodge movement this skill performs, and the invincibility it grants while doing it.
+   *
+   * Move type gates everything else: without one there is no dodge tag to hang steps, speed or an
+   * i-frame window on, so each dependent field disables itself and says which choice is missing.
+   * Whole-dodge invincibility and a manual i-frame window are two spellings of the same idea, so
+   * turning either on clears the other.
+   */
+  const renderDodgeSection = () =>
+  {
+    const hasNoMoveType = jabs.moveType === null;
+    const moveTypeHelperText = hasNoMoveType
+      ? 'Pick a move type first.'
+      : undefined;
+
+    // the iframe window has prerequisites, and each field names the nearest one still unmet rather than
+    // sitting disabled without saying why. The end frame has one more of them than the start frame does.
+    let iframesStartHelperText = moveTypeHelperText;
+    if (hasNoMoveType === false && jabs.invincibleDodge === true)
+    {
+      iframesStartHelperText = 'Turn off invincible dodge to edit.';
+    }
+
+    let iframesEndHelperText = iframesStartHelperText;
+    if (iframesEndHelperText === undefined && jabs.iframesStartFrame === null)
+    {
+      iframesEndHelperText = 'Set start frame first.';
+    }
+
+    return (
+      <BoardSectionCard title={'Dodge'} collapsible defaultExpanded={false}>
+        <Grid container spacing={2}>
+          <Grid size={12}>
+            <Typography variant={'caption'} color={'text.secondary'}>
+              Pick a move type first. None means no dodge movement tag; steps, speed, invincibility, and i-frames stay
+              disabled until you choose forward, backward, or directional.
+            </Typography>
+          </Grid>
+          <Grid size={12}>
+            <Autocomplete<MoveTypePickerRow, false, true, false>
+              fullWidth
+              size={'small'}
+              disableClearable
+              options={MOVE_TYPE_PICKER_ROWS}
+              getOptionLabel={(o) => o.label}
+              isOptionEqualToValue={(
+                a,
+                b
+              ) => a.value === b.value}
+              value={
+                MOVE_TYPE_PICKER_ROWS.find((r) => r.value === jabs.moveType)
+                ?? MOVE_TYPE_PICKER_ROWS[ 0 ]
+              }
+              onChange={(
+                _e,
+                option
+              ) =>
+              {
+                if (option === null || option.value === null)
+                {
+                  patch({
+                    moveType: null,
+                    dodgeSteps: null,
+                    dodgeSpeed: null,
+                    invincibleDodge: false,
+                    iframesStartFrame: null,
+                    iframesEndFrame: null,
+                  });
+                  return;
+                }
+                patch({ moveType: option.value });
+              }}
+              renderInput={(params) =>
+                (
+                  <TextField
+                    {...params}
+                    label={'Move type'}
+                    helperText={'Required before editing other dodge fields. None clears dodge tags from the note.'}
+                  />
+                )}
+            />
+          </Grid>
+          <Grid size={6}>
+            {intField(
+              'Dodge steps',
+              jabs.dodgeSteps,
+              'dodgeSteps',
+              {
+                disabled: hasNoMoveType,
+                helperText: moveTypeHelperText,
+              }
+            )}
+          </Grid>
+          <Grid size={6}>
+            {floatField(
+              'Dodge speed',
+              jabs.dodgeSpeed,
+              'dodgeSpeed',
+              {
+                disabled: hasNoMoveType,
+                helperText: moveTypeHelperText,
+              }
+            )}
+          </Grid>
+          <Grid size={12}>
+            <Stack spacing={0.5}>
+              <FormControlLabel
+                disabled={hasNoMoveType}
+                control={
+                  <Switch
+                    size={'small'}
+                    checked={jabs.invincibleDodge}
+                    disabled={hasNoMoveType}
+                    onChange={(e) =>
+                    {
+                      if (e.target.checked === true)
+                      {
+                        patch({
+                          invincibleDodge: true,
+                          iframesStartFrame: null,
+                          iframesEndFrame: null,
+                        });
+                        return;
+                      }
+                      patch({ invincibleDodge: false });
+                    }}
+                  />
+                }
+                label={'Invincible dodge (full dodge duration)'}
+              />
+              <Typography variant={'caption'} color={'text.secondary'}>
+                {hasNoMoveType
+                  ? 'Pick a move type first.'
+                  : 'Same as i-frames for the entire dodge animation — mutually exclusive with a manual frame window below.'}
+              </Typography>
+            </Stack>
+          </Grid>
+          <Grid size={12}>
+            <Typography variant={'caption'} color={'text.secondary'} sx={{
+              display: 'block',
+              mb: 1
+            }}>
+              Manual i-frames
+              {' '}
+              <Typography component={'span'} variant={'caption'} sx={{ fontFamily: 'monospace' }}>
+                {'<iframes:[START_FRAME, END_FRAME]>'}
+              </Typography>
+              {' '}
+              — both frames required to write the tag. Disabled while invincible dodge is on; typing a start frame
+              turns
+              invincible dodge off.
+              {hasNoMoveType
+                ? ' Pick a move type first.'
+                : ''}
+            </Typography>
+          </Grid>
+          <Grid size={6}>
+            <TextField
+              label={'I-frames start frame'}
+              size={'small'}
+              fullWidth
+              disabled={hasNoMoveType || jabs.invincibleDodge === true}
+              value={jabs.iframesStartFrame === null
+                ? ''
+                : String(jabs.iframesStartFrame)}
+              onChange={(e) =>
+              {
+                const t = e.target.value.trim();
+                if (t === '')
+                {
+                  patch({
+                    iframesStartFrame: null,
+                    iframesEndFrame: null
+                  });
+                  return;
+                }
+                const n = parseInt(t, 10);
+                if (Number.isNaN(n))
+                {
+                  return;
+                }
+                patch({
+                  iframesStartFrame: n,
+                  invincibleDodge: false
+                });
+              }}
+              helperText={iframesStartHelperText}
+              slotProps={{
+                htmlInput: {
+                  inputMode: 'numeric',
+                  min: 0,
+                  step: 1
+                }
+              }}
+            />
+          </Grid>
+          <Grid size={6}>
+            <TextField
+              label={'I-frames end frame'}
+              size={'small'}
+              fullWidth
+              disabled={
+                hasNoMoveType
+                || jabs.invincibleDodge === true
+                || jabs.iframesStartFrame === null
+              }
+              value={jabs.iframesEndFrame === null
+                ? ''
+                : String(jabs.iframesEndFrame)}
+              onChange={(e) =>
+              {
+                onNullableInt(e, 'iframesEndFrame');
+              }}
+              helperText={iframesEndHelperText}
+              slotProps={{
+                htmlInput: {
+                  inputMode: 'numeric',
+                  min: 0,
+                  step: 1
+                }
+              }}
+            />
+          </Grid>
+        </Grid>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * The cosmetic motion layered onto the caster when the skill fires: which icon swings, how hard the
+   * body leans, and which of the motion presets plays.
+   *
+   * Two of the numeric fields only apply to a subset of the presets, and each says which subset rather
+   * than sitting greyed out with no explanation.
+   */
+  const renderJuiceMotionSection = () =>
+  {
+    // span belongs to the arc family and stab tip to the thrust family; the rest of the presets read
+    // neither, which is what both fields fall back to saying.
+    const usesArcSpan =
+      jabs.juiceMotion === 'arc'
+      || jabs.juiceMotion === 'arc-reverse'
+      || jabs.juiceMotion === 'arc-oscillate';
+    const usesStabTip =
+      jabs.juiceMotion === 'bash'
+      || jabs.juiceMotion === 'recoil'
+      || jabs.juiceMotion === 'stab-forward';
+
+    const motionPresetValue =
+      jabs.juiceMotion !== null
+      && JUICE_MOTIONS.includes(jabs.juiceMotion as (typeof JUICE_MOTIONS)[number])
+        ? jabs.juiceMotion as (typeof JUICE_MOTIONS)[number]
+        : null;
+
+    // the profile field explains the state it is in: pointing at a row that no longer exists,
+    // deliberately left to the plugin, or naming a real profile -- in which case the only thing left to
+    // say is the charset a new key has to satisfy.
+    let juiceProfileHelperText =
+      `Charset is ${JUICE_PROFILE_KEY_PATTERN.source} — author additional profiles on the JABS config board.`;
+    if (selectedJuiceProfileOption.isOrphan)
+    {
+      juiceProfileHelperText =
+        'This skill references a profile that does not exist on the JABS config board; add the row or pick "None" to clear.';
+    }
+    else if (selectedJuiceProfileOption.value === null)
+    {
+      juiceProfileHelperText =
+        'Plugin will resolve a profile from the caster\'s equipped weapon / armor at runtime.';
+    }
+
+    return (
+      <BoardSectionCard title={'Juice motion'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Procedural motion polish layered onto the caster when this skill fires: weapon swing icon overlay, body
+            tilt, and squish. All fields are optional — leave them empty to use the inferred icon from equipment and
+            the built-in defaults. These are pure cosmetics; combat math is unchanged.
+          </Typography>
+
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Weapon swing icon
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            The IconSet icon shown briefly over the caster during the swing. When no override is set, the swing uses
+            the icon from the caster's equipped weapon (or the offhand armor / orb for shield-style strikes).
+          </Typography>
+          <Stack direction={'column'} spacing={1}>
+            <FormControlLabel
+              control={
+                <Switch
+                  size={'small'}
+                  checked={jabs.juiceIconIndex !== null && jabs.juiceIconIndex >= 0}
+                  onChange={(e) =>
+                  {
+                    if (e.target.checked === true)
+                    {
+                      patch({ juiceIconIndex: juiceIconPickerIndex });
+                      return;
+                    }
+                    patch({ juiceIconIndex: null });
+                  }}
+                />
+              }
+              label={'Override the swing icon for this skill'}
+            />
+            <IconIndexField
+              disabled={jabs.juiceIconIndex === null}
+              value={juiceIconPickerIndex}
+              onChange={(next) =>
+              {
+                const safe = Math.max(0, Math.trunc(next));
+                setJuiceIconPickerIndex(safe);
+                if (jabs.juiceIconIndex !== null)
+                {
+                  patch({ juiceIconIndex: safe });
+                }
+              }}
+            />
+          </Stack>
+
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Swing intensity profile
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Picks a named tilt-and-swing multiplier row. Each profile pairs a tilt multiplier (how hard the
+            caster's body leans on impact) with a swing multiplier (how wide the swing icon sweeps) so heavy
+            weapons can read beefier while daggers stay flicky. Profiles are authored on the JABS config
+            board's Juice tab; pick "None" here to let the plugin infer the row from the caster's weapon
+            type (or offhand armor for shield-style strikes).
+          </Typography>
+          <Autocomplete<JuiceProfileOption, false, true, false>
+            fullWidth
+            size={'small'}
+            options={juiceProfileOptions}
+            value={selectedJuiceProfileOption}
+            disableClearable={true}
+            isOptionEqualToValue={(opt, val) => opt.value === val.value}
+            getOptionLabel={(opt) => opt.label}
+            renderOption={(props, opt) =>
+            {
+              const { key, ...rest } = props as typeof props & { key?: React.Key };
+              return (
+                <li key={String(key ?? opt.label)} {...rest}>
+                  <Stack>
+                    <Typography variant={'body2'}>
+                      {opt.label}
+                    </Typography>
+                    {opt.value === null && (
+                      <Typography variant={'caption'} color={'text.secondary'}>
+                        clears the skill's tag; plugin infers from gear at strike time.
+                      </Typography>
+                    )}
+                    {opt.value !== null && opt.isOrphan && (
+                      <Typography variant={'caption'} color={'warning.main'}>
+                        authored on this skill but not present in config.jabs.json -&gt; juice.profiles.
+                      </Typography>
+                    )}
+                  </Stack>
+                </li>
+              );
+            }}
+            onChange={(_e, v) =>
+            {
+              patch({ juiceWeaponStyle: v.value });
+            }}
+            renderInput={(params) =>
+              (
+                <TextField
+                  {...params}
+                  label={'Profile key'}
+                  helperText={juiceProfileHelperText}
+                />
+              )}
+          />
+          {jabsConfig === null && (
+            <Alert severity={'info'} variant={'outlined'} sx={{ mt: 1 }}>
+              config.jabs.json hasn't finished loading yet — the profile list will populate once it does.
+            </Alert>
+          )}
+
+          <Divider sx={{ my: 1 }}/>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Motion preset
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Picks the weapon overlay motion. On healing skills, omitting this keeps the caster-only support squish;
+            any motion here opts the skill into the full strike juice. Span / stab tip below only apply to the
+            relevant presets; repeat count applies to every preset.
+          </Typography>
+          <Autocomplete<(typeof JUICE_MOTIONS)[number], false, false, false>
+            fullWidth
+            size={'small'}
+            options={[ ...JUICE_MOTIONS ]}
+            value={motionPresetValue}
+            onChange={(
+              _e,
+              v
+            ) =>
+            {
+              patch({ juiceMotion: v ?? null });
+            }}
+            renderInput={(params) =>
+              (
+                <TextField
+                  {...params}
+                  label={'Motion preset'}
+                  placeholder={'Inherit default'}
+                  helperText={
+                    'arc / arc-reverse / arc-oscillate use span; bash / recoil / stab-forward use stab tip degrees; present lifts the icon upward on screen; repeat count applies to every preset (rotations for spin, sweeps for arc-oscillate, replays for the rest).'
+                  }
+                />
+              )}
+          />
+          <Grid container spacing={2}>
+            <Grid size={4}>
+              {intField(
+                'Arc span (degrees)',
+                jabs.juiceArcSpanDegrees,
+                'juiceArcSpanDegrees',
+                {
+                  disabled: usesArcSpan === false,
+                  helperText: usesArcSpan
+                    ? 'Default 120; typical 30–300.'
+                    : 'Only arc / arc-reverse / arc-oscillate use this.',
+                }
+              )}
+            </Grid>
+            <Grid size={4}>
+              {intField(
+                'Repeat count',
+                jabs.juiceRepeatCount,
+                'juiceRepeatCount',
+                {
+                  helperText:
+                    'Number of repeats within the swing (1–8): rotations for spin / spin-reverse, alternating '
+                    + 'sweeps for arc-oscillate, replays for every other preset.',
+                }
+              )}
+            </Grid>
+            <Grid size={4}>
+              {intField(
+                'Stab tip degrees',
+                jabs.juiceStabTipDegrees,
+                'juiceStabTipDegrees',
+                {
+                  disabled: usesStabTip === false,
+                  helperText: usesStabTip
+                    ? 'Tip bearing from Pixi +x at rotation 0 (signed). Empty = preset default (sword diagonal for stab; barrel toward −x for bash / recoil).'
+                    : 'Only bash / recoil / stab-forward use this.',
+                }
+              )}
+            </Grid>
+          </Grid>
+
+          <Divider sx={{ my: 1 }}/>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Overlay flags
+          </Typography>
+          {boolSwitch(
+            'Profile gun (flip horizontally for east/west aim)',
+            jabs.juiceProfileGun,
+            'juiceProfileGun'
+          )}
+          <Typography variant={'caption'} color={'text.secondary'}>
+            For side-profile firearm icons: mirror left/right instead of rotating ~180°, so the grip never reads
+            upside-down. Up / down still use ±90° rotation — pure side-view art cannot read as true top-down aim.
+          </Typography>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
   return (
     <Stack spacing={1}>
       <Typography variant={'body2'} color={'text.secondary'}>
         JABS settings for this skill. Values are saved with the skill automatically.
       </Typography>
 
-      <BoardSectionCard title={'Action map & menu'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              JABS does not build map actions from the skill database alone. Each skill points at an event on a
-              dedicated
-              {' '}
-              <Typography component={'span'} variant={'caption'} sx={{ fontStyle: 'italic' }}>
-                action map
-              </Typography>
-              {' '}
-              — that event is the template copied onto the battlefield when the skill fires. Pick which template here;
-              use
-              the map override only if you are testing a different action map than the plugin default.
-            </Typography>
-            {mapError !== null
-              ? (
-                <Alert severity={'warning'}>
-                  {mapError}
-                </Alert>
-              )
-              : null}
-            <Typography variant={'caption'} color={'text.secondary'}>
-              {`Active action map: #${resolvedMapId} (plugin default is #${pluginActionMapId}${mapIdOverride.trim() === ''
-                ? ''
-                : '; you overrode it above'}).`}
-            </Typography>
-            <TextField
-              id={'jabs-action-map-override'}
-              variant={'outlined'}
-              size={'small'}
-              fullWidth
-              label={'Action map id override'}
-              placeholder={String(pluginActionMapId)}
-              value={mapIdOverride}
-              onChange={(e) =>
-              {
-                setMapIdOverride(e.target.value);
-              }}
-              helperText={'Leave empty to use the map id from JABS plugin parameters. Set only when this skill should pull templates from another map.'}
-              slotProps={{
-                htmlInput: {
-                  inputMode: 'numeric',
-                  min: 1,
-                  step: 1
-                },
-              }}
-            />
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Which event is this skill?
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Event id on the action map — same id you see in the editor’s event list. This is the skill’s hitbox,
-              visuals,
-              and movement as authored on that map.
-            </Typography>
-            <Autocomplete<ActionIdPickerRow, false, false, false>
-              fullWidth
-              size={'small'}
-              options={pickerOptions}
-              getOptionLabel={(o) => o.label}
-              isOptionEqualToValue={(
-                a,
-                b
-              ) => a.id === b.id}
-              value={selectedPickerOption}
-              onChange={(
-                _e,
-                option
-              ) =>
-              {
-                if (option === null)
-                {
-                  patch({ actionId: null });
-                  return;
-                }
-                patch({ actionId: option.id });
-              }}
-              filterOptions={(
-                options,
-                state
-              ) =>
-              {
-                const q = state.inputValue.trim()
-                  .toLowerCase();
-                if (q === '')
-                {
-                  return options;
-                }
-                return options.filter((o) =>
-                  o.label.toLowerCase()
-                    .includes(q)
-                  || (o.id !== null && String(o.id)
-                    .includes(q)));
-              }}
-              renderInput={(params) =>
-                (
-                  <TextField
-                    {...params}
-                    variant={'outlined'}
-                    label={'Action template (map event id)'}
-                    placeholder={'Search by id or name…'}
-                  />
-                )}
-            />
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Skill menu
-            </Typography>
-            {boolSwitch(
-              'Hide this skill from the JABS quick menu',
-              jabs.hideFromJabsMenu,
-              'hideFromJabsMenu'
-            )}
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Still usable from AI, common events, or other scripts — only the player-facing menu is affected.
-            </Typography>
-          </Stack>
-      </BoardSectionCard>
+      {renderActionMapSection()}
 
-      <BoardSectionCard title={'Casting, map execution & spawn animations'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              One accordion for the full pipeline: Phase 1 cast time, optional map spawn flashes, then wind-up animation
-              and
-              telegraph; Phase 2 how the action behaves on the map. Cast time is in frames (60 ≈ one second at default
-              FPS).
-              With no cast time there is no standing channel, but spawn animations and Phase 2 still apply once the
-              action
-              exists.
-            </Typography>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Phase 1 — Wind-up & cast
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={12}>
-                <TextField
-                  label={'Cast time (frames)'}
-                  size={'small'}
-                  fullWidth
-                  value={jabs.castTime === null
-                    ? ''
-                    : String(jabs.castTime)}
-                  onChange={onCastTimeChange}
-                  helperText={'Empty or 0 = no wind-up. Higher = longer channel before the action event is placed.'}
-                  slotProps={{
-                    htmlInput: {
-                      inputMode: 'numeric',
-                      min: 0,
-                      step: 1
-                    },
-                  }}
-                />
-              </Grid>
-              <Grid size={12}>
-                <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-                  Map spawn animations (optional)
-                </Typography>
-                <Typography variant={'caption'} color={'text.secondary'}>
-                  Separate from the Database battle animation and from wind-up below. Same picker as elsewhere;
-                  weapon-type
-                  entries are omitted on purpose.
-                </Typography>
-              </Grid>
-              <Grid size={6}>
-                <Autocomplete<RmmzSkillAnimationOption, false, false, false>
-                  fullWidth
-                  size={'small'}
-                  options={selfAnimationOptions}
-                  groupBy={(option) => option.group}
-                  getOptionLabel={(option) => option.label}
-                  isOptionEqualToValue={(
-                    a,
-                    b
-                  ) => a.value === b.value}
-                  value={
-                    jabs.selfAnimationId === null
-                      ? null
-                      : skillAnimationOptionForValue(jabs.selfAnimationId, castAnimationBaseOptions)
-                  }
-                  onChange={(
-                    _e,
-                    option
-                  ) =>
-                  {
-                    patch({
-                      selfAnimationId: option === null
-                        ? null
-                        : option.value
-                    });
-                  }}
-                  filterOptions={(
-                    options,
-                    state
-                  ) =>
-                  {
-                    const q = state.inputValue.trim()
-                      .toLowerCase();
-                    if (q === '')
-                    {
-                      return options;
-                    }
-                    return options.filter((o) =>
-                      o.label.toLowerCase()
-                        .includes(q)
-                      || o.detail.toLowerCase()
-                        .includes(q)
-                      || o.group.toLowerCase()
-                        .includes(q)
-                      || String(o.value)
-                        .includes(q));
-                  }}
-                  slotProps={{
-                    listbox: { style: { maxHeight: 280 } },
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        variant={'outlined'}
-                        label={'Self / owner animation'}
-                        placeholder={'Search animations…'}
-                        helperText={'Plays on the acting battler tied to the map action (optional).'}
-                      />
-                    )}
-                />
-              </Grid>
-              <Grid size={6}>
-                <Autocomplete<RmmzSkillAnimationOption, false, false, false>
-                  fullWidth
-                  size={'small'}
-                  options={onCastSkillAnimationOptions}
-                  groupBy={(option) => option.group}
-                  getOptionLabel={(option) => option.label}
-                  isOptionEqualToValue={(
-                    a,
-                    b
-                  ) => a.value === b.value}
-                  value={
-                    jabs.onCastAnimationId === null
-                      ? null
-                      : skillAnimationOptionForValue(jabs.onCastAnimationId, castAnimationBaseOptions)
-                  }
-                  onChange={(
-                    _e,
-                    option
-                  ) =>
-                  {
-                    patch({
-                      onCastAnimationId: option === null
-                        ? null
-                        : option.value
-                    });
-                  }}
-                  filterOptions={(
-                    options,
-                    state
-                  ) =>
-                  {
-                    const q = state.inputValue.trim()
-                      .toLowerCase();
-                    if (q === '')
-                    {
-                      return options;
-                    }
-                    return options.filter((o) =>
-                      o.label.toLowerCase()
-                        .includes(q)
-                      || o.detail.toLowerCase()
-                        .includes(q)
-                      || o.group.toLowerCase()
-                        .includes(q)
-                      || String(o.value)
-                        .includes(q));
-                  }}
-                  slotProps={{
-                    listbox: { style: { maxHeight: 280 } },
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        variant={'outlined'}
-                        label={'On-cast / spawn flash'}
-                        placeholder={'Search animations…'}
-                        helperText={'Fires when the map action is actually spawned or cast through (optional).'}
-                      />
-                    )}
-                />
-              </Grid>
-              {contextSkillAnimationId !== null
-                ? (
-                  <Grid size={12}>
-                    <Typography variant={'caption'} color={'text.secondary'}>
-                      {`This skill’s database animation id is ${contextSkillAnimationId} — use that as reference if you want the map action to match battle timing.`}
-                    </Typography>
-                  </Grid>
-                )
-                : null}
-              <Grid size={12}>
-                <Autocomplete<RmmzSkillAnimationOption, false, false, false>
-                  fullWidth
-                  size={'small'}
-                  disabled={jabs.castTime === null}
-                  options={castAnimationOptions}
-                  groupBy={(option) => option.group}
-                  getOptionLabel={(option) => option.label}
-                  isOptionEqualToValue={(
-                    a,
-                    b
-                  ) => a.value === b.value}
-                  value={
-                    jabs.castAnimation === null
-                      ? null
-                      : skillAnimationOptionForValue(jabs.castAnimation, castAnimationBaseOptions)
-                  }
-                  onChange={(
-                    _e,
-                    option
-                  ) =>
-                  {
-                    patch({
-                      castAnimation: option === null
-                        ? null
-                        : option.value
-                    });
-                  }}
-                  filterOptions={(
-                    options,
-                    state
-                  ) =>
-                  {
-                    const q = state.inputValue.trim()
-                      .toLowerCase();
-                    if (q === '')
-                    {
-                      return options;
-                    }
-                    return options.filter((o) =>
-                      o.label.toLowerCase()
-                        .includes(q)
-                      || o.detail.toLowerCase()
-                        .includes(q)
-                      || o.group.toLowerCase()
-                        .includes(q)
-                      || String(o.value)
-                        .includes(q));
-                  }}
-                  slotProps={{
-                    listbox: { style: { maxHeight: 280 } },
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        variant={'outlined'}
-                        label={'Animation during wind-up'}
-                        placeholder={'Search animations…'}
-                        helperText={
-                          jabs.castTime === null
-                            ? 'Set cast time first — nothing plays without a wind-up.'
-                            : 'Shown on the caster while cast time counts down (optional).'
-                        }
-                      />
-                    )}
-                />
-              </Grid>
-            </Grid>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Cast preview (telegraph)
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              While casting, JABS can preview where the action will land so players can react. Turn that off for stealth
-              or surprise skills, or shorten the warning window with “frames left” below.
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={12}>
-                {boolSwitch(
-                  'No cast preview (hide telegraph)',
-                  jabs.noCastPreview,
-                  'noCastPreview',
-                  jabs.castTime === null
-                )}
-              </Grid>
-              <Grid size={6}>
-                <TextField
-                  label={'Start warning this many frames before finish'}
-                  size={'small'}
-                  fullWidth
-                  disabled={jabs.castTime === null || jabs.noCastPreview}
-                  value={jabs.castPreviewWarnAt === null
-                    ? ''
-                    : String(jabs.castPreviewWarnAt)}
-                  onChange={onCastPreviewWarnAtChange}
-                  helperText={
-                    jabs.castTime === null
-                      ? 'Set cast time to configure preview timing.'
-                      : jabs.noCastPreview
-                        ? 'Unavailable while preview is disabled.'
-                        : `Must be ≤ cast time (${jabs.castTime} frames). Example: 30 = show telegraph for the last half-second of a 60-frame cast.`
-                  }
-                  slotProps={{
-                    htmlInput: {
-                      inputMode: 'numeric',
-                      min: 0,
-                      max: jabs.castTime === null
-                        ? undefined
-                        : jabs.castTime,
-                      step: 1,
-                    },
-                  }}
-                />
-              </Grid>
-            </Grid>
+      {renderCastingSection()}
 
-            <Divider sx={{ my: 1 }}/>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Phase 2 — Action on the map
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Same accordion as above: after wind-up (if any), these fields control the spawned event — direct vs
-              projectile,
-              AI spacing, how long it lives, knockback, delayed detonation, linger, and on-defeat placement.
-            </Typography>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Direct targeting
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              No separate projectile event: the hit resolves toward a target in range. If both tags are present, direct
-              lock wins.
-            </Typography>
-            <Stack direction={'row'} spacing={2} flexWrap={'wrap'}>
-              {boolSwitch(
-                'Instant / direct (no map projectile)',
-                jabs.direct,
-                'direct'
-              )}
-              {boolSwitch(
-                'Snap to target at fire time (removes dodge window)',
-                jabs.directLock,
-                'directLock'
-              )}
-            </Stack>
-            <Grid container spacing={2}>
-              <Grid size={4}>
-                {floatField(
-                  'AI standoff distance (tiles)',
-                  jabs.proximity,
-                  'proximity',
-                  {
-                    helperText:
-                      'How close an AI battler tries to get before using this skill (non-user scopes).',
-                  }
-                )}
-              </Grid>
-              <Grid size={4}>
-                {intField(
-                  'Action lifetime (frames)',
-                  jabs.duration,
-                  'duration',
-                  {
-                    helperText:
-                      'How long the action event stays on the map. Also ends after max hits. JABS enforces a small minimum.',
-                  }
-                )}
-              </Grid>
-              <Grid size={4}>
-                {intField(
-                  'Knockback distance (tiles)',
-                  jabs.knockback,
-                  'knockback',
-                  {
-                    helperText: 'Tiles the defender is pushed when this skill connects.',
-                  }
-                )}
-              </Grid>
-              <Grid size={12}>
-                <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-                  Delayed detonation
-                </Typography>
-                <Typography variant={'caption'} color={'text.secondary'}>
-                  Timed trap / mine: waits on the map, then fires. Use -1 frames with “touch to trigger” for touch-only
-                  arming (see JABS warning if touch is off).
-                </Typography>
-              </Grid>
-              {delayNoteInvalid
-                ? (
-                  <>
-                    <Grid size={12}>
-                      <Alert severity={'warning'}>
-                        This note does not match the expected delay shape
-                        {' '}
-                        <Typography component={'span'} variant={'body2'} sx={{ fontFamily: 'monospace' }}>
-                          [frames, true|false [, triggerRadius]]
-                        </Typography>
-                        . Edit the raw tag or clear it.
-                      </Alert>
-                    </Grid>
-                    <Grid size={12}>
-                      {rawField('Delay tag (raw)', jabs.delayRaw, 'delayRaw')}
-                    </Grid>
-                  </>
-                )
-                : (
-                  <>
-                    <Grid size={4}>
-                      <TextField
-                        label={'Frames until detonation'}
-                        size={'small'}
-                        fullWidth
-                        value={delayParsed === null
-                          ? ''
-                          : String(delayParsed.frames)}
-                        onChange={(e) =>
-                        {
-                          const r =
-                            delayParsed === null
-                              ? ''
-                              : delayParsed.radius !== null
-                                ? String(delayParsed.radius)
-                                : '';
-                          patchDelayFromFields(
-                            e.target.value,
-                            delayParsed?.touchable ?? true,
-                            r
-                          );
-                        }}
-                        helperText={'-1 = never auto-detonate (needs touch).'}
-                        slotProps={{ htmlInput: { inputMode: 'numeric' } }}
-                      />
-                    </Grid>
-                    <Grid size={4}>
-                      <FormControlLabel
-                        disabled={delayParsed === null}
-                        control={
-                          <Switch
-                            size={'small'}
-                            checked={delayParsed?.touchable ?? false}
-                            onChange={(e) =>
-                            {
-                              const f =
-                                delayParsed === null
-                                  ? ''
-                                  : String(delayParsed.frames);
-                              const r =
-                                delayParsed === null
-                                  ? ''
-                                  : delayParsed.radius !== null
-                                    ? String(delayParsed.radius)
-                                    : '';
-                              patchDelayFromFields(
-                                f,
-                                e.target.checked,
-                                r
-                              );
-                            }}
-                          />
-                        }
-                        label={'Trigger when an enemy steps on it'}
-                      />
-                    </Grid>
-                    <Grid size={4}>
-                      <TextField
-                        label={'Optional touch radius (tiles)'}
-                        size={'small'}
-                        fullWidth
-                        disabled={delayParsed === null}
-                        value={
-                          delayParsed !== null && delayParsed.radius !== null
-                            ? String(delayParsed.radius)
-                            : ''
-                        }
-                        onChange={(e) =>
-                        {
-                          const f =
-                            delayParsed === null
-                              ? ''
-                              : String(delayParsed.frames);
-                          patchDelayFromFields(
-                            f,
-                            delayParsed?.touchable ?? true,
-                            e.target.value
-                          );
-                        }}
-                        placeholder={'default = use action normal hitbox'}
-                        slotProps={{ htmlInput: { inputMode: 'decimal' } }}
-                      />
-                    </Grid>
-                    <Grid size={12}>
-                      <Typography variant={'caption'} color={'text.secondary'}>
-                        Set frames first to add the delay tag; then touch trigger and optional radius apply. Clear
-                        frames to remove the tag.
-                      </Typography>
-                    </Grid>
-                  </>
-                )}
-              <Grid size={4}>
-                {intField(
-                  'Fade-out after expire (frames)',
-                  jabs.linger,
-                  'linger',
-                  {
-                    helperText:
-                      'Visual tail after hits/duration end; collision is off during fade. Omit tag for JABS default (~10). Use 0 to vanish instantly.',
-                  }
-                )}
-              </Grid>
-              <Grid size={12}>
-                {boolSwitch(
-                  'Spawn on-target-defeat FX at victim position',
-                  jabs.onDefeatedTarget,
-                  'onDefeatedTarget'
-                )}
-                <Typography variant={'caption'} color={'text.secondary'} sx={{
-                  display: 'block',
-                  mt: 0.5
-                }}>
-                  Only meaningful for follow-up skills fired via battler on-target-defeat tags: places the event on the
-                  defeated enemy instead of the caster.
-                </Typography>
-              </Grid>
-            </Grid>
-          </Stack>
-      </BoardSectionCard>
+      {renderPostExecutionSection()}
 
-      <BoardSectionCard title={'Post-execution (cooldown & combos)'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              After the skill executes, JABS blocks it again until the cooldown elapses (same frame clock as cast time).
-              This is separate from MP/TP costs — it is the JABS “you just used this” gate on the skill slot(s). Combo
-              link
-              timing is validated against this cooldown: the follow-up window must finish before the cooldown does, or
-              the
-              chain never becomes reachable in-game. Global cooldown (GCD) is a separate battler-wide timer when enabled
-              in
-              JABS plugin parameters and for whitelisted skill types; oGCD and per-skill GCD length apply only in that
-              system.
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={6}>
-                <TextField
-                  label={'Cooldown (frames)'}
-                  size={'small'}
-                  fullWidth
-                  value={jabs.cooldown === null
-                    ? ''
-                    : String(jabs.cooldown)}
-                  onChange={onCooldownChange}
-                  helperText={'Empty uses the JABS default. Higher = longer lockout. Lowering cooldown may auto-reduce combo link frames to stay valid.'}
-                  slotProps={{
-                    htmlInput: {
-                      inputMode: 'numeric',
-                      min: 0,
-                      step: 1
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid size={6}>
-                <Stack spacing={0.5}>
-                  {boolSwitch(
-                    'Per-slot cooldown (unique)',
-                    jabs.uniqueCooldown,
-                    'uniqueCooldown'
-                  )}
-                  <Typography variant={'caption'} color={'text.secondary'}>
-                    On: only the slot you fired goes on cooldown. Off: every quick-slot that holds this same skill id
-                    shares one cooldown (fire from one key, they all wait).
-                  </Typography>
-                </Stack>
-              </Grid>
-              <Grid size={6}>
-                <TextField
-                  label={'GCD length override (frames)'}
-                  size={'small'}
-                  fullWidth
-                  value={jabs.globalCooldownOverride === null
-                    ? ''
-                    : String(jabs.globalCooldownOverride)}
-                  onChange={onGlobalCooldownOverrideChange}
-                  helperText={'Empty uses the JABS default GCD length when this skill is subject to GCD. Enter a positive number to override.'}
-                  slotProps={{
-                    htmlInput: {
-                      inputMode: 'numeric',
-                      min: 1,
-                      step: 1
-                    }
-                  }}
-                />
-              </Grid>
-              <Grid size={6}>
-                <Stack spacing={0.5}>
-                  {boolSwitch('oGCD (off-global cooldown)', jabs.ogcd, 'ogcd')}
-                  <Typography variant={'caption'} color={'text.secondary'}>
-                    On: this skill does not start or respect the battler-wide GCD (when GCD is enabled and the skill
-                    type is
-                    whitelisted).
-                  </Typography>
-                </Stack>
-              </Grid>
-            </Grid>
-
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Combo chain
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              After this skill resolves, the battler may chain into the follow-up skill after the link window (frames)
-              has
-              passed — but only if this skill’s cooldown is longer than that link time (JABS requirement). Each step in
-              a
-              chain can extend remaining cooldown by its own link time. By default the follow-up only opens if this
-              skill
-              hit something; use free combo below to open the window on whiff.
-            </Typography>
-            {comboLinkPastCooldown
-              ? (
-                <Alert severity={'warning'}>
-                  Link frames are not shorter than this skill’s cooldown. In-game the combo window will never open —
-                  raise cooldown or lower link frames.
-                </Alert>
-              )
-              : null}
-            {comboNoteInvalid
-              ? (
-                <>
-                  <Alert severity={'warning'}>
-                    This note does not match the expected combo shape
-                    {' '}
-                    <Typography component={'span'} variant={'body2'} sx={{ fontFamily: 'monospace' }}>
-                      [followUpSkillId, linkFrames]
-                    </Typography>
-                    . Edit the raw tag or clear it.
-                  </Alert>
-                  {rawField('Combo tag (raw)', jabs.comboRaw, 'comboRaw')}
-                </>
-              )
-              : (
-                <Grid container spacing={2}>
-                  <Grid size={6}>
-                    <Autocomplete<JabsSkillPickerRow, false, false, false>
-                      fullWidth
-                      size={'small'}
-                      options={comboSkillOptions}
-                      getOptionLabel={(o) => o.label}
-                      isOptionEqualToValue={(
-                        a,
-                        b
-                      ) => a.id === b.id}
-                      value={selectedComboSkillOption}
-                      onChange={(
-                        _e,
-                        option
-                      ) =>
-                      {
-                        const link =
-                          comboParsed === null
-                            ? ''
-                            : String(comboParsed.linkFrames);
-                        if (option === null)
-                        {
-                          patchComboFromFields(null, link);
-                          return;
-                        }
-                        patchComboFromFields(option.id, link);
-                      }}
-                      filterOptions={(
-                        options,
-                        state
-                      ) =>
-                      {
-                        const q = state.inputValue.trim()
-                          .toLowerCase();
-                        if (q === '')
-                        {
-                          return options;
-                        }
-                        return options.filter((o) =>
-                          o.label.toLowerCase()
-                            .includes(q)
-                          || String(o.id)
-                            .includes(q));
-                      }}
-                      renderInput={(params) =>
-                        (
-                          <TextField
-                            {...params}
-                            variant={'outlined'}
-                            label={'Follow-up skill'}
-                            placeholder={'No combo…'}
-                            helperText={'Skill id that can replace this one on the same slot after the link elapses. Clear to remove the combo tag.'}
-                          />
-                        )}
-                    />
-                  </Grid>
-                  <Grid size={6}>
-                    <TextField
-                      label={'Link frames (until follow-up is available)'}
-                      size={'small'}
-                      fullWidth
-                      disabled={comboParsed === null && (jabs.comboRaw === null || jabs.comboRaw.trim() === '')}
-                      value={comboParsed === null
-                        ? ''
-                        : String(comboParsed.linkFrames)}
-                      onChange={(e) =>
-                      {
-                        const sid =
-                          comboParsed === null
-                            ? null
-                            : comboParsed.skillId;
-                        patchComboFromFields(sid, e.target.value);
-                      }}
-                      helperText={
-                        jabs.cooldown !== null && jabs.cooldown > 0
-                          ? `Must stay below cooldown (${jabs.cooldown} frames); max usable link is ${jabs.cooldown - 1}.`
-                          : 'Set an explicit cooldown above to validate against JABS (link must be shorter than cooldown).'
-                      }
-                      slotProps={{
-                        htmlInput: {
-                          inputMode: 'numeric',
-                          min: 0,
-                          max:
-                            jabs.cooldown !== null && jabs.cooldown > 0
-                              ? jabs.cooldown - 1
-                              : undefined,
-                          step: 1,
-                        },
-                      }}
-                    />
-                  </Grid>
-                </Grid>
-              )}
-            <Stack direction={'row'} spacing={2} flexWrap={'wrap'}>
-              {boolSwitch(
-                'Combo starter (AI may open this chain)',
-                jabs.comboStarter,
-                'comboStarter'
-              )}
-              {boolSwitch(
-                'Free combo (open window even on miss)',
-                jabs.freeCombo,
-                'freeCombo'
-              )}
-              {boolSwitch(
-                'Exclude from random AI skill pick',
-                jabs.aiSkillExclusion,
-                'aiSkillExclusion'
-              )}
-            </Stack>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              AI normally skips tagged combo skills unless combo starter is set. Use exclusion on enders that should
-              only be
-              reachable through the chain, not pulled at random.
-            </Typography>
-          </Stack>
-      </BoardSectionCard>
-
-      <BoardSectionCard title={'Action size, shape & projectile'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Tune how far the action reaches and what shape it uses in tile space. Choose hitbox shape first — arc and
-              circle unlock degrees; line and wall unlock thickness. Direct skills (see Casting / map execution above)
-              skip the map
-              projectile, but radius and shape still matter for range checks and previews where applicable.
-            </Typography>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Hitbox
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Geometry JABS uses to test hits. The numeric fields below gray out when they do not apply to the selected
-              shape.
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={12}>
-                <Autocomplete<(typeof HITBOX_SHAPES)[number], false, true, false>
-                  fullWidth
-                  size={'small'}
-                  options={[ ...HITBOX_SHAPES ]}
-                  value={
-                    jabs.hitboxShape !== null
-                    && HITBOX_SHAPES.includes(jabs.hitboxShape as (typeof HITBOX_SHAPES)[number])
-                      ? jabs.hitboxShape as (typeof HITBOX_SHAPES)[number]
-                      : undefined
-                  }
-                  onChange={(
-                    _e,
-                    v
-                  ) =>
-                  {
-                    patch({ hitboxShape: v ?? null });
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        label={'Hitbox shape'}
-                        placeholder={'Engine default if empty'}
-                      />
-                    )}
-                />
-              </Grid>
-              <Grid size={6}>
-                {floatField(
-                  'Reach / radius (tiles)',
-                  jabs.rangeRadius,
-                  'rangeRadius',
-                  {
-                    helperText: 'How far the hitbox extends from the action origin, in map tiles (not pixels).',
-                  }
-                )}
-              </Grid>
-              <Grid size={6}>
-                {intField(
-                  'Arc / sweep (degrees)',
-                  jabs.degrees,
-                  'degrees',
-                  {
-                    disabled:
-                      jabs.hitboxShape !== 'arc'
-                      && jabs.hitboxShape !== 'circle',
-                    helperText:
-                      jabs.hitboxShape === 'arc'
-                        ? 'Wedge opening angle; also shapes the cast-preview sector.'
-                        : jabs.hitboxShape === 'circle'
-                          ? 'Circle hitbox is a full 360° ring in JABS — pick arc if you want a partial wedge.'
-                          : 'Only arc and circle read this field.',
-                  }
-                )}
-              </Grid>
-              <Grid size={6}>
-                {floatField(
-                  'Line or wall thickness (tiles)',
-                  jabs.thickness,
-                  'thickness',
-                  {
-                    disabled: jabs.hitboxShape !== 'line' && jabs.hitboxShape !== 'wall',
-                    helperText:
-                      jabs.hitboxShape === 'line' || jabs.hitboxShape === 'wall'
-                        ? 'How wide the strip is perpendicular to the line or wall axis.'
-                        : 'Only line and wall hitboxes use thickness.',
-                  }
-                )}
-              </Grid>
-            </Grid>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Projectiles
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Formation chooses the firing lines (aim directions) the skill uses. Projectile count is how many map
-              actions
-              spawn on each of those lines, so totals multiply. Example: spray is a three-line “W” (straight ahead,
-              about
-              45° up, about 45° down); with count 3 you get three actions per line — nine actions total. That can
-              explode
-              quickly; that may be exactly what you want. Irrelevant for purely direct / zero-projectile setups.
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={6}>
-                {intField(
-                  'Projectile count (per firing line)',
-                  jabs.projectileCount,
-                  'projectileCount',
-                  {
-                    helperText:
-                      'Each firing line from formation gets this many actions. Total on the map is (lines in that formation) × count.',
-                  }
-                )}
-              </Grid>
-              <Grid size={6}>
-                <Autocomplete<(typeof FORMATIONS)[number], false, true, false>
-                  fullWidth
-                  size={'small'}
-                  options={[ ...FORMATIONS ]}
-                  value={
-                    jabs.projectileFormation !== null
-                    && FORMATIONS.includes(jabs.projectileFormation as (typeof FORMATIONS)[number])
-                      ? jabs.projectileFormation as (typeof FORMATIONS)[number]
-                      : undefined
-                  }
-                  onChange={(
-                    _e,
-                    v
-                  ) =>
-                  {
-                    patch({ projectileFormation: v ?? null });
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        label={'Formation (firing lines)'}
-                        placeholder={'Engine default if empty'}
-                        helperText={
-                          'Which directions count as separate lines; projectile count stacks on every line.'
-                        }
-                      />
-                    )}
-                />
-              </Grid>
-            </Grid>
-          </Stack>
-      </BoardSectionCard>
+      {renderActionShapeSection()}
 
       <BoardSectionCard title={'Visual metadata (sprites)'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
@@ -2324,232 +2965,7 @@ function SkillJabsExtensionsPanel(
           </Stack>
       </BoardSectionCard>
 
-      <BoardSectionCard title={'Juice motion'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Procedural motion polish layered onto the caster when this skill fires: weapon swing icon overlay, body
-              tilt, and squish. All fields are optional — leave them empty to use the inferred icon from equipment and
-              the built-in defaults. These are pure cosmetics; combat math is unchanged.
-            </Typography>
-
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Weapon swing icon
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              The IconSet icon shown briefly over the caster during the swing. When no override is set, the swing uses
-              the icon from the caster's equipped weapon (or the offhand armor / orb for shield-style strikes).
-            </Typography>
-            <Stack direction={'column'} spacing={1}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    size={'small'}
-                    checked={jabs.juiceIconIndex !== null && jabs.juiceIconIndex >= 0}
-                    onChange={(e) =>
-                    {
-                      if (e.target.checked === true)
-                      {
-                        patch({ juiceIconIndex: juiceIconPickerIndex });
-                        return;
-                      }
-                      patch({ juiceIconIndex: null });
-                    }}
-                  />
-                }
-                label={'Override the swing icon for this skill'}
-              />
-              <IconIndexField
-                disabled={jabs.juiceIconIndex === null}
-                value={juiceIconPickerIndex}
-                onChange={(next) =>
-                {
-                  const safe = Math.max(0, Math.trunc(next));
-                  setJuiceIconPickerIndex(safe);
-                  if (jabs.juiceIconIndex !== null)
-                  {
-                    patch({ juiceIconIndex: safe });
-                  }
-                }}
-              />
-            </Stack>
-
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Swing intensity profile
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Picks a named tilt-and-swing multiplier row. Each profile pairs a tilt multiplier (how hard the
-              caster's body leans on impact) with a swing multiplier (how wide the swing icon sweeps) so heavy
-              weapons can read beefier while daggers stay flicky. Profiles are authored on the JABS config
-              board's Juice tab; pick "None" here to let the plugin infer the row from the caster's weapon
-              type (or offhand armor for shield-style strikes).
-            </Typography>
-            <Autocomplete<JuiceProfileOption, false, true, false>
-              fullWidth
-              size={'small'}
-              options={juiceProfileOptions}
-              value={selectedJuiceProfileOption}
-              disableClearable={true}
-              isOptionEqualToValue={(opt, val) => opt.value === val.value}
-              getOptionLabel={(opt) => opt.label}
-              renderOption={(props, opt) =>
-              {
-                const { key, ...rest } = props as typeof props & { key?: React.Key };
-                return (
-                  <li key={String(key ?? opt.label)} {...rest}>
-                    <Stack>
-                      <Typography variant={'body2'}>
-                        {opt.label}
-                      </Typography>
-                      {opt.value === null
-                        ? (
-                          <Typography variant={'caption'} color={'text.secondary'}>
-                            clears the skill's tag; plugin infers from gear at strike time.
-                          </Typography>
-                        )
-                        : opt.isOrphan
-                          ? (
-                            <Typography variant={'caption'} color={'warning.main'}>
-                              authored on this skill but not present in config.jabs.json -&gt; juice.profiles.
-                            </Typography>
-                          )
-                          : null}
-                    </Stack>
-                  </li>
-                );
-              }}
-              onChange={(_e, v) =>
-              {
-                patch({ juiceWeaponStyle: v.value });
-              }}
-              renderInput={(params) =>
-                (
-                  <TextField
-                    {...params}
-                    label={'Profile key'}
-                    helperText={
-                      selectedJuiceProfileOption.isOrphan
-                        ? 'This skill references a profile that does not exist on the JABS config board; add the row or pick "None" to clear.'
-                        : selectedJuiceProfileOption.value === null
-                          ? 'Plugin will resolve a profile from the caster\'s equipped weapon / armor at runtime.'
-                          : `Charset is ${JUICE_PROFILE_KEY_PATTERN.source} — author additional profiles on the JABS config board.`
-                    }
-                  />
-                )}
-            />
-            {jabsConfig === null
-              ? (
-                <Alert severity={'info'} variant={'outlined'} sx={{ mt: 1 }}>
-                  config.jabs.json hasn't finished loading yet — the profile list will populate once it does.
-                </Alert>
-              )
-              : null}
-
-            <Divider sx={{ my: 1 }}/>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Motion preset
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Picks the weapon overlay motion. On healing skills, omitting this keeps the caster-only support squish;
-              any motion here opts the skill into the full strike juice. Span / stab tip below only apply to the
-              relevant presets; repeat count applies to every preset.
-            </Typography>
-            <Autocomplete<(typeof JUICE_MOTIONS)[number], false, false, false>
-              fullWidth
-              size={'small'}
-              options={[ ...JUICE_MOTIONS ]}
-              value={
-                jabs.juiceMotion !== null
-                && JUICE_MOTIONS.includes(jabs.juiceMotion as (typeof JUICE_MOTIONS)[number])
-                  ? jabs.juiceMotion as (typeof JUICE_MOTIONS)[number]
-                  : null
-              }
-              onChange={(
-                _e,
-                v
-              ) =>
-              {
-                patch({ juiceMotion: v ?? null });
-              }}
-              renderInput={(params) =>
-                (
-                  <TextField
-                    {...params}
-                    label={'Motion preset'}
-                    placeholder={'Inherit default'}
-                    helperText={
-                      'arc / arc-reverse / arc-oscillate use span; bash / recoil / stab-forward use stab tip degrees; present lifts the icon upward on screen; repeat count applies to every preset (rotations for spin, sweeps for arc-oscillate, replays for the rest).'
-                    }
-                  />
-                )}
-            />
-            <Grid container spacing={2}>
-              <Grid size={4}>
-                {intField(
-                  'Arc span (degrees)',
-                  jabs.juiceArcSpanDegrees,
-                  'juiceArcSpanDegrees',
-                  {
-                    disabled:
-                      jabs.juiceMotion !== 'arc'
-                      && jabs.juiceMotion !== 'arc-reverse'
-                      && jabs.juiceMotion !== 'arc-oscillate',
-                    helperText:
-                      jabs.juiceMotion === 'arc'
-                      || jabs.juiceMotion === 'arc-reverse'
-                      || jabs.juiceMotion === 'arc-oscillate'
-                        ? 'Default 120; typical 30–300.'
-                        : 'Only arc / arc-reverse / arc-oscillate use this.',
-                  }
-                )}
-              </Grid>
-              <Grid size={4}>
-                {intField(
-                  'Repeat count',
-                  jabs.juiceRepeatCount,
-                  'juiceRepeatCount',
-                  {
-                    helperText:
-                      'Number of repeats within the swing (1–8): rotations for spin / spin-reverse, alternating '
-                      + 'sweeps for arc-oscillate, replays for every other preset.',
-                  }
-                )}
-              </Grid>
-              <Grid size={4}>
-                {intField(
-                  'Stab tip degrees',
-                  jabs.juiceStabTipDegrees,
-                  'juiceStabTipDegrees',
-                  {
-                    disabled:
-                      jabs.juiceMotion !== 'bash'
-                      && jabs.juiceMotion !== 'recoil'
-                      && jabs.juiceMotion !== 'stab-forward',
-                    helperText:
-                      jabs.juiceMotion === 'bash'
-                      || jabs.juiceMotion === 'recoil'
-                      || jabs.juiceMotion === 'stab-forward'
-                        ? 'Tip bearing from Pixi +x at rotation 0 (signed). Empty = preset default (sword diagonal for stab; barrel toward −x for bash / recoil).'
-                        : 'Only bash / recoil / stab-forward use this.',
-                  }
-                )}
-              </Grid>
-            </Grid>
-
-            <Divider sx={{ my: 1 }}/>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Overlay flags
-            </Typography>
-            {boolSwitch(
-              'Profile gun (flip horizontally for east/west aim)',
-              jabs.juiceProfileGun,
-              'juiceProfileGun'
-            )}
-            <Typography variant={'caption'} color={'text.secondary'}>
-              For side-profile firearm icons: mirror left/right instead of rotating ~180°, so the grip never reads
-              upside-down. Up / down still use ±90° rotation — pure side-view art cannot read as true top-down aim.
-            </Typography>
-          </Stack>
-      </BoardSectionCard>
+      {renderJuiceMotionSection()}
 
       <BoardSectionCard title={'Learning & upgrades'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
@@ -2711,422 +3127,9 @@ function SkillJabsExtensionsPanel(
           </Stack>
       </BoardSectionCard>
 
-      <BoardSectionCard title={'Guarding & counters'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Guard uses flat and percent reduction in
-              {' '}
-              <Typography component={'span'} variant={'caption'} sx={{ fontFamily: 'monospace' }}>
-                {'<guard:[FLAT, PERCENT]>'}
-              </Typography>
-              . Counter skills use a 1–100% proc chance.
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={6}>
-                {intField(
-                  'Guard flat reduction',
-                  jabs.guardFlat,
-                  'guardFlat',
-                  {
-                    helperText: 'Omit both flat and percent to remove the guard tag (0,0 is explicit).',
-                  }
-                )}
-              </Grid>
-              <Grid size={6}>
-                {intField('Guard percent reduction', jabs.guardPercent, 'guardPercent')}
-              </Grid>
-              <Grid size={12}>{intField('Parry', jabs.parry, 'parry')}</Grid>
-              <Grid size={12}>
-                <Autocomplete<JabsSkillPickerRow, false, false, false>
-                  fullWidth
-                  size={'small'}
-                  options={counterParrySkillOptions}
-                  getOptionLabel={(o) => o.label}
-                  isOptionEqualToValue={(
-                    a,
-                    b
-                  ) => a.id === b.id}
-                  value={selectedCounterParrySkillOption}
-                  onChange={(
-                    _e,
-                    option
-                  ) =>
-                  {
-                    if (option === null)
-                    {
-                      patch({
-                        counterParrySkillId: null,
-                        counterParryChance: null
-                      });
-                      return;
-                    }
-                    patch({ counterParrySkillId: option.id });
-                  }}
-                  filterOptions={(
-                    options,
-                    state
-                  ) =>
-                  {
-                    const q = state.inputValue.trim()
-                      .toLowerCase();
-                    if (q === '')
-                    {
-                      return options;
-                    }
-                    return options.filter((o) =>
-                      o.label.toLowerCase()
-                        .includes(q)
-                      || String(o.id)
-                        .includes(q));
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        variant={'outlined'}
-                        label={'Counter-parry skill'}
-                        placeholder={'None…'}
-                        helperText={'Skill fired when a parry succeeds (optional).'}
-                      />
-                    )}
-                />
-              </Grid>
-              <Grid size={12}>
-                <Stack spacing={0.75}>
-                  <Typography variant={'caption'} color={'text.secondary'}>
-                    {jabs.counterParrySkillId === null
-                      ? 'Pick a counter-parry skill to set chance.'
-                      : `Counter-parry chance (${Math.min(
-                        100,
-                        Math.max(1, Math.round(jabs.counterParryChance ?? 100))
-                      )}%). Empty stored chance saves as 100%.`}
-                  </Typography>
-                  <Slider
-                    disabled={jabs.counterParrySkillId === null}
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={Math.min(100, Math.max(1, Math.round(jabs.counterParryChance ?? 100)))}
-                    valueLabelDisplay={'auto'}
-                    valueLabelFormat={(v) => `${v}%`}
-                    onChange={(
-                      _e,
-                      v
-                    ) =>
-                    {
-                      const n = Array.isArray(v)
-                        ? v[ 0 ]
-                        : v;
-                      patch({ counterParryChance: n });
-                    }}
-                  />
-                </Stack>
-              </Grid>
-              <Grid size={12}>
-                <Autocomplete<JabsSkillPickerRow, false, false, false>
-                  fullWidth
-                  size={'small'}
-                  options={counterGuardSkillOptions}
-                  getOptionLabel={(o) => o.label}
-                  isOptionEqualToValue={(
-                    a,
-                    b
-                  ) => a.id === b.id}
-                  value={selectedCounterGuardSkillOption}
-                  onChange={(
-                    _e,
-                    option
-                  ) =>
-                  {
-                    if (option === null)
-                    {
-                      patch({
-                        counterGuardSkillId: null,
-                        counterGuardChance: null
-                      });
-                      return;
-                    }
-                    patch({ counterGuardSkillId: option.id });
-                  }}
-                  filterOptions={(
-                    options,
-                    state
-                  ) =>
-                  {
-                    const q = state.inputValue.trim()
-                      .toLowerCase();
-                    if (q === '')
-                    {
-                      return options;
-                    }
-                    return options.filter((o) =>
-                      o.label.toLowerCase()
-                        .includes(q)
-                      || String(o.id)
-                        .includes(q));
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        variant={'outlined'}
-                        label={'Counter-guard skill'}
-                        placeholder={'None…'}
-                        helperText={'Skill fired when a guard blocks (optional).'}
-                      />
-                    )}
-                />
-              </Grid>
-              <Grid size={12}>
-                <Stack spacing={0.75}>
-                  <Typography variant={'caption'} color={'text.secondary'}>
-                    {jabs.counterGuardSkillId === null
-                      ? 'Pick a counter-guard skill to set chance.'
-                      : `Counter-guard chance (${Math.min(
-                        100,
-                        Math.max(1, Math.round(jabs.counterGuardChance ?? 100))
-                      )}%). Empty stored chance saves as 100%.`}
-                  </Typography>
-                  <Slider
-                    disabled={jabs.counterGuardSkillId === null}
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={Math.min(100, Math.max(1, Math.round(jabs.counterGuardChance ?? 100)))}
-                    valueLabelDisplay={'auto'}
-                    valueLabelFormat={(v) => `${v}%`}
-                    onChange={(
-                      _e,
-                      v
-                    ) =>
-                    {
-                      const n = Array.isArray(v)
-                        ? v[ 0 ]
-                        : v;
-                      patch({ counterGuardChance: n });
-                    }}
-                  />
-                </Stack>
-              </Grid>
-            </Grid>
-          </Stack>
-      </BoardSectionCard>
+      {renderGuardingSection()}
 
-      <BoardSectionCard title={'Dodge'} collapsible defaultExpanded={false}>
-          <Grid container spacing={2}>
-            <Grid size={12}>
-              <Typography variant={'caption'} color={'text.secondary'}>
-                Pick a move type first. None means no dodge movement tag; steps, speed, invincibility, and i-frames stay
-                disabled until you choose forward, backward, or directional.
-              </Typography>
-            </Grid>
-            <Grid size={12}>
-              <Autocomplete<MoveTypePickerRow, false, true, false>
-                fullWidth
-                size={'small'}
-                disableClearable
-                options={MOVE_TYPE_PICKER_ROWS}
-                getOptionLabel={(o) => o.label}
-                isOptionEqualToValue={(
-                  a,
-                  b
-                ) => a.value === b.value}
-                value={
-                  MOVE_TYPE_PICKER_ROWS.find((r) => r.value === jabs.moveType)
-                  ?? MOVE_TYPE_PICKER_ROWS[ 0 ]
-                }
-                onChange={(
-                  _e,
-                  option
-                ) =>
-                {
-                  if (option === null || option.value === null)
-                  {
-                    patch({
-                      moveType: null,
-                      dodgeSteps: null,
-                      dodgeSpeed: null,
-                      invincibleDodge: false,
-                      iframesStartFrame: null,
-                      iframesEndFrame: null,
-                    });
-                    return;
-                  }
-                  patch({ moveType: option.value });
-                }}
-                renderInput={(params) =>
-                  (
-                    <TextField
-                      {...params}
-                      label={'Move type'}
-                      helperText={'Required before editing other dodge fields. None clears dodge tags from the note.'}
-                    />
-                  )}
-              />
-            </Grid>
-            <Grid size={6}>
-              {intField(
-                'Dodge steps',
-                jabs.dodgeSteps,
-                'dodgeSteps',
-                {
-                  disabled: jabs.moveType === null,
-                  helperText:
-                    jabs.moveType === null
-                      ? 'Pick a move type first.'
-                      : undefined,
-                }
-              )}
-            </Grid>
-            <Grid size={6}>
-              {floatField(
-                'Dodge speed',
-                jabs.dodgeSpeed,
-                'dodgeSpeed',
-                {
-                  disabled: jabs.moveType === null,
-                  helperText:
-                    jabs.moveType === null
-                      ? 'Pick a move type first.'
-                      : undefined,
-                }
-              )}
-            </Grid>
-            <Grid size={12}>
-              <Stack spacing={0.5}>
-                <FormControlLabel
-                  disabled={jabs.moveType === null}
-                  control={
-                    <Switch
-                      size={'small'}
-                      checked={jabs.invincibleDodge}
-                      disabled={jabs.moveType === null}
-                      onChange={(e) =>
-                      {
-                        if (e.target.checked === true)
-                        {
-                          patch({
-                            invincibleDodge: true,
-                            iframesStartFrame: null,
-                            iframesEndFrame: null,
-                          });
-                          return;
-                        }
-                        patch({ invincibleDodge: false });
-                      }}
-                    />
-                  }
-                  label={'Invincible dodge (full dodge duration)'}
-                />
-                <Typography variant={'caption'} color={'text.secondary'}>
-                  {jabs.moveType === null
-                    ? 'Pick a move type first.'
-                    : 'Same as i-frames for the entire dodge animation — mutually exclusive with a manual frame window below.'}
-                </Typography>
-              </Stack>
-            </Grid>
-            <Grid size={12}>
-              <Typography variant={'caption'} color={'text.secondary'} sx={{
-                display: 'block',
-                mb: 1
-              }}>
-                Manual i-frames
-                {' '}
-                <Typography component={'span'} variant={'caption'} sx={{ fontFamily: 'monospace' }}>
-                  {'<iframes:[START_FRAME, END_FRAME]>'}
-                </Typography>
-                {' '}
-                — both frames required to write the tag. Disabled while invincible dodge is on; typing a start frame
-                turns
-                invincible dodge off.
-                {jabs.moveType === null
-                  ? ' Pick a move type first.'
-                  : ''}
-              </Typography>
-            </Grid>
-            <Grid size={6}>
-              <TextField
-                label={'I-frames start frame'}
-                size={'small'}
-                fullWidth
-                disabled={jabs.moveType === null || jabs.invincibleDodge === true}
-                value={jabs.iframesStartFrame === null
-                  ? ''
-                  : String(jabs.iframesStartFrame)}
-                onChange={(e) =>
-                {
-                  const t = e.target.value.trim();
-                  if (t === '')
-                  {
-                    patch({
-                      iframesStartFrame: null,
-                      iframesEndFrame: null
-                    });
-                    return;
-                  }
-                  const n = parseInt(t, 10);
-                  if (Number.isNaN(n))
-                  {
-                    return;
-                  }
-                  patch({
-                    iframesStartFrame: n,
-                    invincibleDodge: false
-                  });
-                }}
-                helperText={
-                  jabs.moveType === null
-                    ? 'Pick a move type first.'
-                    : jabs.invincibleDodge === true
-                      ? 'Turn off invincible dodge to edit.'
-                      : undefined
-                }
-                slotProps={{
-                  htmlInput: {
-                    inputMode: 'numeric',
-                    min: 0,
-                    step: 1
-                  }
-                }}
-              />
-            </Grid>
-            <Grid size={6}>
-              <TextField
-                label={'I-frames end frame'}
-                size={'small'}
-                fullWidth
-                disabled={
-                  jabs.moveType === null
-                  || jabs.invincibleDodge === true
-                  || jabs.iframesStartFrame === null
-                }
-                value={jabs.iframesEndFrame === null
-                  ? ''
-                  : String(jabs.iframesEndFrame)}
-                onChange={(e) =>
-                {
-                  onNullableInt(e, 'iframesEndFrame');
-                }}
-                helperText={
-                  jabs.moveType === null
-                    ? 'Pick a move type first.'
-                    : jabs.invincibleDodge === true
-                      ? 'Turn off invincible dodge to edit.'
-                      : jabs.iframesStartFrame === null
-                        ? 'Set start frame first.'
-                        : undefined
-                }
-                slotProps={{
-                  htmlInput: {
-                    inputMode: 'numeric',
-                    min: 0,
-                    step: 1
-                  }
-                }}
-              />
-            </Grid>
-          </Grid>
-      </BoardSectionCard>
+      {renderDodgeSection()}
     </Stack>
   );
 }

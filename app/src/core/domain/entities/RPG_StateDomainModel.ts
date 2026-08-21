@@ -172,7 +172,7 @@ class RPG_StateDomainModel
     this.message4 = rmmz.message4;
     this.traits = [ ...(rmmz.traits ?? []) ];
 
-    const note = this.note;
+    const { note } = this;
     this.jabs = StateJabsExtension.fromStateNote(note);
     this.crit = StateCritExtension.fromStateNote(note);
     this.drops = StateDropsExtension.fromStateNote(note);

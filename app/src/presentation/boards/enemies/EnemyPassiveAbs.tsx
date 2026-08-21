@@ -77,36 +77,6 @@ const EnemyPassiveAbs = ({
     }
   };
 
-  const prefixSummaryLine = (): string =>
-  {
-    const gate = selectedEnemy.noRngPassivePrefixes === true
-      ? 'blocked'
-      : 'allowed';
-    const ch = selectedEnemy.passiveAffixPrefixChance;
-
-    if (ch !== null)
-    {
-      return `Prefixes: ${gate} — ${ch}% roll gate`;
-    }
-
-    return `Prefixes: ${gate} — default gate`;
-  };
-
-  const suffixSummaryLine = (): string =>
-  {
-    const gate = selectedEnemy.noRngPassiveSuffixes === true
-      ? 'blocked'
-      : 'allowed';
-    const ch = selectedEnemy.passiveAffixSuffixChance;
-
-    if (ch !== null)
-    {
-      return `Suffixes: ${gate} — ${ch}% roll gate`;
-    }
-
-    return `Suffixes: ${gate} — default gate`;
-  };
-
   return (
     <BoardSectionCard
       title={'Random passive affixes'}

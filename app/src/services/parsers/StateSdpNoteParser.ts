@@ -10,7 +10,7 @@ class StateSdpNoteParser
 
   static strip(note: string): string
   {
-    let n = note.replace(StateSdpNoteParser.#ensureGlobal(StateSdpNoteParser.#RE_MULTIPLIER), '');
+    const n = note.replace(StateSdpNoteParser.#ensureGlobal(StateSdpNoteParser.#RE_MULTIPLIER), '');
     return NoteNormalizer.normalize(n);
   }
 

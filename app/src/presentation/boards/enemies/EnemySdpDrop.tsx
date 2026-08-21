@@ -33,7 +33,7 @@ const EnemySdpDrop = ({
 
   const handleToggleFields = (event: ChangeEvent<HTMLInputElement>) =>
   {
-    const checked = event.target.checked;
+    const { checked } = event.target;
 
     // Track state directly on the model
     selectedEnemy.sdpDrop.isForcedOpen = checked;
@@ -73,12 +73,19 @@ const EnemySdpDrop = ({
     navigate(`/sdp?sdpKey=${encodeURIComponent(currentSdpDrop.key)}`);
   };
 
+  // the subtitle reports what this enemy actually drops: a named panel, an unnamed forced drop, or nothing.
+  let dropSummary = 'Not configured';
+  if (isEnabled)
+  {
+    dropSummary = currentSdpDrop.key !== ''
+      ? currentSdpDrop.key
+      : 'Forced open';
+  }
+
   return (
     <BoardSectionCard
       title={'SDP Drop'}
-      subtitle={isEnabled
-        ? (currentSdpDrop.key !== '' ? currentSdpDrop.key : 'Forced open')
-        : 'Not configured'}
+      subtitle={dropSummary}
       collapsible
       defaultExpanded={false}
     >

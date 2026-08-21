@@ -10,7 +10,7 @@ class StateSksNoteParser
 
   static strip(note: string): string
   {
-    let n = note.replace(
+    const n = note.replace(
       StateSksNoteParser.#ensureGlobal(StateSksNoteParser.#RE_SLOT_COST_MODIFIER),
       ''
     );

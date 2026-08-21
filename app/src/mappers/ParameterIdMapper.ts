@@ -114,64 +114,30 @@ const maxTpName = () =>
  */
 const fromLongParameterIdToName = (paramId: number): string =>
 {
+  // 0-7 are the base parameters, which the long id addresses directly: mhp, mmp, atk, def, mat, mdf, agi, luk.
+  if (paramId >= 0 && paramId <= 7)
+  {
+    return fromBParamIdToName(paramId);
+  }
+
+  // 8-17 are the ex-parameters, offset by where the base parameters end: hit, eva, cri, cev, mev, mrf,
+  // cnt, hrg, mrg, trg. Several carry J-ABS meanings rather than their engine ones -- eva is the parry
+  // boost, cnt is autocounter, and mev goes unused.
+  if (paramId >= 8 && paramId <= 17)
+  {
+    return fromXParamIdToName(paramId - 8);
+  }
+
+  // 18-27 are the sp-parameters, offset by where the ex-parameters end: trg, grd, rec, pha, mcr, tcr,
+  // pdr, mdr, fdr, exr. Here trg is aggro, grd is parry, and mcr and tcr are the mp and tp cost rates.
+  if (paramId >= 18 && paramId <= 27)
+  {
+    return fromSParamIdToName(paramId - 18);
+  }
+
+  // the last three have no engine-side collection to delegate to, so they are named here.
   switch (paramId)
   {
-    case  0:
-      return fromBParamIdToName(paramId); // mhp
-    case  1:
-      return fromBParamIdToName(paramId); // mmp
-    case  2:
-      return fromBParamIdToName(paramId); // atk
-    case  3:
-      return fromBParamIdToName(paramId); // def
-    case  4:
-      return fromBParamIdToName(paramId); // mat
-    case  5:
-      return fromBParamIdToName(paramId); // mdf
-    case  6:
-      return fromBParamIdToName(paramId); // agi
-    case  7:
-      return fromBParamIdToName(paramId); // luk
-    case  8:
-      return fromXParamIdToName(paramId - 8); // hit
-    case  9:
-      return fromXParamIdToName(paramId - 8); // eva (parry boost)
-    case 10:
-      return fromXParamIdToName(paramId - 8); // cri
-    case 11:
-      return fromXParamIdToName(paramId - 8); // cev
-    case 12:
-      return fromXParamIdToName(paramId - 8); // mev (unused)
-    case 13:
-      return fromXParamIdToName(paramId - 8); // mrf
-    case 14:
-      return fromXParamIdToName(paramId - 8); // cnt (autocounter)
-    case 15:
-      return fromXParamIdToName(paramId - 8); // hrg
-    case 16:
-      return fromXParamIdToName(paramId - 8); // mrg
-    case 17:
-      return fromXParamIdToName(paramId - 8); // trg
-    case 18:
-      return fromSParamIdToName(paramId - 18); // trg (aggro)
-    case 19:
-      return fromSParamIdToName(paramId - 18); // grd (parry)
-    case 20:
-      return fromSParamIdToName(paramId - 18); // rec
-    case 21:
-      return fromSParamIdToName(paramId - 18); // pha
-    case 22:
-      return fromSParamIdToName(paramId - 18); // mcr (mp cost)
-    case 23:
-      return fromSParamIdToName(paramId - 18); // tcr (tp cost)
-    case 24:
-      return fromSParamIdToName(paramId - 18); // pdr
-    case 25:
-      return fromSParamIdToName(paramId - 18); // mdr
-    case 26:
-      return fromSParamIdToName(paramId - 18); // fdr
-    case 27:
-      return fromSParamIdToName(paramId - 18); // exr
     case 28:
       return 'Crit Amp'; // cdm
     case 29:

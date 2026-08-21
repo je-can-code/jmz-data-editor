@@ -421,6 +421,37 @@ class SkillJabsNoteParser
   {
     const parts: string[] = [];
 
+    // each helper appends one family of tags, in the order a written note presents them.
+    SkillJabsNoteParser.#writeIdentityTags(ext, parts);
+    SkillJabsNoteParser.#writeCastTags(ext, parts);
+    SkillJabsNoteParser.#writeCooldownTags(ext, parts);
+    SkillJabsNoteParser.#writeHitboxTags(ext, parts);
+    SkillJabsNoteParser.#writeDeliveryTags(ext, parts);
+    SkillJabsNoteParser.#writeAnimationTags(ext, parts);
+    SkillJabsNoteParser.#writeComboTags(ext, parts);
+    SkillJabsNoteParser.#writeUpgradeTags(ext, parts);
+    SkillJabsNoteParser.#writeAggroTags(ext, parts);
+    SkillJabsNoteParser.#writeHitBehaviorTags(ext, parts);
+    SkillJabsNoteParser.#writeGuardTags(ext, parts);
+    SkillJabsNoteParser.#writeDodgeTags(ext, parts);
+    SkillJabsNoteParser.#writeVisualTags(ext, parts);
+    SkillJabsNoteParser.#writeCastPreviewTags(ext, parts);
+    SkillJabsNoteParser.#writeJuiceTags(ext, parts);
+
+    const head = parts.length > 0
+      ? `${parts.join('\n')}\n`
+      : '';
+    return NoteNormalizer.normalize(head + baseNote);
+  }
+
+  /**
+   * Writes the tags identifying the skill's action and its visibility in the JABS menu.
+   */
+  static #writeIdentityTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.actionId !== null && ext.actionId >= 1)
     {
       parts.push(`<actionId:${Math.trunc(ext.actionId)}>`);
@@ -429,7 +460,16 @@ class SkillJabsNoteParser
     {
       parts.push('<hideFromJabsMenu>');
     }
+  }
 
+  /**
+   * Writes the cast timing tags.
+   */
+  static #writeCastTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.castTime !== null)
     {
       parts.push(`<castTime:${Math.trunc(ext.castTime)}>`);
@@ -438,7 +478,16 @@ class SkillJabsNoteParser
     {
       parts.push(`<castAnimation:${Math.trunc(ext.castAnimation)}>`);
     }
+  }
 
+  /**
+   * Writes the cooldown tags, including the global cooldown overrides.
+   */
+  static #writeCooldownTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.cooldown !== null)
     {
       parts.push(`<cooldown:${Math.trunc(ext.cooldown)}>`);
@@ -455,7 +504,16 @@ class SkillJabsNoteParser
     {
       parts.push(`<gcd:${Math.trunc(ext.globalCooldownOverride)}>`);
     }
+  }
 
+  /**
+   * Writes the tags describing the shape and reach of the skill's hitbox.
+   */
+  static #writeHitboxTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.degrees !== null)
     {
       parts.push(`<degrees:${Math.trunc(ext.degrees)}>`);
@@ -482,7 +540,16 @@ class SkillJabsNoteParser
     {
       parts.push(`<thickness:${SkillJabsNoteParser.#fmtNum(ext.thickness)}>`);
     }
+  }
 
+  /**
+   * Writes the tags governing how the action travels and how long it persists.
+   */
+  static #writeDeliveryTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.direct)
     {
       parts.push('<direct>');
@@ -515,7 +582,16 @@ class SkillJabsNoteParser
     {
       parts.push('<onDefeatedTarget>');
     }
+  }
 
+  /**
+   * Writes the animation tags played on the caster rather than the target.
+   */
+  static #writeAnimationTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.selfAnimationId !== null)
     {
       parts.push(`<selfAnimationId:${Math.trunc(ext.selfAnimationId)}>`);
@@ -524,7 +600,16 @@ class SkillJabsNoteParser
     {
       parts.push(`<onCastAnimationId:${Math.trunc(ext.onCastAnimationId)}>`);
     }
+  }
 
+  /**
+   * Writes the combo chaining tags, including whether the AI may select this skill.
+   */
+  static #writeComboTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.comboRaw !== null && ext.comboRaw.trim() !== '')
     {
       parts.push(`<combo:${ext.comboRaw.trim()}>`);
@@ -541,7 +626,16 @@ class SkillJabsNoteParser
     {
       parts.push('<freeCombo>');
     }
+  }
 
+  /**
+   * Writes the tags controlling skill slot assignment and upgrade succession.
+   */
+  static #writeUpgradeTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.noAutoAssign)
     {
       parts.push('<noAutoAssign>');
@@ -558,7 +652,16 @@ class SkillJabsNoteParser
     {
       parts.push('<onlyUpgrade>');
     }
+  }
 
+  /**
+   * Writes the aggro tags describing how much threat the skill generates.
+   */
+  static #writeAggroTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.bonusAggro !== null)
     {
       parts.push(`<aggro:${Math.trunc(ext.bonusAggro)}>`);
@@ -567,7 +670,16 @@ class SkillJabsNoteParser
     {
       parts.push(`<aggroMultiplier:${SkillJabsNoteParser.#fmtNum(ext.aggroMultiplier)}>`);
     }
+  }
 
+  /**
+   * Writes the tags altering how the skill connects: parry immunity, bonus hits, and piercing.
+   */
+  static #writeHitBehaviorTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.unparryable)
     {
       parts.push('<unparryable>');
@@ -583,7 +695,16 @@ class SkillJabsNoteParser
         : Math.trunc(ext.pierceDelayFrames);
       parts.push(`<pierce:[${Math.trunc(ext.pierceMaxCount)}, ${delay}]>`);
     }
+  }
 
+  /**
+   * Writes the defensive tags: guard values, parry window, and the counter skills each can trigger.
+   */
+  static #writeGuardTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.guardFlat !== null || ext.guardPercent !== null)
     {
       const flat = ext.guardFlat === null
@@ -612,7 +733,16 @@ class SkillJabsNoteParser
         `<counterGuard:[${Math.trunc(ext.counterGuardSkillId)}, ${c}]>`
       );
     }
+  }
 
+  /**
+   * Writes the dodge tags, including the invincibility window a dodge may grant.
+   */
+  static #writeDodgeTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.dodgeSteps !== null)
     {
       parts.push(`<dodge:${Math.trunc(ext.dodgeSteps)}>`);
@@ -640,15 +770,17 @@ class SkillJabsNoteParser
         `<iframes:[${Math.trunc(ext.iframesStartFrame)}, ${Math.trunc(ext.iframesEndFrame)}]>`
       );
     }
+  }
 
-    if (
-      ext.visOffsetRaw !== null
-      && ext.visOffsetRaw.trim() !== ''
-      && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetRaw) === false
-    )
-    {
-      parts.push(`<visOffset:${ext.visOffsetRaw.trim()}>`);
-    }
+  /**
+   * Writes the tags positioning and styling the skill's on-screen visual.
+   */
+  static #writeVisualTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
+    SkillJabsNoteParser.#pushVisOffsetTag(parts, 'visOffset', ext.visOffsetRaw);
     if (
       ext.visAnchorRaw !== null
       && ext.visAnchorRaw.trim() !== ''
@@ -677,71 +809,52 @@ class SkillJabsNoteParser
     {
       parts.push('<visDebug>');
     }
-    if (
-      ext.visOffsetURaw !== null
-      && ext.visOffsetURaw.trim() !== ''
-      && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetURaw) === false
-    )
+
+    // the eight directional overrides differ only by which way the caster is facing.
+    SkillJabsNoteParser.#pushVisOffsetTag(parts, 'visOffsetU', ext.visOffsetURaw);
+    SkillJabsNoteParser.#pushVisOffsetTag(parts, 'visOffsetD', ext.visOffsetDRaw);
+    SkillJabsNoteParser.#pushVisOffsetTag(parts, 'visOffsetL', ext.visOffsetLRaw);
+    SkillJabsNoteParser.#pushVisOffsetTag(parts, 'visOffsetR', ext.visOffsetRRaw);
+    SkillJabsNoteParser.#pushVisOffsetTag(parts, 'visOffsetUR', ext.visOffsetURRaw);
+    SkillJabsNoteParser.#pushVisOffsetTag(parts, 'visOffsetUL', ext.visOffsetULRaw);
+    SkillJabsNoteParser.#pushVisOffsetTag(parts, 'visOffsetDR', ext.visOffsetDRRaw);
+    SkillJabsNoteParser.#pushVisOffsetTag(parts, 'visOffsetDL', ext.visOffsetDLRaw);
+  }
+
+  /**
+   * Appends one visual offset tag, skipping it when it is blank or restates the zero default.
+   * @param parts The tag list being built.
+   * @param tagName The tag to write, without its angle brackets.
+   * @param raw The authored offset value, which may be blank or absent.
+   */
+  static #pushVisOffsetTag(
+    parts: string[],
+    tagName: string,
+    raw: string | null
+  ): void
+  {
+    if (raw === null || raw.trim() === '')
     {
-      parts.push(`<visOffsetU:${ext.visOffsetURaw.trim()}>`);
-    }
-    if (
-      ext.visOffsetDRaw !== null
-      && ext.visOffsetDRaw.trim() !== ''
-      && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetDRaw) === false
-    )
-    {
-      parts.push(`<visOffsetD:${ext.visOffsetDRaw.trim()}>`);
-    }
-    if (
-      ext.visOffsetLRaw !== null
-      && ext.visOffsetLRaw.trim() !== ''
-      && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetLRaw) === false
-    )
-    {
-      parts.push(`<visOffsetL:${ext.visOffsetLRaw.trim()}>`);
-    }
-    if (
-      ext.visOffsetRRaw !== null
-      && ext.visOffsetRRaw.trim() !== ''
-      && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetRRaw) === false
-    )
-    {
-      parts.push(`<visOffsetR:${ext.visOffsetRRaw.trim()}>`);
-    }
-    if (
-      ext.visOffsetURRaw !== null
-      && ext.visOffsetURRaw.trim() !== ''
-      && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetURRaw) === false
-    )
-    {
-      parts.push(`<visOffsetUR:${ext.visOffsetURRaw.trim()}>`);
-    }
-    if (
-      ext.visOffsetULRaw !== null
-      && ext.visOffsetULRaw.trim() !== ''
-      && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetULRaw) === false
-    )
-    {
-      parts.push(`<visOffsetUL:${ext.visOffsetULRaw.trim()}>`);
-    }
-    if (
-      ext.visOffsetDRRaw !== null
-      && ext.visOffsetDRRaw.trim() !== ''
-      && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetDRRaw) === false
-    )
-    {
-      parts.push(`<visOffsetDR:${ext.visOffsetDRRaw.trim()}>`);
-    }
-    if (
-      ext.visOffsetDLRaw !== null
-      && ext.visOffsetDLRaw.trim() !== ''
-      && SkillJabsNoteParser.#isRedundantVisOffsetZero(ext.visOffsetDLRaw) === false
-    )
-    {
-      parts.push(`<visOffsetDL:${ext.visOffsetDLRaw.trim()}>`);
+      return;
     }
 
+    // a zero offset is what the engine already does, so writing it would only add noise to the note.
+    if (SkillJabsNoteParser.#isRedundantVisOffsetZero(raw))
+    {
+      return;
+    }
+
+    parts.push(`<${tagName}:${raw.trim()}>`);
+  }
+
+  /**
+   * Writes the cast preview tags telegraphing a cast to the player.
+   */
+  static #writeCastPreviewTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.noCastPreview)
     {
       parts.push('<noCastPreview>');
@@ -755,8 +868,17 @@ class SkillJabsNoteParser
       }
       parts.push(`<castPreviewWarnAt:${warnAt}>`);
     }
+  }
 
-    // J-ABS-Juice tags. Negative / blank values "fall back to plugin inference", so the corresponding tags are omitted.
+  /**
+   * Writes the J-ABS-Juice tags. Negative and blank values fall back to plugin inference, so the
+   * corresponding tags are omitted rather than written at their sentinel.
+   */
+  static #writeJuiceTags(
+    ext: SkillJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.juiceIconIndex !== null && ext.juiceIconIndex >= 0)
     {
       parts.push(`<jabsJuiceIcon:${Math.trunc(ext.juiceIconIndex)}>`);
@@ -797,11 +919,6 @@ class SkillJabsNoteParser
     {
       parts.push('<juiceProfileGun>');
     }
-
-    const head = parts.length > 0
-      ? `${parts.join('\n')}\n`
-      : '';
-    return NoteNormalizer.normalize(head + baseNote);
   }
 
   static #ensureGlobal(re: RegExp): RegExp
@@ -947,7 +1064,7 @@ class SkillJabsNoteParser
     {
       return null;
     }
-    const s = m[ 1 ];
+    const [ , s ] = m;
     if (typeof s !== 'string' || s.length === 0)
     {
       return null;

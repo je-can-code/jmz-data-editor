@@ -39,7 +39,8 @@ class MemoryJsonStore
     // look up the text by path.
     const text = this.files.get(path);
 
-    if (text == null)
+    // a Map miss is undefined; the map never stores null.
+    if (text === undefined)
     {
       // throw if not found to mimic missing file behavior.
       throw new Error(`File not found: ${path}`);

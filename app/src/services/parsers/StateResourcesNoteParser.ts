@@ -10,7 +10,7 @@ class StateResourcesNoteParser
 
   static strip(note: string): string
   {
-    let n = note.replace(StateResourcesNoteParser.#ensureGlobal(StateResourcesNoteParser.#RE_HRC), '');
+    const n = note.replace(StateResourcesNoteParser.#ensureGlobal(StateResourcesNoteParser.#RE_HRC), '');
     return NoteNormalizer.normalize(n);
   }
 
@@ -27,7 +27,8 @@ class StateResourcesNoteParser
       ext.hpCostReductionFormula = '';
       return;
     }
-    ext.hpCostReductionFormula = m[ 1 ];
+    const [ , hpCostReductionFormula ] = m;
+    ext.hpCostReductionFormula = hpCostReductionFormula;
   }
 
   static write(

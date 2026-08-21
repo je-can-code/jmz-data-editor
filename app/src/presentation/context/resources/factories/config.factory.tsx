@@ -58,7 +58,9 @@ export function createConfigContext<T>(
       { console.error(`Failed to load ${displayName}:`, error); }
       finally
       { setLoading(false); }
-    }, [ rmmzDataPath, filename, rootKey, normalizeLoaded ]);
+      // filename, rootKey and normalizeLoaded are arguments to the factory, not props of the component
+      // it builds, so they are fixed for this context's whole life and cannot invalidate the callback.
+    }, [ rmmzDataPath ]);
 
     const save = useCallback(async (updatedList: T[]) =>
     {
