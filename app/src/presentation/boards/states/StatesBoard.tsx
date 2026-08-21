@@ -1669,6 +1669,308 @@ const StatesBoard = () =>
   };
 
   /**
+   * The recent-skills damage bonus: which skills count, how far back to look, and what each is worth.
+   *
+   * The summary line at the bottom restates the whole rule as a sentence, because four fields spread
+   * across a grid do not read as one rule until they are put back together.
+   */
+  const renderRecentSkillsSection = () =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const { jabs } = selectedState;
+    const skillTypes = SystemService.skillTypes ?? [];
+
+    return (
+      <BoardSectionCard title={'Recent skills'} collapsible defaultExpanded={false}>
+        <Stack spacing={2} alignItems={'stretch'}>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            {'Extra damage based on which skills this unit used recently.'}
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={6}>
+              <Autocomplete<RmmzSkillStypeOption, false, false, false>
+                fullWidth
+                size={'small'}
+                options={skillHistoryTypeFilterAutocompleteOptions(
+                  jabs.skillHistoryBonusTypeId ?? 0,
+                  skillTypes
+                )}
+                groupBy={(option) => option.group}
+                getOptionLabel={(option) => option.label}
+                isOptionEqualToValue={(
+                  a,
+                  b
+                ) => a.value === b.value}
+                value={skillHistoryTypeFilterOptionForValue(
+                  jabs.skillHistoryBonusTypeId,
+                  skillTypes
+                )}
+                onChange={(
+                  _event,
+                  option
+                ) =>
+                {
+                  patchStateJabsSkillHistoryBonus({
+                    skillHistoryBonusTypeId: option === null
+                      ? null
+                      : option.value,
+                  });
+                }}
+                filterOptions={(
+                  options,
+                  state
+                ) =>
+                {
+                  const q = state.inputValue.trim()
+                    .toLowerCase();
+                  if (q === '')
+                  {
+                    return options;
+                  }
+                  return options.filter((o) =>
+                    o.label.toLowerCase()
+                      .includes(q)
+                    || o.group.toLowerCase()
+                      .includes(q)
+                    || String(o.value)
+                      .includes(q));
+                }}
+                slotProps={{
+                  listbox: { style: { maxHeight: 240 } },
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    variant={'outlined'}
+                    label={'Skill type filter'}
+                    placeholder={'Any, Techniques, …'}
+                  />
+                )}
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                type={'number'}
+                variant={'outlined'}
+                label={'Lookback (seconds)'}
+                value={jabs.skillHistoryBonusWindowSeconds === null
+                  ? ''
+                  : String(jabs.skillHistoryBonusWindowSeconds)}
+                onChange={(e) =>
+                {
+                  patchStateJabsSkillHistoryBonus({
+                    skillHistoryBonusWindowSeconds: parseStateJabsNonNegativeIntOrNull(e.target.value),
+                  });
+                }}
+                size={'small'}
+                fullWidth
+                slotProps={{
+                  htmlInput: {
+                    min: 0,
+                  },
+                }}
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                type={'number'}
+                variant={'outlined'}
+                label={'Bonus per count (%)'}
+                value={jabs.skillHistoryBonusPctPerCount === null
+                  ? ''
+                  : String(jabs.skillHistoryBonusPctPerCount)}
+                onChange={(e) =>
+                {
+                  patchStateJabsSkillHistoryBonus({
+                    skillHistoryBonusPctPerCount: parseStateJabsNonNegativeIntOrNull(e.target.value),
+                  });
+                }}
+                size={'small'}
+                fullWidth
+                slotProps={{
+                  htmlInput: {
+                    min: 0,
+                  },
+                }}
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                select
+                variant={'outlined'}
+                label={'What to count'}
+                value={jabs.skillHistoryBonusCountMode ?? ''}
+                onChange={(e) =>
+                {
+                  const v = e.target.value;
+                  if (v === '')
+                  {
+                    patchStateJabsSkillHistoryBonus({ skillHistoryBonusCountMode: null });
+                    return;
+                  }
+                  patchStateJabsSkillHistoryBonus({
+                    skillHistoryBonusCountMode: v as SkillHistoryBonusCountMode,
+                  });
+                }}
+                size={'small'}
+                fullWidth
+                slotProps={{
+                  select: {
+                    displayEmpty: true,
+                  },
+                }}
+              >
+                <MenuItem value={''}>
+                  {'—'}
+                </MenuItem>
+                {SKILL_HISTORY_COUNT_MODE_OPTIONS.map((option) => (
+                  <MenuItem
+                    key={option.value}
+                    value={option.value}
+                  >
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid size={12}>
+              {renderRecentSkillsSummary()}
+            </Grid>
+          </Grid>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * Restates the recent-skills bonus as one sentence, or says it is off.
+   */
+  const renderRecentSkillsSummary = () =>
+  {
+    if (selectedState === null || stateJabsHasSkillHistoryBonus(selectedState.jabs) === false)
+    {
+      return (
+        <Typography variant={'body2'} color={'text.secondary'}>
+          {'Not configured.'}
+        </Typography>
+      );
+    }
+
+    const { jabs } = selectedState;
+
+    const countedThing = SKILL_HISTORY_COUNT_MODE_OPTIONS.find((o) =>
+    {
+      return o.value === jabs.skillHistoryBonusCountMode;
+    })?.label.toLowerCase() ?? 'entry';
+
+    const typeFilter = skillHistoryTypeFilterOptionForValue(
+      jabs.skillHistoryBonusTypeId,
+      SystemService.skillTypes ?? []
+    )?.label ?? 'Any';
+
+    return (
+      <Typography variant={'body2'} color={'text.secondary'}>
+        {`+${jabs.skillHistoryBonusPctPerCount}% damage per ${countedThing} in the last ${jabs.skillHistoryBonusWindowSeconds}s (${typeFilter} only).`}
+      </Typography>
+    );
+  };
+
+  /**
+   * The three ways one resource can slip: a flat total, a percentage of the pool, and a formula.
+   *
+   * HP, MP and TP each offer the same trio and differ only in which fields they write, so the grid is
+   * described once. Negative values drain the pool and positive values replenish it, which is why the
+   * numeric fields are signed rather than clamped at zero.
+   *
+   * @param resource The resource whose slip fields are being drawn.
+   * @param percentLabel What the percentage field is called for this resource.
+   * @param formulaPlaceholder An example formula appropriate to this resource.
+   */
+  const renderSlipResourceGrid = (
+    resource: 'Hp' | 'Mp' | 'Tp',
+    percentLabel: string,
+    formulaPlaceholder: string
+  ) =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const flatKey = `slip${resource}Flat` as const;
+    const percentKey = `slip${resource}Percent` as const;
+    const formulaKey = `slip${resource}Formula` as const;
+
+    const flat = selectedState.jabs[ flatKey ];
+    const percent = selectedState.jabs[ percentKey ];
+
+    return (
+      <Grid container spacing={2} alignItems={'flex-start'}>
+        <Grid size={6}>
+          <TextField
+            type={'number'}
+            variant={'outlined'}
+            label={'Flat'}
+            value={flat === null
+              ? ''
+              : String(flat)}
+            onChange={(e) =>
+            {
+              patchStateJabsSlipSigned(flatKey, e.target.value);
+            }}
+            size={'small'}
+            fullWidth
+            slotProps={{
+              htmlInput: {
+                step: 1,
+              },
+            }}
+          />
+        </Grid>
+        <Grid size={6}>
+          <TextField
+            type={'number'}
+            variant={'outlined'}
+            label={percentLabel}
+            value={percent === null
+              ? ''
+              : String(percent)}
+            onChange={(e) =>
+            {
+              patchStateJabsSlipSigned(percentKey, e.target.value);
+            }}
+            size={'small'}
+            fullWidth
+            slotProps={{
+              htmlInput: {
+                step: 1,
+              },
+            }}
+          />
+        </Grid>
+        <Grid size={12}>
+          <TextField
+            variant={'outlined'}
+            label={'Formula'}
+            value={selectedState.jabs[ formulaKey ]}
+            onChange={(e) =>
+            {
+              handleStateJabsSlipFormulaChangeEvent(formulaKey, e);
+            }}
+            size={'small'}
+            fullWidth
+            placeholder={formulaPlaceholder}
+          />
+        </Grid>
+      </Grid>
+    );
+  };
+
+  /**
    * A JABS timing field that takes either a plain frame count or a formula.
    *
    * Both spellings are stored as the same bracket interior, so which editor appears follows what is
@@ -2720,186 +3022,15 @@ const StatesBoard = () =>
                                 <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
                                   HP
                                 </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Flat'}
-                                      value={selectedState.jabs.slipHpFlat === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipHpFlat)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipHpFlat', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Percent of max'}
-                                      value={selectedState.jabs.slipHpPercent === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipHpPercent)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipHpPercent', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={12}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Formula'}
-                                      value={selectedState.jabs.slipHpFormula}
-                                      onChange={(e) =>
-                                      {
-                                        handleStateJabsSlipFormulaChangeEvent('slipHpFormula', e);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      placeholder={'e.g. a.mdf * -1'}
-                                    />
-                                  </Grid>
-                                </Grid>
+                                {renderSlipResourceGrid('Hp', 'Percent of max', 'e.g. a.mdf * -1')}
                                 <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
                                   MP
                                 </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Flat'}
-                                      value={selectedState.jabs.slipMpFlat === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipMpFlat)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipMpFlat', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Percent'}
-                                      value={selectedState.jabs.slipMpPercent === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipMpPercent)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipMpPercent', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={12}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Formula'}
-                                      value={selectedState.jabs.slipMpFormula}
-                                      onChange={(e) =>
-                                      {
-                                        handleStateJabsSlipFormulaChangeEvent('slipMpFormula', e);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      placeholder={'e.g. a.mat * -0.5'}
-                                    />
-                                  </Grid>
-                                </Grid>
+                                {renderSlipResourceGrid('Mp', 'Percent', 'e.g. a.mat * -0.5')}
                                 <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
                                   TP
                                 </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Flat'}
-                                      value={selectedState.jabs.slipTpFlat === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipTpFlat)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipTpFlat', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Percent'}
-                                      value={selectedState.jabs.slipTpPercent === null
-                                        ? ''
-                                        : String(selectedState.jabs.slipTpPercent)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSlipSigned('slipTpPercent', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          step: 1,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={12}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Formula'}
-                                      value={selectedState.jabs.slipTpFormula}
-                                      onChange={(e) =>
-                                      {
-                                        handleStateJabsSlipFormulaChangeEvent('slipTpFormula', e);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      placeholder={'e.g. a.atk * 2'}
-                                    />
-                                  </Grid>
-                                </Grid>
+                                {renderSlipResourceGrid('Tp', 'Percent', 'e.g. a.atk * 2')}
                               </Stack>
                           </BoardSectionCard>
 
@@ -3330,184 +3461,7 @@ const StatesBoard = () =>
                               </Stack>
                           </BoardSectionCard>
 
-                            <BoardSectionCard title={'Recent skills'} collapsible defaultExpanded={false}>
-                              <Stack spacing={2} alignItems={'stretch'}>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  {'Extra damage based on which skills this unit used recently.'}
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <Autocomplete<RmmzSkillStypeOption, false, false, false>
-                                      fullWidth
-                                      size={'small'}
-                                      options={skillHistoryTypeFilterAutocompleteOptions(
-                                        selectedState.jabs.skillHistoryBonusTypeId ?? 0,
-                                        SystemService.skillTypes ?? []
-                                      )}
-                                      groupBy={(option) => option.group}
-                                      getOptionLabel={(option) => option.label}
-                                      isOptionEqualToValue={(
-                                        a,
-                                        b
-                                      ) => a.value === b.value}
-                                      value={skillHistoryTypeFilterOptionForValue(
-                                        selectedState.jabs.skillHistoryBonusTypeId,
-                                        SystemService.skillTypes ?? []
-                                      )}
-                                      onChange={(
-                                        _event,
-                                        option
-                                      ) =>
-                                      {
-                                        patchStateJabsSkillHistoryBonus({
-                                          skillHistoryBonusTypeId: option === null
-                                            ? null
-                                            : option.value,
-                                        });
-                                      }}
-                                      filterOptions={(
-                                        options,
-                                        state
-                                      ) =>
-                                      {
-                                        const q = state.inputValue.trim()
-                                          .toLowerCase();
-                                        if (q === '')
-                                        {
-                                          return options;
-                                        }
-                                        return options.filter((o) =>
-                                          o.label.toLowerCase()
-                                            .includes(q)
-                                          || o.group.toLowerCase()
-                                            .includes(q)
-                                          || String(o.value)
-                                            .includes(q));
-                                      }}
-                                      slotProps={{
-                                        listbox: { style: { maxHeight: 240 } },
-                                      }}
-                                      renderInput={(params) => (
-                                        <TextField
-                                          {...params}
-                                          variant={'outlined'}
-                                          label={'Skill type filter'}
-                                          placeholder={'Any, Techniques, …'}
-                                        />
-                                      )}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Lookback (seconds)'}
-                                      value={selectedState.jabs.skillHistoryBonusWindowSeconds === null
-                                        ? ''
-                                        : String(selectedState.jabs.skillHistoryBonusWindowSeconds)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSkillHistoryBonus({
-                                          skillHistoryBonusWindowSeconds: parseStateJabsNonNegativeIntOrNull(e.target.value),
-                                        });
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          min: 0,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Bonus per count (%)'}
-                                      value={selectedState.jabs.skillHistoryBonusPctPerCount === null
-                                        ? ''
-                                        : String(selectedState.jabs.skillHistoryBonusPctPerCount)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsSkillHistoryBonus({
-                                          skillHistoryBonusPctPerCount: parseStateJabsNonNegativeIntOrNull(e.target.value),
-                                        });
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        htmlInput: {
-                                          min: 0,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      select
-                                      variant={'outlined'}
-                                      label={'What to count'}
-                                      value={selectedState.jabs.skillHistoryBonusCountMode ?? ''}
-                                      onChange={(e) =>
-                                      {
-                                        const v = e.target.value;
-                                        if (v === '')
-                                        {
-                                          patchStateJabsSkillHistoryBonus({ skillHistoryBonusCountMode: null });
-                                          return;
-                                        }
-                                        patchStateJabsSkillHistoryBonus({
-                                          skillHistoryBonusCountMode: v as SkillHistoryBonusCountMode,
-                                        });
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      slotProps={{
-                                        select: {
-                                          displayEmpty: true,
-                                        },
-                                      }}
-                                    >
-                                      <MenuItem value={''}>
-                                        {'—'}
-                                      </MenuItem>
-                                      {SKILL_HISTORY_COUNT_MODE_OPTIONS.map((option) => (
-                                        <MenuItem
-                                          key={option.value}
-                                          value={option.value}
-                                        >
-                                          {option.label}
-                                        </MenuItem>
-                                      ))}
-                                    </TextField>
-                                  </Grid>
-                                  <Grid size={12}>
-                                    {stateJabsHasSkillHistoryBonus(selectedState.jabs)
-                                      ? (
-                                        <Typography variant={'body2'} color={'text.secondary'}>
-                                          {`+${selectedState.jabs.skillHistoryBonusPctPerCount}% damage per ${
-                                            SKILL_HISTORY_COUNT_MODE_OPTIONS.find((o) =>
-                                            {
-                                              return o.value === selectedState.jabs.skillHistoryBonusCountMode;
-                                            })?.label.toLowerCase() ?? 'entry'
-                                          } in the last ${selectedState.jabs.skillHistoryBonusWindowSeconds}s (${
-                                            skillHistoryTypeFilterOptionForValue(
-                                              selectedState.jabs.skillHistoryBonusTypeId,
-                                              SystemService.skillTypes ?? []
-                                            )?.label ?? 'Any'
-                                          } only).`}
-                                        </Typography>
-                                      )
-                                      : (
-                                        <Typography variant={'body2'} color={'text.secondary'}>
-                                          {'Not configured.'}
-                                        </Typography>
-                                      )}
-                                  </Grid>
-                                </Grid>
-                              </Stack>
-                          </BoardSectionCard>
+                            {renderRecentSkillsSection()}
 
                             <StatePassiveConditionalPanel
                               ext={selectedState.passiveConditional}
