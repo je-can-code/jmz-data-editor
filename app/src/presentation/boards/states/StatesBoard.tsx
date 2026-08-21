@@ -339,6 +339,34 @@ const shieldElementRowsFromSystem = (names: readonly string[] | undefined): IdLa
 };
 
 /**
+ * The props that show exactly one editor tab panel and hide the rest.
+ *
+ * Panels stay mounted and are hidden rather than unmounted, so a half-typed field survives a trip to
+ * another tab and back. That means every panel needs both the {@code hidden} attribute, for assistive
+ * technology, and the display rule, for layout.
+ *
+ * @param {number} activeTab The tab index currently selected.
+ * @param {number} panelIndex The index of the panel being drawn.
+ * @returns {object}
+ */
+const stateEditorTabPanelProps = (
+  activeTab: number,
+  panelIndex: number
+) =>
+{
+  const isActive = activeTab === panelIndex;
+
+  return {
+    hidden: isActive === false,
+    sx: {
+      display: isActive
+        ? 'block'
+        : 'none',
+    },
+  };
+};
+
+/**
  * Board for editing project states: list selection, RMMZ fields, JABS, plugins, traits, natural growth, note.
  *
  * @returns States editor grid layout.
@@ -1669,6 +1697,354 @@ const StatesBoard = () =>
   };
 
   /**
+   * One of the unsigned stacking counters. All five are the same text field over a different key, and
+   * all five read blank when unset so the plugin's own default applies rather than a written zero.
+   *
+   * @param fieldKey The stacking field being edited.
+   * @param label The caption shown on the field.
+   */
+  const renderStackingCounterField = (
+    fieldKey:
+      | 'stateRefreshReset'
+      | 'stackExtendAmount'
+      | 'stackExtendMax'
+      | 'stackMax'
+      | 'applyStacks',
+    label: string
+  ) =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const value = selectedState.jabs[ fieldKey ];
+
+    return (
+      <TextField
+        variant={'outlined'}
+        label={label}
+        value={value === null
+          ? ''
+          : String(value)}
+        onChange={(e) =>
+        {
+          patchStateJabsStackingUnsigned(fieldKey, e.target.value);
+        }}
+        size={'small'}
+        fullWidth
+      />
+    );
+  };
+
+  /**
+   * What happens when the state is applied to a battler that already has it: refresh, extend or stack.
+   *
+   * Each strategy gets its own group of settings, all of them shown at once rather than switched on the
+   * chosen strategy, because the strategy itself can be left on the plugin default.
+   */
+  const renderStackingSection = () =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const { jabs } = selectedState;
+
+    return (
+      <BoardSectionCard title={'Stacking & reapply'} collapsible defaultExpanded={false}>
+        <Stack spacing={2} alignItems={'stretch'}>
+          <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
+            How this state behaves when reapplied while already active—refresh, extend, or
+            stack—vs
+            global defaults unless you override below. Times are in frames (~60/s at normal
+            speed).
+          </Typography>
+          <TextField
+            select
+            variant={'outlined'}
+            label={'Reapply strategy'}
+            value={jabs.stackType ?? ''}
+            onChange={(event: ChangeEvent<HTMLInputElement>) =>
+            {
+              const v = event.target.value;
+              patchStateJabs({
+                stackType: v === ''
+                  ? null
+                  : (v as 'extend' | 'refresh' | 'stack'),
+              });
+            }}
+            size={'small'}
+            fullWidth
+          >
+            <MenuItem value={''}>Default (parameters)</MenuItem>
+            <MenuItem value={'refresh'}>Refresh (restart duration from full)</MenuItem>
+            <MenuItem value={'extend'}>Extend (add to remaining time)</MenuItem>
+            <MenuItem value={'stack'}>Stack (build stack count)</MenuItem>
+          </TextField>
+          <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
+            Refresh
+          </Typography>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            Diminish shaves a few frames off each repeat refresh until the reset window passes,
+            then counts from zero again.
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={6}>
+              <TextField
+                variant={'outlined'}
+                label={'Diminish per reapply'}
+                value={jabs.stateRefreshDiminish === null
+                  ? ''
+                  : String(jabs.stateRefreshDiminish)}
+                onChange={(e) =>
+                {
+                  patchStateJabsRefreshDiminish(e.target.value);
+                }}
+                size={'small'}
+                fullWidth
+              />
+            </Grid>
+            <Grid size={6}>
+              {renderStackingCounterField('stateRefreshReset', 'Diminish reset timer')}
+            </Grid>
+          </Grid>
+          <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
+            Extend
+          </Typography>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            Reapply adds duration up to the extend cap.
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={6}>
+              {renderStackingCounterField('stackExtendAmount', 'Added duration per extend')}
+            </Grid>
+            <Grid size={6}>
+              {renderStackingCounterField('stackExtendMax', 'Maximum total duration')}
+            </Grid>
+          </Grid>
+          <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
+            Stack
+          </Typography>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            Stack ceiling, stacks gained per application, and whether expiry clears one layer or
+            the
+            whole pile.
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={6}>
+              {renderStackingCounterField('stackMax', 'Maximum stacks')}
+            </Grid>
+            <Grid size={6}>
+              {renderStackingCounterField('applyStacks', 'Stacks gained per application')}
+            </Grid>
+          </Grid>
+          <FormControlLabel
+            control={(
+              <Checkbox
+                checked={jabs.loseAllStacksAtOnce}
+                onChange={(e) =>
+                {
+                  patchStateJabs({ loseAllStacksAtOnce: e.target.checked });
+                }}
+                size={'small'}
+              />
+            )}
+            label={(
+              <Box>
+                <Typography variant={'body2'} component={'span'}>
+                  Lose all stacks when duration ends
+                </Typography>
+                <Typography variant={'caption'} color={'text.secondary'} display={'block'}>
+                  Off: one stack per tick-out. On: all stacks removed together.
+                </Typography>
+              </Box>
+            )}
+          />
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * How long the state lasts on the map, and how it lengthens states this unit applies to others.
+   *
+   * Frames and seconds are two spellings of the same duration, so both stay editable and the status
+   * line below reports whichever one actually resolved.
+   */
+  const renderStateDurationSection = () =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const { jabs } = selectedState;
+
+    return (
+      <BoardSectionCard title={'State duration'} collapsible defaultExpanded={true}>
+        <Stack spacing={2} alignItems={'stretch'}>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            {'How long this state lasts on the map.'}
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={12}>
+              <FormControlLabel
+                control={(
+                  <Checkbox
+                    checked={jabs.indefiniteState}
+                    onChange={handleStateJabsIndefiniteChange}
+                    size={'small'}
+                  />
+                )}
+                label={'Never expires on the map'}
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                type={'number'}
+                variant={'outlined'}
+                label={'Duration (frames)'}
+                value={jabs.stateDurationFrames === null
+                  ? ''
+                  : String(jabs.stateDurationFrames)}
+                onChange={(e) =>
+                {
+                  patchStateJabsMapDurationFrames(e.target.value);
+                }}
+                size={'small'}
+                fullWidth
+                disabled={jabs.indefiniteState}
+                slotProps={{
+                  htmlInput: {
+                    min: 0,
+                  },
+                }}
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                type={'number'}
+                variant={'outlined'}
+                label={'Duration (seconds)'}
+                value={jabs.stateDurationSeconds === null
+                  ? ''
+                  : String(jabs.stateDurationSeconds)}
+                onChange={(e) =>
+                {
+                  patchStateJabsMapDurationSeconds(e.target.value);
+                }}
+                size={'small'}
+                fullWidth
+                disabled={jabs.indefiniteState}
+                slotProps={{
+                  htmlInput: {
+                    min: 0,
+                  },
+                }}
+              />
+            </Grid>
+            <Grid size={12}>
+              {renderStateDurationStatus()}
+            </Grid>
+          </Grid>
+          <Divider />
+          <Typography variant={'subtitle2'}>
+            {'Outgoing duration'}
+          </Typography>
+          <Typography variant={'body2'} color={'text.secondary'}>
+            {'Adjusts how long states this unit applies to others last on the map.'}
+          </Typography>
+          <Grid container spacing={2} alignItems={'flex-start'}>
+            <Grid size={6}>
+              <TextField
+                variant={'outlined'}
+                label={'Flat bonus (frames)'}
+                value={jabs.stateDurationFlat === null
+                  ? ''
+                  : String(jabs.stateDurationFlat)}
+                onChange={(e) =>
+                {
+                  patchStateJabsDurationInt('stateDurationFlat', e.target.value);
+                }}
+                size={'small'}
+                fullWidth
+              />
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                variant={'outlined'}
+                label={'Percent bonus'}
+                value={jabs.stateDurationPercent === null
+                  ? ''
+                  : String(jabs.stateDurationPercent)}
+                onChange={(e) =>
+                {
+                  patchStateJabsDurationInt('stateDurationPercent', e.target.value);
+                }}
+                size={'small'}
+                fullWidth
+              />
+            </Grid>
+            <Grid size={12}>
+              <TextField
+                variant={'outlined'}
+                label={'Formula bonus (frames)'}
+                value={jabs.stateDurationFormula}
+                onChange={handleStateJabsDurationFormulaChangeEvent}
+                size={'small'}
+                fullWidth
+                multiline
+                minRows={2}
+                placeholder={'e.g. a.atk * 2'}
+              />
+            </Grid>
+          </Grid>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
+   * Reports the map lifetime as an outcome rather than as the fields that produced it.
+   */
+  const renderStateDurationStatus = () =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const { jabs } = selectedState;
+
+    if (jabs.indefiniteState)
+    {
+      return (
+        <Typography variant={'body2'} color={'text.secondary'}>
+          {'Does not expire on the map.'}
+        </Typography>
+      );
+    }
+
+    const tagFrames = resolveStateMapDurationFramesFromJabs(jabs);
+    if (stateJabsHasMapTimer(jabs) && tagFrames !== null)
+    {
+      return (
+        <Typography variant={'body2'} color={'text.secondary'}>
+          {`Expires on the map ${formatApproxSecondsLabelFromFrames(tagFrames).replace(/[()]/g, '')}.`}
+        </Typography>
+      );
+    }
+
+    return (
+      <Typography variant={'body2'} color={'text.secondary'}>
+        {'No duration set.'}
+      </Typography>
+    );
+  };
+
+  /**
    * The recent-skills damage bonus: which skills count, how far back to look, and what each is worth.
    *
    * The summary line at the bottom restates the whole rule as a sentence, because four fields spread
@@ -2734,12 +3110,7 @@ const StatesBoard = () =>
                   id={'state-editor-tabpanel-0'}
                   role={'tabpanel'}
                   aria-labelledby={'state-editor-tab-0'}
-                  hidden={stateEditorTab !== 0}
-                  sx={{
-                    display: stateEditorTab === 0
-                      ? 'block'
-                      : 'none',
-                  }}
+                  {...stateEditorTabPanelProps(stateEditorTab, 0)}
                 >
                   <Stack spacing={3}>
                     <Grid container spacing={2} alignItems={'flex-start'}>
@@ -3062,150 +3433,7 @@ const StatesBoard = () =>
                         md: 5
                       }}>
                         <Stack spacing={2}>
-                            <BoardSectionCard title={'State duration'} collapsible defaultExpanded={true}>
-                              <Stack spacing={2} alignItems={'stretch'}>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  {'How long this state lasts on the map.'}
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={12}>
-                                    <FormControlLabel
-                                      control={(
-                                        <Checkbox
-                                          checked={selectedState.jabs.indefiniteState}
-                                          onChange={handleStateJabsIndefiniteChange}
-                                          size={'small'}
-                                        />
-                                      )}
-                                      label={'Never expires on the map'}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Duration (frames)'}
-                                      value={selectedState.jabs.stateDurationFrames === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateDurationFrames)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsMapDurationFrames(e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      disabled={selectedState.jabs.indefiniteState}
-                                      slotProps={{
-                                        htmlInput: {
-                                          min: 0,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      type={'number'}
-                                      variant={'outlined'}
-                                      label={'Duration (seconds)'}
-                                      value={selectedState.jabs.stateDurationSeconds === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateDurationSeconds)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsMapDurationSeconds(e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                      disabled={selectedState.jabs.indefiniteState}
-                                      slotProps={{
-                                        htmlInput: {
-                                          min: 0,
-                                        },
-                                      }}
-                                    />
-                                  </Grid>
-                                  <Grid size={12}>
-                                    {(() =>
-                                    {
-                                      if (selectedState.jabs.indefiniteState)
-                                      {
-                                        return (
-                                          <Typography variant={'body2'} color={'text.secondary'}>
-                                            {'Does not expire on the map.'}
-                                          </Typography>
-                                        );
-                                      }
-                                      const tagFrames = resolveStateMapDurationFramesFromJabs(selectedState.jabs);
-                                      if (stateJabsHasMapTimer(selectedState.jabs) && tagFrames !== null)
-                                      {
-                                        return (
-                                          <Typography variant={'body2'} color={'text.secondary'}>
-                                            {`Expires on the map ${formatApproxSecondsLabelFromFrames(tagFrames).replace(/[()]/g, '')}.`}
-                                          </Typography>
-                                        );
-                                      }
-                                      return (
-                                        <Typography variant={'body2'} color={'text.secondary'}>
-                                          {'No duration set.'}
-                                        </Typography>
-                                      );
-                                    })()}
-                                  </Grid>
-                                </Grid>
-                                <Divider />
-                                <Typography variant={'subtitle2'}>
-                                  {'Outgoing duration'}
-                                </Typography>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  {'Adjusts how long states this unit applies to others last on the map.'}
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Flat bonus (frames)'}
-                                      value={selectedState.jabs.stateDurationFlat === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateDurationFlat)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsDurationInt('stateDurationFlat', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Percent bonus'}
-                                      value={selectedState.jabs.stateDurationPercent === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateDurationPercent)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsDurationInt('stateDurationPercent', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={12}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Formula bonus (frames)'}
-                                      value={selectedState.jabs.stateDurationFormula}
-                                      onChange={handleStateJabsDurationFormulaChangeEvent}
-                                      size={'small'}
-                                      fullWidth
-                                      multiline
-                                      minRows={2}
-                                      placeholder={'e.g. a.atk * 2'}
-                                    />
-                                  </Grid>
-                                </Grid>
-                              </Stack>
-                          </BoardSectionCard>
+                            {renderStateDurationSection()}
 
                             <BoardSectionCard title={'Traits'} collapsible>
                               <TraitEditor
@@ -3778,186 +4006,7 @@ const StatesBoard = () =>
                               </Stack>
                           </BoardSectionCard>
 
-                            <BoardSectionCard title={'Stacking & reapply'} collapsible defaultExpanded={false}>
-                              <Stack spacing={2} alignItems={'stretch'}>
-                                <Typography variant={'body2'} sx={{ lineHeight: 1.6 }}>
-                                  How this state behaves when reapplied while already active—refresh, extend, or
-                                  stack—vs
-                                  global defaults unless you override below. Times are in frames (~60/s at normal
-                                  speed).
-                                </Typography>
-                                <TextField
-                                  select
-                                  variant={'outlined'}
-                                  label={'Reapply strategy'}
-                                  value={selectedState.jabs.stackType ?? ''}
-                                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                  {
-                                    const v = event.target.value;
-                                    patchStateJabs({
-                                      stackType: v === ''
-                                        ? null
-                                        : (v as 'extend' | 'refresh' | 'stack'),
-                                    });
-                                  }}
-                                  size={'small'}
-                                  fullWidth
-                                >
-                                  <MenuItem value={''}>Default (parameters)</MenuItem>
-                                  <MenuItem value={'refresh'}>Refresh (restart duration from full)</MenuItem>
-                                  <MenuItem value={'extend'}>Extend (add to remaining time)</MenuItem>
-                                  <MenuItem value={'stack'}>Stack (build stack count)</MenuItem>
-                                </TextField>
-                                <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
-                                  Refresh
-                                </Typography>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  Diminish shaves a few frames off each repeat refresh until the reset window passes,
-                                  then counts from zero again.
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Diminish per reapply'}
-                                      value={selectedState.jabs.stateRefreshDiminish === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateRefreshDiminish)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsRefreshDiminish(e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Diminish reset timer'}
-                                      value={selectedState.jabs.stateRefreshReset === null
-                                        ? ''
-                                        : String(selectedState.jabs.stateRefreshReset)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsStackingUnsigned(
-                                          'stateRefreshReset',
-                                          e.target.value
-                                        );
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                </Grid>
-                                <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
-                                  Extend
-                                </Typography>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  Reapply adds duration up to the extend cap.
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Added duration per extend'}
-                                      value={selectedState.jabs.stackExtendAmount === null
-                                        ? ''
-                                        : String(selectedState.jabs.stackExtendAmount)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsStackingUnsigned(
-                                          'stackExtendAmount',
-                                          e.target.value
-                                        );
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Maximum total duration'}
-                                      value={selectedState.jabs.stackExtendMax === null
-                                        ? ''
-                                        : String(selectedState.jabs.stackExtendMax)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsStackingUnsigned(
-                                          'stackExtendMax',
-                                          e.target.value
-                                        );
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                </Grid>
-                                <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
-                                  Stack
-                                </Typography>
-                                <Typography variant={'body2'} color={'text.secondary'}>
-                                  Stack ceiling, stacks gained per application, and whether expiry clears one layer or
-                                  the
-                                  whole pile.
-                                </Typography>
-                                <Grid container spacing={2} alignItems={'flex-start'}>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Maximum stacks'}
-                                      value={selectedState.jabs.stackMax === null
-                                        ? ''
-                                        : String(selectedState.jabs.stackMax)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsStackingUnsigned('stackMax', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                  <Grid size={6}>
-                                    <TextField
-                                      variant={'outlined'}
-                                      label={'Stacks gained per application'}
-                                      value={selectedState.jabs.applyStacks === null
-                                        ? ''
-                                        : String(selectedState.jabs.applyStacks)}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabsStackingUnsigned('applyStacks', e.target.value);
-                                      }}
-                                      size={'small'}
-                                      fullWidth
-                                    />
-                                  </Grid>
-                                </Grid>
-                                <FormControlLabel
-                                  control={(
-                                    <Checkbox
-                                      checked={selectedState.jabs.loseAllStacksAtOnce}
-                                      onChange={(e) =>
-                                      {
-                                        patchStateJabs({ loseAllStacksAtOnce: e.target.checked });
-                                      }}
-                                      size={'small'}
-                                    />
-                                  )}
-                                  label={(
-                                    <Box>
-                                      <Typography variant={'body2'} component={'span'}>
-                                        Lose all stacks when duration ends
-                                      </Typography>
-                                      <Typography variant={'caption'} color={'text.secondary'} display={'block'}>
-                                        Off: one stack per tick-out. On: all stacks removed together.
-                                      </Typography>
-                                    </Box>
-                                  )}
-                                />
-                              </Stack>
-                          </BoardSectionCard>
+                            {renderStackingSection()}
                         </Stack>
                       </Grid>
                     </Grid>
@@ -3968,12 +4017,7 @@ const StatesBoard = () =>
                   id={'state-editor-tabpanel-1'}
                   role={'tabpanel'}
                   aria-labelledby={'state-editor-tab-1'}
-                  hidden={stateEditorTab !== 1}
-                  sx={{
-                    display: stateEditorTab === 1
-                      ? 'block'
-                      : 'none',
-                  }}
+                  {...stateEditorTabPanelProps(stateEditorTab, 1)}
                 >
                   <Stack spacing={2}>
                     <Typography variant={'body2'} color={'text.secondary'}>
@@ -3991,12 +4035,7 @@ const StatesBoard = () =>
                   id={'state-editor-tabpanel-2'}
                   role={'tabpanel'}
                   aria-labelledby={'state-editor-tab-2'}
-                  hidden={stateEditorTab !== 2}
-                  sx={{
-                    display: stateEditorTab === 2
-                      ? 'block'
-                      : 'none',
-                  }}
+                  {...stateEditorTabPanelProps(stateEditorTab, 2)}
                 >
                   <Stack spacing={2}>
                     <Stack
