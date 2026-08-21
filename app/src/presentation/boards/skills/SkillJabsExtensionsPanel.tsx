@@ -1143,6 +1143,422 @@ function SkillJabsExtensionsPanel(
   }
 
   /**
+   * One animation picker. The casting section offers three of them over different fields, and they
+   * differ only in what they are called and which field they write.
+   *
+   * All three search the same way -- by name, by detail, by group, or by raw id -- because an author
+   * hunting an animation may remember any of those.
+   *
+   * @param options The animations selectable for this slot.
+   * @param currentId The stored animation id, or null when unset.
+   * @param fieldKey The extension field this picker writes.
+   * @param label The caption naming when this animation plays.
+   * @param helperText The line under the picker explaining the slot.
+   * @param disabled Whether the slot is unavailable for the current settings.
+   */
+  const renderAnimationPicker = (
+    options: RmmzSkillAnimationOption[],
+    currentId: number | null,
+    fieldKey: 'selfAnimationId' | 'onCastAnimationId' | 'castAnimation',
+    label: string,
+    helperText: string,
+    disabled = false
+  ) =>
+  {
+    const currentOption = currentId === null
+      ? null
+      : skillAnimationOptionForValue(currentId, castAnimationBaseOptions);
+
+    return (
+      <Autocomplete<RmmzSkillAnimationOption, false, false, false>
+        fullWidth
+        size={'small'}
+        disabled={disabled}
+        options={options}
+        groupBy={(option) => option.group}
+        getOptionLabel={(option) => option.label}
+        isOptionEqualToValue={(
+          a,
+          b
+        ) => a.value === b.value}
+        value={currentOption}
+        onChange={(
+          _e,
+          option
+        ) =>
+        {
+          patch({
+            [ fieldKey ]: option === null
+              ? null
+              : option.value
+          });
+        }}
+        filterOptions={(
+          opts,
+          state
+        ) =>
+        {
+          const q = state.inputValue.trim()
+            .toLowerCase();
+          if (q === '')
+          {
+            return opts;
+          }
+          return opts.filter((o) =>
+            o.label.toLowerCase()
+              .includes(q)
+            || o.detail.toLowerCase()
+              .includes(q)
+            || o.group.toLowerCase()
+              .includes(q)
+            || String(o.value)
+              .includes(q));
+        }}
+        slotProps={{
+          listbox: { style: { maxHeight: 280 } },
+        }}
+        renderInput={(params) =>
+          (
+            <TextField
+              {...params}
+              variant={'outlined'}
+              label={label}
+              placeholder={'Search animations…'}
+              helperText={helperText}
+            />
+          )}
+      />
+    );
+  };
+
+  /**
+   * The whole execution pipeline: the wind-up, what plays during it, and how the spawned action behaves
+   * once it exists.
+   *
+   * Cast time gates the wind-up half -- without one there is no channel to animate or telegraph -- so
+   * those fields disable themselves and say so. The delay tag is edited through three fields when it
+   * parses and as raw text when it does not, since the fields cannot represent what they could not read.
+   */
+  const renderCastingSection = () =>
+  {
+    const hasNoCastTime = jabs.castTime === null;
+    const windUpAnimationHelperText = hasNoCastTime
+      ? 'Set cast time first — nothing plays without a wind-up.'
+      : 'Shown on the caster while cast time counts down (optional).';
+    const delayTouchable = delayParsed?.touchable ?? true;
+    const delayFramesText = delayParsed === null
+      ? ''
+      : String(delayParsed.frames);
+
+    return (
+      <BoardSectionCard title={'Casting, map execution & spawn animations'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            One accordion for the full pipeline: Phase 1 cast time, optional map spawn flashes, then wind-up animation
+            and
+            telegraph; Phase 2 how the action behaves on the map. Cast time is in frames (60 ≈ one second at default
+            FPS).
+            With no cast time there is no standing channel, but spawn animations and Phase 2 still apply once the
+            action
+            exists.
+          </Typography>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Phase 1 — Wind-up & cast
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={12}>
+              <TextField
+                label={'Cast time (frames)'}
+                size={'small'}
+                fullWidth
+                value={jabs.castTime === null
+                  ? ''
+                  : String(jabs.castTime)}
+                onChange={onCastTimeChange}
+                helperText={'Empty or 0 = no wind-up. Higher = longer channel before the action event is placed.'}
+                slotProps={{
+                  htmlInput: {
+                    inputMode: 'numeric',
+                    min: 0,
+                    step: 1
+                  },
+                }}
+              />
+            </Grid>
+            <Grid size={12}>
+              <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+                Map spawn animations (optional)
+              </Typography>
+              <Typography variant={'caption'} color={'text.secondary'}>
+                Separate from the Database battle animation and from wind-up below. Same picker as elsewhere;
+                weapon-type
+                entries are omitted on purpose.
+              </Typography>
+            </Grid>
+            <Grid size={6}>
+              {renderAnimationPicker(
+                selfAnimationOptions,
+                jabs.selfAnimationId,
+                'selfAnimationId',
+                'Self / owner animation',
+                'Plays on the acting battler tied to the map action (optional).'
+              )}
+            </Grid>
+            <Grid size={6}>
+              {renderAnimationPicker(
+                onCastSkillAnimationOptions,
+                jabs.onCastAnimationId,
+                'onCastAnimationId',
+                'On-cast / spawn flash',
+                'Fires when the map action is actually spawned or cast through (optional).'
+              )}
+            </Grid>
+            {contextSkillAnimationId !== null && (
+              <Grid size={12}>
+                <Typography variant={'caption'} color={'text.secondary'}>
+                  {`This skill’s database animation id is ${contextSkillAnimationId} — use that as reference if you want the map action to match battle timing.`}
+                </Typography>
+              </Grid>
+            )}
+            <Grid size={12}>
+              {renderAnimationPicker(
+                castAnimationOptions,
+                jabs.castAnimation,
+                'castAnimation',
+                'Animation during wind-up',
+                windUpAnimationHelperText,
+                hasNoCastTime
+              )}
+            </Grid>
+          </Grid>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Cast preview (telegraph)
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            While casting, JABS can preview where the action will land so players can react. Turn that off for stealth
+            or surprise skills, or shorten the warning window with “frames left” below.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={12}>
+              {boolSwitch(
+                'No cast preview (hide telegraph)',
+                jabs.noCastPreview,
+                'noCastPreview',
+                hasNoCastTime
+              )}
+            </Grid>
+            <Grid size={6}>
+              <TextField
+                label={'Start warning this many frames before finish'}
+                size={'small'}
+                fullWidth
+                disabled={hasNoCastTime || jabs.noCastPreview}
+                value={jabs.castPreviewWarnAt === null
+                  ? ''
+                  : String(jabs.castPreviewWarnAt)}
+                onChange={onCastPreviewWarnAtChange}
+                helperText={castPreviewWarnHelperText}
+                slotProps={{
+                  htmlInput: {
+                    inputMode: 'numeric',
+                    min: 0,
+                    max: hasNoCastTime
+                      ? undefined
+                      : jabs.castTime,
+                    step: 1,
+                  },
+                }}
+              />
+            </Grid>
+          </Grid>
+
+          <Divider sx={{ my: 1 }}/>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Phase 2 — Action on the map
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Same accordion as above: after wind-up (if any), these fields control the spawned event — direct vs
+            projectile,
+            AI spacing, how long it lives, knockback, delayed detonation, linger, and on-defeat placement.
+          </Typography>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Direct targeting
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            No separate projectile event: the hit resolves toward a target in range. If both tags are present, direct
+            lock wins.
+          </Typography>
+          <Stack direction={'row'} spacing={2} flexWrap={'wrap'}>
+            {boolSwitch(
+              'Instant / direct (no map projectile)',
+              jabs.direct,
+              'direct'
+            )}
+            {boolSwitch(
+              'Snap to target at fire time (removes dodge window)',
+              jabs.directLock,
+              'directLock'
+            )}
+          </Stack>
+          <Grid container spacing={2}>
+            <Grid size={4}>
+              {floatField(
+                'AI standoff distance (tiles)',
+                jabs.proximity,
+                'proximity',
+                {
+                  helperText:
+                    'How close an AI battler tries to get before using this skill (non-user scopes).',
+                }
+              )}
+            </Grid>
+            <Grid size={4}>
+              {intField(
+                'Action lifetime (frames)',
+                jabs.duration,
+                'duration',
+                {
+                  helperText:
+                    'How long the action event stays on the map. Also ends after max hits. JABS enforces a small minimum.',
+                }
+              )}
+            </Grid>
+            <Grid size={4}>
+              {intField(
+                'Knockback distance (tiles)',
+                jabs.knockback,
+                'knockback',
+                {
+                  helperText: 'Tiles the defender is pushed when this skill connects.',
+                }
+              )}
+            </Grid>
+            <Grid size={12}>
+              <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+                Delayed detonation
+              </Typography>
+              <Typography variant={'caption'} color={'text.secondary'}>
+                Timed trap / mine: waits on the map, then fires. Use -1 frames with “touch to trigger” for touch-only
+                arming (see JABS warning if touch is off).
+              </Typography>
+            </Grid>
+            {delayNoteInvalid
+              ? (
+                <>
+                  <Grid size={12}>
+                    <Alert severity={'warning'}>
+                      This note does not match the expected delay shape
+                      {' '}
+                      <Typography component={'span'} variant={'body2'} sx={{ fontFamily: 'monospace' }}>
+                        [frames, true|false [, triggerRadius]]
+                      </Typography>
+                      . Edit the raw tag or clear it.
+                    </Alert>
+                  </Grid>
+                  <Grid size={12}>
+                    {rawField('Delay tag (raw)', jabs.delayRaw, 'delayRaw')}
+                  </Grid>
+                </>
+              )
+              : (
+                <>
+                  <Grid size={4}>
+                    <TextField
+                      label={'Frames until detonation'}
+                      size={'small'}
+                      fullWidth
+                      value={delayFramesText}
+                      onChange={(e) =>
+                      {
+                        patchDelayFromFields(
+                          e.target.value,
+                          delayTouchable,
+                          delayRadiusText
+                        );
+                      }}
+                      helperText={'-1 = never auto-detonate (needs touch).'}
+                      slotProps={{ htmlInput: { inputMode: 'numeric' } }}
+                    />
+                  </Grid>
+                  <Grid size={4}>
+                    <FormControlLabel
+                      disabled={delayParsed === null}
+                      control={
+                        <Switch
+                          size={'small'}
+                          checked={delayParsed?.touchable ?? false}
+                          onChange={(e) =>
+                          {
+                            patchDelayFromFields(
+                              delayFramesText,
+                              e.target.checked,
+                              delayRadiusText
+                            );
+                          }}
+                        />
+                      }
+                      label={'Trigger when an enemy steps on it'}
+                    />
+                  </Grid>
+                  <Grid size={4}>
+                    <TextField
+                      label={'Optional touch radius (tiles)'}
+                      size={'small'}
+                      fullWidth
+                      disabled={delayParsed === null}
+                      value={delayRadiusText}
+                      onChange={(e) =>
+                      {
+                        patchDelayFromFields(
+                          delayFramesText,
+                          delayTouchable,
+                          e.target.value
+                        );
+                      }}
+                      placeholder={'default = use action normal hitbox'}
+                      slotProps={{ htmlInput: { inputMode: 'decimal' } }}
+                    />
+                  </Grid>
+                  <Grid size={12}>
+                    <Typography variant={'caption'} color={'text.secondary'}>
+                      Set frames first to add the delay tag; then touch trigger and optional radius apply. Clear
+                      frames to remove the tag.
+                    </Typography>
+                  </Grid>
+                </>
+              )}
+            <Grid size={4}>
+              {intField(
+                'Fade-out after expire (frames)',
+                jabs.linger,
+                'linger',
+                {
+                  helperText:
+                    'Visual tail after hits/duration end; collision is off during fade. Omit tag for JABS default (~10). Use 0 to vanish instantly.',
+                }
+              )}
+            </Grid>
+            <Grid size={12}>
+              {boolSwitch(
+                'Spawn on-target-defeat FX at victim position',
+                jabs.onDefeatedTarget,
+                'onDefeatedTarget'
+              )}
+              <Typography variant={'caption'} color={'text.secondary'} sx={{
+                display: 'block',
+                mt: 0.5
+              }}>
+                Only meaningful for follow-up skills fired via battler on-target-defeat tags: places the event on the
+                defeated enemy instead of the caster.
+              </Typography>
+            </Grid>
+          </Grid>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
    * How far the action reaches, what shape it tests hits with, and how many projectiles it throws.
    *
    * The shape decides which of the numeric fields mean anything: arc and circle read degrees, line and
@@ -2299,492 +2715,7 @@ function SkillJabsExtensionsPanel(
 
       {renderActionMapSection()}
 
-      <BoardSectionCard title={'Casting, map execution & spawn animations'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              One accordion for the full pipeline: Phase 1 cast time, optional map spawn flashes, then wind-up animation
-              and
-              telegraph; Phase 2 how the action behaves on the map. Cast time is in frames (60 ≈ one second at default
-              FPS).
-              With no cast time there is no standing channel, but spawn animations and Phase 2 still apply once the
-              action
-              exists.
-            </Typography>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Phase 1 — Wind-up & cast
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={12}>
-                <TextField
-                  label={'Cast time (frames)'}
-                  size={'small'}
-                  fullWidth
-                  value={jabs.castTime === null
-                    ? ''
-                    : String(jabs.castTime)}
-                  onChange={onCastTimeChange}
-                  helperText={'Empty or 0 = no wind-up. Higher = longer channel before the action event is placed.'}
-                  slotProps={{
-                    htmlInput: {
-                      inputMode: 'numeric',
-                      min: 0,
-                      step: 1
-                    },
-                  }}
-                />
-              </Grid>
-              <Grid size={12}>
-                <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-                  Map spawn animations (optional)
-                </Typography>
-                <Typography variant={'caption'} color={'text.secondary'}>
-                  Separate from the Database battle animation and from wind-up below. Same picker as elsewhere;
-                  weapon-type
-                  entries are omitted on purpose.
-                </Typography>
-              </Grid>
-              <Grid size={6}>
-                <Autocomplete<RmmzSkillAnimationOption, false, false, false>
-                  fullWidth
-                  size={'small'}
-                  options={selfAnimationOptions}
-                  groupBy={(option) => option.group}
-                  getOptionLabel={(option) => option.label}
-                  isOptionEqualToValue={(
-                    a,
-                    b
-                  ) => a.value === b.value}
-                  value={
-                    jabs.selfAnimationId === null
-                      ? null
-                      : skillAnimationOptionForValue(jabs.selfAnimationId, castAnimationBaseOptions)
-                  }
-                  onChange={(
-                    _e,
-                    option
-                  ) =>
-                  {
-                    patch({
-                      selfAnimationId: option === null
-                        ? null
-                        : option.value
-                    });
-                  }}
-                  filterOptions={(
-                    options,
-                    state
-                  ) =>
-                  {
-                    const q = state.inputValue.trim()
-                      .toLowerCase();
-                    if (q === '')
-                    {
-                      return options;
-                    }
-                    return options.filter((o) =>
-                      o.label.toLowerCase()
-                        .includes(q)
-                      || o.detail.toLowerCase()
-                        .includes(q)
-                      || o.group.toLowerCase()
-                        .includes(q)
-                      || String(o.value)
-                        .includes(q));
-                  }}
-                  slotProps={{
-                    listbox: { style: { maxHeight: 280 } },
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        variant={'outlined'}
-                        label={'Self / owner animation'}
-                        placeholder={'Search animations…'}
-                        helperText={'Plays on the acting battler tied to the map action (optional).'}
-                      />
-                    )}
-                />
-              </Grid>
-              <Grid size={6}>
-                <Autocomplete<RmmzSkillAnimationOption, false, false, false>
-                  fullWidth
-                  size={'small'}
-                  options={onCastSkillAnimationOptions}
-                  groupBy={(option) => option.group}
-                  getOptionLabel={(option) => option.label}
-                  isOptionEqualToValue={(
-                    a,
-                    b
-                  ) => a.value === b.value}
-                  value={
-                    jabs.onCastAnimationId === null
-                      ? null
-                      : skillAnimationOptionForValue(jabs.onCastAnimationId, castAnimationBaseOptions)
-                  }
-                  onChange={(
-                    _e,
-                    option
-                  ) =>
-                  {
-                    patch({
-                      onCastAnimationId: option === null
-                        ? null
-                        : option.value
-                    });
-                  }}
-                  filterOptions={(
-                    options,
-                    state
-                  ) =>
-                  {
-                    const q = state.inputValue.trim()
-                      .toLowerCase();
-                    if (q === '')
-                    {
-                      return options;
-                    }
-                    return options.filter((o) =>
-                      o.label.toLowerCase()
-                        .includes(q)
-                      || o.detail.toLowerCase()
-                        .includes(q)
-                      || o.group.toLowerCase()
-                        .includes(q)
-                      || String(o.value)
-                        .includes(q));
-                  }}
-                  slotProps={{
-                    listbox: { style: { maxHeight: 280 } },
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        variant={'outlined'}
-                        label={'On-cast / spawn flash'}
-                        placeholder={'Search animations…'}
-                        helperText={'Fires when the map action is actually spawned or cast through (optional).'}
-                      />
-                    )}
-                />
-              </Grid>
-              {contextSkillAnimationId !== null
-                ? (
-                  <Grid size={12}>
-                    <Typography variant={'caption'} color={'text.secondary'}>
-                      {`This skill’s database animation id is ${contextSkillAnimationId} — use that as reference if you want the map action to match battle timing.`}
-                    </Typography>
-                  </Grid>
-                )
-                : null}
-              <Grid size={12}>
-                <Autocomplete<RmmzSkillAnimationOption, false, false, false>
-                  fullWidth
-                  size={'small'}
-                  disabled={jabs.castTime === null}
-                  options={castAnimationOptions}
-                  groupBy={(option) => option.group}
-                  getOptionLabel={(option) => option.label}
-                  isOptionEqualToValue={(
-                    a,
-                    b
-                  ) => a.value === b.value}
-                  value={
-                    jabs.castAnimation === null
-                      ? null
-                      : skillAnimationOptionForValue(jabs.castAnimation, castAnimationBaseOptions)
-                  }
-                  onChange={(
-                    _e,
-                    option
-                  ) =>
-                  {
-                    patch({
-                      castAnimation: option === null
-                        ? null
-                        : option.value
-                    });
-                  }}
-                  filterOptions={(
-                    options,
-                    state
-                  ) =>
-                  {
-                    const q = state.inputValue.trim()
-                      .toLowerCase();
-                    if (q === '')
-                    {
-                      return options;
-                    }
-                    return options.filter((o) =>
-                      o.label.toLowerCase()
-                        .includes(q)
-                      || o.detail.toLowerCase()
-                        .includes(q)
-                      || o.group.toLowerCase()
-                        .includes(q)
-                      || String(o.value)
-                        .includes(q));
-                  }}
-                  slotProps={{
-                    listbox: { style: { maxHeight: 280 } },
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        variant={'outlined'}
-                        label={'Animation during wind-up'}
-                        placeholder={'Search animations…'}
-                        helperText={
-                          jabs.castTime === null
-                            ? 'Set cast time first — nothing plays without a wind-up.'
-                            : 'Shown on the caster while cast time counts down (optional).'
-                        }
-                      />
-                    )}
-                />
-              </Grid>
-            </Grid>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Cast preview (telegraph)
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              While casting, JABS can preview where the action will land so players can react. Turn that off for stealth
-              or surprise skills, or shorten the warning window with “frames left” below.
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={12}>
-                {boolSwitch(
-                  'No cast preview (hide telegraph)',
-                  jabs.noCastPreview,
-                  'noCastPreview',
-                  jabs.castTime === null
-                )}
-              </Grid>
-              <Grid size={6}>
-                <TextField
-                  label={'Start warning this many frames before finish'}
-                  size={'small'}
-                  fullWidth
-                  disabled={jabs.castTime === null || jabs.noCastPreview}
-                  value={jabs.castPreviewWarnAt === null
-                    ? ''
-                    : String(jabs.castPreviewWarnAt)}
-                  onChange={onCastPreviewWarnAtChange}
-                  helperText={castPreviewWarnHelperText}
-                  slotProps={{
-                    htmlInput: {
-                      inputMode: 'numeric',
-                      min: 0,
-                      max: jabs.castTime === null
-                        ? undefined
-                        : jabs.castTime,
-                      step: 1,
-                    },
-                  }}
-                />
-              </Grid>
-            </Grid>
-
-            <Divider sx={{ my: 1 }}/>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Phase 2 — Action on the map
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Same accordion as above: after wind-up (if any), these fields control the spawned event — direct vs
-              projectile,
-              AI spacing, how long it lives, knockback, delayed detonation, linger, and on-defeat placement.
-            </Typography>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Direct targeting
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              No separate projectile event: the hit resolves toward a target in range. If both tags are present, direct
-              lock wins.
-            </Typography>
-            <Stack direction={'row'} spacing={2} flexWrap={'wrap'}>
-              {boolSwitch(
-                'Instant / direct (no map projectile)',
-                jabs.direct,
-                'direct'
-              )}
-              {boolSwitch(
-                'Snap to target at fire time (removes dodge window)',
-                jabs.directLock,
-                'directLock'
-              )}
-            </Stack>
-            <Grid container spacing={2}>
-              <Grid size={4}>
-                {floatField(
-                  'AI standoff distance (tiles)',
-                  jabs.proximity,
-                  'proximity',
-                  {
-                    helperText:
-                      'How close an AI battler tries to get before using this skill (non-user scopes).',
-                  }
-                )}
-              </Grid>
-              <Grid size={4}>
-                {intField(
-                  'Action lifetime (frames)',
-                  jabs.duration,
-                  'duration',
-                  {
-                    helperText:
-                      'How long the action event stays on the map. Also ends after max hits. JABS enforces a small minimum.',
-                  }
-                )}
-              </Grid>
-              <Grid size={4}>
-                {intField(
-                  'Knockback distance (tiles)',
-                  jabs.knockback,
-                  'knockback',
-                  {
-                    helperText: 'Tiles the defender is pushed when this skill connects.',
-                  }
-                )}
-              </Grid>
-              <Grid size={12}>
-                <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-                  Delayed detonation
-                </Typography>
-                <Typography variant={'caption'} color={'text.secondary'}>
-                  Timed trap / mine: waits on the map, then fires. Use -1 frames with “touch to trigger” for touch-only
-                  arming (see JABS warning if touch is off).
-                </Typography>
-              </Grid>
-              {delayNoteInvalid
-                ? (
-                  <>
-                    <Grid size={12}>
-                      <Alert severity={'warning'}>
-                        This note does not match the expected delay shape
-                        {' '}
-                        <Typography component={'span'} variant={'body2'} sx={{ fontFamily: 'monospace' }}>
-                          [frames, true|false [, triggerRadius]]
-                        </Typography>
-                        . Edit the raw tag or clear it.
-                      </Alert>
-                    </Grid>
-                    <Grid size={12}>
-                      {rawField('Delay tag (raw)', jabs.delayRaw, 'delayRaw')}
-                    </Grid>
-                  </>
-                )
-                : (
-                  <>
-                    <Grid size={4}>
-                      <TextField
-                        label={'Frames until detonation'}
-                        size={'small'}
-                        fullWidth
-                        value={delayParsed === null
-                          ? ''
-                          : String(delayParsed.frames)}
-                        onChange={(e) =>
-                        {
-                          patchDelayFromFields(
-                            e.target.value,
-                            delayParsed?.touchable ?? true,
-                            delayRadiusText
-                          );
-                        }}
-                        helperText={'-1 = never auto-detonate (needs touch).'}
-                        slotProps={{ htmlInput: { inputMode: 'numeric' } }}
-                      />
-                    </Grid>
-                    <Grid size={4}>
-                      <FormControlLabel
-                        disabled={delayParsed === null}
-                        control={
-                          <Switch
-                            size={'small'}
-                            checked={delayParsed?.touchable ?? false}
-                            onChange={(e) =>
-                            {
-                              const f =
-                                delayParsed === null
-                                  ? ''
-                                  : String(delayParsed.frames);
-                              patchDelayFromFields(
-                                f,
-                                e.target.checked,
-                                delayRadiusText
-                              );
-                            }}
-                          />
-                        }
-                        label={'Trigger when an enemy steps on it'}
-                      />
-                    </Grid>
-                    <Grid size={4}>
-                      <TextField
-                        label={'Optional touch radius (tiles)'}
-                        size={'small'}
-                        fullWidth
-                        disabled={delayParsed === null}
-                        value={
-                          delayParsed !== null && delayParsed.radius !== null
-                            ? String(delayParsed.radius)
-                            : ''
-                        }
-                        onChange={(e) =>
-                        {
-                          const f =
-                            delayParsed === null
-                              ? ''
-                              : String(delayParsed.frames);
-                          patchDelayFromFields(
-                            f,
-                            delayParsed?.touchable ?? true,
-                            e.target.value
-                          );
-                        }}
-                        placeholder={'default = use action normal hitbox'}
-                        slotProps={{ htmlInput: { inputMode: 'decimal' } }}
-                      />
-                    </Grid>
-                    <Grid size={12}>
-                      <Typography variant={'caption'} color={'text.secondary'}>
-                        Set frames first to add the delay tag; then touch trigger and optional radius apply. Clear
-                        frames to remove the tag.
-                      </Typography>
-                    </Grid>
-                  </>
-                )}
-              <Grid size={4}>
-                {intField(
-                  'Fade-out after expire (frames)',
-                  jabs.linger,
-                  'linger',
-                  {
-                    helperText:
-                      'Visual tail after hits/duration end; collision is off during fade. Omit tag for JABS default (~10). Use 0 to vanish instantly.',
-                  }
-                )}
-              </Grid>
-              <Grid size={12}>
-                {boolSwitch(
-                  'Spawn on-target-defeat FX at victim position',
-                  jabs.onDefeatedTarget,
-                  'onDefeatedTarget'
-                )}
-                <Typography variant={'caption'} color={'text.secondary'} sx={{
-                  display: 'block',
-                  mt: 0.5
-                }}>
-                  Only meaningful for follow-up skills fired via battler on-target-defeat tags: places the event on the
-                  defeated enemy instead of the caster.
-                </Typography>
-              </Grid>
-            </Grid>
-          </Stack>
-      </BoardSectionCard>
+      {renderCastingSection()}
 
       {renderPostExecutionSection()}
 
