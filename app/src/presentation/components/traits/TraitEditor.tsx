@@ -40,6 +40,72 @@ import RPG_Trait = Rmmz.Data.RPG_Trait;
  */
 const TRAIT_EDITOR_GRID_TEMPLATE = '88px minmax(4.5rem, 7rem) minmax(0, 1fr) 88px';
 
+/**
+ * How each trait code presents its value field. A {@code percent} trait stores a factor and is authored
+ * as a whole-number percent; an {@code integer} trait stores exactly what was typed. Only the caption
+ * differs between traits sharing a kind.
+ */
+const TRAIT_VALUE_INPUTS: Record<number, { kind: 'percent' | 'integer'; label: string }> = {
+  11: { kind: 'percent', label: 'Rate' }, // elemental rate
+  12: { kind: 'percent', label: 'Rate' }, // debuff rate
+  13: { kind: 'percent', label: 'Rate' }, // state rate
+  21: { kind: 'percent', label: 'Rate' }, // base parameter rate
+  22: { kind: 'percent', label: 'Rate' }, // ex parameter rate
+  23: { kind: 'percent', label: 'Rate' }, // sp parameter rate
+  32: { kind: 'percent', label: 'Apply Rate' }, // on-hit state application rate
+  33: { kind: 'integer', label: 'Speed' }, // attack speed modifier
+  34: { kind: 'integer', label: 'Extra Hits' }, // attack count modifier
+  61: { kind: 'percent', label: 'Extra Turn Chance' }, // action times
+};
+
+/**
+ * The trait codes that carry no numeric value at all. These are distinct from codes this editor does
+ * not recognize: a listed code renders a note saying there is nothing to set, where an unknown one
+ * renders nothing.
+ */
+const TRAIT_CODES_WITHOUT_VALUE = new Set([
+  14, // state immunity
+  31, // attack element
+  35, // attack skill
+  41, 42, 43, 44, // skill access
+  51, 52, 53, 54, 55, // equipment
+  62, 63, 64, // party-wide
+]);
+
+/**
+ * What a freshly added trait starts at, keyed by trait code. Zero is a fine starting point for most
+ * fields, but not all: a rate of zero would read as "nullify", and a dataId of zero names the engine's
+ * "none" row, which is not something an author can mean to pick.
+ *
+ * Codes absent from this table start at zero for both, which is correct for them -- 22, 33, 55, 61,
+ * 62, 63 and 64 either take no dataId or read zero as a real value.
+ */
+const TRAIT_SEED_VALUES: Record<number, { dataId: number; value: number }> = {
+  // rate traits are multipliers, so they open at 1x rather than at zero.
+  12: { dataId: 0, value: 1 }, // debuff rate
+  21: { dataId: 0, value: 1 }, // parameter rate
+  23: { dataId: 0, value: 1 }, // sp-parameter rate
+  34: { dataId: 0, value: 1 }, // attack count
+
+  // state traits name a state and carry a rate, so both fields open at one.
+  13: { dataId: 1, value: 1 }, // state resist rate
+  14: { dataId: 1, value: 1 }, // state immunity
+  32: { dataId: 1, value: 1 }, // attack state rate
+
+  // these name a database row, where id 0 is the engine's "none" and is not a valid pick.
+  11: { dataId: 1, value: 0 }, // element rate
+  31: { dataId: 1, value: 0 }, // attack element
+  35: { dataId: 1, value: 0 }, // attack skill
+  41: { dataId: 1, value: 0 }, // add skill type
+  42: { dataId: 1, value: 0 }, // seal skill type
+  43: { dataId: 1, value: 0 }, // add skill
+  44: { dataId: 1, value: 0 }, // seal skill
+  51: { dataId: 1, value: 0 }, // add weapon equip type
+  52: { dataId: 1, value: 0 }, // add armor equip type
+  53: { dataId: 1, value: 0 }, // lock slot
+  54: { dataId: 1, value: 0 }, // seal slot
+};
+
 type TraitEditorProps = {
   selectedTraits: RPG_Trait[],
   updateEnemyTraits: (updatedTraits: RPG_Trait[]) => void,
@@ -108,52 +174,16 @@ const TraitEditor = ({
 
   const determineInitialTraitBeingEdited = (newCode: number): RPG_Trait =>
   {
-    const initialTrait: RPG_Trait = {
-      code: newCode,
+    const seed = TRAIT_SEED_VALUES[ newCode ] ?? {
       dataId: 0,
-      value: 0
+      value: 0,
     };
-    switch (newCode)
-    {
-      case 12: // debuff rate
-      case 21: // parameter rate
-      case 23: // sp-parameter rate
-      case 34: // attack count
-        initialTrait.value = 1;
-        break;
 
-      case 13: // state resist rate
-      case 14: // state immunity
-      case 32: // attack state rate
-        initialTrait.dataId = 1;
-        initialTrait.value = 1;
-        break;
-
-      case 11: // element rate - dataId 0 is "no element", which isn't valid here.
-      case 31: // attack element - dataId 0 is "no element", which isn't valid here.
-      case 35: // attack skill
-      case 41: // add skill type
-      case 42: // seal skill type
-      case 43: // add skill
-      case 44: // seal skill
-      case 51: // add weapon equip type
-      case 52: // add armor equip type
-      case 53: // lock slot
-      case 54: // seal slot
-        initialTrait.dataId = 1;
-        break;
-
-      case 22: // ex-parameter rate
-      case 33: // attack speed bonus
-      case 55: // enable dual-wield
-      case 61: // action times
-      case 62: // special flag
-      case 63: // collapse type
-      case 64: // party ability
-        break;
-    }
-
-    return initialTrait;
+    return {
+      code: newCode,
+      dataId: seed.dataId,
+      value: seed.value,
+    };
   };
 
   const handleAddMenuOpen = (event: MouseEvent<HTMLElement>) =>
@@ -301,9 +331,40 @@ const TraitEditor = ({
       return <></>;
     }
 
-    switch (traitBeingEdited.code)
+    // trait codes group by their tens digit, and each group picks its dataId from a different source.
+    const { code } = traitBeingEdited;
+    if (code <= 14)
     {
-      // rates
+      return renderRateDataSelection(code);
+    }
+    if (code <= 23)
+    {
+      return renderParameterDataSelection(code);
+    }
+    if (code <= 35)
+    {
+      return renderAttackDataSelection(code);
+    }
+    if (code <= 44)
+    {
+      return renderSkillDataSelection(code);
+    }
+    if (code <= 55)
+    {
+      return renderEquipmentDataSelection(code);
+    }
+
+    return renderOtherDataSelection(code);
+  };
+
+  /**
+   * Picks the dataId source for the resistance rate traits.
+   * @param {number} code The trait code being edited.
+   */
+  const renderRateDataSelection = (code: number) =>
+  {
+    switch (code)
+    {
       case 11:
         return renderSearchableSelection(SystemService.elements, 'Element', 300);
       case 12:
@@ -312,16 +373,39 @@ const TraitEditor = ({
         return renderSearchableSelection(states.map(s => s.name), 'State');
       case 14:
         return renderSearchableSelection(states.map(s => s.name), 'Immunity to State');
+      default:
+        return <></>;
+    }
+  };
 
-      // parameters
+  /**
+   * Picks the dataId source for the parameter rate traits.
+   * @param {number} code The trait code being edited.
+   */
+  const renderParameterDataSelection = (code: number) =>
+  {
+    switch (code)
+    {
       case 21:
         return renderParamDataSelection('Base Parameter', 8, fromBParamIdToName);
       case 22:
         return renderParamDataSelection('EX Parameter', 10, fromXParamIdToName);
       case 23:
         return renderParamDataSelection('SP Parameter', 10, fromSParamIdToName);
+      default:
+        return <></>;
+    }
+  };
 
-      // attack-related
+  /**
+   * Picks the dataId source for the attack traits. Speed and hit count carry no dataId, so they say so
+   * rather than showing an empty picker.
+   * @param {number} code The trait code being edited.
+   */
+  const renderAttackDataSelection = (code: number) =>
+  {
+    switch (code)
+    {
       case 31:
         return renderSearchableSelection(SystemService.elements, 'On-Hit Element', 300);
       case 32:
@@ -332,8 +416,19 @@ const TraitEditor = ({
         return <Typography>Select the extra hit count in the next step.</Typography>;
       case 35:
         return renderSearchableSelection(skills.map(s => `${s.name} (id:${s.id})`), 'Attack Skill', 420);
+      default:
+        return <></>;
+    }
+  };
 
-      // skills
+  /**
+   * Picks the dataId source for the skill access traits.
+   * @param {number} code The trait code being edited.
+   */
+  const renderSkillDataSelection = (code: number) =>
+  {
+    switch (code)
+    {
       case 41:
         return renderSearchableSelection(SystemService.systemData.skillTypes, 'Add Skill Type');
       case 42:
@@ -342,8 +437,19 @@ const TraitEditor = ({
         return renderSearchableSelection(skills.map(s => `${s.name} (id:${s.id})`), 'Add Skill', 420);
       case 44:
         return renderSearchableSelection(skills.map(s => `${s.name} (id:${s.id})`), 'Seal Skill', 420);
+      default:
+        return <></>;
+    }
+  };
 
-      // equipment
+  /**
+   * Picks the dataId source for the equipment traits. Dual-wield is a flag with nothing to select.
+   * @param {number} code The trait code being edited.
+   */
+  const renderEquipmentDataSelection = (code: number) =>
+  {
+    switch (code)
+    {
       case 51:
         return renderSearchableSelection(SystemService.weaponTypes, 'Weapon Type');
       case 52:
@@ -354,8 +460,19 @@ const TraitEditor = ({
         return renderSearchableSelection(SystemService.equipTypes, 'Seal Slot');
       case 55:
         return <Typography>No selection necessary.</Typography>;
+      default:
+        return <></>;
+    }
+  };
 
-      // other
+  /**
+   * Picks the dataId source for the party-wide traits, which read from enums rather than the database.
+   * @param {number} code The trait code being edited.
+   */
+  const renderOtherDataSelection = (code: number) =>
+  {
+    switch (code)
+    {
       case 61:
         return <Typography>Select the chance in the next step.</Typography>;
       case 62:
@@ -364,7 +481,6 @@ const TraitEditor = ({
         return renderSearchableSelection(CollapseEffect, 'Collapse Effect');
       case 64:
         return renderSearchableSelection(PartyAbility, 'Party Ability');
-
       default:
         return <></>;
     }
@@ -476,140 +592,85 @@ const TraitEditor = ({
       return <></>;
     }
 
-    switch (traitBeingEdited.code)
+    const { code } = traitBeingEdited;
+
+    const valueInput = TRAIT_VALUE_INPUTS[ code ];
+    if (valueInput !== undefined)
     {
-      // percentage-based: value stored as 0.0-? factor
-      case 11: // elemental rate
-      case 12: // debuff rate
-      case 13: // state rate
-      case 21: // base parameter rate
-      case 22: // ex parameter rate
-      case 23: // sp parameter rate
-        return <>
-          <NumberInputWithLabel
-            label={'Rate'}
-            value={(traitBeingEdited.value ?? 0) * 100}
-            endAdornment={<Percent/>}
-            onChangeEventHandler={(event) =>
-            {
-              const raw = parseInt(event.target.value);
-              const updatedValue = isNaN(raw)
-                ? 0
-                : parseFloat(((raw) / 100).toFixed(2));
-              const updatedTrait = {
-                ...traitBeingEdited,
-                value: updatedValue,
-              } as RPG_Trait;
-              setTraitBeingEdited(updatedTrait);
-            }}
-          />
-        </>;
-
-      // on-hit state application rate (percentage factor)
-      case 32:
-        return <>
-          <NumberInputWithLabel
-            label={'Apply Rate'}
-            value={(traitBeingEdited.value ?? 0) * 100}
-            endAdornment={<Percent/>}
-            onChangeEventHandler={(event) =>
-            {
-              const raw = parseInt(event.target.value);
-              const updatedValue = isNaN(raw)
-                ? 0
-                : parseFloat(((raw) / 100).toFixed(2));
-              const updatedTrait = {
-                ...traitBeingEdited,
-                value: updatedValue,
-              } as RPG_Trait;
-              setTraitBeingEdited(updatedTrait);
-            }}
-          />
-        </>;
-
-      // attack speed modifier: integer
-      case 33:
-        return <>
-          <NumberInputWithLabel
-            label={'Speed'}
-            value={traitBeingEdited.value ?? 0}
-            onChangeEventHandler={(event) =>
-            {
-              const raw = parseInt(event.target.value);
-              const updatedTrait = {
-                ...traitBeingEdited,
-                value: isNaN(raw)
-                  ? 0
-                  : raw,
-              } as RPG_Trait;
-              setTraitBeingEdited(updatedTrait);
-            }}
-          />
-        </>;
-
-      // attack count modifier: integer (extra hits)
-      case 34:
-        return <>
-          <NumberInputWithLabel
-            label={'Extra Hits'}
-            value={traitBeingEdited.value ?? 0}
-            onChangeEventHandler={(event) =>
-            {
-              const raw = parseInt(event.target.value);
-              const updatedTrait = {
-                ...traitBeingEdited,
-                value: isNaN(raw)
-                  ? 0
-                  : raw,
-              } as RPG_Trait;
-              setTraitBeingEdited(updatedTrait);
-            }}
-          />
-        </>;
-
-      // action times: percentage chance (factor)
-      case 61:
-        return <>
-          <NumberInputWithLabel
-            label={'Extra Turn Chance'}
-            value={(traitBeingEdited.value ?? 0) * 100}
-            endAdornment={<Percent/>}
-            onChangeEventHandler={(event) =>
-            {
-              const raw = parseInt(event.target.value);
-              const updatedValue = isNaN(raw)
-                ? 0
-                : parseFloat(((raw) / 100).toFixed(2));
-              const updatedTrait = {
-                ...traitBeingEdited,
-                value: updatedValue,
-              } as RPG_Trait;
-              setTraitBeingEdited(updatedTrait);
-            }}
-          />
-        </>;
-
-      // codes without a numeric value component
-      case 14: // state immunity
-      case 31: // attack element
-      case 35: // attack skill
-      case 41:
-      case 42:
-      case 43:
-      case 44:
-      case 51:
-      case 52:
-      case 53:
-      case 54:
-      case 55:
-      case 62:
-      case 63:
-      case 64:
-        return <Typography>No numeric value for this trait.</Typography>;
-
-      default:
-        return <></>;
+      return valueInput.kind === 'percent'
+        ? renderPercentageValueInput(valueInput.label)
+        : renderIntegerValueInput(valueInput.label);
     }
+
+    // a known code with no numeric component says so, rather than leaving the step looking unfinished.
+    if (TRAIT_CODES_WITHOUT_VALUE.has(code))
+    {
+      return <Typography>No numeric value for this trait.</Typography>;
+    }
+
+    return <></>;
+  };
+
+  /**
+   * Renders a value field for a trait whose value is stored as a factor and authored as a percent.
+   * @param {string} label The caption naming what the percentage means for this trait.
+   */
+  const renderPercentageValueInput = (label: string) =>
+  {
+    if (traitBeingEdited === null)
+    {
+      return <></>;
+    }
+
+    return <>
+      <NumberInputWithLabel
+        label={label}
+        value={(traitBeingEdited.value ?? 0) * 100}
+        endAdornment={<Percent/>}
+        onChangeEventHandler={(event) =>
+        {
+          const raw = parseInt(event.target.value);
+          const updatedValue = isNaN(raw)
+            ? 0
+            : parseFloat(((raw) / 100).toFixed(2));
+          const updatedTrait = {
+            ...traitBeingEdited,
+            value: updatedValue,
+          } as RPG_Trait;
+          setTraitBeingEdited(updatedTrait);
+        }}
+      />
+    </>;
+  };
+
+  /**
+   * Renders a value field for a trait whose value is stored exactly as authored.
+   * @param {string} label The caption naming what the number means for this trait.
+   */
+  const renderIntegerValueInput = (label: string) =>
+  {
+    if (traitBeingEdited === null)
+    {
+      return <></>;
+    }
+
+    return <>
+      <NumberInputWithLabel
+        label={label}
+        value={traitBeingEdited.value ?? 0}
+        onChangeEventHandler={(event) =>
+        {
+          const raw = parseInt(event.target.value);
+          const updatedTrait = {
+            ...traitBeingEdited,
+            value: isNaN(raw)
+              ? 0
+              : raw,
+          } as RPG_Trait;
+          setTraitBeingEdited(updatedTrait);
+        }}
+      />
+    </>;
   };
 
   const renderStepper = () =>
