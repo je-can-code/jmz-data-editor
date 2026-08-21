@@ -1143,6 +1143,136 @@ function SkillJabsExtensionsPanel(
   }
 
   /**
+   * Which action-map event this skill copies onto the battlefield, and whether it shows in the menu.
+   *
+   * A skill's hitbox, visuals and movement are authored as an event on a dedicated action map rather
+   * than derived from the skill row, so this section is what ties the two together.
+   */
+  const renderActionMapSection = () =>
+  {
+    const overrodeMapId = mapIdOverride.trim() !== '';
+    const activeMapNote = overrodeMapId
+      ? '; you overrode it above'
+      : '';
+
+    return (
+      <BoardSectionCard title={'Action map & menu'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            JABS does not build map actions from the skill database alone. Each skill points at an event on a
+            dedicated
+            {' '}
+            <Typography component={'span'} variant={'caption'} sx={{ fontStyle: 'italic' }}>
+              action map
+            </Typography>
+            {' '}
+            — that event is the template copied onto the battlefield when the skill fires. Pick which template here;
+            use
+            the map override only if you are testing a different action map than the plugin default.
+          </Typography>
+          {mapError !== null && (
+            <Alert severity={'warning'}>
+              {mapError}
+            </Alert>
+          )}
+          <Typography variant={'caption'} color={'text.secondary'}>
+            {`Active action map: #${resolvedMapId} (plugin default is #${pluginActionMapId}${activeMapNote}).`}
+          </Typography>
+          <TextField
+            id={'jabs-action-map-override'}
+            variant={'outlined'}
+            size={'small'}
+            fullWidth
+            label={'Action map id override'}
+            placeholder={String(pluginActionMapId)}
+            value={mapIdOverride}
+            onChange={(e) =>
+            {
+              setMapIdOverride(e.target.value);
+            }}
+            helperText={'Leave empty to use the map id from JABS plugin parameters. Set only when this skill should pull templates from another map.'}
+            slotProps={{
+              htmlInput: {
+                inputMode: 'numeric',
+                min: 1,
+                step: 1
+              },
+            }}
+          />
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Which event is this skill?
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Event id on the action map — same id you see in the editor’s event list. This is the skill’s hitbox,
+            visuals,
+            and movement as authored on that map.
+          </Typography>
+          <Autocomplete<ActionIdPickerRow, false, false, false>
+            fullWidth
+            size={'small'}
+            options={pickerOptions}
+            getOptionLabel={(o) => o.label}
+            isOptionEqualToValue={(
+              a,
+              b
+            ) => a.id === b.id}
+            value={selectedPickerOption}
+            onChange={(
+              _e,
+              option
+            ) =>
+            {
+              if (option === null)
+              {
+                patch({ actionId: null });
+                return;
+              }
+              patch({ actionId: option.id });
+            }}
+            filterOptions={(
+              options,
+              state
+            ) =>
+            {
+              const q = state.inputValue.trim()
+                .toLowerCase();
+              if (q === '')
+              {
+                return options;
+              }
+              return options.filter((o) =>
+                o.label.toLowerCase()
+                  .includes(q)
+                || (o.id !== null && String(o.id)
+                  .includes(q)));
+            }}
+            renderInput={(params) =>
+              (
+                <TextField
+                  {...params}
+                  variant={'outlined'}
+                  label={'Action template (map event id)'}
+                  placeholder={'Search by id or name…'}
+                />
+              )}
+          />
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Skill menu
+          </Typography>
+          {boolSwitch(
+            'Hide this skill from the JABS quick menu',
+            jabs.hideFromJabsMenu,
+            'hideFromJabsMenu'
+          )}
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Still usable from AI, common events, or other scripts — only the player-facing menu is affected.
+          </Typography>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
    * The dodge movement this skill performs, and the invincibility it grants while doing it.
    *
    * Move type gates everything else: without one there is no dodge tag to hang steps, speed or an
@@ -1590,123 +1720,7 @@ function SkillJabsExtensionsPanel(
         JABS settings for this skill. Values are saved with the skill automatically.
       </Typography>
 
-      <BoardSectionCard title={'Action map & menu'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              JABS does not build map actions from the skill database alone. Each skill points at an event on a
-              dedicated
-              {' '}
-              <Typography component={'span'} variant={'caption'} sx={{ fontStyle: 'italic' }}>
-                action map
-              </Typography>
-              {' '}
-              — that event is the template copied onto the battlefield when the skill fires. Pick which template here;
-              use
-              the map override only if you are testing a different action map than the plugin default.
-            </Typography>
-            {mapError !== null
-              ? (
-                <Alert severity={'warning'}>
-                  {mapError}
-                </Alert>
-              )
-              : null}
-            <Typography variant={'caption'} color={'text.secondary'}>
-              {`Active action map: #${resolvedMapId} (plugin default is #${pluginActionMapId}${mapIdOverride.trim() === ''
-                ? ''
-                : '; you overrode it above'}).`}
-            </Typography>
-            <TextField
-              id={'jabs-action-map-override'}
-              variant={'outlined'}
-              size={'small'}
-              fullWidth
-              label={'Action map id override'}
-              placeholder={String(pluginActionMapId)}
-              value={mapIdOverride}
-              onChange={(e) =>
-              {
-                setMapIdOverride(e.target.value);
-              }}
-              helperText={'Leave empty to use the map id from JABS plugin parameters. Set only when this skill should pull templates from another map.'}
-              slotProps={{
-                htmlInput: {
-                  inputMode: 'numeric',
-                  min: 1,
-                  step: 1
-                },
-              }}
-            />
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Which event is this skill?
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Event id on the action map — same id you see in the editor’s event list. This is the skill’s hitbox,
-              visuals,
-              and movement as authored on that map.
-            </Typography>
-            <Autocomplete<ActionIdPickerRow, false, false, false>
-              fullWidth
-              size={'small'}
-              options={pickerOptions}
-              getOptionLabel={(o) => o.label}
-              isOptionEqualToValue={(
-                a,
-                b
-              ) => a.id === b.id}
-              value={selectedPickerOption}
-              onChange={(
-                _e,
-                option
-              ) =>
-              {
-                if (option === null)
-                {
-                  patch({ actionId: null });
-                  return;
-                }
-                patch({ actionId: option.id });
-              }}
-              filterOptions={(
-                options,
-                state
-              ) =>
-              {
-                const q = state.inputValue.trim()
-                  .toLowerCase();
-                if (q === '')
-                {
-                  return options;
-                }
-                return options.filter((o) =>
-                  o.label.toLowerCase()
-                    .includes(q)
-                  || (o.id !== null && String(o.id)
-                    .includes(q)));
-              }}
-              renderInput={(params) =>
-                (
-                  <TextField
-                    {...params}
-                    variant={'outlined'}
-                    label={'Action template (map event id)'}
-                    placeholder={'Search by id or name…'}
-                  />
-                )}
-            />
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Skill menu
-            </Typography>
-            {boolSwitch(
-              'Hide this skill from the JABS quick menu',
-              jabs.hideFromJabsMenu,
-              'hideFromJabsMenu'
-            )}
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Still usable from AI, common events, or other scripts — only the player-facing menu is affected.
-            </Typography>
-          </Stack>
-      </BoardSectionCard>
+      {renderActionMapSection()}
 
       <BoardSectionCard title={'Casting, map execution & spawn animations'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
