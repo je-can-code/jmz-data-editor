@@ -1076,72 +1076,6 @@ function SkillJabsExtensionsPanel(
     && jabs.delayRaw.trim() !== ''
     && delayParsed === null;
 
-  // the radius half of the delay tag, as the field wants it. An unparsed tag and a tag carrying no
-  // radius both read as empty, since neither gives the field anything to show.
-  let delayRadiusText = '';
-  if (delayParsed !== null && delayParsed.radius !== null)
-  {
-    delayRadiusText = String(delayParsed.radius);
-  }
-
-  // the preview warning only means something once there is a cast to preview, so the helper explains
-  // which prerequisite is missing before it explains what the field does.
-  let castPreviewWarnHelperText =
-    `Must be ≤ cast time (${jabs.castTime} frames). Example: 30 = show telegraph for the last half-second of a 60-frame cast.`;
-  if (jabs.castTime === null)
-  {
-    castPreviewWarnHelperText = 'Set cast time to configure preview timing.';
-  }
-  else if (jabs.noCastPreview)
-  {
-    castPreviewWarnHelperText = 'Unavailable while preview is disabled.';
-  }
-
-  // the iframe window has prerequisites, and each field names the nearest one still unmet rather than
-  // sitting disabled without saying why. The end frame has one more of them than the start frame does.
-  let iframesStartHelperText: string | undefined = undefined;
-  if (jabs.moveType === null)
-  {
-    iframesStartHelperText = 'Pick a move type first.';
-  }
-  else if (jabs.invincibleDodge === true)
-  {
-    iframesStartHelperText = 'Turn off invincible dodge to edit.';
-  }
-
-  let iframesEndHelperText = iframesStartHelperText;
-  if (iframesEndHelperText === undefined && jabs.iframesStartFrame === null)
-  {
-    iframesEndHelperText = 'Set start frame first.';
-  }
-
-  // the profile field explains the state it is in: pointing at a row that no longer exists, deliberately
-  // left to the plugin, or naming a real profile -- in which case the only thing left to say is the
-  // charset a new key has to satisfy.
-  let juiceProfileHelperText =
-    `Charset is ${JUICE_PROFILE_KEY_PATTERN.source} — author additional profiles on the JABS config board.`;
-  if (selectedJuiceProfileOption.isOrphan)
-  {
-    juiceProfileHelperText =
-      'This skill references a profile that does not exist on the JABS config board; add the row or pick "None" to clear.';
-  }
-  else if (selectedJuiceProfileOption.value === null)
-  {
-    juiceProfileHelperText =
-      'Plugin will resolve a profile from the caster\'s equipped weapon / armor at runtime.';
-  }
-
-  // only two hitbox shapes read a degrees value, and they read it differently enough to say so.
-  let degreesHelperText = 'Only arc and circle read this field.';
-  if (jabs.hitboxShape === 'arc')
-  {
-    degreesHelperText = 'Wedge opening angle; also shapes the cast-preview sector.';
-  }
-  else if (jabs.hitboxShape === 'circle')
-  {
-    degreesHelperText = 'Circle hitbox is a full 360° ring in JABS — pick arc if you want a partial wedge.';
-  }
-
   /**
    * One animation picker. The casting section offers three of them over different fields, and they
    * differ only in what they are called and which field they write.
@@ -1249,6 +1183,27 @@ function SkillJabsExtensionsPanel(
     const delayFramesText = delayParsed === null
       ? ''
       : String(delayParsed.frames);
+
+    // the radius half of the delay tag, as the field wants it. An unparsed tag and a tag carrying no
+    // radius both read as empty, since neither gives the field anything to show.
+    let delayRadiusText = '';
+    if (delayParsed !== null && delayParsed.radius !== null)
+    {
+      delayRadiusText = String(delayParsed.radius);
+    }
+
+    // the preview warning only means something once there is a cast to preview, so the helper explains
+    // which prerequisite is missing before it explains what the field does.
+    let castPreviewWarnHelperText =
+      `Must be ≤ cast time (${jabs.castTime} frames). Example: 30 = show telegraph for the last half-second of a 60-frame cast.`;
+    if (hasNoCastTime)
+    {
+      castPreviewWarnHelperText = 'Set cast time to configure preview timing.';
+    }
+    else if (jabs.noCastPreview)
+    {
+      castPreviewWarnHelperText = 'Unavailable while preview is disabled.';
+    }
 
     return (
       <BoardSectionCard title={'Casting, map execution & spawn animations'} collapsible defaultExpanded={false}>
@@ -1569,6 +1524,17 @@ function SkillJabsExtensionsPanel(
   {
     const usesThickness = jabs.hitboxShape === 'line' || jabs.hitboxShape === 'wall';
     const usesDegrees = jabs.hitboxShape === 'arc' || jabs.hitboxShape === 'circle';
+
+    // both shapes read a degrees value, but they read it differently enough to say so.
+    let degreesHelperText = 'Only arc and circle read this field.';
+    if (jabs.hitboxShape === 'arc')
+    {
+      degreesHelperText = 'Wedge opening angle; also shapes the cast-preview sector.';
+    }
+    else if (jabs.hitboxShape === 'circle')
+    {
+      degreesHelperText = 'Circle hitbox is a full 360° ring in JABS — pick arc if you want a partial wedge.';
+    }
 
     const hitboxShapeValue =
       jabs.hitboxShape !== null
@@ -2280,6 +2246,20 @@ function SkillJabsExtensionsPanel(
       ? 'Pick a move type first.'
       : undefined;
 
+    // the iframe window has prerequisites, and each field names the nearest one still unmet rather than
+    // sitting disabled without saying why. The end frame has one more of them than the start frame does.
+    let iframesStartHelperText = moveTypeHelperText;
+    if (hasNoMoveType === false && jabs.invincibleDodge === true)
+    {
+      iframesStartHelperText = 'Turn off invincible dodge to edit.';
+    }
+
+    let iframesEndHelperText = iframesStartHelperText;
+    if (iframesEndHelperText === undefined && jabs.iframesStartFrame === null)
+    {
+      iframesEndHelperText = 'Set start frame first.';
+    }
+
     return (
       <BoardSectionCard title={'Dodge'} collapsible defaultExpanded={false}>
         <Grid container spacing={2}>
@@ -2504,6 +2484,22 @@ function SkillJabsExtensionsPanel(
       && JUICE_MOTIONS.includes(jabs.juiceMotion as (typeof JUICE_MOTIONS)[number])
         ? jabs.juiceMotion as (typeof JUICE_MOTIONS)[number]
         : null;
+
+    // the profile field explains the state it is in: pointing at a row that no longer exists,
+    // deliberately left to the plugin, or naming a real profile -- in which case the only thing left to
+    // say is the charset a new key has to satisfy.
+    let juiceProfileHelperText =
+      `Charset is ${JUICE_PROFILE_KEY_PATTERN.source} — author additional profiles on the JABS config board.`;
+    if (selectedJuiceProfileOption.isOrphan)
+    {
+      juiceProfileHelperText =
+        'This skill references a profile that does not exist on the JABS config board; add the row or pick "None" to clear.';
+    }
+    else if (selectedJuiceProfileOption.value === null)
+    {
+      juiceProfileHelperText =
+        'Plugin will resolve a profile from the caster\'s equipped weapon / armor at runtime.';
+    }
 
     return (
       <BoardSectionCard title={'Juice motion'} collapsible defaultExpanded={false}>
