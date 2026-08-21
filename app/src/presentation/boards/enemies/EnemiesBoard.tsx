@@ -28,11 +28,9 @@ import {
   ShowChart,
   Timeline
 } from '@mui/icons-material';
-import { throttle } from 'lodash';
 
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 
-import { ExtraDropManager } from '@services/parsers/ExtraDropParser.ts';
 
 import EnemyBaseParameters from './EnemyBaseParameters.tsx';
 import EnemiesExtraDrops from './EnemiesExtraDrops.tsx';
@@ -57,7 +55,6 @@ import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel
 import { EnemyJabsConfigs } from '@boards/enemies/EnemyJabsConfigs.tsx';
 import { EnemyPassiveAbs } from '@boards/enemies/EnemyPassiveAbs.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
-import RPG_DropItem = Rmmz.Data.RPG_DropItem;
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 const EnemiesBoard = () =>
@@ -74,13 +71,9 @@ const EnemiesBoard = () =>
   const [ selectedEnemyIndex, setSelectedEnemyIndex ] = useState<number>(0);
   const [ searchTerm, setSearchTerm ] = useState<string>('');
 
-  const [ currentFamilyIndex, setCurrentFamilyIndex ] = useState<number>(0);
-  const [ currentGroupIndex, setCurrentGroupIndex ] = useState<number>(0);
   const listRef = useRef<FixedSizeList>(null);
   const listViewportRef = useRef<HTMLDivElement>(null);
   const listViewportSize = useElementClientRect(listViewportRef);
-
-  const [ selectedEnemyDropItems, setSelectedEnemyDropItems ] = useState<RPG_DropItem[]>([]);
 
   const [ enemyTab, setEnemyTab ] = useState(0);
 
@@ -126,9 +119,6 @@ const EnemiesBoard = () =>
       const enemy = enemies.at(index)!;
       setSelectedEnemy(enemy);
       updateUrl(enemy);
-
-      const extraDropItems = ExtraDropManager.read(enemy.note);
-      setSelectedEnemyDropItems(extraDropItems);
     }
 
     if (keepListFocus)
@@ -157,7 +147,6 @@ const EnemiesBoard = () =>
     if (!enemies || enemies.length === 0)
     {
       setSelectedEnemy(null);
-      setSelectedEnemyDropItems([]);
       return;
     }
 
@@ -179,36 +168,9 @@ const EnemiesBoard = () =>
     if (next !== selectedEnemy)
     {
       setSelectedEnemy(next);
-      setSelectedEnemyDropItems(ExtraDropManager.read(next.note));
       updateUrlRef.current(next);
     }
   }, [ enemies, selectedEnemyIndex, selectedEnemy ]);
-
-  const throttledListScroll = useCallback(
-    throttle(({ scrollOffset }: {
-      scrollOffset: number
-    }) =>
-    {
-      // Calculate which family and group are currently visible based on scroll position
-      const itemHeight = 30; // Same as itemSize in FixedSizeList
-      const currentIndex = Math.floor(scrollOffset / itemHeight);
-
-      const familyIndex = Math.floor(currentIndex / 50);
-      const groupIndex = Math.floor(currentIndex / 10);
-
-      setCurrentFamilyIndex(familyIndex);
-      setCurrentGroupIndex(groupIndex);
-    }, 250),
-    []
-  );
-
-  useEffect(() =>
-  {
-    return () =>
-    {
-      throttledListScroll.cancel();
-    };
-  }, [ throttledListScroll ]);
 
   const listWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -501,12 +463,6 @@ const EnemiesBoard = () =>
     updateEnemy(selectedEnemy!);
   };
 
-  const updateEnemyNote = (updatedEnemyNote: string) =>
-  {
-    selectedEnemy!.note = updatedEnemyNote;
-    updateEnemy(selectedEnemy!);
-  };
-
   const updateEnemyLevel = (updatedLevel: number) =>
   {
     selectedEnemy!.level = updatedLevel;
@@ -794,7 +750,6 @@ const EnemiesBoard = () =>
             itemSize={30}
             overscanCount={5}
             itemCount={enemies.length}
-            onScroll={throttledListScroll}
           >
             {renderEnemyListItem}
           </FixedSizeList>
@@ -864,8 +819,8 @@ const EnemiesBoard = () =>
                               onChange: (v: number) => handleEnemyExpOnChangeEvent(v),
                               formula: (() =>
                               {
-                                const p = knownLongParams().find(p => p.key === 'exp');
-                                return p ? GrowthParser.read(selectedEnemy.note, p) : '';
+                                const expParam = knownLongParams().find(param => param.key === 'exp');
+                                return expParam ? GrowthParser.read(selectedEnemy.note, expParam) : '';
                               })(),
                             },
                             {

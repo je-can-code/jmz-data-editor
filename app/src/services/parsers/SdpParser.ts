@@ -18,7 +18,8 @@ class SdpParser
 
     if (result && result.length > 0)
     {
-      const [ key, dropChance ] = result[ 0 ];
+      const [ firstMatch ] = result;
+      const [ key, dropChance ] = firstMatch;
       return {
         key: String(key),
         dropChance: Number(dropChance) || 0

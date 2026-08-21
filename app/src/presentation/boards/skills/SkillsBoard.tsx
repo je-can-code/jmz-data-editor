@@ -3302,7 +3302,8 @@ const SkillsBoard = () =>
                         startIcon={<ContentCopy/>}
                         onClick={() =>
                         {
-                          void handleCopySerializedSkillNote();
+                          // the copy is fire and forget; nothing reports its outcome.
+                          handleCopySerializedSkillNote();
                         }}
                       >
                         Copy

@@ -4204,7 +4204,8 @@ const StatesBoard = () =>
                         startIcon={<ContentCopy/>}
                         onClick={() =>
                         {
-                          void navigator.clipboard.writeText(selectedState.note);
+                          // the copy is fire and forget; nothing reports its outcome.
+                          navigator.clipboard.writeText(selectedState.note);
                         }}
                       >
                         Copy

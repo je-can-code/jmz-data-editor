@@ -73,7 +73,7 @@ class PassiveGrantParser
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null)
     {
-      const inner = m[ 1 ];
+      const [ , inner ] = m;
       if (typeof inner !== 'string')
       {
         continue;

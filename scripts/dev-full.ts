@@ -252,8 +252,15 @@ async function main(): Promise<void>
     process.exitCode = code;
   };
 
-  process.on("SIGINT", () => void shutdown(0));
-  process.on("SIGTERM", () => void shutdown(0));
+  // shutdown is async and a signal handler cannot await, so these start it and return.
+  process.on("SIGINT", () =>
+  {
+    shutdown(0);
+  });
+  process.on("SIGTERM", () =>
+  {
+    shutdown(0);
+  });
   process.on("exit", () =>
   {
     // best-effort cleanup when the process exits unexpectedly.
@@ -264,13 +271,13 @@ async function main(): Promise<void>
   {
     // eslint-disable-next-line no-console
     console.error(err);
-    void shutdown(1);
+    shutdown(1);
   });
   process.on("unhandledRejection", (err) =>
   {
     // eslint-disable-next-line no-console
     console.error(err);
-    void shutdown(1);
+    shutdown(1);
   });
 
   try
@@ -293,10 +300,10 @@ async function main(): Promise<void>
     server.exited.then((code) =>
     {
       // If the server exits, bring everything down so we don't leave the UI running.
-      void shutdown(code ?? 1);
+      shutdown(code ?? 1);
     }).catch(() =>
     {
-      void shutdown(1);
+      shutdown(1);
     });
 
     const healthy = await waitForHealth(apiBase, 5_000);
@@ -331,5 +338,6 @@ async function main(): Promise<void>
   }
 }
 
-void main();
+// the runner owns the process for its whole life; nothing downstream awaits it.
+main();
 

@@ -24,7 +24,7 @@ class ToggleOnExecuteParser
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null)
     {
-      const raw = m[ 1 ];
+      const [ , raw ] = m;
       if (typeof raw !== 'string')
       {
         continue;

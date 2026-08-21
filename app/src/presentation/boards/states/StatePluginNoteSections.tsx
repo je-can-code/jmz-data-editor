@@ -1042,9 +1042,9 @@ const StatePluginNoteSections = (props: StatePluginNoteSectionsProps) =>
                   {
                     patchPassiveAbs({ tierColorHex: next?.hex ?? '' });
                   }}
-                  renderOption={(props, option) =>
+                  renderOption={(optionProps, option) =>
                   {
-                    const { key, ...liProps } = props;
+                    const { key, ...liProps } = optionProps;
                     return (
                       <li key={key} {...liProps}>
                         <Stack

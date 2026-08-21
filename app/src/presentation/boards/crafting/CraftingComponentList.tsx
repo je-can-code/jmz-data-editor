@@ -403,7 +403,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
       }
 
       // dropping the types is what makes this exclusive: a slot carrying both would leave the game to decide.
-      const { categories, ...withoutCategories } = prev;
+      const { categories: _categories, ...withoutCategories } = prev;
 
       // gold and panel points are quantities rather than rows, so any id left over would be meaningless.
       const keepsItsRow = chosenType !== CraftingComponentType.Gold && chosenType !== CraftingComponentType.Sdp;

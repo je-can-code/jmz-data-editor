@@ -947,7 +947,7 @@ class SkillJabsNoteParser
     {
       return null;
     }
-    const s = m[ 1 ];
+    const [ , s ] = m;
     if (typeof s !== 'string' || s.length === 0)
     {
       return null;

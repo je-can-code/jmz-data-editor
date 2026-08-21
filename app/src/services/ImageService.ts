@@ -100,10 +100,10 @@ function resolveIconSetPngPath(projectDataPath: string): string
 
 /**
  * Loads {@code IconSet.png} bytes via Go HTTP {@code GET /api/iconset}.
- * @param projectDataPath RMMZ project root or {@code data/} directory (unused — server uses {@code JMZ_PROJECT_ROOT}).
+ * @param _projectDataPath RMMZ project root or {@code data/} directory (unused — server uses {@code JMZ_PROJECT_ROOT}).
  * @returns Raw PNG bytes.
  */
-async function loadIconSetPng(projectDataPath: string): Promise<ArrayBuffer>
+async function loadIconSetPng(_projectDataPath: string): Promise<ArrayBuffer>
 {
   const apiBase = getJmzHttpApiBase();
   if (apiBase === null)

@@ -27,7 +27,8 @@ class StateResourcesNoteParser
       ext.hpCostReductionFormula = '';
       return;
     }
-    ext.hpCostReductionFormula = m[ 1 ];
+    const [ , hpCostReductionFormula ] = m;
+    ext.hpCostReductionFormula = hpCostReductionFormula;
   }
 
   static write(

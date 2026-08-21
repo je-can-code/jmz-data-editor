@@ -580,14 +580,17 @@ function SkillJabsExtensionsPanel(
   {
     let cancelled = false;
 
-    void (async () =>
+    const loadPluginActionMapId = async () =>
     {
       const id = await readJabsActionMapIdFromPluginsJs(projectRoot);
       if (cancelled === false)
       {
         setPluginActionMapId(id);
       }
-    })();
+    };
+
+    // An effect body cannot be async, so the read is started and not awaited.
+    loadPluginActionMapId();
 
     return () =>
     {
@@ -599,7 +602,7 @@ function SkillJabsExtensionsPanel(
   {
     let cancelled = false;
 
-    void (async () =>
+    const loadActionMapEvents = async () =>
     {
       if (rmmzDataPath.trim() === '')
       {
@@ -629,7 +632,10 @@ function SkillJabsExtensionsPanel(
           );
         }
       }
-    })();
+    };
+
+    // An effect body cannot be async, so the load is started and not awaited.
+    loadActionMapEvents();
 
     return () =>
     {

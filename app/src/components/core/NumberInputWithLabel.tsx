@@ -104,7 +104,7 @@ export default function NumberInputWithLabel({
   })();
 
   const slotProps: Record<string, unknown> = {};
-  if (endAdornment != null)
+  if (endAdornment !== undefined && endAdornment !== null)
   {
     slotProps[ 'input' ] = {
       endAdornment: (

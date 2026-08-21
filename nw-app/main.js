@@ -90,7 +90,10 @@ async function waitForUrlOk(url, timeoutMs)
     {
       // ignore
     }
-    await new Promise(r => setTimeout(r, 250));
+    await new Promise(r =>
+    {
+      setTimeout(r, 250);
+    });
   }
   return false;
 }

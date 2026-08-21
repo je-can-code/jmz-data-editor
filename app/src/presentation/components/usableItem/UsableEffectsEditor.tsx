@@ -1016,14 +1016,14 @@ function UsableEffectsEditor(props: UsableEffectsEditorProps)
                           b
                         ) => a.code === b.code}
                         renderOption={(
-                          props,
+                          optionProps,
                           option
                         ) =>
                         {
                           const {
                             key,
                             ...rest
-                          } = props;
+                          } = optionProps;
                           return (
                             <li key={key} {...rest}>
                               <Stack spacing={0}>

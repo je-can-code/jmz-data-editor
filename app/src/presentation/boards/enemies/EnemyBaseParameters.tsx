@@ -88,8 +88,8 @@ export default function EnemyBaseParameters({
 
   const getFormula = (longParamId: number): string =>
   {
-    const p = allParams.find((p) => p.longParamId === longParamId);
-    return p ? GrowthParser.read(selectedEnemy.note, p) : '';
+    const match = allParams.find((param) => param.longParamId === longParamId);
+    return match ? GrowthParser.read(selectedEnemy.note, match) : '';
   };
 
   const renderRow = (p: ParamDef) =>

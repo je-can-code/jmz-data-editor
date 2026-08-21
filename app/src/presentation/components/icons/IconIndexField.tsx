@@ -46,7 +46,6 @@ function IconIndexField(props: IconIndexFieldProps)
     imgWidth,
     imgHeight,
     loadError,
-    resolvedPath,
   } = useIconSetAtlas();
 
   const [ dialogOpen, setDialogOpen ] = useState(false);

@@ -47,7 +47,7 @@ const BackendGate = (props: BackendGateProps) =>
 
     let cancelled = false;
 
-    void (async () =>
+    const probeBackendHealth = async () =>
     {
       try
       {
@@ -97,7 +97,10 @@ const BackendGate = (props: BackendGateProps) =>
           setState({ type: "unreachable", apiBase });
         }
       }
-    })();
+    };
+
+    // An effect body cannot be async, so the probe is started and not awaited.
+    probeBackendHealth();
 
     return () =>
     {
