@@ -255,35 +255,6 @@ const SdpBoard = () =>
   const [ snackVariant, setSnackVariant ] = useState<MuiSnackbarVariant>(MuiSnackbarVariant.Filled);
   //endregion state
 
-  const selectedMasterySubgroupKey = selectedPanel?.mastery.subgroupKey ?? '';
-  const masterySubgroupKeyIsOrphan = selectedMasterySubgroupKey !== ''
-    && subgroupKeySet.has(selectedMasterySubgroupKey) === false;
-  const selectedMasterySubgroup = selectedMasterySubgroupKey === ''
-    ? null
-    : subgroups.find(subgroup => subgroup.key === selectedMasterySubgroupKey) ?? null;
-  const selectedPanelFamily = selectedMasterySubgroupKey === ''
-    ? null
-    : families.find(family => family.subgroupKeys.includes(selectedMasterySubgroupKey)) ?? null;
-
-  // the derived family field reads blank when no subgroup is chosen, and flags a subgroup that belongs to no family.
-  let selectedPanelFamilyDisplay = '';
-  if (selectedPanelFamily !== null)
-  {
-    selectedPanelFamilyDisplay = selectedPanelFamily.name
-      ? `[${selectedPanelFamily.key}] ${selectedPanelFamily.name}`
-      : selectedPanelFamily.key;
-  }
-  else if (selectedMasterySubgroupKey !== '')
-  {
-    selectedPanelFamilyDisplay = 'Unknown';
-  }
-  const masteryIsBlank = selectedPanel === null
-    || (
-      selectedPanel.mastery.subgroupKey === ''
-      && selectedPanel.mastery.subgroupTier === 0
-      && selectedPanel.mastery.masterySkillId === 0
-    );
-
   //region setup
   /**
    * Initializes the board selection when data is loaded.
@@ -1576,6 +1547,146 @@ const SdpBoard = () =>
   };
 
   /**
+   * Where this panel sits in the subgroup hierarchy, and what mastering it teaches.
+   *
+   * Family is not stored on the panel: it is derived by finding which family claims the chosen
+   * subgroup. That makes two states worth reporting distinctly -- no subgroup chosen at all, which
+   * reads blank, and a subgroup that no family claims, which reads Unknown and is worth noticing.
+   */
+  const renderPanelMasterySection = () =>
+  {
+    if (selectedPanel === null)
+    {
+      return <></>;
+    }
+
+    const { subgroupKey } = selectedPanel.mastery;
+    const subgroupIsOrphan = subgroupKey !== '' && subgroupKeySet.has(subgroupKey) === false;
+    const selectedSubgroup = subgroupKey === ''
+      ? null
+      : subgroups.find(subgroup => subgroup.key === subgroupKey) ?? null;
+    const owningFamily = subgroupKey === ''
+      ? null
+      : families.find(family => family.subgroupKeys.includes(subgroupKey)) ?? null;
+
+    let familyDisplay = '';
+    if (owningFamily !== null)
+    {
+      familyDisplay = owningFamily.name
+        ? `[${owningFamily.key}] ${owningFamily.name}`
+        : owningFamily.key;
+    }
+    else if (subgroupKey !== '')
+    {
+      familyDisplay = 'Unknown';
+    }
+
+    // "clear" has nothing to clear when all three mastery fields already sit at their empty values.
+    const masteryIsBlank =
+      subgroupKey === ''
+      && selectedPanel.mastery.subgroupTier === 0
+      && selectedPanel.mastery.masterySkillId === 0;
+
+    return (
+      <BoardSectionCard
+        title={'Mastery'}
+        actions={
+          <Button
+            size={'small'}
+            variant={'outlined'}
+            disabled={masteryIsBlank}
+            onClick={handleClearPanelMastery}
+          >
+            Clear
+          </Button>
+        }
+      >
+        <Stack
+          direction={'row'}
+          spacing={1.5}
+          alignItems={'flex-start'}
+          useFlexGap
+          flexWrap={'wrap'}
+        >
+          <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
+            <Autocomplete
+              size={'small'}
+              fullWidth
+              disabled={subgroups.length === 0}
+              options={subgroups}
+              getOptionLabel={(subgroup) =>
+                subgroup.name
+                  ? `[${subgroup.key}] ${subgroup.name}`
+                  : subgroup.key}
+              isOptionEqualToValue={(left, right) => left.key === right.key}
+              value={selectedSubgroup}
+              onChange={(_, subgroup) =>
+              {
+                handlePanelMasterySubgroupKeyChange(subgroup?.key ?? '');
+              }}
+              renderInput={(params) =>
+                <TextField
+                  {...params}
+                  fullWidth
+                  label={'Subgroup'}
+                  error={subgroupIsOrphan}
+                  helperText={
+                    subgroupIsOrphan
+                      ? `Unknown subgroup [${subgroupKey}].`
+                      : undefined
+                  }
+                />}
+            />
+          </Box>
+          <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
+            <TextField
+              fullWidth
+              size={'small'}
+              label={'Family (derived)'}
+              value={familyDisplay}
+              slotProps={{ input: { readOnly: true } }}
+              helperText={'Set on the Families tab via subgroup membership.'}
+            />
+          </Box>
+          <Box sx={{ flex: '0 0 88px' }}>
+            <TextField
+              type={'number'}
+              label={'Tier'}
+              variant={'outlined'}
+              size={'small'}
+              fullWidth
+              value={selectedPanel.mastery.subgroupTier}
+              onChange={event => handlePanelMasterySubgroupTierChange(
+                Math.max(0, parseInt(event.target.value, 10) || 0)
+              )}
+              slotProps={{ htmlInput: { min: '0', step: '1' } }}
+            />
+          </Box>
+          <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
+            <Autocomplete
+              size={'small'}
+              fullWidth
+              options={skills}
+              getOptionLabel={(skill) => `${skill.id}: ${skill.name}`}
+              value={skillsById.get(selectedPanel.mastery.masterySkillId) ?? null}
+              onChange={(_, skill) =>
+              {
+                handlePanelMasterySkillIdChange(skill?.id ?? 0);
+              }}
+              renderInput={(params) =>
+                <TextField
+                  {...params}
+                  fullWidth
+                  label={'Mastery Skill'}
+                />}
+            />
+          </Box>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
    * The panel's own identity: what it is called, what it looks like, and the two blocks of flavor text
    * the game renders in a fixed-width font. Both text fields warn when a line outruns that width,
    * because the game clips rather than wraps.
@@ -1853,101 +1964,7 @@ const SdpBoard = () =>
                       </Grid>
                     </BoardSectionCard>
 
-                    <BoardSectionCard
-                      title={'Mastery'}
-                      actions={
-                        <Button
-                          size={'small'}
-                          variant={'outlined'}
-                          disabled={masteryIsBlank}
-                          onClick={handleClearPanelMastery}
-                        >
-                          Clear
-                        </Button>
-                      }
-                    >
-                      <Stack
-                        direction={'row'}
-                        spacing={1.5}
-                        alignItems={'flex-start'}
-                        useFlexGap
-                        flexWrap={'wrap'}
-                      >
-                        <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
-                          <Autocomplete
-                            size={'small'}
-                            fullWidth
-                            disabled={subgroups.length === 0}
-                            options={subgroups}
-                            getOptionLabel={(subgroup) =>
-                              subgroup.name
-                                ? `[${subgroup.key}] ${subgroup.name}`
-                                : subgroup.key}
-                            isOptionEqualToValue={(left, right) => left.key === right.key}
-                            value={selectedMasterySubgroup}
-                            onChange={(_, subgroup) =>
-                            {
-                              handlePanelMasterySubgroupKeyChange(subgroup?.key ?? '');
-                            }}
-                            renderInput={(params) =>
-                              <TextField
-                                {...params}
-                                fullWidth
-                                label={'Subgroup'}
-                                error={masterySubgroupKeyIsOrphan}
-                                helperText={
-                                  masterySubgroupKeyIsOrphan
-                                    ? `Unknown subgroup [${selectedMasterySubgroupKey}].`
-                                    : undefined
-                                }
-                              />}
-                          />
-                        </Box>
-                        <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
-                          <TextField
-                            fullWidth
-                            size={'small'}
-                            label={'Family (derived)'}
-                            value={selectedPanelFamilyDisplay}
-                            slotProps={{ input: { readOnly: true } }}
-                            helperText={'Set on the Families tab via subgroup membership.'}
-                          />
-                        </Box>
-                        <Box sx={{ flex: '0 0 88px' }}>
-                          <TextField
-                            type={'number'}
-                            label={'Tier'}
-                            variant={'outlined'}
-                            size={'small'}
-                            fullWidth
-                            value={selectedPanel.mastery.subgroupTier}
-                            onChange={event => handlePanelMasterySubgroupTierChange(
-                              Math.max(0, parseInt(event.target.value, 10) || 0)
-                            )}
-                            slotProps={{ htmlInput: { min: '0', step: '1' } }}
-                          />
-                        </Box>
-                        <Box sx={{ flex: '2 1 220px', minWidth: 0 }}>
-                          <Autocomplete
-                            size={'small'}
-                            fullWidth
-                            options={skills}
-                            getOptionLabel={(skill) => `${skill.id}: ${skill.name}`}
-                            value={skillsById.get(selectedPanel.mastery.masterySkillId) ?? null}
-                            onChange={(_, skill) =>
-                            {
-                              handlePanelMasterySkillIdChange(skill?.id ?? 0);
-                            }}
-                            renderInput={(params) =>
-                              <TextField
-                                {...params}
-                                fullWidth
-                                label={'Mastery Skill'}
-                              />}
-                          />
-                        </Box>
-                      </Stack>
-                    </BoardSectionCard>
+                    {renderPanelMasterySection()}
 
                     <BoardSectionCard title={'Rank Rewards'}>
                       <Stack spacing={1}>
