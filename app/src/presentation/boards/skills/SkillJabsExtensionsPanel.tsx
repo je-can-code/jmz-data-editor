@@ -1143,6 +1143,220 @@ function SkillJabsExtensionsPanel(
   }
 
   /**
+   * The dodge movement this skill performs, and the invincibility it grants while doing it.
+   *
+   * Move type gates everything else: without one there is no dodge tag to hang steps, speed or an
+   * i-frame window on, so each dependent field disables itself and says which choice is missing.
+   * Whole-dodge invincibility and a manual i-frame window are two spellings of the same idea, so
+   * turning either on clears the other.
+   */
+  const renderDodgeSection = () =>
+  {
+    const hasNoMoveType = jabs.moveType === null;
+    const moveTypeHelperText = hasNoMoveType
+      ? 'Pick a move type first.'
+      : undefined;
+
+    return (
+      <BoardSectionCard title={'Dodge'} collapsible defaultExpanded={false}>
+        <Grid container spacing={2}>
+          <Grid size={12}>
+            <Typography variant={'caption'} color={'text.secondary'}>
+              Pick a move type first. None means no dodge movement tag; steps, speed, invincibility, and i-frames stay
+              disabled until you choose forward, backward, or directional.
+            </Typography>
+          </Grid>
+          <Grid size={12}>
+            <Autocomplete<MoveTypePickerRow, false, true, false>
+              fullWidth
+              size={'small'}
+              disableClearable
+              options={MOVE_TYPE_PICKER_ROWS}
+              getOptionLabel={(o) => o.label}
+              isOptionEqualToValue={(
+                a,
+                b
+              ) => a.value === b.value}
+              value={
+                MOVE_TYPE_PICKER_ROWS.find((r) => r.value === jabs.moveType)
+                ?? MOVE_TYPE_PICKER_ROWS[ 0 ]
+              }
+              onChange={(
+                _e,
+                option
+              ) =>
+              {
+                if (option === null || option.value === null)
+                {
+                  patch({
+                    moveType: null,
+                    dodgeSteps: null,
+                    dodgeSpeed: null,
+                    invincibleDodge: false,
+                    iframesStartFrame: null,
+                    iframesEndFrame: null,
+                  });
+                  return;
+                }
+                patch({ moveType: option.value });
+              }}
+              renderInput={(params) =>
+                (
+                  <TextField
+                    {...params}
+                    label={'Move type'}
+                    helperText={'Required before editing other dodge fields. None clears dodge tags from the note.'}
+                  />
+                )}
+            />
+          </Grid>
+          <Grid size={6}>
+            {intField(
+              'Dodge steps',
+              jabs.dodgeSteps,
+              'dodgeSteps',
+              {
+                disabled: hasNoMoveType,
+                helperText: moveTypeHelperText,
+              }
+            )}
+          </Grid>
+          <Grid size={6}>
+            {floatField(
+              'Dodge speed',
+              jabs.dodgeSpeed,
+              'dodgeSpeed',
+              {
+                disabled: hasNoMoveType,
+                helperText: moveTypeHelperText,
+              }
+            )}
+          </Grid>
+          <Grid size={12}>
+            <Stack spacing={0.5}>
+              <FormControlLabel
+                disabled={hasNoMoveType}
+                control={
+                  <Switch
+                    size={'small'}
+                    checked={jabs.invincibleDodge}
+                    disabled={hasNoMoveType}
+                    onChange={(e) =>
+                    {
+                      if (e.target.checked === true)
+                      {
+                        patch({
+                          invincibleDodge: true,
+                          iframesStartFrame: null,
+                          iframesEndFrame: null,
+                        });
+                        return;
+                      }
+                      patch({ invincibleDodge: false });
+                    }}
+                  />
+                }
+                label={'Invincible dodge (full dodge duration)'}
+              />
+              <Typography variant={'caption'} color={'text.secondary'}>
+                {hasNoMoveType
+                  ? 'Pick a move type first.'
+                  : 'Same as i-frames for the entire dodge animation — mutually exclusive with a manual frame window below.'}
+              </Typography>
+            </Stack>
+          </Grid>
+          <Grid size={12}>
+            <Typography variant={'caption'} color={'text.secondary'} sx={{
+              display: 'block',
+              mb: 1
+            }}>
+              Manual i-frames
+              {' '}
+              <Typography component={'span'} variant={'caption'} sx={{ fontFamily: 'monospace' }}>
+                {'<iframes:[START_FRAME, END_FRAME]>'}
+              </Typography>
+              {' '}
+              — both frames required to write the tag. Disabled while invincible dodge is on; typing a start frame
+              turns
+              invincible dodge off.
+              {hasNoMoveType
+                ? ' Pick a move type first.'
+                : ''}
+            </Typography>
+          </Grid>
+          <Grid size={6}>
+            <TextField
+              label={'I-frames start frame'}
+              size={'small'}
+              fullWidth
+              disabled={hasNoMoveType || jabs.invincibleDodge === true}
+              value={jabs.iframesStartFrame === null
+                ? ''
+                : String(jabs.iframesStartFrame)}
+              onChange={(e) =>
+              {
+                const t = e.target.value.trim();
+                if (t === '')
+                {
+                  patch({
+                    iframesStartFrame: null,
+                    iframesEndFrame: null
+                  });
+                  return;
+                }
+                const n = parseInt(t, 10);
+                if (Number.isNaN(n))
+                {
+                  return;
+                }
+                patch({
+                  iframesStartFrame: n,
+                  invincibleDodge: false
+                });
+              }}
+              helperText={iframesStartHelperText}
+              slotProps={{
+                htmlInput: {
+                  inputMode: 'numeric',
+                  min: 0,
+                  step: 1
+                }
+              }}
+            />
+          </Grid>
+          <Grid size={6}>
+            <TextField
+              label={'I-frames end frame'}
+              size={'small'}
+              fullWidth
+              disabled={
+                hasNoMoveType
+                || jabs.invincibleDodge === true
+                || jabs.iframesStartFrame === null
+              }
+              value={jabs.iframesEndFrame === null
+                ? ''
+                : String(jabs.iframesEndFrame)}
+              onChange={(e) =>
+              {
+                onNullableInt(e, 'iframesEndFrame');
+              }}
+              helperText={iframesEndHelperText}
+              slotProps={{
+                htmlInput: {
+                  inputMode: 'numeric',
+                  min: 0,
+                  step: 1
+                }
+              }}
+            />
+          </Grid>
+        </Grid>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
    * The cosmetic motion layered onto the caster when the skill fires: which icon swings, how hard the
    * body leans, and which of the motion presets plays.
    *
@@ -2964,207 +3178,7 @@ function SkillJabsExtensionsPanel(
           </Stack>
       </BoardSectionCard>
 
-      <BoardSectionCard title={'Dodge'} collapsible defaultExpanded={false}>
-          <Grid container spacing={2}>
-            <Grid size={12}>
-              <Typography variant={'caption'} color={'text.secondary'}>
-                Pick a move type first. None means no dodge movement tag; steps, speed, invincibility, and i-frames stay
-                disabled until you choose forward, backward, or directional.
-              </Typography>
-            </Grid>
-            <Grid size={12}>
-              <Autocomplete<MoveTypePickerRow, false, true, false>
-                fullWidth
-                size={'small'}
-                disableClearable
-                options={MOVE_TYPE_PICKER_ROWS}
-                getOptionLabel={(o) => o.label}
-                isOptionEqualToValue={(
-                  a,
-                  b
-                ) => a.value === b.value}
-                value={
-                  MOVE_TYPE_PICKER_ROWS.find((r) => r.value === jabs.moveType)
-                  ?? MOVE_TYPE_PICKER_ROWS[ 0 ]
-                }
-                onChange={(
-                  _e,
-                  option
-                ) =>
-                {
-                  if (option === null || option.value === null)
-                  {
-                    patch({
-                      moveType: null,
-                      dodgeSteps: null,
-                      dodgeSpeed: null,
-                      invincibleDodge: false,
-                      iframesStartFrame: null,
-                      iframesEndFrame: null,
-                    });
-                    return;
-                  }
-                  patch({ moveType: option.value });
-                }}
-                renderInput={(params) =>
-                  (
-                    <TextField
-                      {...params}
-                      label={'Move type'}
-                      helperText={'Required before editing other dodge fields. None clears dodge tags from the note.'}
-                    />
-                  )}
-              />
-            </Grid>
-            <Grid size={6}>
-              {intField(
-                'Dodge steps',
-                jabs.dodgeSteps,
-                'dodgeSteps',
-                {
-                  disabled: jabs.moveType === null,
-                  helperText:
-                    jabs.moveType === null
-                      ? 'Pick a move type first.'
-                      : undefined,
-                }
-              )}
-            </Grid>
-            <Grid size={6}>
-              {floatField(
-                'Dodge speed',
-                jabs.dodgeSpeed,
-                'dodgeSpeed',
-                {
-                  disabled: jabs.moveType === null,
-                  helperText:
-                    jabs.moveType === null
-                      ? 'Pick a move type first.'
-                      : undefined,
-                }
-              )}
-            </Grid>
-            <Grid size={12}>
-              <Stack spacing={0.5}>
-                <FormControlLabel
-                  disabled={jabs.moveType === null}
-                  control={
-                    <Switch
-                      size={'small'}
-                      checked={jabs.invincibleDodge}
-                      disabled={jabs.moveType === null}
-                      onChange={(e) =>
-                      {
-                        if (e.target.checked === true)
-                        {
-                          patch({
-                            invincibleDodge: true,
-                            iframesStartFrame: null,
-                            iframesEndFrame: null,
-                          });
-                          return;
-                        }
-                        patch({ invincibleDodge: false });
-                      }}
-                    />
-                  }
-                  label={'Invincible dodge (full dodge duration)'}
-                />
-                <Typography variant={'caption'} color={'text.secondary'}>
-                  {jabs.moveType === null
-                    ? 'Pick a move type first.'
-                    : 'Same as i-frames for the entire dodge animation — mutually exclusive with a manual frame window below.'}
-                </Typography>
-              </Stack>
-            </Grid>
-            <Grid size={12}>
-              <Typography variant={'caption'} color={'text.secondary'} sx={{
-                display: 'block',
-                mb: 1
-              }}>
-                Manual i-frames
-                {' '}
-                <Typography component={'span'} variant={'caption'} sx={{ fontFamily: 'monospace' }}>
-                  {'<iframes:[START_FRAME, END_FRAME]>'}
-                </Typography>
-                {' '}
-                — both frames required to write the tag. Disabled while invincible dodge is on; typing a start frame
-                turns
-                invincible dodge off.
-                {jabs.moveType === null
-                  ? ' Pick a move type first.'
-                  : ''}
-              </Typography>
-            </Grid>
-            <Grid size={6}>
-              <TextField
-                label={'I-frames start frame'}
-                size={'small'}
-                fullWidth
-                disabled={jabs.moveType === null || jabs.invincibleDodge === true}
-                value={jabs.iframesStartFrame === null
-                  ? ''
-                  : String(jabs.iframesStartFrame)}
-                onChange={(e) =>
-                {
-                  const t = e.target.value.trim();
-                  if (t === '')
-                  {
-                    patch({
-                      iframesStartFrame: null,
-                      iframesEndFrame: null
-                    });
-                    return;
-                  }
-                  const n = parseInt(t, 10);
-                  if (Number.isNaN(n))
-                  {
-                    return;
-                  }
-                  patch({
-                    iframesStartFrame: n,
-                    invincibleDodge: false
-                  });
-                }}
-                helperText={iframesStartHelperText}
-                slotProps={{
-                  htmlInput: {
-                    inputMode: 'numeric',
-                    min: 0,
-                    step: 1
-                  }
-                }}
-              />
-            </Grid>
-            <Grid size={6}>
-              <TextField
-                label={'I-frames end frame'}
-                size={'small'}
-                fullWidth
-                disabled={
-                  jabs.moveType === null
-                  || jabs.invincibleDodge === true
-                  || jabs.iframesStartFrame === null
-                }
-                value={jabs.iframesEndFrame === null
-                  ? ''
-                  : String(jabs.iframesEndFrame)}
-                onChange={(e) =>
-                {
-                  onNullableInt(e, 'iframesEndFrame');
-                }}
-                helperText={iframesEndHelperText}
-                slotProps={{
-                  htmlInput: {
-                    inputMode: 'numeric',
-                    min: 0,
-                    step: 1
-                  }
-                }}
-              />
-            </Grid>
-          </Grid>
-      </BoardSectionCard>
+      {renderDodgeSection()}
     </Stack>
   );
 }
