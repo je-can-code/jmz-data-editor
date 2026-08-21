@@ -264,6 +264,19 @@ const SdpBoard = () =>
   const selectedPanelFamily = selectedMasterySubgroupKey === ''
     ? null
     : families.find(family => family.subgroupKeys.includes(selectedMasterySubgroupKey)) ?? null;
+
+  // the derived family field reads blank when no subgroup is chosen, and flags a subgroup that belongs to no family.
+  let selectedPanelFamilyDisplay = '';
+  if (selectedPanelFamily !== null)
+  {
+    selectedPanelFamilyDisplay = selectedPanelFamily.name
+      ? `[${selectedPanelFamily.key}] ${selectedPanelFamily.name}`
+      : selectedPanelFamily.key;
+  }
+  else if (selectedMasterySubgroupKey !== '')
+  {
+    selectedPanelFamilyDisplay = 'Unknown';
+  }
   const masteryIsBlank = selectedPanel === null
     || (
       selectedPanel.mastery.subgroupKey === ''
@@ -1296,40 +1309,39 @@ const SdpBoard = () =>
         <Tab label={'Subgroups'} value={'subgroups'}/>
         <Tab label={'Families'} value={'families'}/>
       </Tabs>
-      {boardTab === 'subgroups'
-        ? (
-          <Box sx={{
-            flex: 1,
-            minHeight: 0,
-            overflow: 'auto',
-            p: 2,
-          }}>
-            <SdpSubgroupsSection
-              subgroups={subgroups}
-              selectedIndex={selectedSubgroupIndex}
-              onSelectIndex={setSelectedSubgroupIndex}
-              onChange={applySubgroups}
-            />
-          </Box>
-        )
-        : boardTab === 'families'
-          ? (
-            <Box sx={{
-              flex: 1,
-              minHeight: 0,
-              overflow: 'auto',
-              p: 2,
-            }}>
-              <SdpFamiliesSection
-                families={families}
-                subgroups={subgroups}
-                selectedIndex={selectedFamilyIndex}
-                onSelectIndex={setSelectedFamilyIndex}
-                onChange={applyFamilies}
-              />
-            </Box>
-          )
-        : (
+      {/* one block per tab; BoardTab has exactly these three values, so exactly one renders. */}
+      {boardTab === 'subgroups' && (
+        <Box sx={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          p: 2,
+        }}>
+          <SdpSubgroupsSection
+            subgroups={subgroups}
+            selectedIndex={selectedSubgroupIndex}
+            onSelectIndex={setSelectedSubgroupIndex}
+            onChange={applySubgroups}
+          />
+        </Box>
+      )}
+      {boardTab === 'families' && (
+        <Box sx={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          p: 2,
+        }}>
+          <SdpFamiliesSection
+            families={families}
+            subgroups={subgroups}
+            selectedIndex={selectedFamilyIndex}
+            onSelectIndex={setSelectedFamilyIndex}
+            onChange={applyFamilies}
+          />
+        </Box>
+      )}
+      {boardTab === 'panels' && (
       <EditorBoardSplitLayout
         sidebarColumnWidth={sdpBoardListColumnWidth}
         sidebar={
@@ -1838,15 +1850,7 @@ const SdpBoard = () =>
                             fullWidth
                             size={'small'}
                             label={'Family (derived)'}
-                            value={
-                              selectedPanelFamily === null
-                                ? selectedMasterySubgroupKey === ''
-                                  ? ''
-                                  : 'Unknown'
-                                : selectedPanelFamily.name
-                                  ? `[${selectedPanelFamily.key}] ${selectedPanelFamily.name}`
-                                  : selectedPanelFamily.key
-                            }
+                            value={selectedPanelFamilyDisplay}
                             slotProps={{ input: { readOnly: true } }}
                             helperText={'Set on the Families tab via subgroup membership.'}
                           />

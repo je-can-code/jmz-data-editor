@@ -60,14 +60,22 @@ function buildTypeOptions(names: readonly string[] | undefined, fallbackPrefix: 
   {
     return [ { value: 0, label: 'None' } ];
   }
-  return names.map((name, i) => ({
-    value: i,
-    label: name.trim().length > 0
-      ? name
-      : (i === 0
+  return names.map((name, i) =>
+  {
+    // a named type shows its name; a blank one falls back to its slot, where index 0 is RMMZ's empty type.
+    let label = name;
+    if (name.trim().length === 0)
+    {
+      label = i === 0
         ? 'None'
-        : `${fallbackPrefix} ${i}`),
-  }));
+        : `${fallbackPrefix} ${i}`;
+    }
+
+    return {
+      value: i,
+      label,
+    };
+  });
 }
 
 function ArmorsBoard()

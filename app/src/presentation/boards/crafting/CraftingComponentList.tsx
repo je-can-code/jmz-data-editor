@@ -505,13 +505,17 @@ const CraftingComponentList = (props: CraftingListProps) =>
     props.updateRecipeFunc(next, props.type);
 
     const prevSel = selectedComponentIndex;
-    const nextSel = selectedComponentIndex === index
-      ? partner
-      : (
-        selectedComponentIndex === partner
-          ? index
-          : selectedComponentIndex
-      );
+
+    // the two rows traded places, so a selection sitting on either one follows it rather than staying put.
+    let nextSel = selectedComponentIndex;
+    if (selectedComponentIndex === index)
+    {
+      nextSel = partner;
+    }
+    else if (selectedComponentIndex === partner)
+    {
+      nextSel = index;
+    }
     setSelectedComponentIndex(nextSel);
     setSelectedComponent(next[ nextSel ] ?? null);
 
