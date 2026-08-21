@@ -1143,6 +1143,161 @@ function SkillJabsExtensionsPanel(
   }
 
   /**
+   * How far the action reaches, what shape it tests hits with, and how many projectiles it throws.
+   *
+   * The shape decides which of the numeric fields mean anything: arc and circle read degrees, line and
+   * wall read thickness. The ones that do not apply disable themselves and say which shapes would use
+   * them, rather than greying out unexplained.
+   */
+  const renderActionShapeSection = () =>
+  {
+    const usesThickness = jabs.hitboxShape === 'line' || jabs.hitboxShape === 'wall';
+    const usesDegrees = jabs.hitboxShape === 'arc' || jabs.hitboxShape === 'circle';
+
+    const hitboxShapeValue =
+      jabs.hitboxShape !== null
+      && HITBOX_SHAPES.includes(jabs.hitboxShape as (typeof HITBOX_SHAPES)[number])
+        ? jabs.hitboxShape as (typeof HITBOX_SHAPES)[number]
+        : undefined;
+
+    const formationValue =
+      jabs.projectileFormation !== null
+      && FORMATIONS.includes(jabs.projectileFormation as (typeof FORMATIONS)[number])
+        ? jabs.projectileFormation as (typeof FORMATIONS)[number]
+        : undefined;
+
+    return (
+      <BoardSectionCard title={'Action size, shape & projectile'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Tune how far the action reaches and what shape it uses in tile space. Choose hitbox shape first — arc and
+            circle unlock degrees; line and wall unlock thickness. Direct skills (see Casting / map execution above)
+            skip the map
+            projectile, but radius and shape still matter for range checks and previews where applicable.
+          </Typography>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Hitbox
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Geometry JABS uses to test hits. The numeric fields below gray out when they do not apply to the selected
+            shape.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={12}>
+              <Autocomplete<(typeof HITBOX_SHAPES)[number], false, true, false>
+                fullWidth
+                size={'small'}
+                options={[ ...HITBOX_SHAPES ]}
+                value={hitboxShapeValue}
+                onChange={(
+                  _e,
+                  v
+                ) =>
+                {
+                  patch({ hitboxShape: v ?? null });
+                }}
+                renderInput={(params) =>
+                  (
+                    <TextField
+                      {...params}
+                      label={'Hitbox shape'}
+                      placeholder={'Engine default if empty'}
+                    />
+                  )}
+              />
+            </Grid>
+            <Grid size={6}>
+              {floatField(
+                'Reach / radius (tiles)',
+                jabs.rangeRadius,
+                'rangeRadius',
+                {
+                  helperText: 'How far the hitbox extends from the action origin, in map tiles (not pixels).',
+                }
+              )}
+            </Grid>
+            <Grid size={6}>
+              {intField(
+                'Arc / sweep (degrees)',
+                jabs.degrees,
+                'degrees',
+                {
+                  disabled: usesDegrees === false,
+                  helperText: degreesHelperText,
+                }
+              )}
+            </Grid>
+            <Grid size={6}>
+              {floatField(
+                'Line or wall thickness (tiles)',
+                jabs.thickness,
+                'thickness',
+                {
+                  disabled: usesThickness === false,
+                  helperText: usesThickness
+                    ? 'How wide the strip is perpendicular to the line or wall axis.'
+                    : 'Only line and wall hitboxes use thickness.',
+                }
+              )}
+            </Grid>
+          </Grid>
+          <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
+            Projectiles
+          </Typography>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Formation chooses the firing lines (aim directions) the skill uses. Projectile count is how many map
+            actions
+            spawn on each of those lines, so totals multiply. Example: spray is a three-line “W” (straight ahead,
+            about
+            45° up, about 45° down); with count 3 you get three actions per line — nine actions total. That can
+            explode
+            quickly; that may be exactly what you want. Irrelevant for purely direct / zero-projectile setups.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={6}>
+              {intField(
+                'Projectile count (per firing line)',
+                jabs.projectileCount,
+                'projectileCount',
+                {
+                  helperText:
+                    'Each firing line from formation gets this many actions. Total on the map is (lines in that formation) × count.',
+                }
+              )}
+            </Grid>
+            <Grid size={6}>
+              <Autocomplete<(typeof FORMATIONS)[number], false, true, false>
+                fullWidth
+                size={'small'}
+                options={[ ...FORMATIONS ]}
+                value={formationValue}
+                onChange={(
+                  _e,
+                  v
+                ) =>
+                {
+                  patch({ projectileFormation: v ?? null });
+                }}
+                renderInput={(params) =>
+                  (
+                    <TextField
+                      {...params}
+                      label={'Formation (firing lines)'}
+                      placeholder={'Engine default if empty'}
+                      helperText={
+                        'Which directions count as separate lines; projectile count stacks on every line.'
+                      }
+                    />
+                  )}
+              />
+            </Grid>
+          </Grid>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
    * A counter skill and the chance it fires. Parry and guard offer the same pair of controls over
    * different fields, so they share one renderer.
    *
@@ -2633,146 +2788,7 @@ function SkillJabsExtensionsPanel(
 
       {renderPostExecutionSection()}
 
-      <BoardSectionCard title={'Action size, shape & projectile'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Tune how far the action reaches and what shape it uses in tile space. Choose hitbox shape first — arc and
-              circle unlock degrees; line and wall unlock thickness. Direct skills (see Casting / map execution above)
-              skip the map
-              projectile, but radius and shape still matter for range checks and previews where applicable.
-            </Typography>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Hitbox
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Geometry JABS uses to test hits. The numeric fields below gray out when they do not apply to the selected
-              shape.
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={12}>
-                <Autocomplete<(typeof HITBOX_SHAPES)[number], false, true, false>
-                  fullWidth
-                  size={'small'}
-                  options={[ ...HITBOX_SHAPES ]}
-                  value={
-                    jabs.hitboxShape !== null
-                    && HITBOX_SHAPES.includes(jabs.hitboxShape as (typeof HITBOX_SHAPES)[number])
-                      ? jabs.hitboxShape as (typeof HITBOX_SHAPES)[number]
-                      : undefined
-                  }
-                  onChange={(
-                    _e,
-                    v
-                  ) =>
-                  {
-                    patch({ hitboxShape: v ?? null });
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        label={'Hitbox shape'}
-                        placeholder={'Engine default if empty'}
-                      />
-                    )}
-                />
-              </Grid>
-              <Grid size={6}>
-                {floatField(
-                  'Reach / radius (tiles)',
-                  jabs.rangeRadius,
-                  'rangeRadius',
-                  {
-                    helperText: 'How far the hitbox extends from the action origin, in map tiles (not pixels).',
-                  }
-                )}
-              </Grid>
-              <Grid size={6}>
-                {intField(
-                  'Arc / sweep (degrees)',
-                  jabs.degrees,
-                  'degrees',
-                  {
-                    disabled:
-                      jabs.hitboxShape !== 'arc'
-                      && jabs.hitboxShape !== 'circle',
-                    helperText: degreesHelperText,
-                  }
-                )}
-              </Grid>
-              <Grid size={6}>
-                {floatField(
-                  'Line or wall thickness (tiles)',
-                  jabs.thickness,
-                  'thickness',
-                  {
-                    disabled: jabs.hitboxShape !== 'line' && jabs.hitboxShape !== 'wall',
-                    helperText:
-                      jabs.hitboxShape === 'line' || jabs.hitboxShape === 'wall'
-                        ? 'How wide the strip is perpendicular to the line or wall axis.'
-                        : 'Only line and wall hitboxes use thickness.',
-                  }
-                )}
-              </Grid>
-            </Grid>
-            <Typography variant={'subtitle2'} sx={{ fontWeight: 600 }}>
-              Projectiles
-            </Typography>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Formation chooses the firing lines (aim directions) the skill uses. Projectile count is how many map
-              actions
-              spawn on each of those lines, so totals multiply. Example: spray is a three-line “W” (straight ahead,
-              about
-              45° up, about 45° down); with count 3 you get three actions per line — nine actions total. That can
-              explode
-              quickly; that may be exactly what you want. Irrelevant for purely direct / zero-projectile setups.
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={6}>
-                {intField(
-                  'Projectile count (per firing line)',
-                  jabs.projectileCount,
-                  'projectileCount',
-                  {
-                    helperText:
-                      'Each firing line from formation gets this many actions. Total on the map is (lines in that formation) × count.',
-                  }
-                )}
-              </Grid>
-              <Grid size={6}>
-                <Autocomplete<(typeof FORMATIONS)[number], false, true, false>
-                  fullWidth
-                  size={'small'}
-                  options={[ ...FORMATIONS ]}
-                  value={
-                    jabs.projectileFormation !== null
-                    && FORMATIONS.includes(jabs.projectileFormation as (typeof FORMATIONS)[number])
-                      ? jabs.projectileFormation as (typeof FORMATIONS)[number]
-                      : undefined
-                  }
-                  onChange={(
-                    _e,
-                    v
-                  ) =>
-                  {
-                    patch({ projectileFormation: v ?? null });
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        label={'Formation (firing lines)'}
-                        placeholder={'Engine default if empty'}
-                        helperText={
-                          'Which directions count as separate lines; projectile count stacks on every line.'
-                        }
-                      />
-                    )}
-                />
-              </Grid>
-            </Grid>
-          </Stack>
-      </BoardSectionCard>
+      {renderActionShapeSection()}
 
       <BoardSectionCard title={'Visual metadata (sprites)'} collapsible defaultExpanded={false}>
           <Stack spacing={2}>
