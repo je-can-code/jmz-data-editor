@@ -143,6 +143,43 @@ const recipeListRowIconIndex = (
 };
 
 /**
+ * What a recipe is called in the sidebar, and what its tooltip says.
+ *
+ * A recipe need not be named: an unnamed one borrows the name of what it produces, and one that
+ * produces nothing recognizable falls back to its key, so a row is never blank.
+ */
+const recipeListRowLabels = (
+  recipe: Recipe,
+  itemsById: ReadonlyMap<number, RPG_ItemDomainModel>,
+  weaponsById: ReadonlyMap<number, RPG_WeaponDomainModel>,
+  armorsById: ReadonlyMap<number, RPG_ArmorDomainModel>
+): { label: string; title: string } =>
+{
+  const outputRow = recipeFirstOutputDatabaseRow(recipe, itemsById, weaponsById, armorsById);
+  const outputName = outputRow === null
+    ? ''
+    : outputRow.name;
+
+  const displayName = recipe.name.length > 0
+    ? recipe.name
+    : outputName;
+
+  // with nothing to display, the key is all the row has, and repeating it in the tooltip says nothing.
+  if (displayName.length === 0)
+  {
+    return {
+      label: recipe.key,
+      title: recipe.key,
+    };
+  }
+
+  return {
+    label: displayName,
+    title: `${recipe.key}: ${displayName}`,
+  };
+};
+
+/**
  * The main board that encapsulates all things related to crafting.
  */
 const CraftingBoard = () =>
@@ -222,6 +259,11 @@ const CraftingBoard = () =>
     if (selectedRecipe === null || selectedRecipe.description.trim().length > 0) return '';
     return readDatabaseDescription(recipeFirstOutput);
   }, [ selectedRecipe, recipeFirstOutput ]);
+
+  // both placeholder memos already blank themselves when the field is filled, so a placeholder that
+  // survived is one that should be shown. The label has to be shrunk out of its way when it is.
+  const showsRecipeNamePlaceholder = recipeNamePlaceholderFromFirstOutput.length > 0;
+  const showsRecipeDescriptionPlaceholder = recipeDescriptionPlaceholderFromFirstOutput.length > 0;
 
   //region actions
   const handleSnack = (
@@ -689,10 +731,7 @@ const CraftingBoard = () =>
       };
     }
 
-    const outputName = recipeFirstOutputDatabaseRow(recipe, itemsById, weaponsById, armorsById)?.name ?? '';
-    const displayName = recipe.name.length > 0 ? recipe.name : outputName;
-    const label = displayName.length > 0 ? displayName : recipe.key;
-    const title = displayName.length > 0 ? `${recipe.key}: ${displayName}` : recipe.key;
+    const { label, title } = recipeListRowLabels(recipe, itemsById, weaponsById, armorsById);
 
     return {
       type: 'item',
@@ -826,10 +865,10 @@ const CraftingBoard = () =>
                       onChange={handleRecipeNameOnChangeEvent}
                       size={'small'}
                       fullWidth
-                      InputLabelProps={selectedRecipe.name.trim().length === 0 && recipeNamePlaceholderFromFirstOutput.length > 0
+                      InputLabelProps={showsRecipeNamePlaceholder
                         ? { shrink: true }
                         : undefined}
-                      placeholder={selectedRecipe.name.trim().length === 0 && recipeNamePlaceholderFromFirstOutput.length > 0
+                      placeholder={showsRecipeNamePlaceholder
                         ? recipeNamePlaceholderFromFirstOutput
                         : undefined}
                     />
@@ -910,10 +949,10 @@ const CraftingBoard = () =>
                       multiline
                       fullWidth
                       rows={4}
-                      InputLabelProps={selectedRecipe.description.trim().length === 0 && recipeDescriptionPlaceholderFromFirstOutput.length > 0
+                      InputLabelProps={showsRecipeDescriptionPlaceholder
                         ? { shrink: true }
                         : undefined}
-                      placeholder={selectedRecipe.description.trim().length === 0 && recipeDescriptionPlaceholderFromFirstOutput.length > 0
+                      placeholder={showsRecipeDescriptionPlaceholder
                         ? recipeDescriptionPlaceholderFromFirstOutput
                         : undefined}
                     />
