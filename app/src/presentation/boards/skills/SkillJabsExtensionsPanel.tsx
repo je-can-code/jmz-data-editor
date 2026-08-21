@@ -1143,6 +1143,184 @@ function SkillJabsExtensionsPanel(
   }
 
   /**
+   * A counter skill and the chance it fires. Parry and guard offer the same pair of controls over
+   * different fields, so they share one renderer.
+   *
+   * The chance only means something once a skill is picked, so the slider stays disabled until then
+   * and the caption above it says so rather than showing a percentage for nothing. A stored chance of
+   * nothing is written as 100%, which is what the caption reports.
+   *
+   * @param trigger What the counter reacts to, as the labels name it.
+   * @param options The skills selectable as this counter.
+   * @param selectedOption The currently selected row, or null.
+   * @param skillId The stored skill id, or null when no counter is set.
+   * @param chance The stored proc chance, or null to mean 100.
+   * @param skillIdKey The extension field holding the skill id.
+   * @param chanceKey The extension field holding the chance.
+   * @param pickerHelperText What the picker says about when this counter fires.
+   */
+  const renderCounterControls = (
+    trigger: 'parry' | 'guard',
+    options: JabsSkillPickerRow[],
+    selectedOption: JabsSkillPickerRow | null,
+    skillId: number | null,
+    chance: number | null,
+    skillIdKey: 'counterParrySkillId' | 'counterGuardSkillId',
+    chanceKey: 'counterParryChance' | 'counterGuardChance',
+    pickerHelperText: string
+  ) =>
+  {
+    const hasNoCounterSkill = skillId === null;
+    const effectiveChance = Math.min(100, Math.max(1, Math.round(chance ?? 100)));
+    const chanceCaption = hasNoCounterSkill
+      ? `Pick a counter-${trigger} skill to set chance.`
+      : `Counter-${trigger} chance (${effectiveChance}%). Empty stored chance saves as 100%.`;
+
+    return (
+      <>
+        <Grid size={12}>
+          <Autocomplete<JabsSkillPickerRow, false, false, false>
+            fullWidth
+            size={'small'}
+            options={options}
+            getOptionLabel={(o) => o.label}
+            isOptionEqualToValue={(
+              a,
+              b
+            ) => a.id === b.id}
+            value={selectedOption}
+            onChange={(
+              _e,
+              option
+            ) =>
+            {
+              if (option === null)
+              {
+                patch({
+                  [ skillIdKey ]: null,
+                  [ chanceKey ]: null
+                });
+                return;
+              }
+              patch({ [ skillIdKey ]: option.id });
+            }}
+            filterOptions={(
+              opts,
+              state
+            ) =>
+            {
+              const q = state.inputValue.trim()
+                .toLowerCase();
+              if (q === '')
+              {
+                return opts;
+              }
+              return opts.filter((o) =>
+                o.label.toLowerCase()
+                  .includes(q)
+                || String(o.id)
+                  .includes(q));
+            }}
+            renderInput={(params) =>
+              (
+                <TextField
+                  {...params}
+                  variant={'outlined'}
+                  label={`Counter-${trigger} skill`}
+                  placeholder={'None…'}
+                  helperText={pickerHelperText}
+                />
+              )}
+          />
+        </Grid>
+        <Grid size={12}>
+          <Stack spacing={0.75}>
+            <Typography variant={'caption'} color={'text.secondary'}>
+              {chanceCaption}
+            </Typography>
+            <Slider
+              disabled={hasNoCounterSkill}
+              min={1}
+              max={100}
+              step={1}
+              value={effectiveChance}
+              valueLabelDisplay={'auto'}
+              valueLabelFormat={(v) => `${v}%`}
+              onChange={(
+                _e,
+                v
+              ) =>
+              {
+                const n = Array.isArray(v)
+                  ? v[ 0 ]
+                  : v;
+                patch({ [ chanceKey ]: n });
+              }}
+            />
+          </Stack>
+        </Grid>
+      </>
+    );
+  };
+
+  /**
+   * Damage reduction while guarding, and the skills a successful parry or block can fire back.
+   */
+  const renderGuardingSection = () =>
+  {
+    return (
+      <BoardSectionCard title={'Guarding & counters'} collapsible defaultExpanded={false}>
+        <Stack spacing={2}>
+          <Typography variant={'caption'} color={'text.secondary'}>
+            Guard uses flat and percent reduction in
+            {' '}
+            <Typography component={'span'} variant={'caption'} sx={{ fontFamily: 'monospace' }}>
+              {'<guard:[FLAT, PERCENT]>'}
+            </Typography>
+            . Counter skills use a 1–100% proc chance.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid size={6}>
+              {intField(
+                'Guard flat reduction',
+                jabs.guardFlat,
+                'guardFlat',
+                {
+                  helperText: 'Omit both flat and percent to remove the guard tag (0,0 is explicit).',
+                }
+              )}
+            </Grid>
+            <Grid size={6}>
+              {intField('Guard percent reduction', jabs.guardPercent, 'guardPercent')}
+            </Grid>
+            <Grid size={12}>{intField('Parry', jabs.parry, 'parry')}</Grid>
+            {renderCounterControls(
+              'parry',
+              counterParrySkillOptions,
+              selectedCounterParrySkillOption,
+              jabs.counterParrySkillId,
+              jabs.counterParryChance,
+              'counterParrySkillId',
+              'counterParryChance',
+              'Skill fired when a parry succeeds (optional).'
+            )}
+            {renderCounterControls(
+              'guard',
+              counterGuardSkillOptions,
+              selectedCounterGuardSkillOption,
+              jabs.counterGuardSkillId,
+              jabs.counterGuardChance,
+              'counterGuardSkillId',
+              'counterGuardChance',
+              'Skill fired when a guard blocks (optional).'
+            )}
+          </Grid>
+        </Stack>
+      </BoardSectionCard>
+    );
+  };
+
+  /**
    * What happens once the skill resolves: how long the slot is locked, and what it can chain into.
    *
    * The combo window is bounded by the cooldown -- JABS never opens a follow-up that outlives the
@@ -3006,206 +3184,7 @@ function SkillJabsExtensionsPanel(
           </Stack>
       </BoardSectionCard>
 
-      <BoardSectionCard title={'Guarding & counters'} collapsible defaultExpanded={false}>
-          <Stack spacing={2}>
-            <Typography variant={'caption'} color={'text.secondary'}>
-              Guard uses flat and percent reduction in
-              {' '}
-              <Typography component={'span'} variant={'caption'} sx={{ fontFamily: 'monospace' }}>
-                {'<guard:[FLAT, PERCENT]>'}
-              </Typography>
-              . Counter skills use a 1–100% proc chance.
-            </Typography>
-            <Grid container spacing={2}>
-              <Grid size={6}>
-                {intField(
-                  'Guard flat reduction',
-                  jabs.guardFlat,
-                  'guardFlat',
-                  {
-                    helperText: 'Omit both flat and percent to remove the guard tag (0,0 is explicit).',
-                  }
-                )}
-              </Grid>
-              <Grid size={6}>
-                {intField('Guard percent reduction', jabs.guardPercent, 'guardPercent')}
-              </Grid>
-              <Grid size={12}>{intField('Parry', jabs.parry, 'parry')}</Grid>
-              <Grid size={12}>
-                <Autocomplete<JabsSkillPickerRow, false, false, false>
-                  fullWidth
-                  size={'small'}
-                  options={counterParrySkillOptions}
-                  getOptionLabel={(o) => o.label}
-                  isOptionEqualToValue={(
-                    a,
-                    b
-                  ) => a.id === b.id}
-                  value={selectedCounterParrySkillOption}
-                  onChange={(
-                    _e,
-                    option
-                  ) =>
-                  {
-                    if (option === null)
-                    {
-                      patch({
-                        counterParrySkillId: null,
-                        counterParryChance: null
-                      });
-                      return;
-                    }
-                    patch({ counterParrySkillId: option.id });
-                  }}
-                  filterOptions={(
-                    options,
-                    state
-                  ) =>
-                  {
-                    const q = state.inputValue.trim()
-                      .toLowerCase();
-                    if (q === '')
-                    {
-                      return options;
-                    }
-                    return options.filter((o) =>
-                      o.label.toLowerCase()
-                        .includes(q)
-                      || String(o.id)
-                        .includes(q));
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        variant={'outlined'}
-                        label={'Counter-parry skill'}
-                        placeholder={'None…'}
-                        helperText={'Skill fired when a parry succeeds (optional).'}
-                      />
-                    )}
-                />
-              </Grid>
-              <Grid size={12}>
-                <Stack spacing={0.75}>
-                  <Typography variant={'caption'} color={'text.secondary'}>
-                    {jabs.counterParrySkillId === null
-                      ? 'Pick a counter-parry skill to set chance.'
-                      : `Counter-parry chance (${Math.min(
-                        100,
-                        Math.max(1, Math.round(jabs.counterParryChance ?? 100))
-                      )}%). Empty stored chance saves as 100%.`}
-                  </Typography>
-                  <Slider
-                    disabled={jabs.counterParrySkillId === null}
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={Math.min(100, Math.max(1, Math.round(jabs.counterParryChance ?? 100)))}
-                    valueLabelDisplay={'auto'}
-                    valueLabelFormat={(v) => `${v}%`}
-                    onChange={(
-                      _e,
-                      v
-                    ) =>
-                    {
-                      const n = Array.isArray(v)
-                        ? v[ 0 ]
-                        : v;
-                      patch({ counterParryChance: n });
-                    }}
-                  />
-                </Stack>
-              </Grid>
-              <Grid size={12}>
-                <Autocomplete<JabsSkillPickerRow, false, false, false>
-                  fullWidth
-                  size={'small'}
-                  options={counterGuardSkillOptions}
-                  getOptionLabel={(o) => o.label}
-                  isOptionEqualToValue={(
-                    a,
-                    b
-                  ) => a.id === b.id}
-                  value={selectedCounterGuardSkillOption}
-                  onChange={(
-                    _e,
-                    option
-                  ) =>
-                  {
-                    if (option === null)
-                    {
-                      patch({
-                        counterGuardSkillId: null,
-                        counterGuardChance: null
-                      });
-                      return;
-                    }
-                    patch({ counterGuardSkillId: option.id });
-                  }}
-                  filterOptions={(
-                    options,
-                    state
-                  ) =>
-                  {
-                    const q = state.inputValue.trim()
-                      .toLowerCase();
-                    if (q === '')
-                    {
-                      return options;
-                    }
-                    return options.filter((o) =>
-                      o.label.toLowerCase()
-                        .includes(q)
-                      || String(o.id)
-                        .includes(q));
-                  }}
-                  renderInput={(params) =>
-                    (
-                      <TextField
-                        {...params}
-                        variant={'outlined'}
-                        label={'Counter-guard skill'}
-                        placeholder={'None…'}
-                        helperText={'Skill fired when a guard blocks (optional).'}
-                      />
-                    )}
-                />
-              </Grid>
-              <Grid size={12}>
-                <Stack spacing={0.75}>
-                  <Typography variant={'caption'} color={'text.secondary'}>
-                    {jabs.counterGuardSkillId === null
-                      ? 'Pick a counter-guard skill to set chance.'
-                      : `Counter-guard chance (${Math.min(
-                        100,
-                        Math.max(1, Math.round(jabs.counterGuardChance ?? 100))
-                      )}%). Empty stored chance saves as 100%.`}
-                  </Typography>
-                  <Slider
-                    disabled={jabs.counterGuardSkillId === null}
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={Math.min(100, Math.max(1, Math.round(jabs.counterGuardChance ?? 100)))}
-                    valueLabelDisplay={'auto'}
-                    valueLabelFormat={(v) => `${v}%`}
-                    onChange={(
-                      _e,
-                      v
-                    ) =>
-                    {
-                      const n = Array.isArray(v)
-                        ? v[ 0 ]
-                        : v;
-                      patch({ counterGuardChance: n });
-                    }}
-                  />
-                </Stack>
-              </Grid>
-            </Grid>
-          </Stack>
-      </BoardSectionCard>
+      {renderGuardingSection()}
 
       {renderDodgeSection()}
     </Stack>
