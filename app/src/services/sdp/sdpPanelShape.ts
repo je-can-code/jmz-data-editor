@@ -67,7 +67,25 @@ export function defaultPanelProgression(): Sdp.PanelProgression
  */
 export function normalizeSdpPanelFromDisk(raw: LegacyFlatPanel): Panel
 {
-  const identitySource = raw.identity ?? {
+  return {
+    key: raw.key ?? "",
+    identity: normalizePanelIdentityFromDisk(raw),
+    progression: normalizePanelProgressionFromDisk(raw),
+    mastery: normalizePanelMasteryFromDisk(raw),
+    panelParameters: (raw.panelParameters ?? []).map(normalizeSdpParameter),
+    panelRewards: raw.panelRewards ?? [],
+  };
+}
+
+/**
+ * Reads a panel's identity, accepting either the nested row or the legacy flat fields it replaced.
+ *
+ * @param raw Parsed JSON panel row (nested or legacy flat).
+ * @returns Canonical identity row for the editor.
+ */
+function normalizePanelIdentityFromDisk(raw: LegacyFlatPanel): Sdp.PanelIdentity
+{
+  const source = raw.identity ?? {
     name: raw.name ?? "",
     iconIndex: raw.iconIndex ?? 0,
     unlockedByDefault: raw.unlockedByDefault === true,
@@ -75,7 +93,24 @@ export function normalizeSdpPanelFromDisk(raw: LegacyFlatPanel): Panel
     topFlavorText: raw.topFlavorText ?? "",
   };
 
-  const progressionSource = raw.progression ?? {
+  return {
+    name: source.name ?? "",
+    iconIndex: Number(source.iconIndex) || 0,
+    unlockedByDefault: source.unlockedByDefault === true,
+    description: source.description ?? "",
+    topFlavorText: source.topFlavorText ?? "",
+  };
+}
+
+/**
+ * Reads a panel's progression, accepting either the nested row or the legacy flat fields it replaced.
+ *
+ * @param raw Parsed JSON panel row (nested or legacy flat).
+ * @returns Canonical progression row for the editor.
+ */
+function normalizePanelProgressionFromDisk(raw: LegacyFlatPanel): Sdp.PanelProgression
+{
+  const source = raw.progression ?? {
     maxRank: raw.maxRank ?? 1,
     rarity: raw.rarity ?? 0,
     baseCost: raw.baseCost ?? 0,
@@ -83,35 +118,33 @@ export function normalizeSdpPanelFromDisk(raw: LegacyFlatPanel): Panel
     multGrowthCost: raw.multGrowthCost ?? 1,
   };
 
-  const masterySource = raw.mastery ?? {
+  return {
+    maxRank: Number(source.maxRank) || 1,
+    rarity: normalizeSdpRarityFromDisk(Number(source.rarity) || 0),
+    baseCost: Number(source.baseCost) || 0,
+    flatGrowthCost: Number(source.flatGrowthCost) || 0,
+    multGrowthCost: Number(source.multGrowthCost) || 1,
+  };
+}
+
+/**
+ * Reads a panel's mastery, accepting either the nested row or the legacy flat fields it replaced.
+ *
+ * @param raw Parsed JSON panel row (nested or legacy flat).
+ * @returns Canonical mastery row for the editor.
+ */
+function normalizePanelMasteryFromDisk(raw: LegacyFlatPanel): Sdp.PanelMastery
+{
+  const source = raw.mastery ?? {
     subgroupKey: raw.subgroupKey ?? "",
     subgroupTier: raw.subgroupTier ?? 0,
     masterySkillId: raw.masterySkillId ?? 0,
   };
 
   return {
-    key: raw.key ?? "",
-    identity: {
-      name: identitySource.name ?? "",
-      iconIndex: Number(identitySource.iconIndex) || 0,
-      unlockedByDefault: identitySource.unlockedByDefault === true,
-      description: identitySource.description ?? "",
-      topFlavorText: identitySource.topFlavorText ?? "",
-    },
-    progression: {
-      maxRank: Number(progressionSource.maxRank) || 1,
-      rarity: normalizeSdpRarityFromDisk(Number(progressionSource.rarity) || 0),
-      baseCost: Number(progressionSource.baseCost) || 0,
-      flatGrowthCost: Number(progressionSource.flatGrowthCost) || 0,
-      multGrowthCost: Number(progressionSource.multGrowthCost) || 1,
-    },
-    mastery: {
-      subgroupKey: masterySource.subgroupKey ?? "",
-      subgroupTier: Number(masterySource.subgroupTier) || 0,
-      masterySkillId: Number(masterySource.masterySkillId) || 0,
-    },
-    panelParameters: (raw.panelParameters ?? []).map(normalizeSdpParameter),
-    panelRewards: raw.panelRewards ?? [],
+    subgroupKey: source.subgroupKey ?? "",
+    subgroupTier: Number(source.subgroupTier) || 0,
+    masterySkillId: Number(source.masterySkillId) || 0,
   };
 }
 

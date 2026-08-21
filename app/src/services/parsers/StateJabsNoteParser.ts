@@ -334,6 +334,47 @@ class StateJabsNoteParser
   ): string
   {
     const parts: string[] = [];
+
+    // each helper appends one family of tags, in the order a written note presents them.
+    StateJabsNoteParser.#writeAfflictionTags(ext, parts);
+    StateJabsNoteParser.#writeStackingTags(ext, parts);
+    StateJabsNoteParser.#writeAggroTags(ext, parts);
+    StateJabsNoteParser.#writeSlipTags(ext, parts);
+    StateJabsNoteParser.#writeDurationTags(ext, parts);
+    StateJabsNoteParser.#writeShieldTags(ext, parts);
+
+    if (ext.speedBoost !== null)
+    {
+      parts.push(`<speedBoost:${Math.trunc(ext.speedBoost)}>`);
+    }
+
+    StateJabsNoteParser.#writeTimingTags(ext, parts);
+
+    if (ext.gapCloseTarget)
+    {
+      parts.push('<gapCloseTarget>');
+    }
+
+    const skillHistoryTag = StateJabsNoteParser.#formatSkillHistoryBonusTag(ext);
+    if (skillHistoryTag !== null)
+    {
+      parts.push(skillHistoryTag);
+    }
+
+    const head = parts.length > 0
+      ? `${parts.join('\n')}\n`
+      : '';
+    return NoteNormalizer.normalize(head + baseNote);
+  }
+
+  /**
+   * Writes the flags marking what the state prevents its bearer from doing.
+   */
+  static #writeAfflictionTags(
+    ext: StateJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.negative)
     {
       parts.push('<negative>');
@@ -354,7 +395,16 @@ class StateJabsNoteParser
     {
       parts.push('<paralyzed>');
     }
+  }
 
+  /**
+   * Writes the tags describing how reapplying the state stacks, refreshes or extends it.
+   */
+  static #writeStackingTags(
+    ext: StateJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.stackType !== null)
     {
       parts.push(`<stackType:${ext.stackType}>`);
@@ -387,7 +437,16 @@ class StateJabsNoteParser
     {
       parts.push('<loseAllStacksAtOnce>');
     }
+  }
 
+  /**
+   * Writes the tags changing how much threat the bearer draws and generates.
+   */
+  static #writeAggroTags(
+    ext: StateJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.aggroLock)
     {
       parts.push('<aggroLock>');
@@ -400,7 +459,16 @@ class StateJabsNoteParser
     {
       parts.push(`<aggroInAmp:${StateJabsNoteParser.#fmtNum(ext.aggroInAmp)}>`);
     }
+  }
 
+  /**
+   * Writes the per-tick resource drain or regeneration tags, in flat, percent and formula forms.
+   */
+  static #writeSlipTags(
+    ext: StateJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.slipHpFlat !== null)
     {
       parts.push(`<hpFlat:${Math.trunc(ext.slipHpFlat)}>`);
@@ -437,7 +505,17 @@ class StateJabsNoteParser
     {
       parts.push(`<tpFormula:[${ext.slipTpFormula.trim()}]>`);
     }
+  }
 
+  /**
+   * Writes how long the state lasts. Frames and seconds are two spellings of one duration, so a state
+   * carrying both writes only the frame count.
+   */
+  static #writeDurationTags(
+    ext: StateJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.indefiniteState)
     {
       parts.push('<indefiniteState>');
@@ -462,7 +540,16 @@ class StateJabsNoteParser
     {
       parts.push(`<stateDurationFormula:[${ext.stateDurationFormula.trim()}]>`);
     }
+  }
 
+  /**
+   * Writes the shield tags: the points it grants, what breaks it, and what it protects against.
+   */
+  static #writeShieldTags(
+    ext: StateJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.shieldPointsFormula.trim() !== '')
     {
       parts.push(`<shield:[${ext.shieldPointsFormula.trim()}]>`);
@@ -479,26 +566,28 @@ class StateJabsNoteParser
     {
       parts.push('<shieldProtect>');
     }
+
+    const shieldTypes = StateJabsNoteParser.#toBracketList(ext.shieldTypeList);
+    if (shieldTypes !== null)
     {
-      const br = StateJabsNoteParser.#toBracketList(ext.shieldTypeList);
-      if (br !== null)
-      {
-        parts.push(`<shieldType:${br}>`);
-      }
-    }
-    {
-      const br = StateJabsNoteParser.#toBracketList(ext.shieldBreakSkillIds);
-      if (br !== null)
-      {
-        parts.push(`<shieldBreak:${br}>`);
-      }
+      parts.push(`<shieldType:${shieldTypes}>`);
     }
 
-    if (ext.speedBoost !== null)
+    const shieldBreakSkills = StateJabsNoteParser.#toBracketList(ext.shieldBreakSkillIds);
+    if (shieldBreakSkills !== null)
     {
-      parts.push(`<speedBoost:${Math.trunc(ext.speedBoost)}>`);
+      parts.push(`<shieldBreak:${shieldBreakSkills}>`);
     }
+  }
 
+  /**
+   * Writes the tags adjusting the bearer's cast times and cooldowns.
+   */
+  static #writeTimingTags(
+    ext: StateJabsExtension,
+    parts: string[]
+  ): void
+  {
     if (ext.timingBaseCastTime.trim() !== '')
     {
       parts.push(`<baseCastTime:[${ext.timingBaseCastTime.trim()}]>`);
@@ -523,24 +612,6 @@ class StateJabsNoteParser
     {
       parts.push(`<fastCooldownRate:[${ext.timingFastCooldownRate.trim()}]>`);
     }
-
-    if (ext.gapCloseTarget)
-    {
-      parts.push('<gapCloseTarget>');
-    }
-
-    {
-      const tag = StateJabsNoteParser.#formatSkillHistoryBonusTag(ext);
-      if (tag !== null)
-      {
-        parts.push(tag);
-      }
-    }
-
-    const head = parts.length > 0
-      ? `${parts.join('\n')}\n`
-      : '';
-    return NoteNormalizer.normalize(head + baseNote);
   }
 
   static #ensureGlobal(re: RegExp): RegExp
