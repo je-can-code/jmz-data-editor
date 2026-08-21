@@ -11,6 +11,8 @@ import {
 } from '@core/enums/RmmzSkillInvocation.ts';
 import { UsableItemAttackElementsParser } from '@services/parsers/UsableItemAttackElementsParser.ts';
 import { UsableItemThisCritParser } from '@services/parsers/UsableItemThisCritParser.ts';
+import { IngredientTypeParser } from '@services/parsers/IngredientTypeParser.ts';
+import { FoodTypeParser } from '@services/parsers/FoodTypeParser.ts';
 import { cloneUsableEffectsFromRmmz } from '@core/enums/RmmzUsableEffectCatalog.ts';
 import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 import RPG_Item = Rmmz.Implementations.RPG_Item;
@@ -40,6 +42,10 @@ class RPG_ItemDomainModel
   public damageVariance: number;
   public damageCritical: boolean;
   public attackElementIds: number[];
+  /** The ingredient types this item counts as when a recipe slot asks for them. */
+  public ingredientTypeKeys: string[];
+  /** The food group eating this item binds the battler to, or empty when it is not food. */
+  public foodTypeKey: string;
   public thisCritChanceFormula: string;
   public thisCritDamageMultiplierFormula: string;
   public thisCritsAlways: boolean;
@@ -117,6 +123,8 @@ class RPG_ItemDomainModel
     this.thisCritChanceFormula = UsableItemThisCritParser.readThisCritChance(this.note);
     this.thisCritDamageMultiplierFormula = UsableItemThisCritParser.readThisCritDamageMultiplier(this.note);
     this.thisCritsAlways = UsableItemThisCritParser.readThisCritsAlways(this.note);
+    this.ingredientTypeKeys = IngredientTypeParser.readIngredientTypes(this.note);
+    this.foodTypeKey = FoodTypeParser.readFoodType(this.note);
 
     this.effects = cloneUsableEffectsFromRmmz(rmmz.effects);
   }
@@ -159,6 +167,8 @@ class RPG_ItemDomainModel
     note = UsableItemThisCritParser.writeThisCritChance(note, this.thisCritChanceFormula);
     note = UsableItemThisCritParser.writeThisCritDamageMultiplier(note, this.thisCritDamageMultiplierFormula);
     note = UsableItemThisCritParser.writeThisCritsAlways(note, this.thisCritsAlways);
+    note = IngredientTypeParser.writeIngredientTypes(note, this.ingredientTypeKeys);
+    note = FoodTypeParser.writeFoodType(note, this.foodTypeKey);
     return NoteNormalizer.normalize(note);
   }
 }

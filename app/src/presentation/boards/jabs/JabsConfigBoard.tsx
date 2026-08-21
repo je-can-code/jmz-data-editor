@@ -4,9 +4,10 @@ import { useBoardActions } from "@presentation/context/board-actions.context.tsx
 import { useJabs } from "@presentation/context/resources/jabs.context.tsx";
 import JabsTeamsTab from "@boards/jabs/JabsTeamsTab.tsx";
 import JabsJuiceTab from "@boards/jabs/JabsJuiceTab.tsx";
+import JabsFoodTypesTab from "@presentation/boards/jabs/JabsFoodTypesTab.tsx";
 import JabsBossesTab from "@boards/jabs/boss/JabsBossesTab.tsx";
 
-type JabsConfigTab = "teams" | "juice" | "bosses";
+type JabsConfigTab = "teams" | "juice" | "bosses" | "foodTypes";
 
 /**
  * Single editor board for everything JABS owns. The board wraps three horizontal sub-tabs:
@@ -83,6 +84,7 @@ const JabsConfigBoard = () =>
           <Tab label={"Teams"} value={"teams"}/>
           <Tab label={"Juice"} value={"juice"}/>
           <Tab label={"Bosses"} value={"bosses"}/>
+          <Tab label={"Food Groups"} value={"foodTypes"}/>
         </Tabs>
       </Box>
 
@@ -90,6 +92,7 @@ const JabsConfigBoard = () =>
         {activeTab === "teams" && <JabsTeamsTab/>}
         {activeTab === "juice" && <JabsJuiceTab/>}
         {activeTab === "bosses" && <JabsBossesTab/>}
+        {activeTab === "foodTypes" && <JabsFoodTypesTab/>}
       </Box>
     </Box>
   );

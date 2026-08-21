@@ -28,6 +28,8 @@ export function useCrafting()
 
   const recipes = config?.recipes ?? [];
   const categories = config?.categories ?? [];
+  const ingredientTypes = config?.ingredientTypes ?? [];
+  const professions = config?.professions ?? [];
 
   const setRecipes = (updated: Crafting.Recipe[]) =>
   {
@@ -55,14 +57,52 @@ export function useCrafting()
     });
   };
 
+  /**
+   * Replaces the authored ingredient type vocabulary.
+   * @param {Crafting.IngredientType[]} updated The full list of types, in display order.
+   */
+  const setIngredientTypes = (updated: Crafting.IngredientType[]) =>
+  {
+    if (!config)
+    {
+      return;
+    }
+
+    setConfig({
+      ...config,
+      ingredientTypes: updated,
+    });
+  };
+
+  /**
+   * Replaces the authored professions.
+   * @param {Crafting.Profession[]} updated The full list of professions, in display order.
+   */
+  const setProfessions = (updated: Crafting.Profession[]) =>
+  {
+    if (!config)
+    {
+      return;
+    }
+
+    setConfig({
+      ...config,
+      professions: updated,
+    });
+  };
+
   return {
     // data
     recipes,
     categories,
+    ingredientTypes,
+    professions,
 
     // setters
     setRecipes,
     setCategories,
+    setIngredientTypes,
+    setProfessions,
 
     // base controls
     save,

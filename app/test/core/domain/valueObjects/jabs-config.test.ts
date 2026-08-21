@@ -181,6 +181,48 @@ describe("hydrateJabsConfig", () =>
       });
   });
 
+  it("keeps the authored food groups", () =>
+  {
+    // Arrange - the groups are a vocabulary rather than a computed thing, so hydration must pass them through
+    // untouched. Anything it fails to carry is erased from disk on the next save.
+    const withFoodTypes = {
+      teams: [],
+      foodTypes: [
+        {
+          key: "protein",
+          name: "Protein",
+          iconIndex: 0,
+        },
+      ],
+    };
+
+    // Act
+    const hydrated = hydrateJabsConfig(withFoodTypes);
+
+    // Assert
+    expect(hydrated.foodTypes)
+      .toEqual([
+        {
+          key: "protein",
+          name: "Protein",
+          iconIndex: 0,
+        },
+      ]);
+  });
+
+  it("offers no food groups when the file authors none", () =>
+  {
+    // Arrange - an older file predates the block entirely, and the board has to render against something.
+    const withoutFoodTypes = { teams: [] };
+
+    // Act
+    const hydrated = hydrateJabsConfig(withoutFoodTypes);
+
+    // Assert
+    expect(hydrated.foodTypes)
+      .toEqual([]);
+  });
+
   it("drops unrelated top-level keys so saved files stay clean", () =>
   {
     // Arrange
@@ -199,6 +241,7 @@ describe("hydrateJabsConfig", () =>
       .sort())
       .toEqual([
         "bosses",
+        "foodTypes",
         "juice",
         "teams",
       ]);

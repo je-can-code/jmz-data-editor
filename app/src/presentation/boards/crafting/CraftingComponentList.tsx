@@ -8,7 +8,6 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  Grid,
   IconButton,
   List,
   ListItem,
@@ -30,6 +29,7 @@ import {
   AttachMoney,
   AutoAwesome,
   BusinessCenter,
+  Category,
   Clear,
   Close,
   ContentCopy,
@@ -44,6 +44,8 @@ import { brown } from '@mui/material/colors';
 import React, { MouseEvent, useEffect, useMemo, useState } from 'react';
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import CraftingListType from '@core/enums/CraftingListType.ts';
+import { IngredientTypeChips } from '@presentation/components/crafting/IngredientTypeChips.tsx';
+import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 import { useItems } from '@presentation/context/resources/items.context.tsx';
 import { useWeapons } from '@presentation/context/resources/weapons.context.tsx';
 import { useArmors } from '@presentation/context/resources/armors.context.tsx';
@@ -60,6 +62,13 @@ import { BoardSectionCard } from '@presentation/components/board/BoardSectionCar
  */
 const EDITOR_REWARD_PARAM_ICON_GOLD = 2048;
 const EDITOR_REWARD_PARAM_ICON_SDP = 445;
+
+/**
+ * Stands beside the datastore types in the slot-kind picker, for a slot that matches by ingredient type instead of
+ * naming a row. Deliberately not a {@link CraftingComponentType}: nothing is ever written to disk under this value,
+ * it only exists so one exclusive control can cover every kind of slot.
+ */
+const CATEGORICAL_SLOT_KIND = "categorical";
 
 type CraftingListProps = {
   type: CraftingListType;
@@ -125,12 +134,19 @@ export function readDatabaseDescription(
 
 const CraftingComponentList = (props: CraftingListProps) =>
 {
+  // the vocabulary is authored on this board's own Ingredient Types tab.
+  const { ingredientTypes } = useCrafting();
+
   //region state
   const [ currentComponents, setCurrentComponents ] = useState<Crafting.CraftingComponent[]>([]);
   const [ selectedComponent, setSelectedComponent ] = useState<Crafting.CraftingComponent | null>(null);
   const [ selectedComponentType, setSelectedComponentType ] = useState<CraftingComponentType | null>(null);
   const [ selectedComponentIndex, setSelectedComponentIndex ] = useState<number>(0);
   const [ pendingComponent, setPendingComponent ] = useState<Crafting.CraftingComponent | null>(null);
+
+  // a slot is categorical exactly when it carries a categories array; the absence of one is what makes a slot
+  // point at a specific row instead.
+  const pendingSlotIsCategorical = pendingComponent?.categories !== undefined;
 
   const {
     data: items,
@@ -317,17 +333,63 @@ const CraftingComponentList = (props: CraftingListProps) =>
     setPendingComponent(updatedSelectedIngredient);
   };
 
-  const handleRecipeComponentTypeOnChangeEvent = (
+  /**
+   * Replaces the ingredient types the pending slot will accept.
+   * @param {string[]} keys The chosen type keys.
+   */
+  const handlePendingComponentCategoriesOnChangeEvent = (keys: string[]) =>
+  {
+    if (!pendingComponent)
+    {
+      return;
+    }
+
+    setPendingComponent({
+      ...pendingComponent,
+      categories: keys,
+    } as Crafting.CraftingComponent);
+  };
+
+  /**
+   * Answers the single question the slot editor asks: what kind of thing is this slot.
+   *
+   * Naming a datastore row and matching by type used to be two controls, and the second one silently disabled the
+   * first - which read as the dialog breaking rather than as a choice. They are one decision with six answers, so
+   * they are one control, and picking any of them clears whatever the other kind left behind.
+   * @param {unknown} _ The originating event, which carries nothing this needs.
+   * @param {string | null} newValue The chosen slot kind, or null when the current one is clicked again.
+   */
+  const handleSlotKindOnChangeEvent = (
     _: unknown,
-    newValue: CraftingComponentType | null
+    newValue: string | null
   ) =>
   {
+    // an exclusive group reports null when the active button is clicked again; there is no "no kind" slot.
     if (newValue === null)
     {
       return;
     }
 
-    setSelectedComponentType(newValue);
+    if (newValue === CATEGORICAL_SLOT_KIND)
+    {
+      // the type letter is written but never read for a categorical slot - whatever fills it decides its own kind at
+      // craft time. Carrying over whichever datastore was last selected leaves a slot claiming to be gold or panel
+      // points, which is meaningless in the file and answers yes to predicates that ask.
+      setPendingComponent((prev) => ({
+        ...(prev ?? { count: 1 }),
+        type: CraftingComponentType.Item,
+        id: 0,
+        categories: prev?.categories ?? [],
+      }) as Crafting.CraftingComponent);
+
+      setSelectedComponentType(CraftingComponentType.Item);
+
+      return;
+    }
+
+    const chosenType = newValue as CraftingComponentType;
+
+    setSelectedComponentType(chosenType);
 
     setPendingComponent((prev) =>
     {
@@ -335,30 +397,30 @@ const CraftingComponentList = (props: CraftingListProps) =>
       {
         return {
           id: 0,
-          type: newValue,
+          type: chosenType,
           count: 1,
         } as Crafting.CraftingComponent;
       }
 
-      if (newValue === CraftingComponentType.Gold || newValue === CraftingComponentType.Sdp)
-      {
-        return {
-          ...prev,
-          type: newValue,
-          id: 0,
-        } as Crafting.CraftingComponent;
-      }
+      // dropping the types is what makes this exclusive: a slot carrying both would leave the game to decide.
+      const { categories, ...withoutCategories } = prev;
+
+      // gold and panel points are quantities rather than rows, so any id left over would be meaningless.
+      const keepsItsRow = chosenType !== CraftingComponentType.Gold && chosenType !== CraftingComponentType.Sdp;
 
       return {
-        ...prev,
-        type: newValue,
+        ...withoutCategories,
+        type: chosenType,
+        id: keepsItsRow
+          ? withoutCategories.id
+          : 0,
       } as Crafting.CraftingComponent;
     });
   };
   //endregion component updates
 
   //region list updates
-  const handleAddNewComponent = (index: number | null) =>
+  const handleAddNewComponent = (index: number) =>
   {
     const newComponent = {
       id: 1,
@@ -366,9 +428,8 @@ const CraftingComponentList = (props: CraftingListProps) =>
       count: 1,
     } as Crafting.CraftingComponent;
 
-    const updatedComponents = (index === null)
-      ? [ newComponent ]
-      : currentComponents.toSpliced(index, 0, newComponent);
+    // splicing covers the empty list too, where it lands the new slot at position zero.
+    const updatedComponents = currentComponents.toSpliced(index, 0, newComponent);
 
     setCurrentComponents(updatedComponents);
     props.updateRecipeFunc(updatedComponents, props.type);
@@ -401,11 +462,9 @@ const CraftingComponentList = (props: CraftingListProps) =>
       return;
     }
 
-    const updatedSelectedIngredient = {
-      type: pendingComponent.type,
-      id: pendingComponent.id,
-      count: pendingComponent.count
-    } as Crafting.CraftingComponent;
+    // spread the pending component rather than naming its fields: listing them by hand is what silently drops any
+    // field added to a slot later, and the change simply appears not to have taken.
+    const updatedSelectedIngredient = { ...pendingComponent } as Crafting.CraftingComponent;
 
     setSelectedComponent(updatedSelectedIngredient);
 
@@ -468,6 +527,116 @@ const CraftingComponentList = (props: CraftingListProps) =>
   //endregion list updates
 
   //region render
+  /**
+   * Resolves the type keys a slot accepts into their authored definitions, dropping any that no longer exist.
+   * @param {string[]} categories The keys the slot was authored with.
+   * @returns {Crafting.IngredientType[]} The definitions behind them, in the order chosen.
+   */
+  const resolveCategories = (categories: string[]): Crafting.IngredientType[] =>
+  {
+    return categories
+      .map(key => ingredientTypes.find(type => type.key === key))
+      .filter((type): type is Crafting.IngredientType => type !== undefined);
+  };
+
+  /**
+   * Labels a slot that matches by type rather than naming a row.
+   *
+   * Wrapped in angle brackets and set in monospace so it cannot be mistaken for an item. "Any Gel" is a perfectly
+   * plausible name for a real item in a game that already has Big Gelatin and Jelli Pilaf, whereas nothing in the
+   * database is ever named with brackets - and they are the same brackets the underlying note tag uses, so the row
+   * reads in the same language as the data behind it.
+   * @param {string[]} categories The keys the slot accepts.
+   * @param {number} count How many the slot consumes.
+   */
+  const renderCategoricalLabel = (
+    categories: string[],
+    count: number
+  ) =>
+  {
+    const named = resolveCategories(categories);
+    const inner = named.length === 0
+      ? 'any ingredient'
+      : `any ${named.map(type => type.name)
+        .join(' + ')}`;
+
+    return (
+      <>
+        <Box component={'span'} sx={{ fontFamily: 'monospace' }}>
+          {`<${inner}>`}
+        </Box>
+        {` (${count})`}
+      </>
+    );
+  };
+
+  /**
+   * The icon a categorical slot borrows: the first type it accepts, so the row is still recognisable at a glance.
+   * @param {string[]} categories The keys the slot accepts.
+   * @returns {number} An icon index, or zero when nothing resolves.
+   */
+  const categoricalIconIndex = (categories: string[]): number =>
+  {
+    const named = resolveCategories(categories);
+
+    return named.length > 0
+      ? named[ 0 ].iconIndex
+      : 0;
+  };
+
+  /**
+   * Counts the database entries that would currently satisfy a set of ingredient types.
+   *
+   * The runtime requires an entry to carry *every* type a slot asks for, which is easy to read as "any of these"
+   * when the chips sit side by side. Asking for egg, eyeball and blood together looks reasonable and matches
+   * nothing, because no single ingredient is all three. A count says so immediately, where prose does not.
+   * @param {string[]} categories The keys the slot asks for.
+   * @returns {number} How many items, weapons and armors carry all of them.
+   */
+  const countMatchingEntries = (categories: string[]): number =>
+  {
+    const carriesAll = (entry: { ingredientTypeKeys: string[] }) =>
+      categories.every(key => entry.ingredientTypeKeys.includes(key));
+
+    return items.filter(carriesAll).length
+      + weapons.filter(carriesAll).length
+      + armors.filter(carriesAll).length;
+  };
+
+  /**
+   * Reports what a slot would accept, so an impossible combination announces itself while it is being authored.
+   * @param {string[]} categories The keys the slot asks for.
+   * @returns {string} Guidance naming the current match count.
+   */
+  // whether the vocabulary is in use at all yet, which decides how to read a count of zero.
+  const anythingIsTagged = useMemo(
+    () => items.some(row => row.ingredientTypeKeys.length > 0)
+      || weapons.some(row => row.ingredientTypeKeys.length > 0)
+      || armors.some(row => row.ingredientTypeKeys.length > 0),
+    [ items, weapons, armors ]
+  );
+
+  const describeCategoricalMatches = (categories: string[]): string =>
+  {
+    if (categories.length === 0)
+    {
+      return 'Pick the types this slot accepts.';
+    }
+
+    const matches = countMatchingEntries(categories);
+
+    if (matches === 0)
+    {
+      // "nothing matches" means two very different things, and saying the alarming one while a database is still
+      // being tagged would fire on every slot until the work is finished - which teaches the reader to ignore it
+      // before it ever means anything.
+      return anythingIsTagged
+        ? 'Nothing carries all of these, so this slot can never be filled. Try fewer, or a broader type.'
+        : 'Needs one thing carrying all of these. Nothing is tagged with ingredient types yet.';
+    }
+
+    return `Needs one thing carrying all of these. ${matches} currently qualify.`;
+  };
   const renderRecipeComponent = (
     craftingComponent: Crafting.CraftingComponent,
     index: number
@@ -486,35 +655,45 @@ const CraftingComponentList = (props: CraftingListProps) =>
 
     let ingredientData = null;
     let spriteIndex = 0;
-    let primaryLine = '';
+    let primaryLine: React.ReactNode = '';
 
-    switch (ingredient.type)
+    // a categorical slot has no row to name, so describing it by id would render as "0: ?" - which reads as a
+    // broken row rather than a deliberate one.
+    if (ingredient.categories !== undefined)
     {
-      case CraftingComponentType.Item:
-        ingredientData = itemsById.get(ingredient.id) ?? null;
-        spriteIndex = readDatabaseIconIndex(ingredientData);
-        primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
-        break;
-      case CraftingComponentType.Weapon:
-        ingredientData = weaponsById.get(ingredient.id) ?? null;
-        spriteIndex = readDatabaseIconIndex(ingredientData);
-        primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
-        break;
-      case CraftingComponentType.Armor:
-        ingredientData = armorsById.get(ingredient.id) ?? null;
-        spriteIndex = readDatabaseIconIndex(ingredientData);
-        primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
-        break;
-      case CraftingComponentType.Gold:
-        spriteIndex = EDITOR_REWARD_PARAM_ICON_GOLD;
-        primaryLine = `Gold (${ingredient.count})`;
-        break;
-      case CraftingComponentType.Sdp:
-        spriteIndex = EDITOR_REWARD_PARAM_ICON_SDP;
-        primaryLine = `SDP (${ingredient.count})`;
-        break;
-      default:
-        throw new Error(`unknown ingredient type detected: ${ingredient.type}`);
+      spriteIndex = categoricalIconIndex(ingredient.categories);
+      primaryLine = renderCategoricalLabel(ingredient.categories, ingredient.count);
+    }
+    else
+    {
+      switch (ingredient.type)
+      {
+        case CraftingComponentType.Item:
+          ingredientData = itemsById.get(ingredient.id) ?? null;
+          spriteIndex = readDatabaseIconIndex(ingredientData);
+          primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
+          break;
+        case CraftingComponentType.Weapon:
+          ingredientData = weaponsById.get(ingredient.id) ?? null;
+          spriteIndex = readDatabaseIconIndex(ingredientData);
+          primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
+          break;
+        case CraftingComponentType.Armor:
+          ingredientData = armorsById.get(ingredient.id) ?? null;
+          spriteIndex = readDatabaseIconIndex(ingredientData);
+          primaryLine = `${ingredient.id}: ${ingredientData?.name ?? '?'} (${ingredient.count})`;
+          break;
+        case CraftingComponentType.Gold:
+          spriteIndex = EDITOR_REWARD_PARAM_ICON_GOLD;
+          primaryLine = `Gold (${ingredient.count})`;
+          break;
+        case CraftingComponentType.Sdp:
+          spriteIndex = EDITOR_REWARD_PARAM_ICON_SDP;
+          primaryLine = `SDP (${ingredient.count})`;
+          break;
+        default:
+          throw new Error(`unknown ingredient type detected: ${ingredient.type}`);
+      }
     }
 
     const dbDescription = readDatabaseDescription(ingredientData);
@@ -766,49 +945,37 @@ const CraftingComponentList = (props: CraftingListProps) =>
     }
   };
 
-  const renderSelectedComponentChip = () =>
-  {
-    if (!selectedComponent)
-    {
-      return <></>;
-    }
-    if (selectedComponentIndex < 0)
-    {
-      return <></>;
-    }
-
-    return <Stack spacing={4}>
-      {'Current Component:'}
-      {buildComponentChip(selectedComponent, 'outlined')}
-    </Stack>;
-  };
-
-  const renderPendingComponentChip = () =>
+  /**
+   * Shows what the slot will become, and what it was only when that differs.
+   *
+   * Showing both unconditionally meant the dialog opened displaying the same chip twice, which reads as a diff
+   * view of the form rather than as an edit of a recipe. The row behind the dialog already states the current
+   * value, so repeating it earns its space only once the two have parted ways.
+   */
+  const renderPendingComponentPreview = () =>
   {
     if (!pendingComponent)
     {
       return <></>;
     }
 
+    const changed = selectedComponent !== null
+      && JSON.stringify(selectedComponent) !== JSON.stringify(pendingComponent);
+
     return (
-      <Stack
-        spacing={4}
-        sx={{
-          border: '1px solid',
-          borderRadius: '10px',
-          padding: '10px',
-          borderColor: 'grey'
-        }}
-      >
-        {'Pending Component Update:'}
-        {buildComponentChip(pendingComponent)}
-        <TextField
-          type={'number'}
-          label={'Count'}
-          value={pendingComponent.count}
-          fullWidth
-          onChange={(event) => handlePendingComponentCountOnChangeEvent(parseInt(event.target.value) ?? 1)}
-        />
+      <Stack spacing={1}>
+        <Typography variant={'caption'} color={'text.secondary'}>
+          {changed
+            ? 'Result'
+            : 'Unchanged'}
+        </Typography>
+        <Stack direction={'row'} spacing={1} alignItems={'center'} flexWrap={'wrap'} useFlexGap>
+          {changed && (<>
+            {buildComponentChip(selectedComponent, 'outlined')}
+            <Typography variant={'body2'} color={'text.secondary'}>{'>'}</Typography>
+          </>)}
+          {buildComponentChip(pendingComponent)}
+        </Stack>
       </Stack>
     );
   };
@@ -822,6 +989,25 @@ const CraftingComponentList = (props: CraftingListProps) =>
     let color: ('primary' | 'secondary' | 'success' | 'error' | 'info' | 'warning') = 'primary';
     let chipLabel = '';
     let chipIconIndex = 0;
+
+    // a categorical slot names no row, so the switch below has nothing to look up. describe what it accepts instead,
+    // borrowing the icon of the first type so the chip is still recognisable at a glance.
+    if (craftingComponent.categories !== undefined)
+    {
+      return (
+        <Chip
+          icon={
+            <IconSetSprite
+              iconIndex={categoricalIconIndex(craftingComponent.categories)}
+              sizePx={22}
+            />
+          }
+          label={renderCategoricalLabel(craftingComponent.categories, craftingComponent.count)}
+          variant={variant}
+          color={'primary'}
+        />
+      );
+    }
 
     switch (craftingComponent.type)
     {
@@ -873,6 +1059,26 @@ const CraftingComponentList = (props: CraftingListProps) =>
       />
     );
   };
+
+  /**
+   * Names the add button after the one thing it adds, rather than after the list it adds to.
+   */
+  const renderAddComponentLabel = (): string =>
+  {
+    switch (props.type)
+    {
+      case CraftingListType.Ingredients:
+        return 'Add ingredient';
+      case CraftingListType.Tools:
+        return 'Add tool';
+      case CraftingListType.Outputs:
+        return 'Add output';
+      case CraftingListType.Cost:
+        return 'Add to price';
+      default:
+        throw new Error(`unknown crafting list type detected: ${props.type}`);
+    }
+  };
   //endregion render
 
   if (itemsLoading || weaponsLoading || armorsLoading)
@@ -884,16 +1090,20 @@ const CraftingComponentList = (props: CraftingListProps) =>
     <BoardSectionCard title={props.type} density={'compact'}>
       <div onContextMenu={handleComponentListContextMenu} style={{ cursor: 'context-menu' }}>
         <List dense>
-          {currentComponents.length > 0
-            ? currentComponents.map((ingredient, index) => renderRecipeComponent(ingredient, index))
-            : (
-              <Button
-                fullWidth
-                startIcon={<Add/>}
-                onClick={() => handleAddNewComponent(null)}
-                variant={'contained'}/>
-            )}
+          {currentComponents.map((ingredient, index) => renderRecipeComponent(ingredient, index))}
         </List>
+        {/* always offered, not only while the list is empty. the right-click menu can place a slot precisely, but
+            nothing on screen says it exists, so a recipe that already had one slot appeared to be finished. */}
+        <Button
+          fullWidth
+          startIcon={<Add/>}
+          onClick={() => handleAddNewComponent(currentComponents.length)}
+          variant={currentComponents.length > 0
+            ? 'outlined'
+            : 'contained'}
+        >
+          {renderAddComponentLabel()}
+        </Button>
       </div>
     </BoardSectionCard>
     <Menu
@@ -959,56 +1169,74 @@ const CraftingComponentList = (props: CraftingListProps) =>
         </Typography>
       </DialogTitle>
       <DialogContent>
-        <Grid container spacing={4}>
-          <Grid size={7}>
-            <Stack>
-              <ToggleButtonGroup
-                exclusive
-                color={'primary'}
-                value={selectedComponentType}
-                defaultValue={CraftingComponentType.Item}
-                onChange={handleRecipeComponentTypeOnChangeEvent}
-                fullWidth
-                sx={{ flexWrap: 'wrap', gap: 0.5 }}
-              >
-                <ToggleButton
-                  selected={selectedComponentType === CraftingComponentType.Item}
-                  value={CraftingComponentType.Item}>
-                  <BusinessCenter sx={{ color: brown[ 500 ] }}/>
+        <Stack spacing={2} sx={{ pt: 1 }}>
+          <Stack>
+            <Typography variant={'caption'} color={'text.secondary'} sx={{ mb: 0.5 }}>
+              Slot kind
+            </Typography>
+            <ToggleButtonGroup
+              exclusive
+              size={'small'}
+              color={'primary'}
+              value={pendingSlotIsCategorical
+                ? CATEGORICAL_SLOT_KIND
+                : selectedComponentType}
+              onChange={handleSlotKindOnChangeEvent}
+              sx={{ flexWrap: 'wrap', gap: 0.5 }}
+            >
+              <ToggleButton value={CraftingComponentType.Item}>
+                <BusinessCenter sx={{ color: brown[ 500 ], mr: 0.5 }} fontSize={'small'}/>
+                Item
+              </ToggleButton>
+              <ToggleButton value={CraftingComponentType.Weapon}>
+                <LocalDining color={'error'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                Weapon
+              </ToggleButton>
+              <ToggleButton value={CraftingComponentType.Armor}>
+                <Shield color={'info'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                Armor
+              </ToggleButton>
+              <ToggleButton value={CraftingComponentType.Gold}>
+                <AttachMoney color={'warning'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                Gold
+              </ToggleButton>
+              <ToggleButton value={CraftingComponentType.Sdp}>
+                <AutoAwesome color={'secondary'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                SDP
+              </ToggleButton>
+              {props.type === CraftingListType.Ingredients && (
+                <ToggleButton value={CATEGORICAL_SLOT_KIND}>
+                  <Category color={'success'} sx={{ mr: 0.5 }} fontSize={'small'}/>
+                  Any type
                 </ToggleButton>
-                <ToggleButton
-                  selected={selectedComponentType === CraftingComponentType.Weapon}
-                  value={CraftingComponentType.Weapon}>
-                  <LocalDining color={'error'}/>
-                </ToggleButton>
-                <ToggleButton
-                  selected={selectedComponentType === CraftingComponentType.Armor}
-                  value={CraftingComponentType.Armor}>
-                  <Shield color={'info'}/>
-                </ToggleButton>
-                <ToggleButton
-                  selected={selectedComponentType === CraftingComponentType.Gold}
-                  value={CraftingComponentType.Gold}>
-                  <AttachMoney color={'warning'}/>
-                </ToggleButton>
-                <ToggleButton
-                  selected={selectedComponentType === CraftingComponentType.Sdp}
-                  value={CraftingComponentType.Sdp}>
-                  <AutoAwesome color={'secondary'}/>
-                </ToggleButton>
-              </ToggleButtonGroup>
+              )}
+            </ToggleButtonGroup>
+          </Stack>
 
-              {renderRelevantRecipeComponentDropdown()}
-            </Stack>
-          </Grid>
-          <Grid size={5}>
-            <Stack spacing={2}>
-              {renderSelectedComponentChip()}
+          {pendingSlotIsCategorical
+            ? (
+              <IngredientTypeChips
+                options={ingredientTypes}
+                value={pendingComponent?.categories ?? []}
+                onChange={handlePendingComponentCategoriesOnChangeEvent}
+                label={'Accepts'}
+                placeholder={'Any ingredient'}
+                helperText={describeCategoricalMatches(pendingComponent?.categories ?? [])}
+              />
+            )
+            : renderRelevantRecipeComponentDropdown()}
 
-              {renderPendingComponentChip()}
-            </Stack>
-          </Grid>
-        </Grid>
+          <TextField
+            type={'number'}
+            size={'small'}
+            label={'Count'}
+            value={pendingComponent?.count ?? 1}
+            sx={{ maxWidth: 160 }}
+            onChange={(event) => handlePendingComponentCountOnChangeEvent(parseInt(event.target.value) ?? 1)}
+          />
+
+          {renderPendingComponentPreview()}
+        </Stack>
       </DialogContent>
       <DialogActions>
         <Button

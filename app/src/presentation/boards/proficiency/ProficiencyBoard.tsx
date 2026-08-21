@@ -21,6 +21,8 @@ import {
   Snackbar,
   Stack,
   Switch,
+  Tab,
+  Tabs,
   TextField,
   Tooltip,
   Typography,
@@ -46,6 +48,8 @@ import { RPG_SkillDomainModel } from '@core/domain/entities/RPG_SkillDomainModel
 import { RPG_ActorDomainModel } from '@core/domain/entities/RPG_ActorDomainModel.ts';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
 import { useProficiency } from '@presentation/context/resources/proficiency.context.tsx';
+import { KnowledgeTab } from './KnowledgeTab.tsx';
+import { KnowledgeExchangesTab } from './KnowledgeExchangesTab.tsx';
 import {
   VirtualizedSidebarList,
   virtualizedSidebarColumnWidth,
@@ -57,6 +61,9 @@ import type { VirtualizedSidebarRow } from '@presentation/components/board/Virtu
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import { IconSetSprite } from '@presentation/components/icons/IconSetSprite.tsx';
 import Conditional = Proficiency.Conditional;
+import Configuration = Proficiency.Configuration;
+import KnowledgeExchange = Proficiency.KnowledgeExchange;
+import KnowledgeTag = Proficiency.KnowledgeTag;
 import Requirement = Proficiency.Requirement;
 
 const proficiencyBoardListColumnWidth = virtualizedSidebarColumnWidth(
@@ -69,6 +76,12 @@ const ProficiencyBoard = () =>
   const {
     conditionals,
     setConditionals,
+    knowledgeTags,
+    setKnowledgeTags,
+    skillTypeMapping,
+    setSkillTypeMapping,
+    knowledgeExchanges,
+    setKnowledgeExchanges,
     save,
     reload,
     loading: proficiencyLoading,
@@ -96,6 +109,7 @@ const ProficiencyBoard = () =>
   const [ skillIdRewardEarned, setSkillIdRewardEarned ] = useState<number[]>([]);
 
   const [ canSave, setCanSave ] = useState<boolean>(false);
+  const [ tabIndex, setTabIndex ] = useState<number>(0);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
   const [ snackMessage, setSnackMessage ] = useState<string>('');
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
@@ -105,6 +119,36 @@ const ProficiencyBoard = () =>
   const applyConditionals = (updatedConditionals: Conditional[]) =>
   {
     setConditionals(updatedConditionals);
+    setCanSave(true);
+  };
+
+  /**
+   * Replaces the authored kinds of knowledge.
+   * @param {KnowledgeTag[]} updated The full list of kinds, in display order.
+   */
+  const applyKnowledgeTags = (updated: KnowledgeTag[]) =>
+  {
+    setKnowledgeTags(updated);
+    setCanSave(true);
+  };
+
+  /**
+   * Replaces which kinds of knowledge each skill type produces.
+   * @param {Proficiency.SkillTypeMapping} updated The full mapping, keyed by skill type id.
+   */
+  const applySkillTypeMapping = (updated: Proficiency.SkillTypeMapping) =>
+  {
+    setSkillTypeMapping(updated);
+    setCanSave(true);
+  };
+
+  /**
+   * Replaces the authored knowledge exchanges.
+   * @param {KnowledgeExchange[]} updated The full list of exchanges, in display order.
+   */
+  const applyKnowledgeExchanges = (updated: KnowledgeExchange[]) =>
+  {
+    setKnowledgeExchanges(updated);
     setCanSave(true);
   };
 
@@ -368,7 +412,15 @@ const ProficiencyBoard = () =>
     onSave: async () =>
     {
       setCanSave(false);
-      await save(conditionals);
+
+      // every block of the configuration has to be named here. anything left out is not merely
+      // unsaved - it is written away, because this replaces the file rather than patching it.
+      await save({
+        conditionals,
+        knowledgeTags,
+        skillTypeMapping,
+        knowledgeExchanges,
+      } as Configuration);
       handleSnack('Proficiency data saved successfully!', MuiSnackbarSeverity.Success);
     },
     canSave: canSave && !proficiencyLoading,
@@ -413,7 +465,36 @@ const ProficiencyBoard = () =>
           />
         }
       >
-        {selectedConditional === null
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 1 }}>
+          <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)}>
+            <Tab label={'Conditionals'} id={'proficiency-tab-0'} aria-controls={'proficiency-tabpanel-0'}/>
+            <Tab label={'Knowledge'} id={'proficiency-tab-1'} aria-controls={'proficiency-tabpanel-1'}/>
+            <Tab label={'Exchanges'} id={'proficiency-tab-2'} aria-controls={'proficiency-tabpanel-2'}/>
+          </Tabs>
+        </Box>
+
+        {tabIndex === 1 && (
+          <Box sx={{ overflow: 'auto', p: 2 }}>
+            <KnowledgeTab
+              tags={knowledgeTags}
+              onTagsChange={applyKnowledgeTags}
+              mapping={skillTypeMapping}
+              onMappingChange={applySkillTypeMapping}
+            />
+          </Box>
+        )}
+
+        {tabIndex === 2 && (
+          <Box sx={{ overflow: 'auto', p: 2 }}>
+            <KnowledgeExchangesTab
+              exchanges={knowledgeExchanges}
+              onChange={applyKnowledgeExchanges}
+              tags={knowledgeTags}
+            />
+          </Box>
+        )}
+
+        {tabIndex === 0 && (selectedConditional === null
           ? <Typography sx={{ p: 2 }}>
               Please select a conditional on the left.
             </Typography>
@@ -739,7 +820,7 @@ const ProficiencyBoard = () =>
                 </BoardSectionCard>
 
               </Stack>
-            </Box>}
+            </Box>)}
       </EditorBoardSplitLayout>
     </Box>
 

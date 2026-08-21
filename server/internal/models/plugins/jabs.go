@@ -11,9 +11,21 @@ import "encoding/json"
 // it is erased from the file. Blocks with no meaning to the server are held as json.RawMessage, which
 // round-trips them untouched without anyone having to hand-maintain a mirror of their shape.
 type JabsConfiguration struct {
-	Teams  []JabsTeam      `json:"teams"`
-	Juice  json.RawMessage `json:"juice,omitempty"`
-	Bosses []BossEncounter `json:"bosses"`
+	Teams     []JabsTeam      `json:"teams"`
+	Juice     json.RawMessage `json:"juice,omitempty"`
+	Bosses    []BossEncounter `json:"bosses"`
+	FoodTypes []JabsFoodType  `json:"foodTypes,omitempty"`
+}
+
+// JabsFoodType is one food group a consumable can belong to, such as "protein" or "sweet".
+//
+// Eating binds the battler to that group's state chain, and only one group can be active at a time. The keys here are
+// the same ones the chain states are tagged with, so this list is the vocabulary an author picks from rather than a
+// second definition of what the groups are.
+type JabsFoodType struct {
+	Key       string `json:"key"`
+	Name      string `json:"name"`
+	IconIndex int    `json:"iconIndex"`
 }
 
 // JabsTeam is one combat team definition (id, key, display name, opposed team ids).
