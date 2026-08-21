@@ -1278,6 +1278,173 @@ const SdpBoard = () =>
     canReload: !loading,
   });
 
+  /**
+   * The panel list and its search box. With no panels loaded at all the list is replaced by the button
+   * that creates the first one, since an empty virtualized list gives an author nothing to act on.
+   */
+  const renderPanelSidebar = () =>
+  {
+    return (
+      <>
+        {/* Search bar for SDPs */}
+        <TextField
+          variant={'outlined'}
+          label={'Search SDP'}
+          value={searchTerm}
+          onChange={(event) => handleSearchChange(event.target.value)}
+          size={'small'}
+          fullWidth
+          sx={{
+            marginTop: 1,
+            marginBottom: 1
+          }}
+          slotProps={{
+            input: {
+              endAdornment: searchTerm
+                ? (
+                  <Tooltip title={'Clear search'}>
+                    <Box
+                      component={'span'}
+                      sx={{ cursor: 'pointer' }}
+                      onClick={() => setSearchTerm('')}
+                    >
+                      ✕
+                    </Box>
+                  </Tooltip>
+                )
+                : null
+            }
+          }}
+        />
+        <VirtualizedSidebarListRegion onContextMenu={handlePanelListContextMenu}>
+          {sdps.length > 0
+            ? (
+              <VirtualizedSidebarList
+                ref={listRef}
+                itemCount={sdps.length}
+                itemSize={VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE}
+                fillContainer
+                listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
+                labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
+                selectedIndex={selectedPanelIndex}
+                getRow={getSdpSidebarRow}
+                onSelectIndex={(index) =>
+                {
+                  handleSdpListItemOnClickEvent(index);
+                }}
+                listWrapperRef={listWrapperRef}
+              />
+            )
+            : (
+              <Button
+                fullWidth
+                startIcon={<Add/>}
+                onClick={() => handleAddNewPanel(null)}
+                variant={'contained'}
+              />
+            )}
+        </VirtualizedSidebarListRegion>
+      </>
+    );
+  };
+
+  /**
+   * The panel's own identity: what it is called, what it looks like, and the two blocks of flavor text
+   * the game renders in a fixed-width font. Both text fields warn when a line outruns that width,
+   * because the game clips rather than wraps.
+   */
+  const renderPanelIdentitySection = () =>
+  {
+    if (selectedPanel === null)
+    {
+      return <></>;
+    }
+
+    const { identity } = selectedPanel;
+
+    return (
+      <BoardSectionCard title={'Identity'}>
+        <Grid container spacing={1.5} alignItems={'center'}>
+          <Grid size={3}>
+            <KeyTextField
+              value={selectedPanel.key}
+              onChange={handlePanelKeyChange}
+            />
+          </Grid>
+          <Grid size={6}>
+            <TextField
+              variant={'outlined'}
+              label={'Name'}
+              value={identity.name}
+              onChange={event => handlePanelNameChange(event.target.value)}
+              size={'small'}
+              fullWidth
+            />
+          </Grid>
+          <Grid size={3}>
+            <FormControlLabel
+              control={
+                <Switch
+                  size={'small'}
+                  checked={identity.unlockedByDefault}
+                  onChange={event => handlePanelUnlockedByDefaultChange(event.target.checked)}
+                />
+              }
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  {identity.unlockedByDefault
+                    ? <LockOpen color={'success'} fontSize={'small'}/>
+                    : <Lock color={'error'} fontSize={'small'}/>}
+                  <Typography variant={'body2'}>
+                    {identity.unlockedByDefault
+                      ? 'Unlocked'
+                      : 'Locked'}
+                  </Typography>
+                </Box>
+              }
+            />
+          </Grid>
+          <Grid size={5}>
+            <IconIndexField
+              value={identity.iconIndex}
+              onChange={handlePanelIconIndexChange}
+            />
+          </Grid>
+          <Grid size={12}>
+            <TextField
+              fullWidth
+              size={'small'}
+              variant={'outlined'}
+              label={'Top Flavor Text'}
+              value={identity.topFlavorText}
+              onChange={event => handlePanelTopFlavorTextChange(event.target.value)}
+              error={topFlavorTooLong}
+              helperText={topFlavorTooLong
+                ? `Longest line ~${topFlavorMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
+                : undefined}
+            />
+          </Grid>
+          <Grid size={12}>
+            <TextField
+              fullWidth
+              size={'small'}
+              variant={'outlined'}
+              label={'Description'}
+              multiline
+              rows={4}
+              value={identity.description}
+              onChange={event => handlePanelDescriptionChange(event.target.value)}
+              error={descriptionTooLong}
+              helperText={descriptionTooLong
+                ? `Longest line ~${descriptionMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
+                : undefined}
+            />
+          </Grid>
+        </Grid>
+      </BoardSectionCard>
+    );
+  };
+
   if (loading)
   {
     return (
@@ -1344,68 +1511,7 @@ const SdpBoard = () =>
       {boardTab === 'panels' && (
       <EditorBoardSplitLayout
         sidebarColumnWidth={sdpBoardListColumnWidth}
-        sidebar={
-          <>
-        {/* Search bar for SDPs */}
-        <TextField
-          variant={'outlined'}
-          label={'Search SDP'}
-          value={searchTerm}
-          onChange={(event) => handleSearchChange(event.target.value)}
-          size={'small'}
-          fullWidth
-          sx={{
-            marginTop: 1,
-            marginBottom: 1
-          }}
-          slotProps={{
-            input: {
-              endAdornment: searchTerm
-                ? (
-                  <Tooltip title={'Clear search'}>
-                    <Box
-                      component={'span'}
-                      sx={{ cursor: 'pointer' }}
-                      onClick={() => setSearchTerm('')}
-                    >
-                      ✕
-                    </Box>
-                  </Tooltip>
-                )
-                : null
-            }
-          }}
-        />
-        <VirtualizedSidebarListRegion onContextMenu={handlePanelListContextMenu}>
-          {sdps.length > 0
-            ? (
-              <VirtualizedSidebarList
-                ref={listRef}
-                itemCount={sdps.length}
-                itemSize={VIRTUALIZED_SIDEBAR_DEFAULT_ITEM_SIZE}
-                fillContainer
-                listHeight={VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT}
-                labelMinCh={VIRTUALIZED_SIDEBAR_DEFAULT_LABEL_MIN_CH}
-                selectedIndex={selectedPanelIndex}
-                getRow={getSdpSidebarRow}
-                onSelectIndex={(index) =>
-                {
-                  handleSdpListItemOnClickEvent(index);
-                }}
-                listWrapperRef={listWrapperRef}
-              />
-            )
-            : (
-              <Button
-                fullWidth
-                startIcon={<Add/>}
-                onClick={() => handleAddNewPanel(null)}
-                variant={'contained'}
-              />
-            )}
-        </VirtualizedSidebarListRegion>
-          </>
-        }
+        sidebar={renderPanelSidebar()}
       >
           {(
             selectedPanel === null
@@ -1419,83 +1525,7 @@ const SdpBoard = () =>
                 {/* Left column: Identity + Parameters */}
                 <Grid size={6}>
                   <Stack spacing={2}>
-                    <BoardSectionCard title={'Identity'}>
-                      <Grid container spacing={1.5} alignItems={'center'}>
-                        <Grid size={3}>
-                          <KeyTextField
-                            value={selectedPanel.key}
-                            onChange={handlePanelKeyChange}
-                          />
-                        </Grid>
-                        <Grid size={6}>
-                          <TextField
-                            variant={'outlined'}
-                            label={'Name'}
-                            value={selectedPanel.identity.name}
-                            onChange={event => handlePanelNameChange(event.target.value)}
-                            size={'small'}
-                            fullWidth
-                          />
-                        </Grid>
-                        <Grid size={3}>
-                          <FormControlLabel
-                            control={
-                              <Switch
-                                size={'small'}
-                                checked={selectedPanel.identity.unlockedByDefault}
-                                onChange={event => handlePanelUnlockedByDefaultChange(event.target.checked)}
-                              />
-                            }
-                            label={
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                {selectedPanel.identity.unlockedByDefault
-                                  ? <LockOpen color={'success'} fontSize={'small'}/>
-                                  : <Lock color={'error'} fontSize={'small'}/>}
-                                <Typography variant={'body2'}>
-                                  {selectedPanel.identity.unlockedByDefault ? 'Unlocked' : 'Locked'}
-                                </Typography>
-                              </Box>
-                            }
-                          />
-                        </Grid>
-                        <Grid size={5}>
-                          <IconIndexField
-                            value={selectedPanel.identity.iconIndex}
-                            onChange={handlePanelIconIndexChange}
-                          />
-                        </Grid>
-                        <Grid size={12}>
-                          <TextField
-                            fullWidth
-                            size={'small'}
-                            variant={'outlined'}
-                            label={'Top Flavor Text'}
-                            value={selectedPanel.identity.topFlavorText}
-                            onChange={event => handlePanelTopFlavorTextChange(event.target.value)}
-                            error={topFlavorTooLong}
-                            helperText={topFlavorTooLong
-                              ? `Longest line ~${topFlavorMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
-                              : undefined}
-                          />
-                        </Grid>
-                        <Grid size={12}>
-                          <TextField
-                            fullWidth
-                            size={'small'}
-                            variant={'outlined'}
-                            label={'Description'}
-                            multiline
-                            rows={4}
-                            value={selectedPanel.identity.description}
-                            onChange={event => handlePanelDescriptionChange(event.target.value)}
-                            error={descriptionTooLong}
-                            helperText={descriptionTooLong
-                              ? `Longest line ~${descriptionMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
-                              : undefined}
-                          />
-                        </Grid>
-                      </Grid>
-                    </BoardSectionCard>
+                    {renderPanelIdentitySection()}
 
                     <BoardSectionCard title={'Parameters'}>
                       <Stack spacing={1}>
