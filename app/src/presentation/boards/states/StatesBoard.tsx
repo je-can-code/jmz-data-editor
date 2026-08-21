@@ -1669,6 +1669,179 @@ const StatesBoard = () =>
   };
 
   /**
+   * A JABS timing field that takes either a plain frame count or a formula.
+   *
+   * Both spellings are stored as the same bracket interior, so which editor appears follows what is
+   * already written there: an author who typed a formula keeps the formula box, and one who typed a
+   * number keeps the stepper. The four fields differ only in what they write and what they are called.
+   *
+   * @param fieldKey The JABS timing field being edited.
+   * @param label The caption shown on the field.
+   */
+  const renderTimingFrameField = (
+    fieldKey:
+      | 'timingBaseCastTime'
+      | 'timingCastTimeFlat'
+      | 'timingBaseFastCooldown'
+      | 'timingFastCooldownFlat',
+    label: string
+  ) =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const raw = selectedState.jabs[ fieldKey ];
+
+    if (isPlainNumberBracketInterior(raw) === false)
+    {
+      return (
+        <TextField
+          variant={'outlined'}
+          label={`${label} (formula)`}
+          value={raw}
+          onChange={(e) =>
+          {
+            handleStateJabsBracketInteriorChangeEvent(fieldKey, e);
+          }}
+          size={'small'}
+          fullWidth
+          multiline
+          minRows={2}
+          helperText={'Plain number only to use frame input.'}
+        />
+      );
+    }
+
+    return (
+      <TextField
+        type={'number'}
+        variant={'outlined'}
+        label={label}
+        value={raw.trim() === ''
+          ? ''
+          : raw}
+        onChange={(e) =>
+        {
+          handleStateJabsTimingNumberInteriorChange(fieldKey, e);
+        }}
+        size={'small'}
+        fullWidth
+        slotProps={{
+          htmlInput: {
+            step: 1,
+          },
+        }}
+      />
+    );
+  };
+
+  /**
+   * A JABS timing percentage, shown as a slider when it holds a plain integer and as a formula box
+   * otherwise. Clearing the formula is what hands control back to the slider, which is why the
+   * formula variant says so and the slider carries a reset back to 1x.
+   *
+   * @param fieldKey The JABS percent field being edited.
+   * @param sliderCaption What the slider calls the thing it scales.
+   * @param formulaLabel The caption on the formula box.
+   * @param sliderAriaLabel The accessible name for the slider.
+   */
+  const renderTimingPercentField = (
+    fieldKey: 'timingCastTimePercent' | 'timingFastCooldownRate',
+    sliderCaption: string,
+    formulaLabel: string,
+    sliderAriaLabel: string
+  ) =>
+  {
+    if (selectedState === null)
+    {
+      return <></>;
+    }
+
+    const raw = selectedState.jabs[ fieldKey ];
+
+    if (isPlainIntegerBracketInterior(raw) === false)
+    {
+      return (
+        <TextField
+          variant={'outlined'}
+          label={formulaLabel}
+          value={raw}
+          onChange={(e) =>
+          {
+            handleStateJabsBracketInteriorChangeEvent(fieldKey, e);
+          }}
+          size={'small'}
+          fullWidth
+          helperText={'Clear to use the slider, or keep a custom formula.'}
+        />
+      );
+    }
+
+    return (
+      <Stack spacing={0.75} sx={{ width: '100%' }}>
+        <Stack
+          direction={'row'}
+          alignItems={'center'}
+          spacing={1}
+          sx={{ minHeight: 32 }}
+        >
+          <Typography
+            variant={'body2'}
+            color={'text.secondary'}
+            component={'div'}
+            sx={{
+              flex: 1,
+              minWidth: 0
+            }}
+          >
+            {timingPercentSliderCaption(sliderCaption, raw)}
+          </Typography>
+          <Tooltip title={'Set to 100% speed (1×)'}>
+            <Button
+              variant={'text'}
+              size={'small'}
+              onClick={() =>
+              {
+                resetTimingPercentModifier(fieldKey);
+              }}
+              sx={{
+                flexShrink: 0,
+                minWidth: 'auto',
+                px: 1,
+              }}
+            >
+              1×
+            </Button>
+          </Tooltip>
+        </Stack>
+        <Slider
+          size={'small'}
+          value={timingPercentSliderValueFromInterior(raw)}
+          onChange={(
+            e,
+            v
+          ) =>
+          {
+            handleStateJabsTimingPercentSliderChange(fieldKey, e, v);
+          }}
+          min={TIMING_PERCENT_SLIDER_MIN}
+          max={TIMING_PERCENT_SLIDER_MAX}
+          step={1}
+          marks={TIMING_PERCENT_SLIDER_MARKS}
+          valueLabelDisplay={'auto'}
+          valueLabelFormat={(x) => timingPercentMultiplierLabel(x)}
+          getAriaValueText={(x) =>
+            `${timingPercentMultiplierLabel(x)}, modifier ${x} percent`}
+          aria-label={sliderAriaLabel}
+          sx={{ width: '100%' }}
+        />
+      </Stack>
+    );
+  };
+
+  /**
    * Clears a percent timing field so the slider path can take over.
    *
    * @param key Cast-time or fast-cooldown percent field.
@@ -3615,170 +3788,18 @@ const StatesBoard = () =>
                                 </Typography>
                                 <Grid container spacing={2}>
                                   <Grid size={6}>
-                                    {isPlainNumberBracketInterior(selectedState.jabs.timingBaseCastTime) === true
-                                      ? (
-                                        <TextField
-                                          type={'number'}
-                                          variant={'outlined'}
-                                          label={'Base'}
-                                          value={selectedState.jabs.timingBaseCastTime.trim() === ''
-                                            ? ''
-                                            : selectedState.jabs.timingBaseCastTime}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsTimingNumberInteriorChange('timingBaseCastTime', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          slotProps={{
-                                            htmlInput: {
-                                              step: 1,
-                                            },
-                                          }}
-                                        />
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Base (formula)'}
-                                          value={selectedState.jabs.timingBaseCastTime}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent('timingBaseCastTime', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          multiline
-                                          minRows={2}
-                                          helperText={'Plain number only to use frame input.'}
-                                        />
-                                      )}
+                                    {renderTimingFrameField('timingBaseCastTime', 'Base')}
                                   </Grid>
                                   <Grid size={6}>
-                                    {isPlainNumberBracketInterior(selectedState.jabs.timingCastTimeFlat) === true
-                                      ? (
-                                        <TextField
-                                          type={'number'}
-                                          variant={'outlined'}
-                                          label={'Flat'}
-                                          value={selectedState.jabs.timingCastTimeFlat.trim() === ''
-                                            ? ''
-                                            : selectedState.jabs.timingCastTimeFlat}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsTimingNumberInteriorChange('timingCastTimeFlat', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          slotProps={{
-                                            htmlInput: {
-                                              step: 1,
-                                            },
-                                          }}
-                                        />
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Flat (formula)'}
-                                          value={selectedState.jabs.timingCastTimeFlat}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent('timingCastTimeFlat', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          multiline
-                                          minRows={2}
-                                          helperText={'Plain number only to use frame input.'}
-                                        />
-                                      )}
+                                    {renderTimingFrameField('timingCastTimeFlat', 'Flat')}
                                   </Grid>
                                   <Grid size={12}>
-                                    {isPlainIntegerBracketInterior(selectedState.jabs.timingCastTimePercent) === true
-                                      ? (
-                                        <Stack spacing={0.75} sx={{ width: '100%' }}>
-                                          <Stack
-                                            direction={'row'}
-                                            alignItems={'center'}
-                                            spacing={1}
-                                            sx={{ minHeight: 32 }}
-                                          >
-                                            <Typography
-                                              variant={'body2'}
-                                              color={'text.secondary'}
-                                              component={'div'}
-                                              sx={{
-                                                flex: 1,
-                                                minWidth: 0
-                                              }}
-                                            >
-                                              {timingPercentSliderCaption(
-                                                'Cast scale',
-                                                selectedState.jabs.timingCastTimePercent
-                                              )}
-                                            </Typography>
-                                            <Tooltip title={'Set to 100% speed (1×)'}>
-                                              <Button
-                                                variant={'text'}
-                                                size={'small'}
-                                                onClick={() =>
-                                                {
-                                                  resetTimingPercentModifier('timingCastTimePercent');
-                                                }}
-                                                sx={{
-                                                  flexShrink: 0,
-                                                  minWidth: 'auto',
-                                                  px: 1,
-                                                }}
-                                              >
-                                                1×
-                                              </Button>
-                                            </Tooltip>
-                                          </Stack>
-                                          <Slider
-                                            size={'small'}
-                                            value={timingPercentSliderValueFromInterior(
-                                              selectedState.jabs.timingCastTimePercent
-                                            )}
-                                            onChange={(
-                                              e,
-                                              v
-                                            ) =>
-                                            {
-                                              handleStateJabsTimingPercentSliderChange(
-                                                'timingCastTimePercent',
-                                                e,
-                                                v
-                                              );
-                                            }}
-                                            min={TIMING_PERCENT_SLIDER_MIN}
-                                            max={TIMING_PERCENT_SLIDER_MAX}
-                                            step={1}
-                                            marks={TIMING_PERCENT_SLIDER_MARKS}
-                                            valueLabelDisplay={'auto'}
-                                            valueLabelFormat={(x) => timingPercentMultiplierLabel(x)}
-                                            getAriaValueText={(x) =>
-                                              `${timingPercentMultiplierLabel(x)}, modifier ${x} percent`}
-                                            aria-label={'Cast time percent modifier'}
-                                            sx={{ width: '100%' }}
-                                          />
-                                        </Stack>
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Percent (formula)'}
-                                          value={selectedState.jabs.timingCastTimePercent}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent('timingCastTimePercent', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          helperText={'Clear to use the slider, or keep a custom formula.'}
-                                        />
-                                      )}
+                                    {renderTimingPercentField(
+                                      'timingCastTimePercent',
+                                      'Cast scale',
+                                      'Percent (formula)',
+                                      'Cast time percent modifier'
+                                    )}
                                   </Grid>
                                 </Grid>
                                 <Typography variant={'overline'} sx={{ lineHeight: 1.6 }}>
@@ -3786,182 +3807,18 @@ const StatesBoard = () =>
                                 </Typography>
                                 <Grid container spacing={2}>
                                   <Grid size={6}>
-                                    {isPlainNumberBracketInterior(selectedState.jabs.timingBaseFastCooldown) === true
-                                      ? (
-                                        <TextField
-                                          type={'number'}
-                                          variant={'outlined'}
-                                          label={'Base'}
-                                          value={selectedState.jabs.timingBaseFastCooldown.trim() === ''
-                                            ? ''
-                                            : selectedState.jabs.timingBaseFastCooldown}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsTimingNumberInteriorChange(
-                                              'timingBaseFastCooldown',
-                                              e
-                                            );
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          slotProps={{
-                                            htmlInput: {
-                                              step: 1,
-                                            },
-                                          }}
-                                        />
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Base (formula)'}
-                                          value={selectedState.jabs.timingBaseFastCooldown}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent(
-                                              'timingBaseFastCooldown',
-                                              e
-                                            );
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          multiline
-                                          minRows={2}
-                                          helperText={'Plain number only to use frame input.'}
-                                        />
-                                      )}
+                                    {renderTimingFrameField('timingBaseFastCooldown', 'Base')}
                                   </Grid>
                                   <Grid size={6}>
-                                    {isPlainNumberBracketInterior(selectedState.jabs.timingFastCooldownFlat) === true
-                                      ? (
-                                        <TextField
-                                          type={'number'}
-                                          variant={'outlined'}
-                                          label={'Flat'}
-                                          value={selectedState.jabs.timingFastCooldownFlat.trim() === ''
-                                            ? ''
-                                            : selectedState.jabs.timingFastCooldownFlat}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsTimingNumberInteriorChange(
-                                              'timingFastCooldownFlat',
-                                              e
-                                            );
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          slotProps={{
-                                            htmlInput: {
-                                              step: 1,
-                                            },
-                                          }}
-                                        />
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Flat (formula)'}
-                                          value={selectedState.jabs.timingFastCooldownFlat}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent(
-                                              'timingFastCooldownFlat',
-                                              e
-                                            );
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          multiline
-                                          minRows={2}
-                                          helperText={'Plain number only to use frame input.'}
-                                        />
-                                      )}
+                                    {renderTimingFrameField('timingFastCooldownFlat', 'Flat')}
                                   </Grid>
                                   <Grid size={12}>
-                                    {isPlainIntegerBracketInterior(selectedState.jabs.timingFastCooldownRate) === true
-                                      ? (
-                                        <Stack spacing={0.75} sx={{ width: '100%' }}>
-                                          <Stack
-                                            direction={'row'}
-                                            alignItems={'center'}
-                                            spacing={1}
-                                            sx={{ minHeight: 32 }}
-                                          >
-                                            <Typography
-                                              variant={'body2'}
-                                              color={'text.secondary'}
-                                              component={'div'}
-                                              sx={{
-                                                flex: 1,
-                                                minWidth: 0
-                                              }}
-                                            >
-                                              {timingPercentSliderCaption(
-                                                'Cooldown scale',
-                                                selectedState.jabs.timingFastCooldownRate
-                                              )}
-                                            </Typography>
-                                            <Tooltip title={'Set to 100% speed (1×)'}>
-                                              <Button
-                                                variant={'text'}
-                                                size={'small'}
-                                                onClick={() =>
-                                                {
-                                                  resetTimingPercentModifier('timingFastCooldownRate');
-                                                }}
-                                                sx={{
-                                                  flexShrink: 0,
-                                                  minWidth: 'auto',
-                                                  px: 1,
-                                                }}
-                                              >
-                                                1×
-                                              </Button>
-                                            </Tooltip>
-                                          </Stack>
-                                          <Slider
-                                            size={'small'}
-                                            value={timingPercentSliderValueFromInterior(
-                                              selectedState.jabs.timingFastCooldownRate
-                                            )}
-                                            onChange={(
-                                              e,
-                                              v
-                                            ) =>
-                                            {
-                                              handleStateJabsTimingPercentSliderChange(
-                                                'timingFastCooldownRate',
-                                                e,
-                                                v
-                                              );
-                                            }}
-                                            min={TIMING_PERCENT_SLIDER_MIN}
-                                            max={TIMING_PERCENT_SLIDER_MAX}
-                                            step={1}
-                                            marks={TIMING_PERCENT_SLIDER_MARKS}
-                                            valueLabelDisplay={'auto'}
-                                            valueLabelFormat={(x) => timingPercentMultiplierLabel(x)}
-                                            getAriaValueText={(x) =>
-                                              `${timingPercentMultiplierLabel(x)}, modifier ${x} percent`}
-                                            aria-label={'Fast cooldown percent modifier'}
-                                            sx={{ width: '100%' }}
-                                          />
-                                        </Stack>
-                                      )
-                                      : (
-                                        <TextField
-                                          variant={'outlined'}
-                                          label={'Rate (formula)'}
-                                          value={selectedState.jabs.timingFastCooldownRate}
-                                          onChange={(e) =>
-                                          {
-                                            handleStateJabsBracketInteriorChangeEvent('timingFastCooldownRate', e);
-                                          }}
-                                          size={'small'}
-                                          fullWidth
-                                          helperText={'Clear to use the slider, or keep a custom formula.'}
-                                        />
-                                      )}
+                                    {renderTimingPercentField(
+                                      'timingFastCooldownRate',
+                                      'Cooldown scale',
+                                      'Rate (formula)',
+                                      'Fast cooldown percent modifier'
+                                    )}
                                   </Grid>
                                 </Grid>
                               </Stack>
