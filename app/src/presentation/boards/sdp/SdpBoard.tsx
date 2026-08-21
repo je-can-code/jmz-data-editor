@@ -1279,6 +1279,233 @@ const SdpBoard = () =>
   });
 
   /**
+   * One parameter row on the panel: what it boosts, whether it is the panel's core stat, whether the
+   * boost is flat or a percentage, and how much of it each rank buys.
+   *
+   * @param parameter The parameter being drawn.
+   * @param idx Its position in the panel, which the reorder and delete actions address it by.
+   */
+  const renderPanelParameterRow = (
+    parameter: Sdp.SdpParameter,
+    idx: number
+  ) =>
+  {
+    if (selectedPanel === null)
+    {
+      return <></>;
+    }
+
+    const isPositive = parameter.perRank > 0;
+    const pct = parameter.isFlat
+      ? ''
+      : '%';
+    const sign = isPositive
+      ? '+'
+      : '';
+    const perRankText = `${sign}${parameter.perRank}${pct} / rank`;
+    const totalText = `${sign}${parameter.perRank * selectedPanel.progression.maxRank}${pct} total`;
+
+    return (
+      <Accordion
+        key={idx}
+        disableGutters
+        sx={{
+          border: '1px solid',
+          borderColor: parameter.isCore
+            ? 'warning.dark'
+            : 'divider',
+          '&:before': { display: 'none' },
+        }}
+      >
+        <AccordionSummary expandIcon={<ExpandMore/>}>
+          <Stack
+            direction={'row'}
+            alignItems={'center'}
+            justifyContent={'space-between'}
+            sx={{ flex: 1, mr: 1 }}
+          >
+            <Stack direction={'row'} alignItems={'center'} spacing={1}>
+              {fromParameterKeyToIconElement(parameter.parameterKey, parameter.isCore)}
+              <Stack>
+                <Stack direction={'row'} alignItems={'center'} spacing={0.5}>
+                  <Typography variant={'body2'}>
+                    {fromParameterKeyToName(parameter.parameterKey)}
+                  </Typography>
+                  {parameter.isCore && (
+                    <PlayCircleFilled sx={{ fontSize: 14, color: 'warning.main' }}/>
+                  )}
+                </Stack>
+                <Typography variant={'caption'} color={'text.secondary'}>
+                  {perRankText} — {totalText}
+                </Typography>
+              </Stack>
+            </Stack>
+            <Stack direction={'row'} spacing={0.5}>
+              <IconButton
+                size={'small'}
+                disabled={idx === 0}
+                onClick={e =>
+                {
+                  e.stopPropagation();
+                  handleMoveParameter(idx, idx - 1);
+                }}
+              >
+                <ArrowUpward fontSize={'small'}/>
+              </IconButton>
+              <IconButton
+                size={'small'}
+                disabled={idx === selectedPanel.panelParameters.length - 1}
+                onClick={e =>
+                {
+                  e.stopPropagation();
+                  handleMoveParameter(idx, idx + 1);
+                }}
+              >
+                <ArrowDownward fontSize={'small'}/>
+              </IconButton>
+              <IconButton
+                size={'small'}
+                onClick={e =>
+                {
+                  e.stopPropagation();
+                  handleClonePanelParameter(idx + 1, parameter);
+                }}
+              >
+                <ContentCopy fontSize={'small'}/>
+              </IconButton>
+              <IconButton
+                size={'small'}
+                onClick={e =>
+                {
+                  e.stopPropagation();
+                  handleDeletePanelParameter(idx);
+                }}
+              >
+                <DeleteOutline fontSize={'small'}/>
+              </IconButton>
+            </Stack>
+          </Stack>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Stack spacing={1.5}>
+            <FormControl size={'small'} fullWidth>
+              <InputLabel id={`sdp-param-type-label-${idx}`}>Parameter Type</InputLabel>
+              <Select
+                labelId={`sdp-param-type-label-${idx}`}
+                label={'Parameter Type'}
+                value={parameter.parameterKey}
+                onChange={event => updatePanelParameters(
+                  { ...parameter, parameterKey: event.target.value.toString() },
+                  idx
+                )}
+              >
+                {mapParametersToSelectMenuItems()}
+              </Select>
+            </FormControl>
+            <Stack direction={'row'} spacing={1.5} flexWrap={'wrap'} useFlexGap>
+              <ToggleButtonGroup
+                exclusive
+                size={'small'}
+                value={parameter.isCore
+                  ? 'core'
+                  : 'standard'}
+                onChange={(_e, val: string | null) =>
+                {
+                  if (!val) return;
+                  updatePanelParameters({ ...parameter, isCore: val === 'core' }, idx);
+                }}
+              >
+                <ToggleButton
+                  value={'standard'}
+                  sx={(theme) => ({
+                    '&.Mui-selected': {
+                      backgroundColor: alpha(theme.palette.info.main, 0.16),
+                      borderColor: theme.palette.info.main,
+                      color: theme.palette.info.main,
+                      '&:hover': { backgroundColor: alpha(theme.palette.info.main, 0.24) },
+                    },
+                  })}
+                >
+                  <KeyboardArrowRight fontSize={'small'} sx={{ mr: 0.75 }}/>
+                  Standard
+                </ToggleButton>
+                <ToggleButton
+                  value={'core'}
+                  sx={(theme) => ({
+                    '&.Mui-selected': {
+                      backgroundColor: alpha(theme.palette.warning.main, 0.16),
+                      borderColor: theme.palette.warning.main,
+                      color: theme.palette.warning.main,
+                      '&:hover': { backgroundColor: alpha(theme.palette.warning.main, 0.24) },
+                    },
+                  })}
+                >
+                  <PlayCircleFilled fontSize={'small'} sx={{ mr: 0.75 }}/>
+                  Core
+                </ToggleButton>
+              </ToggleButtonGroup>
+              <ToggleButtonGroup
+                exclusive
+                size={'small'}
+                value={parameter.isFlat
+                  ? 'flat'
+                  : 'percent'}
+                onChange={(_e, val: string | null) =>
+                {
+                  if (!val) return;
+                  updatePanelParameters({ ...parameter, isFlat: val === 'flat' }, idx);
+                }}
+              >
+                <ToggleButton
+                  value={'flat'}
+                  sx={(theme) => ({
+                    '&.Mui-selected': {
+                      backgroundColor: alpha(theme.palette.success.main, 0.16),
+                      borderColor: theme.palette.success.main,
+                      color: theme.palette.success.main,
+                      '&:hover': { backgroundColor: alpha(theme.palette.success.main, 0.24) },
+                    },
+                  })}
+                >
+                  <TrendingFlat fontSize={'small'} sx={{ mr: 0.75 }}/>
+                  Flat
+                </ToggleButton>
+                <ToggleButton
+                  value={'percent'}
+                  sx={(theme) => ({
+                    '&.Mui-selected': {
+                      backgroundColor: alpha(theme.palette.secondary.main, 0.16),
+                      borderColor: theme.palette.secondary.main,
+                      color: theme.palette.secondary.main,
+                      '&:hover': { backgroundColor: alpha(theme.palette.secondary.main, 0.24) },
+                    },
+                  })}
+                >
+                  <Percent fontSize={'small'} sx={{ mr: 0.75 }}/>
+                  % Growth
+                </ToggleButton>
+              </ToggleButtonGroup>
+            </Stack>
+            <TextField
+              type={'number'}
+              label={'Per Rank'}
+              variant={'outlined'}
+              size={'small'}
+              value={parameter.perRank}
+              onChange={event => updatePanelParameters(
+                { ...parameter, perRank: parseFloat(event.target.value) || 0.01 },
+                idx
+              )}
+              slotProps={{ htmlInput: { step: '0.1' } }}
+              sx={{ width: '120px' }}
+            />
+          </Stack>
+        </AccordionDetails>
+      </Accordion>
+    );
+  };
+
+  /**
    * The panel list and its search box. With no panels loaded at all the list is replaced by the button
    * that creates the first one, since an empty virtualized list gives an author nothing to act on.
    */
@@ -1537,206 +1764,7 @@ const SdpBoard = () =>
                         >
                           Add Parameter
                         </Button>
-                        {selectedPanel.panelParameters.map((parameter, idx) =>
-                        {
-                          const isPositive = parameter.perRank > 0;
-                          const pct = parameter.isFlat ? '' : '%';
-                          const sign = isPositive ? '+' : '';
-                          const perRankText = `${sign}${parameter.perRank}${pct} / rank`;
-                          const totalText = `${sign}${parameter.perRank * selectedPanel.progression.maxRank}${pct} total`;
-                          return (
-                            <Accordion
-                              key={idx}
-                              disableGutters
-                              sx={{
-                                border: '1px solid',
-                                borderColor: parameter.isCore ? 'warning.dark' : 'divider',
-                                '&:before': { display: 'none' },
-                              }}
-                            >
-                              <AccordionSummary expandIcon={<ExpandMore/>}>
-                                <Stack
-                                  direction={'row'}
-                                  alignItems={'center'}
-                                  justifyContent={'space-between'}
-                                  sx={{ flex: 1, mr: 1 }}
-                                >
-                                  <Stack direction={'row'} alignItems={'center'} spacing={1}>
-                                    {fromParameterKeyToIconElement(parameter.parameterKey, parameter.isCore)}
-                                    <Stack>
-                                      <Stack direction={'row'} alignItems={'center'} spacing={0.5}>
-                                        <Typography variant={'body2'}>
-                                          {fromParameterKeyToName(parameter.parameterKey)}
-                                        </Typography>
-                                        {parameter.isCore && (
-                                          <PlayCircleFilled sx={{ fontSize: 14, color: 'warning.main' }}/>
-                                        )}
-                                      </Stack>
-                                      <Typography variant={'caption'} color={'text.secondary'}>
-                                        {perRankText} — {totalText}
-                                      </Typography>
-                                    </Stack>
-                                  </Stack>
-                                  <Stack direction={'row'} spacing={0.5}>
-                                    <IconButton
-                                      size={'small'}
-                                      disabled={idx === 0}
-                                      onClick={e =>
-                                      {
-                                        e.stopPropagation();
-                                        handleMoveParameter(idx, idx - 1);
-                                      }}
-                                    >
-                                      <ArrowUpward fontSize={'small'}/>
-                                    </IconButton>
-                                    <IconButton
-                                      size={'small'}
-                                      disabled={idx === selectedPanel.panelParameters.length - 1}
-                                      onClick={e =>
-                                      {
-                                        e.stopPropagation();
-                                        handleMoveParameter(idx, idx + 1);
-                                      }}
-                                    >
-                                      <ArrowDownward fontSize={'small'}/>
-                                    </IconButton>
-                                    <IconButton
-                                      size={'small'}
-                                      onClick={e =>
-                                      {
-                                        e.stopPropagation();
-                                        handleClonePanelParameter(idx + 1, parameter);
-                                      }}
-                                    >
-                                      <ContentCopy fontSize={'small'}/>
-                                    </IconButton>
-                                    <IconButton
-                                      size={'small'}
-                                      onClick={e =>
-                                      {
-                                        e.stopPropagation();
-                                        handleDeletePanelParameter(idx);
-                                      }}
-                                    >
-                                      <DeleteOutline fontSize={'small'}/>
-                                    </IconButton>
-                                  </Stack>
-                                </Stack>
-                              </AccordionSummary>
-                              <AccordionDetails>
-                                <Stack spacing={1.5}>
-                                  <FormControl size={'small'} fullWidth>
-                                    <InputLabel id={`sdp-param-type-label-${idx}`}>Parameter Type</InputLabel>
-                                    <Select
-                                      labelId={`sdp-param-type-label-${idx}`}
-                                      label={'Parameter Type'}
-                                      value={parameter.parameterKey}
-                                      onChange={event => updatePanelParameters(
-                                        { ...parameter, parameterKey: event.target.value.toString() },
-                                        idx
-                                      )}
-                                    >
-                                      {mapParametersToSelectMenuItems()}
-                                    </Select>
-                                  </FormControl>
-                                  <Stack direction={'row'} spacing={1.5} flexWrap={'wrap'} useFlexGap>
-                                    <ToggleButtonGroup
-                                      exclusive
-                                      size={'small'}
-                                      value={parameter.isCore ? 'core' : 'standard'}
-                                      onChange={(_e, val: string | null) =>
-                                      {
-                                        if (!val) return;
-                                        updatePanelParameters({ ...parameter, isCore: val === 'core' }, idx);
-                                      }}
-                                    >
-                                      <ToggleButton
-                                        value={'standard'}
-                                        sx={(theme) => ({
-                                          '&.Mui-selected': {
-                                            backgroundColor: alpha(theme.palette.info.main, 0.16),
-                                            borderColor: theme.palette.info.main,
-                                            color: theme.palette.info.main,
-                                            '&:hover': { backgroundColor: alpha(theme.palette.info.main, 0.24) },
-                                          },
-                                        })}
-                                      >
-                                        <KeyboardArrowRight fontSize={'small'} sx={{ mr: 0.75 }}/>
-                                        Standard
-                                      </ToggleButton>
-                                      <ToggleButton
-                                        value={'core'}
-                                        sx={(theme) => ({
-                                          '&.Mui-selected': {
-                                            backgroundColor: alpha(theme.palette.warning.main, 0.16),
-                                            borderColor: theme.palette.warning.main,
-                                            color: theme.palette.warning.main,
-                                            '&:hover': { backgroundColor: alpha(theme.palette.warning.main, 0.24) },
-                                          },
-                                        })}
-                                      >
-                                        <PlayCircleFilled fontSize={'small'} sx={{ mr: 0.75 }}/>
-                                        Core
-                                      </ToggleButton>
-                                    </ToggleButtonGroup>
-                                    <ToggleButtonGroup
-                                      exclusive
-                                      size={'small'}
-                                      value={parameter.isFlat ? 'flat' : 'percent'}
-                                      onChange={(_e, val: string | null) =>
-                                      {
-                                        if (!val) return;
-                                        updatePanelParameters({ ...parameter, isFlat: val === 'flat' }, idx);
-                                      }}
-                                    >
-                                      <ToggleButton
-                                        value={'flat'}
-                                        sx={(theme) => ({
-                                          '&.Mui-selected': {
-                                            backgroundColor: alpha(theme.palette.success.main, 0.16),
-                                            borderColor: theme.palette.success.main,
-                                            color: theme.palette.success.main,
-                                            '&:hover': { backgroundColor: alpha(theme.palette.success.main, 0.24) },
-                                          },
-                                        })}
-                                      >
-                                        <TrendingFlat fontSize={'small'} sx={{ mr: 0.75 }}/>
-                                        Flat
-                                      </ToggleButton>
-                                      <ToggleButton
-                                        value={'percent'}
-                                        sx={(theme) => ({
-                                          '&.Mui-selected': {
-                                            backgroundColor: alpha(theme.palette.secondary.main, 0.16),
-                                            borderColor: theme.palette.secondary.main,
-                                            color: theme.palette.secondary.main,
-                                            '&:hover': { backgroundColor: alpha(theme.palette.secondary.main, 0.24) },
-                                          },
-                                        })}
-                                      >
-                                        <Percent fontSize={'small'} sx={{ mr: 0.75 }}/>
-                                        % Growth
-                                      </ToggleButton>
-                                    </ToggleButtonGroup>
-                                  </Stack>
-                                  <TextField
-                                    type={'number'}
-                                    label={'Per Rank'}
-                                    variant={'outlined'}
-                                    size={'small'}
-                                    value={parameter.perRank}
-                                    onChange={event => updatePanelParameters(
-                                      { ...parameter, perRank: parseFloat(event.target.value) || 0.01 },
-                                      idx
-                                    )}
-                                    slotProps={{ htmlInput: { step: '0.1' } }}
-                                    sx={{ width: '120px' }}
-                                  />
-                                </Stack>
-                              </AccordionDetails>
-                            </Accordion>
-                          );
-                        })}
+                        {selectedPanel.panelParameters.map(renderPanelParameterRow)}
                       </Stack>
                     </BoardSectionCard>
                   </Stack>
