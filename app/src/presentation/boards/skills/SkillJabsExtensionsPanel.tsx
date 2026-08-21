@@ -1076,6 +1076,72 @@ function SkillJabsExtensionsPanel(
     && jabs.delayRaw.trim() !== ''
     && delayParsed === null;
 
+  // the radius half of the delay tag, as the field wants it. An unparsed tag and a tag carrying no
+  // radius both read as empty, since neither gives the field anything to show.
+  let delayRadiusText = '';
+  if (delayParsed !== null && delayParsed.radius !== null)
+  {
+    delayRadiusText = String(delayParsed.radius);
+  }
+
+  // the preview warning only means something once there is a cast to preview, so the helper explains
+  // which prerequisite is missing before it explains what the field does.
+  let castPreviewWarnHelperText =
+    `Must be ≤ cast time (${jabs.castTime} frames). Example: 30 = show telegraph for the last half-second of a 60-frame cast.`;
+  if (jabs.castTime === null)
+  {
+    castPreviewWarnHelperText = 'Set cast time to configure preview timing.';
+  }
+  else if (jabs.noCastPreview)
+  {
+    castPreviewWarnHelperText = 'Unavailable while preview is disabled.';
+  }
+
+  // the iframe window has prerequisites, and each field names the nearest one still unmet rather than
+  // sitting disabled without saying why. The end frame has one more of them than the start frame does.
+  let iframesStartHelperText: string | undefined = undefined;
+  if (jabs.moveType === null)
+  {
+    iframesStartHelperText = 'Pick a move type first.';
+  }
+  else if (jabs.invincibleDodge === true)
+  {
+    iframesStartHelperText = 'Turn off invincible dodge to edit.';
+  }
+
+  let iframesEndHelperText = iframesStartHelperText;
+  if (iframesEndHelperText === undefined && jabs.iframesStartFrame === null)
+  {
+    iframesEndHelperText = 'Set start frame first.';
+  }
+
+  // the profile field explains the state it is in: pointing at a row that no longer exists, deliberately
+  // left to the plugin, or naming a real profile -- in which case the only thing left to say is the
+  // charset a new key has to satisfy.
+  let juiceProfileHelperText =
+    `Charset is ${JUICE_PROFILE_KEY_PATTERN.source} — author additional profiles on the JABS config board.`;
+  if (selectedJuiceProfileOption.isOrphan)
+  {
+    juiceProfileHelperText =
+      'This skill references a profile that does not exist on the JABS config board; add the row or pick "None" to clear.';
+  }
+  else if (selectedJuiceProfileOption.value === null)
+  {
+    juiceProfileHelperText =
+      'Plugin will resolve a profile from the caster\'s equipped weapon / armor at runtime.';
+  }
+
+  // only two hitbox shapes read a degrees value, and they read it differently enough to say so.
+  let degreesHelperText = 'Only arc and circle read this field.';
+  if (jabs.hitboxShape === 'arc')
+  {
+    degreesHelperText = 'Wedge opening angle; also shapes the cast-preview sector.';
+  }
+  else if (jabs.hitboxShape === 'circle')
+  {
+    degreesHelperText = 'Circle hitbox is a full 360° ring in JABS — pick arc if you want a partial wedge.';
+  }
+
   return (
     <Stack spacing={1}>
       <Typography variant={'body2'} color={'text.secondary'}>
@@ -1474,13 +1540,7 @@ function SkillJabsExtensionsPanel(
                     ? ''
                     : String(jabs.castPreviewWarnAt)}
                   onChange={onCastPreviewWarnAtChange}
-                  helperText={
-                    jabs.castTime === null
-                      ? 'Set cast time to configure preview timing.'
-                      : jabs.noCastPreview
-                        ? 'Unavailable while preview is disabled.'
-                        : `Must be ≤ cast time (${jabs.castTime} frames). Example: 30 = show telegraph for the last half-second of a 60-frame cast.`
-                  }
+                  helperText={castPreviewWarnHelperText}
                   slotProps={{
                     htmlInput: {
                       inputMode: 'numeric',
@@ -1595,16 +1655,10 @@ function SkillJabsExtensionsPanel(
                           : String(delayParsed.frames)}
                         onChange={(e) =>
                         {
-                          const r =
-                            delayParsed === null
-                              ? ''
-                              : delayParsed.radius !== null
-                                ? String(delayParsed.radius)
-                                : '';
                           patchDelayFromFields(
                             e.target.value,
                             delayParsed?.touchable ?? true,
-                            r
+                            delayRadiusText
                           );
                         }}
                         helperText={'-1 = never auto-detonate (needs touch).'}
@@ -1624,16 +1678,10 @@ function SkillJabsExtensionsPanel(
                                 delayParsed === null
                                   ? ''
                                   : String(delayParsed.frames);
-                              const r =
-                                delayParsed === null
-                                  ? ''
-                                  : delayParsed.radius !== null
-                                    ? String(delayParsed.radius)
-                                    : '';
                               patchDelayFromFields(
                                 f,
                                 e.target.checked,
-                                r
+                                delayRadiusText
                               );
                             }}
                           />
@@ -1999,12 +2047,7 @@ function SkillJabsExtensionsPanel(
                     disabled:
                       jabs.hitboxShape !== 'arc'
                       && jabs.hitboxShape !== 'circle',
-                    helperText:
-                      jabs.hitboxShape === 'arc'
-                        ? 'Wedge opening angle; also shapes the cast-preview sector.'
-                        : jabs.hitboxShape === 'circle'
-                          ? 'Circle hitbox is a full 360° ring in JABS — pick arc if you want a partial wedge.'
-                          : 'Only arc and circle read this field.',
+                    helperText: degreesHelperText,
                   }
                 )}
               </Grid>
@@ -2406,19 +2449,16 @@ function SkillJabsExtensionsPanel(
                       <Typography variant={'body2'}>
                         {opt.label}
                       </Typography>
-                      {opt.value === null
-                        ? (
-                          <Typography variant={'caption'} color={'text.secondary'}>
-                            clears the skill's tag; plugin infers from gear at strike time.
-                          </Typography>
-                        )
-                        : opt.isOrphan
-                          ? (
-                            <Typography variant={'caption'} color={'warning.main'}>
-                              authored on this skill but not present in config.jabs.json -&gt; juice.profiles.
-                            </Typography>
-                          )
-                          : null}
+                      {opt.value === null && (
+                        <Typography variant={'caption'} color={'text.secondary'}>
+                          clears the skill's tag; plugin infers from gear at strike time.
+                        </Typography>
+                      )}
+                      {opt.value !== null && opt.isOrphan && (
+                        <Typography variant={'caption'} color={'warning.main'}>
+                          authored on this skill but not present in config.jabs.json -&gt; juice.profiles.
+                        </Typography>
+                      )}
                     </Stack>
                   </li>
                 );
@@ -2432,13 +2472,7 @@ function SkillJabsExtensionsPanel(
                   <TextField
                     {...params}
                     label={'Profile key'}
-                    helperText={
-                      selectedJuiceProfileOption.isOrphan
-                        ? 'This skill references a profile that does not exist on the JABS config board; add the row or pick "None" to clear.'
-                        : selectedJuiceProfileOption.value === null
-                          ? 'Plugin will resolve a profile from the caster\'s equipped weapon / armor at runtime.'
-                          : `Charset is ${JUICE_PROFILE_KEY_PATTERN.source} — author additional profiles on the JABS config board.`
-                    }
+                    helperText={juiceProfileHelperText}
                   />
                 )}
             />
@@ -3080,13 +3114,7 @@ function SkillJabsExtensionsPanel(
                     invincibleDodge: false
                   });
                 }}
-                helperText={
-                  jabs.moveType === null
-                    ? 'Pick a move type first.'
-                    : jabs.invincibleDodge === true
-                      ? 'Turn off invincible dodge to edit.'
-                      : undefined
-                }
+                helperText={iframesStartHelperText}
                 slotProps={{
                   htmlInput: {
                     inputMode: 'numeric',
@@ -3113,15 +3141,7 @@ function SkillJabsExtensionsPanel(
                 {
                   onNullableInt(e, 'iframesEndFrame');
                 }}
-                helperText={
-                  jabs.moveType === null
-                    ? 'Pick a move type first.'
-                    : jabs.invincibleDodge === true
-                      ? 'Turn off invincible dodge to edit.'
-                      : jabs.iframesStartFrame === null
-                        ? 'Set start frame first.'
-                        : undefined
-                }
+                helperText={iframesEndHelperText}
                 slotProps={{
                   htmlInput: {
                     inputMode: 'numeric',
