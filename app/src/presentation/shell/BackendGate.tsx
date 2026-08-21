@@ -106,7 +106,7 @@ const BackendGate = (props: BackendGateProps) =>
     {
       cancelled = true;
     };
-  }, []);
+  }, [ apiBase ]);
 
   if (state.type === "ready")
   {

@@ -1,5 +1,5 @@
 // FormulaVisualizer.tsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
   Box,
@@ -109,8 +109,11 @@ export default function FormulaVisualizer({
     }
   }, [ open, suggestedLevel ]);
 
-  const debouncedUpdateFormula = useCallback(
-    debounce((value: string) =>
+  // useMemo rather than useCallback: the debounced function is the value being kept, and building it
+  // has to happen once. Passing debounce(...) to useCallback re-ran it on every render and discarded
+  // the result, which only looked correct because the first one was the one retained.
+  const debouncedUpdateFormula = useMemo(
+    () => debounce((value: string) =>
     {
       setLocalFormula(value);
     }, 300),
