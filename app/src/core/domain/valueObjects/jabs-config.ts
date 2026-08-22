@@ -72,11 +72,52 @@ type JabsFoodTypeDefinition = {
   iconIndex: number;
 };
 
+/**
+ * Which game variable holds which combat statistic.
+ *
+ * Every value is a variableId, and every key is a metric J-ABS-Metrics records into it. The plugin
+ * throws at boot when any key is missing, so this type is exhaustive on purpose - a metric added to
+ * the plugin without being added here is a block the editor writes back incomplete.
+ *
+ * Two metrics pointed at one variable is the failure this editor exists to prevent: the game reports
+ * no error, both counters simply climb into the same slot and every number downstream of them is
+ * quietly wrong.
+ */
+type JabsMetricsConfig = {
+  enemiesDefeated: number;
+  destructiblesDestroyed: number;
+  alliesDowned: number;
+  numberOfDeaths: number;
+  totalDamageDealt: number;
+  highestDamageDealt: number;
+  numberOfCritsDealt: number;
+  biggestCritDealt: number;
+  attacksEvadedByEnemies: number;
+  totalDamageTaken: number;
+  highestDamageTaken: number;
+  numberOfCritsTaken: number;
+  biggestCritTaken: number;
+  numberOfParries: number;
+  numberOfPreciseParries: number;
+  numberOfGlancingBlows: number;
+  numberOfGuardedHits: number;
+  attacksEvadedByParty: number;
+  damagePreventedByGuarding: number;
+  mainhandSkillUsage: number;
+  offhandSkillUsage: number;
+  assignedSkillUsage: number;
+  dodgeSkillUsage: number;
+  guardActivations: number;
+  toolUsage: number;
+  usableItemUsage: number;
+};
+
 type JabsConfigRoot = {
   teams: JabsTeamDefinition[];
   juice: JuiceConfig;
   bosses: BossEncounter[];
   foodTypes: JabsFoodTypeDefinition[];
+  metrics: JabsMetricsConfig;
 };
 
 /**
@@ -116,6 +157,42 @@ const JUICE_DEFAULTS: JuiceConfig = {
       swingMul: 1,
     },
   },
+};
+
+/**
+ * Hardcoded metric defaults — the reserved run of variables committed in
+ * `ca/chef-adventure/data/config.jabs.json` and documented in the J-ABS-Metrics help block.
+ *
+ * Declaration order is meaningful: it is the order the metrics are presented in, grouped the way the
+ * plugin groups them, so a reader of either file meets them in the same sequence.
+ */
+const METRICS_DEFAULTS: JabsMetricsConfig = {
+  enemiesDefeated: 61,
+  destructiblesDestroyed: 62,
+  alliesDowned: 63,
+  numberOfDeaths: 64,
+  totalDamageDealt: 65,
+  highestDamageDealt: 66,
+  numberOfCritsDealt: 67,
+  biggestCritDealt: 68,
+  attacksEvadedByEnemies: 69,
+  totalDamageTaken: 70,
+  highestDamageTaken: 71,
+  numberOfCritsTaken: 72,
+  biggestCritTaken: 73,
+  numberOfParries: 74,
+  numberOfPreciseParries: 75,
+  numberOfGlancingBlows: 76,
+  numberOfGuardedHits: 77,
+  attacksEvadedByParty: 78,
+  damagePreventedByGuarding: 79,
+  mainhandSkillUsage: 80,
+  offhandSkillUsage: 81,
+  assignedSkillUsage: 82,
+  dodgeSkillUsage: 83,
+  guardActivations: 84,
+  toolUsage: 85,
+  usableItemUsage: 86,
 };
 
 /**
@@ -255,6 +332,48 @@ function hydrateJuiceConfig(rawJuice: unknown): JuiceConfig
 }
 
 /**
+ * Normalizes the `metrics` block, filling any key the file does not author from
+ * {@link METRICS_DEFAULTS}.
+ *
+ * A partial block is filled rather than rejected because the plugin's metric list grows over time,
+ * and a file written before a metric existed is a normal thing to open- not a broken one. The
+ * filled-in value is the plugin's own documented default, which is at least a real variable in the
+ * reserved run rather than a zero that would silently point the metric at variable 0.
+ *
+ * @param rawMetrics Whatever sat under the `metrics` key, if anything.
+ */
+function hydrateMetricsConfig(rawMetrics: unknown): JabsMetricsConfig
+{
+  const record = isPlainObject(rawMetrics)
+    ? rawMetrics
+    : null;
+
+  // start from the defaults so every key is present, then let the file override the ones it names.
+  const hydrated = { ...METRICS_DEFAULTS };
+
+  if (record === null)
+  {
+    return hydrated;
+  }
+
+  (Object.keys(METRICS_DEFAULTS) as (keyof JabsMetricsConfig)[]).forEach(key =>
+  {
+    const value = record[ key ];
+
+    // a key present but holding something other than a number is a corrupt entry, and honoring it
+    // would put a string where the game will do arithmetic.
+    if (Number.isFinite(value) === false)
+    {
+      return;
+    }
+
+    hydrated[ key ] = value as number;
+  });
+
+  return hydrated;
+}
+
+/**
  * Normalizes a freshly loaded `config.jabs.json` payload into the editor's strongly-typed
  * {@link JabsConfigRoot} shape. Missing fields are filled from {@link JUICE_DEFAULTS}, teams are coerced
  * to an array, and unrelated extra keys on the raw root are dropped so the saved file stays clean.
@@ -286,11 +405,16 @@ function hydrateJabsConfig(rawRoot: unknown): JabsConfigRoot
     ? (rootRecord[ "foodTypes" ] as JabsFoodTypeDefinition[])
     : [];
 
+  const metrics = hydrateMetricsConfig(rootRecord === null
+    ? undefined
+    : rootRecord[ "metrics" ]);
+
   return {
     teams,
     juice,
     bosses,
     foodTypes,
+    metrics,
   };
 }
 
@@ -298,12 +422,15 @@ export {
   cloneJuiceDefaults,
   hydrateJabsConfig,
   hydrateJuiceConfig,
+  hydrateMetricsConfig,
   JUICE_DEFAULTS,
   JUICE_PROFILE_KEY_PATTERN,
+  METRICS_DEFAULTS,
 };
 export type {
   JabsConfigRoot,
   JabsFoodTypeDefinition,
+  JabsMetricsConfig,
   JabsTeamDefinition,
   JuiceCasterConfig,
   JuiceCastingConfig,
