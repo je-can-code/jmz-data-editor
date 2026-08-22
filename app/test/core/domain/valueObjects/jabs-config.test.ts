@@ -243,6 +243,7 @@ describe("hydrateJabsConfig", () =>
         "bosses",
         "foodTypes",
         "juice",
+        "metrics",
         "teams",
       ]);
   });

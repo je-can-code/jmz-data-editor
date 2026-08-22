@@ -6,19 +6,22 @@ import JabsTeamsTab from "@boards/jabs/JabsTeamsTab.tsx";
 import JabsJuiceTab from "@boards/jabs/JabsJuiceTab.tsx";
 import JabsFoodTypesTab from "@presentation/boards/jabs/JabsFoodTypesTab.tsx";
 import JabsBossesTab from "@boards/jabs/boss/JabsBossesTab.tsx";
+import JabsMetricsTab from "@boards/jabs/JabsMetricsTab.tsx";
 
-type JabsConfigTab = "teams" | "juice" | "bosses" | "foodTypes";
+type JabsConfigTab = "teams" | "juice" | "bosses" | "foodTypes" | "metrics";
 
 /**
- * Single editor board for everything JABS owns. The board wraps three horizontal sub-tabs:
+ * Single editor board for everything JABS owns. The board wraps one horizontal sub-tab per plugin in
+ * the family:
  *
  *   - **Teams** — the original per-team editor (id / key / name / opposes).
  *   - **Juice** — profiles table + target / caster / casting tuning accordions.
  *   - **Bosses** — boss encounters, one per fight, with their participants and routines.
+ *   - **Food Groups** — the vocabulary a consumable's chain states are tagged with.
+ *   - **Metrics** — which game variable holds which combat statistic.
  *
- * All three blocks live in the same `config.jabs.json`, one per plugin in the JABS family, so save and
- * reload are owned here rather than by individual tabs: one write persists the whole config root
- * regardless of which tab the user touched.
+ * Every block lives in the same `config.jabs.json`, so save and reload are owned here rather than by
+ * individual tabs: one write persists the whole config root regardless of which tab the user touched.
  */
 const JabsConfigBoard = () =>
 {
@@ -85,6 +88,7 @@ const JabsConfigBoard = () =>
           <Tab label={"Juice"} value={"juice"}/>
           <Tab label={"Bosses"} value={"bosses"}/>
           <Tab label={"Food Groups"} value={"foodTypes"}/>
+          <Tab label={"Metrics"} value={"metrics"}/>
         </Tabs>
       </Box>
 
@@ -93,6 +97,7 @@ const JabsConfigBoard = () =>
         {activeTab === "juice" && <JabsJuiceTab/>}
         {activeTab === "bosses" && <JabsBossesTab/>}
         {activeTab === "foodTypes" && <JabsFoodTypesTab/>}
+        {activeTab === "metrics" && <JabsMetricsTab/>}
       </Box>
     </Box>
   );
