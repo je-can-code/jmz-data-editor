@@ -1,3 +1,4 @@
+import type React from 'react';
 import { Box, Chip, FormControlLabel, Stack, Switch, TextField, Tooltip, Typography } from '@mui/material';
 import { RestartAlt } from '@mui/icons-material';
 import IconButton from '@mui/material/IconButton';
@@ -178,7 +179,16 @@ const DifficultyParametersSection = ({
                     : 'text.disabled',
                 },
               }}
-              slotProps={{ htmlInput: { step: 5 } }}
+              slotProps={{
+                htmlInput: {
+                  step: 5,
+                  // a focused number input swallows the wheel to change its own value, so
+                  // scrolling the page with the pointer over a field silently edits that field
+                  // and then stops scrolling entirely. dropping focus hands the wheel back to
+                  // the page and leaves the value alone; the arrow keys still step it.
+                  onWheel: (event: React.WheelEvent<HTMLInputElement>) => event.currentTarget.blur(),
+                },
+              }}
             />
           );
         })}
