@@ -106,14 +106,14 @@ describe('NaturalGrowthQuadrantsParser.tagFragment', () =>
       .toBe('mtpGrowthRate');
   });
 
-  it('uses quad suffixes for crit natural cdm / cdr (long 28, 29)', () =>
+  it('uses quad suffixes for crit natural cdm / ctr (long 28, 29)', () =>
   {
     const cdm = knownParamByLongId(28);
-    const cdr = knownParamByLongId(29);
+    const ctr = knownParamByLongId(29);
     expect(NaturalGrowthQuadrantsParser.tagFragment(cdm, NaturalGrowthQuadrant.BuffPlus))
       .toBe('cdmBuffPlus');
-    expect(NaturalGrowthQuadrantsParser.tagFragment(cdr, NaturalGrowthQuadrant.GrowthPlus))
-      .toBe('cdrGrowthPlus');
+    expect(NaturalGrowthQuadrantsParser.tagFragment(ctr, NaturalGrowthQuadrant.GrowthPlus))
+      .toBe('ctrGrowthPlus');
   });
 
   it('covers every known long param with at least one tag', () =>
