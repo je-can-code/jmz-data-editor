@@ -24,7 +24,7 @@ import type { DifficultyLayer } from '@core/domain/valueObjects/difficulty-confi
  * Column widths, shared by the header row and every parameter row so the two stay aligned.
  */
 const LABEL_WIDTH = 170;
-const FIELD_WIDTH = 208;
+const FIELD_WIDTH = 300;
 const DELTA_WIDTH = 48;
 
 type DifficultyParametersSectionProps = {
@@ -117,25 +117,32 @@ const DifficultyParametersSection = ({
   };
 
   /**
-   * Draws the column headings once per family, so a row never has to repeat which side it is in.
+   * Draws the legend once per family, naming what each track colour means.
+   *
+   * Needed because the tracks stack rather than sitting in labelled columns: the two are told apart
+   * by colour, and a colour has to be introduced somewhere.
    * @returns {JSX.Element}
    */
   const renderHeaderRow = () => (
-    <Stack direction={'row'} spacing={1} alignItems={'center'} sx={{ pb: 0.5 }}>
-      <Box sx={{ width: LABEL_WIDTH }}/>
+    <Stack direction={'row'} spacing={2} alignItems={'center'} sx={{ pb: 0.5, pl: `${String(LABEL_WIDTH)}px` }}>
       {BATTLER_SIDES.map(side => (
-        <Box key={side.key} sx={{ width: FIELD_WIDTH }}>
+        <Stack key={side.key} direction={'row'} spacing={0.75} alignItems={'center'}>
+          <Box sx={{ width: 16, height: 4, borderRadius: 2, bgcolor: `${side.tone}.main` }}/>
           <Typography variant={'caption'} color={'text.secondary'}>
             {side.label}
           </Typography>
-        </Box>
+        </Stack>
       ))}
-      <Box sx={{ width: DELTA_WIDTH }}/>
     </Stack>
   );
 
   /**
-   * Draws one parameter: its name, a field per side, and the change it represents.
+   * Draws one parameter: its name, a stacked track per side, and a way back to unchanged.
+   *
+   * The two sides stack rather than sitting side by side so their bars share an axis. Difficulty is
+   * authored as a relationship between them, and a relationship read by comparing two lengths in
+   * different places on the screen is a relationship read badly - stacked, one bar being twice the
+   * other is simply visible.
    * @param {ParameterFamily} family The family being drawn.
    * @param {number} parameterId The parameter's index within that family.
    * @param {string} name The parameter's display name.
@@ -146,7 +153,13 @@ const DifficultyParametersSection = ({
     const rowModified = isParameterRowModified(layer, family.key, parameterId);
 
     return (
-      <Stack key={`${family.key}-${String(parameterId)}`} direction={'row'} spacing={1} alignItems={'center'}>
+      <Stack
+        key={`${family.key}-${String(parameterId)}`}
+        direction={'row'}
+        spacing={1}
+        alignItems={'center'}
+        sx={{ py: 0.25 }}
+      >
         <Box sx={{ width: LABEL_WIDTH }}>
           <Typography
             variant={'body2'}
@@ -156,15 +169,17 @@ const DifficultyParametersSection = ({
           </Typography>
         </Box>
 
-        {BATTLER_SIDES.map(side => (
-          <Box key={side.key} sx={{ width: FIELD_WIDTH }}>
+        <Stack spacing={0.25} sx={{ width: FIELD_WIDTH }}>
+          {BATTLER_SIDES.map(side => (
             <DifficultyParameterControl
+              key={side.key}
               value={readParameter(layer[ side.key ], family.key, parameterId)}
               onChange={next => setParameter(side.key, family.key, parameterId, next)}
               ariaLabel={`${name} for ${side.label}`}
+              tone={side.tone}
             />
-          </Box>
-        ))}
+          ))}
+        </Stack>
 
         <Box sx={{ width: DELTA_WIDTH, textAlign: 'right' }}>
           {rowModified

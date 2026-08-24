@@ -50,16 +50,22 @@ const DIFFICULTY_PARAMETER_FAMILIES: ParameterFamily[] = [
 ];
 
 /**
- * Both sides of a fight, in the order they are shown side by side on a parameter row.
+ * Both sides of a fight, in the order their tracks stack on a parameter row.
+ *
+ * Each carries its own palette tone, because on a stacked row colour is what says which side a bar
+ * belongs to. Direction needs no colour there - the tracks share an axis, so which way a bar runs
+ * from the unchanged mark already says whether the value went up or down.
  */
-const BATTLER_SIDES: { key: BattlerSideKey; label: string }[] = [
+const BATTLER_SIDES: { key: BattlerSideKey; label: string; tone: string }[] = [
   {
     key: 'actorEffects',
     label: 'Actors',
+    tone: 'info',
   },
   {
     key: 'enemyEffects',
     label: 'Enemies',
+    tone: 'error',
   },
 ];
 
@@ -80,11 +86,13 @@ const isParameterModified = (value: number): boolean =>
 /**
  * The top of the magnitude track.
  *
- * Chosen from what the live configuration actually authors rather than from a round number: values
- * run from 1 to 500, and a ceiling above the highest real value would spend most of the track on
- * space nothing ever occupies.
+ * A thousand rather than the five hundred the live configuration currently tops out at, so a layer
+ * can reach for something more extreme than anything authored so far without the control becoming
+ * the reason it cannot. The cost is that unchanged sits a tenth of the way along rather than a
+ * fifth, which leaves reductions working in a narrower band than increases - the number beside each
+ * track is what makes that band precise.
  */
-const PARAMETER_SLIDER_MAX = 500;
+const PARAMETER_SLIDER_MAX = 1000;
 
 /**
  * How far a drag moves a parameter.
@@ -125,30 +133,6 @@ const parameterFillBounds = (value: number): { startPercent: number; widthPercen
     startPercent: Math.min(anchor, position),
     widthPercent: Math.abs(position - anchor),
   };
-};
-
-/**
- * Which direction a value was moved in, expressed as a palette tone.
- *
- * Deliberately not a judgement. Whether more of a parameter helps depends on which parameter it is
- * and which side of the fight carries it, so the colour says raised or lowered and leaves better or
- * worse to the person reading it.
- * @param {number} value The parameter percentage.
- * @returns {string} A theme palette key.
- */
-const parameterTone = (value: number): string =>
-{
-  if (value > UNCHANGED_PERCENT)
-  {
-    return 'warning';
-  }
-
-  if (value < UNCHANGED_PERCENT)
-  {
-    return 'info';
-  }
-
-  return 'primary';
 };
 
 /**
@@ -237,7 +221,6 @@ export {
   isParameterRowModified,
   parameterTrackPercent,
   parameterFillBounds,
-  parameterTone,
   readParameter,
   countModifiedInFamily,
   countModifiedParameters,

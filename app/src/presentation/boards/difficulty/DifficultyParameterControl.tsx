@@ -4,19 +4,19 @@ import {
   PARAMETER_SLIDER_MAX,
   PARAMETER_SLIDER_STEP,
   parameterFillBounds,
-  parameterTone,
 } from '@core/domain/valueObjects/difficulty-parameters.ts';
 
 /**
- * Width of the magnitude track, and of the numeric readout beside it.
+ * Width of the numeric readout beside a track. Wide enough for four digits and the stepper arrows
+ * without the value colliding with them.
  */
-const TRACK_WIDTH = 120;
-const READOUT_WIDTH = 68;
+const READOUT_WIDTH = 96;
 
 type DifficultyParameterControlProps = {
   value: number;
   onChange: (next: number) => void;
   ariaLabel: string;
+  tone: string;
 };
 
 /**
@@ -27,27 +27,26 @@ type DifficultyParameterControlProps = {
  * changes nothing therefore draws nothing at all, so a section of untouched parameters reads as a
  * row of quiet empty tracks and the handful that were touched are the only marks on the screen.
  *
- * Direction is carried by colour rather than by any notion of better or worse, because whether more
- * of a parameter helps depends on which one it is and which side of the fight it lands on - raising
- * a damage rate means taking more damage, and raising an enemy's stat is the opposite of raising
- * yours. Cool means reduced, warm means increased, and neither means good.
+ * Colour says which side of the fight the bar belongs to, not whether the change is good. The two
+ * sides stack on a shared axis, so which way a bar runs from the unchanged mark already carries
+ * direction, and spending colour on that too would leave nothing to tell the tracks apart. Whether
+ * more of a parameter helps is not a question this control can answer anyway - raising a damage rate
+ * means taking more damage, and raising an enemy's stat is the opposite of raising yours.
  *
- * The number stays because the bar cannot be honest at both ends: the authored values run from 1 to
- * 500, so the low end is a few pixels wide no matter how the scale is drawn. Drag for the shape,
- * type for the value.
+ * The number stays because the bar cannot be honest at both ends: authored values run down to 1
+ * while the track reaches 1000, so the low end is a few pixels wide no matter how it is drawn. Drag
+ * for the shape, type for the value.
  */
-const DifficultyParameterControl = ({ value, onChange, ariaLabel }: DifficultyParameterControlProps) =>
+const DifficultyParameterControl = ({ value, onChange, ariaLabel, tone }: DifficultyParameterControlProps) =>
 {
   const {
     startPercent,
     widthPercent,
   } = parameterFillBounds(value);
 
-  const tone = parameterTone(value);
-
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-      <Box sx={{ position: 'relative', width: TRACK_WIDTH, display: 'flex', alignItems: 'center' }}>
+      <Box sx={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}>
         {/* the resting rail, always drawn, so an untouched parameter still reads as a control. */}
         <Box
           sx={{

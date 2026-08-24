@@ -7,7 +7,6 @@ import {
   isParameterModified,
   isParameterRowModified,
   parameterFillBounds,
-  parameterTone,
   parameterTrackPercent,
   readParameter,
   totalParameterSlots,
@@ -95,6 +94,19 @@ describe('BATTLER_SIDES', () =>
     // Assert
     expect(keys)
       .toEqual([ 'actorEffects', 'enemyEffects' ]);
+  });
+
+  it('gives each side a tone of its own', () =>
+  {
+    // Arrange - the two tracks stack on a shared axis, so colour is the only thing telling them
+    // apart. Two sides sharing a tone would make a stacked row unreadable.
+
+    // Act
+    const tones = BATTLER_SIDES.map(side => side.tone);
+
+    // Assert
+    expect(new Set(tones).size)
+      .toBe(BATTLER_SIDES.length);
   });
 });
 
@@ -256,20 +268,20 @@ describe('totalParameterSlots', () =>
 
 describe('parameterTrackPercent', () =>
 {
-  it('places the unchanged value a fifth along the track', () =>
+  it('places the unchanged value a tenth along the track', () =>
   {
-    // Arrange - the track runs to 500 because that is the largest value the live configuration
-    // authors, which puts unchanged well left of centre rather than in the middle.
+    // Arrange - the track reaches well past anything currently authored so a layer is never
+    // capped by its control, which leaves unchanged near the left rather than at the centre.
 
     // Act & Assert
     expect(parameterTrackPercent(100))
-      .toBe(20);
+      .toBe(10);
   });
 
   it('places the top of the range at the end of the track', () =>
   {
     // Arrange & Act & Assert
-    expect(parameterTrackPercent(500))
+    expect(parameterTrackPercent(1000))
       .toBe(100);
   });
 
@@ -280,13 +292,23 @@ describe('parameterTrackPercent', () =>
       .toBe(0);
   });
 
-  it('clamps a value authored beyond the top of the track', () =>
+  it('places the largest currently authored value halfway along', () =>
+  {
+    // Arrange - 500 is the highest value in the live configuration, and the headroom above it is
+    // the point of the range rather than an accident of it.
+
+    // Act & Assert
+    expect(parameterTrackPercent(500))
+      .toBe(50);
+  });
+
+  it('clamps a value typed beyond the top of the track', () =>
   {
     // Arrange - nothing stops a number field from being typed past the range, and a bar wider
     // than its rail would spill across the row beside it.
 
     // Act & Assert
-    expect(parameterTrackPercent(900))
+    expect(parameterTrackPercent(1500))
       .toBe(100);
   });
 });
@@ -308,16 +330,16 @@ describe('parameterFillBounds', () =>
 
   it('grows rightward from the unchanged mark for a raised value', () =>
   {
-    // Arrange - 200 sits at 40% of the track, and unchanged at 20%.
+    // Arrange - 200 sits at 20% of the track, and unchanged at 10%.
 
     // Act
     const bounds = parameterFillBounds(200);
 
     // Assert
     expect(bounds.startPercent)
-      .toBe(20);
+      .toBe(10);
     expect(bounds.widthPercent)
-      .toBe(20);
+      .toBe(10);
   });
 
   it('grows leftward from the unchanged mark for a lowered value', () =>
@@ -330,9 +352,9 @@ describe('parameterFillBounds', () =>
 
     // Assert
     expect(bounds.startPercent)
-      .toBe(10);
+      .toBe(5);
     expect(bounds.widthPercent)
-      .toBe(10);
+      .toBe(5);
   });
 
   it('gives a fivefold value four times the width of a doubled one', () =>
@@ -360,32 +382,7 @@ describe('parameterFillBounds', () =>
     expect(bounds.startPercent)
       .toBe(0);
     expect(bounds.widthPercent)
-      .toBe(20);
-  });
-});
-
-describe('parameterTone', () =>
-{
-  it('marks a raised value as raised', () =>
-  {
-    // Arrange & Act & Assert
-    expect(parameterTone(150))
-      .toBe('warning');
-  });
-
-  it('marks a lowered value as lowered', () =>
-  {
-    // Arrange & Act & Assert - a distinct tone from the case above, since direction is the only
-    // thing the colour is allowed to say.
-    expect(parameterTone(50))
-      .toBe('info');
-  });
-
-  it('marks an unchanged value as neither', () =>
-  {
-    // Arrange & Act & Assert
-    expect(parameterTone(100))
-      .toBe('primary');
+      .toBe(10);
   });
 });
 
