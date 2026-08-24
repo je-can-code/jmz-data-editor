@@ -47,7 +47,7 @@ describe('ParameterIdMapper basic b/x/s param name lookups', () =>
     expect(fromXParamIdToName(0))
       .toBe('Accuracy');
     expect(fromXParamIdToName(1))
-      .toBe('Parry Extend');
+      .toBe('Phys Evade');
     expect(fromXParamIdToName(2))
       .toBe('Crit Rate');
     expect(fromXParamIdToName(3))
@@ -61,9 +61,9 @@ describe('ParameterIdMapper basic b/x/s param name lookups', () =>
     expect(fromXParamIdToName(7))
       .toBe('HP Regen');
     expect(fromXParamIdToName(8))
-      .toBe('MP Regen');
+      .toBe('MP Rejuv');
     expect(fromXParamIdToName(9))
-      .toBe('TP Regen');
+      .toBe('TP Restore');
 
     expect(() => fromXParamIdToName(-1))
       .toThrowError('Unsupported xParamId: -1');
@@ -78,7 +78,7 @@ describe('ParameterIdMapper basic b/x/s param name lookups', () =>
     expect(fromSParamIdToName(1))
       .toBe('Parry');
     expect(fromSParamIdToName(2))
-      .toBe('Healing Rate');
+      .toBe('Recovery Rate');
     expect(fromSParamIdToName(3))
       .toBe('Item Effects');
     expect(fromSParamIdToName(4))
@@ -90,7 +90,7 @@ describe('ParameterIdMapper basic b/x/s param name lookups', () =>
     expect(fromSParamIdToName(7))
       .toBe('Magi Dmg Rate');
     expect(fromSParamIdToName(8))
-      .toBe('Environ Dmg Rate');
+      .toBe('Env Dmg Rate');
     expect(fromSParamIdToName(9))
       .toBe('Experience UP');
 
@@ -143,7 +143,7 @@ describe('ParameterIdMapper fromLongParameterIdToName', () =>
     expect(fromLongParameterIdToName(8))
       .toBe('Accuracy');
     expect(fromLongParameterIdToName(9))
-      .toBe('Parry Extend');
+      .toBe('Phys Evade');
     expect(fromLongParameterIdToName(10))
       .toBe('Crit Rate');
     expect(fromLongParameterIdToName(11))
@@ -157,9 +157,9 @@ describe('ParameterIdMapper fromLongParameterIdToName', () =>
     expect(fromLongParameterIdToName(15))
       .toBe('HP Regen');
     expect(fromLongParameterIdToName(16))
-      .toBe('MP Regen');
+      .toBe('MP Rejuv');
     expect(fromLongParameterIdToName(17))
-      .toBe('TP Regen');
+      .toBe('TP Restore');
   });
 
   it('maps s params (18-27) via sparam offset', () =>
@@ -169,7 +169,7 @@ describe('ParameterIdMapper fromLongParameterIdToName', () =>
     expect(fromLongParameterIdToName(19))
       .toBe('Parry');
     expect(fromLongParameterIdToName(20))
-      .toBe('Healing Rate');
+      .toBe('Recovery Rate');
     expect(fromLongParameterIdToName(21))
       .toBe('Item Effects');
     expect(fromLongParameterIdToName(22))
@@ -181,7 +181,7 @@ describe('ParameterIdMapper fromLongParameterIdToName', () =>
     expect(fromLongParameterIdToName(25))
       .toBe('Magi Dmg Rate');
     expect(fromLongParameterIdToName(26))
-      .toBe('Environ Dmg Rate');
+      .toBe('Env Dmg Rate');
     expect(fromLongParameterIdToName(27))
       .toBe('Experience UP');
   });
@@ -245,7 +245,7 @@ describe('ParameterIdMapper known param lists', () =>
     expect(ex[ 9 ])
       .toEqual({
         id: 9,
-        name: 'TP Regen',
+        name: 'TP Restore',
         key: 'trg',
         longParamId: 17
       });

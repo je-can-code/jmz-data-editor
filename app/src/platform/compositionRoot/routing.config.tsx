@@ -7,7 +7,8 @@ import ProficiencyBoard from '../../presentation/boards/proficiency/ProficiencyB
 import EnemiesBoard from '../../presentation/boards/enemies/EnemiesBoard.tsx';
 import JabsConfigBoard from '@boards/jabs/JabsConfigBoard.tsx';
 import LevelConfigBoard from '@boards/level/LevelConfigBoard.tsx';
-import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, TrendingUp, } from '@mui/icons-material';
+import DifficultyBoard from '@boards/difficulty/DifficultyBoard.tsx';
+import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, TrendingUp, Whatshot, } from '@mui/icons-material';
 import IndexBoard from '@boards/_index/IndexBoard.tsx';
 import SkillsBoard from '@boards/skills/SkillsBoard.tsx';
 import StatesBoard from '@boards/states/StatesBoard.tsx';
@@ -136,6 +137,17 @@ const levelConfigBoard: BoardDefinition = {
   group: 'Systems',
 };
 
+const difficultyBoard: BoardDefinition = {
+  id: 'difficulty-config',
+  title: 'Difficulty',
+  path: '/difficulty',
+  component: DifficultyBoard,
+  guard: () => true,
+  icon: <Whatshot fontSize={'small'}/>,
+  featureFlag: 'difficulty',
+  group: 'Systems',
+};
+
 const weaponsBoard: BoardDefinition = {
   id: 'weapons',
   title: 'Weapons',
@@ -184,6 +196,7 @@ const APP_ROUTES: BoardDefinition[] = [
   proficiencyBoard,
   jabsConfigBoard,
   levelConfigBoard,
+  difficultyBoard,
 ];
 
 export { APP_ROUTES };
