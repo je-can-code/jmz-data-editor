@@ -342,7 +342,7 @@ describe('ParameterIdMapper known param lists', () =>
       .toEqual({
         id: 1,
         name: 'Crit Block',
-        key: 'cdr',
+        key: 'ctr',
         longParamId: 29
       });
     expect(all.find(p => p.longParamId === 30))

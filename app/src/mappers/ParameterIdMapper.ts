@@ -141,7 +141,7 @@ const fromLongParameterIdToName = (paramId: number): string =>
     case 28:
       return 'Crit Amp'; // cdm
     case 29:
-      return 'Crit Block'; // cdr
+      return 'Crit Block'; // ctr
     case 30:
       return maxTpName(); // max tp
     default:
@@ -571,7 +571,7 @@ const knownLongParams = (): KnownParameter[] =>
     {
       id: 1,
       name: 'Crit Block',
-      key: 'cdr',
+      key: 'ctr',
       longParamId: 29
     },
     {
