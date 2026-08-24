@@ -39,7 +39,9 @@ const DifficultyBoard = () =>
   const listWrapperRef = useRef<HTMLDivElement | null>(null);
 
   // held on the board rather than inside the section, so switching layers keeps the chosen view.
-  const [ showOnlyModified, setShowOnlyModified ] = useState(true);
+  // starts off: filtering to what a layer already changes hides every parameter it does not, which
+  // is exactly the set somebody opening the board is usually here to start changing.
+  const [ showOnlyModified, setShowOnlyModified ] = useState(false);
 
   const layers = useMemo(() =>
   {

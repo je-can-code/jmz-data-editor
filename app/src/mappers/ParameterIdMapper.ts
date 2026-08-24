@@ -42,7 +42,7 @@ const fromSParamIdToName = (sParamId: number): string =>
     case 1:
       return 'Parry';
     case 2:
-      return 'Healing Rate';
+      return 'Recovery Rate';
     case 3:
       return 'Item Effects';
     case 4:
@@ -54,7 +54,7 @@ const fromSParamIdToName = (sParamId: number): string =>
     case 7:
       return 'Magi Dmg Rate';
     case 8:
-      return 'Environ Dmg Rate';
+      return 'Env Dmg Rate';
     case 9:
       return 'Experience UP';
     default:
@@ -74,7 +74,7 @@ const fromXParamIdToName = (xParamId: number): string =>
     case 0:
       return 'Accuracy';
     case 1:
-      return 'Parry Extend';
+      return 'Phys Evade';
     case 2:
       return 'Crit Rate';
     case 3:
@@ -88,9 +88,9 @@ const fromXParamIdToName = (xParamId: number): string =>
     case 7:
       return 'HP Regen';
     case 8:
-      return 'MP Regen';
+      return 'MP Rejuv';
     case 9:
-      return 'TP Regen';
+      return 'TP Restore';
     default:
       throw new Error(`Unsupported xParamId: ${xParamId}`);
   }
@@ -121,8 +121,10 @@ const fromLongParameterIdToName = (paramId: number): string =>
   }
 
   // 8-17 are the ex-parameters, offset by where the base parameters end: hit, eva, cri, cev, mev, mrf,
-  // cnt, hrg, mrg, trg. Several carry J-ABS meanings rather than their engine ones -- eva is the parry
-  // boost, cnt is autocounter, and mev goes unused.
+  // cnt, hrg, mrg, trg. Some carry J-ABS meanings rather than their engine ones -- cnt is autocounter,
+  // and mev goes unused. Parry extension is not among them: it is a J-ABS parameter of its own (`per`,
+  // read as `(1 + per) * parryDuration`), so eva means physical evasion here exactly as it does in the
+  // engine, and the parry rate itself is grd.
   if (paramId >= 8 && paramId <= 17)
   {
     return fromXParamIdToName(paramId - 8);

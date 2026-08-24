@@ -45,10 +45,15 @@ type DifficultyParametersSectionProps = {
  * authored as a relationship - actors up, enemies down - so the two numbers being compared belong
  * next to each other, and the reader scans twenty-eight rows instead of hunting fifty-six fields.
  *
- * And the default view is **only what changed**. Across a real seventeen-layer configuration barely
- * an eighth of the values differ from unchanged, so the full grid is mostly a wall of hundreds with
- * the meaningful handful buried in it. The unfiltered view is one toggle away for when a value needs
- * finding rather than reviewing.
+ * Every parameter is always **rendered and editable**, and the change filter is opt-in rather than
+ * the default. Across a real seventeen-layer configuration barely an eighth of the values differ
+ * from unchanged, which makes filtering tempting - but the parameters a layer has not touched are
+ * precisely the ones somebody opening this board is usually here to touch, so hiding them by default
+ * hides the job. The filter earns its place for reviewing what a layer already does; it is a lens,
+ * not a starting position.
+ *
+ * What carries the eye instead is emphasis: an unchanged value is dimmed and a changed one is not,
+ * so the meaningful handful stand out of the wall of hundreds without anything being hidden.
  */
 const DifficultyParametersSection = ({
   layer,
