@@ -1,14 +1,13 @@
-import type React from 'react';
-import { Box, Chip, FormControlLabel, Stack, Switch, TextField, Tooltip, Typography } from '@mui/material';
+import { Box, Chip, FormControlLabel, Stack, Switch, Tooltip, Typography } from '@mui/material';
 import { RestartAlt } from '@mui/icons-material';
 import IconButton from '@mui/material/IconButton';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
+import DifficultyParameterControl from '@boards/difficulty/DifficultyParameterControl.tsx';
 import {
   BATTLER_SIDES,
   countModifiedInFamily,
   countModifiedParameters,
   DIFFICULTY_PARAMETER_FAMILIES,
-  isParameterModified,
   isParameterRowModified,
   readParameter,
   totalParameterSlots,
@@ -24,9 +23,9 @@ import type { DifficultyLayer } from '@core/domain/valueObjects/difficulty-confi
 /**
  * Column widths, shared by the header row and every parameter row so the two stay aligned.
  */
-const LABEL_WIDTH = 190;
-const FIELD_WIDTH = 104;
-const DELTA_WIDTH = 56;
+const LABEL_WIDTH = 170;
+const FIELD_WIDTH = 208;
+const DELTA_WIDTH = 48;
 
 type DifficultyParametersSectionProps = {
   layer: DifficultyLayer;
@@ -157,41 +156,15 @@ const DifficultyParametersSection = ({
           </Typography>
         </Box>
 
-        {BATTLER_SIDES.map(side =>
-        {
-          const value = readParameter(layer[ side.key ], family.key, parameterId);
-          const modified = isParameterModified(value);
-
-          return (
-            <TextField
-              key={side.key}
-              type={'number'}
-              size={'small'}
-              value={value}
-              onChange={event => setParameter(side.key, family.key, parameterId, Number(event.target.value))}
-              sx={{
-                width: FIELD_WIDTH,
-                // an unchanged value is noise; dimming it lets the handful that matter carry the eye.
-                '& .MuiInputBase-input': {
-                  fontWeight: modified ? 600 : 400,
-                  color: modified
-                    ? 'text.primary'
-                    : 'text.disabled',
-                },
-              }}
-              slotProps={{
-                htmlInput: {
-                  step: 5,
-                  // a focused number input swallows the wheel to change its own value, so
-                  // scrolling the page with the pointer over a field silently edits that field
-                  // and then stops scrolling entirely. dropping focus hands the wheel back to
-                  // the page and leaves the value alone; the arrow keys still step it.
-                  onWheel: (event: React.WheelEvent<HTMLInputElement>) => event.currentTarget.blur(),
-                },
-              }}
+        {BATTLER_SIDES.map(side => (
+          <Box key={side.key} sx={{ width: FIELD_WIDTH }}>
+            <DifficultyParameterControl
+              value={readParameter(layer[ side.key ], family.key, parameterId)}
+              onChange={next => setParameter(side.key, family.key, parameterId, next)}
+              ariaLabel={`${name} for ${side.label}`}
             />
-          );
-        })}
+          </Box>
+        ))}
 
         <Box sx={{ width: DELTA_WIDTH, textAlign: 'right' }}>
           {rowModified

@@ -6,6 +6,9 @@ import {
   DIFFICULTY_PARAMETER_FAMILIES,
   isParameterModified,
   isParameterRowModified,
+  parameterFillBounds,
+  parameterTone,
+  parameterTrackPercent,
   readParameter,
   totalParameterSlots,
 } from '@core/domain/valueObjects/difficulty-parameters.ts';
@@ -248,6 +251,141 @@ describe('totalParameterSlots', () =>
     // Act & Assert
     expect(totalParameterSlots())
       .toBe(56);
+  });
+});
+
+describe('parameterTrackPercent', () =>
+{
+  it('places the unchanged value a fifth along the track', () =>
+  {
+    // Arrange - the track runs to 500 because that is the largest value the live configuration
+    // authors, which puts unchanged well left of centre rather than in the middle.
+
+    // Act & Assert
+    expect(parameterTrackPercent(100))
+      .toBe(20);
+  });
+
+  it('places the top of the range at the end of the track', () =>
+  {
+    // Arrange & Act & Assert
+    expect(parameterTrackPercent(500))
+      .toBe(100);
+  });
+
+  it('places zero at the start of the track', () =>
+  {
+    // Arrange & Act & Assert
+    expect(parameterTrackPercent(0))
+      .toBe(0);
+  });
+
+  it('clamps a value authored beyond the top of the track', () =>
+  {
+    // Arrange - nothing stops a number field from being typed past the range, and a bar wider
+    // than its rail would spill across the row beside it.
+
+    // Act & Assert
+    expect(parameterTrackPercent(900))
+      .toBe(100);
+  });
+});
+
+describe('parameterFillBounds', () =>
+{
+  it('draws nothing at all for an unchanged value', () =>
+  {
+    // Arrange - this is what makes a section of untouched parameters read as empty rails, which
+    // is the whole reason the bar is anchored where it is.
+
+    // Act
+    const bounds = parameterFillBounds(100);
+
+    // Assert
+    expect(bounds.widthPercent)
+      .toBe(0);
+  });
+
+  it('grows rightward from the unchanged mark for a raised value', () =>
+  {
+    // Arrange - 200 sits at 40% of the track, and unchanged at 20%.
+
+    // Act
+    const bounds = parameterFillBounds(200);
+
+    // Assert
+    expect(bounds.startPercent)
+      .toBe(20);
+    expect(bounds.widthPercent)
+      .toBe(20);
+  });
+
+  it('grows leftward from the unchanged mark for a lowered value', () =>
+  {
+    // Arrange - the near-miss for the case above: a reduction must start at the value and run
+    // back to the mark, not start at the mark and run backwards into nothing.
+
+    // Act
+    const bounds = parameterFillBounds(50);
+
+    // Assert
+    expect(bounds.startPercent)
+      .toBe(10);
+    expect(bounds.widthPercent)
+      .toBe(10);
+  });
+
+  it('gives a fivefold value four times the width of a doubled one', () =>
+  {
+    // Arrange - the length has to mean magnitude or the bar is decoration. 500 is four times as
+    // far from unchanged as 200 is, and must read that way.
+
+    // Act
+    const doubled = parameterFillBounds(200);
+    const fivefold = parameterFillBounds(500);
+
+    // Assert
+    expect(fivefold.widthPercent)
+      .toBe(doubled.widthPercent * 4);
+  });
+
+  it('draws the deepest reduction back to the start of the track', () =>
+  {
+    // Arrange - a value of zero is authored in the live configuration, so the floor is real.
+
+    // Act
+    const bounds = parameterFillBounds(0);
+
+    // Assert
+    expect(bounds.startPercent)
+      .toBe(0);
+    expect(bounds.widthPercent)
+      .toBe(20);
+  });
+});
+
+describe('parameterTone', () =>
+{
+  it('marks a raised value as raised', () =>
+  {
+    // Arrange & Act & Assert
+    expect(parameterTone(150))
+      .toBe('warning');
+  });
+
+  it('marks a lowered value as lowered', () =>
+  {
+    // Arrange & Act & Assert - a distinct tone from the case above, since direction is the only
+    // thing the colour is allowed to say.
+    expect(parameterTone(50))
+      .toBe('info');
+  });
+
+  it('marks an unchanged value as neither', () =>
+  {
+    // Arrange & Act & Assert
+    expect(parameterTone(100))
+      .toBe('primary');
   });
 });
 

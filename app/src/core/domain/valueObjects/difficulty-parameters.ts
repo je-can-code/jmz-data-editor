@@ -78,6 +78,80 @@ const isParameterModified = (value: number): boolean =>
 };
 
 /**
+ * The top of the magnitude track.
+ *
+ * Chosen from what the live configuration actually authors rather than from a round number: values
+ * run from 1 to 500, and a ceiling above the highest real value would spend most of the track on
+ * space nothing ever occupies.
+ */
+const PARAMETER_SLIDER_MAX = 500;
+
+/**
+ * How far a drag moves a parameter.
+ *
+ * Five rather than one because every authored value in the live configuration is a multiple of ten
+ * except a deliberate 1, and a step fine enough to land on that would make dragging to 120 an
+ * exercise. The number field is what reaches an odd value.
+ */
+const PARAMETER_SLIDER_STEP = 5;
+
+/**
+ * Where a value sits along the track, as a percentage of its width.
+ * @param {number} value The parameter percentage.
+ * @returns {number} A position between 0 and 100.
+ */
+const parameterTrackPercent = (value: number): number =>
+{
+  const clamped = Math.min(Math.max(value, 0), PARAMETER_SLIDER_MAX);
+
+  return (clamped / PARAMETER_SLIDER_MAX) * 100;
+};
+
+/**
+ * Where a value's magnitude bar starts and how wide it runs.
+ *
+ * Measured from the unchanged mark rather than from zero, so the width means "how far this was moved"
+ * instead of "how large this is". An unchanged value produces no width at all, which is what lets a
+ * section of untouched parameters disappear into empty rails.
+ * @param {number} value The parameter percentage.
+ * @returns {{startPercent: number, widthPercent: number}} The bar's bounds along the track.
+ */
+const parameterFillBounds = (value: number): { startPercent: number; widthPercent: number } =>
+{
+  const anchor = parameterTrackPercent(UNCHANGED_PERCENT);
+  const position = parameterTrackPercent(value);
+
+  return {
+    startPercent: Math.min(anchor, position),
+    widthPercent: Math.abs(position - anchor),
+  };
+};
+
+/**
+ * Which direction a value was moved in, expressed as a palette tone.
+ *
+ * Deliberately not a judgement. Whether more of a parameter helps depends on which parameter it is
+ * and which side of the fight carries it, so the colour says raised or lowered and leaves better or
+ * worse to the person reading it.
+ * @param {number} value The parameter percentage.
+ * @returns {string} A theme palette key.
+ */
+const parameterTone = (value: number): string =>
+{
+  if (value > UNCHANGED_PERCENT)
+  {
+    return 'warning';
+  }
+
+  if (value < UNCHANGED_PERCENT)
+  {
+    return 'info';
+  }
+
+  return 'primary';
+};
+
+/**
  * Reads one parameter out of one side of a layer.
  * @param {DifficultyBattlerEffects} effects The side to read from.
  * @param {ParameterFamilyKey} family Which family the parameter belongs to.
@@ -157,8 +231,13 @@ const isParameterRowModified = (
 export {
   DIFFICULTY_PARAMETER_FAMILIES,
   BATTLER_SIDES,
+  PARAMETER_SLIDER_MAX,
+  PARAMETER_SLIDER_STEP,
   isParameterModified,
   isParameterRowModified,
+  parameterTrackPercent,
+  parameterFillBounds,
+  parameterTone,
   readParameter,
   countModifiedInFamily,
   countModifiedParameters,
