@@ -13,6 +13,7 @@ import type { VirtualizedSidebarRow } from '@presentation/components/board/Virtu
 import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import { useDifficultyConfig } from '@presentation/context/resources/difficulty.context.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
+import DifficultyParametersSection from '@boards/difficulty/DifficultyParametersSection.tsx';
 import type { DifficultyLayer } from '@core/domain/valueObjects/difficulty-config.ts';
 
 /**
@@ -36,6 +37,9 @@ const DifficultyBoard = () =>
   const [ isSaving, setIsSaving ] = useState(false);
   const [ selectedIndex, setSelectedIndex ] = useState(0);
   const listWrapperRef = useRef<HTMLDivElement | null>(null);
+
+  // held on the board rather than inside the section, so switching layers keeps the chosen view.
+  const [ showOnlyModified, setShowOnlyModified ] = useState(true);
 
   const layers = useMemo(() =>
   {
@@ -176,7 +180,7 @@ const DifficultyBoard = () =>
       {selectedLayer === null
         ? null
         : (
-          <Stack spacing={2} sx={{ p: 2, maxWidth: 900 }}>
+          <Stack spacing={2} sx={{ p: 2, maxWidth: 900, overflow: 'auto' }}>
             <BoardSectionCard title={'Identity'} subtitle={'What the player sees in the difficulty menu'}>
               <TextField
                 label={'Name'}
@@ -186,6 +190,13 @@ const DifficultyBoard = () =>
                 onChange={event => patchSelectedLayer({ name: event.target.value })}
               />
             </BoardSectionCard>
+
+            <DifficultyParametersSection
+              layer={selectedLayer}
+              onChange={updateSelectedLayer}
+              showOnlyModified={showOnlyModified}
+              onShowOnlyModifiedChange={setShowOnlyModified}
+            />
           </Stack>
         )}
     </EditorBoardSplitLayout>
