@@ -3,8 +3,10 @@ import {
   cloneJuiceDefaults,
   hydrateJabsConfig,
   hydrateJuiceConfig,
+  hydrateLootConfig,
   JUICE_DEFAULTS,
   JUICE_PROFILE_KEY_PATTERN,
+  LOOT_DEFAULTS,
 } from "@core/domain/valueObjects/jabs-config.ts";
 
 /**
@@ -139,6 +141,67 @@ describe("hydrateJuiceConfig", () =>
   });
 });
 
+/**
+ * The {@code loot} block carries the baseline loot magnet radius J-ABS reads at boot. The hydrator
+ * owes callers a complete block whether or not the file authored one, because anything missing from
+ * {@link hydrateJabsConfig}'s return is written away the next time the board saves — and the plugin
+ * destructures this block without checking, so losing it is a crash on next launch rather than a
+ * cosmetic diff.
+ */
+describe("hydrateLootConfig", () =>
+{
+  it("returns the documented defaults when rawLoot is undefined / null", () =>
+  {
+    // Arrange- nothing to arrange; absence is the input under test.
+
+    // Act & Assert
+    expect(hydrateLootConfig(undefined))
+      .toEqual(LOOT_DEFAULTS);
+    expect(hydrateLootConfig(null))
+      .toEqual(LOOT_DEFAULTS);
+  });
+
+  it("honors an authored numeric radius over the default", () =>
+  {
+    // Arrange- a value deliberately unequal to the default, so a hydrator that ignored the file
+    // entirely would still read as the default and be caught.
+    const raw = { magnetRadius: 9 };
+
+    // Act
+    const hydrated = hydrateLootConfig(raw);
+
+    // Assert
+    expect(hydrated.magnetRadius)
+      .toBe(9);
+  });
+
+  it("falls back to the default when the authored radius is not a number", () =>
+  {
+    // Arrange- a corrupt entry; honoring it would hand the game a string to do arithmetic with.
+    const raw = { magnetRadius: "eight" };
+
+    // Act
+    const hydrated = hydrateLootConfig(raw);
+
+    // Assert
+    expect(hydrated.magnetRadius)
+      .toBe(LOOT_DEFAULTS.magnetRadius);
+  });
+
+  it("does not share references with LOOT_DEFAULTS", () =>
+  {
+    // Arrange
+    const hydrated = hydrateLootConfig(undefined);
+
+    // Act
+    hydrated.magnetRadius = 99;
+
+    // Assert
+    expect(LOOT_DEFAULTS.magnetRadius)
+      .toBe(2);
+  });
+});
+
 describe("hydrateJabsConfig", () =>
 {
   it("returns a complete shape (teams + juice) when raw root is null / undefined", () =>
@@ -243,6 +306,7 @@ describe("hydrateJabsConfig", () =>
         "bosses",
         "foodTypes",
         "juice",
+        "loot",
         "metrics",
         "teams",
       ]);

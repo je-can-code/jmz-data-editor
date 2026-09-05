@@ -8,7 +8,8 @@ import EnemiesBoard from '../../presentation/boards/enemies/EnemiesBoard.tsx';
 import JabsConfigBoard from '@boards/jabs/JabsConfigBoard.tsx';
 import LevelConfigBoard from '@boards/level/LevelConfigBoard.tsx';
 import DifficultyBoard from '@boards/difficulty/DifficultyBoard.tsx';
-import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, TrendingUp, Whatshot, } from '@mui/icons-material';
+import MotionConfigBoard from '@boards/motion/MotionConfigBoard.tsx';
+import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, TrendingUp, Waves, Whatshot, } from '@mui/icons-material';
 import IndexBoard from '@boards/_index/IndexBoard.tsx';
 import SkillsBoard from '@boards/skills/SkillsBoard.tsx';
 import StatesBoard from '@boards/states/StatesBoard.tsx';
@@ -148,6 +149,17 @@ const difficultyBoard: BoardDefinition = {
   group: 'Systems',
 };
 
+const motionConfigBoard: BoardDefinition = {
+  id: 'motion-config',
+  title: 'Motion',
+  path: '/motion',
+  component: MotionConfigBoard,
+  guard: () => true,
+  icon: <Waves fontSize={'small'}/>,
+  featureFlag: 'motion',
+  group: 'Systems',
+};
+
 const weaponsBoard: BoardDefinition = {
   id: 'weapons',
   title: 'Weapons',
@@ -197,6 +209,7 @@ const APP_ROUTES: BoardDefinition[] = [
   jabsConfigBoard,
   levelConfigBoard,
   difficultyBoard,
+  motionConfigBoard,
 ];
 
 export { APP_ROUTES };

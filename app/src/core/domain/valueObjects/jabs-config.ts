@@ -112,12 +112,19 @@ type JabsMetricsConfig = {
   usableItemUsage: number;
 };
 
+type JabsLootConfig = {
+  magnetRadius: number;
+  magnetSpeed: number;
+  magnetAcceleration: number;
+};
+
 type JabsConfigRoot = {
   teams: JabsTeamDefinition[];
   juice: JuiceConfig;
   bosses: BossEncounter[];
   foodTypes: JabsFoodTypeDefinition[];
   metrics: JabsMetricsConfig;
+  loot: JabsLootConfig;
 };
 
 /**
@@ -193,6 +200,22 @@ const METRICS_DEFAULTS: JabsMetricsConfig = {
   guardActivations: 84,
   toolUsage: 85,
   usableItemUsage: 86,
+};
+
+/**
+ * Hardcoded loot defaults — the baseline committed in `ca/chef-adventure/data/config.jabs.json` and
+ * documented in the J-ABS help block.
+ *
+ * `magnetRadius` is the distance in tiles from which a battler draws loot drops toward themselves,
+ * before any `<lootMagnetBuff:N>` or `<lootMagnetRate:N>` the battler carries is applied.
+ * `magnetSpeed` is how fast a drop travels in tiles per frame at the very edge of that radius, and
+ * `magnetAcceleration` is how much faster it moves as it closes, so drops snap home rather than
+ * drifting the last half tile.
+ */
+const LOOT_DEFAULTS: JabsLootConfig = {
+  magnetRadius: 2,
+  magnetSpeed: 0.08,
+  magnetAcceleration: 3.5,
 };
 
 /**
@@ -374,6 +397,42 @@ function hydrateMetricsConfig(rawMetrics: unknown): JabsMetricsConfig
 }
 
 /**
+ * Normalizes the `loot` block, filling any key the file does not author from {@link LOOT_DEFAULTS}.
+ *
+ * @param rawLoot The raw `loot` value off the config root, if the file carried one.
+ */
+function hydrateLootConfig(rawLoot: unknown): JabsLootConfig
+{
+  const record = isPlainObject(rawLoot)
+    ? rawLoot
+    : null;
+
+  // start from the defaults so every key is present, then let the file override the ones it names.
+  const hydrated = { ...LOOT_DEFAULTS };
+
+  if (record === null)
+  {
+    return hydrated;
+  }
+
+  (Object.keys(LOOT_DEFAULTS) as (keyof JabsLootConfig)[]).forEach(key =>
+  {
+    const value = record[ key ];
+
+    // a key present but holding something other than a number is a corrupt entry, and honoring it
+    // would put a string where the game will do arithmetic.
+    if (Number.isFinite(value) === false)
+    {
+      return;
+    }
+
+    hydrated[ key ] = value as number;
+  });
+
+  return hydrated;
+}
+
+/**
  * Normalizes a freshly loaded `config.jabs.json` payload into the editor's strongly-typed
  * {@link JabsConfigRoot} shape. Missing fields are filled from {@link JUICE_DEFAULTS}, teams are coerced
  * to an array, and unrelated extra keys on the raw root are dropped so the saved file stays clean.
@@ -409,12 +468,17 @@ function hydrateJabsConfig(rawRoot: unknown): JabsConfigRoot
     ? undefined
     : rootRecord[ "metrics" ]);
 
+  const loot = hydrateLootConfig(rootRecord === null
+    ? undefined
+    : rootRecord[ "loot" ]);
+
   return {
     teams,
     juice,
     bosses,
     foodTypes,
     metrics,
+    loot,
   };
 }
 
@@ -422,14 +486,17 @@ export {
   cloneJuiceDefaults,
   hydrateJabsConfig,
   hydrateJuiceConfig,
+  hydrateLootConfig,
   hydrateMetricsConfig,
   JUICE_DEFAULTS,
   JUICE_PROFILE_KEY_PATTERN,
+  LOOT_DEFAULTS,
   METRICS_DEFAULTS,
 };
 export type {
   JabsConfigRoot,
   JabsFoodTypeDefinition,
+  JabsLootConfig,
   JabsMetricsConfig,
   JabsTeamDefinition,
   JuiceCasterConfig,

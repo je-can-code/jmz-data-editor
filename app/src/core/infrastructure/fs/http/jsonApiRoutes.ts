@@ -56,6 +56,8 @@ function apiPathnameForBasename(baseName: string): string | null
       return '/api/config/level';
     case 'config.difficulty.json':
       return '/api/config/difficulty';
+    case 'config.motion.json':
+      return '/api/config/motion';
     default:
       break;
   }
