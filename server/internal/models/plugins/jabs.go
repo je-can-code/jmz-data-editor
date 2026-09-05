@@ -13,6 +13,8 @@ import "encoding/json"
 type JabsConfiguration struct {
 	Teams     []JabsTeam      `json:"teams"`
 	Juice     json.RawMessage `json:"juice,omitempty"`
+	Metrics   json.RawMessage `json:"metrics,omitempty"`
+	Loot      json.RawMessage `json:"loot,omitempty"`
 	Bosses    []BossEncounter `json:"bosses"`
 	FoodTypes []JabsFoodType  `json:"foodTypes,omitempty"`
 }

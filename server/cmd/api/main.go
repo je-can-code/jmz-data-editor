@@ -78,6 +78,9 @@ func main() {
 
 	mux.HandleFunc("GET /api/config/difficulty", api.Load[plugins.DifficultyConfiguration]("data/config.difficulty.json"))
 	mux.HandleFunc("POST /api/config/difficulty", api.Save[plugins.DifficultyConfiguration]("data/config.difficulty.json"))
+
+	mux.HandleFunc("GET /api/config/motion", api.Load[plugins.MotionConfiguration]("data/config.motion.json"))
+	mux.HandleFunc("POST /api/config/motion", api.Save[plugins.MotionConfiguration]("data/config.motion.json"))
 	//endregion plugin config endpoints
 
 	fmt.Println("Server running on http://localhost:8080")

@@ -1,5 +1,7 @@
 package plugins
 
+import "encoding/json"
+
 // CraftingConfiguration is the root shape of data/config.crafting.json (J-Crafting++ editor export).
 //
 // Nothing here is omitempty. An absent field and a deliberately empty one are the same bytes, which
@@ -52,13 +54,35 @@ type CraftingRecipe struct {
 	Outputs            []CraftingComponent `json:"outputs"`
 	// Cost is what a shop charges to teach this recipe, paid once. An empty cost means the recipe takes
 	// whatever its profession charges for its tier; naming a cost here opts out of that entirely.
-	Cost []CraftingComponent `json:"cost"`
+	//
+	// Typed as CraftingComponents so that an unpriced recipe writes as [] rather than null - see that
+	// type for why the distinction matters here and nowhere else in this struct.
+	Cost CraftingComponents `json:"cost"`
 	// Tier is how far up its family a recipe sits, and it exists so that a price does not have to be
 	// written five hundred times. The plugin turns a tier into a scrap cost through a table of its
 	// own, which is why no currency appears here. Cost still wins where it is set: the tier is the
 	// rule and the cost is the exception. Zero means untiered, and an untiered recipe with no cost is
 	// simply not for sale.
 	Tier int `json:"tier"`
+}
+
+// CraftingComponents is a component slice that writes as [] rather than null when it holds nothing.
+//
+// Go marshals a nil slice to null, and the plugin iterates a recipe's cost - so null arrives as a value
+// that cannot be iterated and throws at boot, where an empty array is simply "this recipe is not for
+// sale". Every one of the 933 recipes Chef Adventure ships carries "cost": [], and none carries null.
+//
+// Cost is the only field in a recipe that is ever legitimately empty; a recipe with no outputs or no
+// ingredients is not a recipe, so its siblings never reach this case and do not need the type.
+type CraftingComponents []CraftingComponent
+
+// MarshalJSON writes an empty component list as [] instead of letting a nil slice become null.
+func (components CraftingComponents) MarshalJSON() ([]byte, error) {
+	if components == nil {
+		return []byte("[]"), nil
+	}
+
+	return json.Marshal([]CraftingComponent(components))
 }
 
 // CraftingComponent is a single tool, ingredient, or output slot.

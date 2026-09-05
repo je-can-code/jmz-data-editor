@@ -18,6 +18,7 @@ import { CraftingProvider } from '@presentation/context/resources/crafting.conte
 import { JabsProvider } from '@presentation/context/resources/jabs.context.tsx';
 import { LevelProvider } from '@presentation/context/resources/level.context.tsx';
 import { DifficultyProvider } from '@presentation/context/resources/difficulty.context.tsx';
+import { MotionProvider } from '@presentation/context/resources/motion.context.tsx';
 
 const AppProviders = ({ children }: { children: React.ReactNode }) =>
 {
@@ -34,6 +35,7 @@ const AppProviders = ({ children }: { children: React.ReactNode }) =>
         JabsProvider,
         LevelProvider,
         DifficultyProvider,
+        MotionProvider,
         ItemsProvider,
         WeaponsProvider,
         ArmorsProvider,
