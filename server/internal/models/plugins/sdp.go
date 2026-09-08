@@ -2,9 +2,9 @@ package plugins
 
 // SdpConfiguration is the root shape of data/config.sdp.json (J-SDP panel definitions).
 type SdpConfiguration struct {
-	Sdps      []SdpPanel      `json:"sdps"`
-	Subgroups []SdpSubgroup   `json:"subgroups"`
-	Families  []SdpFamily     `json:"families"`
+	Sdps      []SdpPanel    `json:"sdps"`
+	Subgroups []SdpSubgroup `json:"subgroups"`
+	Families  []SdpFamily   `json:"families"`
 }
 
 // SdpPanelIdentity is presentation and unlock metadata for one panel.
@@ -13,7 +13,6 @@ type SdpPanelIdentity struct {
 	IconIndex         int    `json:"iconIndex"`
 	UnlockedByDefault bool   `json:"unlockedByDefault"`
 	Description       string `json:"description"`
-	TopFlavorText     string `json:"topFlavorText"`
 }
 
 // SdpPanelProgression is rank cap, rarity tier, and rank-up cost offsets.
@@ -42,12 +41,22 @@ type SdpPanel struct {
 	PanelRewards    []SdpReward         `json:"panelRewards"`
 }
 
+// SdpMasteryProse is the player-facing mastery description for one subgroup, one template per act.
+// Templates carry tokens (for example {p.def}) that the plugin resolves against live data at draw
+// time, so rebalancing a tier never leaves the description quoting a number that no longer exists.
+type SdpMasteryProse struct {
+	Beginning string `json:"beginning"`
+	Middle    string `json:"middle"`
+	End       string `json:"end"`
+}
+
 // SdpSubgroup groups tiered panels whose masteries replace one another.
 type SdpSubgroup struct {
-	Name        string `json:"name"`
-	Key         string `json:"key"`
-	IconIndex   int    `json:"iconIndex"`
-	Description string `json:"description"`
+	Name        string          `json:"name"`
+	Key         string          `json:"key"`
+	IconIndex   int             `json:"iconIndex"`
+	Description string          `json:"description"`
+	Prose       SdpMasteryProse `json:"prose"`
 }
 
 // SdpFamily groups subgroups for the in-game SDP family filter strip.

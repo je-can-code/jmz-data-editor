@@ -13,7 +13,6 @@ declare namespace Sdp
     iconIndex: number;
     unlockedByDefault: boolean;
     description: string;
-    topFlavorText: string;
   }
 
   interface PanelProgression
@@ -46,12 +45,27 @@ declare namespace Sdp
     panelRewards: SdpReward[];
   }
 
+  interface MasteryProse
+  {
+    /** Template describing tiers 1-3, where the base effect is established. */
+    beginning: string;
+    /** Template describing tiers 4-9, where potency ramps and behavior layers appear. */
+    middle: string;
+    /** Template describing the tier 10 capstone. */
+    end: string;
+  }
+
   interface PanelSubgroup
   {
     name: string;
     key: string;
     iconIndex: number;
     description: string;
+    /**
+     * Player-facing mastery descriptions, one per act. Tokens such as `{p.def}` are resolved
+     * against live data at draw time, so a rebalance never leaves the prose stale.
+     */
+    prose: MasteryProse;
   }
 
   interface PanelFamily
