@@ -468,11 +468,6 @@ const SdpBoard = () =>
   //endregion actions
 
   //region validators
-  const topFlavorMaxLine = selectedPanel
-    ? maxVisibleLineLength(selectedPanel.identity.topFlavorText)
-    : 0;
-  const topFlavorTooLong = topFlavorMaxLine > SDP_MONO_CAP_CH;
-
   const descriptionMaxLine = selectedPanel
     ? maxVisibleLineLength(selectedPanel.identity.description)
     : 0;
@@ -570,14 +565,6 @@ const SdpBoard = () =>
   {
     updatePanel(
       patchPanelProgression(selectedPanel!, { multGrowthCost: input }),
-      selectedPanelIndex
-    );
-  };
-
-  const handlePanelTopFlavorTextChange = (input: string) =>
-  {
-    updatePanel(
-      patchPanelIdentity(selectedPanel!, { topFlavorText: input }),
       selectedPanelIndex
     );
   };
@@ -1746,20 +1733,6 @@ const SdpBoard = () =>
             <IconIndexField
               value={identity.iconIndex}
               onChange={handlePanelIconIndexChange}
-            />
-          </Grid>
-          <Grid size={12}>
-            <TextField
-              fullWidth
-              size={'small'}
-              variant={'outlined'}
-              label={'Top Flavor Text'}
-              value={identity.topFlavorText}
-              onChange={event => handlePanelTopFlavorTextChange(event.target.value)}
-              error={topFlavorTooLong}
-              helperText={topFlavorTooLong
-                ? `Longest line ~${topFlavorMaxLine} chars (cap ~${SDP_MONO_CAP_CH} @ fontSize 24).`
-                : undefined}
             />
           </Grid>
           <Grid size={12}>

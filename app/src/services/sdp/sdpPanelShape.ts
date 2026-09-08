@@ -8,7 +8,6 @@ type LegacyFlatPanel = Panel & {
   iconIndex?: number;
   unlockedByDefault?: boolean;
   description?: string;
-  topFlavorText?: string;
   maxRank?: number;
   rarity?: number;
   baseCost?: number;
@@ -41,7 +40,6 @@ export function defaultPanelIdentity(name = ""): Sdp.PanelIdentity
     iconIndex: -1,
     unlockedByDefault: false,
     description: "",
-    topFlavorText: "",
   };
 }
 
@@ -90,7 +88,6 @@ function normalizePanelIdentityFromDisk(raw: LegacyFlatPanel): Sdp.PanelIdentity
     iconIndex: raw.iconIndex ?? 0,
     unlockedByDefault: raw.unlockedByDefault === true,
     description: raw.description ?? "",
-    topFlavorText: raw.topFlavorText ?? "",
   };
 
   return {
@@ -98,7 +95,6 @@ function normalizePanelIdentityFromDisk(raw: LegacyFlatPanel): Sdp.PanelIdentity
     iconIndex: Number(source.iconIndex) || 0,
     unlockedByDefault: source.unlockedByDefault === true,
     description: source.description ?? "",
-    topFlavorText: source.topFlavorText ?? "",
   };
 }
 
@@ -180,8 +176,48 @@ export function normalizeSdpConfigurationFromDisk(
 
   return {
     sdps: normalizeSdpPanelList(config?.sdps ?? []),
-    subgroups: config?.subgroups ?? [],
+    subgroups: (config?.subgroups ?? []).map(normalizeSdpSubgroupFromDisk),
     families: (config?.families ?? []).map(normalizeSdpFamilyFromDisk),
+  };
+}
+
+/**
+ * Blank mastery prose, for a subgroup whose masteries have no authored description yet.
+ *
+ * @returns Empty prose row.
+ */
+export function emptyMasteryProse(): Sdp.MasteryProse
+{
+  return {
+    beginning: "",
+    middle: "",
+    end: "",
+  };
+}
+
+/**
+ * Normalizes one subgroup row from disk.
+ *
+ * Prose is rebuilt rather than passed through, because a row written before the field existed has no
+ * prose at all and the editor must never hand a partial object to the form.
+ *
+ * @param raw Parsed subgroup row.
+ * @returns Canonical subgroup row for the editor.
+ */
+export function normalizeSdpSubgroupFromDisk(raw: Partial<Sdp.PanelSubgroup>): Sdp.PanelSubgroup
+{
+  const prose = raw.prose ?? emptyMasteryProse();
+
+  return {
+    key: raw.key ?? "",
+    name: raw.name ?? "",
+    iconIndex: Number(raw.iconIndex) || -1,
+    description: raw.description ?? "",
+    prose: {
+      beginning: prose.beginning ?? "",
+      middle: prose.middle ?? "",
+      end: prose.end ?? "",
+    },
   };
 }
 
@@ -234,7 +270,10 @@ export function serializeSdpConfigurationForDisk(config: Sdp.Configuration): Sdp
 {
   return {
     sdps: config.sdps.map(serializeSdpPanelForDisk),
-    subgroups: config.subgroups.map(subgroup => ({ ...subgroup })),
+    subgroups: config.subgroups.map(subgroup => ({
+      ...subgroup,
+      prose: { ...subgroup.prose },
+    })),
     families: config.families.map(family => ({
       ...family,
       subgroupKeys: [ ...family.subgroupKeys ],
@@ -310,7 +349,6 @@ export function createBlankSdpPanel(key: string, name: string): Panel
     identity: {
       ...defaultPanelIdentity(name),
       description: "The best panel ever, hands down. You only need to acquire it somehow!",
-      topFlavorText: "Get this panel, you will not regret it.",
     },
     progression: defaultPanelProgression(),
     mastery: emptyPanelMastery(),

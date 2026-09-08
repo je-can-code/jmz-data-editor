@@ -18,6 +18,7 @@ import {
 import KeyTextField from '../../../components/core/KeyTextField.tsx';
 import { BoardSectionCard } from "@presentation/components/board/BoardSectionCard.tsx";
 import { IconIndexField } from "@presentation/components/icons/IconIndexField.tsx";
+import { emptyMasteryProse } from "@services/sdp/sdpPanelShape";
 
 type Subgroup = Sdp.PanelSubgroup;
 
@@ -35,6 +36,7 @@ const createBlankSubgroup = (index: number): Subgroup =>
     name: `New Subgroup #${index}`,
     iconIndex: -1,
     description: "",
+    prose: emptyMasteryProse(),
   };
 };
 
@@ -63,6 +65,21 @@ const SdpSubgroupsSection = ({
       ...selectedSubgroup,
       ...patch,
     }));
+  };
+
+  const updateProse = (patch: Partial<Sdp.MasteryProse>) =>
+  {
+    if (selectedSubgroup === null)
+    {
+      return;
+    }
+
+    updateSelected({
+      prose: {
+        ...selectedSubgroup.prose,
+        ...patch,
+      },
+    });
   };
 
   const handleAdd = () =>
@@ -232,6 +249,52 @@ const SdpSubgroupsSection = ({
                       rows={4}
                       value={selectedSubgroup.description}
                       onChange={(event) => updateSelected({ description: event.target.value })}
+                    />
+                  </Grid>
+                  <Grid size={12}>
+                    <Typography variant={"subtitle2"} sx={{ mt: 1 }}>
+                      Mastery prose
+                    </Typography>
+                    <Typography variant={"caption"} color={"text.secondary"}>
+                      What the player reads on the SDP screen before buying the strip. One template
+                      per act, not per tier. Tokens resolve against live data at draw time, so
+                      rebalancing a number never leaves the sentence wrong: {"{p.def}"} reads a
+                      parameter on the mastery state, {"{d.atk}"} reads one on the payload it
+                      applies, {"{s.radius}"} is derived, and {"{v.cdr}"} is a raw tag value. Leave
+                      an act blank to reuse a neighbouring one.
+                    </Typography>
+                  </Grid>
+                  <Grid size={12}>
+                    <TextField
+                      fullWidth
+                      size={"small"}
+                      label={"Beginning (tiers 1-3)"}
+                      multiline
+                      rows={2}
+                      value={selectedSubgroup.prose.beginning}
+                      onChange={(event) => updateProse({ beginning: event.target.value })}
+                    />
+                  </Grid>
+                  <Grid size={12}>
+                    <TextField
+                      fullWidth
+                      size={"small"}
+                      label={"Middle (tiers 4-9)"}
+                      multiline
+                      rows={2}
+                      value={selectedSubgroup.prose.middle}
+                      onChange={(event) => updateProse({ middle: event.target.value })}
+                    />
+                  </Grid>
+                  <Grid size={12}>
+                    <TextField
+                      fullWidth
+                      size={"small"}
+                      label={"End (tier 10 capstone)"}
+                      multiline
+                      rows={2}
+                      value={selectedSubgroup.prose.end}
+                      onChange={(event) => updateProse({ end: event.target.value })}
                     />
                   </Grid>
                 </Grid>
