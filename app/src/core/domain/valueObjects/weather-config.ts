@@ -182,6 +182,8 @@ type WeatherConfigRoot = {
   /** What each look sounds like, by look and then by strength. */
   presetSounds: Record<string, Record<string, WeatherKnobBag>>;
   variables: WeatherVariables;
+  /** The word standing in for weather where there is none, used everywhere weather is written. */
+  nothingLabel: string;
   sky: WeatherSky;
   climates: Record<string, WeatherClimate>;
 };
@@ -421,6 +423,7 @@ const hydrateWeatherConfig = (raw: unknown): WeatherConfigRoot =>
     });
 
   const rawVariables = isPlainObject(source[ 'variables' ]) ? source[ 'variables' ] : {};
+  const rawLabels = isPlainObject(source[ 'labels' ]) ? source[ 'labels' ] : {};
 
   const types: Record<string, WeatherSkyType> = {};
   const rawTypes = isPlainObject(rawSky[ 'types' ]) ? rawSky[ 'types' ] : {};
@@ -499,6 +502,7 @@ const hydrateWeatherConfig = (raw: unknown): WeatherConfigRoot =>
       weatherType: numberAt(rawVariables, 'weatherType', 0),
       weatherIntensity: numberAt(rawVariables, 'weatherIntensity', 0),
     },
+    nothingLabel: stringAt(rawLabels, 'nothing', ''),
     climates,
     sky: {
       types,
@@ -530,6 +534,33 @@ const hydrateWeatherConfig = (raw: unknown): WeatherConfigRoot =>
  * @param {WeatherConfigRoot} root The configuration as the editor holds it.
  * @returns {Record<string, unknown>} The whole file, ready to write.
  */
+/**
+ * The `labels` block, or nothing at all when the file never had one and nobody wrote a word.
+ *
+ * A save must not invent blocks. A config that has never needed a word for "no weather" should
+ * come back exactly as it went in, because the plugin has its own default and an empty block
+ * written into every file is noise that outlives whoever added it.
+ * @param {Record<string, unknown>} source The file as it was read.
+ * @param {string} nothingLabel The word for having no weather, or empty for none.
+ * @returns {Record<string, unknown>} A block to spread, empty when there is nothing to say.
+ */
+const labelsBlockFor = (
+  source: Record<string, unknown>,
+  nothingLabel: string
+): Record<string, unknown> =>
+{
+  const existing = isPlainObject(source[ 'labels' ]) ? source[ 'labels' ] : null;
+
+  if (existing === null && nothingLabel === '') return {};
+
+  return {
+    labels: {
+      ...(existing ?? {}),
+      nothing: nothingLabel,
+    },
+  };
+};
+
 const serializeWeatherConfig = (root: WeatherConfigRoot): Record<string, unknown> =>
 {
   const source = root.source;
@@ -710,6 +741,7 @@ const serializeWeatherConfig = (root: WeatherConfigRoot): Record<string, unknown
       weatherType: root.variables.weatherType,
       weatherIntensity: root.variables.weatherIntensity,
     },
+    ...labelsBlockFor(source, root.nothingLabel),
     climates,
     sky: {
       ...rawSky,

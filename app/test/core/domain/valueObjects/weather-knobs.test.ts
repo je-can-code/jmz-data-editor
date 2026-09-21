@@ -140,7 +140,9 @@ describe('weather-knobs', () =>
       // Arrange - the board edits these and nothing else, so a block appearing outside the list
       // is one an author would have to reach into the JSON for.
       const file = JSON.parse(readFileSync(CHEF_ADVENTURE_CONFIG, 'utf8'));
-      const topLevel = [ 'motions', 'presets', 'presetIds', 'intensityIds', 'variables', 'sky', 'climates' ];
+      const topLevel = [
+        'motions', 'presets', 'presetIds', 'intensityIds', 'variables', 'labels', 'sky', 'climates',
+      ];
       const skyLevel = [
         'types', 'seasons', 'months', 'voices', 'places',
         'intensityDrift', 'settleTo', 'forecastPhases', 'visibleDays',
@@ -210,6 +212,7 @@ describe('weather-knobs', () =>
       });
 
       sweep('variables', file.variables, [ 'enabled', 'weatherType', 'weatherIntensity' ]);
+      sweep('labels', file.labels, [ 'nothing' ]);
 
       // Assert.
       expect(stray)

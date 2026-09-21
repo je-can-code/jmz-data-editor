@@ -37,6 +37,12 @@ type WeatherConfiguration struct {
 	// Variables are the two game variables the current weather is mirrored into.
 	Variables json.RawMessage `json:"variables,omitempty"`
 
+	CommentLabels json.RawMessage `json:"_comment_labels,omitempty"`
+
+	// Labels are the words weather is written with, wherever it is written down - a forecast row
+	// or a text code in somebody's dialogue.
+	Labels json.RawMessage `json:"labels,omitempty"`
+
 	CommentSky json.RawMessage `json:"_comment_sky,omitempty"`
 
 	// Sky is everything J-Weather-Time owns: the conditions, the per-season graphs, the per-month

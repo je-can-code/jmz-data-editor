@@ -67,6 +67,16 @@ const WeatherWiringTab = () =>
     ));
   };
 
+  const setNothingLabel = (nothingLabel: string) =>
+  {
+    setConfig(previous => (
+      {
+        ...previous!,
+        nothingLabel,
+      }
+    ));
+  };
+
   const setPresetId = (look: string, id: number) =>
   {
     setConfig(previous => (
@@ -102,6 +112,27 @@ const WeatherWiringTab = () =>
 
   return (
     <Box sx={{ p: 2 }}>
+      <Paper variant={'outlined'} sx={{ p: 2, mb: 3 }}>
+        <Typography variant={'subtitle1'} gutterBottom>
+          How weather is worded
+        </Typography>
+        <Typography variant={'body2'} color={'text.secondary'} sx={{ mb: 2 }}>
+          Weather reads as its picture, its name, then its strength in brackets - and the
+          <code> \weather[]</code> text code puts exactly that into a line of dialogue. The only
+          word worth choosing is the one for having none, since it has to finish somebody&apos;s
+          sentence.
+        </Typography>
+
+        <TextField
+          size={'small'}
+          label={'When nothing is falling, call it'}
+          sx={{ minWidth: 280 }}
+          value={weatherConfig.nothingLabel}
+          helperText={'Reads as: "Looks like <this> out there."'}
+          onChange={event => setNothingLabel(event.target.value)}
+        />
+      </Paper>
+
       <Paper variant={'outlined'} sx={{ p: 2, mb: 3 }}>
         <Typography variant={'subtitle1'} gutterBottom>
           What events can see
