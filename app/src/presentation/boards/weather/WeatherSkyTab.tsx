@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Box,
   Chip,
+  IconButton,
   MenuItem,
   Paper,
   Stack,
@@ -13,6 +14,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import { Delete } from '@mui/icons-material';
 import { useWeatherConfig } from '@presentation/context/resources/weather.context.tsx';
 import WeatherConditionsPanel from '@boards/weather/WeatherConditionsPanel.tsx';
 
@@ -88,6 +90,96 @@ const WeatherSkyTab = () =>
     ));
   };
 
+  /**
+   * Lets a season have a condition it did not have before.
+   *
+   * The grid has to grow with it, in both directions. A permitted condition with no row of its own
+   * is a dead end the sky can arrive at and never leave, and a row that never names it means
+   * nothing can arrive there in the first place - the plugin reports both as faults on load. So a
+   * new condition arrives wired to everything at an even weight, which is a starting point to tune
+   * rather than an opinion about what the season should be.
+   */
+  const addCondition = (type: string) =>
+  {
+    setConfig(previous =>
+    {
+      const block = previous!.sky.seasons[ season ];
+      const allowedNow = [ ...block.allowed, type ];
+      const transitions: Record<string, Record<string, number>> = {};
+
+      // every existing row gains a way into the new condition.
+      Object.keys(block.transitions)
+        .forEach(from =>
+        {
+          transitions[ from ] = {
+            ...block.transitions[ from ],
+            [ type ]: 1,
+          };
+        });
+
+      // and the new condition gains a row reaching everything, itself included, so that it can
+      // both persist and move on.
+      const row: Record<string, number> = {};
+      allowedNow.forEach(target => { row[ target ] = 1; });
+      transitions[ type ] = row;
+
+      return {
+        ...previous!,
+        sky: {
+          ...previous!.sky,
+          seasons: {
+            ...previous!.sky.seasons,
+            [ season ]: {
+              ...block,
+              allowed: allowedNow,
+              transitions,
+            },
+          },
+        },
+      };
+    });
+  };
+
+  /**
+   * Takes a condition away from a season entirely.
+   *
+   * Its row goes and so does every reference to it, because a weight pointing at something the
+   * season forbids is filtered out at runtime and reported as a fault - it would read as a badly
+   * tuned graph rather than as a leftover.
+   */
+  const removeCondition = (type: string) =>
+  {
+    setConfig(previous =>
+    {
+      const block = previous!.sky.seasons[ season ];
+      const transitions: Record<string, Record<string, number>> = {};
+
+      Object.keys(block.transitions)
+        .filter(from => from !== type)
+        .forEach(from =>
+        {
+          const row = { ...block.transitions[ from ] };
+          delete row[ type ];
+          transitions[ from ] = row;
+        });
+
+      return {
+        ...previous!,
+        sky: {
+          ...previous!.sky,
+          seasons: {
+            ...previous!.sky.seasons,
+            [ season ]: {
+              ...block,
+              allowed: block.allowed.filter(entry => entry !== type),
+              transitions,
+            },
+          },
+        },
+      };
+    });
+  };
+
   const setLean = (month: string, type: string, multiplier: number) =>
   {
     setConfig(previous => (
@@ -137,6 +229,8 @@ const WeatherSkyTab = () =>
   };
 
   const monthsOfSeason = MONTHS.filter(month => month.season === season);
+  const addable = Object.keys(sky.types)
+    .filter(type => allowed.includes(type) === false);
 
   return (
     <Box sx={{ p: 2 }}>
@@ -164,13 +258,40 @@ const WeatherSkyTab = () =>
         <Stack spacing={2}>
           {allowed.map(condition => (
             <Paper key={condition} variant={'outlined'} sx={{ p: 2 }}>
-              <Typography variant={'subtitle2'} gutterBottom sx={{ textTransform: 'capitalize' }}>
-                {condition}
-              </Typography>
+              <Stack direction={'row'} alignItems={'center'} justifyContent={'space-between'}>
+                <Typography variant={'subtitle2'} gutterBottom sx={{ textTransform: 'capitalize' }}>
+                  {condition}
+                </Typography>
+                <IconButton
+                  size={'small'}
+                  aria-label={`Stop ${season} having ${condition}`}
+                  onClick={() => removeCondition(condition)}
+                >
+                  <Delete fontSize={'small'}/>
+                </IconButton>
+              </Stack>
               <WeatherConditionsPanel condition={condition}/>
             </Paper>
           ))}
         </Stack>
+
+        {addable.length > 0 && (
+          <TextField
+            select
+            size={'small'}
+            label={'Let this season also have'}
+            sx={{ mt: 2, minWidth: 260 }}
+            value={''}
+            helperText={'Arrives wired evenly to everything; tune it in the grid below.'}
+            onChange={event => addCondition(event.target.value)}
+          >
+            {addable.map(type => (
+              <MenuItem key={type} value={type}>
+                {type}
+              </MenuItem>
+            ))}
+          </TextField>
+        )}
       </Paper>
 
       <Paper variant={'outlined'} sx={{ p: 2, mb: 3 }}>

@@ -65,13 +65,13 @@ describe('weather-knobs', () =>
     });
   });
 
-  describe('against the real configuration', () =>
+  // reported as a skip rather than a silent pass when the sibling repo is not checked out, which
+  // is the same thing the Go unmarshal test does with `t.Skip`.
+  describe.skipIf(existsSync(CHEF_ADVENTURE_CONFIG) === false)('against the real configuration', () =>
   {
     it('has a control for every motion knob in use', () =>
     {
-      // Arrange - optional, like the Go unmarshal test beside it.
-      if (existsSync(CHEF_ADVENTURE_CONFIG) === false) return;
-
+      // Arrange.
       const file = JSON.parse(readFileSync(CHEF_ADVENTURE_CONFIG, 'utf8'));
       const known = new Set(MOTION_KNOBS.map(knob => knob.key));
 
@@ -102,8 +102,6 @@ describe('weather-knobs', () =>
     it('has a control for every layer knob in use', () =>
     {
       // Arrange.
-      if (existsSync(CHEF_ADVENTURE_CONFIG) === false) return;
-
       const file = JSON.parse(readFileSync(CHEF_ADVENTURE_CONFIG, 'utf8'));
       const known = new Set([ ...LAYER_KNOBS, ...STAGE_KNOBS ].map(knob => knob.key));
 
@@ -141,8 +139,6 @@ describe('weather-knobs', () =>
     {
       // Arrange - the board edits these and nothing else, so a block appearing outside the list
       // is one an author would have to reach into the JSON for.
-      if (existsSync(CHEF_ADVENTURE_CONFIG) === false) return;
-
       const file = JSON.parse(readFileSync(CHEF_ADVENTURE_CONFIG, 'utf8'));
       const topLevel = [ 'motions', 'presets', 'presetIds', 'intensityIds', 'variables', 'sky', 'climates' ];
       const skyLevel = [
@@ -165,11 +161,66 @@ describe('weather-knobs', () =>
         .toEqual([]);
     });
 
+    it('has somewhere for every field inside the nested blocks', () =>
+    {
+      // Arrange - the checks above guard the blocks; this one guards what is inside them, which
+      // is where "never reach into the JSON to modify a field" is actually won or lost. Each
+      // entry is a block and the fields the board renders a control for.
+      const file = JSON.parse(readFileSync(CHEF_ADVENTURE_CONFIG, 'utf8'));
+      const stray: string[] = [];
+      let checked = 0;
+
+      /** Records any field of `block` the board has no control for. */
+      const sweep = (where: string, block: Record<string, unknown>, editable: string[]) =>
+      {
+        checked += 1;
+        Object.keys(block)
+          .filter(key => isNote(key) === false)
+          .filter(key => editable.includes(key) === false)
+          .forEach(key => stray.push(`${where}.${key}`));
+      };
+
+      // Act.
+      Object.keys(file.sky.seasons)
+        .filter(name => isNote(name) === false)
+        .forEach(name => sweep(`seasons.${name}`, file.sky.seasons[ name ], [ 'allowed', 'transitions' ]));
+
+      Object.keys(file.sky.types)
+        .filter(name => isNote(name) === false)
+        .forEach(name =>
+        {
+          const type = file.sky.types[ name ];
+          sweep(`types.${name}`, type, [ 'preset', 'intensities', 'faces' ]);
+          (type.faces ?? []).forEach((face: Record<string, unknown>, index: number) =>
+          {
+            sweep(`types.${name}.faces[${String(index)}]`, face, [ 'phases', 'seasons', 'preset' ]);
+          });
+        });
+
+      Object.keys(file.climates)
+        .filter(name => isNote(name) === false)
+        .forEach(name =>
+        {
+          sweep(`climates.${name}`, file.climates[ name ], [ 'byType', 'byIntensity', 'default' ]);
+        });
+
+      file.sky.places.forEach((place: Record<string, unknown>, index: number) =>
+      {
+        sweep(`places[${String(index)}]`, place, [ 'name', 'mapId' ]);
+      });
+
+      sweep('variables', file.variables, [ 'enabled', 'weatherType', 'weatherIntensity' ]);
+
+      // Assert.
+      expect(stray)
+        .toEqual([]);
+      expect(checked)
+        .toBeGreaterThan(20);
+    });
+
     it('has somewhere for everything a look carries', () =>
     {
       // Arrange.
-      if (existsSync(CHEF_ADVENTURE_CONFIG) === false) return;
-
       const file = JSON.parse(readFileSync(CHEF_ADVENTURE_CONFIG, 'utf8'));
       const editable = [ 'description', 'iconIndex', 'stops', 'sounds' ];
 

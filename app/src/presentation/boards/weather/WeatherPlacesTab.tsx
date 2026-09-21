@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Box,
   Button,
@@ -40,6 +41,11 @@ const WeatherPlacesTab = () =>
     setConfig,
   } = useWeatherConfig();
 
+  // which question each climate has been switched to. A climate that has been emptied still has
+  // to stay on the table the author chose, and the data cannot say which that is once it is
+  // empty - so the choice is held here until something is typed into it.
+  const [ keying, rememberKeying ] = useState<Record<string, 'byType' | 'byIntensity'>>({});
+
   if (weatherConfig === null)
   {
     return null;
@@ -48,6 +54,20 @@ const WeatherPlacesTab = () =>
   const { climates } = weatherConfig;
   const { places } = weatherConfig.sky;
   const conditions = Object.keys(weatherConfig.sky.types);
+
+  /**
+   * Which question a climate is answering: what it was switched to, or failing that what the
+   * file already says. An authored `byIntensity` table is the only evidence in the data, since a
+   * climate with neither is keyed by condition by convention.
+   */
+  const keyedBy = (climate: string): 'byType' | 'byIntensity' =>
+  {
+    const remembered = keying[ climate ];
+
+    if (remembered !== undefined) return remembered;
+
+    return Object.keys(climates[ climate ].byIntensity).length > 0 ? 'byIntensity' : 'byType';
+  };
 
   const setByType = (climate: string, condition: string, strength: string) =>
   {
@@ -62,6 +82,61 @@ const WeatherPlacesTab = () =>
               ...previous!.climates[ climate ].byType,
               [ condition ]: strength,
             },
+          },
+        },
+      }
+    ));
+  };
+
+  /**
+   * Sets one row of the strength-keyed table, for a climate that answers how hard it is coming
+   * down rather than what it is doing.
+   */
+  const setByIntensity = (climate: string, strength: string, becomes: string) =>
+  {
+    setConfig(previous => (
+      {
+        ...previous!,
+        climates: {
+          ...previous!.climates,
+          [ climate ]: {
+            ...previous!.climates[ climate ],
+            byIntensity: {
+              ...previous!.climates[ climate ].byIntensity,
+              [ strength ]: becomes,
+            },
+          },
+        },
+      }
+    ));
+  };
+
+  /**
+   * Switches which question a climate answers, emptying the table it is no longer using.
+   *
+   * **A climate keys on one or the other, never both** - the plugin reports a climate declaring
+   * both as a fault rather than picking one, so the two tables cannot be allowed to coexist. The
+   * discarded table is not kept in the background either: an author who switched away and saved
+   * would otherwise be carrying invisible entries that come back the moment they switch return.
+   */
+  const setKeying = (climate: string, answers: 'byType' | 'byIntensity') =>
+  {
+    rememberKeying(previous => (
+      {
+        ...previous,
+        [ climate ]: answers,
+      }
+    ));
+
+    setConfig(previous => (
+      {
+        ...previous!,
+        climates: {
+          ...previous!.climates,
+          [ climate ]: {
+            ...previous!.climates[ climate ],
+            byType: answers === 'byType' ? previous!.climates[ climate ].byType : {},
+            byIntensity: answers === 'byIntensity' ? previous!.climates[ climate ].byIntensity : {},
           },
         },
       }
@@ -138,8 +213,25 @@ const WeatherPlacesTab = () =>
               {name}
             </Typography>
             <Typography variant={'body2'} color={'text.secondary'} sx={{ mb: 2 }}>
-              What a place with this climate does under each kind of sky.
+              What a place with this climate does under each kind of sky. A climate answers one
+              question or the other, so choosing here empties the table it stops using.
             </Typography>
+
+            <TextField
+              select
+              size={'small'}
+              label={'Answers'}
+              sx={{ mb: 2, minWidth: 260 }}
+              value={keyedBy(name)}
+              onChange={event => setKeying(name, event.target.value as 'byType' | 'byIntensity')}
+            >
+              <MenuItem value={'byType'}>
+                what the sky is doing
+              </MenuItem>
+              <MenuItem value={'byIntensity'}>
+                how hard it is coming down
+              </MenuItem>
+            </TextField>
 
             <Table size={'small'}>
               <TableHead>
@@ -149,31 +241,57 @@ const WeatherPlacesTab = () =>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {conditions.map(condition => (
-                  <TableRow key={condition}>
-                    <TableCell>
-                      {condition}
-                    </TableCell>
-                    <TableCell>
-                      <TextField
-                        select
-                        size={'small'}
-                        sx={{ minWidth: 160 }}
-                        value={climates[ name ].byType[ condition ] ?? ''}
-                        onChange={event => setByType(name, condition, event.target.value)}
-                      >
-                        <MenuItem value={''}>
-                          (follows the sky)
-                        </MenuItem>
-                        {STRENGTHS.map(strength => (
-                          <MenuItem key={strength} value={strength}>
-                            {strength}
+                {keyedBy(name) === 'byIntensity'
+                  ? STRENGTHS.map(strength => (
+                    <TableRow key={strength}>
+                      <TableCell>
+                        {strength}
+                      </TableCell>
+                      <TableCell>
+                        <TextField
+                          select
+                          size={'small'}
+                          sx={{ minWidth: 160 }}
+                          value={climates[ name ].byIntensity[ strength ] ?? ''}
+                          onChange={event => setByIntensity(name, strength, event.target.value)}
+                        >
+                          <MenuItem value={''}>
+                            (follows the sky)
                           </MenuItem>
-                        ))}
-                      </TextField>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                          {STRENGTHS.map(entry => (
+                            <MenuItem key={entry} value={entry}>
+                              {entry}
+                            </MenuItem>
+                          ))}
+                        </TextField>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                  : conditions.map(condition => (
+                    <TableRow key={condition}>
+                      <TableCell>
+                        {condition}
+                      </TableCell>
+                      <TableCell>
+                        <TextField
+                          select
+                          size={'small'}
+                          sx={{ minWidth: 160 }}
+                          value={climates[ name ].byType[ condition ] ?? ''}
+                          onChange={event => setByType(name, condition, event.target.value)}
+                        >
+                          <MenuItem value={''}>
+                            (follows the sky)
+                          </MenuItem>
+                          {STRENGTHS.map(strength => (
+                            <MenuItem key={strength} value={strength}>
+                              {strength}
+                            </MenuItem>
+                          ))}
+                        </TextField>
+                      </TableCell>
+                    </TableRow>
+                  ))}
                 <TableRow>
                   <TableCell sx={{ fontStyle: 'italic' }}>
                     anything else
