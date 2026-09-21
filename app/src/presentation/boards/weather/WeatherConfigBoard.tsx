@@ -1,5 +1,6 @@
 import { type SyntheticEvent, useState } from 'react';
-import { Box, Tab, Tabs } from '@mui/material';
+import { Alert, Box, Snackbar, Tab, Tabs } from '@mui/material';
+import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
 import { useWeatherConfig } from '@presentation/context/resources/weather.context.tsx';
 import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import WeatherMotionsTab from '@boards/weather/WeatherMotionsTab.tsx';
@@ -43,12 +44,29 @@ const WeatherConfigBoard = () =>
 
   const [ activeTab, setActiveTab ] = useState<WeatherConfigTab>('sky');
   const [ isSaving, setIsSaving ] = useState(false);
+  const [ snackOpen, setSnackOpen ] = useState(false);
+  const [ snackMessage, setSnackMessage ] = useState('');
+  const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Success);
 
   const handleTabChange = (_event: SyntheticEvent, value: WeatherConfigTab) =>
   {
     setActiveTab(value);
   };
 
+  const handleSnackClose = () =>
+  {
+    setSnackOpen(false);
+  };
+
+  /**
+   * Saves the whole config and says so either way.
+   *
+   * **Silence is the wrong answer to a save.** A write that worked and a write that never happened
+   * look identical from the toolbar, so somebody who has just spent an hour typing weather lines
+   * has no way to tell which one they got. Reporting the failure matters more than reporting the
+   * success: the server refuses a payload it cannot account for, and that refusal has to arrive
+   * somewhere a person is looking rather than only in the console.
+   */
   const handleSave = async () =>
   {
     if (weatherConfig === null)
@@ -60,10 +78,19 @@ const WeatherConfigBoard = () =>
     try
     {
       await save(weatherConfig);
+      setSnackSeverity(MuiSnackbarSeverity.Success);
+      setSnackMessage('Weather configuration saved.');
+    }
+    catch (error)
+    {
+      const message = error instanceof Error ? error.message : 'Unknown error.';
+      setSnackSeverity(MuiSnackbarSeverity.Error);
+      setSnackMessage(`Could not save the weather configuration: ${message}`);
     }
     finally
     {
       setIsSaving(false);
+      setSnackOpen(true);
     }
   };
 
@@ -119,6 +146,21 @@ const WeatherConfigBoard = () =>
         {activeTab === 'places' && <WeatherPlacesTab/>}
         {activeTab === 'wiring' && <WeatherWiringTab/>}
       </Box>
+
+      <Snackbar
+        open={snackOpen}
+        autoHideDuration={snackSeverity === MuiSnackbarSeverity.Error ? null : 2500}
+        onClose={handleSnackClose}
+      >
+        <Alert
+          onClose={handleSnackClose}
+          severity={snackSeverity}
+          variant={MuiSnackbarVariant.Filled}
+          sx={{ width: '100%' }}
+        >
+          {snackMessage}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };
