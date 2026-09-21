@@ -4,18 +4,20 @@
  * `rmmz-plugins/src/plugins/weather/core/core/WeatherPresets.js` for the looks themselves and
  * `.../weather/ext/time/core/SkyStates.js` for the sky that chooses between them.
  *
- * **The original file is carried through every edit.** Hydration keeps the parsed root on
- * {@link WeatherConfigRoot.source}, and serialization starts from a copy of it and lays the edited
- * sections back on top. That is not caution for its own sake: the file interleaves `_comment_*`
- * blocks that are the only documentation an author has while reading it by hand, presets carry
- * their own per-stop notes, and the motions hold a couple of hundred hand-tuned numbers this
- * editor deliberately does not model. A serializer that rebuilt the root from a typed model would
- * quietly delete every one of them on the first save.
+ * **Everything in the file is reachable, and nothing in it can be lost.** Those are two separate
+ * promises and they are kept two different ways.
  *
- * **What this models is what J-Weather-Time added**: the sky, its per-month bias, the climates,
- * the forecast's destinations and voices, and the icon each look is drawn with in the forecast.
- * The motions and the layer stacks inside each preset are passed through untouched — those were
- * tuned by eye against a running game, which is a better tool for them than a form.
+ * Reachable: every block has somewhere in this shape to live, because an author should never have
+ * to open the JSON to change a value. That includes the particle knobs — a look that turns out to
+ * have too much floating about is a thing to fix in the editor, not in a text file.
+ *
+ * Not lost: hydration keeps the parsed root on {@link WeatherConfigRoot.source} and serialization
+ * lays the edits back over a copy of it. The file interleaves `_comment_*` blocks that are the
+ * only documentation an author has while reading it by hand, and motions and layers carry notes
+ * of their own. A serializer that rebuilt the root from a typed model would delete every one of
+ * them on the first save. For the same reason the knobs themselves are carried as bags rather
+ * than modelled field by field: the plugin reads whatever a motion declares, so a typed shape
+ * would drop a knob the day one is added. What the knobs *mean* lives in `weather-knobs.ts`.
  */
 
 /**
@@ -145,6 +147,23 @@ type WeatherSky = {
 };
 
 /**
+ * One bag of knobs — a motion's physics, or one layer of a look.
+ *
+ * **Carried faithfully rather than modelled.** The plugin reads whatever a motion happens to
+ * declare, so a typed shape here would drop a knob the day one is added, and would drop the
+ * per-motion `_comment` notes today. The editor knows what the knobs *mean* through
+ * `weather-knobs.ts`; what they *are* is whatever the file says.
+ */
+type WeatherKnobBag = Record<string, unknown>;
+
+/** The two game variables the current weather is mirrored into, for events to branch on. */
+type WeatherVariables = {
+  enabled: boolean;
+  weatherType: number;
+  weatherIntensity: number;
+};
+
+/**
  * The editor's whole view of the weather configuration.
  */
 type WeatherConfigRoot = {
@@ -156,6 +175,13 @@ type WeatherConfigRoot = {
   presetIcons: Record<string, number>;
   /** What each look is, in the author's own words. */
   presetDescriptions: Record<string, string>;
+  /** The physics each look is drawn with, by name. */
+  motions: Record<string, WeatherKnobBag>;
+  /** The layers each look draws, by look and then by strength. */
+  presetStops: Record<string, Record<string, WeatherKnobBag[]>>;
+  /** What each look sounds like, by look and then by strength. */
+  presetSounds: Record<string, Record<string, WeatherKnobBag>>;
+  variables: WeatherVariables;
   sky: WeatherSky;
   climates: Record<string, WeatherClimate>;
 };
@@ -336,6 +362,8 @@ const hydrateWeatherConfig = (raw: unknown): WeatherConfigRoot =>
 
   const presetIcons: Record<string, number> = {};
   const presetDescriptions: Record<string, string> = {};
+  const presetStops: Record<string, Record<string, WeatherKnobBag[]>> = {};
+  const presetSounds: Record<string, Record<string, WeatherKnobBag>> = {};
   Object.keys(rawPresets)
     .filter(isDataKey)
     .forEach(name =>
@@ -346,7 +374,53 @@ const hydrateWeatherConfig = (raw: unknown): WeatherConfigRoot =>
 
       presetIcons[ name ] = numberAt(preset, 'iconIndex', 0);
       presetDescriptions[ name ] = stringAt(preset, 'description', '');
+
+      // the layers are copied rather than modelled, so a knob this editor has no control for -
+      // or one added to the plugin tomorrow - survives being saved.
+      const stops: Record<string, WeatherKnobBag[]> = {};
+      const rawStops = isPlainObject(preset[ 'stops' ]) ? preset[ 'stops' ] : {};
+      Object.keys(rawStops)
+        .filter(isDataKey)
+        .forEach(strength =>
+        {
+          const layers = rawStops[ strength ];
+
+          if (Array.isArray(layers) === false) return;
+
+          stops[ strength ] = (layers as unknown[]).filter(isPlainObject)
+            .map(layer => ({ ...layer }));
+        });
+      presetStops[ name ] = stops;
+
+      const sounds: Record<string, WeatherKnobBag> = {};
+      const rawSounds = isPlainObject(preset[ 'sounds' ]) ? preset[ 'sounds' ] : {};
+      Object.keys(rawSounds)
+        .filter(isDataKey)
+        .forEach(strength =>
+        {
+          const sound = rawSounds[ strength ];
+
+          if (isPlainObject(sound) === false) return;
+
+          sounds[ strength ] = { ...sound };
+        });
+      presetSounds[ name ] = sounds;
     });
+
+  const motions: Record<string, WeatherKnobBag> = {};
+  const rawMotions = isPlainObject(source[ 'motions' ]) ? source[ 'motions' ] : {};
+  Object.keys(rawMotions)
+    .filter(isDataKey)
+    .forEach(name =>
+    {
+      const motion = rawMotions[ name ];
+
+      if (isPlainObject(motion) === false) return;
+
+      motions[ name ] = { ...motion };
+    });
+
+  const rawVariables = isPlainObject(source[ 'variables' ]) ? source[ 'variables' ] : {};
 
   const types: Record<string, WeatherSkyType> = {};
   const rawTypes = isPlainObject(rawSky[ 'types' ]) ? rawSky[ 'types' ] : {};
@@ -417,6 +491,14 @@ const hydrateWeatherConfig = (raw: unknown): WeatherConfigRoot =>
     intensityIds: numericMap(source[ 'intensityIds' ]),
     presetIcons,
     presetDescriptions,
+    presetStops,
+    presetSounds,
+    motions,
+    variables: {
+      enabled: rawVariables[ 'enabled' ] !== false,
+      weatherType: numberAt(rawVariables, 'weatherType', 0),
+      weatherIntensity: numberAt(rawVariables, 'weatherIntensity', 0),
+    },
     climates,
     sky: {
       types,
@@ -471,7 +553,58 @@ const serializeWeatherConfig = (root: WeatherConfigRoot): Record<string, unknown
       if (icon > 0) merged[ 'iconIndex' ] = icon;
       else delete merged[ 'iconIndex' ];
 
+      // the stops are laid over the originals key by key, so a per-strength note living beside
+      // the layers keeps both its value and its place.
+      const originalStops = isPlainObject(original[ 'stops' ]) ? original[ 'stops' ] : {};
+      const stops: Record<string, unknown> = { ...originalStops };
+      const editedStops = root.presetStops[ name ] ?? {};
+      Object.keys(editedStops)
+        .forEach(strength =>
+        {
+          stops[ strength ] = editedStops[ strength ];
+        });
+
+      // a strength whose layers were all removed goes, rather than lingering as an empty rung
+      // the plugin would resolve to nothing.
+      Object.keys(stops)
+        .filter(isDataKey)
+        .filter(strength => editedStops[ strength ] === undefined)
+        .forEach(strength =>
+        {
+          delete stops[ strength ];
+        });
+
+      merged[ 'stops' ] = stops;
+
+      const originalSounds = isPlainObject(original[ 'sounds' ]) ? original[ 'sounds' ] : {};
+      const sounds: Record<string, unknown> = { ...originalSounds };
+      const editedSounds = root.presetSounds[ name ] ?? {};
+      Object.keys(editedSounds)
+        .forEach(strength =>
+        {
+          sounds[ strength ] = editedSounds[ strength ];
+        });
+      Object.keys(sounds)
+        .filter(isDataKey)
+        .filter(strength => editedSounds[ strength ] === undefined)
+        .forEach(strength =>
+        {
+          delete sounds[ strength ];
+        });
+
+      // most looks are silent and say so by having nothing to say, so an empty block is left off
+      // rather than written as an empty object.
+      if (Object.keys(sounds).length > 0) merged[ 'sounds' ] = sounds;
+      else delete merged[ 'sounds' ];
+
       presets[ name ] = merged;
+    });
+
+  const motions: Record<string, unknown> = { ...(isPlainObject(source[ 'motions' ]) ? source[ 'motions' ] : {}) };
+  Object.keys(root.motions)
+    .forEach(name =>
+    {
+      motions[ name ] = root.motions[ name ];
     });
 
   const rawTypes = isPlainObject(rawSky[ 'types' ]) ? rawSky[ 'types' ] : {};
@@ -567,9 +700,16 @@ const serializeWeatherConfig = (root: WeatherConfigRoot): Record<string, unknown
 
   return {
     ...source,
+    motions,
     presets,
     presetIds: root.presetIds,
     intensityIds: root.intensityIds,
+    variables: {
+      ...(isPlainObject(source[ 'variables' ]) ? source[ 'variables' ] : {}),
+      enabled: root.variables.enabled,
+      weatherType: root.variables.weatherType,
+      weatherIntensity: root.variables.weatherIntensity,
+    },
     climates,
     sky: {
       ...rawSky,
@@ -592,6 +732,7 @@ export {
   type WeatherClimate,
   type WeatherConfigRoot,
   type WeatherFace,
+  type WeatherKnobBag,
   type WeatherMonthLean,
   type WeatherPlace,
   type WeatherSeason,
@@ -599,4 +740,5 @@ export {
   type WeatherSkyType,
   type WeatherVoiceEntry,
   type WeatherVoiceLine,
+  type WeatherVariables,
 };

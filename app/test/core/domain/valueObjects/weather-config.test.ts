@@ -302,6 +302,96 @@ describe('weather-config', () =>
         .toBe(JSON.stringify(file));
     });
 
+    it('writes an edited particle knob', () =>
+    {
+      // Arrange - the reason the motions are editable at all: after actually playing, a look
+      // turns out to have too much floating about and the fix belongs on a screen.
+      const root = hydrateWeatherConfig(buildFile());
+      root.motions[ 'fall' ][ 'speedY' ] = 2;
+
+      // Act.
+      const written = serializeWeatherConfig(root) as { motions: Record<string, Record<string, unknown>>; };
+
+      // Assert - and the knobs beside it survive, so this is an edit rather than a replacement.
+      expect(written.motions[ 'fall' ][ 'speedY' ])
+        .toBe(2);
+      expect(written.motions[ 'fall' ][ 'jitterY' ])
+        .toBe(3);
+    });
+
+    it('keeps a motion authoring note beside the knobs it explains', () =>
+    {
+      // Arrange - the note lives inside the motions block rather than on one motion, so a
+      // rebuild that only knew about motions would drop it.
+      const root = hydrateWeatherConfig(buildFile());
+      root.motions[ 'fall' ][ 'speedY' ] = 2;
+
+      // Act.
+      const written = serializeWeatherConfig(root) as { motions: Record<string, unknown>; };
+
+      // Assert.
+      expect(written.motions[ '_comment_motions' ])
+        .toEqual([ 'a note the author left themselves' ]);
+    });
+
+    it('writes an edited layer', () =>
+    {
+      // Arrange - halving how much of something there is, which is the knob that prompted all of
+      // this being editable.
+      const root = hydrateWeatherConfig(buildFile());
+      root.presetStops[ 'rain' ][ 'light' ][ 0 ][ 'density' ] = 75;
+
+      // Act.
+      const written = serializeWeatherConfig(root) as { presets: Record<string, Record<string, unknown>>; };
+      const stops = written.presets[ 'rain' ][ 'stops' ] as Record<string, Record<string, unknown>[]>;
+
+      // Assert - the rest of the layer is intact, so this replaced a value rather than the layer.
+      expect(stops[ 'light' ][ 0 ])
+        .toEqual({ motion: 'fall', asset: 'Rain_01A', density: 75 });
+    });
+
+    it('drops a strength whose every layer was removed', () =>
+    {
+      // Arrange - an empty rung would resolve to nothing at all, which is different from the
+      // rung not existing and being clamped to the nearest one that does.
+      const root = hydrateWeatherConfig(buildFile());
+      delete root.presetStops[ 'rain' ][ 'light' ];
+
+      // Act.
+      const written = serializeWeatherConfig(root) as { presets: Record<string, Record<string, unknown>>; };
+
+      // Assert.
+      expect(written.presets[ 'rain' ][ 'stops' ])
+        .toEqual({});
+    });
+
+    it('leaves a silent look silent rather than writing an empty sound block', () =>
+    {
+      // Arrange - most looks say nothing about sound by having nothing to say.
+      const root = hydrateWeatherConfig(buildFile());
+
+      // Act.
+      const written = serializeWeatherConfig(root) as { presets: Record<string, Record<string, unknown>>; };
+
+      // Assert.
+      expect('sounds' in written.presets[ 'rain' ])
+        .toBe(false);
+    });
+
+    it('writes the variables events read the weather from', () =>
+    {
+      // Arrange.
+      const root = hydrateWeatherConfig(buildFile());
+      root.variables.weatherType = 140;
+
+      // Act.
+      const written = serializeWeatherConfig(root) as { variables: Record<string, unknown>; };
+
+      // Assert.
+      expect(written.variables)
+        .toEqual({ enabled: true, weatherType: 140, weatherIntensity: 132 });
+    });
+
     it('writes only the climate table that was authored', () =>
     {
       // Arrange - a climate carrying both tables is reported as ambiguous by the plugin's own

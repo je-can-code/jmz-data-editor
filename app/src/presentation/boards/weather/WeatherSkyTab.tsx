@@ -14,6 +14,7 @@ import {
   Typography,
 } from '@mui/material';
 import { useWeatherConfig } from '@presentation/context/resources/weather.context.tsx';
+import WeatherConditionsPanel from '@boards/weather/WeatherConditionsPanel.tsx';
 
 /** The months of the year, in the order the calendar runs them. */
 const MONTHS = [
@@ -150,6 +151,27 @@ const WeatherSkyTab = () =>
           />
         ))}
       </Stack>
+
+      <Paper variant={'outlined'} sx={{ p: 2, mb: 3 }}>
+        <Typography variant={'subtitle1'} gutterBottom>
+          What this season can be
+        </Typography>
+        <Typography variant={'body2'} color={'text.secondary'} sx={{ mb: 2 }}>
+          Each condition below, as this season draws it. A condition missing from a season simply
+          never happens there, which is why it never snows in summer.
+        </Typography>
+
+        <Stack spacing={2}>
+          {allowed.map(condition => (
+            <Paper key={condition} variant={'outlined'} sx={{ p: 2 }}>
+              <Typography variant={'subtitle2'} gutterBottom sx={{ textTransform: 'capitalize' }}>
+                {condition}
+              </Typography>
+              <WeatherConditionsPanel condition={condition}/>
+            </Paper>
+          ))}
+        </Stack>
+      </Paper>
 
       <Paper variant={'outlined'} sx={{ p: 2, mb: 3 }}>
         <Typography variant={'subtitle1'} gutterBottom>
