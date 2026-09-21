@@ -19,8 +19,15 @@ import type { WeatherVoiceLine } from '@core/domain/valueObjects/weather-config.
 /** The strengths a look can be written for, plus the catch-all that covers the ones it is not. */
 const STRENGTHS = [ 'any', 'light', 'moderate', 'heavy' ];
 
-/** The key holding lines for standing somewhere with no weather at all. */
-const SHELTERED = 'none';
+/**
+ * The key holding lines for standing somewhere nothing is falling.
+ *
+ * **Not the same as being indoors.** A sheltered place can absolutely have weather - the Forlorn
+ * Basin is a roofed cave full of drifting motes, and it wants the motes lines rather than these.
+ * This case is the narrower one of nothing happening at all: a map that opted out, or a roofed one
+ * that never authored a look.
+ */
+const NOTHING = 'none';
 
 /**
  * Editor for what somebody travelling with you says about the weather.
@@ -40,7 +47,7 @@ const WeatherVoicesTab = () =>
     setConfig,
   } = useWeatherConfig();
   const { data: actors } = useActors();
-  const [ selected, setSelected ] = useState<string>(SHELTERED);
+  const [ selected, setSelected ] = useState<string>(NOTHING);
 
   if (weatherConfig === null)
   {
@@ -49,7 +56,7 @@ const WeatherVoicesTab = () =>
 
   // every look that can be drawn, plus the sheltered case, which is not a look but is somewhere a
   // player stands constantly.
-  const looks = [ SHELTERED, ...Object.keys(weatherConfig.presetIds) ];
+  const looks = [ NOTHING, ...Object.keys(weatherConfig.presetIds) ];
   const voices = weatherConfig.sky.voices;
   const written = voices[ selected ] ?? {};
 
@@ -132,7 +139,7 @@ const WeatherVoicesTab = () =>
         {looks.map(look => (
           <Chip
             key={look}
-            label={`${look === SHELTERED ? 'Sheltered' : look} (${String(countFor(look))})`}
+            label={`${look === NOTHING ? 'Nothing falling' : look} (${String(countFor(look))})`}
             color={look === selected ? 'primary' : 'default'}
             variant={countFor(look) > 0 ? 'filled' : 'outlined'}
             onClick={() => setSelected(look)}
