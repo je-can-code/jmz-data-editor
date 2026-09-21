@@ -22,4 +22,8 @@ type RpgState struct {
 	RemoveByRestriction bool   `json:"removeByRestriction"`
 	RemoveByWalking     bool   `json:"removeByWalking"`
 	StepsToRemove       int    `json:"stepsToRemove"`
+
+	// MessageType decides who the message1-4 lines are shown for: nobody, the actor, the enemy, or
+	// always. Declared last because that is where MZ writes it, and struct order is marshal order.
+	MessageType int `json:"messageType"`
 }
