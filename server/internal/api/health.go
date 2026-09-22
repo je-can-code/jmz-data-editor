@@ -31,4 +31,3 @@ func Health(responseWriter http.ResponseWriter, httpRequest *http.Request) {
 		http.StatusOK,
 	)
 }
-

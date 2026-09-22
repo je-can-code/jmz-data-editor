@@ -8,6 +8,7 @@ enum ConfigFilenames
   Level = 'config.level.json',
   Difficulty = 'config.difficulty.json',
   Motion = 'config.motion.json',
+  Weather = 'config.weather.json',
   System = 'System.json',
 }
 

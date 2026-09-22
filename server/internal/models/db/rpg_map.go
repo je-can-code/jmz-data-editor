@@ -28,6 +28,12 @@ type RpgMap struct {
 	SpecifyBattleback bool              `json:"specifyBattleback"`
 	TilesetId         int               `json:"tilesetId"`
 	Width             int               `json:"width"`
+
+	// Meta is the note tags MZ has already parsed out into an object, which it normally builds at
+	// load time and keeps in memory - but a project saved from certain editor versions persists it
+	// to disk as well. Carried verbatim and never interpreted: `note` is the authority, and a
+	// derived copy that disagreed with it would be worse than not having one.
+	Meta json.RawMessage `json:"meta,omitempty"`
 }
 
 // RpgMapEncounter is one random encounter row on the map properties.
@@ -45,6 +51,10 @@ type RpgMapEvent struct {
 	Pages []RpgMapEventPage `json:"pages"`
 	X     int               `json:"x"`
 	Y     int               `json:"y"`
+
+	// Meta is this event's parsed note tags, persisted alongside the note for the same reason the
+	// map's own copy is. See RpgMap.Meta.
+	Meta json.RawMessage `json:"meta,omitempty"`
 }
 
 // RpgMapEventPage is one event page (graphic, conditions, interpreter list, move route).

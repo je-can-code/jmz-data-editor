@@ -81,6 +81,9 @@ func main() {
 
 	mux.HandleFunc("GET /api/config/motion", api.Load[plugins.MotionConfiguration]("data/config.motion.json"))
 	mux.HandleFunc("POST /api/config/motion", api.Save[plugins.MotionConfiguration]("data/config.motion.json"))
+
+	mux.HandleFunc("GET /api/config/weather", api.Load[plugins.WeatherConfiguration]("data/config.weather.json"))
+	mux.HandleFunc("POST /api/config/weather", api.Save[plugins.WeatherConfiguration]("data/config.weather.json"))
 	//endregion plugin config endpoints
 
 	fmt.Println("Server running on http://localhost:8080")

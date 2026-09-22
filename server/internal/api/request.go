@@ -41,8 +41,15 @@ func (request *RestRequestSave[T]) ToRestRequestSave(responseWriter http.Respons
 		return errors.New(pathErr.Error())
 	}
 
+	// strict for the same reason the file read is: whatever this decodes into is what gets written
+	// back to disk, so a field the model does not declare would be dropped here and then absent
+	// from the saved file. A 400 naming the field is a worse afternoon than a silent save, and a
+	// far better week.
 	var updatedData T
-	decodeErr := json.NewDecoder(httpRequest.Body).Decode(&updatedData)
+	decoder := json.NewDecoder(httpRequest.Body)
+	decoder.DisallowUnknownFields()
+
+	decodeErr := decoder.Decode(&updatedData)
 	if decodeErr != nil {
 		http.Error(responseWriter, decodeErr.Error(), http.StatusBadRequest)
 		return errors.New(decodeErr.Error())
