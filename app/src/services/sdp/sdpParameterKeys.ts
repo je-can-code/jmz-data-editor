@@ -1,3 +1,5 @@
+import { knownPluginParams } from "../../mappers/ParameterIdMapper.ts";
+
 /**
  * Legacy SDP panel long-param id → registry key.
  * Keep in sync with {@link LEGACY_LONG_PARAM_TO_KEY} in rmmz-plugins migrate script.
@@ -53,23 +55,11 @@ export const LEGACY_LONG_PARAM_TO_KEY: Record<number, string> = {
 
 /**
  * Display names for registry-backed SDP panel keys (long-param ids 31+).
- * Keep aligned with in-game TextManager labels where applicable.
+ * These are the plugin parameters the natural growth panel lists too, so both boards read one set of names,
+ * kept aligned with in-game TextManager labels where applicable.
  */
-export const SDP_REGISTRY_PARAMETER_NAMES: Record<string, string> = {
-  msb: "Move Speed Boost",
-  prof: "Proficiency Boost",
-  sdr: "SDP Multiplier",
-  lst: "Lifesteal",
-  mst: "Manasteal",
-  tst: "Techsteal",
-  sar: "Shield Amplification",
-  ser: "Shield Effectiveness",
-  apr: "AP Multiplier",
-  gdr: "Gold Rate",
-  dor: "Drop Rate",
-  hcr: "HP Cost Reduction",
-  har: "Healing Rate",
-};
+export const SDP_REGISTRY_PARAMETER_NAMES: Record<string, string> = Object.fromEntries(
+  knownPluginParams().map((param) => [ param.key, param.name ]));
 
 /** Long-param ids offered in the SDP panel parameter picker beyond vanilla custom (28–30). */
 export const SDP_REGISTRY_PARAMETER_LONG_IDS = [

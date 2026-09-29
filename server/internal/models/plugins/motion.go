@@ -38,10 +38,18 @@ type MotionConfiguration struct {
 	// Collapse is the death animation's own motion type, declared by J-Motion-ABS rather than core.
 	Collapse json.RawMessage `json:"collapse,omitempty"`
 
+	// Fold and Unfold are how a battler leaves the map and arrives on it when nobody killed it, the
+	// two motion types J-Motion-ABS declares beside Collapse.
+	Fold   json.RawMessage `json:"fold,omitempty"`
+	Unfold json.RawMessage `json:"unfold,omitempty"`
+
 	// Death is how long each death style holds a corpse open for, and which style is the default.
 	Death json.RawMessage `json:"death,omitempty"`
 
 	// Loot is when an expiring loot drop starts blinking, when it starts dissolving, and the shape
 	// of that blink.
 	Loot json.RawMessage `json:"loot,omitempty"`
+
+	// Presence is how long a battler takes to arrive on the map and to leave it.
+	Presence json.RawMessage `json:"presence,omitempty"`
 }

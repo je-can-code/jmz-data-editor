@@ -393,6 +393,101 @@ const knownRewardParams = (): KnownParameter[] =>
   ];
 };
 
+/**
+ * The parameters plugins register and bind to natural growth, beyond the engine's own and the three custom
+ * ones above: healing rate, the three steals, the two shield stats, HP cost, move speed, and the gold, drop,
+ * AP, SDP and proficiency rates. Every one of them takes all four natural growth tags, from
+ * `<{key}BuffPlus:[formula]>` to `<{key}GrowthRate:[formula]>`.
+ *
+ * Their `longParamId`s are this map's own, continuing past the rewards. The SDP board keeps an older numbering
+ * for some of the same keys in `sdpParameterKeys.ts`; the two are unrelated, and neither is written to disk.
+ * Their names are the ones the SDP board shows, which it reads from here.
+ * @returns {KnownParameter[]} The plugin parameters, in the order the natural growth panel groups them.
+ */
+const knownPluginParams = (): KnownParameter[] =>
+{
+  return [
+    {
+      id: 0,
+      name: 'Healing Rate',
+      key: 'har',
+      longParamId: 34
+    },
+    {
+      id: 1,
+      name: 'Lifesteal',
+      key: 'lst',
+      longParamId: 35
+    },
+    {
+      id: 2,
+      name: 'Manasteal',
+      key: 'mst',
+      longParamId: 36
+    },
+    {
+      id: 3,
+      name: 'Techsteal',
+      key: 'tst',
+      longParamId: 37
+    },
+    {
+      id: 4,
+      name: 'Shield Amplification',
+      key: 'sar',
+      longParamId: 38
+    },
+    {
+      id: 5,
+      name: 'Shield Effectiveness',
+      key: 'ser',
+      longParamId: 39
+    },
+    {
+      id: 6,
+      name: 'HP Cost Reduction',
+      key: 'hcr',
+      longParamId: 40
+    },
+    {
+      id: 7,
+      name: 'Move Speed Boost',
+      key: 'msb',
+      longParamId: 41
+    },
+    {
+      id: 8,
+      name: 'Gold Rate',
+      key: 'gdr',
+      longParamId: 42
+    },
+    {
+      id: 9,
+      name: 'Drop Rate',
+      key: 'dor',
+      longParamId: 43
+    },
+    {
+      id: 10,
+      name: 'AP Multiplier',
+      key: 'apr',
+      longParamId: 44
+    },
+    {
+      id: 11,
+      name: 'SDP Multiplier',
+      key: 'sdr',
+      longParamId: 45
+    },
+    {
+      id: 12,
+      name: 'Proficiency Boost',
+      key: 'prof',
+      longParamId: 46
+    },
+  ];
+};
+
 const knownLongParams = (): KnownParameter[] =>
 {
   return [
@@ -603,6 +698,7 @@ const knownLongParams = (): KnownParameter[] =>
       longParamId: 33,
       regex: 'Plus'
     },
+    ...knownPluginParams(),
   ];
 };
 
@@ -635,6 +731,7 @@ export {
   knownExParams,
   knownSpParams,
   knownRewardParams,
+  knownPluginParams,
   knownLongParams,
   knownParamByLongId,
   KnownParameter

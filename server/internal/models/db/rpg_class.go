@@ -9,10 +9,17 @@ const (
 
 type ClassParams [ClassParamKinds][ClassParamLevels]int
 
+// RpgClass is a row in Classes.json.
+//
+// Description and IconIndex are this editor's own additions: RPG Maker's editor has no field for
+// a class's description or icon, so a class it saved carries neither, and decodes to an empty
+// string and to icon zero, which is no icon of its own.
 type RpgClass struct {
 	models.RpgBase
-	ExpParams [4]int                    `json:"expParams"`
-	Learnings []models.RpgClassLearning `json:"learnings"`
-	Params    ClassParams               `json:"params"`
-	Traits    []models.RpgTrait         `json:"traits"`
+	Description string                    `json:"description"`
+	ExpParams   [4]int                    `json:"expParams"`
+	IconIndex   int                       `json:"iconIndex"`
+	Learnings   []models.RpgClassLearning `json:"learnings"`
+	Params      ClassParams               `json:"params"`
+	Traits      []models.RpgTrait         `json:"traits"`
 }

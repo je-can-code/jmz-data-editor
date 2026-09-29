@@ -10,7 +10,8 @@ import LevelConfigBoard from '@boards/level/LevelConfigBoard.tsx';
 import DifficultyBoard from '@boards/difficulty/DifficultyBoard.tsx';
 import MotionConfigBoard from '@boards/motion/MotionConfigBoard.tsx';
 import WeatherConfigBoard from '@boards/weather/WeatherConfigBoard.tsx';
-import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, Thunderstorm, TrendingUp, Waves, Whatshot, } from '@mui/icons-material';
+import NotetagLinesBoard from '@boards/notetagLines/NotetagLinesBoard.tsx';
+import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, ShortText, Thunderstorm, TrendingUp, Waves, Whatshot, } from '@mui/icons-material';
 import IndexBoard from '@boards/_index/IndexBoard.tsx';
 import SkillsBoard from '@boards/skills/SkillsBoard.tsx';
 import StatesBoard from '@boards/states/StatesBoard.tsx';
@@ -172,6 +173,17 @@ const weatherConfigBoard: BoardDefinition = {
   group: 'Systems',
 };
 
+const notetagLinesBoard: BoardDefinition = {
+  id: 'notetag-lines-config',
+  title: 'Tag Lines',
+  path: '/tag-lines',
+  component: NotetagLinesBoard,
+  guard: () => true,
+  icon: <ShortText fontSize={'small'}/>,
+  featureFlag: 'notetag-lines',
+  group: 'Systems',
+};
+
 const weaponsBoard: BoardDefinition = {
   id: 'weapons',
   title: 'Weapons',
@@ -223,6 +235,7 @@ const APP_ROUTES: BoardDefinition[] = [
   difficultyBoard,
   motionConfigBoard,
   weatherConfigBoard,
+  notetagLinesBoard,
 ];
 
 export { APP_ROUTES };

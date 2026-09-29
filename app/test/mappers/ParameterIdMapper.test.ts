@@ -8,6 +8,7 @@ import {
   knownExParams,
   knownLongParams,
   knownParamByLongId,
+  knownPluginParams,
   knownRewardParams,
   knownSpParams,
 } from '@mappers/ParameterIdMapper.ts';
@@ -303,11 +304,44 @@ describe('ParameterIdMapper known param lists', () =>
       });
   });
 
-  it('knownLongParams returns 34 entries and includes special ones', () =>
+  it('knownPluginParams returns the 13 parameters plugins bind to natural growth, past the rewards', () =>
+  {
+    // Arrange
+    // Act
+    const plugin = knownPluginParams();
+
+    // Assert- healing rate first, proficiency last, and Shield Amplification among them, since that is the
+    // growth the panel could not show before.
+    expect(plugin.length)
+      .toBe(13);
+    expect(plugin[ 0 ])
+      .toEqual({
+        id: 0,
+        name: 'Healing Rate',
+        key: 'har',
+        longParamId: 34
+      });
+    expect(plugin.find(p => p.key === 'sar'))
+      .toEqual({
+        id: 4,
+        name: 'Shield Amplification',
+        key: 'sar',
+        longParamId: 38
+      });
+    expect(plugin[ 12 ])
+      .toEqual({
+        id: 12,
+        name: 'Proficiency Boost',
+        key: 'prof',
+        longParamId: 46
+      });
+  });
+
+  it('knownLongParams returns 47 entries and includes special ones', () =>
   {
     const all = knownLongParams();
     expect(all.length)
-      .toBe(34); // 8 base + 10 ex + 10 sp + 3 special (cdm/cdr/mtp) + 3 reward
+      .toBe(47); // 8 base + 10 ex + 10 sp + 3 special (cdm/ctr/mtp) + 3 reward + 13 plugin
 
     // spot-check a few
     expect(all.find(p => p.longParamId === 0))
@@ -359,6 +393,13 @@ describe('ParameterIdMapper known param lists', () =>
         key: 'exp',
         longParamId: 31,
         regex: 'Plus'
+      });
+    expect(all.find(p => p.longParamId === 35))
+      .toEqual({
+        id: 1,
+        name: 'Lifesteal',
+        key: 'lst',
+        longParamId: 35
       });
   });
 });

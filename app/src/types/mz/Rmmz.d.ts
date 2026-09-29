@@ -114,7 +114,17 @@ declare namespace Rmmz {
 
     interface RPG_Class
       extends Base.RPG_Base {
+      /**
+       * What the class says about itself, shown across the top of the class scene. RPG Maker's own editor
+       * has no such field, so a class it saved carries none until this editor saves it.
+       */
+      description?: string;
       expParams: [ number, number, number, number ];
+      /**
+       * The icon the class is drawn with in the class scene. RPG Maker's own editor has no such field either,
+       * so a class it saved carries none until this editor saves it.
+       */
+      iconIndex?: number;
       learnings: Data.RPG_ClassLearning[];
       params: number[][];
       traits: Data.RPG_Trait[];

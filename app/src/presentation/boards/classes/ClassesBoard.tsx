@@ -1,5 +1,5 @@
 import { ChangeEvent, useCallback, useRef, useState } from 'react';
-import { Alert, Box, Snackbar, Stack, Tab, Tabs, TextField, Typography } from '@mui/material';
+import { Alert, Box, Grid, Snackbar, Stack, Tab, Tabs, TextField, Typography } from '@mui/material';
 import { FixedSizeList } from 'react-window';
 import { School } from '@mui/icons-material';
 import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar.ts';
@@ -24,6 +24,9 @@ import { StealRatesFields } from '@presentation/components/resources/StealRatesF
 import { ClassLearningsEditor } from '@presentation/components/classLearnings/ClassLearningsEditor.tsx';
 import { AptitudeTeachingsEditor } from '@presentation/components/aptitude/AptitudeTeachingsEditor.tsx';
 import { UnslottedSkillsEditor } from '@presentation/components/unslottedSkills/UnslottedSkillsEditor.tsx';
+import { UnlockableForActorsEditor } from '@presentation/components/unlockableForActors/UnlockableForActorsEditor.tsx';
+import { IconIndexField } from '@presentation/components/icons/IconIndexField.tsx';
+import { patchAt } from '@services/utils/patchAt.ts';
 import { NaturalGrowthQuadrantsEditor } from '@presentation/components/naturalGrowth/NaturalGrowthQuadrantsEditor.tsx';
 import { ClassParamsGrowthEditor } from '@presentation/components/classParams/ClassParamsGrowthEditor.tsx';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
@@ -94,10 +97,11 @@ function ClassesBoard()
     {
       return;
     }
-    const updated = Object.assign(Object.create(Object.getPrototypeOf(selectedClass)), selectedClass, partial);
-    setData((prev) => prev.map((c, i) => i === selectedIndex
-      ? updated
-      : c));
+
+    // change the class as it stands in the list right now, not as it stood when the board last drew. One
+    // click can make two changes- Apply on a growth row writes the formula into the note, then the baked
+    // values into the params- and building both from the same drawing dropped the formula.
+    setData((prev) => patchAt(prev, selectedIndex, partial));
   }, [ selectedClass, selectedIndex, setData ]);
 
   const handleSave = async () =>
@@ -179,14 +183,41 @@ function ClassesBoard()
         <Box sx={{ p: 2 }}>
           <Stack spacing={2}>
             <BoardSectionCard title={'Identity'}>
-              <TextField
-                label={'Name'}
-                value={selectedClass.name}
-                onChange={(e: ChangeEvent<HTMLInputElement>) => patch({ name: e.target.value })}
-                size={'small'}
-                fullWidth
-              />
+              <Stack spacing={2}>
+                <Grid container spacing={2} alignItems={'flex-start'}>
+                  <Grid size={6}>
+                    <TextField
+                      label={'Name'}
+                      value={selectedClass.name}
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => patch({ name: e.target.value })}
+                      size={'small'}
+                      fullWidth
+                    />
+                  </Grid>
+                  <Grid size={6}>
+                    <IconIndexField
+                      value={selectedClass.iconIndex}
+                      onChange={(iconIndex: number) => patch({ iconIndex })}
+                    />
+                  </Grid>
+                </Grid>
+                <TextField
+                  label={'Description'}
+                  helperText={'Shown across the top of the class screen.'}
+                  value={selectedClass.description}
+                  onChange={(e: ChangeEvent<HTMLInputElement>) => patch({ description: e.target.value })}
+                  size={'small'}
+                  fullWidth
+                  multiline
+                  minRows={2}
+                />
+              </Stack>
             </BoardSectionCard>
+
+            <UnlockableForActorsEditor
+              note={selectedClass.note}
+              onNoteChange={(note: string) => patch({ note })}
+            />
 
             <BoardSectionCard
               title={'Traits'}
@@ -223,15 +254,10 @@ function ClassesBoard()
             </BoardSectionCard>
 
             <ClassParamsGrowthEditor
-              params={selectedClass.params}
-              note={selectedClass.note}
-              onParamsChange={(paramId: number, values: number[]) =>
-              {
-                const nextParams = selectedClass.params.map((row) => [ ...row ]);
-                nextParams[ paramId ] = values;
-                patch({ params: nextParams });
-              }}
-              onNoteChange={(note: string) => patch({ note })}
+              classId={selectedClass.id}
+              growth={selectedClass}
+              cloneSources={classes}
+              onGrowthChange={(growth) => patch(growth)}
             />
           </Stack>
         </Box>

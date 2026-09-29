@@ -8,38 +8,8 @@ import { type ReactNode, useEffect, useMemo, useState, } from 'react';
 import { knownParamByLongId, type KnownParameter, } from '../../../mappers/ParameterIdMapper.ts';
 import { NaturalGrowthQuadrantsParser } from '@services/parsers/NaturalGrowthQuadrantsParser.ts';
 import { NaturalFormulaWithGraphRow } from './NaturalFormulaWithGraphRow.tsx';
+import { NATURAL_GROWTH_UI_CATEGORIES } from './naturalGrowthCategories.ts';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
-
-/**
- * Same titles and longParamId groupings as enemy growth UI (`parameterCategories` in
- * `presentation/boards/enemies/ParameterGrowth.tsx`). Keep in sync when changing layout.
- */
-const NATURAL_GROWTH_UI_CATEGORIES: { title: string; longIds: number[] }[] = [
-  {
-    title: 'Rewards',
-    longIds: [ 31, 32, 33 ]
-  },
-  {
-    title: 'Core Stats',
-    longIds: [ 0, 1, 30, 2, 3, 4, 5, 6, 7 ]
-  },
-  {
-    title: 'Hit/Evasion',
-    longIds: [ 8, 9, 12, 13, 14 ]
-  },
-  {
-    title: 'Recovery',
-    longIds: [ 15, 16, 17, 20, 21 ]
-  },
-  {
-    title: 'Damage/Defense',
-    longIds: [ 18, 19, 22, 23, 24, 25, 26, 27 ]
-  },
-  {
-    title: 'Critical',
-    longIds: [ 10, 11, 28, 29 ]
-  },
-];
 
 type QuadrantPaletteKey = 'info' | 'secondary' | 'success' | 'warning';
 

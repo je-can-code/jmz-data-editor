@@ -84,6 +84,9 @@ func main() {
 
 	mux.HandleFunc("GET /api/config/weather", api.Load[plugins.WeatherConfiguration]("data/config.weather.json"))
 	mux.HandleFunc("POST /api/config/weather", api.Save[plugins.WeatherConfiguration]("data/config.weather.json"))
+
+	mux.HandleFunc("GET /api/config/notetag-lines", api.Load[plugins.NotetagLinesConfiguration]("data/config.notetag-lines.json"))
+	mux.HandleFunc("POST /api/config/notetag-lines", api.Save[plugins.NotetagLinesConfiguration]("data/config.notetag-lines.json"))
 	//endregion plugin config endpoints
 
 	fmt.Println("Server running on http://localhost:8080")

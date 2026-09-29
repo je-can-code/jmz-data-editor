@@ -64,7 +64,7 @@ and extra enemy drop management.
 
 **Adding a config-driven board touches five places**, and missing one fails quietly: a Go model under
 `server/internal/models/plugins/`, its two routes in `server/cmd/api/main.go`, an entry in
-`app/src/core/enums/ConfigFilenames.ts`, a `case` in `jsonApiRoutes.ts`, and a `BoardDefinition` in
+`app/src/core/enums/ConfigFilenames.ts`, an entry in `jsonApiRoutes.ts`'s pathname table, and a `BoardDefinition` in
 `app/src/platform/compositionRoot/routing.config.tsx`. Most also want a resource context under
 `presentation/context/resources/` mounted in `shell/app.providers.tsx`.
 

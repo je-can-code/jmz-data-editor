@@ -4,7 +4,12 @@ import {
   NaturalGrowthQuadrant,
   type NaturalQuadFormulas,
 } from '@core/domain/valueObjects/NaturalQuadFormulas.ts';
-import { knownLongParams, knownParamByLongId, type KnownParameter, } from '../../mappers/ParameterIdMapper.ts';
+import {
+  knownLongParams,
+  knownParamByLongId,
+  type KnownParameter,
+  knownPluginParams,
+} from '../../mappers/ParameterIdMapper.ts';
 import NoteReader from '@services/utils/NoteReader.ts';
 import { NoteNormalizer } from '@services/utils/NoteNormalizer.ts';
 
@@ -18,7 +23,11 @@ const QUAD_SUFFIX: Record<NaturalGrowthQuadrant, string> = {
 const REWARD_LONG_IDS = new Set<number>([ 31, 32, 33 ]);
 
 /**
- * Display / serialization order: base (mhp, mmp, mtp, then atk…luk), ex, sp, crit natural, rewards.
+ * Display / serialization order: base (mhp, mmp, mtp, then atk…luk), ex, sp, crit natural, the parameters
+ * plugins register, rewards.
+ *
+ * Every parameter the parser strips must be written back from here, or saving through the panel would delete
+ * its tags; the plugin parameters are taken straight from their list so a new one can never be left out.
  */
 const NATURAL_GROWTH_LONG_PARAM_ORDER: number[] = [
   0,
@@ -46,6 +55,8 @@ const NATURAL_GROWTH_LONG_PARAM_ORDER: number[] = [
   ),
   28,
   29,
+  ...knownPluginParams()
+    .map((param) => param.longParamId),
   31,
   32,
   33,
