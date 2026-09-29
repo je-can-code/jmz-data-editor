@@ -57,7 +57,7 @@ const WeatherVoicesTab = () =>
   // every look that can be drawn, plus the sheltered case, which is not a look but is somewhere a
   // player stands constantly.
   const looks = [ NOTHING, ...Object.keys(weatherConfig.presetIds) ];
-  const voices = weatherConfig.sky.voices;
+  const { voices } = weatherConfig.sky;
   const written = voices[ selected ] ?? {};
 
   const speakers = (actors ?? []).filter(actor => actor !== null && actor.id > 0);

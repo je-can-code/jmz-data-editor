@@ -20,6 +20,7 @@ import { LevelProvider } from '@presentation/context/resources/level.context.tsx
 import { DifficultyProvider } from '@presentation/context/resources/difficulty.context.tsx';
 import { MotionProvider } from '@presentation/context/resources/motion.context.tsx';
 import { WeatherProvider } from '@presentation/context/resources/weather.context.tsx';
+import { NotetagLinesProvider } from '@presentation/context/resources/notetag-lines.context.tsx';
 
 const AppProviders = ({ children }: { children: React.ReactNode }) =>
 {
@@ -38,6 +39,7 @@ const AppProviders = ({ children }: { children: React.ReactNode }) =>
         DifficultyProvider,
         MotionProvider,
         WeatherProvider,
+        NotetagLinesProvider,
         ItemsProvider,
         WeaponsProvider,
         ArmorsProvider,

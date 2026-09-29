@@ -9,6 +9,7 @@ enum ConfigFilenames
   Difficulty = 'config.difficulty.json',
   Motion = 'config.motion.json',
   Weather = 'config.weather.json',
+  NotetagLines = 'config.notetag-lines.json',
   System = 'System.json',
 }
 

@@ -54,6 +54,7 @@ import { RPG_ItemDomainModel } from '@core/domain/entities/RPG_ItemDomainModel.t
 import { RPG_WeaponDomainModel } from '@core/domain/entities/RPG_WeaponDomainModel.ts';
 import { IconSetSprite } from '@presentation/components/icons/IconSetSprite.tsx';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
+import { CraftingSlot } from '@services/crafting/CraftingSlot.ts';
 
 /**
  * Mirrors J-Base {@code IconManager.rewardParam}: {@code rewardParam(1)} gold → 2048, {@code rewardParam(4)} SDP → 445.
@@ -144,9 +145,9 @@ const CraftingComponentList = (props: CraftingListProps) =>
   const [ selectedComponentIndex, setSelectedComponentIndex ] = useState<number>(0);
   const [ pendingComponent, setPendingComponent ] = useState<Crafting.CraftingComponent | null>(null);
 
-  // a slot is categorical exactly when it carries a categories array; the absence of one is what makes a slot
-  // point at a specific row instead.
-  const pendingSlotIsCategorical = pendingComponent?.categories !== undefined;
+  // the slot being edited is categorical when it carries a categories list at all, which is how "any type, none
+  // picked yet" is told apart from a slot naming its row- see CraftingSlot.
+  const pendingSlotIsCategorical = pendingComponent !== null && CraftingSlot.isCategoricalWhileEditing(pendingComponent);
 
   const {
     data: items,
@@ -243,7 +244,9 @@ const CraftingComponentList = (props: CraftingListProps) =>
       const thisIngredient = currentComponents[ index ];
       setSelectedComponent(thisIngredient);
       setSelectedComponentType(thisIngredient.type);
-      setPendingComponent(thisIngredient);
+
+      // the slot goes into the editor in the editor's own reading, so an exact row is not read as "any type".
+      setPendingComponent(CraftingSlot.toEditing(thisIngredient));
     }
   };
 
@@ -422,10 +425,12 @@ const CraftingComponentList = (props: CraftingListProps) =>
   //region list updates
   const handleAddNewComponent = (index: number) =>
   {
+    // a new slot names item 1, stored the way every exact row is: with an empty categories list.
     const newComponent = {
       id: 1,
       type: CraftingComponentType.Item,
       count: 1,
+      categories: [],
     } as Crafting.CraftingComponent;
 
     // splicing covers the empty list too, where it lands the new slot at position zero.
@@ -443,11 +448,8 @@ const CraftingComponentList = (props: CraftingListProps) =>
       return;
     }
 
-    const clonedComponent = {
-      id: selectedComponent.id,
-      type: selectedComponent.type,
-      count: selectedComponent.count
-    } as Crafting.CraftingComponent;
+    // a copy of the whole slot, so a categorical slot keeps the types it accepts rather than becoming item 0.
+    const clonedComponent = CraftingSlot.toStored({ ...selectedComponent });
 
     const updatedComponents = currentComponents.toSpliced(index, 0, clonedComponent);
 
@@ -463,8 +465,9 @@ const CraftingComponentList = (props: CraftingListProps) =>
     }
 
     // spread the pending component rather than naming its fields: listing them by hand is what silently drops any
-    // field added to a slot later, and the change simply appears not to have taken.
-    const updatedSelectedIngredient = { ...pendingComponent } as Crafting.CraftingComponent;
+    // field added to a slot later, and the change simply appears not to have taken. it comes back out of the editor
+    // in the file's reading, so a slot naming its row is stored with its empty categories list.
+    const updatedSelectedIngredient = CraftingSlot.toStored({ ...pendingComponent });
 
     setSelectedComponent(updatedSelectedIngredient);
 
@@ -525,7 +528,11 @@ const CraftingComponentList = (props: CraftingListProps) =>
       && (prevSel === index || prevSel === partner)
     )
     {
-      setPendingComponent(next[ nextSel ] ?? null);
+      // the slot now selected goes into the editor in the editor's own reading.
+      const nowSelected = next[ nextSel ];
+      setPendingComponent(nowSelected === undefined
+        ? null
+        : CraftingSlot.toEditing(nowSelected));
     }
   };
   //endregion list updates
@@ -662,8 +669,8 @@ const CraftingComponentList = (props: CraftingListProps) =>
     let primaryLine: React.ReactNode = '';
 
     // a categorical slot has no row to name, so describing it by id would render as "0: ?" - which reads as a
-    // broken row rather than a deliberate one.
-    if (ingredient.categories !== undefined)
+    // broken row rather than a deliberate one. these rows are stored slots, which name a row with an empty list.
+    if (CraftingSlot.isCategorical(ingredient))
     {
       spriteIndex = categoricalIconIndex(ingredient.categories);
       primaryLine = renderCategoricalLabel(ingredient.categories, ingredient.count);
@@ -963,8 +970,13 @@ const CraftingComponentList = (props: CraftingListProps) =>
       return <></>;
     }
 
-    const changed = selectedComponent !== null
-      && JSON.stringify(selectedComponent) !== JSON.stringify(pendingComponent);
+    // the row behind the dialog is stored and the pending slot is being edited, so both are compared, and drawn, in
+    // the editor's reading- otherwise an untouched exact row differs from itself by its empty categories list.
+    const selectedWhileEditing = selectedComponent === null
+      ? null
+      : CraftingSlot.toEditing(selectedComponent);
+    const changed = selectedWhileEditing !== null
+      && JSON.stringify(selectedWhileEditing) !== JSON.stringify(pendingComponent);
 
     return (
       <Stack spacing={1}>
@@ -975,7 +987,7 @@ const CraftingComponentList = (props: CraftingListProps) =>
         </Typography>
         <Stack direction={'row'} spacing={1} alignItems={'center'} flexWrap={'wrap'} useFlexGap>
           {changed && (<>
-            {buildComponentChip(selectedComponent, 'outlined')}
+            {buildComponentChip(selectedWhileEditing, 'outlined')}
             <Typography variant={'body2'} color={'text.secondary'}>{'>'}</Typography>
           </>)}
           {buildComponentChip(pendingComponent)}
@@ -995,8 +1007,9 @@ const CraftingComponentList = (props: CraftingListProps) =>
     let chipIconIndex = 0;
 
     // a categorical slot names no row, so the switch below has nothing to look up. describe what it accepts instead,
-    // borrowing the icon of the first type so the chip is still recognisable at a glance.
-    if (craftingComponent.categories !== undefined)
+    // borrowing the icon of the first type so the chip is still recognisable at a glance. both chips are drawn in the
+    // editor's reading of a slot.
+    if (CraftingSlot.isCategoricalWhileEditing(craftingComponent))
     {
       return (
         <Chip

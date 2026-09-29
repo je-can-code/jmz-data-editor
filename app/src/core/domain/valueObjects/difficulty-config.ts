@@ -8,29 +8,6 @@
  */
 
 /**
- * Parameter scaling applied to one side of a fight, as percentages where 100 means unchanged.
- * The three fixed-length groups mirror RPG Maker's own parameter families; custom parameters are
- * open-ended and stay a plain list.
- */
-type DifficultyBattlerEffects = {
-  bparams: number[];
-  xparams: number[];
-  sparams: number[];
-  cparams: number[];
-};
-
-/**
- * Reward scaling applied to the party, as percentages where 100 means unchanged.
- */
-type DifficultyBonusEffects = {
-  exp: number;
-  gold: number;
-  drops: number;
-  encounters: number;
-  sdp: number;
-};
-
-/**
  * A weight handed to an enemy affix that was authored as unavailable, making it reachable while the
  * granting layer is enabled.
  */
@@ -51,7 +28,8 @@ type DifficultyAffixEffects = {
 };
 
 /**
- * One difficulty layer. Any number of layers can be active at once and their effects multiply.
+ * One difficulty layer. Any number of layers can be enabled at once; each names the state every actor
+ * carries and the state every enemy carries while it is.
  */
 type DifficultyLayer = {
   key: string;
@@ -59,9 +37,8 @@ type DifficultyLayer = {
   iconIndex: number;
   description: string;
   cost: number;
-  actorEffects: DifficultyBattlerEffects;
-  enemyEffects: DifficultyBattlerEffects;
-  rewards: DifficultyBonusEffects;
+  actorStateId: number;
+  enemyStateId: number;
   enabled: boolean;
   unlocked: boolean;
   hidden: boolean;
@@ -74,79 +51,16 @@ type DifficultyLayer = {
 type DifficultyConfigRoot = DifficultyLayer[];
 
 /**
- * How many entries each fixed parameter family holds, so a short authored list is padded rather than
- * read as a shorter set of parameters.
+ * The state id meaning a layer grants that side of every fight nothing.
  */
-const BPARAM_COUNT = 8;
-const XPARAM_COUNT = 10;
-const SPARAM_COUNT = 10;
-
-/**
- * The value every parameter and reward percentage means "unchanged" by.
- */
-const UNCHANGED_PERCENT = 100;
-
-/**
- * Pads a parameter list out to its family's length, filling absent entries with "unchanged".
- * @param {unknown} source The authored list, which may be short, absent, or not a list at all.
- * @param {number} length How many entries this parameter family holds.
- * @returns {number[]} A list of exactly `length` numbers.
- */
-const hydrateParams = (source: unknown, length: number): number[] =>
-{
-  const authored = Array.isArray(source)
-    ? source
-    : [];
-
-  return Array.from(
-    { length },
-    (_unused, index) => Number(authored[ index ] ?? UNCHANGED_PERCENT));
-};
-
-/**
- * Fills out one side's parameter scaling, padding the three fixed families and preserving whatever
- * custom parameters were authored.
- * @param {unknown} source The authored effects object.
- * @returns {DifficultyBattlerEffects} A fully populated effects object.
- */
-const hydrateBattlerEffects = (source: unknown): DifficultyBattlerEffects =>
-{
-  const authored = (source ?? {}) as Partial<DifficultyBattlerEffects>;
-
-  return {
-    bparams: hydrateParams(authored.bparams, BPARAM_COUNT),
-    xparams: hydrateParams(authored.xparams, XPARAM_COUNT),
-    sparams: hydrateParams(authored.sparams, SPARAM_COUNT),
-    cparams: Array.isArray(authored.cparams)
-      ? authored.cparams.map(Number)
-      : [],
-  };
-};
-
-/**
- * Fills out the reward scaling, defaulting anything absent to "unchanged".
- * @param {unknown} source The authored rewards object.
- * @returns {DifficultyBonusEffects} A fully populated rewards object.
- */
-const hydrateRewards = (source: unknown): DifficultyBonusEffects =>
-{
-  const authored = (source ?? {}) as Partial<DifficultyBonusEffects>;
-
-  return {
-    exp: Number(authored.exp ?? UNCHANGED_PERCENT),
-    gold: Number(authored.gold ?? UNCHANGED_PERCENT),
-    drops: Number(authored.drops ?? UNCHANGED_PERCENT),
-    encounters: Number(authored.encounters ?? UNCHANGED_PERCENT),
-    sdp: Number(authored.sdp ?? UNCHANGED_PERCENT),
-  };
-};
+const NO_STATE = 0;
 
 /**
  * Carries a layer's affix block through untouched, or reports its absence.
  *
  * Deliberately not defaulted the way the other sections are. "No affix block" and "an affix block
  * that changes nothing" are different statements in the file, and inventing the second where the
- * author wrote the first would add a block to all seventeen layers on the first save.
+ * author wrote the first would add a block to every layer on the first save.
  * @param {unknown} source The authored affix effects, if the layer declared any.
  * @returns {DifficultyAffixEffects|undefined} The block as authored, or undefined when there is none.
  */
@@ -191,9 +105,8 @@ const hydrateLayer = (source: unknown, index: number): DifficultyLayer =>
     iconIndex: Number(authored.iconIndex ?? 0),
     description: String(authored.description ?? ''),
     cost: Number(authored.cost ?? 0),
-    actorEffects: hydrateBattlerEffects(authored.actorEffects),
-    enemyEffects: hydrateBattlerEffects(authored.enemyEffects),
-    rewards: hydrateRewards(authored.rewards),
+    actorStateId: Number(authored.actorStateId ?? NO_STATE),
+    enemyStateId: Number(authored.enemyStateId ?? NO_STATE),
     enabled: authored.enabled === true,
     unlocked: authored.unlocked === true,
     hidden: authored.hidden === true,
@@ -221,19 +134,12 @@ const hydrateDifficultyConfig = (source: unknown): DifficultyConfigRoot =>
 export {
   hydrateDifficultyConfig,
   hydrateLayer,
-  hydrateBattlerEffects,
-  hydrateRewards,
   hydrateAffixEffects,
-  BPARAM_COUNT,
-  XPARAM_COUNT,
-  SPARAM_COUNT,
-  UNCHANGED_PERCENT,
+  NO_STATE,
 };
 export type {
   DifficultyConfigRoot,
   DifficultyLayer,
-  DifficultyBattlerEffects,
-  DifficultyBonusEffects,
   DifficultyAffixEffects,
   DifficultyAffixGrant,
 };

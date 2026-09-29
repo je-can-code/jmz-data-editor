@@ -10,6 +10,18 @@ import RPG_ClassLearning = Rmmz.Data.RPG_ClassLearning;
 class RPG_ClassDomainModel
   extends RPG_BaseDomainModel<RPG_Class>
 {
+  /**
+   * What the class says about itself, shown across the top of the class scene
+   * ({@link Rmmz.Implementations.RPG_Class.description}).
+   */
+  public description: string = '';
+
+  /**
+   * The icon the class is drawn with in the class scene ({@link Rmmz.Implementations.RPG_Class.iconIndex}).
+   * Zero is no icon of its own, which the game fills in with its shared class icon.
+   */
+  public iconIndex: number = 0;
+
   public traits: RPG_Trait[];
   public learnings: RPG_ClassLearning[];
   /**
@@ -32,6 +44,11 @@ class RPG_ClassDomainModel
   constructor(rmmz: RPG_Class)
   {
     super(rmmz);
+
+    // RPG Maker's own editor never writes a class description or icon, so a class it saved reads as
+    // undescribed, and as having no icon of its own.
+    this.description = rmmz.description ?? '';
+    this.iconIndex = rmmz.iconIndex ?? 0;
     this.traits = rmmz.traits.map((t) => ({ ...t }));
     this.learnings = rmmz.learnings.map((l) => ({ ...l }));
     this.params = rmmz.params.map((row) => [ ...row ]);
@@ -49,6 +66,8 @@ class RPG_ClassDomainModel
       id: this.id,
       name: this.name,
       note: this.syncNote(),
+      description: this.description,
+      iconIndex: this.iconIndex,
       traits: this.traits.map((t) => ({ ...t })),
       learnings: this.learnings.map((l) => ({ ...l })),
       params: this.params.map((row) => [ ...row ]),

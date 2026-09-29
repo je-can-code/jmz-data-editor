@@ -37,8 +37,11 @@ func TestMotionConfigurationRoundTripPreservesEveryBlock(t *testing.T) {
 		"hue": { "degrees": 180, "duration": 30 },
 		"tint": { "color": "#ffa0a0", "duration": 30 },
 		"collapse": { "style": "swift", "duration": 30 },
+		"fold": { "duration": 30 },
+		"unfold": { "duration": 30 },
 		"death": { "defaultStyle": "swift", "durations": { "swift": 30 } },
-		"loot": { "expiryWarnFrames": 300, "expiryFadeFrames": 120, "flicker": { "min": 0.2 } }
+		"loot": { "expiryWarnFrames": 300, "expiryFadeFrames": 120, "flicker": { "min": 0.2 } },
+		"presence": { "arrivalDuration": 30, "departureDuration": 30 }
 	}`)
 
 	// Act- the exact decode/encode pair a save performs.

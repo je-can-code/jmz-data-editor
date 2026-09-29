@@ -116,6 +116,23 @@ describe('NaturalGrowthQuadrantsParser.tagFragment', () =>
       .toBe('ctrGrowthPlus');
   });
 
+  it('uses quad suffixes for the parameters plugins register (long 34-46)', () =>
+  {
+    // Arrange- Shield Amplification and Proficiency Boost, the first and last of the plugins' own.
+    const sar = knownParamByLongId(38);
+    const prof = knownParamByLongId(46);
+
+    // Act
+    const sarGrowth = NaturalGrowthQuadrantsParser.tagFragment(sar, NaturalGrowthQuadrant.GrowthPlus);
+    const profRate = NaturalGrowthQuadrantsParser.tagFragment(prof, NaturalGrowthQuadrant.BuffRate);
+
+    // Assert- the same tags the plugins read.
+    expect(sarGrowth)
+      .toBe('sarGrowthPlus');
+    expect(profRate)
+      .toBe('profBuffRate');
+  });
+
   it('covers every known long param with at least one tag', () =>
   {
     const longIdsWithTag = new Set(managedTagCases.map(c => c.longId));

@@ -14,54 +14,46 @@ function basename(filesystemPath: string): string
 }
 
 /**
+ * The API pathname for every data file the server reads and writes whole, keyed by its basename inside
+ * {@code data/}. A table rather than a switch, so each new board adds one line here instead of one more branch.
+ * Align with {@code server/cmd/api/main.go}.
+ */
+const API_PATHNAMES_BY_BASENAME: ReadonlyMap<string, string> = new Map([
+  [ 'Actors.json', '/api/actors' ],
+  [ 'Animations.json', '/api/animations' ],
+  [ 'Armors.json', '/api/armors' ],
+  [ 'Classes.json', '/api/classes' ],
+  [ 'CommonEvents.json', '/api/common-events' ],
+  [ 'Enemies.json', '/api/enemies' ],
+  [ 'Items.json', '/api/items' ],
+  [ 'Skills.json', '/api/skills' ],
+  [ 'States.json', '/api/states' ],
+  [ 'Weapons.json', '/api/weapons' ],
+  [ 'System.json', '/api/system' ],
+  [ 'config.crafting.json', '/api/config/crafting' ],
+  [ 'config.proficiency.json', '/api/config/proficiency' ],
+  [ 'config.quest.json', '/api/config/quest' ],
+  [ 'config.sdp.json', '/api/config/sdp' ],
+  [ 'config.jabs.json', '/api/config/jabs' ],
+  [ 'config.level.json', '/api/config/level' ],
+  [ 'config.difficulty.json', '/api/config/difficulty' ],
+  [ 'config.motion.json', '/api/config/motion' ],
+  [ 'config.weather.json', '/api/config/weather' ],
+  [ 'config.notetag-lines.json', '/api/config/notetag-lines' ],
+]);
+
+/**
  * Returns the API pathname (with leading slash, no query) for read/write, or null if unknown.
+ * @param {string} baseName The file's basename inside {@code data/}.
+ * @returns {string | null} The API pathname, or null for a file the server does not serve.
  */
 function apiPathnameForBasename(baseName: string): string | null
 {
-  switch (baseName)
+  // every file the server knows by name.
+  const pathname = API_PATHNAMES_BY_BASENAME.get(baseName);
+  if (pathname !== undefined)
   {
-    case 'Actors.json':
-      return '/api/actors';
-    case 'Animations.json':
-      return '/api/animations';
-    case 'Armors.json':
-      return '/api/armors';
-    case 'Classes.json':
-      return '/api/classes';
-    case 'CommonEvents.json':
-      return '/api/common-events';
-    case 'Enemies.json':
-      return '/api/enemies';
-    case 'Items.json':
-      return '/api/items';
-    case 'Skills.json':
-      return '/api/skills';
-    case 'States.json':
-      return '/api/states';
-    case 'Weapons.json':
-      return '/api/weapons';
-    case 'System.json':
-      return '/api/system';
-    case 'config.crafting.json':
-      return '/api/config/crafting';
-    case 'config.proficiency.json':
-      return '/api/config/proficiency';
-    case 'config.quest.json':
-      return '/api/config/quest';
-    case 'config.sdp.json':
-      return '/api/config/sdp';
-    case 'config.jabs.json':
-      return '/api/config/jabs';
-    case 'config.level.json':
-      return '/api/config/level';
-    case 'config.difficulty.json':
-      return '/api/config/difficulty';
-    case 'config.motion.json':
-      return '/api/config/motion';
-    case 'config.weather.json':
-      return '/api/config/weather';
-    default:
-      break;
+    return pathname;
   }
 
   const mapMatch = /^Map(\d+)\.json$/u.exec(baseName);

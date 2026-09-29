@@ -13,16 +13,16 @@ import type { VirtualizedSidebarRow } from '@presentation/components/board/Virtu
 import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import { useDifficultyConfig } from '@presentation/context/resources/difficulty.context.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
-import DifficultyParametersSection from '@boards/difficulty/DifficultyParametersSection.tsx';
+import DifficultyStatesSection from '@boards/difficulty/DifficultyStatesSection.tsx';
 import type { DifficultyLayer } from '@core/domain/valueObjects/difficulty-config.ts';
 
 /**
  * Editor board for `config.difficulty.json` — the layers a player stacks to reshape a playthrough.
  *
- * A layer carries far more than this board currently shows: parameter scaling for both sides of a
- * fight, reward multipliers, access flags, and optional affix biasing. Only the name is editable
- * here for now, and everything else rides through untouched on save rather than being rebuilt from
- * what the UI happens to know about.
+ * A layer's effects live on two states, one every party member carries and one every enemy carries
+ * while the layer is enabled, so this board edits the name and those two states. Everything else a
+ * layer carries (cost, access flags, affix biasing) rides through untouched on save rather than being
+ * rebuilt from what the UI happens to know about.
  */
 const DifficultyBoard = () =>
 {
@@ -37,11 +37,6 @@ const DifficultyBoard = () =>
   const [ isSaving, setIsSaving ] = useState(false);
   const [ selectedIndex, setSelectedIndex ] = useState(0);
   const listWrapperRef = useRef<HTMLDivElement | null>(null);
-
-  // held on the board rather than inside the section, so switching layers keeps the chosen view.
-  // starts off: filtering to what a layer already changes hides every parameter it does not, which
-  // is exactly the set somebody opening the board is usually here to start changing.
-  const [ showOnlyModified, setShowOnlyModified ] = useState(false);
 
   const layers = useMemo(() =>
   {
@@ -193,11 +188,9 @@ const DifficultyBoard = () =>
               />
             </BoardSectionCard>
 
-            <DifficultyParametersSection
+            <DifficultyStatesSection
               layer={selectedLayer}
-              onChange={updateSelectedLayer}
-              showOnlyModified={showOnlyModified}
-              onShowOnlyModifiedChange={setShowOnlyModified}
+              onChange={patchSelectedLayer}
             />
           </Stack>
         )}

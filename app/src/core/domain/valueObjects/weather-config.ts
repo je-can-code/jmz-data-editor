@@ -563,7 +563,7 @@ const labelsBlockFor = (
 
 const serializeWeatherConfig = (root: WeatherConfigRoot): Record<string, unknown> =>
 {
-  const source = root.source;
+  const { source } = root;
   const rawSky = isPlainObject(source[ 'sky' ]) ? source[ 'sky' ] : {};
   const rawPresets = isPlainObject(source[ 'presets' ]) ? source[ 'presets' ] : {};
   const rawClimates = isPlainObject(source[ 'climates' ]) ? source[ 'climates' ] : {};
