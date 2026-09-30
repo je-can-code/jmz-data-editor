@@ -1,6 +1,7 @@
 import { isEditorDataName } from '../model/documentKeys.ts';
 import { isJsonObject, type JsonValue } from '../model/json.ts';
 import type { RmmzMap, RmmzMapInfo, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { MapArrival } from '../properties/arrivals.ts';
 
 /**
  * The image folders the map editor draws from: tilesets, character sheets, faces, parallaxes and system sheets.
@@ -66,6 +67,14 @@ interface MapEditorApi
    * @returns {Promise<void>} Settles once the file is back.
    */
   restoreMapFile(mapId: number, text: string): Promise<void>;
+
+  /**
+   * Reads every transfer on disk, on any map, that names outright a tile of a map as where it lands: what a resize
+   * of that map must warn about, since it leaves them pointing at the old spots.
+   * @param {number} mapId The map landed on.
+   * @returns {Promise<MapArrival[]>} The transfers, by the map they are on, then event and page; empty when none.
+   */
+  loadArrivals(mapId: number): Promise<MapArrival[]>;
 
   /**
    * Reads the map tree.
@@ -312,6 +321,18 @@ class HttpMapEditorApi implements MapEditorApi
       body: text,
     });
     await this.#requireOk(response, `PUT ${route}`);
+  }
+
+  async loadArrivals(mapId: number): Promise<MapArrival[]>
+  {
+    // the answer names the map it is about, so a late answer for another map is never taken for this one's.
+    const answer = await this.#getJson<{ mapId: number; arrivals: MapArrival[] }>(`/api/maps/${requireMapId(mapId)}/arrivals`);
+    if (answer.mapId !== mapId)
+    {
+      throw new MapEditorApiError(`GET /api/maps/${mapId}/arrivals answered about map ${answer.mapId}`, 0);
+    }
+
+    return answer.arrivals;
   }
 
   async loadMapInfos(): Promise<(RmmzMapInfo | null)[]>

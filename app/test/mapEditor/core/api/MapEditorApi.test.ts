@@ -57,6 +57,33 @@ describe('HttpMapEditorApi', () =>
         .toStrictEqual([ [ [ null, { id: 1 } ], [ null, { id: 2 } ] ], [ `${BASE}/api/mapinfos`, `${BASE}/api/tilesets` ] ]);
     });
 
+    it('reads the transfers landing on a map from its route, unwrapped from the answer about that map', async () =>
+    {
+      // Arrange.
+      const door = { mapId: 2, mapName: 'Cellar', eventId: 1, eventName: 'Door', pageIndex: 0, x: 3, y: 4 };
+      const { api, requests } = buildApi(() => envelope({ mapId: 12, arrivals: [ door ] }));
+
+      // Act.
+      const arrivals = await api.loadArrivals(12);
+
+      // Assert.
+      expect([ arrivals, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ [ door ], [ `GET ${BASE}/api/maps/12/arrivals` ] ]);
+    });
+
+    it('refuses an answer about another map\'s transfers rather than take it for this one\'s', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => envelope({ mapId: 13, arrivals: [] }));
+
+      // Act.
+      const load = api.loadArrivals(12);
+
+      // Assert.
+      await expect(load)
+        .rejects.toThrow('GET /api/maps/12/arrivals answered about map 13');
+    });
+
     it('refuses a body that is not the envelope, even one carrying data', async () =>
     {
       // Arrange: the document raw, and a near miss with data but no path.

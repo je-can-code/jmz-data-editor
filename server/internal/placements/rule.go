@@ -1,5 +1,6 @@
 // Package placements finds where each enemy stands on the game's maps: every map event whose comments
-// make it a battler of that enemy, in the way J-ABS reads them.
+// make it a battler of that enemy, in the way J-ABS reads them. From the same reading of every map it
+// also finds where each transfer lands, so a map can be told which transfers point into it.
 package placements
 
 import (

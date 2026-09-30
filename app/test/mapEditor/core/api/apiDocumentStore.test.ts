@@ -22,6 +22,7 @@ describe('apiDocumentStore', () =>
     deleteMap: vi.fn(async () => undefined),
     loadMapFile: vi.fn(async () => null),
     restoreMapFile: vi.fn(async () => undefined),
+    loadArrivals: vi.fn(async () => []),
     loadMapInfos: vi.fn(async () => [ null, 'infos' ] as never),
     saveMapInfos: vi.fn(async () => undefined),
     loadTilesets: vi.fn(async () => [ null, 'tilesets' ] as never),

@@ -60,6 +60,71 @@ func TestPlacementsAcrossTheRealMaps(t *testing.T) {
 	}
 }
 
+// TestArrivalsAcrossTheRealMaps asks the game's own project which transfers land on each of its maps, as a
+// resize of each would. It proves every shipped map reads for its transfers, and checks each arrival against
+// a plain reading of the map it is on: the event is there under that id and name, and the page listed holds a
+// Transfer Player naming that map and tile outright. It finds the project as the placements sweep does. The
+// floors are far below today's counts (907 arrivals landing on 305 of 384 maps), so adding content never
+// breaks them, while a scan that quietly saw nothing would.
+func TestArrivalsAcrossTheRealMaps(t *testing.T) {
+	// Arrange- the first answer lists the maps to ask about.
+	dataDir := gametest.DataDir(t)
+	root := filepath.Dir(dataDir)
+	index, _ := newCountingIndex(t, watch.NewHub("data"))
+	if _, err := index.Arrivals(root, 1); err != nil {
+		t.Fatal(err)
+	}
+	mapIds := append([]int{}, index.mapIds...)
+	rawMaps := map[int][]*rawEvent{}
+
+	// Act- ask about each map in turn.
+	found := 0
+	landedOn := 0
+	for _, mapId := range mapIds {
+		arrivals, err := index.Arrivals(root, mapId)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, arrival := range arrivals {
+			assertLandsFromItsMap(t, rawEventsOf(t, dataDir, arrival.MapId, rawMaps), mapId, arrival)
+		}
+		found += len(arrivals)
+		if len(arrivals) > 0 {
+			landedOn++
+		}
+	}
+
+	// Assert- the sweep found transfers into maps across the folder.
+	if len(mapIds) < 300 || found < 300 || landedOn < 100 {
+		t.Errorf("asked about %d maps and found %d arrivals landing on %d of them", len(mapIds), found, landedOn)
+	}
+}
+
+// assertLandsFromItsMap checks one arrival against the events of the map it is on, read without the models.
+func assertLandsFromItsMap(t *testing.T, events []*rawEvent, targetMapId int, arrival Arrival) {
+	t.Helper()
+
+	where := mapFileName(arrival.MapId) + " event " + strconv.Itoa(arrival.EventId)
+	if arrival.EventId >= len(events) || events[arrival.EventId] == nil {
+		t.Fatalf("%s: no such event", where)
+	}
+	event := events[arrival.EventId]
+	if event.Id != arrival.EventId || event.Name != arrival.EventName || arrival.PageIndex >= len(event.Pages) {
+		t.Errorf("%s: answered %+v, the file holds id %d %q with %d pages", where, arrival, event.Id, event.Name, len(event.Pages))
+		return
+	}
+
+	// the page holds a transfer naming this map and tile outright; plain JSON reads its numbers as floats.
+	for _, line := range event.Pages[arrival.PageIndex].List {
+		if line.Code == transferPlayer && len(line.Parameters) == 6 &&
+			line.Parameters[0] == float64(directDesignation) && line.Parameters[1] == float64(targetMapId) &&
+			line.Parameters[2] == float64(arrival.X) && line.Parameters[3] == float64(arrival.Y) {
+			return
+		}
+	}
+	t.Errorf("%s: page %d holds no transfer to map %d at %d,%d", where, arrival.PageIndex+1, targetMapId, arrival.X, arrival.Y)
+}
+
 // rawEvent is a map event as a plain reading of the file sees it.
 type rawEvent struct {
 	Id    int    `json:"id"`

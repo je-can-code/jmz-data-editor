@@ -11,8 +11,9 @@ import {
   PROPERTY_LIMITS,
   SCROLL_TYPES,
 } from '../../core/properties/propertyInputs.ts';
+import { describeStranded, type StrandedArrival } from '../../core/properties/arrivals.ts';
 import { MAX_MAP_SIZE, MIN_MAP_SIZE, RESIZE_ANCHORS, type ResizeAnchor } from '../../core/properties/resizeMap.ts';
-import { useHeldMap, useTilesets, useWorkspace, useWorkspaceState } from '../workspaceHooks.tsx';
+import { useHeldMap, useStrandedArrivals, useTilesets, useWorkspace, useWorkspaceState } from '../workspaceHooks.tsx';
 import { CheckField, CommitNumberField, CommitTextField, SectionTitle, SelectField } from './propertyFields.tsx';
 
 /**
@@ -99,8 +100,31 @@ const AnchorPicker = (props: { value: ResizeAnchor; onChange: (anchor: ResizeAnc
 };
 
 /**
- * The map's size, changed with a resize that keeps one edge or corner in place and warns which events would be
- * left outside.
+ * The transfers a resize would leave pointing at the wrong tile, listed before it is made: transfers keep the tile
+ * numbers they name, so each one landing where the resize moves or cuts off tiles would now land somewhere else.
+ * @param {{ stranded: readonly StrandedArrival[] }} props The transfers.
+ * @returns {React.JSX.Element} The warning.
+ */
+const StrandedTransfers = (props: { stranded: readonly StrandedArrival[] }) =>
+{
+  const { stranded } = props;
+  return (
+    <Alert severity={'warning'} sx={{ py: 0 }} data-testid={'resize-transfers'}>
+      {`${stranded.length === 1 ? '1 transfer lands' : `${stranded.length} transfers land`} on this map and will not follow the resize:`}
+      <Box component={'ul'} sx={{ m: 0, pl: 2 }}>
+        {stranded.map(arrival => (
+          <li key={`${arrival.mapId}:${arrival.eventId}:${arrival.pageIndex}:${arrival.x}:${arrival.y}`}>
+            {describeStranded(arrival)}
+          </li>
+        ))}
+      </Box>
+    </Alert>
+  );
+};
+
+/**
+ * The map's size, changed with a resize that keeps one edge or corner in place and warns, before it is made, which
+ * events would be left outside and which transfers landing on the map would no longer land where they did.
  * @param {{ map: MapDocument, mapId: number }} props The map.
  * @returns {React.JSX.Element} The fields.
  */
@@ -122,10 +146,12 @@ const SizeFields = (props: { map: MapDocument; mapId: number }) =>
   const newWidth = parseWholeNumber(width, SIZE_LIMITS);
   const newHeight = parseWholeNumber(height, SIZE_LIMITS);
   const changed = newWidth !== null && newHeight !== null && (newWidth !== map.width || newHeight !== map.height);
-  const dropped = changed ? previewResize(map, newWidth, newHeight, anchor).dropped.length : 0;
+  const plan = changed ? previewResize(map, newWidth, newHeight, anchor) : null;
+  const dropped = plan === null ? 0 : plan.dropped.length;
+  const transfers = useStrandedArrivals(mapId, plan);
 
   /**
-   * Makes the resize, saying how many events went with it.
+   * Makes the resize, saying how many events went with it and how many transfers no longer land where they did.
    */
   const resize = () =>
   {
@@ -135,9 +161,14 @@ const SizeFields = (props: { map: MapDocument; mapId: number }) =>
     }
 
     resizeMap(controller.services.hub, mapId, newWidth, newHeight, anchor);
-    if (dropped > 0)
+    const stranded = transfers.stranded.length;
+    const losses = [
+      ...(dropped > 0 ? [ `${dropped === 1 ? '1 event' : `${dropped} events`} outside the new size went with it` ] : []),
+      ...(stranded > 0 ? [ `${stranded === 1 ? '1 transfer lands' : `${stranded} transfers land`} somewhere else now` ] : []),
+    ];
+    if (losses.length > 0)
     {
-      controller.notify(`Resized; ${dropped === 1 ? '1 event' : `${dropped} events`} outside the new size went with it.`);
+      controller.notify(`Resized; ${losses.join(', and ')}.`);
     }
   };
 
@@ -163,8 +194,19 @@ const SizeFields = (props: { map: MapDocument; mapId: number }) =>
           {`${dropped === 1 ? '1 event stands' : `${dropped} events stand`} outside the new size and will be removed.`}
         </Alert>
       )}
+      {transfers.stranded.length > 0 && <StrandedTransfers stranded={transfers.stranded}/>}
+      {transfers.checking && (
+        <Typography variant={'caption'} color={'text.secondary'}>
+          Checking which transfers land on this map.
+        </Typography>
+      )}
+      {transfers.failure !== null && (
+        <Alert severity={'warning'} sx={{ py: 0 }}>
+          {`The transfers landing on this map could not be checked: ${transfers.failure}`}
+        </Alert>
+      )}
       <Box>
-        <Button size={'small'} variant={'outlined'} disabled={changed === false} onClick={resize}>
+        <Button size={'small'} variant={'outlined'} disabled={changed === false || transfers.checking} onClick={resize}>
           Resize
         </Button>
       </Box>

@@ -1,9 +1,17 @@
 import React, { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
-import { MAP_INFOS_KEY, mapDocumentKey, TILESETS_KEY } from '../core/model/documentKeys.ts';
+import { MAP_INFOS_KEY, mapDocumentKey, parseDocumentKey, TILESETS_KEY } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { RmmzMapInfo, RmmzTileset } from '../core/model/rmmzTypes.ts';
+import {
+  arrivalsFrom,
+  strandedByResize,
+  withLiveArrivals,
+  type MapArrival,
+  type StrandedArrival,
+} from '../core/properties/arrivals.ts';
+import type { ResizePlan } from '../core/properties/resizeMap.ts';
 import type { WorkspaceController, WorkspaceState } from './WorkspaceController.ts';
 
 /**
@@ -214,6 +222,87 @@ const useHeldMap = (mapId: number | null): HeldMap =>
 };
 
 /**
+ * What checking a resize against the transfers landing on its map came to: the transfers it would strand, whether
+ * the disk's answer is still on its way, and why it could not be had, if it could not.
+ */
+type StrandedCheck = {
+  readonly stranded: readonly StrandedArrival[];
+  readonly checking: boolean;
+  readonly failure: string | null;
+};
+
+/**
+ * Works out which transfers landing on a map a resize would leave pointing at the wrong tile, for the resize form to
+ * list before the resize is made. The transfers on disk come from the server, asked afresh each time a resize starts
+ * being worked out; the maps open in this window are read from their live copies instead, so a transfer placed and
+ * not yet saved counts too. Other maps are never changed: the author decides what to do with each transfer listed.
+ * @param {number} mapId The map being resized.
+ * @param {ResizePlan | null} plan The resize being worked out, or null while there is none.
+ * @returns {StrandedCheck} The transfers it would strand.
+ */
+const useStrandedArrivals = (mapId: number, plan: ResizePlan | null): StrandedCheck =>
+{
+  const controller = useWorkspace();
+  const { hub, api } = controller.services;
+  const pending = plan !== null;
+  const [ disk, setDisk ] = useState<{ mapId: number; arrivals: readonly MapArrival[] | null; failure: string | null }>({ mapId, arrivals: null, failure: null });
+
+  useEffect(() =>
+  {
+    if (api === null || pending === false)
+    {
+      return undefined;
+    }
+
+    let live = true;
+    setDisk({ mapId, arrivals: null, failure: null });
+    api.loadArrivals(mapId)
+      .then(arrivals =>
+      {
+        if (live)
+        {
+          setDisk({ mapId, arrivals, failure: null });
+        }
+      })
+      .catch((error: unknown) =>
+      {
+        if (live)
+        {
+          setDisk({ mapId, arrivals: [], failure: error instanceof Error ? error.message : String(error) });
+        }
+      });
+
+    return () =>
+    {
+      live = false;
+    };
+  }, [ api, mapId, pending ]);
+
+  const answered = disk.mapId === mapId ? disk.arrivals : null;
+  if (plan === null || api === null)
+  {
+    return { stranded: [], checking: false, failure: null };
+  }
+
+  if (answered === null)
+  {
+    return { stranded: [], checking: true, failure: null };
+  }
+
+  // every map open here is read as it stands, in place of what the disk says of it.
+  const openMaps = hub.documentKeys()
+    .map(parseDocumentKey)
+    .flatMap(parsed => (parsed.kind === 'map' ? [ parsed.mapId ] : []));
+  const live = openMaps.flatMap(openId => arrivalsFrom({
+    mapId: openId,
+    mapName: controller.mapName(openId),
+    events: hub.map(mapDocumentKey(openId)).events,
+  }, mapId));
+  const arrivals = withLiveArrivals(answered, live, new Set(openMaps));
+  return { stranded: strandedByResize(arrivals, plan), checking: false, failure: disk.failure };
+};
+
+/**
  * Holds the tilesets for a panel, loading them the first time.
  * @returns {readonly (RmmzTileset | null)[]} The tilesets by id, or none while they load.
  */
@@ -242,9 +331,10 @@ export {
   useHeldMap,
   useHubVersion,
   useMapTreeDocument,
+  useStrandedArrivals,
   useTilesets,
   useWorkspace,
   useWorkspaceState,
   WorkspaceProvider,
 };
-export type { HeldMap };
+export type { HeldMap, StrandedCheck };
