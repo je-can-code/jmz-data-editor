@@ -22,6 +22,11 @@ type HistoryView = {
 
 /**
  * One undo history: the steps done, oldest first, and the steps undone, with the next to redo last.
+ *
+ * Undo and redo invoked here always act on this history's own head: its newest done step, its most recently
+ * undone one. A step shared with other histories can also move because one of those was undone or redone, and
+ * then it may sit anywhere in this one; {@link markUndone} and {@link markRedone} take it from wherever it is, so
+ * this history stays a truthful list of which of its steps are applied.
  */
 class History
 {
@@ -111,33 +116,24 @@ class History
   }
 
   /**
-   * Moves the newest done step to the redo list.
-   * @param {HistoryStep} step The step, which must be the newest done.
+   * Notes a step as undone: taken out of the done list wherever it sits, and made the next step to redo.
+   * @param {HistoryStep} step The step.
    */
   markUndone(step: HistoryStep): void
   {
-    if (this.lastDone() !== step)
-    {
-      throw new Error(`${step.label} is not the newest step in ${this.key}`);
-    }
-
-    this.#done.pop();
-    this.#undone.push(step);
+    this.#done = this.#done.filter(each => each.id !== step.id);
+    this.#undone = [ ...this.#undone.filter(each => each.id !== step.id), step ];
   }
 
   /**
-   * Moves the next redo step back to the done list.
-   * @param {HistoryStep} step The step, which must be the next to redo.
+   * Notes a step as redone: taken out of the redo list wherever it sits (or never there, when this history had
+   * moved on from it), and made the newest done step, since its patches now apply on top of everything here.
+   * @param {HistoryStep} step The step.
    */
   markRedone(step: HistoryStep): void
   {
-    if (this.nextRedo() !== step)
-    {
-      throw new Error(`${step.label} is not the next step to redo in ${this.key}`);
-    }
-
-    this.#undone.pop();
-    this.#done.push(step);
+    this.#undone = this.#undone.filter(each => each.id !== step.id);
+    this.#done = [ ...this.#done.filter(each => each.id !== step.id), step ];
   }
 
   /**

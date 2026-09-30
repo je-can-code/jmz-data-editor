@@ -4,33 +4,35 @@ import type { DocumentKey } from './model/documentKeys.ts';
 /**
  * What the close guard needs to know about the other windows.
  */
-type HeldElsewhere = {
+type SharedLatest = {
   /**
-   * Reports whether another live window holds a document.
+   * Reports whether another live window holds a document at exactly this window's latest state.
    * @param {DocumentKey} key The document.
    * @returns {boolean} True when closing this window would not lose its edits.
    */
-  isHeldElsewhere(key: DocumentKey): boolean;
+  sharesLatest(key: DocumentKey): boolean;
 };
 
 /**
- * The part of a window the guard listens on.
+ * The part of a window the guard and the services listen on: {@code beforeunload}, where a page may ask to stay
+ * open, and {@code pagehide}, when it is going for good.
  */
 type CloseTarget = {
-  addEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
-  removeEventListener(type: 'beforeunload', listener: (event: BeforeUnloadEvent) => void): void;
+  addEventListener(type: 'beforeunload' | 'pagehide', listener: (event: Event) => void): void;
+  removeEventListener(type: 'beforeunload' | 'pagehide', listener: (event: Event) => void): void;
 };
 
 /**
- * Lists the documents whose unsaved edits would be lost if this window closed now: dirty here, and held by no
- * other live window. An event window closing beside the map it edits loses nothing, so it does not ask.
+ * Lists the documents whose unsaved edits would be lost if this window closed now: dirty here, and not held at
+ * this window's latest state by any other live window. An event window closing beside the map it edits loses
+ * nothing, so it does not ask; a window that holds an older copy of the map, or has gone, is no such guarantee.
  * @param {DocumentHub} hub This window's documents.
- * @param {HeldElsewhere} session The other windows.
+ * @param {SharedLatest} session The other windows.
  * @returns {DocumentKey[]} The documents at risk.
  */
-const unsavedOnlyHere = (hub: DocumentHub, session: HeldElsewhere): DocumentKey[] =>
+const unsavedOnlyHere = (hub: DocumentHub, session: SharedLatest): DocumentKey[] =>
 {
-  return hub.dirtyKeys().filter(key => session.isHeldElsewhere(key) === false);
+  return hub.dirtyKeys().filter(key => session.sharesLatest(key) === false);
 };
 
 /**
@@ -43,13 +45,13 @@ const unsavedOnlyHere = (hub: DocumentHub, session: HeldElsewhere): DocumentKey[
  */
 const installCloseGuard = (target: CloseTarget, shouldAsk: () => boolean): (() => void) =>
 {
-  const listener = (event: BeforeUnloadEvent) =>
+  const listener = (event: Event) =>
   {
     if (shouldAsk())
     {
       // both, since older engines only ask when a return value is set.
       event.preventDefault();
-      event.returnValue = '';
+      (event as BeforeUnloadEvent).returnValue = '';
     }
   };
 
@@ -58,4 +60,4 @@ const installCloseGuard = (target: CloseTarget, shouldAsk: () => boolean): (() =
 };
 
 export { installCloseGuard, unsavedOnlyHere };
-export type { CloseTarget, HeldElsewhere };
+export type { CloseTarget, SharedLatest };

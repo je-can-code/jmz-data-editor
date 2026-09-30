@@ -73,9 +73,9 @@ describe('fileChangeRouting', () =>
     // Act.
     const outcome = await routeFileChange({ path: 'data/Map002.json', kind: 'remove', client: '' }, hub, NOBODY);
 
-    // Assert.
-    expect([ outcome, hub.isConflicted('map:2'), hub.isConflicted('map:1'), hub.document('map:2').toJson() ])
-      .toStrictEqual([ 'conflicted', true, false, before ]);
+    // Assert: flagged with no file content beside it, since there is no file.
+    expect([ outcome, hub.conflict('map:2'), hub.isConflicted('map:1'), hub.document('map:2').toJson() ])
+      .toStrictEqual([ 'conflicted', { kind: 'disk', content: null }, false, before ]);
   });
 
   it('re-reads only the clean documents after a reconnect', async () =>

@@ -3,10 +3,16 @@ import type { DocumentKey, MapDocumentKey } from '../model/documentKeys.ts';
 import type { EditorDocument } from '../model/EditorDocument.ts';
 import { jsonEquals, type JsonValue } from '../model/json.ts';
 import { MapDocument } from '../model/MapDocument.ts';
-import { invertPatch, PatchConflictError } from '../model/patches.ts';
+import { invertPatch, PatchConflictError, type Patch } from '../model/patches.ts';
 import { History, type HistoryView } from './History.ts';
 import { homeDocumentOf, type HistoryKey } from './historyKeys.ts';
-import { documentsOfStep, type DocumentVersions, type HistoryStep, type StepEntry } from './HistoryStep.ts';
+import {
+  documentsOfStep,
+  documentsTouchedBy,
+  type DocumentHeads,
+  type HistoryStep,
+  type StepEntry,
+} from './HistoryStep.ts';
 import { Transaction, type TransactionHost } from './Transaction.ts';
 
 /**
@@ -30,18 +36,38 @@ type DocumentStore = {
 };
 
 /**
+ * Two copies of a document that disagree, both kept until the person chooses. The editor never settles one of
+ * these by itself, because either choice throws work away.
+ *
+ * - {@code disk}: the file changed outside the editor while this window held unsaved edits. {@code content} is
+ *   the file's new content, or null when the file was removed.
+ * - {@code window}: another window's copy went its own way at the same time as this one. {@code theirs} is that
+ *   window's copy, histories included, ready to adopt.
+ */
+type DocumentConflict =
+  | { readonly kind: 'disk'; readonly content: JsonValue | null }
+  | { readonly kind: 'window'; readonly peer: string; readonly theirs: DocumentSnapshot };
+
+/**
  * Why an undo, redo or jump could not happen.
  *
  * - {@code nothing}: the history has no step in that direction.
  * - {@code missing-documents}: the step touches documents this window does not hold; open them and retry.
- * - {@code blocked}: the step is a transaction, and another history it belongs to has newer steps on top.
- * - {@code conflict}: a patch found its document changed underneath it, so the step was left in place.
+ * - {@code conflict}: a later edit changed something the step changed, so undoing it would overwrite that edit.
+ *   {@code blockedBy} names the later step when the window can tell which one it was. The step stays where it
+ *   is; the person can undo the blocking step first, or forget this one ({@link DocumentHub.forgetStep}) and go
+ *   on past it.
  */
 type HistoryFailure =
   | { readonly ok: false; readonly reason: 'nothing'; readonly historyKey: HistoryKey }
   | { readonly ok: false; readonly reason: 'missing-documents'; readonly step: HistoryStep; readonly documents: readonly DocumentKey[] }
-  | { readonly ok: false; readonly reason: 'blocked'; readonly step: HistoryStep; readonly by: HistoryKey }
-  | { readonly ok: false; readonly reason: 'conflict'; readonly step: HistoryStep; readonly message: string };
+  | {
+    readonly ok: false;
+    readonly reason: 'conflict';
+    readonly step: HistoryStep;
+    readonly blockedBy: HistoryStep | null;
+    readonly message: string;
+  };
 
 /**
  * The answer to an undo or redo: the step it acted on, or why it could not.
@@ -59,19 +85,23 @@ type JumpResult = { readonly ok: true } | HistoryFailure;
 type HubSource = 'local' | 'remote';
 
 /**
- * Everything the hub announces. The history panel, dirty markers and cross-window sync all listen here.
+ * Everything the hub announces. The history panel, dirty markers, conflict banners and cross-window sync all
+ * listen here. Every operation event carries the operation's id and the heads it was made against, which is
+ * what other windows check before repeating it.
  */
 type HubEvent =
-  | { readonly type: 'committed'; readonly step: HistoryStep; readonly bases: DocumentVersions; readonly source: HubSource }
-  | { readonly type: 'undone'; readonly step: HistoryStep; readonly bases: DocumentVersions; readonly source: HubSource }
-  | { readonly type: 'redone'; readonly step: HistoryStep; readonly bases: DocumentVersions; readonly source: HubSource }
+  | { readonly type: 'committed'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
+  | { readonly type: 'undone'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
+  | { readonly type: 'redone'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
+  | { readonly type: 'forgotten'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
   | { readonly type: 'discarded'; readonly stepIds: readonly string[] }
   | { readonly type: 'saved'; readonly document: DocumentKey; readonly marker: readonly string[]; readonly source: HubSource }
   | { readonly type: 'adopted'; readonly document: DocumentKey; readonly source: HubSource }
   | { readonly type: 'released'; readonly document: DocumentKey }
   | { readonly type: 'reloaded'; readonly document: DocumentKey }
-  | { readonly type: 'conflicted'; readonly document: DocumentKey }
-  | { readonly type: 'out-of-sync'; readonly documents: readonly DocumentKey[]; readonly origin: string; readonly originVersions: DocumentVersions };
+  | { readonly type: 'conflicted'; readonly document: DocumentKey; readonly conflict: DocumentConflict }
+  | { readonly type: 'conflict-cleared'; readonly document: DocumentKey }
+  | { readonly type: 'out-of-sync'; readonly documents: readonly DocumentKey[]; readonly origin: string };
 
 /**
  * Hears every hub event.
@@ -79,26 +109,27 @@ type HubEvent =
 type HubListener = (event: HubEvent) => void;
 
 /**
- * An operation made in another window, to be repeated here. {@code bases} holds the version of each touched
- * document just before the operation, so a window that drifted can tell and ask for a fresh copy.
+ * An operation made in another window, to be repeated here. {@code bases} holds the head of each touched
+ * document just before the operation, so a window whose copy went elsewhere can tell and sort it out.
  */
 type RemoteOperation =
-  | { readonly type: 'commit'; readonly origin: string; readonly step: HistoryStep; readonly bases: DocumentVersions }
-  | { readonly type: 'undo'; readonly origin: string; readonly stepId: string; readonly bases: DocumentVersions }
-  | { readonly type: 'redo'; readonly origin: string; readonly stepId: string; readonly bases: DocumentVersions }
+  | { readonly type: 'commit'; readonly origin: string; readonly opId: string; readonly step: HistoryStep; readonly bases: DocumentHeads }
+  | { readonly type: 'undo'; readonly origin: string; readonly opId: string; readonly stepId: string; readonly bases: DocumentHeads }
+  | { readonly type: 'redo'; readonly origin: string; readonly opId: string; readonly stepId: string; readonly bases: DocumentHeads }
+  | { readonly type: 'forget'; readonly origin: string; readonly opId: string; readonly stepId: string; readonly bases: DocumentHeads }
   | { readonly type: 'saved'; readonly origin: string; readonly document: DocumentKey; readonly marker: readonly string[] };
 
 /**
- * Everything one window knows about a document, for another window to adopt: its content, its place in time,
- * whether it is saved, and every history that lives on it. Plain data, so it crosses a BroadcastChannel.
+ * Everything one window knows about a document, for another window to adopt: its committed content, the
+ * lineage of operations that produced it, whether it is saved, and every history that lives on it. An edit still
+ * open is never part of it. Plain data, so it crosses a BroadcastChannel.
  */
 type DocumentSnapshot = {
   readonly document: DocumentKey;
   readonly content: JsonValue;
-  readonly version: number;
+  readonly lineage: readonly string[];
   readonly applied: readonly string[];
   readonly saved: readonly string[];
-  readonly conflicted: boolean;
   readonly histories: readonly { key: HistoryKey; done: readonly HistoryStep[]; undone: readonly HistoryStep[] }[];
 };
 
@@ -117,7 +148,7 @@ type ExternalChangeResult = 'ignored' | 'unchanged' | 'reloaded' | 'conflicted';
  */
 type DocumentHubOptions = {
   /**
-   * This window's id: it prefixes every step id, and saves carry it so the window can ignore their echo.
+   * This window's id: it prefixes every step and operation id, and saves carry it so the window can ignore their echo.
    */
   clientId: string;
 
@@ -144,18 +175,80 @@ const sameSequence = (left: readonly string[], right: readonly string[]): boolea
 };
 
 /**
+ * Names the content of a file, for the first entry of a lineage: two windows that load the same file start from
+ * the same entry, so their copies are recognisably one, and a window that loaded a different version of the file
+ * is recognisably not. A 32-bit FNV-1a hash of the JSON text is plenty for telling versions of one file apart.
+ * @param {JsonValue} content The file's content.
+ * @returns {string} The lineage entry.
+ */
+const diskOperationId = (content: JsonValue): string =>
+{
+  const text = JSON.stringify(content);
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++)
+  {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+
+  return `disk:${text.length.toString(36)}:${hash.toString(36)}`;
+};
+
+/**
+ * Reports whether one path lies inside another, or is it.
+ * @param {readonly (string | number)[]} outer The shorter path.
+ * @param {readonly (string | number)[]} inner The longer path.
+ * @returns {boolean} True when {@code outer} is a prefix of {@code inner}.
+ */
+const isPathPrefix = (outer: readonly (string | number)[], inner: readonly (string | number)[]): boolean =>
+{
+  return outer.length <= inner.length && outer.every((segment, index) => segment === inner[index]);
+};
+
+/**
+ * Reports whether two patches on one document change any of the same data: overlapping paths, shared cells,
+ * or a resize, which rewrites every cell.
+ * @param {Patch} left One patch.
+ * @param {Patch} right The other.
+ * @returns {boolean} True when they touch the same target.
+ */
+const patchesOverlap = (left: Patch, right: Patch): boolean =>
+{
+  if (left.kind === 'resize' || right.kind === 'resize')
+  {
+    return true;
+  }
+
+  if (left.kind === 'tiles' || right.kind === 'tiles')
+  {
+    return left.kind === 'tiles' && right.kind === 'tiles' && left.indices.some(index => right.indices.includes(index));
+  }
+
+  return isPathPrefix(left.path, right.path) || isPathPrefix(right.path, left.path);
+};
+
+/**
  * One window's documents and their histories.
  *
- * Every edit is a named step of reversible patches, recorded in the history of each thing it touches. A step
- * in several histories is a transaction, and undoes as one step from any of them; it is only undone while it is
- * the newest step in all of them, so every history stays strictly last-in, first-out. Every patch is checked
- * against what it replaces, on the way in and on the way back, so two histories editing one map (the map's own
- * and an event window's) can never quietly reverse each other's work.
+ * Every edit is a named step of reversible patches, recorded in the history of each thing it touches. A step in
+ * several histories is a transaction (a door pair, a blueprint propagating to every copy), and undoes as one step
+ * from any of them.
  *
- * Saving writes a document and records which steps the file now reflects; it never touches history, so undo
- * after a save works, and undoing back to the saved state makes the document clean again.
+ * The undo rule: a history's newest step can be undone whenever every one of its patches still applies, meaning
+ * each target still holds exactly what the step left there, however many unrelated steps came after it in this
+ * or any other history. A step that a later edit changed underneath is refused, naming that edit, and nothing
+ * moves; the person can undo the later edit first, or forget the step and go on past it. In the other histories a
+ * transaction belongs to, it may be undone out of order; each of those histories then lists it as its next redo,
+ * keeps its own newer steps undoable in their order, and drops it from its redo list the moment it records
+ * something new, while the step stays redoable from any history that has not. Redo follows the same rule
+ * forwards, and a redone step becomes the newest done step in every history it belongs to.
  *
- * Other windows holding the same documents stay in step through {@link applyRemote}, fed by the sync peer.
+ * Saving writes a document's committed content and records which steps the file now reflects; it never touches
+ * history, so undo after a save works, and undoing back to the saved state makes the document clean again.
+ *
+ * Every operation on a document is logged by id in its lineage. Other windows holding the same documents repeat
+ * this window's operations through {@link applyRemote}, and check each against the head of their own lineage, so
+ * a copy that went elsewhere is always noticed and never silently written over.
  */
 class DocumentHub
 {
@@ -175,9 +268,9 @@ class DocumentHub
 
   #saved = new Map<DocumentKey, string[]>();
 
-  #versions = new Map<DocumentKey, number>();
+  #lineage = new Map<DocumentKey, string[]>();
 
-  #conflicted = new Set<DocumentKey>();
+  #conflicts = new Map<DocumentKey, DocumentConflict>();
 
   #listeners = new Set<HubListener>();
 
@@ -257,13 +350,37 @@ class DocumentHub
   }
 
   /**
-   * Reads a held document's version, which counts the operations applied to it.
+   * Reads a held document's lineage: the id of every operation that produced its current state, oldest first,
+   * starting from the file it was loaded from.
    * @param {DocumentKey} key The document.
-   * @returns {number} The version, or -1 when not held.
+   * @returns {readonly string[]} The lineage; empty when not held.
+   */
+  lineage(key: DocumentKey): readonly string[]
+  {
+    return this.#lineage.get(key) ?? [];
+  }
+
+  /**
+   * Reads the id of the latest operation applied to a held document.
+   * @param {DocumentKey} key The document.
+   * @returns {string | null} The id, or null when not held.
+   */
+  head(key: DocumentKey): string | null
+  {
+    const lineage = this.#lineage.get(key);
+    return lineage === undefined
+      ? null
+      : lineage[lineage.length - 1] ?? '';
+  }
+
+  /**
+   * Counts the operations in a held document's lineage.
+   * @param {DocumentKey} key The document.
+   * @returns {number} The count, or -1 when not held.
    */
   version(key: DocumentKey): number
   {
-    return this.#versions.get(key) ?? -1;
+    return this.#lineage.get(key)?.length ?? -1;
   }
 
   /**
@@ -284,8 +401,8 @@ class DocumentHub
   }
 
   /**
-   * Holds a document built from its file content, clean and with empty histories. A document already held is
-   * returned as it is.
+   * Holds a document built from its file content, clean, with empty histories, and a lineage that starts from
+   * that exact file. A document already held is returned as it is.
    * @param {DocumentKey} key The document.
    * @param {JsonValue} content The file's content.
    * @returns {EditorDocument} The document.
@@ -300,7 +417,7 @@ class DocumentHub
 
     const document = createDocument(key, content);
     this.#documents.set(key, document);
-    this.#versions.set(key, 0);
+    this.#lineage.set(key, [ diskOperationId(content) ]);
     this.#applied.set(key, []);
     this.#saved.set(key, []);
     this.#emit({ type: 'adopted', document: key, source: 'local' });
@@ -308,30 +425,30 @@ class DocumentHub
   }
 
   /**
-   * Captures everything this window knows about a document, for another window to adopt.
+   * Captures everything this window knows about a document, for another window to adopt. An edit still open is
+   * left out: it may yet be cancelled, and a window that took it would keep a draft that no longer exists here.
    * @param {DocumentKey} key The document.
    * @returns {DocumentSnapshot} The snapshot.
    */
   snapshot(key: DocumentKey): DocumentSnapshot
   {
-    const document = this.document(key);
     const histories = [ ...this.#histories.values() ]
       .filter(history => homeDocumentOf(history.key) === key)
       .map(history => ({ key: history.key, done: [ ...history.done ], undone: [ ...history.undone ] }));
 
     return {
       document: key,
-      content: document.toJson(),
-      version: this.version(key),
+      content: this.#committedContent(key),
+      lineage: [ ...this.lineage(key) ],
       applied: [ ...this.#applied.get(key) ?? [] ],
       saved: [ ...this.#saved.get(key) ?? [] ],
-      conflicted: this.#conflicted.has(key),
       histories,
     };
   }
 
   /**
-   * Takes on another window's copy of a document, with its histories, replacing any copy held here.
+   * Takes on another window's copy of a document, with its lineage and histories, replacing any copy held here.
+   * Conflicts are left for their owner to clear.
    * @param {DocumentSnapshot} snapshot The snapshot.
    * @returns {EditorDocument} The document.
    */
@@ -349,10 +466,9 @@ class DocumentHub
       this.#documents.set(key, createDocument(key, snapshot.content));
     }
 
-    this.#versions.set(key, snapshot.version);
+    this.#lineage.set(key, [ ...snapshot.lineage ]);
     this.#applied.set(key, [ ...snapshot.applied ]);
     this.#saved.set(key, [ ...snapshot.saved ]);
-    this.#setConflicted(key, snapshot.conflicted);
 
     // one object per step, however many histories and snapshots mention it.
     const intern = (step: HistoryStep): HistoryStep =>
@@ -385,13 +501,30 @@ class DocumentHub
       return;
     }
 
-    this.#versions.delete(key);
+    this.#lineage.delete(key);
     this.#applied.delete(key);
     this.#saved.delete(key);
-    this.#conflicted.delete(key);
+    this.#conflicts.delete(key);
     this.#dropHistoriesOn(key);
     this.#prune();
     this.#emit({ type: 'released', document: key });
+  }
+
+  /**
+   * Produces a document's committed content: the live content with any open edit's patches taken back out.
+   * @param {DocumentKey} key The document.
+   * @returns {JsonValue} The content, in file shape.
+   */
+  #committedContent(key: DocumentKey): JsonValue
+  {
+    const document = this.document(key);
+    const pending = (this.#transaction?.entries ?? [])
+      .filter(entry => entry.document === key)
+      .map(entry => entry.patch);
+
+    return pending.length === 0
+      ? document.toJson()
+      : document.toJsonWithout(pending);
   }
 
   //endregion documents
@@ -468,9 +601,8 @@ class DocumentHub
       return null;
     }
 
-    this.#counter += 1;
     const step: HistoryStep = {
-      id: `${this.clientId}#${this.#counter}`,
+      id: this.#nextId(),
       label: transaction.label,
       histories: [ ...transaction.histories ],
       entries: [ ...entries ],
@@ -478,10 +610,11 @@ class DocumentHub
       at: this.#now(),
     };
 
-    const bases = this.#versionsOf(step);
+    const bases = this.#headsOf(step);
     this.#record(step);
     this.#markApplied(step);
-    this.#emit({ type: 'committed', step, bases, source: 'local' });
+    this.#extendLineage(step, step.id);
+    this.#emit({ type: 'committed', step, bases, opId: step.id, source: 'local' });
     this.#drainQueue();
     return step;
   }
@@ -510,91 +643,51 @@ class DocumentHub
   }
 
   /**
-   * Reports whether an undo in a history would go ahead, without doing it.
+   * Reports whether an undo in a history can be attempted: it has a step to undo, and this window holds every
+   * document that step touches. Whether each patch still applies is only known by trying.
    * @param {HistoryKey} key The history.
    * @returns {HistoryCheck} The step it would undo, or why it cannot.
    */
   canUndo(key: HistoryKey): HistoryCheck
   {
     const step = this.#histories.get(key)?.lastDone() ?? null;
-    if (step === null)
-    {
-      return { ok: false, reason: 'nothing', historyKey: key };
-    }
-
-    return this.#checkStep(step, history => history.lastDone());
+    return step === null
+      ? { ok: false, reason: 'nothing', historyKey: key }
+      : this.#checkHeld(step);
   }
 
   /**
-   * Reports whether a redo in a history would go ahead, without doing it.
+   * Reports whether a redo in a history can be attempted.
    * @param {HistoryKey} key The history.
    * @returns {HistoryCheck} The step it would redo, or why it cannot.
    */
   canRedo(key: HistoryKey): HistoryCheck
   {
     const step = this.#histories.get(key)?.nextRedo() ?? null;
-    if (step === null)
-    {
-      return { ok: false, reason: 'nothing', historyKey: key };
-    }
-
-    return this.#checkStep(step, history => history.nextRedo());
+    return step === null
+      ? { ok: false, reason: 'nothing', historyKey: key }
+      : this.#checkHeld(step);
   }
 
   /**
-   * Undoes the newest step of a history, across every document it touched.
+   * Undoes the newest step of a history, across every document it touched, whenever each of its patches still
+   * applies, however many unrelated steps came after it elsewhere.
    * @param {HistoryKey} key The history.
    * @returns {HistoryCheck} The step undone, or why nothing was.
    */
   undo(key: HistoryKey): HistoryCheck
   {
-    this.#requireIdle();
-    const check = this.canUndo(key);
-    if (check.ok === false)
-    {
-      return check;
-    }
-
-    const { step } = check;
-    const bases = this.#versionsOf(step);
-    const conflict = this.#applyEntries(step, 'backward');
-    if (conflict !== null)
-    {
-      return { ok: false, reason: 'conflict', step, message: conflict };
-    }
-
-    this.#heldHistoriesOf(step).forEach(history => history.markUndone(step));
-    this.#markReverted(step);
-    this.#emit({ type: 'undone', step, bases, source: 'local' });
-    return check;
+    return this.#move(key, 'backward');
   }
 
   /**
-   * Redoes the most recently undone step of a history.
+   * Redoes the most recently undone step of a history, whenever each of its patches applies again.
    * @param {HistoryKey} key The history.
    * @returns {HistoryCheck} The step redone, or why nothing was.
    */
   redo(key: HistoryKey): HistoryCheck
   {
-    this.#requireIdle();
-    const check = this.canRedo(key);
-    if (check.ok === false)
-    {
-      return check;
-    }
-
-    const { step } = check;
-    const bases = this.#versionsOf(step);
-    const conflict = this.#applyEntries(step, 'forward');
-    if (conflict !== null)
-    {
-      return { ok: false, reason: 'conflict', step, message: conflict };
-    }
-
-    this.#heldHistoriesOf(step).forEach(history => history.markRedone(step));
-    this.#markApplied(step);
-    this.#emit({ type: 'redone', step, bases, source: 'local' });
-    return check;
+    return this.#move(key, 'forward');
   }
 
   /**
@@ -644,27 +737,120 @@ class DocumentHub
   }
 
   /**
-   * Checks that a step can move: every document it touches is held, and it is at the head of every history.
-   * @param {HistoryStep} step The step.
-   * @param {(history: History) => HistoryStep | null} headOf Reads the step a history would move next.
-   * @returns {HistoryCheck} The step, or why it cannot move.
+   * Forgets a step: it leaves every history, so it can never be undone or redone, and whatever it did stays as it
+   * is. This is the way past a step a later edit blocks, when the person wants to keep that later edit and keep
+   * undoing older ones.
+   * @param {string} stepId The step.
+   * @returns {boolean} True when the step was known and is now forgotten.
    */
-  #checkStep(step: HistoryStep, headOf: (history: History) => HistoryStep | null): HistoryCheck
+  forgetStep(stepId: string): boolean
   {
-    const needed = [ ...documentsOfStep(step), ...step.histories.map(homeDocumentOf) ];
-    const missing = [ ...new Set(needed) ].filter(key => this.has(key) === false);
-    if (missing.length > 0)
+    this.#requireIdle();
+    const step = this.#steps.get(stepId);
+    if (step === undefined)
     {
-      return { ok: false, reason: 'missing-documents', step, documents: missing };
+      return false;
     }
 
-    const blocker = step.histories.find(key => headOf(this.#historyFor(key)) !== step);
-    if (blocker !== undefined)
+    const bases = this.#headsOf(step);
+    this.#discard(step);
+    const opId = this.#nextId();
+    this.#extendLineage(step, opId);
+    this.#emit({ type: 'forgotten', step, bases, opId, source: 'local' });
+    return true;
+  }
+
+  /**
+   * Undoes or redoes a history's head step.
+   * @param {HistoryKey} key The history.
+   * @param {'forward' | 'backward'} direction Redo or undo.
+   * @returns {HistoryCheck} The step moved, or why nothing was.
+   */
+  #move(key: HistoryKey, direction: 'forward' | 'backward'): HistoryCheck
+  {
+    this.#requireIdle();
+    const check = direction === 'backward'
+      ? this.canUndo(key)
+      : this.canRedo(key);
+    if (check.ok === false)
     {
-      return { ok: false, reason: 'blocked', step, by: blocker };
+      return check;
     }
 
-    return { ok: true, step };
+    const { step } = check;
+    const bases = this.#headsOf(step);
+    const failed = this.#applyEntries(step, direction);
+    if (failed !== null)
+    {
+      return {
+        ok: false,
+        reason: 'conflict',
+        step,
+        blockedBy: this.#laterStepTouching(step, failed.entry),
+        message: failed.message,
+      };
+    }
+
+    const opId = this.#nextId();
+    this.#settleMove(step, direction, opId);
+    this.#emit({ type: direction === 'backward' ? 'undone' : 'redone', step, bases, opId, source: 'local' });
+    return check;
+  }
+
+  /**
+   * Records a step's move in every held history and document once its patches have moved.
+   * @param {HistoryStep} step The step.
+   * @param {'forward' | 'backward'} direction Redo or undo.
+   * @param {string} opId The operation's id, for the lineage.
+   */
+  #settleMove(step: HistoryStep, direction: 'forward' | 'backward', opId: string): void
+  {
+    if (direction === 'backward')
+    {
+      this.#heldHistoriesOf(step).forEach(history => history.markUndone(step));
+      this.#markReverted(step);
+    }
+    else
+    {
+      this.#heldHistoriesOf(step).forEach(history => history.markRedone(step));
+      this.#markApplied(step);
+    }
+
+    this.#extendLineage(step, opId);
+  }
+
+  /**
+   * Checks that this window holds every document a step touches.
+   * @param {HistoryStep} step The step.
+   * @returns {HistoryCheck} The step, or which documents are missing.
+   */
+  #checkHeld(step: HistoryStep): HistoryCheck
+  {
+    const missing = documentsTouchedBy(step).filter(key => this.has(key) === false);
+    return missing.length > 0
+      ? { ok: false, reason: 'missing-documents', step, documents: missing }
+      : { ok: true, step };
+  }
+
+  /**
+   * Finds the edit that changed a step's target after it: the newest step applied to the same document, after
+   * the given one when it is applied, whose patches overlap the one that could not move.
+   * @param {HistoryStep} step The step that could not move.
+   * @param {StepEntry} entry The patch of it that failed.
+   * @returns {HistoryStep | null} The blocking step, or null when no recorded step explains it.
+   */
+  #laterStepTouching(step: HistoryStep, entry: StepEntry): HistoryStep | null
+  {
+    const applied = this.#applied.get(entry.document) ?? [];
+    const position = applied.lastIndexOf(step.id);
+    const later = applied.slice(position + 1).reverse();
+
+    const blocking = later
+      .map(id => this.#steps.get(id))
+      .find(candidate => candidate !== undefined && candidate.entries
+        .some(each => each.document === entry.document && patchesOverlap(each.patch, entry.patch)));
+
+    return blocking ?? null;
   }
 
   //endregion history
@@ -693,7 +879,8 @@ class DocumentHub
   }
 
   /**
-   * Writes a document to its file. History is untouched: undo still works afterwards, and undoing back to
+   * Writes a document's committed content to its file; an edit still open is left out, since the file must match
+   * the steps it is marked as reflecting. History is untouched: undo still works afterwards, and undoing back to
    * this point makes the document clean again. Edits made while the write is in flight stay unsaved.
    * @param {DocumentKey} key The document.
    * @returns {Promise<void>} Settles once the file is written.
@@ -701,7 +888,7 @@ class DocumentHub
   async save(key: DocumentKey): Promise<void>
   {
     const store = this.#requireStore();
-    const content = this.document(key).toJson();
+    const content = this.#committedContent(key);
     const marker = [ ...this.#applied.get(key) ?? [] ];
 
     await store.save(key, content);
@@ -725,22 +912,64 @@ class DocumentHub
 
   //endregion saving
 
-  //region external changes
+  //region conflicts
 
   /**
-   * Reports whether a document's file changed on disk while it held unsaved edits.
+   * Reads a document's conflict: two copies this window is keeping until the person chooses.
+   * @param {DocumentKey} key The document.
+   * @returns {DocumentConflict | null} The conflict, or null when there is none.
+   */
+  conflict(key: DocumentKey): DocumentConflict | null
+  {
+    return this.#conflicts.get(key) ?? null;
+  }
+
+  /**
+   * Reports whether a document is in conflict.
    * @param {DocumentKey} key The document.
    * @returns {boolean} True when flagged.
    */
   isConflicted(key: DocumentKey): boolean
   {
-    return this.#conflicted.has(key);
+    return this.#conflicts.has(key);
   }
 
   /**
+   * Flags a held document as in conflict, keeping everything it holds and the other copy beside it.
+   * @param {DocumentKey} key The document.
+   * @param {DocumentConflict} conflict The other copy, and where it came from.
+   */
+  flagConflict(key: DocumentKey, conflict: DocumentConflict): void
+  {
+    if (this.has(key) === false)
+    {
+      return;
+    }
+
+    this.#conflicts.set(key, conflict);
+    this.#emit({ type: 'conflicted', document: key, conflict });
+  }
+
+  /**
+   * Clears a document's conflict flag, keeping the copy this window holds.
+   * @param {DocumentKey} key The document.
+   */
+  clearConflict(key: DocumentKey): void
+  {
+    if (this.#conflicts.delete(key))
+    {
+      this.#emit({ type: 'conflict-cleared', document: key });
+    }
+  }
+
+  //endregion conflicts
+
+  //region external changes
+
+  /**
    * Responds to a document's file changing outside the editor (in MZ, a script, another editor): a clean
-   * document takes the new content, and one with unsaved edits keeps them and is flagged, so nothing is ever
-   * thrown away without the author choosing to.
+   * document takes the new content, and one with unsaved edits keeps them and is flagged with the file's content
+   * beside it, so nothing is ever thrown away without the person choosing to.
    * @param {DocumentKey} key The document.
    * @returns {Promise<ExternalChangeResult>} What was done.
    */
@@ -757,7 +986,7 @@ class DocumentHub
       return 'ignored';
     }
 
-    if (jsonEquals(this.document(key).toJson(), content))
+    if (jsonEquals(this.#committedContent(key), content))
     {
       return 'unchanged';
     }
@@ -765,7 +994,7 @@ class DocumentHub
     // an edit in progress counts as unsaved work too.
     if (this.isDirty(key) || this.#transaction !== null)
     {
-      this.#setConflicted(key, true);
+      this.flagConflict(key, { kind: 'disk', content });
       return 'conflicted';
     }
 
@@ -774,9 +1003,9 @@ class DocumentHub
   }
 
   /**
-   * Replaces a document with its file's content, as when taking the disk's version over unsaved edits. Every
-   * step that touched the old content can no longer reverse against the new, so each one is dropped from every
-   * history, and the document comes back clean.
+   * Replaces a document with its file's content, as when the person takes the disk's version over their edits.
+   * Every step that touched the old content can no longer reverse against the new, so each one is dropped from
+   * every history, and the document comes back clean, with a lineage that starts from this file.
    * @param {DocumentKey} key The document.
    * @param {JsonValue} content The file's content.
    */
@@ -785,15 +1014,14 @@ class DocumentHub
     this.#requireIdle();
     this.document(key).replace(content);
 
-    const stale = [ ...this.#steps.values() ]
-      .filter(step => documentsOfStep(step).includes(key) || step.histories.some(history => homeDocumentOf(history) === key));
+    const stale = [ ...this.#steps.values() ].filter(step => documentsTouchedBy(step).includes(key));
     stale.forEach(step => this.#discard(step));
     this.#dropHistoriesOn(key);
 
     this.#applied.set(key, []);
     this.#saved.set(key, []);
-    this.#versions.set(key, this.version(key) + 1);
-    this.#conflicted.delete(key);
+    this.#lineage.set(key, [ diskOperationId(content) ]);
+    this.clearConflict(key);
 
     if (stale.length > 0)
     {
@@ -803,57 +1031,15 @@ class DocumentHub
     this.#emit({ type: 'reloaded', document: key });
   }
 
-  /**
-   * Flags a held document as changed on disk behind the editor's back, as when its file was removed, keeping
-   * everything it holds.
-   * @param {DocumentKey} key The document.
-   */
-  flagConflict(key: DocumentKey): void
-  {
-    if (this.has(key))
-    {
-      this.#setConflicted(key, true);
-    }
-  }
-
-  /**
-   * Clears a document's conflict flag, keeping the edits it holds.
-   * @param {DocumentKey} key The document.
-   */
-  dismissConflict(key: DocumentKey): void
-  {
-    this.#setConflicted(key, false);
-  }
-
-  /**
-   * Sets or clears a conflict flag, announcing a new one.
-   * @param {DocumentKey} key The document.
-   * @param {boolean} conflicted Whether it is flagged.
-   */
-  #setConflicted(key: DocumentKey, conflicted: boolean): void
-  {
-    if (conflicted === false)
-    {
-      this.#conflicted.delete(key);
-      return;
-    }
-
-    const isNew = this.#conflicted.has(key) === false;
-    this.#conflicted.add(key);
-    if (isNew)
-    {
-      this.#emit({ type: 'conflicted', document: key });
-    }
-  }
-
   //endregion external changes
 
   //region sync
 
   /**
    * Repeats an operation made in another window. Anything touching only documents this window does not hold
-   * is ignored; a document found at a different version, or a patch that no longer fits, announces
-   * {@code out-of-sync} so the sync peer can fetch a fresh copy. Operations wait while a local edit is open.
+   * is ignored. An operation made against a head this window's copy does not have, naming a step this window
+   * has never seen, or finding its step already where it would put it, announces {@code out-of-sync} and
+   * changes nothing, so the sync peer can work out whose copy is ahead. Operations wait while a local edit is open.
    * @param {RemoteOperation} operation The operation.
    */
   applyRemote(operation: RemoteOperation): void
@@ -867,13 +1053,14 @@ class DocumentHub
     switch (operation.type)
     {
       case 'commit':
-        this.#applyRemoteCommit(operation.step, operation.bases, operation.origin);
+        this.#applyRemoteCommit(operation.step, operation.bases, operation.origin, operation.opId);
         break;
       case 'undo':
-        this.#applyRemoteMove(operation.stepId, operation.bases, operation.origin, 'backward');
-        break;
       case 'redo':
-        this.#applyRemoteMove(operation.stepId, operation.bases, operation.origin, 'forward');
+        this.#applyRemoteMove(operation);
+        break;
+      case 'forget':
+        this.#applyRemoteForget(operation.stepId, operation.bases, operation.origin, operation.opId);
         break;
       case 'saved':
         if (this.has(operation.document))
@@ -887,95 +1074,128 @@ class DocumentHub
   /**
    * Repeats another window's new step.
    * @param {HistoryStep} step The step.
-   * @param {DocumentVersions} bases The versions it was made against.
+   * @param {DocumentHeads} bases The heads it was made against.
    * @param {string} origin The window that made it.
+   * @param {string} opId The operation's id.
    */
-  #applyRemoteCommit(step: HistoryStep, bases: DocumentVersions, origin: string): void
+  #applyRemoteCommit(step: HistoryStep, bases: DocumentHeads, origin: string, opId: string): void
   {
-    const held = documentsOfStep(step).filter(key => this.has(key));
-    if (this.#steps.has(step.id) || (held.length === 0 && this.#heldHistoriesOf(step).length === 0))
+    const held = documentsTouchedBy(step).filter(key => this.has(key));
+    if (this.#steps.has(step.id) || held.length === 0)
     {
       return;
     }
 
-    if (this.#isStale(held, bases, origin) || this.#applyEntries(step, 'forward') !== null)
+    if (this.#staleAmong(held, bases).length > 0 || this.#applyEntries(step, 'forward') !== null)
     {
-      this.#reportOutOfSync(held, origin, bases);
+      this.#reportOutOfSync(held, origin);
       return;
     }
 
     this.#record(step);
     this.#markApplied(step);
-    this.#emit({ type: 'committed', step, bases, source: 'remote' });
+    this.#extendLineage(step, opId);
+    this.#emit({ type: 'committed', step, bases, opId, source: 'remote' });
   }
 
   /**
-   * Repeats another window's undo or redo.
-   * @param {string} stepId The step.
-   * @param {DocumentVersions} bases The versions it was made against.
-   * @param {string} origin The window that made it.
-   * @param {'forward' | 'backward'} direction Redo or undo.
+   * Repeats another window's undo or redo, but only when this window's copy is where that window's was: at the
+   * same heads, with the step applied (for an undo) or not (for a redo).
+   * @param {Extract<RemoteOperation, { type: 'undo' | 'redo' }>} operation The operation.
    */
-  #applyRemoteMove(stepId: string, bases: DocumentVersions, origin: string, direction: 'forward' | 'backward'): void
+  #applyRemoteMove(operation: Extract<RemoteOperation, { type: 'undo' | 'redo' }>): void
+  {
+    const direction = operation.type === 'undo'
+      ? 'backward'
+      : 'forward';
+    const step = this.#knownStep(operation.stepId, operation.bases, operation.origin);
+    if (step === null)
+    {
+      return;
+    }
+
+    const held = documentsTouchedBy(step).filter(key => this.has(key));
+    const inPlace = this.#isApplied(step) === (direction === 'backward');
+    if (inPlace === false || this.#staleAmong(held, operation.bases).length > 0 || this.#applyEntries(step, direction) !== null)
+    {
+      this.#reportOutOfSync(held, operation.origin);
+      return;
+    }
+
+    this.#settleMove(step, direction, operation.opId);
+    this.#emit({ type: operation.type === 'undo' ? 'undone' : 'redone', step, bases: operation.bases, opId: operation.opId, source: 'remote' });
+  }
+
+  /**
+   * Repeats another window's forgetting of a step.
+   * @param {string} stepId The step.
+   * @param {DocumentHeads} bases The heads it was made against.
+   * @param {string} origin The window that made it.
+   * @param {string} opId The operation's id.
+   */
+  #applyRemoteForget(stepId: string, bases: DocumentHeads, origin: string, opId: string): void
+  {
+    const step = this.#knownStep(stepId, bases, origin);
+    if (step === null)
+    {
+      return;
+    }
+
+    const held = documentsTouchedBy(step).filter(key => this.has(key));
+    if (this.#staleAmong(held, bases).length > 0)
+    {
+      this.#reportOutOfSync(held, origin);
+      return;
+    }
+
+    this.#discard(step);
+    this.#extendLineage(step, opId);
+    this.#emit({ type: 'forgotten', step, bases, opId, source: 'remote' });
+  }
+
+  /**
+   * Finds the step a remote operation names. A step this window has never seen, on a document it holds, means
+   * its copy missed something, which is announced rather than ignored.
+   * @param {string} stepId The step.
+   * @param {DocumentHeads} bases The heads the operation was made against, which name its documents.
+   * @param {string} origin The window that made it.
+   * @returns {HistoryStep | null} The step, or null when it is unknown here.
+   */
+  #knownStep(stepId: string, bases: DocumentHeads, origin: string): HistoryStep | null
   {
     const step = this.#steps.get(stepId);
-    if (step === undefined)
+    if (step !== undefined)
     {
-      return;
+      return step;
     }
 
-    const held = documentsOfStep(step).filter(key => this.has(key));
-    const histories = this.#heldHistoriesOf(step);
-    const inPlace = histories.every(history => (direction === 'backward'
-      ? history.lastDone()
-      : history.nextRedo()) === step);
-    if (inPlace === false || this.#isStale(held, bases, origin) || this.#applyEntries(step, direction) !== null)
-    {
-      this.#reportOutOfSync(held, origin, bases);
-      return;
-    }
-
-    if (direction === 'backward')
-    {
-      histories.forEach(history => history.markUndone(step));
-      this.#markReverted(step);
-      this.#emit({ type: 'undone', step, bases, source: 'remote' });
-      return;
-    }
-
-    histories.forEach(history => history.markRedone(step));
-    this.#markApplied(step);
-    this.#emit({ type: 'redone', step, bases, source: 'remote' });
+    const held = (Object.keys(bases) as DocumentKey[]).filter(key => this.has(key));
+    this.#reportOutOfSync(held, origin);
+    return null;
   }
 
   /**
-   * Reports whether any held document stands at a different version than an operation was made against.
+   * Lists the held documents whose head differs from the one an operation was made against.
    * @param {readonly DocumentKey[]} held The held documents the operation touches.
-   * @param {DocumentVersions} bases The versions it was made against.
-   * @param {string} origin The window that made it.
-   * @returns {boolean} True when this window has drifted.
+   * @param {DocumentHeads} bases The heads it was made against.
+   * @returns {DocumentKey[]} The documents that went elsewhere.
    */
-  #isStale(held: readonly DocumentKey[], bases: DocumentVersions, origin: string): boolean
+  #staleAmong(held: readonly DocumentKey[], bases: DocumentHeads): DocumentKey[]
   {
-    return origin !== this.clientId && held.some(key => this.version(key) !== bases[key]);
+    return held.filter(key => this.head(key) !== bases[key]);
   }
 
   /**
-   * Announces documents that have drifted from another window's copy, with the versions that window's copies
-   * stand at now, so the sync peer can tell which copy has seen more.
+   * Announces documents whose copy here differs from another window's.
    * @param {readonly DocumentKey[]} documents The documents.
    * @param {string} origin The window whose operation exposed it.
-   * @param {DocumentVersions} bases The versions its operation was made against; each operation moves them on by one.
    */
-  #reportOutOfSync(documents: readonly DocumentKey[], origin: string, bases: DocumentVersions): void
+  #reportOutOfSync(documents: readonly DocumentKey[], origin: string): void
   {
-    if (documents.length === 0)
+    if (documents.length > 0)
     {
-      return;
+      this.#emit({ type: 'out-of-sync', documents: [ ...documents ], origin });
     }
-
-    const originVersions = Object.fromEntries(documents.map(key => [ key, (bases[key] ?? -1) + 1 ]));
-    this.#emit({ type: 'out-of-sync', documents: [ ...documents ], origin, originVersions });
   }
 
   /**
@@ -1001,30 +1221,27 @@ class DocumentHub
    * order. On a conflict, everything already applied is put back, so a step moves whole or not at all.
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Which way.
-   * @returns {string | null} The conflict's message, or null on success.
+   * @returns {{ entry: StepEntry, message: string } | null} The entry that did not fit and why, or null on success.
    */
-  #applyEntries(step: HistoryStep, direction: 'forward' | 'backward'): string | null
+  #applyEntries(step: HistoryStep, direction: 'forward' | 'backward'): { entry: StepEntry; message: string } | null
   {
-    const entries = step.entries
-      .filter(entry => this.has(entry.document))
-      .map(entry => ({
-        document: entry.document,
-        patch: direction === 'forward'
-          ? entry.patch
-          : invertPatch(entry.patch),
-      }));
-    if (direction === 'backward')
-    {
-      entries.reverse();
-    }
+    const entries = step.entries.filter(entry => this.has(entry.document));
+    const ordered = direction === 'forward'
+      ? entries
+      : [ ...entries ].reverse();
 
-    const done: StepEntry[] = [];
-    for (const entry of entries)
+    const done: Patch[] = [];
+    const documents: DocumentKey[] = [];
+    for (const entry of ordered)
     {
+      const patch = direction === 'forward'
+        ? entry.patch
+        : invertPatch(entry.patch);
       try
       {
-        this.document(entry.document).apply(entry.patch);
-        done.push(entry);
+        this.document(entry.document).apply(patch);
+        done.push(patch);
+        documents.push(entry.document);
       }
       catch (error)
       {
@@ -1034,8 +1251,12 @@ class DocumentHub
         }
 
         // put back what already moved, newest first.
-        done.reverse().forEach(applied => this.document(applied.document).apply(invertPatch(applied.patch)));
-        return error.message;
+        for (let index = done.length - 1; index >= 0; index--)
+        {
+          this.document(documents[index]).apply(invertPatch(done[index]));
+        }
+
+        return { entry, message: error.message };
       }
     }
 
@@ -1043,19 +1264,38 @@ class DocumentHub
   }
 
   /**
-   * Records a step in every held history it belongs to, dropping whatever those histories could have redone
-   * from every history.
+   * Reports whether a step's patches are applied here: by the documents it changes when any is held, otherwise
+   * by the histories that list it.
+   * @param {HistoryStep} step The step.
+   * @returns {boolean} True when applied.
+   */
+  #isApplied(step: HistoryStep): boolean
+  {
+    const documents = documentsOfStep(step).filter(key => this.has(key));
+    if (documents.length > 0)
+    {
+      return documents.some(key => (this.#applied.get(key) ?? []).includes(step.id));
+    }
+
+    return this.#heldHistoriesOf(step).some(history => history.stateOf(step.id) === 'done');
+  }
+
+  /**
+   * Records a step in every held history it belongs to. Each of those histories stops being able to redo what it
+   * could; a step dropped that way is only forgotten altogether once no history can redo it any more.
    * @param {HistoryStep} step The step.
    */
   #record(step: HistoryStep): void
   {
     this.#steps.set(step.id, step);
     const dropped = this.#heldHistoriesOf(step).flatMap(history => history.record(step));
-    const unique = [ ...new Map(dropped.map(each => [ each.id, each ])).values() ];
-    unique.forEach(each => this.#discard(each));
-    if (unique.length > 0)
+    const orphaned = [ ...new Map(dropped.map(each => [ each.id, each ])).values() ]
+      .filter(each => [ ...this.#histories.values() ].every(history => history.stateOf(each.id) === null));
+
+    orphaned.forEach(each => this.#steps.delete(each.id));
+    if (orphaned.length > 0)
     {
-      this.#emit({ type: 'discarded', stepIds: unique.map(each => each.id) });
+      this.#emit({ type: 'discarded', stepIds: orphaned.map(each => each.id) });
     }
   }
 
@@ -1070,7 +1310,7 @@ class DocumentHub
   }
 
   /**
-   * Notes a step as applied to each document it touches, and moves their versions on.
+   * Notes a step as applied to each document it changes.
    * @param {HistoryStep} step The step.
    */
   #markApplied(step: HistoryStep): void
@@ -1078,12 +1318,11 @@ class DocumentHub
     documentsOfStep(step).filter(key => this.has(key)).forEach(key =>
     {
       this.#applied.get(key)?.push(step.id);
-      this.#versions.set(key, this.version(key) + 1);
     });
   }
 
   /**
-   * Notes a step as reverted on each document it touches, and moves their versions on.
+   * Notes a step as reverted on each document it changes, wherever it sat among the applied steps.
    * @param {HistoryStep} step The step.
    */
   #markReverted(step: HistoryStep): void
@@ -1096,19 +1335,54 @@ class DocumentHub
       {
         applied.splice(index, 1);
       }
-
-      this.#versions.set(key, this.version(key) + 1);
     });
   }
 
   /**
-   * Reads the current version of every document a step touches.
-   * @param {HistoryStep} step The step.
-   * @returns {DocumentVersions} The versions.
+   * Logs an operation in the lineage of every held document it touched.
+   * @param {HistoryStep} step The step the operation acted on.
+   * @param {string} opId The operation's id.
    */
-  #versionsOf(step: HistoryStep): DocumentVersions
+  #extendLineage(step: HistoryStep, opId: string): void
   {
-    return Object.fromEntries(documentsOfStep(step).map(key => [ key, this.version(key) ]));
+    documentsTouchedBy(step).filter(key => this.has(key)).forEach(key =>
+    {
+      this.#lineage.get(key)?.push(opId);
+    });
+  }
+
+  /**
+   * Reads the current head of every held document an operation on a step touches.
+   * @param {HistoryStep} step The step.
+   * @returns {DocumentHeads} The heads.
+   */
+  #headsOf(step: HistoryStep): DocumentHeads
+  {
+    return Object.fromEntries(documentsTouchedBy(step)
+      .filter(key => this.has(key))
+      .map(key => [ key, this.head(key) as string ]));
+  }
+
+  /**
+   * Makes the next step or operation id, unique across windows.
+   * @returns {string} The id.
+   */
+  #nextId(): string
+  {
+    this.#counter += 1;
+    return `${this.clientId}#${this.#counter}`;
+  }
+
+  /**
+   * Lists the histories a step belongs to whose documents this window holds.
+   * @param {HistoryStep} step The step.
+   * @returns {History[]} The histories.
+   */
+  #heldHistoriesOf(step: HistoryStep): History[]
+  {
+    return step.histories
+      .filter(key => this.has(homeDocumentOf(key)))
+      .map(key => this.#historyFor(key));
   }
 
   /**
@@ -1126,18 +1400,6 @@ class DocumentHub
     }
 
     return history;
-  }
-
-  /**
-   * Lists the histories a step belongs to whose documents this window holds.
-   * @param {HistoryStep} step The step.
-   * @returns {History[]} The histories.
-   */
-  #heldHistoriesOf(step: HistoryStep): History[]
-  {
-    return step.histories
-      .filter(key => this.has(homeDocumentOf(key)))
-      .map(key => this.#historyFor(key));
   }
 
   /**
@@ -1208,8 +1470,9 @@ class DocumentHub
   //endregion internals
 }
 
-export { DocumentHub };
+export { diskOperationId, DocumentHub };
 export type {
+  DocumentConflict,
   DocumentHubOptions,
   DocumentSnapshot,
   DocumentStore,

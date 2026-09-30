@@ -5,6 +5,7 @@ import {
   applyJsonPatch,
   createSetPatch,
   createSplicePatch,
+  invertPatch,
   PatchConflictError,
   readAt,
   type MapTiles,
@@ -402,6 +403,36 @@ class MapDocument implements EditorDocument
   {
     const { events, ...properties } = cloneJson(this.#root);
     return { ...properties, data: Array.from(this.#cells), events };
+  }
+
+  toJsonWithout(patches: readonly Patch[]): RmmzMap
+  {
+    const file = this.toJson();
+
+    // newest first, so each inverse finds exactly what its patch left; tiles live in the file's data array here.
+    [ ...patches ].reverse().forEach(patch =>
+    {
+      const inverse = invertPatch(patch);
+      switch (inverse.kind)
+      {
+        case 'tiles':
+          inverse.indices.forEach((index, position) =>
+          {
+            file.data[index] = inverse.after[position];
+          });
+          break;
+        case 'resize':
+          file.width = inverse.after.width;
+          file.height = inverse.after.height;
+          file.data = [ ...inverse.after.data ];
+          break;
+        default:
+          applyJsonPatch(file, inverse);
+          break;
+      }
+    });
+
+    return file;
   }
 
   subscribe(listener: DocumentListener): () => void

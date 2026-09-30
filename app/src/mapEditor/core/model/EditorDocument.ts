@@ -61,6 +61,15 @@ interface EditorDocument
   toJson(): JsonValue;
 
   /**
+   * Produces the content as it would be with some recently applied patches taken back out, without touching the
+   * live document: what a save or another window must see while an edit is still open, since an open edit may
+   * yet be cancelled.
+   * @param {readonly Patch[]} patches Patches applied to this document, oldest first.
+   * @returns {JsonValue} An independent copy, in file shape.
+   */
+  toJsonWithout(patches: readonly Patch[]): JsonValue;
+
+  /**
    * Listens for changes.
    * @param {DocumentListener} listener Called after every change.
    * @returns {() => void} Stops listening.

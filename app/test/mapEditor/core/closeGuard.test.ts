@@ -8,8 +8,9 @@ import { buildMapJson } from '../support/fixtures.ts';
 /*
  * A window with unsaved edits asks before it closes, but only when closing would lose them. The same map is often
  * open in two windows at once (a map and its event window), and closing one of them loses nothing while the other
- * still holds the edits, so asking there would teach the author to click through the question. The guard is the
- * page's own beforeunload, which NW.js and a plain browser both honour.
+ * holds exactly the same state, so asking there would teach the author to click through the question. But only
+ * exactly the same state counts: a window holding an older copy of the map does not hold these edits. The guard
+ * is the page's own beforeunload, which NW.js and a plain browser both honour.
  */
 describe('closeGuard', () =>
 {
@@ -27,12 +28,12 @@ describe('closeGuard', () =>
   };
 
   /**
-   * A window stand-in that keeps its one beforeunload listener.
-   * @returns {{ target: CloseTarget, fire: () => { prevented: boolean } }} The window, and a way to close it.
+   * A window stand-in that keeps its beforeunload listener.
+   * @returns {{ target: CloseTarget, fire: () => { prevented: boolean, returnValue: string } }} The window, and a way to close it.
    */
   const buildTarget = () =>
   {
-    let listener: ((event: BeforeUnloadEvent) => void) | null = null;
+    let listener: ((event: Event) => void) | null = null;
     const target: CloseTarget = {
       addEventListener: (_type, added) =>
       {
@@ -49,7 +50,7 @@ describe('closeGuard', () =>
     const fire = () =>
     {
       const event = { preventDefault: vi.fn(), returnValue: 'untouched' };
-      listener?.(event as unknown as BeforeUnloadEvent);
+      listener?.(event as unknown as Event);
       return { prevented: event.preventDefault.mock.calls.length > 0, returnValue: event.returnValue };
     };
 
@@ -58,26 +59,26 @@ describe('closeGuard', () =>
 
   describe('unsavedOnlyHere', () =>
   {
-    it('lists an edited document no other window holds', () =>
+    it('lists an edited document no other window holds at this state', () =>
     {
       // Arrange.
       const hub = buildHub();
 
       // Act.
-      const atRisk = unsavedOnlyHere(hub, { isHeldElsewhere: () => false });
+      const atRisk = unsavedOnlyHere(hub, { sharesLatest: () => false });
 
       // Assert.
       expect(atRisk)
         .toStrictEqual([ 'map:1' ]);
     });
 
-    it('leaves out an edited document another window still holds', () =>
+    it('leaves out an edited document another window holds at exactly this state', () =>
     {
       // Arrange.
       const hub = buildHub();
 
       // Act.
-      const atRisk = unsavedOnlyHere(hub, { isHeldElsewhere: key => key === 'map:1' });
+      const atRisk = unsavedOnlyHere(hub, { sharesLatest: key => key === 'map:1' });
 
       // Assert.
       expect(atRisk)

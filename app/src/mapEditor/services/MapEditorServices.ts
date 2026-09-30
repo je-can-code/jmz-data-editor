@@ -66,15 +66,26 @@ type MapEditorServices = {
   readonly modules: PluginModuleRegistry;
 
   /**
-   * Holds a document: the live copy from another window when one holds it, the file otherwise. Only a window
-   * known to hold it is asked, so opening a map nobody else has open never waits on an answer that cannot come.
+   * Holds a document: the live copy from another window when one holds it, the file otherwise. It first gives
+   * the other windows time to answer this window's hello, so a window that has just opened never mistakes
+   * "nobody answered yet" for "nobody holds it" and loads a file that is missing another window's edits.
    * @param {DocumentKey} key The document.
    * @returns {Promise<EditorDocument>} The document.
    */
   openDocument(key: DocumentKey): Promise<EditorDocument>;
 
   /**
-   * Starts syncing, watching for changes and guarding against closing with unsaved edits.
+   * Settles a document's conflict the way the person chose: keep this window's copy, or take the other one (the
+   * file on disk, or another window's copy).
+   * @param {DocumentKey} key The document.
+   * @param {'mine' | 'theirs'} choice Which copy to keep.
+   * @returns {boolean} True when there was a conflict to settle that way.
+   */
+  resolveConflict(key: DocumentKey, choice: 'mine' | 'theirs'): boolean;
+
+  /**
+   * Starts syncing, watching for changes and guarding against closing with unsaved edits. When the page goes, it
+   * stops, which tells the other windows at once that this one no longer holds anything.
    */
   start(): void;
 
@@ -190,6 +201,14 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
 
   const stops: (() => void)[] = [];
 
+  /**
+   * Stops everything start began, newest first.
+   */
+  const stop = () =>
+  {
+    stops.splice(0).reverse().forEach(each => each());
+  };
+
   return {
     clientId,
     view: parseMapEditorView(environment.search),
@@ -202,23 +221,66 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     modules: new PluginModuleRegistry(catalog),
     openDocument: async (key: DocumentKey) =>
     {
+      if (hub.has(key) === false)
+      {
+        // another window's copy may hold unsaved edits the file lacks, so its answer is waited for first.
+        await sync.whenDiscovered();
+      }
+
       if (hub.has(key))
       {
         return hub.document(key);
       }
 
-      // another window's copy may hold unsaved edits the file lacks, so it comes first when there is one.
-      const snapshot = sync.isHeldElsewhere(key)
+      const snapshot = sync.holders(key).length > 0
         ? await sync.requestSnapshot(key)
         : null;
+      if (hub.has(key))
+      {
+        return hub.document(key);
+      }
+
       return snapshot === null
         ? hub.load(key)
         : hub.adoptSnapshot(snapshot);
+    },
+    resolveConflict: (key: DocumentKey, choice: 'mine' | 'theirs') =>
+    {
+      const conflict = hub.conflict(key);
+      if (conflict === null)
+      {
+        return false;
+      }
+
+      if (conflict.kind === 'window')
+      {
+        return sync.resolveConflict(key, choice);
+      }
+
+      // the file was removed, so there is no version on disk to take.
+      if (choice === 'theirs' && conflict.content === null)
+      {
+        return false;
+      }
+
+      if (choice === 'theirs' && conflict.content !== null)
+      {
+        hub.reload(key, conflict.content);
+        return true;
+      }
+
+      hub.clearConflict(key);
+      return true;
     },
     start: () =>
     {
       sync.start();
       stops.push(() => sync.stop());
+
+      // a page going for good says goodbye, so no window counts it as holding anything a moment longer.
+      const onPageHide = () => stop();
+      environment.closeTarget.addEventListener('pagehide', onPageHide);
+      stops.push(() => environment.closeTarget.removeEventListener('pagehide', onPageHide));
 
       if (feed !== null)
       {
@@ -239,10 +301,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
 
       stops.push(installCloseGuard(environment.closeTarget, () => unsavedOnlyHere(hub, sync).length > 0));
     },
-    stop: () =>
-    {
-      stops.splice(0).reverse().forEach(stop => stop());
-    },
+    stop,
   };
 };
 

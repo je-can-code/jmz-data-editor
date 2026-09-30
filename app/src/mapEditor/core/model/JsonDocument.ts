@@ -1,7 +1,16 @@
 import type { DocumentKey } from './documentKeys.ts';
 import { DocumentListeners, type DocumentListener, type EditorDocument } from './EditorDocument.ts';
 import { cloneJson, type JsonValue } from './json.ts';
-import { applyJsonPatch, createSetPatch, createSplicePatch, PatchConflictError, readAt, type Patch, type PatchPath } from './patches.ts';
+import {
+  applyJsonPatch,
+  createSetPatch,
+  createSplicePatch,
+  invertPatch,
+  PatchConflictError,
+  readAt,
+  type Patch,
+  type PatchPath,
+} from './patches.ts';
 import type { RmmzMapInfo, RmmzTileset } from './rmmzTypes.ts';
 
 /**
@@ -69,6 +78,23 @@ class JsonDocument implements EditorDocument
   toJson(): JsonValue
   {
     return cloneJson(this.#content);
+  }
+
+  toJsonWithout(patches: readonly Patch[]): JsonValue
+  {
+    const content = cloneJson(this.#content);
+
+    // newest first, so each inverse finds exactly what its patch left.
+    [ ...patches ].reverse().forEach(patch =>
+    {
+      const inverse = invertPatch(patch);
+      if (inverse.kind === 'set' || inverse.kind === 'splice')
+      {
+        applyJsonPatch(content, inverse);
+      }
+    });
+
+    return content;
   }
 
   subscribe(listener: DocumentListener): () => void

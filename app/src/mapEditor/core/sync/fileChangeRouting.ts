@@ -49,7 +49,7 @@ const routeFileChange = async (change: FileChange, hub: DocumentHub, session: Se
 
   if (change.kind === 'remove')
   {
-    hub.flagConflict(key);
+    hub.flagConflict(key, { kind: 'disk', content: null });
     return 'conflicted';
   }
 
