@@ -210,6 +210,25 @@ describe('fileChangeRouting', () =>
         .toStrictEqual([ 'conflicted', [], [ [ 'map:2', null, false ] ], { kind: 'disk', content: null }, false, before ]);
     });
 
+    it('hands nobody a file that holds nothing its document could be, and leaves the document as it was', async () =>
+    {
+      // Arrange: the map's file loses a cell, so it no longer fits its size.
+      const { hub, files } = buildHub();
+      const peers = buildPeers({ 'window-b': [ 'map:1' ] });
+      const router = new FileChangeRouter(hub, peers, () => true);
+      const broken = structuredClone(files.get('map:1')) as { data: number[] };
+      broken.data.pop();
+      files.set('map:1', broken as unknown as JsonValue);
+      const before = hub.document('map:1').toJson();
+
+      // Act.
+      const outcome = await router.route(outsideWrite(1));
+
+      // Assert.
+      expect([ outcome, peers.posts, hub.document('map:1').toJson(), hub.isConflicted('map:1') ])
+        .toStrictEqual([ 'unholdable', [], before, false ]);
+    });
+
     it('reads one change after another, so a slow read never lands after a newer one', async () =>
     {
       // Arrange: each read answers with the file as it stood when asked, but only when let go, and the newest answer
@@ -271,12 +290,15 @@ describe('fileChangeRouting', () =>
         .toStrictEqual([ [ 'recorded', 'ignored' ], [ 'map:2', 'map:3' ], [ [ 'map:2', true ], [ 'map:3', true ] ], false, 'changed while the stream was down' ]);
     });
 
-    it('leaves a document it cannot read for its next change, and goes on to the rest', async () =>
+    it('leaves a document it cannot read, or cannot take, for its next change, and goes on to the rest', async () =>
     {
-      // Arrange: the other window holds a map whose file is gone, and one that changed.
+      // Arrange: the other window holds a map whose file is gone and one whose file lost a cell; map 2 changed.
       const { hub, files, reads } = buildHub();
-      const peers = buildPeers({ 'window-b': [ 'map:9' ] });
+      const peers = buildPeers({ 'window-b': [ 'map:9', 'map:3' ] });
       const router = new FileChangeRouter(hub, peers, () => true);
+      const broken = structuredClone(files.get('map:3')) as { data: number[] };
+      broken.data.pop();
+      files.set('map:3', broken as unknown as JsonValue);
       changeOnDisk(files, 'map:2', 'changed while the stream was down');
 
       // Act.
@@ -284,7 +306,7 @@ describe('fileChangeRouting', () =>
 
       // Assert.
       expect([ outcomes, reads, peers.posts.map(([ key ]) => key) ])
-        .toStrictEqual([ [ 'unchanged', 'recorded' ], [ 'map:1', 'map:2', 'map:9' ], [ 'map:1', 'map:2' ] ]);
+        .toStrictEqual([ [ 'unchanged', 'recorded' ], [ 'map:1', 'map:2', 'map:9', 'map:3' ], [ 'map:1', 'map:2' ] ]);
     });
   });
 });

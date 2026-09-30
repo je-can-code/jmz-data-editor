@@ -1,4 +1,5 @@
 import type { DocumentHub, ExternalChangeResult } from '../history/DocumentHub.ts';
+import { createDocument } from '../model/createDocument.ts';
 import { documentKeyForProjectPath, type DocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { FileChange } from './FileChangeFeed.ts';
@@ -9,9 +10,11 @@ import type { FileChange } from './FileChangeFeed.ts';
  * - {@code follower}: another window reads the change stream for everyone, and hands this one what it reads.
  * - {@code echo}: a save by this window or another window of the session; sync already carried its content.
  * - {@code untracked}: the file backs no document any window holds.
+ * - {@code unholdable}: the file holds nothing its document could be, such as a map with the wrong number of cells, so
+ *   it was handed to nobody; its next change is read afresh.
  * - anything else: this window's own answer to the version it read, see {@link ExternalChangeResult}.
  */
-type FileChangeOutcome = 'follower' | 'echo' | 'untracked' | ExternalChangeResult;
+type FileChangeOutcome = 'follower' | 'echo' | 'untracked' | 'unholdable' | ExternalChangeResult;
 
 /**
  * What routing needs to know about the other windows, and how it reaches them.
@@ -47,6 +50,27 @@ type RoutingPeers = {
 };
 
 /**
+ * Reports whether a file's content is something its document could be at all: a map a whole number of tiles in size
+ * with a tile id in every cell, say. A document is built from it and thrown away, which is exactly the check every
+ * window would otherwise make on taking it, each failing on its own.
+ * @param {DocumentKey} key The document.
+ * @param {JsonValue} content The file's content.
+ * @returns {boolean} True when a document can be built from it.
+ */
+const isHoldable = (key: DocumentKey, content: JsonValue): boolean =>
+{
+  try
+  {
+    createDocument(key, content);
+    return true;
+  }
+  catch
+  {
+    return false;
+  }
+};
+
+/**
  * Decides what the server's change stream means for the documents every window holds, and reads each changed file
  * once for all of them.
  *
@@ -57,7 +81,8 @@ type RoutingPeers = {
  * version as the same "Externally modified" step, however soon a second write follows the first, and never a version
  * of its own. Reads happen one after another, in the order the changes came, so a slow read can never land after a
  * newer one and take the document back to an older version. A removed file is handed over as removed, and flagged
- * wherever it is held, since the document's content is the only copy left.
+ * wherever it is held, since the document's content is the only copy left; a file holding nothing its document could
+ * be is handed to nobody.
  *
  * When the stream comes back after dropping, the same window re-reads every document held anywhere, since whatever
  * changed meanwhile was never announced; only a document without unsaved edits takes what it finds, the others
@@ -109,11 +134,16 @@ class FileChangeRouter
     }
 
     // a removed file has nothing to read.
-    return this.#inTurn(async () =>
+    return this.#inTurn(async (): Promise<FileChangeOutcome> =>
     {
       const content = change.kind === 'remove'
         ? null
         : await this.#hub.readFile(key);
+      if (content !== null && isHoldable(key, content) === false)
+      {
+        return 'unholdable';
+      }
+
       return this.#handOver(key, content, false);
     });
   }
@@ -121,7 +151,8 @@ class FileChangeRouter
   /**
    * Re-reads every document held anywhere after the stream came back, since changes made while it was down were
    * never announced. A document this window holds with unsaved edits is not read at all, since every window holding
-   * it holds the same edits; one it cannot read now is left for its next change.
+   * it holds the same edits; one it cannot read now, or whose file holds nothing it could be, is left for its next
+   * change.
    * @returns {Promise<ExternalChangeResult[]>} What this window did with each document read, in order.
    */
   recheck(): Promise<ExternalChangeResult[]>
@@ -139,7 +170,7 @@ class FileChangeRouter
       for (const key of [ ...held, ...elsewhere ])
       {
         const content = await this.#hub.readFile(key).catch(() => undefined);
-        if (content !== undefined)
+        if (content !== undefined && isHoldable(key, content))
         {
           results.push(this.#handOver(key, content, true));
         }
