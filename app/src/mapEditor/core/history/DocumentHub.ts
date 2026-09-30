@@ -1252,7 +1252,8 @@ class DocumentHub
       return 'ignored';
     }
 
-    // a flag an earlier change raised (the file removed, or a version since written over) no longer stands.
+    // a file holding nothing new needs nothing done, and a flag an earlier change raised (the file removed, or a
+    // version since written over) no longer stands.
     if (this.#holdsFile(key, content))
     {
       this.#clearDiskConflict(key);
@@ -1327,9 +1328,19 @@ class DocumentHub
 
     try
     {
+      // take the unsaved steps back out, newest first, each one's patches in reverse.
       const copy = createDocument(key, this.#committedContent(key));
-      applied.slice(shared).reverse().forEach(step => patchesOn(step, key).reverse().forEach(patch => copy.apply(invertPatch(patch))));
-      (putBack as HistoryStep[]).forEach(step => patchesOn(step, key).forEach(patch => copy.apply(patch)));
+      applied.slice(shared).reverse().forEach(step =>
+      {
+        patchesOn(step, key).reverse().forEach(patch => copy.apply(invertPatch(patch)));
+      });
+
+      // then put back the steps the save held that were undone since, in the order they went in.
+      (putBack as HistoryStep[]).forEach(step =>
+      {
+        patchesOn(step, key).forEach(patch => copy.apply(patch));
+      });
+
       return copy.toJson();
     }
     catch (error)
