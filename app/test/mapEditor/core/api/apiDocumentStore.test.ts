@@ -31,6 +31,10 @@ describe('apiDocumentStore', () =>
     loadEditorData: vi.fn(async (key: string) => (key === 'layouts' ? { schemaVersion: 1, data: { layouts: { main: 1 } } } : null)),
     saveEditorData: vi.fn(async () => undefined),
     fileChangesUrl: vi.fn(() => ''),
+    loadCommonEvents: vi.fn(async () => [ null, 'common events' ] as never),
+    saveCommonEvents: vi.fn(async () => undefined),
+    loadCommandUsage: vi.fn(async () => ({ events: 0, codes: {}, pluginCommands: [] })),
+    loadDatabaseNames: vi.fn(async () => ({}) as never),
   });
 
   it('loads each kind of document through its own call', async () =>
@@ -43,6 +47,7 @@ describe('apiDocumentStore', () =>
       await store.load('map:12'),
       await store.load('mapinfos'),
       await store.load('tilesets'),
+      await store.load('common-events'),
       await store.load('editor-data:layouts'),
     ];
 
@@ -52,6 +57,7 @@ describe('apiDocumentStore', () =>
         { map: 12 },
         [ null, 'infos' ],
         [ null, 'tilesets' ],
+        [ null, 'common events' ],
         { schemaVersion: 1, data: { layouts: { main: 1 } } },
       ]);
   });
@@ -80,6 +86,7 @@ describe('apiDocumentStore', () =>
     await store.save('map:3', content);
     await store.save('mapinfos', [ null ]);
     await store.save('tilesets', [ null ]);
+    await store.save('common-events', [ null, 'events' ]);
     await store.save('editor-data:tileset-marks', content);
 
     // Assert.
@@ -87,9 +94,10 @@ describe('apiDocumentStore', () =>
       vi.mocked(api.saveMap).mock.calls,
       vi.mocked(api.saveMapInfos).mock.calls,
       vi.mocked(api.saveTilesets).mock.calls,
+      vi.mocked(api.saveCommonEvents).mock.calls,
       vi.mocked(api.saveEditorData).mock.calls,
     ])
-      .toStrictEqual([ [ [ 3, content ] ], [ [ [ null ] ] ], [ [ [ null ] ] ], [ [ 'tileset-marks', content ] ] ]);
+      .toStrictEqual([ [ [ 3, content ] ], [ [ [ null ] ] ], [ [ [ null ] ] ], [ [ [ null, 'events' ] ] ], [ [ 'tileset-marks', content ] ] ]);
   });
 
   it('refuses an editor document the editor does not keep', async () =>

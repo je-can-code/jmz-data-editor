@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   blueprintHistoryKey,
+  commonEventHistoryKey,
   documentHistoryKey,
   eventHistoryKey,
   homeDocumentOf,
@@ -51,6 +52,31 @@ describe('historyKeys', () =>
     // Assert.
     expect(homes)
       .toStrictEqual([ 'map:12', 'map:12', 'map:1', 'editor-data:blueprints', 'mapinfos', 'editor-data:layouts' ]);
+  });
+
+  it('names each common event\'s history apart, and homes it on the common events', () =>
+  {
+    // Arrange: two common events, and the common events document's own history beside them.
+
+    // Act.
+    const keys = [ commonEventHistoryKey(3), commonEventHistoryKey(31), documentHistoryKey('common-events') ];
+    const homes = keys.map(homeDocumentOf);
+
+    // Assert.
+    expect([ keys, homes ])
+      .toStrictEqual([ [ 'common-event:3', 'common-event:31', 'common-events' ], [ 'common-events', 'common-events', 'common-events' ] ]);
+  });
+
+  it('refuses a common event id no common event can have', () =>
+  {
+    // Arrange: slot 0 is never a common event.
+
+    // Act.
+    const names = [ () => commonEventHistoryKey(0), () => commonEventHistoryKey(1.5) ];
+
+    // Assert.
+    names.forEach(name => expect(name)
+      .toThrow(/positive integer/u));
   });
 
   it('refuses an event id no event can have, and a blueprint without an id', () =>

@@ -1,4 +1,5 @@
 import {
+  COMMON_EVENTS_KEY,
   editorDataDocumentKey,
   MAP_INFOS_KEY,
   mapDocumentKey,
@@ -66,6 +67,22 @@ const blueprintHistoryKey = (blueprintId: string): HistoryKey =>
 };
 
 /**
+ * Names a common event's history: everything edited inside one common event, which is a thing of its own the
+ * way an event window is, so undo in one never reaches another.
+ * @param {number} commonEventId The common event's id.
+ * @returns {HistoryKey} The key.
+ */
+const commonEventHistoryKey = (commonEventId: number): HistoryKey =>
+{
+  if (Number.isInteger(commonEventId) === false || commonEventId < 1)
+  {
+    throw new Error(`a common event id is a positive integer, not ${commonEventId}`);
+  }
+
+  return `common-event:${commonEventId}`;
+};
+
+/**
  * Names the history of a document with no finer scope, such as the tilesets.
  * @param {DocumentKey} key The document.
  * @returns {HistoryKey} The key, which is the document key itself.
@@ -98,6 +115,11 @@ const homeDocumentOf = (key: HistoryKey): DocumentKey =>
     return editorDataDocumentKey(BLUEPRINTS_DATA_NAME);
   }
 
+  if (key.startsWith('common-event:'))
+  {
+    return COMMON_EVENTS_KEY;
+  }
+
   // a map's own history, and every document-wide one, share the document's key.
   return key as DocumentKey;
 };
@@ -105,6 +127,7 @@ const homeDocumentOf = (key: HistoryKey): DocumentKey =>
 export {
   BLUEPRINTS_DATA_NAME,
   blueprintHistoryKey,
+  commonEventHistoryKey,
   documentHistoryKey,
   eventHistoryKey,
   homeDocumentOf,

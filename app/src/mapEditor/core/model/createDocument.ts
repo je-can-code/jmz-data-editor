@@ -23,6 +23,7 @@ const createDocument = (key: DocumentKey, content: JsonValue): EditorDocument =>
       return new MapInfosDocument(key, content);
     case 'tilesets':
       return new TilesetsDocument(key, content);
+    case 'common-events':
     case 'editor-data':
       return new JsonDocument(key, content);
   }

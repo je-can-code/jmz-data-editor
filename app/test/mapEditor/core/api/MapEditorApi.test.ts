@@ -57,6 +57,27 @@ describe('HttpMapEditorApi', () =>
         .toStrictEqual([ [ [ null, { id: 1 } ], [ null, { id: 2 } ] ], [ `${BASE}/api/mapinfos`, `${BASE}/api/tilesets` ] ]);
     });
 
+    it('reads the common events, command usage and database names from their routes', async () =>
+    {
+      // Arrange: each route answers something recognisable.
+      const answers: Record<string, unknown> = {
+        'common-events': [ null, { id: 1 } ],
+        'command-usage': { events: 2, codes: { 250: 1 }, pluginCommands: [] },
+        'database-names': { switches: [ '', 'Door' ] },
+      };
+      const { api, requests } = buildApi(url => envelope(answers[url.slice(`${BASE}/api/`.length)]));
+
+      // Act.
+      const loaded = [ await api.loadCommonEvents(), await api.loadCommandUsage(), await api.loadDatabaseNames() ];
+
+      // Assert.
+      expect([ loaded, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([
+          [ [ null, { id: 1 } ], { events: 2, codes: { 250: 1 }, pluginCommands: [] }, { switches: [ '', 'Door' ] } ],
+          [ `GET ${BASE}/api/common-events`, `GET ${BASE}/api/command-usage`, `GET ${BASE}/api/database-names` ],
+        ]);
+    });
+
     it('refuses a body that is not the envelope, even one carrying data', async () =>
     {
       // Arrange: the document raw, and a near miss with data but no path.
@@ -163,6 +184,34 @@ describe('HttpMapEditorApi', () =>
           `PUT ${BASE}/api/tilesets [null]`,
           `PUT ${BASE}/api/editor-data/tileset-marks {"schemaVersion":1,"data":{}}`,
         ]);
+    });
+
+    it('posts the common events to the database route the data editor shares, with this window\'s id', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(() => envelope(null));
+      const rows = [ null, { id: 1, list: [ { code: 0, indent: 0, parameters: [] } ], name: 'Heal', switchId: 1, trigger: 0 } ];
+
+      // Act.
+      await api.saveCommonEvents(rows);
+
+      // Assert.
+      const [ request ] = requests;
+      expect([ request.method, request.url, request.headers['x-jmz-client'], request.headers['content-type'], JSON.parse(request.body as string) ])
+        .toStrictEqual([ 'POST', `${BASE}/api/common-events`, 'window-7', 'application/json', rows ]);
+    });
+
+    it('raises a refused common events save as a POST', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response('json: unknown field "extra"', { status: 400 }));
+
+      // Act.
+      const save = api.saveCommonEvents([ null ]);
+
+      // Assert.
+      await expect(save)
+        .rejects.toThrow('POST /api/common-events answered 400: json: unknown field "extra"');
     });
 
     it('raises the server\'s refusal, naming the field it refused', async () =>

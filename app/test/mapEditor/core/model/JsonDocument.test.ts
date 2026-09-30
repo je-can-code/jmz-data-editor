@@ -155,12 +155,13 @@ describe('JsonDocument', () =>
         createDocument('map:3', map),
         createDocument('mapinfos', buildInfos()),
         createDocument('tilesets', []),
+        createDocument('common-events', [ null ]),
         createDocument('editor-data:blueprints', {}),
       ];
 
       // Assert.
       expect(documents.map(document => document.constructor))
-        .toStrictEqual([ MapDocument, MapInfosDocument, TilesetsDocument, JsonDocument ]);
+        .toStrictEqual([ MapDocument, MapInfosDocument, TilesetsDocument, JsonDocument, JsonDocument ]);
     });
   });
 });
