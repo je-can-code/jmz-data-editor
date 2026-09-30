@@ -10,6 +10,7 @@ import {
   dropZoneAt,
   initiallyExpanded,
   revealMaps,
+  selectionAfterCollapse,
   selectRange,
   toggleSelection,
   visibleTreeLines,
@@ -382,10 +383,14 @@ const MapTreePanel = (props: IDockviewPanelProps<MapTreeParams>) =>
     api.updateParameters({ expanded: [ ...expanded ] });
   }, [ api, expanded ]);
 
-  // whatever gets picked (a paste, a duplicate, an undone delete) is revealed and scrolled into view.
+  // whatever gets picked (a paste, a duplicate, an undone delete) is revealed and scrolled into view. Only a new pick or
+  // a changed tree reveals anything: a branch closed by hand stays closed.
+  const revealedFor = useRef<{ rows: MapInfoRows; selection: readonly number[] } | null>(null);
   useEffect(() =>
   {
-    const revealed = revealMaps(rows, expanded, selection);
+    const fresh = revealedFor.current === null || revealedFor.current.rows !== rows || revealedFor.current.selection !== selection;
+    revealedFor.current = { rows, selection };
+    const revealed = fresh ? revealMaps(rows, expanded, selection) : expanded;
     if (revealed.size !== expanded.size)
     {
       setExpanded(revealed);
@@ -396,8 +401,8 @@ const MapTreePanel = (props: IDockviewPanelProps<MapTreeParams>) =>
     list.current?.querySelector(`[data-map-id="${last}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [ rows, expanded, selection ]);
 
-  const state = useRef({ rows, lines, selection, anchor, drop });
-  state.current = { rows, lines, selection, anchor, drop };
+  const state = useRef({ rows, lines, selection, anchor, drop, expanded });
+  state.current = { rows, lines, selection, anchor, drop, expanded };
 
   const handlers = useMemo<RowHandlers>(() => ({
     click: (event, mapId) =>
@@ -426,16 +431,33 @@ const MapTreePanel = (props: IDockviewPanelProps<MapTreeParams>) =>
 
       setMenu({ x: event.clientX, y: event.clientY, mapId });
     },
-    toggle: mapId => setExpanded(current =>
+    toggle: mapId =>
     {
-      const next = new Set(current);
-      if (next.delete(mapId) === false)
+      const { current } = state;
+      const closing = current.expanded.has(mapId);
+      setExpanded(open =>
       {
-        next.add(mapId);
-      }
+        const next = new Set(open);
+        if (next.delete(mapId) === false)
+        {
+          next.add(mapId);
+        }
 
-      return next;
-    }),
+        return next;
+      });
+
+      // closing a branch holding picked maps picks the branch instead, rather than opening it again to show them.
+      const picked = closing ? selectionAfterCollapse(current.rows, current.selection, mapId) : current.selection;
+      if (picked.length !== current.selection.length || picked.some((id, at) => id !== current.selection[at]))
+      {
+        if (current.anchor !== null && picked.includes(current.anchor) === false)
+        {
+          setAnchor(mapId);
+        }
+
+        controller.selectTreeMaps(picked);
+      }
+    },
     dragStart: (event, mapId) =>
     {
       const carried = draggedMaps(state.current.selection, mapId);
