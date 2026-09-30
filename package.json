@@ -8,11 +8,13 @@
     "nw:dev": "nw ./nw-app",
     "build": "cd app && bun run build",
     "test": "cd app && bun run test",
-    "lint": "oxlint app/src app/test scripts nw-app"
+    "lint": "oxlint app/src app/test scripts nw-app",
+    "speed": "bun scripts/speed/runSpeed.ts"
   },
   "devDependencies": {
     "@types/node": "^22.9.3",
     "bun-types": "^1.3.13",
-    "oxlint": "^1.79.0"
+    "oxlint": "^1.79.0",
+    "playwright-core": "1.61.1"
   }
 }
