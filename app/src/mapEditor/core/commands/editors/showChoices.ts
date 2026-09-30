@@ -313,21 +313,23 @@ const readBlock = (commands: readonly RmmzEventCommand[], start: number) =>
  */
 const mergedCancel = (raws: readonly number[], sizes: readonly number[]): number =>
 {
-  let merged = raws[0];
-  let offset = sizes[0];
-  for (let index = 1; index < raws.length; index++)
+  const [ first, ...later ] = raws;
+  const [ firstSize, ...laterSizes ] = sizes;
+  let merged = first;
+  let offset = firstSize;
+  later.forEach((raw, index) =>
   {
-    if (raws[index] > CANCEL_DISALLOWED)
+    if (raw > CANCEL_DISALLOWED)
     {
-      merged = raws[index] + offset;
+      merged = raw + offset;
     }
-    else if (raws[index] === CANCEL_BRANCH)
+    else if (raw === CANCEL_BRANCH)
     {
       merged = CANCEL_BRANCH;
     }
 
-    offset += sizes[index];
-  }
+    offset += laterSizes[index];
+  });
 
   return merged;
 };
@@ -341,17 +343,19 @@ const mergedCancel = (raws: readonly number[], sizes: readonly number[]): number
  */
 const mergedDefault = (raws: readonly number[], sizes: readonly number[]): number =>
 {
-  let merged = raws[0];
-  let offset = sizes[0];
-  for (let index = 1; index < raws.length; index++)
+  const [ first, ...later ] = raws;
+  const [ firstSize, ...laterSizes ] = sizes;
+  let merged = first;
+  let offset = firstSize;
+  later.forEach((raw, index) =>
   {
-    if (raws[index] > NO_DEFAULT)
+    if (raw > NO_DEFAULT)
     {
-      merged = raws[index] + offset;
+      merged = raw + offset;
     }
 
-    offset += sizes[index];
-  }
+    offset += laterSizes[index];
+  });
 
   return merged;
 };
