@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes.ts';
 import { paintTiles, planPlacement, strokeLayerChoice, swapTiles, type LayerChoice, type TilesetLayering } from '../../../../src/mapEditor/core/tiles/layering.ts';
-import { gridReader, type CellChange, type TileGrid } from '../../../../src/mapEditor/core/tiles/tileGrid.ts';
+import { cellIndex, gridReader, type CellChange, type TileGrid } from '../../../../src/mapEditor/core/tiles/tileGrid.ts';
 import { autotileKind, makeAutotileId, TileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
 import type { TilesetMarks } from '../../../../src/mapEditor/core/tiles/tilesetMarks.ts';
 import { blankGrid, cellOf, fill, kindTile, put, type TestGrid } from './support/tileGridBuilder.ts';
@@ -475,6 +475,68 @@ describe('painting and shapes', () =>
     // Assert.
     expect(changes)
       .toEqual([]);
+  });
+});
+
+describe('hand-shaped autotiles beside a stroke', () =>
+{
+  /**
+   * Builds a 2x1 map whose left cell holds grass in a shape its neighbours do not call for, the way MZ stores a tile
+   * drawn with Shift held.
+   * @returns {TestGrid} The map.
+   */
+  const handShaped = (): TestGrid => put(blankGrid(2, 1), 0, 0, 0, makeAutotileId(GRASS, 5));
+
+  it('survive a B to E tile painted beside them', () =>
+  {
+    // Arrange.
+    const grid = handShaped();
+
+    // Act.
+    const changes = paintTiles(grid, [ { x: 1, y: 0, tileId: TREE } ], layeringWith(), 'auto');
+
+    // Assert: the tree, and nothing else.
+    expect(changes)
+      .toEqual([ [ cellIndex(2, 1, 1, 0, 3), TREE ] ]);
+  });
+
+  it('survive a manual stroke on another layer beside them', () =>
+  {
+    // Arrange.
+    const grid = handShaped();
+
+    // Act: a rock painted by hand on layer 2 of the next cell.
+    const changes = paintTiles(grid, [ { x: 1, y: 0, tileId: SOLID_ROCK } ], layeringWith(), 1);
+
+    // Assert.
+    expect(changes)
+      .toEqual([ [ cellIndex(2, 1, 1, 0, 1), SOLID_ROCK ] ]);
+  });
+
+  it('survive a B to E tile swapped for another beside them', () =>
+  {
+    // Arrange: a tree on layer 4 of the next cell.
+    const grid = put(handShaped(), 1, 0, 3, TREE);
+
+    // Act.
+    const changes = swapTiles(grid, TREE, BUSH, TilesetMode.area);
+
+    // Assert.
+    expect(changes)
+      .toEqual([ [ cellIndex(2, 1, 1, 0, 3), BUSH ] ]);
+  });
+
+  it('are reshaped when the stroke changes what joins them', () =>
+  {
+    // Arrange.
+    const grid = handShaped();
+
+    // Act: grass painted beside the hand-shaped grass, which now joins it.
+    const changes = paintTiles(grid, [ { x: 1, y: 0, tileId: kindTile(GRASS) } ], layeringWith(), 'auto');
+
+    // Assert: both cells joined all round.
+    expect(changes)
+      .toEqual([ [ 0, makeAutotileId(GRASS, 0) ], [ 1, makeAutotileId(GRASS, 0) ] ]);
   });
 });
 

@@ -1,6 +1,6 @@
-import { shapedTileAt } from './autotileShapes.ts';
+import { autotileShapeFor } from './autotileShapes.ts';
 import { isInside, TileDraft, type CellChange, type TileGrid, type TileReader } from './tileGrid.ts';
-import { autotileKind, isAutotile, isWallSideKind } from './tileIds.ts';
+import { autotileKind, isAutotile, isWallSideKind, makeAutotileId } from './tileIds.ts';
 
 /**
  * A cell by its column and row.
@@ -74,7 +74,10 @@ const cellsToReshape = (reader: TileReader, changed: Iterable<CellPosition>): Ce
 };
 
 /**
- * Reshapes, in a draft, every autotile that the given changed cells could have affected.
+ * Reshapes, in a draft, every autotile that the given changed cells affected. A tile the stroke placed takes the
+ * shape its neighbours call for. Any other tile is reshaped only when the stroke changed what its neighbours call
+ * for: it is shaped against the map as it stood and against the draft, and left alone when the two agree, so a
+ * shape somebody drew by hand (with Shift held, in MZ) survives every stroke that does not touch its neighbours.
  * @param {TileDraft} draft The map with the new tiles already staged.
  * @param {Iterable<CellPosition>} changed The cells whose tiles changed.
  * @param {number} mode The tileset's mode.
@@ -85,9 +88,22 @@ const reshapeAround = (draft: TileDraft, changed: Iterable<CellPosition>, mode: 
   {
     for (let z = 0; z < 4; z++)
     {
-      // shapes read only their neighbours' kinds, never their shapes, so the order cells are reshaped in is free.
       const tileId = draft.tileAt(x, y, z);
-      const shaped = shapedTileAt(draft, x, y, z, mode);
+      if (isAutotile(tileId) === false)
+      {
+        continue;
+      }
+
+      // shapes read only their neighbours' kinds, never their shapes, so the order cells are reshaped in is free.
+      const kind = autotileKind(tileId);
+      const after = autotileShapeFor(draft, x, y, kind, mode);
+      const placed = draft.hasChanged(x, y, z);
+      if (placed === false && autotileShapeFor(draft.base, x, y, kind, mode) === after)
+      {
+        continue;
+      }
+
+      const shaped = makeAutotileId(kind, after);
       if (shaped !== tileId)
       {
         draft.setTile(x, y, z, shaped);

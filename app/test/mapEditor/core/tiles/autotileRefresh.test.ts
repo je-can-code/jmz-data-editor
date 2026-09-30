@@ -65,6 +65,21 @@ describe('reshapeAround', () =>
       .toEqual([ 16, 5 ]);
   });
 
+  it('leaves a hand-shaped neighbour alone when the change does not alter what it joins', () =>
+  {
+    // Arrange: grass drawn in a wrong shape at (0,0); a rock is staged at (1,0), which grass never joins anyway.
+    const grid = put(blankGrid(2, 1), 0, 0, 0, makeAutotileId(GRASS, 5));
+    const draft = new TileDraft(grid);
+    draft.setTile(1, 0, 0, 1536);
+
+    // Act.
+    reshapeAround(draft, [ [ 1, 0 ] ], TilesetMode.area);
+
+    // Assert: the empty cell before and the rock after both leave the grass's east side open, so it keeps shape 5.
+    expect(draft.changes())
+      .toEqual([ [ 1, 1536 ] ]);
+  });
+
   it('moves the side edges of every row of a wall when the wall beside it grows taller', () =>
   {
     // Arrange: two wall columns under a ceiling row, both starting at row 1; then column 0 grows up into row 0.

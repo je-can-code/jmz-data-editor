@@ -104,6 +104,11 @@ class TileDraft implements TileReader
 
   readonly height: number;
 
+  /**
+   * The map as it stood before anything was staged, for comparing a shape before and after a stroke.
+   */
+  readonly base: TileReader;
+
   #cells: Uint16Array;
 
   #staged = new Map<number, number>();
@@ -115,7 +120,27 @@ class TileDraft implements TileReader
   {
     this.width = grid.width;
     this.height = grid.height;
+    this.base = gridReader(grid);
     this.#cells = grid.cells;
+  }
+
+  /**
+   * Reports whether the draft holds something other than the grid in a cell.
+   * @param {number} x The column.
+   * @param {number} y The row.
+   * @param {number} z The layer, 0 to 5.
+   * @returns {boolean} True when a value different from the grid's is staged there.
+   */
+  hasChanged(x: number, y: number, z: number): boolean
+  {
+    if (x < 0 || y < 0 || x >= this.width || y >= this.height)
+    {
+      return false;
+    }
+
+    const index = cellIndex(this.width, this.height, x, y, z);
+    const staged = this.#staged.get(index);
+    return staged !== undefined && staged !== this.#cells[index];
   }
 
   /**
