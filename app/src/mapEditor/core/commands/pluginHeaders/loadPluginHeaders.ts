@@ -1,27 +1,49 @@
-import { readPluginEntries } from '../../../../services/plugins/PluginsJsReader.ts';
+import { readPluginEntries, type PluginsJsEntry } from '../../../../services/plugins/PluginsJsReader.ts';
 import type { MapEditorApi } from '../../api/MapEditorApi.ts';
 import { parsePluginHeader } from './parsePluginHeader.ts';
 import type { PluginHeader } from './pluginHeader.ts';
 
 /**
- * Reads the header of every enabled plugin: {@code js/plugins.js} says which plugins are on, and each one's
- * source comes through the server. A plugin switched off is never read, and one whose file is missing is left
- * out, so a stale entry in {@code js/plugins.js} costs nothing but its commands.
- * @param {Pick<MapEditorApi, 'loadPluginList' | 'loadPluginSource'>} api The server.
- * @returns {Promise<PluginHeader[]>} The headers, in {@code js/plugins.js} order.
+ * What one read of {@code js/plugins.js} and its enabled plugins' sources produces: every entry the file
+ * lists, enabled or not, and the header of each enabled one whose source could be fetched. The full list
+ * travels alongside the headers so a plugin command can be checked against a disabled or unknown plugin, not
+ * only against the ones with headers in hand.
  */
-const loadPluginHeaders = async (api: Pick<MapEditorApi, 'loadPluginList' | 'loadPluginSource'>): Promise<PluginHeader[]> =>
+type PluginHeaders = {
+  /**
+   * Every plugin {@code js/plugins.js} lists, enabled or not, in its order.
+   */
+  readonly entries: readonly PluginsJsEntry[];
+
+  /**
+   * The headers of the enabled plugins whose source could be fetched, in {@code js/plugins.js} order.
+   */
+  readonly headers: readonly PluginHeader[];
+};
+
+/**
+ * Reads {@code js/plugins.js} once, then the header of every enabled plugin: a plugin switched off is never
+ * fetched (the game never loads it, so its commands would do nothing), and a plugin whose file is missing is
+ * left out of the headers rather than failing the rest.
+ * @param {Pick<MapEditorApi, 'loadPluginList' | 'loadPluginSource'>} api The server.
+ * @returns {Promise<PluginHeaders>} Every entry {@code js/plugins.js} lists, and the enabled ones' headers.
+ */
+const loadPluginHeaders = async (api: Pick<MapEditorApi, 'loadPluginList' | 'loadPluginSource'>): Promise<PluginHeaders> =>
 {
-  const enabled = readPluginEntries(await api.loadPluginList()).filter(entry => entry.status);
+  const entries = readPluginEntries(await api.loadPluginList());
+  const enabled = entries.filter(entry => entry.status);
   const sources = await Promise.all(enabled.map(entry => api.loadPluginSource(entry.name)));
 
-  return enabled.flatMap((entry, index) =>
+  const headers = enabled.flatMap((entry, index) =>
   {
     const source = sources[index];
     return source === null
       ? []
       : [ parsePluginHeader(entry.name, source) ];
   });
+
+  return { entries, headers };
 };
 
 export { loadPluginHeaders };
+export type { PluginHeaders };

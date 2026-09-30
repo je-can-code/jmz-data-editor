@@ -321,7 +321,7 @@ const CommandList = (props: CommandListProps) =>
     loadCommandResources();
   }, [ loadCommandResources ]);
   const subscribeToHeaders = useCallback((listener: () => void) => pluginHeaders.subscribe(listener), [ pluginHeaders ]);
-  useSyncExternalStore(subscribeToHeaders, () => pluginHeaders.library());
+  const pluginLibrary = useSyncExternalStore(subscribeToHeaders, () => pluginHeaders.library());
   const { names, usage } = useCommandListResources(api);
   const lookup = useMemo(() => nameLookup(names), [ names ]);
   const pathKey = path.join('/');
@@ -1191,6 +1191,7 @@ const CommandList = (props: CommandListProps) =>
             focused={position === focusPosition}
             open={isOpen}
             api={api}
+            pluginLibrary={pluginLibrary}
             playSound={playSound}
             onClick={event => onRowClick(row, event)}
             onContextMenu={event => onRowContextMenu(row, event)}

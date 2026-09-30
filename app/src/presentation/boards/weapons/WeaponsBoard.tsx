@@ -48,6 +48,7 @@ import { IngredientTypeChips } from '@presentation/components/crafting/Ingredien
 import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 import { SystemService } from '@services/SystemService.ts';
 import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { BLANK_WEAPON_ROW } from '@services/rows/RowClear.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
@@ -183,6 +184,7 @@ function WeaponsBoard()
     getRows: () => weapons,
     toRow: (weapon) => weapon.toRmmz(),
     fromRow: (row) => new RPG_WeaponDomainModel(row),
+    blankRow: BLANK_WEAPON_ROW,
     applyPaste: setData,
     notify: (message, severity) => setSnackbar({ open: true, message, severity, variant: MuiSnackbarVariant.Filled }),
   });
