@@ -19,6 +19,7 @@ describe('apiDocumentStore', () =>
     clientId: 'window-1',
     loadMap: vi.fn(async (mapId: number) => ({ map: mapId }) as never),
     saveMap: vi.fn(async () => undefined),
+    createMap: vi.fn(async () => undefined),
     deleteMap: vi.fn(async () => undefined),
     loadMapFile: vi.fn(async () => null),
     restoreMapFile: vi.fn(async () => undefined),

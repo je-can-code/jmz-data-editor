@@ -246,6 +246,7 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       };
     },
     camera: () => renderer.camera,
+    drawState: () => renderer.drawState,
     contextMenus: () => [ ...contextMenus ],
     lookAt: (x: number, y: number, zoom: number) => renderer.lookAt({ x, y }, zoom),
     zoomToFit: () => renderer.zoomToFit(),
@@ -316,6 +317,29 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
         whenMapDrawn(renderer, resolve);
       });
       return { ms: drawn - started, key: mapDocumentKey(mapId) };
+    },
+    // a map panel put behind another tab and brought back: the view lets its GPU context go, waits for it to be gone,
+    // then is shown and asks for it back. It ends at the first frame drawn once the context is back, which uploads
+    // everything afresh, as a warm open ends at its first frame showing the map complete.
+    showAgain: async (hiddenMs = 250) =>
+    {
+      renderer.setVisible(false);
+      await new Promise(resolve =>
+      {
+        setTimeout(resolve, hiddenMs);
+      });
+      const hidden = renderer.drawState;
+      const started = performance.now();
+      const drawn = new Promise<number>(resolve =>
+      {
+        const stop = renderer.onFrame(() =>
+        {
+          stop();
+          resolve(performance.now());
+        });
+      });
+      renderer.setVisible(true);
+      return { ms: (await drawn) - started, hidden, shown: renderer.drawState };
     },
     // P5 fills this in once events can be dragged; the speed script measures it only when it is there.
     dragEvents: null as null | ((options: unknown) => Promise<unknown>),

@@ -56,7 +56,15 @@ const wheelZoomFactor = (deltaY: number, deltaMode: number): number =>
 };
 
 /**
- * Finds the zoom that shows a whole map in a view.
+ * The zoom a map with no tiles shows at: the game's own scale, since there is nothing to fit.
+ */
+const EMPTY_MAP_ZOOM = 1;
+
+/**
+ * Finds the zoom that shows a whole map in a view. It never goes closer than the wheel may zoom, so a map smaller
+ * than the view shows as close as the wheel could bring it, and a map with no tiles at all (the 0x0 placeholders the
+ * tree holds for maps not yet built) shows at the game's own scale rather than at whatever the view's size divided by
+ * nothing comes to.
  * @param {ViewSize} view The view.
  * @param {MapSize} map The map's size in tiles.
  * @param {number} tileSize The tile size in world pixels.
@@ -64,9 +72,14 @@ const wheelZoomFactor = (deltaY: number, deltaMode: number): number =>
  */
 const fitZoom = (view: ViewSize, map: MapSize, tileSize: number): number =>
 {
-  const width = Math.max(1, map.width * tileSize);
-  const height = Math.max(1, map.height * tileSize);
-  return Math.min(view.width / width, view.height / height) * FIT_FILL;
+  // a map with no cells has nothing to fit.
+  if (map.width * map.height === 0)
+  {
+    return EMPTY_MAP_ZOOM;
+  }
+
+  const zoom = Math.min(view.width / (map.width * tileSize), view.height / (map.height * tileSize)) * FIT_FILL;
+  return Math.min(MAX_ZOOM, zoom);
 };
 
 /**
@@ -83,7 +96,8 @@ const zoomLimits = (view: ViewSize, map: MapSize, tileSize: number): ZoomLimits 
 };
 
 /**
- * Builds the camera that shows a whole map, centred in the view.
+ * Builds the camera that shows a whole map, centred in the view. A map with no tiles shows at the game's own scale,
+ * with the corner it would grow from in the middle of the view.
  * @param {ViewSize} view The view.
  * @param {MapSize} map The map's size in tiles.
  * @param {number} tileSize The tile size in world pixels.

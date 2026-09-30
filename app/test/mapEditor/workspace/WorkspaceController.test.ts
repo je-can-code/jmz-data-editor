@@ -114,6 +114,10 @@ describe('WorkspaceController', () =>
       {
         maps.set(mapId, structuredClone(map));
       },
+      createMap: async (mapId: number, map: RmmzMap) =>
+      {
+        maps.set(mapId, structuredClone(map));
+      },
       restoreMapFile: async (mapId: number, text: string) =>
       {
         maps.set(mapId, JSON.parse(text) as RmmzMap);

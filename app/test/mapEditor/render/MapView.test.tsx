@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { WindowShell, type OpenBrowserWindow } from '../../../src/core/infrastructure/shell/WindowShell.ts';
 import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
@@ -19,10 +19,16 @@ import { buildMapJson } from '../support/fixtures.ts';
 
 /**
  * What the stand-in renderers and controllers record and answer: every renderer made, what each was asked to show
- * and where to look, and the maps an open lands on.
+ * and where to look, what it was told of the view being on screen (with "mount" where it was mounted), a way to change
+ * its draw state, and the maps an open lands on.
  */
 const stand = vi.hoisted(() => ({
-  renderers: [] as { overlays: OverlayState[]; looks: { cell: MapCell; zoom: number }[] }[],
+  renderers: [] as {
+    overlays: OverlayState[];
+    looks: { cell: MapCell; zoom: number }[];
+    shown: (boolean | 'mount')[];
+    announce: (state: string) => void;
+  }[],
   maps: new Map<number, unknown>(),
 }));
 
@@ -35,7 +41,17 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
    */
   class PixiMapRenderer
   {
-    record = { overlays: [] as OverlayState[], looks: [] as { cell: MapCell; zoom: number }[] };
+    record = {
+      overlays: [] as OverlayState[],
+      looks: [] as { cell: MapCell; zoom: number }[],
+      shown: [] as (boolean | 'mount')[],
+      announce: (state: string) =>
+      {
+        this.drawListeners.forEach(listener => listener(state));
+      },
+    };
+
+    drawListeners = new Set<(state: string) => void>();
 
     constructor()
     {
@@ -44,7 +60,18 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
 
     mount(): void
     {
-      // nothing to draw into.
+      this.record.shown.push('mount');
+    }
+
+    setVisible(visible: boolean): void
+    {
+      this.record.shown.push(visible);
+    }
+
+    onDrawStateChange(listener: (state: string) => void): () => void
+    {
+      this.drawListeners.add(listener);
+      return () => this.drawListeners.delete(listener);
     }
 
     onCameraChange(): () => void
@@ -142,6 +169,11 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * editor asked to see, shows selected once the map is open, with the view centred on it, and so does each event picked
  * after it; with nothing picked, nothing is selected and the view stays put. The drawing itself happens on the GPU and
  * is proved by the speed script and the parity check, not here.
+ *
+ * A view behind another tab lets its GPU context go, so the renderer hears whether the view is on screen before it is
+ * mounted (a view mounted behind a tab must make no context at all) and each time that changes. And a map that cannot
+ * draw says why over the canvas, in plain words, rather than leaving it blank: every context the window may keep is
+ * taken by maps on screen, the graphics card let go of it for a moment, or the window cannot draw at all.
  */
 describe('MapView', () =>
 {
@@ -255,6 +287,63 @@ describe('MapView', () =>
     const [ renderer ] = stand.renderers;
     expect([ stand.renderers.length, renderer.overlays.map(state => state.selectedEvents), renderer.looks ])
       .toStrictEqual([ 1, [ [ 3 ], [ 1 ] ], [ { cell: { x: 2, y: 1 }, zoom: 1 }, { cell: { x: 0, y: 0 }, zoom: 1 } ] ]);
+  });
+
+  it('tells the renderer whether the view is on screen before mounting it, and again each time that changes', () =>
+  {
+    // Arrange: a view that opens behind another tab.
+    const services = served();
+    const { rerender } = render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} visible={false}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act.
+    rerender(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} visible={true}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert: off screen before the mount, and one renderer throughout.
+    expect([ stand.renderers.length, stand.renderers[0].shown.slice(0, 2), stand.renderers[0].shown.at(-1) ])
+      .toStrictEqual([ 1, [ false, 'mount' ], true ]);
+  });
+
+  it('says over the map why it is not drawing, and nothing once it draws', () =>
+  {
+    // Arrange.
+    render(
+      <MapEditorServicesProvider services={served()}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const [ renderer ] = stand.renderers;
+
+    /**
+     * Moves the renderer to a draw state and reads what the view says over the map.
+     * @param {string} state The draw state.
+     * @returns {string | null} The words, or null when it says nothing.
+     */
+    const noticeFor = (state: string): string | null =>
+    {
+      act(() => renderer.announce(state));
+      return screen.queryByTestId('map-draw-notice')?.textContent ?? null;
+    };
+
+    // Act.
+    const notices = [ 'waiting', 'drawing', 'recovering', 'starting', 'failed' ].map(noticeFor);
+
+    // Assert.
+    expect(notices)
+      .toStrictEqual([
+        'Too many maps are on screen at once to draw this one.Close a map, or stack it behind another tab, and this one draws.',
+        null,
+        'The graphics card let go of this map for a moment.Drawing it again…',
+        null,
+        'This window cannot draw maps with the graphics card.Restarting the editor may bring it back.',
+      ]);
   });
 
   it('selects nothing and leaves the view where it is when no event is picked', async () =>

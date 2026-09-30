@@ -18,6 +18,8 @@
  *   - a brush stroke: real pointer moves with the left button held, each painting a 3x3 patch through the paint
  *     stand-in (P3's tools do not exist yet), matched to the frames that drew them;
  *   - the warm open: reopening the map after another, once this window holds both;
+ *   - shown again: the view hidden, as a panel behind another tab is, which lets its GPU context go, then shown, timed
+ *     to the first frame drawn on the context it got back; measured last, since it restarts the page's GPU context;
  *   - dragging events, once P5 provides the hook; until then it reports that it waited.
  *
  * It refuses to time anywhere but the RX 6950 XT: the browser's WebGL renderer and the page's own must both name it
@@ -86,6 +88,7 @@ type MapResult = {
   paths: Record<string, PathResult>;
   stroke: StrokeResult;
   warmOpenMs: number;
+  shownAgainMs: number;
   drag: string;
   verdicts: Record<string, Verdict>;
 };
@@ -106,6 +109,7 @@ type PageHooks = {
   paintState: () => { steps: number; redrawnFrames: number };
   enableEveryOverlay: () => void;
   openMap: (mapId: number) => Promise<{ ms: number }>;
+  showAgain: () => Promise<{ ms: number; hidden: string; shown: string }>;
   dragEvents: null | ((options: unknown) => Promise<unknown>);
 };
 
@@ -378,11 +382,20 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
     await page.evaluate(id => (window as unknown as HookWindow).__jmzMapView.openMap(id), other);
     const warm = await page.evaluate(id => (window as unknown as HookWindow).__jmzMapView.openMap(id), mapId);
     const hasDrag = await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.dragEvents !== null);
+
+    // last, since the context it gets back is a new one the frame recorder has not seen.
+    const shown = await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.showAgain());
+    if (shown.hidden !== 'hidden' || shown.shown !== 'drawing')
+    {
+      throw new Error(`the view did not let its context go and draw again: hidden "${shown.hidden}", shown "${shown.shown}"`);
+    }
+
     await page.close();
 
     const verdicts: Record<string, Verdict> = {
       coldOpen: judgeOpen(coldOpenMs, BUDGETS.coldOpenMs, 'cold open'),
       warmOpen: judgeOpen(warm.ms, BUDGETS.warmOpenMs, 'warm open'),
+      shownAgain: judgeOpen(shown.ms, BUDGETS.shownAgainMs, 'shown again'),
       stroke: stroke.verdict,
     };
     PATHS.forEach(kind =>
@@ -403,6 +416,7 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
       paths,
       stroke,
       warmOpenMs: warm.ms,
+      shownAgainMs: shown.ms,
       drag: hasDrag ? 'hook present but not yet measured by this script' : 'waits for P5, which provides the drag hook',
       verdicts,
     };
@@ -443,6 +457,7 @@ const printMap = (result: MapResult): void =>
   console.log(`Map${result.map} run ${result.run}: load ${result.loadBefore.toFixed(2)} -> ${result.loadAfter.toFixed(2)}`);
   console.log(`  cold open ${cell(result.coldOpenMs, 1)} ms  ${verdictText(result.verdicts['coldOpen'])}`);
   console.log(`  warm open ${cell(result.warmOpenMs, 1)} ms  ${verdictText(result.verdicts['warmOpen'])}`);
+  console.log(`  shown again ${cell(result.shownAgainMs, 1)} ms  ${verdictText(result.verdicts['shownAgain'])}`);
   PATHS.forEach(kind =>
   {
     const { summary, verdict, gpuBusy: busy, stalls } = result.paths[kind];
@@ -477,6 +492,7 @@ const printSpread = (results: MapResult[], maps: number[]): void =>
     console.log(`Map${map} across ${mine.length} runs:`);
     line('cold open (ms)', mine.map(result => result.coldOpenMs));
     line('warm open (ms)', mine.map(result => result.warmOpenMs));
+    line('shown again (ms)', mine.map(result => result.shownAgainMs));
     PATHS.forEach(kind =>
     {
       line(`${kind} dropped frames`, mine.map(result => result.paths[kind].summary.droppedFrames));

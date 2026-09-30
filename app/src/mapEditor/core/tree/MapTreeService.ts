@@ -80,8 +80,8 @@ class TreeRefusal extends Error
 }
 
 /**
- * A file found where a step brings one back, written after the step checked there was none: someone else's, and
- * never written over by an undo or a redo.
+ * A file found where a step brings one, written after the step checked there was none: someone else's, and never
+ * written over by a new step, an undo or a redo.
  */
 class FileTakenError extends Error
 {
@@ -202,6 +202,29 @@ const fileTakenRefusal = (step: HistoryStep, direction: 'backward' | 'forward', 
 {
   const verb = direction === 'backward' ? 'undo' : 'redo';
   return `"${step.label}" cannot ${verb}: map ${mapId} has a file again, which it would write over.`;
+};
+
+/**
+ * Words the refusal of a new step whose new map's id got a file of its own after the step picked it, which the step
+ * leaves alone. Trying again picks an id with no file behind it.
+ * @param {string} label The step's label.
+ * @param {number} mapId The map whose file arrived.
+ * @returns {string} The words.
+ */
+const newFileTakenRefusal = (label: string, mapId: number): string =>
+{
+  return `Map ${mapId} got a file of its own while "${label}" was being saved, so it was left alone; try it again.`;
+};
+
+/**
+ * Reports whether the server refused a write because a file is already where it would land. Restoring a file's text
+ * answers 409 and creating a map answers 412, and neither writes anything.
+ * @param {unknown} error What the write threw.
+ * @returns {boolean} True for that refusal.
+ */
+const refusedForFileThere = (error: unknown): boolean =>
+{
+  return error instanceof MapEditorApiError && (error.status === 409 || error.status === 412);
 };
 
 /**
@@ -553,6 +576,11 @@ class MapTreeService
       if (problems.length === 0 && step !== null)
       {
         this.#hub.forgetStep(step.id);
+      }
+
+      if (problems.length === 0 && error instanceof FileTakenError)
+      {
+        return { ok: false, message: newFileTakenRefusal(plan.label, error.mapId) };
       }
 
       return error instanceof TreeRefusal && problems.length === 0
@@ -930,10 +958,12 @@ class MapTreeService
   }
 
   /**
-   * Writes a map file: from its exact text when that is known, which the server writes back byte for byte and only
-   * where no file is, or from its content otherwise. The server's refusal of the text (a file is there) means one
-   * was written after the step checked: an undo or redo refuses rather than write over it, and only putting back a
-   * failed step, whose job is to restore what it removed, writes the content over it in that file's own layout.
+   * Writes a map file where a step brings one, only where no file is: from its exact text when that is known, which
+   * the server writes back byte for byte, or from its content in MZ's layout otherwise, as a new map's file is. The
+   * server checks and writes under one lock, so its refusal (a file is there) means one was written after the step
+   * checked, which is someone else's: a new step, an undo or a redo refuses rather than write over it. Only putting
+   * back a failed step, whose job is to restore what it removed, writes over a file found there, in that file's own
+   * layout.
    * @param {number} mapId The map.
    * @param {JsonValue} content The file's content.
    * @param {string | undefined} text The file's exact text, when known.
@@ -941,28 +971,31 @@ class MapTreeService
    */
   async #writeFile(mapId: number, content: JsonValue, text: string | undefined, restoring: boolean): Promise<void>
   {
-    if (text !== undefined)
+    const map = content as unknown as RmmzMap;
+    if (restoring && text === undefined)
     {
-      try
-      {
-        await this.#api.restoreMapFile(mapId, text);
-        return;
-      }
-      catch (error)
-      {
-        if ((error instanceof MapEditorApiError && error.status === 409) === false)
-        {
-          throw error;
-        }
-
-        if (restoring === false)
-        {
-          throw new FileTakenError(mapId);
-        }
-      }
+      await this.#api.saveMap(mapId, map);
+      return;
     }
 
-    await this.#api.saveMap(mapId, content as unknown as RmmzMap);
+    try
+    {
+      await (text === undefined ? this.#api.createMap(mapId, map) : this.#api.restoreMapFile(mapId, text));
+    }
+    catch (error)
+    {
+      if (refusedForFileThere(error) === false)
+      {
+        throw error;
+      }
+
+      if (restoring === false)
+      {
+        throw new FileTakenError(mapId);
+      }
+
+      await this.#api.saveMap(mapId, map);
+    }
   }
 
   /**

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"jmz-data-editor/server/internal/models/db"
 	"jmz-data-editor/server/internal/mzjson"
@@ -69,7 +70,9 @@ func SaveCommonEvents(announcer WriteAnnouncer) http.HandlerFunc {
 }
 
 // SaveMap serves PUT /api/maps/{mapId}: the body is a complete map, written to data/Map###.json and
-// creating the file when the map is new.
+// creating the file when the map is new. Sent with If-None-Match: *, it only ever creates: a map whose file exists
+// is refused with a 412 and nothing is written, which is how the editor brings a new map into being without ever
+// writing over a file that arrived first.
 func SaveMap(announcer WriteAnnouncer) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
 		// map ids start at 1; there is no map 0 for a save to create.
@@ -318,6 +321,10 @@ func loadDocument[T any](responseWriter http.ResponseWriter, httpRequest *http.R
 // or sends as null, would be written as a zero value just as quietly, and a map written without its
 // tiles crashes the engine. Either is refused with a 400 naming the key, before anything is written.
 // The body must also be exactly one JSON value; anything after it is refused rather than ignored.
+//
+// A request sent with If-None-Match: * asks for the file to be created, never replaced, as HTTP means it: where a
+// file already exists it is refused with a 412 Precondition Failed, and nothing is written. The check and the write
+// happen under one lock, so a file that lands after the caller last looked is still never written over.
 func saveDocument[T any](responseWriter http.ResponseWriter, httpRequest *http.Request, announcer WriteAnnouncer, relativePath string, layout mzjson.Layout, whole func(*mzjson.Value) error) {
 	projectPath, pathErr := GetProjectPath()
 	if pathErr != nil {
@@ -359,7 +366,18 @@ func saveDocument[T any](responseWriter http.ResponseWriter, httpRequest *http.R
 	announce := func(content []byte) {
 		withdraw = announcer.Expect(relativePath, client, content)
 	}
-	writeErr := store.SaveInMzLayout(data, filepath.Join(projectPath, filepath.FromSlash(relativePath)), layout, announce)
+	path := filepath.Join(projectPath, filepath.FromSlash(relativePath))
+	creating := onlyCreates(httpRequest)
+	var writeErr error
+	if creating {
+		writeErr = store.CreateInMzLayout(data, path, layout, announce)
+	} else {
+		writeErr = store.SaveInMzLayout(data, path, layout, announce)
+	}
+	if creating && errors.Is(writeErr, fs.ErrExist) {
+		http.Error(responseWriter, relativePath+" already exists; a new file is never written over one", http.StatusPreconditionFailed)
+		return
+	}
 	if writeErr != nil {
 		withdraw()
 		var res RestResponse[*T]
@@ -368,6 +386,12 @@ func saveDocument[T any](responseWriter http.ResponseWriter, httpRequest *http.R
 	}
 
 	responseWriter.WriteHeader(http.StatusNoContent)
+}
+
+// onlyCreates reports whether a request asks, with If-None-Match: *, for its file to be created and never replaced.
+// The server hands out no entity tags, so a header naming tags can never match one and asks for nothing.
+func onlyCreates(httpRequest *http.Request) bool {
+	return strings.TrimSpace(httpRequest.Header.Get("If-None-Match")) == "*"
 }
 
 // refuseBody answers a body that cannot be accepted: 413 when it was too large, 400 otherwise, with

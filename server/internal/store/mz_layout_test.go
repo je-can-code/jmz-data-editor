@@ -2,6 +2,8 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +15,8 @@ import (
 
 // SaveInMzLayout owes its callers MZ's file, exactly: a new map in MZ's own key order, and an
 // existing one in whatever order its file already used, so that only real changes show up in the
-// game's history. These use a small made-up map, so they run whether or not the game is checked out;
+// game's history. CreateInMzLayout owes the same bytes for a new file, and never writes over one that
+// exists. These use a small made-up map, so they run whether or not the game is checked out;
 // the sweep over every real file lives in mz_round_trip_test.go.
 
 // replacedMap is a one-event map whose event image lists its keys alphabetically, one of the three
@@ -114,6 +117,65 @@ func TestSaveInMzLayoutRefusesADocumentItCannotLayOut(t *testing.T) {
 	if _, statErr := os.Stat(path); os.IsNotExist(statErr) == false {
 		t.Errorf("expected no file to be written, stat said %v", statErr)
 	}
+}
+
+// TestCreateInMzLayoutWritesANewMapInMzsOrder covers a create where no file is: the same bytes a save of a new map
+// writes, announced before they land.
+func TestCreateInMzLayoutWritesANewMapInMzsOrder(t *testing.T) {
+	// Arrange- the map saved to one new path, then created at another.
+	var gameMap db.RpgMap
+	if err := json.Unmarshal([]byte(replacedMap), &gameMap); err != nil {
+		t.Fatal(err)
+	}
+	folder := t.TempDir()
+	if err := SaveInMzLayout(&gameMap, filepath.Join(folder, "Map004.json"), mzjson.MapLayout, nil); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(folder, "Map005.json")
+
+	// Act.
+	announced := []byte{}
+	err := CreateInMzLayout(&gameMap, path, mzjson.MapLayout, func(content []byte) { announced = content })
+
+	// Assert.
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, readErr := os.ReadFile(filepath.Join(folder, "Map004.json"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	assertFileHolds(t, path, string(saved))
+	if string(announced) != string(saved) {
+		t.Errorf("announced %q before writing", announced)
+	}
+}
+
+// TestCreateInMzLayoutRefusesAFileThatExists covers the one place a create never lands: on a file that is there,
+// which it leaves byte for byte as it was, announcing nothing.
+func TestCreateInMzLayoutRefusesAFileThatExists(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "Map001.json")
+	if err := os.WriteFile(path, []byte(replacedMap), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var gameMap db.RpgMap
+	if err := json.Unmarshal([]byte(strings.Replace(replacedMap, "<b>Cellar</b>", "Attic", 1)), &gameMap); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	announced := false
+	err := CreateInMzLayout(&gameMap, path, mzjson.MapLayout, func([]byte) { announced = true })
+
+	// Assert.
+	if errors.Is(err, fs.ErrExist) == false {
+		t.Fatalf("expected fs.ErrExist, got %v", err)
+	}
+	if announced {
+		t.Error("a refused create was still announced")
+	}
+	assertFileHolds(t, path, replacedMap)
 }
 
 // replaceOnce swaps one exact occurrence of old for new, failing when old is absent so the expected

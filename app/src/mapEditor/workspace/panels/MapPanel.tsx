@@ -5,6 +5,7 @@ import { mapDocumentKey, TILESETS_KEY } from '../../core/model/documentKeys.ts';
 import type { RmmzTileset } from '../../core/model/rmmzTypes.ts';
 import type { MapPanelParams } from '../../core/workspace/panels.ts';
 import { documentLabel } from '../../views/documentLabels.ts';
+import { usePanelVisible } from '../windowScope.tsx';
 import { useHeldMap, useWorkspace, useWorkspaceState, type HeldMap } from '../workspaceHooks.tsx';
 import { MapSurface } from './MapSurface.tsx';
 
@@ -75,7 +76,8 @@ const MapAbsent = (props: { held: HeldMap; onClose: () => void }) =>
  * One view of one map. It holds the map for as long as the tree lists it and draws it through the renderer's
  * surface; its tab reads the map's name, marked while the map has unsaved edits. Deleting the map from the tree
  * leaves the panel saying so, and undoing the delete brings the map back into it. Any number of map panels can be
- * open, side by side, stacked, or torn out into their own windows, and every one shows the same live map.
+ * open, side by side, stacked, or torn out into their own windows, and every one shows the same live map; only the
+ * ones on screen hold a GPU context to draw with.
  * @param {IDockviewPanelProps<MapPanelParams>} props The dock's panel props; the params name the map.
  * @returns {React.JSX.Element} The panel.
  */
@@ -85,6 +87,7 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
   const { mapId } = params;
   const held = useHeldMap(mapId);
   const focusEventId = useWorkspaceState(state => state.eventFocus[mapId] ?? null);
+  const visible = usePanelVisible(api);
 
   // the tab reads the map's name, marked while it has unsaved edits.
   const title = held.row === null
@@ -104,7 +107,7 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
       <Box sx={{ flex: 1, position: 'relative', minHeight: 0 }}>
         {held.map === null
           ? <MapAbsent held={held} onClose={() => api.close()}/>
-          : <MapSurface document={held.map} focusEventId={focusEventId}/>}
+          : <MapSurface document={held.map} focusEventId={focusEventId} visible={visible}/>}
       </Box>
     </Box>
   );

@@ -179,7 +179,7 @@ describe('HttpMapEditorApi', () =>
 
   describe('saving', () =>
   {
-    it('puts the raw map with this window\'s id', async () =>
+    it('puts the raw map with this window\'s id, over whatever file is there', async () =>
     {
       // Arrange.
       const map = buildMapJson();
@@ -188,10 +188,38 @@ describe('HttpMapEditorApi', () =>
       // Act.
       await api.saveMap(12, map);
 
+      // Assert: a save asks for no condition, so it writes a file that exists as readily as a new one.
+      const [ request ] = requests;
+      expect([ request.method, request.url, request.headers['x-jmz-client'], request.headers['content-type'], request.headers['if-none-match'], JSON.parse(request.body as string) ])
+        .toStrictEqual([ 'PUT', `${BASE}/api/maps/12`, 'window-7', 'application/json', undefined, map ]);
+    });
+
+    it('creates a new map with this window\'s id, asking the server to write only where no file is', async () =>
+    {
+      // Arrange.
+      const map = buildMapJson();
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+
+      // Act.
+      await api.createMap(12, map);
+
       // Assert.
       const [ request ] = requests;
-      expect([ request.method, request.url, request.headers['x-jmz-client'], request.headers['content-type'], JSON.parse(request.body as string) ])
-        .toStrictEqual([ 'PUT', `${BASE}/api/maps/12`, 'window-7', 'application/json', map ]);
+      expect([ request.method, request.url, request.headers['x-jmz-client'], request.headers['if-none-match'], JSON.parse(request.body as string) ])
+        .toStrictEqual([ 'PUT', `${BASE}/api/maps/12`, 'window-7', '*', map ]);
+    });
+
+    it('raises the server\'s refusal to create a map over a file that is there, with its status', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response('data/Map012.json already exists; a new file is never written over one', { status: 412 }));
+
+      // Act.
+      const failure = await api.createMap(12, buildMapJson()).catch((error: unknown) => error);
+
+      // Assert.
+      expect([ failure instanceof MapEditorApiError, (failure as MapEditorApiError).status ])
+        .toStrictEqual([ true, 412 ]);
     });
 
     it('puts the map tree, the tilesets and editor data to their routes', async () =>

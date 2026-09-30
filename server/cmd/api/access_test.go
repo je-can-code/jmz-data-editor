@@ -39,7 +39,8 @@ func TestTheUisPagesMayCallTheApi(t *testing.T) {
 }
 
 // TestPreflightAllowsTheMapEditorsSaves covers the browser's check before a PUT carrying the client
-// header, which would otherwise stop every save from the UI, whose pages sit on another port.
+// header, which would otherwise stop every save from the UI, whose pages sit on another port, and the
+// If-None-Match that creates a new map without writing over one.
 func TestPreflightAllowsTheMapEditorsSaves(t *testing.T) {
 	for _, origin := range uiOrigins {
 		t.Run(origin, func(t *testing.T) {
@@ -50,13 +51,13 @@ func TestPreflightAllowsTheMapEditorsSaves(t *testing.T) {
 			response := current.call(t, http.MethodOptions, "/api/maps/1", "",
 				"Origin", origin,
 				"Access-Control-Request-Method", "PUT",
-				"Access-Control-Request-Headers", "content-type, x-jmz-client")
+				"Access-Control-Request-Headers", "content-type, x-jmz-client, if-none-match")
 
 			// Assert.
 			assertStatus(t, response, http.StatusNoContent)
 			methods := response.Header().Get("Access-Control-Allow-Methods")
 			headers := response.Header().Get("Access-Control-Allow-Headers")
-			if strings.Contains(methods, "PUT") == false || strings.Contains(headers, "X-Jmz-Client") == false {
+			if strings.Contains(methods, "PUT") == false || strings.Contains(headers, "X-Jmz-Client") == false || strings.Contains(headers, "If-None-Match") == false {
 				t.Errorf("the preflight allowed methods %q and headers %q", methods, headers)
 			}
 			if allowed := response.Header().Get("Access-Control-Allow-Origin"); allowed != origin {

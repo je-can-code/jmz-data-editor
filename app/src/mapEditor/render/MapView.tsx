@@ -4,6 +4,7 @@ import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { Camera, MapCell } from '../core/renderer/camera.ts';
 import { GAME_LOOK, type OverlayId } from '../core/renderer/MapRenderer.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
+import type { DrawState } from './ContextKeeper.ts';
 import {
   flipSwitch,
   isSwitchOn,
@@ -33,6 +34,30 @@ type MapViewProps = {
    * and the view centres on it. Null, or left out, picks out nothing.
    */
   readonly pickedEventId?: number | null;
+
+  /**
+   * Whether the view is on screen; false while its panel is a tab behind another. A view off screen lets its GPU
+   * context go and draws again, as it was, when it shows. Left out, the view is on screen.
+   */
+  readonly visible?: boolean;
+};
+
+/**
+ * What the view says over the map when it cannot draw it, by draw state; the states not named draw, or are about to.
+ */
+const DRAW_NOTICES: Partial<Record<DrawState, { readonly title: string; readonly detail: string }>> = {
+  waiting: {
+    title: 'Too many maps are on screen at once to draw this one.',
+    detail: 'Close a map, or stack it behind another tab, and this one draws.',
+  },
+  recovering: {
+    title: 'The graphics card let go of this map for a moment.',
+    detail: 'Drawing it again…',
+  },
+  failed: {
+    title: 'This window cannot draw maps with the graphics card.',
+    detail: 'Restarting the editor may bring it back.',
+  },
 };
 
 /**
@@ -87,23 +112,66 @@ const zoomLabel = (zoom: number): string =>
 };
 
 /**
+ * Says over the map why it is not drawing, in plain words: every context the window may keep is taken by maps on
+ * screen, the graphics card let go of it for a moment, or the window cannot draw at all.
+ * @param {{ state: DrawState }} props Where the drawing stands.
+ * @returns {React.JSX.Element | null} The notice, or nothing while the map draws or is about to.
+ */
+const DrawNotice = (props: { state: DrawState }) =>
+{
+  const notice = DRAW_NOTICES[props.state];
+  if (notice === undefined)
+  {
+    return null;
+  }
+
+  return (
+    <Box
+      data-testid={'map-draw-notice'}
+      sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', p: 2, textAlign: 'center', pointerEvents: 'none' }}
+    >
+      <Box>
+        <Typography variant={'body1'} color={'text.secondary'}>
+          {notice.title}
+        </Typography>
+        <Typography variant={'body2'} color={'text.disabled'}>
+          {notice.detail}
+        </Typography>
+      </Box>
+    </Box>
+  );
+};
+
+/**
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
  * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look,
  * with a status line naming the zoom, the tile under the pointer and the GPU drawing it. An event picked out is shown
  * selected, with the view centred on it.
- * @param {MapViewProps} props The map to show, and the event to pick out.
+ *
+ * A view off screen, behind another tab, lets its GPU context go and draws again, camera and all, when it shows; a map
+ * that cannot draw says why over the canvas rather than leaving it blank.
+ * @param {MapViewProps} props The map to show, the event to pick out, and whether the view is on screen.
  * @returns {React.JSX.Element} The view.
  */
 const MapView = (props: MapViewProps) =>
 {
-  const { mapId, pickedEventId = null } = props;
+  const { mapId, pickedEventId = null, visible = true } = props;
   const services = useMapEditorServices();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<PixiMapRenderer | null>(null);
   const controllerRef = useRef<MapViewController | null>(null);
+  const visibleRef = useRef(visible);
   const [ openMap, setOpenMap ] = useState<MapDocument | null>(null);
   const [ status, setStatus ] = useState<MapViewStatus>({ gpu: '', zoom: 1, cell: null, problem: null });
   const [ settings, setSettings ] = useState<MapViewSettings>({ visibility: GAME_LOOK, overlays: new Set(TOOL_OVERLAYS) });
+  const [ drawState, setDrawState ] = useState<DrawState>('hidden');
+
+  // keep up with whether the view is on screen, for a renderer mounted after this, which must know before it mounts:
+  // a view mounted behind another tab makes no GPU context until it shows.
+  useEffect(() =>
+  {
+    visibleRef.current = visible;
+  }, [ visible ]);
 
   // one renderer for the life of the view, whatever map it shows.
   useEffect(() =>
@@ -117,11 +185,12 @@ const MapView = (props: MapViewProps) =>
     }
 
     const renderer = new PixiMapRenderer();
+    const stops: (() => void)[] = [ renderer.onDrawStateChange(setDrawState) ];
+    renderer.setVisible(visibleRef.current);
     renderer.mount(host);
     rendererRef.current = renderer;
     const controller = new MapViewController(renderer, services, projectImagesFor(api));
     controllerRef.current = controller;
-    const stops: (() => void)[] = [];
     stops.push(renderer.onCameraChange((camera: Camera) =>
     {
       setStatus(current => (current.zoom === camera.zoom ? current : { ...current, zoom: camera.zoom }));
@@ -144,9 +213,10 @@ const MapView = (props: MapViewProps) =>
     host.addEventListener('pointermove', onPointerMove);
     stops.push(() => host.removeEventListener('pointermove', onPointerMove));
 
+    // a window that cannot draw says so over the map, through the draw state.
     renderer.whenReady()
       .then(() => setStatus(current => ({ ...current, gpu: renderer.rendererInfo()?.renderer ?? '' })))
-      .catch(() => setStatus(current => ({ ...current, problem: 'This window cannot draw with the GPU.' })));
+      .catch(() => undefined);
 
     const view = host.ownerDocument.defaultView;
     if (view !== null && wantsSpeedHooks(view.location.search))
@@ -234,6 +304,12 @@ const MapView = (props: MapViewProps) =>
     renderer.setPassabilityRules(services.modules.passabilityRules());
   }, [ services, settings ]);
 
+  // tell the renderer as the view goes behind another tab and comes back.
+  useEffect(() =>
+  {
+    rendererRef.current?.setVisible(visible);
+  }, [ visible ]);
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5, px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
@@ -262,11 +338,14 @@ const MapView = (props: MapViewProps) =>
           />
         ))}
       </Box>
-      <Box
-        data-testid={'map-view'}
-        ref={hostRef}
-        sx={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', backgroundColor: '#121212' }}
-      />
+      <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <Box
+          data-testid={'map-view'}
+          ref={hostRef}
+          sx={{ position: 'absolute', inset: 0, overflow: 'hidden', backgroundColor: '#121212' }}
+        />
+        <DrawNotice state={drawState}/>
+      </Box>
       <Box sx={{ display: 'flex', gap: 2, px: 1, py: 0.25, borderTop: 1, borderColor: 'divider' }}>
         <Typography variant={'caption'} color={'text.secondary'}>
           {`Map ${mapId}`}

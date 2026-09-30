@@ -17,7 +17,8 @@ import {
  * map, and a right click that does not move still opens the context menu. The math must keep the point under the
  * wheel still, always reach the whole map when zooming out however large it is, and tell a click from a drag by a
  * few pixels of slop, in both directions: a drag that strays past the slop pans, a click that drifts inside it does
- * not.
+ * not. A map opens fitted to its view at a zoom the wheel could reach, so the status line never reads a zoom the map
+ * cannot be put back to: a tiny map no closer than the wheel goes, and an empty placeholder map at the game's scale.
  */
 describe('cameraControls', () =>
 {
@@ -50,6 +51,32 @@ describe('cameraControls', () =>
       // Assert: 1000/3600 x 0.95; the map's middle sits in the view's middle.
       expect([ Number(camera.zoom.toFixed(6)), screenToWorld(camera, { x: 1000, y: 500 }) ])
         .toStrictEqual([ 0.263889, { x: 1800, y: 1800 } ]);
+    });
+
+    it('shows an empty placeholder map at the game\'s own scale, with its corner in the middle of the view', () =>
+    {
+      // Arrange: a 0x0 map, as the tree's placeholders for maps not yet built are, in an 800x600 view.
+      const view = { width: 800, height: 600 };
+
+      // Act.
+      const camera = fitCamera(view, { width: 0, height: 0 }, 48);
+
+      // Assert: 100%, where the view's size over nothing once came to 57000%.
+      expect(camera)
+        .toStrictEqual({ x: -400, y: -300, zoom: 1 });
+    });
+
+    it('fits a map smaller than the view no closer than the wheel can zoom', () =>
+    {
+      // Arrange: one tile would fill an 800x600 view at 11.875x, past the limit; a 3x3 map fits at 3.958x, inside it.
+      const view = { width: 800, height: 600 };
+
+      // Act.
+      const zooms = [ fitZoom(view, { width: 1, height: 1 }, 48), Number(fitZoom(view, { width: 3, height: 3 }, 48).toFixed(4)) ];
+
+      // Assert.
+      expect(zooms)
+        .toStrictEqual([ MAX_ZOOM, 3.9583 ]);
     });
 
     it('lets the zoom out reach a whole map below the usual limit, and never caps zooming in beyond it', () =>
