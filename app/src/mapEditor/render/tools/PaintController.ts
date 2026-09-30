@@ -302,14 +302,7 @@ class PaintController
 
     if (event.code === OVERRIDE_KEY_CODE)
     {
-      // the space bar is the override's only over the map, and never in a text field.
-      if (mine === false || isTextEntry(event.target as unknown as KeyTarget))
-      {
-        return;
-      }
-
-      event.preventDefault();
-      this.#setKeys({ ...this.#keys, override: down });
+      this.#onOverrideKey(event, down, mine);
       return;
     }
 
@@ -324,6 +317,34 @@ class PaintController
     if (event.key === 'Shift' || event.key === 'Control' || event.key === 'Meta')
     {
       this.#setKeys({ ...this.#keys, shift: event.shiftKey, copy: event.ctrlKey || event.metaKey });
+    }
+  }
+
+  /**
+   * Takes up the override's key. Pressed, it is the override's only over the map and never in a text field, and is
+   * kept from the page there, which would otherwise scroll or press a focused button. Released, it always lets the
+   * override go, wherever the pointer has wandered since.
+   * @param {KeyboardEvent} event The key.
+   * @param {boolean} down True when it went down.
+   * @param {boolean} mine Whether the pointer is over the map or a drag is in progress.
+   */
+  #onOverrideKey(event: KeyboardEvent, down: boolean, mine: boolean): void
+  {
+    const typing = isTextEntry(event.target as unknown as KeyTarget);
+    if (mine && typing === false)
+    {
+      event.preventDefault();
+    }
+
+    if (down === false)
+    {
+      this.#setKeys({ ...this.#keys, override: false });
+      return;
+    }
+
+    if (mine && typing === false)
+    {
+      this.#setKeys({ ...this.#keys, override: true });
     }
   }
 

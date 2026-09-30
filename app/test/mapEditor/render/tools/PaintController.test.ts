@@ -179,6 +179,26 @@ describe('PaintController', () =>
       .toBe(false);
   });
 
+  it('lets the override go when the space bar comes up away from the map, and never takes it up there', () =>
+  {
+    // Arrange: the space bar pressed over the map, then the pointer wandering off.
+    const bench = controllerWith({ tool: 'pen', brush: singleTileBrush(ROCK), overrideLayer: 2 });
+    pointer(bench.canvas, 'pointerenter', 1, 1);
+    key('keydown', { key: ' ', code: 'Space' });
+    pointer(bench.canvas, 'pointerleave', 1, 1);
+
+    // Act: released away from the map, pressed again there, then a stroke back on the map.
+    key('keyup', { key: ' ', code: 'Space' });
+    key('keydown', { key: ' ', code: 'Space' });
+    pointer(bench.canvas, 'pointerenter', 1, 1);
+    pointer(bench.canvas, 'pointerdown', 1, 1);
+    pointer(bench.canvas, 'pointerup', 1, 1);
+
+    // Assert: the stroke paints automatically, on the ground.
+    expect(stackAt(bench.map, 1, 1))
+      .toEqual([ ROCK, 0, 0, 0 ]);
+  });
+
   it('lays tiles exactly with Shift held on the press', () =>
   {
     // Arrange.
