@@ -218,16 +218,19 @@ const planClearUpper = (reader: TileReader, x: number, y: number, layering: Tile
 };
 
 /**
- * Whether painting the ground also clears the decoration on layer 2 above it, by tileset mode. This is the one place
- * that choice lives, until the owner decides it: an Area tileset keeps the decoration, as D5 says, so repainting the
- * ground under tall grass keeps the grass; a Field (world-map) tileset clears it, as MZ does, because there layer 2
- * holds the ground's own companions, a paired base column or deep sea, which belong to the ground being replaced.
+ * Whether painting the ground also clears the decoration on layer 2 above it. This is the one place that choice
+ * lives, until the owner decides it. A Field (world-map) tileset clears any decoration, as MZ does, because there
+ * layer 2 holds the ground's own companions, a paired base column or deep sea, which belong to the ground being
+ * replaced. An Area tileset keeps its decorations, as D5 says, so repainting the ground under tall grass keeps the
+ * grass; but it clears deep sea and the ocean decorations, the A1 overlays that only make sense over water, so ocean
+ * or grass painted over deep sea does not leave it on top (41 shipped maps hold 8,270 of them on layer 2).
+ * @param {number} decoration The tile on layer 2, which is not laid over the ground (see {@link isLaidOver}).
  * @param {number} mode The tileset's mode.
- * @returns {boolean} True when painting the ground clears the decoration on layer 2.
+ * @returns {boolean} True when painting the ground clears it.
  */
-const groundClearsDecoration = (mode: number): boolean =>
+const groundClearsDecoration = (decoration: number, mode: number): boolean =>
 {
-  return mode === TilesetMode.field;
+  return mode === TilesetMode.field || tileRole(decoration, mode) === 'oceanOverlay';
 };
 
 /**
@@ -243,7 +246,7 @@ const groundClearsDecoration = (mode: number): boolean =>
 const planGround = (reader: TileReader, x: number, y: number, tileId: number, layering: TilesetLayering): PlacementPlan =>
 {
   const decoration = reader.tileAt(x, y, 1);
-  const clears = decoration !== 0 && groundClearsDecoration(layering.mode) && isLaidOver(decoration, 1, layering) === false;
+  const clears = decoration !== 0 && isLaidOver(decoration, 1, layering) === false && groundClearsDecoration(decoration, layering.mode);
   return clears
     ? { landing: 0, writes: [ [ 0, unshapedTile(tileId) ], [ 1, 0 ] ] }
     : { landing: 0, writes: [ [ 0, unshapedTile(tileId) ] ] };

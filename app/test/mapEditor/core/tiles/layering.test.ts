@@ -13,14 +13,17 @@ import { blankGrid, cellOf, fill, kindTile, put, type TestGrid } from './support
  * replaces it. The engine owes the painter MZ's automatic rules as S5 confirmed them (ground on layer 1, the A2
  * decorations and ocean overlays on layer 2, B to E tiles stacked two deep on layers 3 and 4, newest on top) with
  * D5's changes on top: a tile marked "goes on top" lays over the ground instead of replacing it, repainting the
- * ground keeps what is above it, manual mode and the one-stroke override paint exactly one layer, and the swap tool
- * replaces a tile everywhere at once. It answers with the cells to change and never writes the map itself.
+ * ground keeps what is above it (all but the decorations that belong to the ground: deep sea and the ocean
+ * decorations, and on a Field tileset every decoration), manual mode and the one-stroke override paint exactly one
+ * layer, and the swap tool replaces a tile everywhere at once. It answers with the cells to change and never writes
+ * the map itself.
  *
  * Every rule is pinned with a near miss beside it: a cell that must stay untouched, a kind that must not count as
  * ground, a marked tile next to an unmarked one.
  */
 const OCEAN = 0;
 const DEEP_SEA = 1;
+const OCEAN_DECORATION = 2;
 const LAKE = 4;
 const GRASS = 16;
 const GRASS_PAIRED = 17;
@@ -145,6 +148,38 @@ describe('automatic layering: the ground', () =>
     // Assert: MZ's Field behaviour for the companions; the marked tile stays.
     expect(afters.map(after => stackOf(after, 0, 0)))
       .toEqual([ [ 'k18', 0, 0, 0 ], [ 'k18', 0, 0, 0 ], [ 'k18', CLIFF_CORNER, 0, 0 ] ]);
+  });
+
+  it('clears deep sea and the ocean decorations on an Area tileset, but keeps tall grass and water laid by hand', () =>
+  {
+    // Arrange: on an Area tileset, ocean under deep sea, ocean under an ocean decoration, grass under tall grass, and
+    // ocean under lake water somebody laid on layer 2 by hand.
+    const deep = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(OCEAN)), 0, 0, 1, kindTile(DEEP_SEA));
+    const decorated = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(OCEAN)), 0, 0, 1, kindTile(OCEAN_DECORATION));
+    const grass = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, kindTile(TALL_GRASS));
+    const lake = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(OCEAN)), 0, 0, 1, kindTile(LAKE));
+
+    // Act: dirt painted over each, and ocean painted afresh over the deep sea.
+    const afters = [ deep, decorated, grass, lake ].map(grid => paintOne(grid, 0, 0, kindTile(DIRT)));
+    const ocean = paintOne(deep, 0, 0, kindTile(OCEAN));
+
+    // Assert: both water overlays go, under the ocean too; the tall grass and the lake stay.
+    expect([ ...afters, ocean ].map(after => stackOf(after, 0, 0)))
+      .toEqual([ [ 'k18', 0, 0, 0 ], [ 'k18', 0, 0, 0 ], [ 'k18', 'k20', 0, 0 ], [ 'k18', 'k4', 0, 0 ], [ 'k0', 0, 0, 0 ] ]);
+  });
+
+  it('keeps deep sea on an Area tileset when it is marked to go on top', () =>
+  {
+    // Arrange: ocean under deep sea.
+    const grid = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(OCEAN)), 0, 0, 1, kindTile(DEEP_SEA));
+
+    // Act: dirt painted over it with deep sea marked, and with nothing marked.
+    const marked = paintOne(grid, 0, 0, kindTile(DIRT), layeringWith([], [ DEEP_SEA ]));
+    const unmarked = paintOne(grid, 0, 0, kindTile(DIRT), layeringWith());
+
+    // Assert.
+    expect([ stackOf(marked, 0, 0), stackOf(unmarked, 0, 0) ])
+      .toEqual([ [ 'k18', 'k1', 0, 0 ], [ 'k18', 0, 0, 0 ] ]);
   });
 
   it('lays a wall top on layer 1 too, replacing the ground', () =>
