@@ -1,25 +1,12 @@
 import type { RmmzMapJson } from '@core/types/RmmzMapJson.ts';
 import { getJmzHttpApiBase } from '../../constants/jmzHttpApiBase.ts';
+import { parsePluginsJsArray } from '../plugins/PluginsJsReader.ts';
 
 const DEFAULT_JABS_ACTION_MAP_ID = 2;
 
 function isRecord(x: unknown): x is Record<string, unknown>
 {
   return typeof x === 'object' && x !== null;
-}
-
-/**
- * Extracts the {@code $plugins} JSON array from {@code js/plugins.js} text.
- */
-function parsePluginsJsArray(text: string): unknown[]
-{
-  const first = text.indexOf('[');
-  const last = text.lastIndexOf(']');
-  if (first === -1 || last === -1 || last <= first)
-  {
-    throw new Error('plugins.js: could not locate JSON array');
-  }
-  return JSON.parse(text.slice(first, last + 1)) as unknown[];
 }
 
 /**
