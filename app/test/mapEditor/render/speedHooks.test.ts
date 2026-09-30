@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import { screenToWorld } from '../../../src/mapEditor/core/renderer/camera.ts';
+import type { OverlayPainter } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import { makeAutotileId } from '../../../src/mapEditor/core/tiles/tileIds.ts';
 import { fitZoom } from '../../../src/mapEditor/render/cameraControls.ts';
-import { cameraOnPath, wantsSpeedHooks } from '../../../src/mapEditor/render/speedHooks.ts';
+import { cameraOnPath, ringsOverlay, unusedGroundKind, wantsSpeedHooks } from '../../../src/mapEditor/render/speedHooks.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 
 /*
@@ -75,6 +78,43 @@ describe('speedHooks', () =>
       // Assert: always the whole map's zoom, and not standing still.
       expect([ cameras.map(camera => camera.zoom), cameras[0].x !== cameras[1].x ])
         .toStrictEqual([ [ whole, whole ], true ]);
+    });
+  });
+
+  describe('unusedGroundKind', () =>
+  {
+    it('finds a ground kind the map holds on no layer, skipping the decorations', () =>
+    {
+      // Arrange: the first two ground kinds used, one on layer 1 and one on layer 3; kinds 18 and 19 are free.
+      const data = new Array(2 * 1 * 6).fill(0);
+      data[0] = makeAutotileId(16, 5);
+      data[2 * 2 + 1] = makeAutotileId(17, 0);
+      const map = MapDocument.fromJson('map:1', { ...buildMapJson(), width: 2, height: 1, data });
+
+      // Act.
+      const kind = unusedGroundKind(map);
+
+      // Assert.
+      expect(kind)
+        .toBe(18);
+    });
+  });
+
+  describe('ringsOverlay', () =>
+  {
+    it('draws two rings about the middle of every event, as heavy as sight rings', () =>
+    {
+      // Arrange: a map with events at 0, 0 and 2, 1, and a painter that records the circles.
+      const map = MapDocument.fromJson('map:1', { ...buildMapJson(), events: [ null, createMapEvent(1, 0, 0), null, createMapEvent(3, 2, 1) ] });
+      const circles: number[][] = [];
+      const painter = { circle: (x: number, y: number, radius: number) => circles.push([ x, y, radius ]) } as unknown as OverlayPainter;
+
+      // Act.
+      ringsOverlay().draw(painter, { document: map, tileSize: 48, selection: [] });
+
+      // Assert.
+      expect(circles)
+        .toStrictEqual([ [ 24, 24, 192 ], [ 24, 24, 288 ], [ 120, 72, 192 ], [ 120, 72, 288 ] ]);
     });
   });
 });

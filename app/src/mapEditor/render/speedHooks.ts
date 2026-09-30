@@ -1,6 +1,5 @@
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../core/history/historyKeys.ts';
-import type { Transaction } from '../core/history/Transaction.ts';
 import { mapDocumentKey } from '../core/model/documentKeys.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import { TILE_SIZE, type Camera } from '../core/renderer/camera.ts';
@@ -10,11 +9,16 @@ import {
   type CoreOverlayId,
   type GhostTile,
   type MapContextMenu,
+  type OverlayDefinition,
   type OverlayState,
 } from '../core/renderer/MapRenderer.ts';
+import { a2Column, autotileKind, isAutotile, makeAutotileId } from '../core/tiles/tileIds.ts';
+import { tileBrush } from '../core/tools/brush.ts';
+import type { PaintSettings, PaintState } from '../core/tools/PaintState.ts';
 import { centerCamera, fitZoom } from './cameraControls.ts';
 import { whenMapDrawn } from './openTiming.ts';
 import type { PixiMapRenderer } from './PixiMapRenderer.ts';
+import type { PaintController } from './tools/PaintController.ts';
 
 /**
  * The camera paths the speed script records, each driven from the renderer's own frame clock so every run draws the
@@ -24,13 +28,79 @@ import type { PixiMapRenderer } from './PixiMapRenderer.ts';
 type CameraPath = 'pan' | 'zoom' | 'zoomedout';
 
 /**
- * What the paint stand-in paints: tile ids it alternates between, so every step is a real change, on one layer, over a
- * square footprint about the pointer. A footprint of 3 stands in for the autotile neighbourhood P3's pen reshapes.
+ * What the speed script's stroke paints with: a square brush of one tile, painted by the real pen through automatic
+ * layering, so every step goes through the layering engine and reshapes the autotiles around what it covers.
  */
-type PaintSettings = {
-  readonly tileIds: readonly number[];
-  readonly layer: number;
+type StrokeSettings = {
+  /**
+   * The tile to paint; left out, a ground kind the map does not use, so every cell the pen covers really changes.
+   */
+  readonly tileId?: number;
+
+  /**
+   * The brush's size across and down.
+   */
   readonly footprint: number;
+};
+
+/**
+ * Finds an A2 ground kind a map holds nowhere, on any layer, for a stroke that must change every cell it covers.
+ * @param {MapDocument} map The map.
+ * @returns {number} The kind; the first ground kind when the map somehow holds all of them.
+ */
+const unusedGroundKind = (map: MapDocument): number =>
+{
+  const used = new Set<number>();
+  const tileCells = map.width * map.height * 4;
+  for (let index = 0; index < tileCells; index++)
+  {
+    const tileId = map.cells[index];
+    if (isAutotile(tileId))
+    {
+      used.add(autotileKind(tileId));
+    }
+  }
+
+  // the ground kinds are A2's first four columns, kinds 16 to 47.
+  for (let kind = 16; kind < 48; kind++)
+  {
+    if (a2Column(kind) < 4 && used.has(kind) === false)
+    {
+      return kind;
+    }
+  }
+
+  return 16;
+};
+
+/**
+ * Builds a stand-in for a plugin module's overlay, as heavy as J-ABS's sight rings will be: two rings around every
+ * event on the map. The speed script switches it on to measure what module overlays cost while painting, which is
+ * nothing, since a tile edit never redraws them.
+ * @returns {OverlayDefinition} The overlay.
+ */
+const ringsOverlay = (): OverlayDefinition =>
+{
+  return {
+    id: 'speed.rings',
+    title: 'Rings around every event',
+    defaultOn: true,
+    draw: (painter, context) =>
+    {
+      const { document, tileSize } = context;
+      document.eventIds().forEach(id =>
+      {
+        const event = document.event(id);
+        if (event !== null)
+        {
+          const x = (event.x + 0.5) * tileSize;
+          const y = (event.y + 0.5) * tileSize;
+          painter.circle(x, y, tileSize * 4, { stroke: 0xff5252, strokeAlpha: 0.8 });
+          painter.circle(x, y, tileSize * 6, { stroke: 0xffab40, strokeAlpha: 0.5 });
+        }
+      });
+    },
+  };
 };
 
 /**
@@ -44,6 +114,8 @@ type OpenTimings = Record<string, number>;
 type SpeedHooksContext = {
   readonly renderer: PixiMapRenderer;
   readonly hub: DocumentHub;
+  readonly painter: PaintController;
+  readonly painting: PaintState;
   readonly map: () => MapDocument | null;
   readonly openMap: (mapId: number) => Promise<void>;
   readonly timings: OpenTimings;
@@ -164,10 +236,9 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
   const contextMenus: MapContextMenu[] = [];
   stops.push(renderer.onContextMenu(menu => contextMenus.push(menu)));
 
-  // the paint stand-in: a pen that paints on pointer moves with the left button held, the way P3's will.
-  let painting: { transaction: Transaction; map: MapDocument } | null = null;
-  let settings: PaintSettings = { tileIds: [ 2048 + 47, 2816 + 47 ], layer: 0, footprint: 3 };
-  let steps = 0;
+  // strokes paint with the real pen: the map view's own tools, through the layering engine and the autotile refresh.
+  const { painter, painting } = context;
+  let before: PaintSettings | null = null;
 
   // the frames that rebuilt chunks since the pen was picked up: proof a stroke reached the screen.
   let redrawnFrames = 0;
@@ -179,55 +250,6 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     }
   }));
   const { canvas } = renderer;
-  const paintAt = (x: number, y: number) =>
-  {
-    const cell = renderer.cellAt({ x, y });
-    if (painting === null || cell === null)
-    {
-      return;
-    }
-
-    const { map, transaction } = painting;
-    const value = settings.tileIds[steps % settings.tileIds.length];
-    const half = Math.floor(settings.footprint / 2);
-    const cells: [ number, number ][] = [];
-    for (let dy = -half; dy <= half; dy++)
-    {
-      for (let dx = -half; dx <= half; dx++)
-      {
-        const cx = cell.x + dx;
-        const cy = cell.y + dy;
-        if (cx >= 0 && cy >= 0 && cx < map.width && cy < map.height)
-        {
-          cells.push([ map.cellIndex(cx, cy, settings.layer), value ]);
-        }
-      }
-    }
-
-    transaction.tiles(map.key, cells);
-    steps += 1;
-  };
-  const onDown = (event: PointerEvent) =>
-  {
-    const map = context.map();
-    if (event.button !== 0 || map === null || canvas === null)
-    {
-      return;
-    }
-
-    painting = { map, transaction: hub.begin('Paint', [ mapHistoryKey(map.mapId) ]) };
-    canvas.setPointerCapture(event.pointerId);
-    paintAt(event.offsetX, event.offsetY);
-  };
-  const onMove = (event: PointerEvent) =>
-  {
-    paintAt(event.offsetX, event.offsetY);
-  };
-  const onUp = () =>
-  {
-    painting?.transaction.commit();
-    painting = null;
-  };
 
   const hooks = {
     ready: () => context.timings['drawnAt'] !== undefined,
@@ -264,21 +286,41 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     {
       path = null;
     },
-    enablePaint: (next: Partial<PaintSettings>) =>
+    // picks up the pen with a square brush of one tile, remembering what was in hand to put it back afterwards.
+    enablePaint: (next: Partial<StrokeSettings>) =>
     {
-      settings = { ...settings, ...next };
-      steps = 0;
+      const map = context.map();
+      if (map === null)
+      {
+        return null;
+      }
+
+      const footprint = next.footprint ?? 3;
+      const tileId = next.tileId ?? makeAutotileId(unusedGroundKind(map), 0);
+      before ??= painting.settings;
+      painting.setBrush(tileBrush(new Array(footprint * footprint).fill(tileId), footprint, footprint));
+      painting.setStrip('auto');
+      painting.setTool('pen');
+      painter.resetPaintedInputs();
       redrawnFrames = 0;
-      canvas?.addEventListener('pointerdown', onDown);
-      canvas?.addEventListener('pointermove', onMove);
-      canvas?.addEventListener('pointerup', onUp);
+      return tileId;
     },
     disablePaint: () =>
     {
-      onUp();
-      canvas?.removeEventListener('pointerdown', onDown);
-      canvas?.removeEventListener('pointermove', onMove);
-      canvas?.removeEventListener('pointerup', onUp);
+      painter.session.interrupt();
+      if (before !== null)
+      {
+        painting.setBrush(before.brush);
+        painting.setStrip(before.strip);
+        painting.setOverrideLayer(before.overrideLayer);
+        painting.setTool(before.tool);
+        before = null;
+      }
+    },
+    // stands in for a plugin module's overlay, as heavy as sight rings around every event.
+    enableModuleRings: () =>
+    {
+      renderer.setOverlays({ enabled: new Set([ ...EVERY_CORE_OVERLAY, 'speed.rings' ]), definitions: [ ringsOverlay() ] });
     },
     enableEveryOverlay: () =>
     {
@@ -305,7 +347,7 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       renderer.holdAnimation({ step: options.step, frames: options.frames });
     },
     extract: (rect: { x: number; y: number; width: number; height: number }) => renderer.extract(rect),
-    paintState: () => ({ steps, redrawnFrames, painting: painting !== null }),
+    paintState: () => ({ steps: painter.paintedInputs, redrawnFrames, painting: painter.session.isActive }),
     undoPaint: () => hub.undo(mapHistoryKey(context.map()?.mapId ?? 0)),
     // a warm open ends where a cold one does: at the first frame showing the map complete, sprites and parallax included.
     openMap: async (mapId: number) =>
@@ -364,5 +406,5 @@ const wantsSpeedHooks = (search: string): boolean =>
   return new URLSearchParams(search).get('speed') === '1';
 };
 
-export { cameraOnPath, HOOKS_GLOBAL, installSpeedHooks, wantsSpeedHooks };
-export type { CameraPath, PaintSettings, SpeedHooksContext };
+export { cameraOnPath, HOOKS_GLOBAL, installSpeedHooks, ringsOverlay, unusedGroundKind, wantsSpeedHooks };
+export type { CameraPath, SpeedHooksContext, StrokeSettings };

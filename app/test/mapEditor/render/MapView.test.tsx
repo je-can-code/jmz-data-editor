@@ -11,6 +11,7 @@ import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts'
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import { PaintState } from '../../../src/mapEditor/core/tools/PaintState.ts';
 import { MapEditorApp } from '../../../src/mapEditor/MapEditorApp.tsx';
 import { MapView, mapIdFromQuery } from '../../../src/mapEditor/render/MapView.tsx';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
@@ -197,7 +198,9 @@ describe('MapView', () =>
     const openWindow = vi.fn<OpenBrowserWindow>(() => null);
     const shell = new WindowShell({ channel: null, origin: 'http://127.0.0.1:3000', openWindow });
     const hub = new DocumentHub({ clientId: 'window-a' });
-    return { view: { kind: 'workspace' }, api: null, shell, hub, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
+    const openDocument = vi.fn(() => Promise.reject(new Error('no documents in this test')));
+    const painting = new PaintState();
+    return { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, painting, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
   };
 
   /**

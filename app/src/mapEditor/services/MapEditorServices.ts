@@ -11,6 +11,7 @@ import { DocumentHub } from '../core/history/DocumentHub.ts';
 import type { DocumentKey } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
+import { PaintState } from '../core/tools/PaintState.ts';
 import { FileChangeFeed, openEventSource, type EventSourceFactory } from '../core/sync/FileChangeFeed.ts';
 import { recheckCleanDocuments, routeFileChange } from '../core/sync/fileChangeRouting.ts';
 import { SharedFileChangeFeed, type LockManagerLike } from '../core/sync/SharedFileChangeFeed.ts';
@@ -73,6 +74,12 @@ type MapEditorServices = {
    * The event kinds and plugin modules.
    */
   readonly modules: PluginModuleRegistry;
+
+  /**
+   * What the painting tools paint with, shared by every map view in the window: the tool, the brush the palette or
+   * the eyedropper handed over, and the layer strip's choice.
+   */
+  readonly painting: PaintState;
 
   /**
    * Reads what command editing needs from the server, once per window however often it is asked: the plugin
@@ -240,6 +247,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     commandEditors,
     pluginHeaders: commandEditing.headers,
     modules: new PluginModuleRegistry(catalog),
+    painting: new PaintState(),
     loadCommandResources: commandEditing.load,
     openDocument: async (key: DocumentKey) =>
     {

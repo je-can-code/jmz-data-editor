@@ -3,6 +3,7 @@ import { Box, Chip, Divider, Typography } from '@mui/material';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { Camera, MapCell } from '../core/renderer/camera.ts';
 import { GAME_LOOK, type OverlayId } from '../core/renderer/MapRenderer.ts';
+import { TILESET_MARKS_DOCUMENT, TilesetLayeringSource } from '../core/tools/tilesetLayering.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import type { DrawState } from './ContextKeeper.ts';
 import {
@@ -15,10 +16,13 @@ import {
 } from './mapViewSettings.ts';
 import { MapViewController } from './MapViewController.ts';
 import { whenMapDrawn } from './openTiming.ts';
+import { OverlayComposer } from './overlayComposer.ts';
 import { pickEvent } from './pickedEvent.ts';
 import { PixiMapRenderer } from './PixiMapRenderer.ts';
 import { projectImagesFor } from './projectImages.ts';
 import { installSpeedHooks, wantsSpeedHooks } from './speedHooks.ts';
+import { PaintController } from './tools/PaintController.ts';
+import { PaintToolBar } from './tools/PaintToolBar.tsx';
 
 /**
  * What a map view shows.
@@ -145,8 +149,9 @@ const DrawNotice = (props: { state: DrawState }) =>
 /**
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
  * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look,
- * with a status line naming the zoom, the tile under the pointer and the GPU drawing it. An event picked out is shown
- * selected, with the view centred on it.
+ * the painting tools, and a status line naming the zoom, the tile under the pointer and the GPU drawing it. The left
+ * button paints with the tool in hand, previewed before each click. An event picked out is shown selected, with the
+ * view centred on it.
  *
  * A view off screen, behind another tab, lets its GPU context go and draws again, camera and all, when it shows; a map
  * that cannot draw says why over the canvas rather than leaving it blank.
@@ -160,6 +165,7 @@ const MapView = (props: MapViewProps) =>
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<PixiMapRenderer | null>(null);
   const controllerRef = useRef<MapViewController | null>(null);
+  const overlaysRef = useRef<OverlayComposer | null>(null);
   const visibleRef = useRef(visible);
   const [ openMap, setOpenMap ] = useState<MapDocument | null>(null);
   const [ status, setStatus ] = useState<MapViewStatus>({ gpu: '', zoom: 1, cell: null, problem: null });
@@ -196,6 +202,23 @@ const MapView = (props: MapViewProps) =>
       setStatus(current => (current.zoom === camera.zoom ? current : { ...current, zoom: camera.zoom }));
     }));
 
+    // the picked event and the painting tools each hand the renderer their part of the overlay.
+    const overlays = new OverlayComposer(renderer);
+    overlaysRef.current = overlays;
+    const layering = new TilesetLayeringSource(services.hub);
+    const painter = new PaintController({
+      surface: renderer,
+      hub: services.hub,
+      map: () => controller.map,
+      layering: map => layering.layeringFor(map),
+      painting: services.painting,
+      overlay: part => overlays.update(part),
+    });
+    stops.push(painter.attach());
+
+    // the "goes on top" marks decide where painted tiles land, so they are held from the start.
+    services.openDocument(TILESET_MARKS_DOCUMENT).catch(() => undefined);
+
     // the first frame that shows the map complete, sprites and parallax included, ends the page's first open: the cold
     // open the speed script times.
     stops.push(whenMapDrawn(renderer, at =>
@@ -224,6 +247,8 @@ const MapView = (props: MapViewProps) =>
       stops.push(installSpeedHooks(view, {
         renderer,
         hub: services.hub,
+        painter,
+        painting: services.painting,
         map: () => controller.map,
         openMap: async (next: number) =>
         {
@@ -238,6 +263,7 @@ const MapView = (props: MapViewProps) =>
       stops.forEach(stop => stop());
       controller.close();
       controllerRef.current = null;
+      overlaysRef.current = null;
       rendererRef.current = null;
       renderer.destroy();
     };
@@ -274,13 +300,14 @@ const MapView = (props: MapViewProps) =>
   useEffect(() =>
   {
     const renderer = rendererRef.current;
-    if (renderer === null || openMap === null)
+    const overlays = overlaysRef.current;
+    if (renderer === null || overlays === null || openMap === null)
     {
       return;
     }
 
     const picked = pickEvent(openMap, pickedEventId);
-    renderer.setOverlayState(picked.overlay);
+    overlays.update({ selectedEvents: picked.overlay.selectedEvents });
     if (picked.cell !== null)
     {
       renderer.lookAt(picked.cell, PICKED_EVENT_ZOOM);
@@ -338,6 +365,7 @@ const MapView = (props: MapViewProps) =>
           />
         ))}
       </Box>
+      <PaintToolBar painting={services.painting}/>
       <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <Box
           data-testid={'map-view'}
