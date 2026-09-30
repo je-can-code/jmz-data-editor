@@ -1003,6 +1003,8 @@ const CommandList = (props: CommandListProps) =>
     const span = code === 102 || code === 111
       ? editor.blockSpanAt(index)
       : null;
+    // a block editor may reshape the whole run (a merged Show Choices can gain or lose a command), so the row
+    // opened from anywhere in it stays open on the run's first command, which every shape still starts with.
     const block = span === null
       ? undefined
       : {
@@ -1010,7 +1012,7 @@ const CommandList = (props: CommandListProps) =>
         onChange: (commands: readonly RmmzEventCommand[]) => run(() =>
         {
           editor.editBlock(span, commands);
-          keepOpenAt(index);
+          keepOpenAt(span.start);
         }),
       };
     const branch = row.node !== null && row.node.kind === 'block' && code === 111

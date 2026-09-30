@@ -288,6 +288,35 @@ describe('CommandList', () =>
       .toStrictEqual([ 'block of 5', [ cmd(111, 0, [ 0, 2, 0 ]), cmd(0, 1), cmd(412, 0) ], [ 'Edit Conditional Branch' ] ]);
   });
 
+  it('keeps a merged Show Choices open on its first command when its editor reshapes the whole run', async () =>
+  {
+    // Arrange: two Show Choices back to back, opened from the second, whose editor folds them into one.
+    const registry = new CommandEditorRegistry();
+    const Stub = (props: CommandEditorProps) => (
+      <button type={'button'} onClick={() => props.block?.onChange([ cmd(102, 0, [ [ 'A', 'B' ], -1, 0, 2, 0 ]), cmd(402, 0, [ 0, 'A' ]), cmd(0, 1), cmd(402, 0, [ 1, 'B' ]), cmd(0, 1), cmd(404, 0) ])}>
+        {`choices of ${props.block?.commands.length ?? 0}`}
+      </button>
+    );
+    registry.registerForCode(102, Stub);
+    const { hub } = await renderList({ registry });
+    act(() =>
+    {
+      hub.edit('Two lists', [ eventHistoryKey(1, 1) ], tx => tx.splice('map:1', PATH, 0, 0, [
+        cmd(102, 0, [ [ 'A' ], -1, 0, 2, 0 ]), cmd(402, 0, [ 0, 'A' ]), cmd(0, 1), cmd(404, 0),
+        cmd(102, 0, [ [ 'B' ], -1, -1, 2, 0 ]), cmd(402, 0, [ 0, 'B' ]), cmd(0, 1), cmd(404, 0),
+      ] as never));
+    });
+
+    // Act.
+    fireEvent.click(screen.getByText('Choices: B (cannot cancel)'));
+    const shown = screen.getByRole('button', { name: 'choices of 8' }).textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'choices of 8' }));
+
+    // Assert: the run is one list now, and its editor is still open, on the run's first command.
+    expect([ shown, commandsOf(hub).slice(0, 6).map(command => command.code), screen.queryByRole('button', { name: 'choices of 6' }) !== null ])
+      .toStrictEqual([ 'choices of 8', [ 102, 402, 0, 402, 0, 404 ], true ]);
+  });
+
   it('plays a command\'s sound through the window\'s player', async () =>
   {
     // Arrange.
