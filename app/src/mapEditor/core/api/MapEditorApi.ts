@@ -145,7 +145,8 @@ interface MapEditorApi
   loadCommonEvents(): Promise<(RmmzCommonEvent | null)[]>;
 
   /**
-   * Writes the common events through the database route the data editor uses.
+   * Writes the common events the way every map editor save is written: in MZ's own layout, and announced on the
+   * change stream as this window's, so its own save never comes back as an outside change.
    * @param {readonly (RmmzCommonEvent | null)[]} commonEvents The complete array.
    * @returns {Promise<void>} Settles once written.
    */
@@ -370,7 +371,7 @@ class HttpMapEditorApi implements MapEditorApi
 
   async saveCommonEvents(commonEvents: readonly (RmmzCommonEvent | null)[]): Promise<void>
   {
-    return this.#send('POST', '/api/common-events', commonEvents);
+    return this.#put('/api/common-events', commonEvents);
   }
 
   async loadCommandUsage(): Promise<CommandUsageCounts>
@@ -425,35 +426,23 @@ class HttpMapEditorApi implements MapEditorApi
   }
 
   /**
-   * Writes a whole document with a PUT, carrying this window's id.
+   * Writes a whole document with a PUT, carrying this window's id, which the change stream hands back on the
+   * change the write causes.
    * @param {string} route The route, from {@code /api} on.
    * @param {unknown} body The complete document.
    * @returns {Promise<void>} Settles once the server confirms the write.
    */
   async #put(route: string, body: unknown): Promise<void>
   {
-    return this.#send('PUT', route, body);
-  }
-
-  /**
-   * Writes a whole document, carrying this window's id: a PUT for the map editor's own routes, a POST for the
-   * database routes the data editor shares.
-   * @param {'PUT' | 'POST'} method The method the route takes.
-   * @param {string} route The route, from {@code /api} on.
-   * @param {unknown} body The complete document.
-   * @returns {Promise<void>} Settles once the server confirms the write.
-   */
-  async #send(method: 'PUT' | 'POST', route: string, body: unknown): Promise<void>
-  {
     const response = await this.#fetch(`${this.#base}${route}`, {
-      method,
+      method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         [CLIENT_HEADER]: this.clientId,
       },
       body: JSON.stringify(body),
     });
-    await this.#requireOk(response, `${method} ${route}`);
+    await this.#requireOk(response, `PUT ${route}`);
   }
 
   /**

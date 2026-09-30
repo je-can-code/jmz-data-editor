@@ -15,7 +15,7 @@ import (
 // table.
 
 // TestCommandUsageCountsTheProjectsEvents covers the usage answer over the fixture project, whose one map
-// has one event showing a line of text.
+// has one event showing a line of text, beside two common events: one showing a line, one empty.
 func TestCommandUsageCountsTheProjectsEvents(t *testing.T) {
 	// Arrange.
 	current := newProject(t)
@@ -26,7 +26,7 @@ func TestCommandUsageCountsTheProjectsEvents(t *testing.T) {
 	// Assert.
 	assertStatus(t, response, http.StatusOK)
 	answer := readEnvelope(t, response)
-	if string(answer.Data) != `{"events":1,"codes":{"0":1,"101":1,"401":1},"pluginCommands":[]}` || answer.Path != current.root {
+	if string(answer.Data) != `{"events":3,"codes":{"0":3,"101":2,"401":2},"pluginCommands":[]}` || answer.Path != current.root {
 		t.Errorf("answered %s for %s", answer.Data, answer.Path)
 	}
 }
@@ -47,8 +47,8 @@ func TestCommandUsageFailsOnABrokenMapNamingIt(t *testing.T) {
 	}
 }
 
-// TestDatabaseNamesAnswersTheNamesById covers the names answer: the map tree's names, and the system's
-// switches, with empty lists for the tables the fixture project lacks.
+// TestDatabaseNamesAnswersTheNamesById covers the names answer: the map tree's, tilesets' and common
+// events' names, and the system's switches, with empty lists for the tables the fixture project lacks.
 func TestDatabaseNamesAnswersTheNamesById(t *testing.T) {
 	// Arrange.
 	current := newProject(t)
@@ -67,7 +67,7 @@ func TestDatabaseNamesAnswersTheNamesById(t *testing.T) {
 		Switches: []string{"", "Door Open"}, Variables: []string{""}, EquipTypes: []string{""},
 		Actors: []string{}, Classes: []string{}, Skills: []string{}, Items: []string{}, Weapons: []string{},
 		Armors: []string{}, Enemies: []string{}, Troops: []string{}, States: []string{}, Animations: []string{},
-		Tilesets: []string{"", "Outside"}, CommonEvents: []string{}, Maps: []string{"", `<Town> & "Square"`, "Cellar"},
+		Tilesets: []string{"", "Outside"}, CommonEvents: []string{"", "Greet", ""}, Maps: []string{"", `<Town> & "Square"`, "Cellar"},
 	}
 	if reflect.DeepEqual(names, expected) == false {
 		t.Errorf("answered %+v", names)

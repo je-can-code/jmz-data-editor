@@ -208,9 +208,9 @@ const CommonEventsWorkspace = () =>
 
 /**
  * The common events: every one in a list, and the chosen one's commands in the same command list the event window
- * uses, with its name, trigger and switch above. It reads and writes {@code data/CommonEvents.json} through the
- * routes the data editor uses, and each common event keeps its own undo history. A workspace panel can mount it
- * anywhere; it fills whatever space it is given.
+ * uses, with its name, trigger and switch above. It reads {@code data/CommonEvents.json} through the route the data
+ * editor uses and saves it the way maps are saved, in MZ's own layout, and each common event keeps its own undo
+ * history. A workspace panel can mount it anywhere; it fills whatever space it is given.
  * @returns {React.JSX.Element} The view.
  */
 const CommonEventsView = () =>

@@ -26,6 +26,12 @@ const mapInfosFixture = "[\n" +
 	`{"id":2,"expanded":true,"name":"Cellar","order":1,"parentId":1,"scrollX":1101,"scrollY":754}` + "\n" +
 	"]"
 
+const commonEventsFixture = "[\n" +
+	"null,\n" +
+	`{"id":1,"list":[{"code":101,"indent":0,"parameters":["Actor1",0,0,2,""]},{"code":401,"indent":0,"parameters":["<Chef> & \"friends\""]},{"code":0,"indent":0,"parameters":[]}],"name":"Greet","switchId":1,"trigger":0},` + "\n" +
+	`{"id":2,"list":[{"code":0,"indent":0,"parameters":[]}],"name":"","switchId":1,"trigger":0}` + "\n" +
+	"]"
+
 const tilesetsFixture = "[\n" +
 	"null,\n" +
 	`{"id":1,"flags":[16,1551,1536,1536],"mode":1,"name":"Outside","note":"<note>","tilesetNames":["Outside_A1","Outside_A2","","","","Outside_B","","",""]}` + "\n" +
@@ -97,6 +103,7 @@ func writeProject(t *testing.T) *project {
 	files := map[string]string{
 		"data/MapInfos.json":                    mapInfosFixture,
 		"data/Tilesets.json":                    tilesetsFixture,
+		"data/CommonEvents.json":                commonEventsFixture,
 		"data/Map001.json":                      mapFixture,
 		"data/System.json":                      secret,
 		"secret.txt":                            secret,

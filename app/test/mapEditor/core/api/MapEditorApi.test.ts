@@ -186,10 +186,10 @@ describe('HttpMapEditorApi', () =>
         ]);
     });
 
-    it('posts the common events to the database route the data editor shares, with this window\'s id', async () =>
+    it('puts the common events with this window\'s id, as its other saves, so the change comes back as its own', async () =>
     {
       // Arrange.
-      const { api, requests } = buildApi(() => envelope(null));
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
       const rows = [ null, { id: 1, list: [ { code: 0, indent: 0, parameters: [] } ], name: 'Heal', switchId: 1, trigger: 0 } ];
 
       // Act.
@@ -198,10 +198,10 @@ describe('HttpMapEditorApi', () =>
       // Assert.
       const [ request ] = requests;
       expect([ request.method, request.url, request.headers['x-jmz-client'], request.headers['content-type'], JSON.parse(request.body as string) ])
-        .toStrictEqual([ 'POST', `${BASE}/api/common-events`, 'window-7', 'application/json', rows ]);
+        .toStrictEqual([ 'PUT', `${BASE}/api/common-events`, 'window-7', 'application/json', rows ]);
     });
 
-    it('raises a refused common events save as a POST', async () =>
+    it('raises a refused common events save, naming the route', async () =>
     {
       // Arrange.
       const { api } = buildApi(() => new Response('json: unknown field "extra"', { status: 400 }));
@@ -211,7 +211,7 @@ describe('HttpMapEditorApi', () =>
 
       // Assert.
       await expect(save)
-        .rejects.toThrow('POST /api/common-events answered 400: json: unknown field "extra"');
+        .rejects.toThrow('PUT /api/common-events answered 400: json: unknown field "extra"');
     });
 
     it('raises the server\'s refusal, naming the field it refused', async () =>
