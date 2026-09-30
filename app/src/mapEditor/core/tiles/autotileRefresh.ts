@@ -12,7 +12,7 @@ type CellPosition = readonly [ x: number, y: number ];
  * @param {TileReader} reader The map.
  * @param {number} x The column.
  * @param {number} y The row.
- * @returns {boolean} True when some layer holds a wall face or a roof.
+ * @returns {boolean} True when some layer holds a wall face.
  */
 const holdsRunKind = (reader: TileReader, x: number, y: number): boolean =>
 {
@@ -30,9 +30,9 @@ const holdsRunKind = (reader: TileReader, x: number, y: number): boolean =>
 
 /**
  * Lists every cell whose autotiles a change to the given cells could reshape. That is each changed cell and its
- * eight neighbours, since every shape reads its neighbours; and every row of the wall and roof runs reaching up and
- * down from a changed cell, with the cells either side of each, since those shapes read where their column's run
- * starts and ends and where the run beside them does (see {@link isRunKind}).
+ * eight neighbours, since every shape reads its neighbours; and every row of the walls reaching up and down from a
+ * changed cell, with the cells either side of each, since a wall face's sides read where its column's wall starts
+ * and ends and where the wall beside it does (see {@link isRunKind}).
  *
  * Walking the map as it stands after the change is enough. A run whose ends moved is one the change lengthened,
  * shortened, split or joined, so it still reaches the changed cell, or the cell just above or below it, through

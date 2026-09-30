@@ -18,10 +18,11 @@ import { readShippedMaps, readShippedTilesets, type ShippedMap } from './support
  * shapes, resizing leaves old edges at the new border, and mapgen drafted the Nimbus maps with its own wall table.
  * Those cells are listed in autotileOracleExceptions.json by reason. Each reason but one has a test that can refuse a
  * cell (mapgen's own table, only off-map edges differing, a stored shape of exactly 0, an edge out of step from both
- * sides), so a cell cannot be excused by a reason its data contradicts; the last, "unverified", explains nothing and
- * is listed and counted so the gap stays visible. A shape past the end of its table fails outright, as does any
- * mismatch missing from the list and any listed cell that no longer differs, which keeps the list honest as the maps
- * change; rewrite it with support/writeOracleExceptions.ts and read the diff.
+ * sides other than a seam between roofs of different depths, which the maps store both ways), so a cell cannot be
+ * excused by a reason its data contradicts; the last, "unverified", explains nothing and is listed and counted so the
+ * gap stays visible. A shape past the end of its table fails outright, as does any mismatch missing from the list and
+ * any listed cell that no longer differs, which keeps the list honest as the maps change; rewrite it with
+ * support/writeOracleExceptions.ts and read the diff.
  *
  * The game is not part of this repository: set JMZ_PROJECT_ROOT to it. When that is unset and the game does not sit
  * beside the repository, the oracle skips; when it is set and wrong, it fails.
@@ -174,6 +175,32 @@ describe('judgeMap', () =>
     // Assert.
     expect(verdicts.map(verdict => verdict.misfiled))
       .toEqual([ [], [ '(1,0) layer 1: kind 16 stored 28, expected 38 does not fit disturbed-edge' ] ]);
+  });
+
+  it('refuses a disturbed edge between two columns of one roof of different depths, but not of the same depth', () =>
+  {
+    // Arrange: a 2x2 map with a roof down both columns, the right one a row deep in one map and two rows deep in the
+    // other; on the top row the two roofs are stored open toward each other, and every other tile as its neighbours
+    // call for (the map's top and sides draw a roof's edge, its bottom joins).
+    const roof = (shape: number): number => makeAutotileId(48, shape);
+    const shallow = { id: 1, width: 2, height: 2, tilesetId: 1, cells: new Uint16Array(2 * 2 * 6) };
+    shallow.cells.set([ roof(7), roof(15), roof(5) ], 0);
+    const deep = { id: 1, width: 2, height: 2, tilesetId: 1, cells: new Uint16Array(2 * 2 * 6) };
+    deep.cells.set([ roof(7), roof(7), roof(1), roof(4) ], 0);
+
+    // Act.
+    const verdicts = [ judgeMap(shallow, TilesetMode.area, { 'disturbed-edge': [ 0, 1 ] }), judgeMap(deep, TilesetMode.area, { 'disturbed-edge': [ 0, 1 ] }) ];
+
+    // Assert: the seam between roofs of different depths is refused on both sides; the same seam between roofs of the
+    // same depth fits.
+    expect(verdicts.map(verdict => verdict.misfiled))
+      .toEqual([
+        [
+          '(0,0) layer 1: kind 48 stored 7, expected 3 does not fit disturbed-edge',
+          '(1,0) layer 1: kind 48 stored 15, expected 14 does not fit disturbed-edge',
+        ],
+        [],
+      ]);
   });
 
   it('fails a shape past the end of its table outright, whatever reason it is filed under', () =>

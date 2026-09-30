@@ -320,6 +320,11 @@ const waterfallNeighbourJoins = (reader: TileReader, x: number, y: number): bool
  * Reports whether a neighbouring cell joins a roof. Roofs join only their own kind, on any layer (8,663 joined to
  * 349); a building wall beside or below a roof draws the roof's edge (1,022 open to 64). Beyond the edge of the map,
  * a roof joins downwards (43 to 6) but shows its edge at the top (45 to 15) and the sides (75 to 6).
+ *
+ * Unlike a wall face, a roof reads nothing past its neighbours: it joins the same roof beside it whatever rows each
+ * column spans. Where two columns' runs start or end on different rows, the maps are split, 276 joined to 270 open,
+ * and split map by map rather than by any rule found: Map020 joins 143 of 158 while Map335, on the same tileset,
+ * opens all 28. So the open ones are listed as the oracle's exceptions rather than encoded here.
  * @param {TileReader} reader The map.
  * @param {number} x The neighbour's column.
  * @param {number} y The neighbour's row.
@@ -509,44 +514,23 @@ const roofShape = (reader: TileReader, x: number, y: number, kind: number): numb
 
   return sides.reduce((shape, [ dx, dy, edge, beyondEdge ]) =>
   {
-    const joins = roofNeighbourJoins(reader, x + dx, y + dy, kind, beyondEdge)
-      && (dx === 0 || roofRunsMatch(reader, x, y, dx, kind));
-    return joins
+    return roofNeighbourJoins(reader, x + dx, y + dy, kind, beyondEdge)
       ? shape
       : shape | edge;
   }, 0);
 };
 
 /**
- * Reports whether a roof and the same roof beside it span the same rows. Two columns of one roof kind join sideways
- * only when their runs of it start and end on the same rows, so roofs of different depths, side by side, keep a seam
- * between them (1,439 joined to 78 open where the runs match; 270 open to 89 joined where either end differs, counting
- * only roofs not stored in shape 0).
- * @param {TileReader} reader The map.
- * @param {number} x The roof's column.
- * @param {number} y The roof's row.
- * @param {number} dx -1 for the left neighbour, 1 for the right.
- * @param {number} kind The roof's kind.
- * @returns {boolean} True when both columns' runs span the same rows.
- */
-const roofRunsMatch = (reader: TileReader, x: number, y: number, dx: number, kind: number): boolean =>
-{
-  return wallRunTop(reader, x, y, kind) === wallRunTop(reader, x + dx, y, kind)
-    && wallRunBottom(reader, x, y, kind) === wallRunBottom(reader, x + dx, y, kind);
-};
-
-/**
- * Reports whether some shape rule reads a whole vertical run of a kind, not only the cells beside a tile: a wall
- * face's sides compare where its column's wall starts and ends with the wall beside it (see
- * {@link wallSideNeighbourJoins}), and a roof joins the roof beside it only when both span the same rows (see
- * {@link roofRunsMatch}). So a change to one cell of such a run can reshape every row of that run, and the rows
+ * Reports whether some shape rule reads a whole vertical run of a kind, not only the cells beside a tile. Only wall
+ * faces do: a wall face's sides compare where its column's wall starts and ends with the wall beside it (see
+ * {@link wallSideNeighbourJoins}). So a change to one cell of a wall can reshape every row of that wall, and the rows
  * beside it, however far they reach from the change; reshaping after a stroke follows these runs for that reason.
  * @param {number} kind The autotile kind.
- * @returns {boolean} True for wall faces and roofs.
+ * @returns {boolean} True for wall faces.
  */
 const isRunKind = (kind: number): boolean =>
 {
-  return isWallSideKind(kind) || isRoofKind(kind);
+  return isWallSideKind(kind);
 };
 
 /**

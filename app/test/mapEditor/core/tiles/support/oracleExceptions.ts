@@ -1,12 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { autotileTableSize, floorJoins, NEIGHBOUR_OFFSETS } from '../../../../../src/mapEditor/core/tiles/autotileShapes.ts';
+import { autotileTableSize, floorJoins, holdsKind, NEIGHBOUR_OFFSETS } from '../../../../../src/mapEditor/core/tiles/autotileShapes.ts';
 import { auditShapes, type ShapeMismatch } from '../../../../../src/mapEditor/core/tiles/shapeAudit.ts';
+import { gridReader, type TileReader } from '../../../../../src/mapEditor/core/tiles/tileGrid.ts';
 import {
   autotileKind,
   isA4Kind,
   isAutotile,
   isFloorTypeKind,
+  isRoofKind,
   isWaterfallKind,
 } from '../../../../../src/mapEditor/core/tiles/tileIds.ts';
 import type { ShippedMap } from './shippedGame.ts';
@@ -47,14 +49,17 @@ const EXCEPTION_REASONS: readonly { readonly reason: ExceptionReason; readonly e
     explanation: 'Every edge that differs is out of step from both sides: the tile across it also holds a shape that '
       + 'disagrees with the rules about that same edge. One of the two was changed without autotiling (Shift held, or '
       + 'the eyedropper) and neither was reshaped. Checked: the neighbour across every differing edge is itself a '
-      + 'mismatch whose join toward this tile differs too.',
+      + 'mismatch whose join toward this tile differs too, and no differing edge is a roof\'s side toward the same roof '
+      + 'spanning other rows, since the maps keep a seam there on some maps and join it on others, so a seam there says '
+      + 'nothing about how either tile was drawn.',
   },
   {
     reason: 'unverified',
     explanation: 'Not explained. The stored shape disagrees with the rules and no check above accounts for it. Most look '
       + 'like eyedropper stamps (a run of identical shapes copied from somewhere else) or tiles beside a plain tile '
-      + 'drawn with autotiling suspended, neither of which leaves anything to check against. Listed so a new mismatch '
-      + 'still fails, and counted so the gap stays visible.',
+      + 'drawn with autotiling suspended, neither of which leaves anything to check against. One known group is the '
+      + 'seams between two columns of one roof that span different rows, which some maps keep and others join with no '
+      + 'rule found to tell them apart. Listed so a new mismatch still fails, and counted so the gap stays visible.',
   },
 ];
 
@@ -226,6 +231,56 @@ const isDisturbedAcross = (map: ShippedMap, cell: ShapeMismatch, dx: number, dy:
 };
 
 /**
+ * Finds the rows a column's run of one kind spans through a cell, walking up and down while the cells hold the kind
+ * on any layer.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row inside the run.
+ * @param {number} kind The kind.
+ * @returns {readonly [ number, number ]} The run's top and bottom rows.
+ */
+const runRows = (reader: TileReader, x: number, y: number, kind: number): readonly [ number, number ] =>
+{
+  let top = y;
+  while (top > 0 && holdsKind(reader, x, top - 1, kind))
+  {
+    top -= 1;
+  }
+
+  let bottom = y;
+  while (bottom + 1 < reader.height && holdsKind(reader, x, bottom + 1, kind))
+  {
+    bottom += 1;
+  }
+
+  return [ top, bottom ];
+};
+
+/**
+ * Reports whether an edge of a mismatch is a roof's side toward the same roof in a column whose run of it starts or
+ * ends on another row. The maps store such seams both ways, map by map (see roofNeighbourJoins in autotileShapes.ts),
+ * so one out of step from both sides says nothing about how either tile was drawn.
+ * @param {ShippedMap} map The map.
+ * @param {ShapeMismatch} cell The mismatch.
+ * @param {number} dx The edge's direction across, -1 to 1.
+ * @param {number} dy The edge's direction down, -1 to 1.
+ * @returns {boolean} True for a side edge between two columns of one roof of different depths.
+ */
+const isRoofDepthSeam = (map: ShippedMap, cell: ShapeMismatch, dx: number, dy: number): boolean =>
+{
+  const reader = gridReader(map);
+  const x = cell.x + dx;
+  if (isRoofKind(cell.kind) === false || dy !== 0 || holdsKind(reader, x, cell.y, cell.kind) === false)
+  {
+    return false;
+  }
+
+  const [ top, bottom ] = runRows(reader, cell.x, cell.y, cell.kind);
+  const [ besideTop, besideBottom ] = runRows(reader, x, cell.y, cell.kind);
+  return top !== besideTop || bottom !== besideBottom;
+};
+
+/**
  * The test each reason applies to a cell filed under it.
  */
 const REASON_TESTS: Readonly<Record<ExceptionReason, (map: ShippedMap, cell: ShapeMismatch, mismatches: MapMismatches) => boolean>> = {
@@ -250,12 +305,15 @@ const REASON_TESTS: Readonly<Record<ExceptionReason, (map: ShippedMap, cell: Sha
   },
   'disturbed-edge': (map, cell, mismatches) =>
   {
-    // every differing edge inside the map must be out of step from the other side too.
+    // every differing edge inside the map must be out of step from the other side too, and not a roof depth seam.
     const inside = differingNeighbours(cell).filter(([ dx, dy ]) =>
     {
       return cell.x + dx >= 0 && cell.y + dy >= 0 && cell.x + dx < map.width && cell.y + dy < map.height;
     });
-    return isReadable(cell) && inside.length > 0 && inside.every(([ dx, dy ]) => isDisturbedAcross(map, cell, dx, dy, mismatches));
+    return isReadable(cell) && inside.length > 0 && inside.every(([ dx, dy ]) =>
+    {
+      return isDisturbedAcross(map, cell, dx, dy, mismatches) && isRoofDepthSeam(map, cell, dx, dy) === false;
+    });
   },
   'unverified': (_map, cell) =>
   {

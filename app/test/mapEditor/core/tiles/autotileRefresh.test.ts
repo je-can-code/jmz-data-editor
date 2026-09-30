@@ -15,8 +15,8 @@ import { blankGrid, fill, kindTile, put } from './support/tileGridBuilder.ts';
  * When tiles change, every autotile that reads them must be reshaped, and nothing else. Too little leaves a seam
  * where a coastline or wall edge no longer matches what is beside it; too much quietly redraws tiles somebody drew
  * with Shift held on purpose, far from where they painted. So the area reshaped is each changed cell and its eight
- * neighbours, plus every row of the wall and roof runs reaching up and down from a changed cell and the cells either
- * side of them, since those shapes read where their column's run starts and ends, and where the run beside it does.
+ * neighbours, plus every row of the walls reaching up and down from a changed cell and the cells either side of them,
+ * since a wall face's sides read where its column's wall starts and ends, and where the wall beside it does.
  *
  * The strokes over the shipped maps hold the editor to that on real walls and roofs: every stroke that lengthens,
  * shortens, extends by a row or swaps one must leave no cell the autotile oracle would call stale, and must redraw no
@@ -85,21 +85,24 @@ describe('cellsToReshape', () =>
       .toEqual([ [ 0, 3 ], [ 1, 3 ], [ 2, 3 ], [ 0, 2 ], [ 1, 2 ], [ 2, 2 ] ]);
   });
 
-  it('follows a roof run up and down as it does a wall, but not a column of ceiling', () =>
+  it('follows a wall up and down, but not a roof or a ceiling, whose shapes read only the cells beside them', () =>
   {
-    // Arrange: a 5x7 map with a roof down column 1 and a ceiling down column 3, each from top to bottom.
-    const grid = blankGrid(5, 7);
-    fill(grid, 1, 0, 1, 6, 0, kindTile(ROOF));
-    fill(grid, 3, 0, 3, 6, 0, kindTile(CEILING));
+    // Arrange: a 7x7 map with a wall face down column 1, a roof down column 3 and a ceiling down column 5, each from
+    // top to bottom.
+    const grid = blankGrid(7, 7);
+    fill(grid, 1, 0, 1, 6, 0, kindTile(WALL));
+    fill(grid, 3, 0, 3, 6, 0, kindTile(ROOF));
+    fill(grid, 5, 0, 5, 6, 0, kindTile(CEILING));
     const reader = gridReader(grid);
 
     // Act: a change in the middle of each column.
-    const roof = cellsToReshape(reader, [ [ 1, 3 ] ]);
-    const ceiling = cellsToReshape(reader, [ [ 3, 3 ] ]);
+    const wall = cellsToReshape(reader, [ [ 1, 3 ] ]);
+    const roof = cellsToReshape(reader, [ [ 3, 3 ] ]);
+    const ceiling = cellsToReshape(reader, [ [ 5, 3 ] ]);
 
-    // Assert: the roof's whole column; only the neighbourhood of the ceiling, whose runs no shape reads.
-    expect([ rowsIn(roof, 1), rowsIn(ceiling, 3) ])
-      .toEqual([ [ 0, 1, 2, 3, 4, 5, 6 ], [ 2, 3, 4 ] ]);
+    // Assert: the wall's whole column; only the neighbourhood of the roof and of the ceiling.
+    expect([ rowsIn(wall, 1), rowsIn(roof, 3), rowsIn(ceiling, 5) ])
+      .toEqual([ [ 0, 1, 2, 3, 4, 5, 6 ], [ 2, 3, 4 ], [ 2, 3, 4 ] ]);
   });
 });
 
@@ -168,7 +171,7 @@ describe('reshapeAround', () =>
       .toEqual([ WallEdge.right, 0 ]);
   });
 
-  it('reshapes the roof beside a roof column that grows a row, all the way up', () =>
+  it('keeps a roof joined to the roof beside it when that one grows a row deeper', () =>
   {
     // Arrange: roofs down both columns of a 2x6 map from row 0 to row 3; column 1 grows into row 4.
     const grid = fill(blankGrid(2, 6), 0, 0, 1, 3, 0, kindTile(ROOF));
@@ -178,9 +181,10 @@ describe('reshapeAround', () =>
     // Act.
     reshapeAround(draft, [ [ 1, 4 ] ], TilesetMode.area);
 
-    // Assert: column 0's row 0, four rows above the change, now keeps a seam toward the deeper roof.
-    expect(autotileShape(draft.tileAt(0, 0, 0)) & WallEdge.right)
-      .toBe(WallEdge.right);
+    // Assert: column 0's row 0 still joins the deeper roof, while column 1's old bottom row now joins downward and
+    // keeps only its edge at the map's side.
+    expect([ autotileShape(draft.tileAt(0, 0, 0)) & WallEdge.right, autotileShape(draft.tileAt(1, 3, 0)) ])
+      .toEqual([ 0, WallEdge.right ]);
   });
 });
 

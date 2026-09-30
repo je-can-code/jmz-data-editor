@@ -32,6 +32,7 @@ const POND = 6;
 const GRASS = 16;
 const DIRT = 17;
 const ROOF = 48;
+const OTHER_ROOF = 49;
 const BUILDING_WALL = 56;
 const CEILING = 80;
 const OTHER_CEILING = 81;
@@ -329,11 +330,13 @@ describe('roofs', () =>
       .toBe(WallEdge.top | WallEdge.bottom);
   });
 
-  it('join the same roof beside them only when both columns span the same rows', () =>
+  it('join the same roof beside them whatever rows each column spans, but not another roof', () =>
   {
-    // Arrange: a 3x4 map; roof columns 0 and 1 span rows 1 to 2, column 2 spans rows 1 to 1; building wall below.
+    // Arrange: a 3x4 map; column 0 holds another roof kind on rows 1 and 2, column 1 this roof on rows 1 and 2, and
+    // column 2 this roof on row 1 only; building wall below each.
     const grid = blankGrid(3, 4);
-    fill(grid, 0, 1, 1, 2, 0, kindTile(ROOF));
+    fill(grid, 0, 1, 0, 2, 0, kindTile(OTHER_ROOF));
+    fill(grid, 1, 1, 1, 2, 0, kindTile(ROOF));
     put(grid, 2, 1, 0, kindTile(ROOF));
     fill(grid, 0, 3, 1, 3, 0, kindTile(BUILDING_WALL));
     put(grid, 2, 2, 0, kindTile(BUILDING_WALL));
@@ -341,9 +344,9 @@ describe('roofs', () =>
     // Act.
     const middle = shapeOf(grid, 1, 1, ROOF);
 
-    // Assert: joined to the matching column on the left, a seam toward the shallower one on the right.
+    // Assert: an edge toward the other roof on the left; joined to the shallower column of the same roof on the right.
     expect([ middle & WallEdge.left, middle & WallEdge.right ])
-      .toEqual([ 0, WallEdge.right ]);
+      .toEqual([ WallEdge.left, 0 ]);
   });
 
   it('show their edge at the top and sides of the map, but join past the bottom', () =>
