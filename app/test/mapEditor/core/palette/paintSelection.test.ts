@@ -20,9 +20,9 @@ import {
  * nothing. The layer is the layering service's own choice ('auto', or tile layers 0 to 3), and Shift with the wheel
  * steps along the strip one notch at a time, stopping at its ends.
  */
-const brushOf = (ids: number[], width = ids.length, height = 1, tilesetId = 12): PaletteBrush =>
+const brushOf = (cells: number[], width = cells.length, height = 1, tilesetId = 12): PaletteBrush =>
 {
-  return { kind: 'tiles', tilesetId, width, height, ids };
+  return { kind: 'tiles', tilesetId, width, height, cells };
 };
 
 describe('EMPTY_BRUSH', () =>
@@ -32,17 +32,17 @@ describe('EMPTY_BRUSH', () =>
     // Arrange: nothing to set up; this is what the palette hands out before a choice.
 
     // Act.
-    const { width, height, ids } = EMPTY_BRUSH;
+    const { width, height, cells } = EMPTY_BRUSH;
 
     // Assert.
-    expect([ width, height, ids ])
+    expect([ width, height, cells ])
       .toStrictEqual([ 0, 0, [] ]);
   });
 });
 
 describe('shadowBrush', () =>
 {
-  it('is one cell shadowing all four quarters, on the tileset on show', () =>
+  it('is one cell holding no value, on the tileset on show, since the pen marks whichever quarter it is over', () =>
   {
     // Arrange.
 
@@ -51,7 +51,7 @@ describe('shadowBrush', () =>
 
     // Assert.
     expect(brush)
-      .toStrictEqual({ kind: 'shadows', tilesetId: 12, width: 1, height: 1, ids: [ 15 ] });
+      .toStrictEqual({ kind: 'shadows', tilesetId: 12, width: 1, height: 1, cells: [] });
   });
 });
 

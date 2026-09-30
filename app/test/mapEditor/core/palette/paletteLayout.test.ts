@@ -4,11 +4,11 @@ import {
   describeTile,
   displayShapeOf,
   displayTileOf,
-  idsInRect,
   isTabAvailable,
   layoutPaletteTab,
   locateTile,
   rectBetween,
+  rectCells,
   sheetOfRow,
 } from '../../../../src/mapEditor/core/palette/paletteLayout.ts';
 import { autotileKind, isWallSideKind, isWallTopKind, makeAutotileId, TileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
@@ -339,7 +339,7 @@ describe('rectBetween', () =>
   });
 });
 
-describe('idsInRect', () =>
+describe('rectCells', () =>
 {
   it('reads a rectangle\'s ids row by row, and none of the cells around it', () =>
   {
@@ -347,11 +347,11 @@ describe('idsInRect', () =>
     const layout = layoutPaletteTab('A', ALL_SHEETS);
 
     // Act.
-    const brush = idsInRect(layout, { column: 1, row: 0, columns: 2, rows: 2 });
+    const brush = rectCells(layout, { column: 1, row: 0, columns: 2, rows: 2 });
 
     // Assert: kinds 1 and 2, then 9 and 10 beneath them; kinds 0, 3, 8 and 11 stay out.
     expect(brush)
-      .toStrictEqual({ width: 2, height: 2, ids: [ 1, 2, 9, 10 ].map(kind => makeAutotileId(kind, 0)) });
+      .toStrictEqual({ width: 2, height: 2, cells: [ 1, 2, 9, 10 ].map(kind => makeAutotileId(kind, 0)) });
   });
 
   it('leaves out the part of a rectangle hanging past the edge', () =>
@@ -360,11 +360,11 @@ describe('idsInRect', () =>
     const layout = layoutPaletteTab('B', ALL_SHEETS);
 
     // Act.
-    const brush = idsInRect(layout, { column: 6, row: 31, columns: 4, rows: 3 });
+    const brush = rectCells(layout, { column: 6, row: 31, columns: 4, rows: 3 });
 
     // Assert.
     expect(brush)
-      .toStrictEqual({ width: 2, height: 1, ids: [ 254, 255 ] });
+      .toStrictEqual({ width: 2, height: 1, cells: [ 254, 255 ] });
   });
 
   it('reads nothing from a rectangle with no cells', () =>
@@ -373,11 +373,11 @@ describe('idsInRect', () =>
     const layout = layoutPaletteTab('B', ALL_SHEETS);
 
     // Act.
-    const brush = idsInRect(layout, { column: 3, row: 3, columns: 0, rows: 0 });
+    const brush = rectCells(layout, { column: 3, row: 3, columns: 0, rows: 0 });
 
     // Assert.
     expect(brush)
-      .toStrictEqual({ width: 0, height: 0, ids: [] });
+      .toStrictEqual({ width: 0, height: 0, cells: [] });
   });
 });
 

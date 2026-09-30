@@ -311,33 +311,34 @@ const rectBetween = (
 };
 
 /**
- * Lists the ids a rectangle of the palette carries, row by row, which is what a brush made from it paints.
+ * Reads the ids a rectangle of the palette carries, row by row, which is what a brush made from it paints: its size
+ * and values in the shape a brush holds them.
  * @param {PaletteLayout} layout The layout.
  * @param {PaletteRect} rect The rectangle; any part outside the layout is left out.
- * @returns {{ width: number, height: number, ids: number[] }} The rectangle's size in cells and its ids.
+ * @returns {{ width: number, height: number, cells: number[] }} The rectangle's size in cells and its ids.
  */
-const idsInRect = (layout: PaletteLayout, rect: PaletteRect): { width: number; height: number; ids: number[] } =>
+const rectCells = (layout: PaletteLayout, rect: PaletteRect): { width: number; height: number; cells: number[] } =>
 {
   // a rectangle with no cells carries nothing, wherever it sits.
   if (rect.columns < 1 || rect.rows < 1)
   {
-    return { width: 0, height: 0, ids: [] };
+    return { width: 0, height: 0, cells: [] };
   }
 
   const { column: left, row: top, columns, rows } = rectBetween(layout, { column: rect.column, row: rect.row }, {
     column: rect.column + rect.columns - 1,
     row: rect.row + rect.rows - 1,
   });
-  const ids: number[] = [];
+  const cells: number[] = [];
   for (let row = top; row < top + rows; row++)
   {
     for (let column = left; column < left + columns; column++)
     {
-      ids.push(layout.cells[row * PALETTE_COLUMNS + column].id);
+      cells.push(layout.cells[row * PALETTE_COLUMNS + column].id);
     }
   }
 
-  return { width: columns, height: rows, ids };
+  return { width: columns, height: rows, cells };
 };
 
 /**
@@ -471,13 +472,13 @@ export {
   describeTile,
   displayShapeOf,
   displayTileOf,
-  idsInRect,
   isTabAvailable,
   layoutPaletteTab,
   locateTile,
   PALETTE_COLUMNS,
   PALETTE_TABS,
   rectBetween,
+  rectCells,
   REGION_COUNT,
   sheetOfRow,
   sheetsOnTab,

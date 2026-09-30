@@ -6,15 +6,15 @@ import type { LayerChoice } from '../tiles/layering.ts';
 type BrushKind = 'tiles' | 'regions' | 'shadows';
 
 /**
- * What the palette hands the painting tools: a rectangle of ids and what they are.
+ * What the palette hands the painting tools: a rectangle of values and what they are.
  *
- * - {@code kind} says what the ids mean: tile ids for {@code 'tiles'} (an autotile in its shape 0, which painting
+ * - {@code kind} says what the values mean: tile ids for {@code 'tiles'} (an autotile in its shape 0, which painting
  *   shapes to its neighbours; 0 is B's empty tile, which clears layers 3 and 4), region ids 0 to 255 for
- *   {@code 'regions'} (0 clears a region), and shadow bits for {@code 'shadows'} (1 top left, 2 top right, 4 bottom
- *   left, 8 bottom right).
+ *   {@code 'regions'} (0 clears a region). A {@code 'shadows'} brush holds no values: the shadow pen marks whichever
+ *   quarter of a tile the pointer is over.
  * - {@code tilesetId} names the tileset the tile ids belong to; a tile id means another picture on another tileset.
- * - {@code width} and {@code height} are the rectangle's size in cells, and {@code ids} holds its ids row by row, top
- *   row first, so the id for column {@code x} and row {@code y} is {@code ids[y * width + x]}.
+ * - {@code width} and {@code height} are the rectangle's size in cells, and {@code cells} holds its values row by row,
+ *   top row first, so the value for column {@code x} and row {@code y} is {@code cells[y * width + x]}.
  *
  * A brush with no cells ({@link EMPTY_BRUSH}) paints nothing: it is what the palette hands out before anything has
  * been chosen.
@@ -24,34 +24,30 @@ type PaletteBrush = {
   readonly tilesetId: number;
   readonly width: number;
   readonly height: number;
-  readonly ids: readonly number[];
+  readonly cells: readonly number[];
 };
 
 /**
  * The brush before anything is chosen: no cells, so it paints nothing.
  */
-const EMPTY_BRUSH: PaletteBrush = { kind: 'tiles', tilesetId: 0, width: 0, height: 0, ids: [] };
+const EMPTY_BRUSH: PaletteBrush = { kind: 'tiles', tilesetId: 0, width: 0, height: 0, cells: [] };
 
 /**
- * The shadow bits of a whole cell: all four quarters.
- */
-const FULL_SHADOW = 15;
-
-/**
- * Builds the brush the palette's shadow pen hands out: one cell, all four quarters shadowed.
+ * Builds the brush the palette's shadow pen hands out: one cell, holding no value, since the pen marks whichever
+ * quarter of a tile the pointer is over.
  * @param {number} tilesetId The tileset on show.
  * @returns {PaletteBrush} The brush.
  */
 const shadowBrush = (tilesetId: number): PaletteBrush =>
 {
-  return { kind: 'shadows', tilesetId, width: 1, height: 1, ids: [ FULL_SHADOW ] };
+  return { kind: 'shadows', tilesetId, width: 1, height: 1, cells: [] };
 };
 
 /**
  * Reports whether two brushes paint the same thing.
  * @param {PaletteBrush} left One brush.
  * @param {PaletteBrush} right The other.
- * @returns {boolean} True when kind, tileset, size and every id match.
+ * @returns {boolean} True when kind, tileset, size and every value match.
  */
 const sameBrush = (left: PaletteBrush, right: PaletteBrush): boolean =>
 {
@@ -59,8 +55,8 @@ const sameBrush = (left: PaletteBrush, right: PaletteBrush): boolean =>
     && left.tilesetId === right.tilesetId
     && left.width === right.width
     && left.height === right.height
-    && left.ids.length === right.ids.length
-    && left.ids.every((id, index) => id === right.ids[index]);
+    && left.cells.length === right.cells.length
+    && left.cells.every((value, index) => value === right.cells[index]);
 };
 
 /**
@@ -261,7 +257,6 @@ const paintSelection = new PaintSelection();
 
 export {
   EMPTY_BRUSH,
-  FULL_SHADOW,
   LAYER_STRIP,
   PaintSelection,
   paintSelection,
