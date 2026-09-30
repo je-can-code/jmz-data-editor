@@ -14,7 +14,7 @@ import {
 import { describeStranded, type StrandedArrival } from '../../core/properties/arrivals.ts';
 import { MAX_MAP_SIZE, MIN_MAP_SIZE, RESIZE_ANCHORS, type ResizeAnchor } from '../../core/properties/resizeMap.ts';
 import { useHeldMap, useStrandedArrivals, useTilesets, useWorkspace, useWorkspaceState } from '../workspaceHooks.tsx';
-import { CheckField, CommitNumberField, CommitTextField, SectionTitle, SelectField } from './propertyFields.tsx';
+import { CheckField, CommitNumberField, CommitTextField, FieldRow, SectionTitle, SelectField } from './propertyFields.tsx';
 
 /**
  * Applies a change to the map's properties; one call is one step in the map's history.
@@ -174,7 +174,7 @@ const SizeFields = (props: { map: MapDocument; mapId: number }) =>
 
   return (
     <Stack spacing={1}>
-      <Stack direction={'row'} spacing={1} alignItems={'flex-start'}>
+      <Stack direction={'row'} spacing={1} useFlexGap flexWrap={'wrap'} alignItems={'flex-start'}>
         <TextField label={'Width'} value={width} size={'small'} error={newWidth === null} onChange={event => setWidth(event.target.value)} sx={{ width: 90 }}/>
         <TextField label={'Height'} value={height} size={'small'} error={newHeight === null} onChange={event => setHeight(event.target.value)} sx={{ width: 90 }}/>
         <Box>
@@ -234,11 +234,11 @@ const AudioFields = (props: {
       <Stack spacing={1}>
         <CheckField label={'Play on arriving'} checked={autoplay} onChange={onAutoplay}/>
         <CommitTextField label={'Track'} value={audio.name} onCommit={name => onAudio({ ...audio, name })}/>
-        <Stack direction={'row'} spacing={1}>
-          <CommitNumberField label={'Volume'} value={audio.volume} limits={PROPERTY_LIMITS.volume} onCommit={volume => onAudio({ ...audio, volume })}/>
-          <CommitNumberField label={'Pitch'} value={audio.pitch} limits={PROPERTY_LIMITS.pitch} onCommit={pitch => onAudio({ ...audio, pitch })}/>
-          <CommitNumberField label={'Pan'} value={audio.pan} limits={PROPERTY_LIMITS.pan} onCommit={pan => onAudio({ ...audio, pan })}/>
-        </Stack>
+        <FieldRow>
+          <CommitNumberField label={'Volume'} value={audio.volume} limits={PROPERTY_LIMITS.volume} fullWidth onCommit={volume => onAudio({ ...audio, volume })}/>
+          <CommitNumberField label={'Pitch'} value={audio.pitch} limits={PROPERTY_LIMITS.pitch} fullWidth onCommit={pitch => onAudio({ ...audio, pitch })}/>
+          <CommitNumberField label={'Pan'} value={audio.pan} limits={PROPERTY_LIMITS.pan} fullWidth onCommit={pan => onAudio({ ...audio, pan })}/>
+        </FieldRow>
       </Stack>
     </>
   );
@@ -279,11 +279,11 @@ const ParallaxFields = (props: { map: MapDocument; edit: EditProperties }) =>
       <SectionTitle>Parallax background</SectionTitle>
       <Stack spacing={1}>
         <CommitTextField label={'Image'} value={map.property('parallaxName')} onCommit={parallaxName => edit({ parallaxName })}/>
-        <Stack direction={'row'} spacing={1} alignItems={'center'}>
+        <Stack direction={'row'} spacing={1} useFlexGap flexWrap={'wrap'} alignItems={'center'}>
           <CheckField label={'Loop across'} checked={loopX} onChange={parallaxLoopX => edit({ parallaxLoopX })}/>
           <CommitNumberField label={'Speed'} value={map.property('parallaxSx')} limits={PROPERTY_LIMITS.parallaxSpeed} disabled={loopX === false} onCommit={parallaxSx => edit({ parallaxSx })}/>
         </Stack>
-        <Stack direction={'row'} spacing={1} alignItems={'center'}>
+        <Stack direction={'row'} spacing={1} useFlexGap flexWrap={'wrap'} alignItems={'center'}>
           <CheckField label={'Loop down'} checked={loopY} onChange={parallaxLoopY => edit({ parallaxLoopY })}/>
           <CommitNumberField label={'Speed'} value={map.property('parallaxSy')} limits={PROPERTY_LIMITS.parallaxSpeed} disabled={loopY === false} onCommit={parallaxSy => edit({ parallaxSy })}/>
         </Stack>
@@ -332,6 +332,7 @@ const RegionField = (props: { value: readonly number[]; onCommit: (regions: numb
       label={'Regions'}
       value={draft}
       size={'small'}
+      fullWidth
       error={parsed === null}
       placeholder={'All'}
       onChange={event => setDraft(event.target.value)}
@@ -343,7 +344,6 @@ const RegionField = (props: { value: readonly number[]; onCommit: (regions: numb
           commit();
         }
       }}
-      sx={{ flex: 1 }}
     />
   );
 };
@@ -374,11 +374,15 @@ const EncounterFields = (props: { map: MapDocument; edit: EditProperties }) =>
       <Stack spacing={1}>
         <CommitNumberField label={'Steps between'} value={map.property('encounterStep')} limits={PROPERTY_LIMITS.encounterStep} onCommit={encounterStep => edit({ encounterStep })}/>
         {list.map((encounter, index) => (
-          <Stack key={index} direction={'row'} spacing={1} alignItems={'center'}>
-            <CommitNumberField label={'Troop'} value={encounter.troopId} limits={PROPERTY_LIMITS.troopId} onCommit={troopId => change(index, { troopId })}/>
-            <CommitNumberField label={'Weight'} value={encounter.weight} limits={PROPERTY_LIMITS.weight} onCommit={weight => change(index, { weight })}/>
-            <RegionField value={encounter.regionSet} onCommit={regionSet => change(index, { regionSet })}/>
-            <IconButton size={'small'} aria-label={'Remove encounter'} onClick={() => edit({ encounterList: list.filter((_, at) => at !== index) })}>
+          <Stack key={index} direction={'row'} spacing={0.5} alignItems={'flex-start'}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <FieldRow>
+                <CommitNumberField label={'Troop'} value={encounter.troopId} limits={PROPERTY_LIMITS.troopId} fullWidth onCommit={troopId => change(index, { troopId })}/>
+                <CommitNumberField label={'Weight'} value={encounter.weight} limits={PROPERTY_LIMITS.weight} fullWidth onCommit={weight => change(index, { weight })}/>
+                <RegionField value={encounter.regionSet} onCommit={regionSet => change(index, { regionSet })}/>
+              </FieldRow>
+            </Box>
+            <IconButton size={'small'} aria-label={'Remove encounter'} onClick={() => edit({ encounterList: list.filter((_, at) => at !== index) })} sx={{ mt: 0.5 }}>
               <Close fontSize={'small'}/>
             </IconButton>
           </Stack>

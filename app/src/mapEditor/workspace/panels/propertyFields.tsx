@@ -1,6 +1,28 @@
 import React, { useEffect, useState } from 'react';
-import { Checkbox, FormControlLabel, MenuItem, TextField, Typography } from '@mui/material';
+import { Box, Checkbox, FormControlLabel, MenuItem, TextField, Typography } from '@mui/material';
 import { parseWholeNumber, type NumberLimits } from '../../core/properties/propertyInputs.ts';
+
+/**
+ * The narrowest a number field in a row of them may get before the row wraps, in pixels: room for its label and a
+ * few digits.
+ */
+const NUMBER_FIELD_MIN_WIDTH = 84;
+
+/**
+ * Lays a few fields side by side, sharing the width evenly, as many to a line as fit at their minimum width. A narrow
+ * panel wraps them onto more lines rather than squeezing their labels away.
+ * @param {{ minWidth?: number, children: React.ReactNode }} props The narrowest each field may get, and the fields.
+ * @returns {React.JSX.Element} The row.
+ */
+const FieldRow = (props: { minWidth?: number; children: React.ReactNode }) =>
+{
+  const { minWidth = NUMBER_FIELD_MIN_WIDTH, children } = props;
+  return (
+    <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: `repeat(auto-fit, minmax(${minWidth}px, 1fr))`, alignItems: 'start' }}>
+      {children}
+    </Box>
+  );
+};
 
 /**
  * A text field that keeps what is typed to itself until it is committed, by leaving the field or pressing Enter,
@@ -66,8 +88,9 @@ const CommitTextField = (props: {
 
 /**
  * A whole-number field committed like {@link CommitTextField}. A value that is not a whole number inside its limits
- * is refused: the field says so and puts back the saved value.
- * @param {object} props The label, the saved value, its limits, and what to do with a committed value.
+ * is refused: the field says so and puts back the saved value. On its own it keeps a fixed width; in a
+ * {@link FieldRow} it fills its share of the row.
+ * @param {object} props The label, the saved value, its limits, what to do with a committed value, and whether it fills its space.
  * @returns {React.JSX.Element} The field.
  */
 const CommitNumberField = (props: {
@@ -76,9 +99,10 @@ const CommitNumberField = (props: {
   limits: NumberLimits;
   onCommit: (value: number) => void;
   disabled?: boolean;
+  fullWidth?: boolean;
 }) =>
 {
-  const { label, value, limits, onCommit, disabled = false } = props;
+  const { label, value, limits, onCommit, disabled = false, fullWidth = false } = props;
   const [ draft, setDraft ] = useState(String(value));
   const parsed = parseWholeNumber(draft, limits);
 
@@ -110,6 +134,7 @@ const CommitNumberField = (props: {
       value={draft}
       size={'small'}
       disabled={disabled}
+      fullWidth={fullWidth}
       error={parsed === null}
       helperText={parsed === null ? `${limits.min} to ${limits.max}` : undefined}
       slotProps={{ htmlInput: { inputMode: 'numeric' } }}
@@ -128,7 +153,7 @@ const CommitNumberField = (props: {
           commit();
         }
       }}
-      sx={{ width: 120 }}
+      sx={fullWidth ? undefined : { width: 120 }}
     />
   );
 };
@@ -196,4 +221,4 @@ const SectionTitle = (props: { children: React.ReactNode }) =>
   );
 };
 
-export { CheckField, CommitNumberField, CommitTextField, SectionTitle, SelectField };
+export { CheckField, CommitNumberField, CommitTextField, FieldRow, SectionTitle, SelectField };

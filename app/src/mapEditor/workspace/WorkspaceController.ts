@@ -17,6 +17,8 @@ import { MAP_INFOS_KEY } from '../core/model/documentKeys.ts';
 import type { RmmzMapInfo } from '../core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../services/MapEditorServices.ts';
 import { documentLabel } from '../views/documentLabels.ts';
+import { POPOUT_URL } from './defaultLayout.ts';
+import { PopoutKeeper } from './PopoutKeeper.ts';
 
 /**
  * What the map tree's clipboard holds: maps copied with their files, or maps marked to move on the next paste.
@@ -121,6 +123,15 @@ class WorkspaceController
   readonly router: HistoryRouter;
 
   readonly layouts: LayoutStore;
+
+  /**
+   * Tears panels out into windows of their own, and puts them back where they came from; maps with no place of their
+   * own go back among the maps.
+   */
+  readonly popouts = new PopoutKeeper({
+    popoutUrl: POPOUT_URL,
+    mapsGroup: returning => (this.#dockview === null ? null : this.#mapGroup(this.#dockview, returning)),
+  });
 
   #dockview: DockviewApi | null = null;
 
@@ -316,14 +327,16 @@ class WorkspaceController
 
   /**
    * Finds the group maps open into: in the main window, the one that last showed a focused map, or any holding a
-   * map. A torn-out window was torn out for what it shows, so new maps never open inside one.
+   * map. A torn-out window was torn out for what it shows, so new maps never open inside one. Maps on their way back
+   * from a closed window are passed over, since the dock may have dropped them anywhere.
    * @param {DockviewApi} api The dock.
+   * @param {ReadonlySet<string>} returning The panels on their way back, by id.
    * @returns {DockviewGroupPanel | null} The group, or null when no map is open in the main window.
    */
-  #mapGroup(api: DockviewApi): DockviewGroupPanel | null
+  #mapGroup(api: DockviewApi, returning: ReadonlySet<string> = new Set()): DockviewGroupPanel | null
   {
     const groups = api.panels
-      .filter(panel => panel.api.component === PANEL_COMPONENTS.map && panel.group.api.location.type === 'grid')
+      .filter(panel => panel.api.component === PANEL_COMPONENTS.map && panel.group.api.location.type === 'grid' && returning.has(panel.id) === false)
       .map(panel => panel.group);
     if (this.#lastMapGroup !== null && groups.includes(this.#lastMapGroup))
     {
