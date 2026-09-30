@@ -55,6 +55,9 @@ import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel
 import { EnemyJabsConfigs } from '@boards/enemies/EnemyJabsConfigs.tsx';
 import { EnemyPassiveAbs } from '@boards/enemies/EnemyPassiveAbs.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
+import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { RowClipboardMenu } from '@presentation/components/board/RowClipboardMenu.tsx';
+import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 const EnemiesBoard = () =>
@@ -479,6 +482,23 @@ const EnemiesBoard = () =>
     updateEnemy(selectedEnemy!);
   };
   //endregion update parameters
+
+  // whole enemies copy and paste like any other edit: the row changes, and Save lights up.
+  const rowClipboard = useRowClipboard({
+    table: DatabaseFilenames.Enemies,
+    selectedIndex: selectedEnemyIndex,
+    onSelectIndex: (index) => handleEnemyListItemOnClickEvent(index),
+    listWrapperRef,
+    getRows: () => enemies,
+    toRow: (enemy) => enemy.toRmmz(),
+    fromRow: (row) => new RPG_EnemyDomainModel(row),
+    applyPaste: (update) =>
+    {
+      setEnemies(update);
+      setCanSave(true);
+    },
+    notify: (message, severity) => handleSnack(message, severity),
+  });
   //endregion updates
 
   //region render
@@ -552,14 +572,15 @@ const EnemiesBoard = () =>
               }
             }
           }}
-          selected={selectedEnemyIndex === index}
+          selected={rowClipboard.isSelected(index)}
           onMouseDown={(e) =>
           {
             // keep keyboard focus on the wrapper
             e.preventDefault();
           }}
           tabIndex={-1}
-          onClick={() => handleEnemyListItemOnClickEvent(index)}
+          onClick={(event) => rowClipboard.onRowClick(index, event)}
+          onContextMenu={(event) => rowClipboard.onRowContextMenu(index, event)}
         >
           <ListItemIcon
             sx={{ minWidth: '24px' }}
@@ -732,10 +753,6 @@ const EnemiesBoard = () =>
           tabIndex={0}
           role={'listbox'}
           onKeyDown={handleListKeyDown}
-          onContextMenu={() =>
-          {
-            // TODO: implement context menu.
-          }}
           style={{
             cursor: 'context-menu',
             outline: 'none',
@@ -754,6 +771,7 @@ const EnemiesBoard = () =>
             {renderEnemyListItem}
           </FixedSizeList>
         </div>
+        <RowClipboardMenu {...rowClipboard.menu}/>
         </Box>
           </>
         }

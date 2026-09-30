@@ -27,6 +27,8 @@ import {
   KeyboardArrowRight,
 } from "@mui/icons-material";
 import { IconSetSprite } from "@presentation/components/icons/IconSetSprite.tsx";
+import { RowClipboardMenu } from '@presentation/components/board/RowClipboardMenu.tsx';
+import type { RowClipboardHandle } from '@presentation/hooks/useRowClipboard.ts';
 
 /**
  * Standard sidebar list-column shell: grows with {@link EditorBoardSplitLayout}, constrains height for react-window.
@@ -106,6 +108,11 @@ type VirtualizedSidebarListProps = {
    * Label shown inside the search field. Defaults to {@code "Search"}.
    */
   searchLabel?: string;
+  /**
+   * When set, rows can be Shift-clicked into a run and copied and pasted whole, by shortcut and from a
+   * right-click menu on the rows (see {@link useRowClipboard}).
+   */
+  rowClipboard?: RowClipboardHandle;
 };
 
 const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListProps>(
@@ -125,6 +132,7 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
       onContextMenu,
       searchable = false,
       searchLabel = 'Search',
+      rowClipboard,
     } = props;
 
     const listColumnRef = useRef<HTMLDivElement>(null);
@@ -267,6 +275,11 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
         ? row.title
         : row.label;
 
+      // every row of a copy and paste run highlights, not only the row the board shows.
+      const isRowSelected = rowClipboard === undefined
+        ? selectedIndex === index
+        : rowClipboard.isSelected(index);
+
       return (
         <ListItem
           dense
@@ -305,16 +318,26 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
                   : []),
               ] as SxProps<Theme>
             }
-            selected={selectedIndex === index}
+            selected={isRowSelected}
             onMouseDown={(e) =>
             {
               e.preventDefault();
             }}
             tabIndex={-1}
-            onClick={() =>
+            onClick={(event) =>
             {
-              onSelectIndex(index);
+              // with copy and paste on, the click also decides the run of selected rows.
+              if (rowClipboard === undefined)
+              {
+                onSelectIndex(index);
+                return;
+              }
+
+              rowClipboard.onRowClick(index, event);
             }}
+            onContextMenu={rowClipboard === undefined
+              ? undefined
+              : (event) => rowClipboard.onRowContextMenu(index, event)}
           >
             <ListItemIcon sx={{
               minWidth: "22px",
@@ -456,7 +479,7 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
             ...(fillContainer
               ? { flex: 1, minHeight: 0 }
               : {}),
-            ...(onContextMenu !== undefined
+            ...(onContextMenu !== undefined || rowClipboard !== undefined
               ? { cursor: 'context-menu' }
               : {}),
           }}
@@ -497,6 +520,10 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
             </FixedSizeList>
           </div>
         </Box>
+
+        {rowClipboard !== undefined && (
+          <RowClipboardMenu {...rowClipboard.menu}/>
+        )}
       </Box>
     );
   },

@@ -58,6 +58,8 @@ import {
   VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT,
 } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
+import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import { RMMZ_STATE_MOTION_OPTIONS, } from '@core/enums/RmmzStateMotion.ts';
 import { RMMZ_STATE_OVERLAY_OPTIONS, } from '@core/enums/RmmzStateOverlay.ts';
 import {
@@ -2964,6 +2966,23 @@ const StatesBoard = () =>
     };
   }, [ states ]);
 
+  // whole states copy and paste like any other edit: the row changes, and Save lights up.
+  const rowClipboard = useRowClipboard({
+    table: DatabaseFilenames.States,
+    selectedIndex: selectedStateIndex,
+    onSelectIndex: (index) => handleStateListItemOnClickEvent(index),
+    listWrapperRef,
+    getRows: () => states,
+    toRow: (state) => state.toRmmz(),
+    fromRow: (row) => new RPG_StateDomainModel(row),
+    applyPaste: (update) =>
+    {
+      setStates(update);
+      setCanSave(true);
+    },
+    notify: (message, severity) => handleSnack(message, severity),
+  });
+
   useBoardActions({
     onSave: async () =>
     {
@@ -3062,6 +3081,7 @@ const StatesBoard = () =>
           }}
           onListKeyDown={handleListKeyDown}
           listWrapperRef={listWrapperRef}
+          rowClipboard={rowClipboard}
         />
           </>
         }

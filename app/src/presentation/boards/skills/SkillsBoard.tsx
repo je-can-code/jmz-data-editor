@@ -76,6 +76,8 @@ import {
   VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT,
 } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
+import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import {
   type UsableItemDamageEditorValue,
   UsableItemDamageSection
@@ -1892,6 +1894,25 @@ const SkillsBoard = () =>
     };
   }, [ skills ]);
 
+  // whole skills copy and paste like any other edit: the row changes, and Save lights up.
+  const rowClipboard = useRowClipboard({
+    table: DatabaseFilenames.Skills,
+    selectedIndex: selectedSkillIndex,
+    onSelectIndex: (index) => handleSkillListItemOnClickEvent(index),
+    listWrapperRef,
+    // reading through the pending edit also settles it, so a copy takes what the fields show, and the
+    // debounce can never fire after a paste and put the row back the way it was before.
+    getRows: skillsWithPendingEditApplied,
+    toRow: (skill) => skill.toRmmz(),
+    fromRow: (row) => new RPG_SkillDomainModel(row),
+    applyPaste: (update) =>
+    {
+      setSkills(update);
+      setCanSave(true);
+    },
+    notify: (message, severity) => handleSnack(message, severity),
+  });
+
   useBoardActions({
     onSave: async () =>
     {
@@ -1990,6 +2011,7 @@ const SkillsBoard = () =>
           }}
           onListKeyDown={handleListKeyDown}
           listWrapperRef={listWrapperRef}
+          rowClipboard={rowClipboard}
         />
           </>
         }
