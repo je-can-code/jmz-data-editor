@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
-import { TileAnimation, waterSurfaceIndex } from '../../../../src/mapEditor/render/engine/animation.ts';
+import { animationVector, TileAnimation } from '../../../../src/mapEditor/render/engine/animation.ts';
 import { readMapData, writeSpot, writeTile, type RectSink, type TileSource } from '../../../../src/mapEditor/render/engine/spotWriter.ts';
 import { locateGameProject } from '../../../support/gameProject.ts';
 
@@ -12,7 +13,8 @@ import { locateGameProject } from '../../../support/gameProject.ts';
  * animation, tables and wrapping are pinned here, each beside a near miss that must come out differently.
  *
  * The renderer builds every rect at animation frame 0 and lets the tilemap shader move animated rects by a fixed
- * offset per frame; the real-map test proves those offsets land exactly where the engine's own per-frame cut would.
+ * offset per frame. The shipped-map tests hold the port, and those offsets, to the engine itself: its own Tilemap code,
+ * read from the game's js/rmmz_core.js and run over every cell of Map102 at each animation step.
  */
 
 /**
@@ -398,47 +400,184 @@ describe('spotWriter', () =>
   });
 
   const project = locateGameProject();
-  describe('writeSpot on a shipped map', () =>
+  describe('writeSpot on a shipped map, against the engine\'s own tilemap', () =>
   {
-    it.skipIf(project === null)('lands every animated rect where the engine cuts it at each frame, by the shader\'s offsets', () =>
+    /**
+     * A map file, as far as the drawing reads it.
+     */
+    type ShippedMap = { width: number; height: number; data: number[]; tilesetId: number };
+
+    /**
+     * The engine's Tilemap, as far as these tests drive it.
+     */
+    type EngineTilemap = { prototype: { _addSpot: (startX: number, startY: number, x: number, y: number) => void } };
+
+    /**
+     * What the engine's tilemap adds to its two layers, each rect as its addRect arguments: sheet, source x and y,
+     * destination x and y, width and height.
+     */
+    type EngineRects = { lower: number[][]; upper: number[][] };
+
+    /**
+     * Runs the engine's own Tilemap from the game's js/rmmz_core.js: the class, its static helpers and its tables, cut
+     * out of the file and run in a context of their own with a bare PIXI, which none of the drawing code touches.
+     * @param {string} root The game's folder.
+     * @returns {EngineTilemap} The engine's Tilemap.
+     */
+    const loadEngineTilemap = (root: string): EngineTilemap =>
     {
-      // Arrange: Map102, which holds water and waterfalls, with its tileset's flags.
-      const map = JSON.parse(readFileSync(`${project}/data/Map102.json`, 'utf8')) as { width: number; height: number; data: number[]; tilesetId: number };
-      const tilesets = JSON.parse(readFileSync(`${project}/data/Tilesets.json`, 'utf8')) as ({ flags: number[] } | null)[];
-      const source: TileSource = { width: map.width, height: map.height, data: map.data, flags: tilesets[map.tilesetId]?.flags ?? [], horizontalWrap: false, verticalWrap: false };
-      const drawFrame = (frame: number): RectTuple[] =>
+      const source = readFileSync(`${root}/js/rmmz_core.js`, 'utf8');
+      const start = source.indexOf('function Tilemap() {');
+      const end = source.indexOf('Tilemap.Layer = function');
+      if (start < 0 || end < start)
       {
-        const { rects, sink } = recorder();
-        for (let y = 0; y < map.height; y++)
+        throw new Error('js/rmmz_core.js no longer holds the Tilemap class where this test looks for it');
+      }
+
+      const sandbox: Record<string, unknown> = { PIXI: { Container: function Container() {} } };
+      runInNewContext(source.slice(start, end), sandbox);
+      return sandbox['Tilemap'] as EngineTilemap;
+    };
+
+    /**
+     * Draws every cell of a map with the engine's own Tilemap#_addSpot at one animation step, from the map's top-left
+     * corner, collecting what it adds below and above characters.
+     * @param {EngineTilemap} Tilemap The engine's Tilemap.
+     * @param {ShippedMap} map The map.
+     * @param {number[]} flags Its tileset's flags.
+     * @param {number} frame The animation step.
+     * @returns {EngineRects} The rects.
+     */
+    const engineRects = (Tilemap: EngineTilemap, map: ShippedMap, flags: number[], frame: number): EngineRects =>
+    {
+      const rects: EngineRects = { lower: [], upper: [] };
+      const tilemap = Object.assign(Object.create(Tilemap.prototype) as EngineTilemap['prototype'], {
+        _mapWidth: map.width,
+        _mapHeight: map.height,
+        _mapData: map.data,
+        flags,
+        tileWidth: 48,
+        tileHeight: 48,
+        horizontalWrap: false,
+        verticalWrap: false,
+        animationFrame: frame,
+        _lowerLayer: { addRect: (...rect: number[]) => rects.lower.push(rect) },
+        _upperLayer: { addRect: (...rect: number[]) => rects.upper.push(rect) },
+      });
+      for (let y = 0; y < map.height; y++)
+      {
+        for (let x = 0; x < map.width; x++)
         {
-          for (let x = 0; x < map.width; x++)
-          {
-            writeSpot(source, x, y, x * 48, y * 48, sink, { tileSize: 48, animationFrame: frame, shadows: true });
-          }
+          tilemap._addSpot(0, 0, x, y);
         }
+      }
 
-        return rects;
-      };
-      const base = drawFrame(0);
+      return rects;
+    };
 
-      // Act: frames 1 to 5, against frame 0 moved as the shader moves it.
-      const mismatches = [ 1, 2, 3, 4, 5 ].map(frame =>
+    /**
+     * Draws every cell of a map with the port at one animation step, shadows included as the engine's core draws them.
+     * @param {TileSource} source The map.
+     * @param {number} frame The animation step.
+     * @returns {RectTuple[]} The rects, in the order the port emits them.
+     */
+    const portRects = (source: TileSource, frame: number): RectTuple[] =>
+    {
+      const { rects, sink } = recorder();
+      for (let y = 0; y < source.height; y++)
+      {
+        for (let x = 0; x < source.width; x++)
+        {
+          writeSpot(source, x, y, x * 48, y * 48, sink, { tileSize: 48, animationFrame: frame, shadows: true });
+        }
+      }
+
+      return rects;
+    };
+
+    /**
+     * Splits the port's rects into the engine's two layers, each rect as the engine's addRect arguments.
+     * @param {RectTuple[]} rects The port's rects.
+     * @returns {EngineRects} The rects below and above characters.
+     */
+    const asEngineRects = (rects: RectTuple[]): EngineRects =>
+    {
+      const layer = (upper: number) => rects.filter(rect => rect[0] === upper).map(rect => rect.slice(2, 9));
+      return { lower: layer(0), upper: layer(1) };
+    };
+
+    /**
+     * Counts where two sets of rects differ: rect by rect in order, plus any the longer list has over the shorter.
+     * @param {EngineRects} expected The engine's rects.
+     * @param {EngineRects} actual The port's rects.
+     * @returns {number} How many rects differ.
+     */
+    const differences = (expected: EngineRects, actual: EngineRects): number =>
+    {
+      const count = (left: number[][], right: number[][]) => Math.abs(left.length - right.length)
+        + left.filter((rect, index) => rect.join() !== (right[index] ?? []).join()).length;
+      return count(expected.lower, actual.lower) + count(expected.upper, actual.upper);
+    };
+
+    /**
+     * Reads Map102, which holds water, waterfalls, star tiles and shadows, with its tileset's flags.
+     * @param {string} root The game's folder.
+     * @returns {{ map: ShippedMap, flags: number[], source: TileSource }} The map, its flags and the port's view of it.
+     */
+    const readMap102 = (root: string) =>
+    {
+      const map = JSON.parse(readFileSync(`${root}/data/Map102.json`, 'utf8')) as ShippedMap;
+      const tilesets = JSON.parse(readFileSync(`${root}/data/Tilesets.json`, 'utf8')) as ({ flags: number[] } | null)[];
+      const flags = tilesets[map.tilesetId]?.flags ?? [];
+      const source: TileSource = { width: map.width, height: map.height, data: map.data, flags, horizontalWrap: false, verticalWrap: false };
+      return { map, flags, source };
+    };
+
+    it.skipIf(project === null)('draws every cell of Map102 as the engine\'s own tilemap code does, at each animation step', () =>
+    {
+      // Arrange.
+      const root = project as string;
+      const Tilemap = loadEngineTilemap(root);
+      const { map, flags, source } = readMap102(root);
+
+      // Act: the first six animation steps, the engine against the port.
+      const steps = [ 0, 1, 2, 3, 4, 5 ];
+      const engine = steps.map(step => engineRects(Tilemap, map, flags, step));
+      const mismatches = steps.map((step, index) => differences(engine[index], asEngineRects(portRects(source, step))));
+
+      // Assert: no rect differs at any step, and the engine drew the map in full, with rects above characters too.
+      expect([ mismatches, engine[0].lower.length > 20000, engine[0].upper.length > 0 ])
+        .toStrictEqual([ [ 0, 0, 0, 0, 0, 0 ], true, true ]);
+    });
+
+    it.skipIf(project === null)('moves step 0\'s animated rects by the shader\'s offsets onto where the engine cuts them at each later step', () =>
+    {
+      // Arrange: the port's rects at step 0, which the renderer builds once, and the frame the shader takes for each
+      // later step: the sea's frame across (two tiles each) and the waterfall's down (one tile each).
+      const root = project as string;
+      const Tilemap = loadEngineTilemap(root);
+      const { map, flags, source } = readMap102(root);
+      const base = portRects(source, 0);
+      const shaderFrames: [ number, [ number, number ] ][] = [ [ 1, [ 1, 1 ] ], [ 2, [ 2, 2 ] ], [ 3, [ 1, 0 ] ], [ 4, [ 0, 1 ] ], [ 5, [ 1, 2 ] ] ];
+
+      // Act: each later step's rects as the shader shows them, against the engine's own cut at that step.
+      const mismatches = shaderFrames.map(([ step, [ water, waterfall ] ]) =>
       {
         const moved = base.map(rect =>
         {
           const shifted = [ ...rect ] as RectTuple;
-          shifted[3] += rect[9] === WATER ? 96 * waterSurfaceIndex(frame) : 0;
-          shifted[4] += rect[9] === WATERFALL ? 48 * (frame % 3) : 0;
+          shifted[3] += rect[9] === WATER ? 96 * water : 0;
+          shifted[4] += rect[9] === WATERFALL ? 48 * waterfall : 0;
           return shifted;
         });
-        const engine = drawFrame(frame);
-        return engine.filter((rect, index) => rect.join() !== moved[index].join()).length;
+        return differences(engineRects(Tilemap, map, flags, step), asEngineRects(moved));
       });
+      const vectors = shaderFrames.map(([ step ]) => animationVector(step));
       const animated = base.filter(rect => rect[9] !== NONE).length;
 
-      // Assert: every frame matches, and the map really animates.
-      expect([ mismatches, animated > 1000 ])
-        .toStrictEqual([ [ 0, 0, 0, 0, 0 ], true ]);
+      // Assert: every step lands exactly; the renderer hands the shader those same frames; and the map really animates.
+      expect([ mismatches, vectors, animated > 1000 ])
+        .toStrictEqual([ [ 0, 0, 0, 0, 0 ], shaderFrames.map(([ , vector ]) => vector), true ]);
     });
   });
 });
