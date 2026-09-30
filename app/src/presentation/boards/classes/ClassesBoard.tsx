@@ -30,6 +30,7 @@ import { patchAt } from '@services/utils/patchAt.ts';
 import { NaturalGrowthQuadrantsEditor } from '@presentation/components/naturalGrowth/NaturalGrowthQuadrantsEditor.tsx';
 import { ClassParamsGrowthEditor } from '@presentation/components/classParams/ClassParamsGrowthEditor.tsx';
 import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { BLANK_CLASS_ROW } from '@services/rows/RowClear.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 import RPG_ClassLearning = Rmmz.Data.RPG_ClassLearning;
@@ -147,6 +148,7 @@ function ClassesBoard()
     getRows: () => classes,
     toRow: (rpgClass) => rpgClass.toRmmz(),
     fromRow: (row) => new RPG_ClassDomainModel(row),
+    blankRow: BLANK_CLASS_ROW,
     applyPaste: setData,
     notify: (message, severity) => setSnackbar({ open: true, message, severity, variant: MuiSnackbarVariant.Filled }),
   });

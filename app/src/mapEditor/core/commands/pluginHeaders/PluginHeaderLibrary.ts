@@ -1,9 +1,12 @@
-import { pluginBasename } from '../../../../services/plugins/PluginsJsReader.ts';
+import { pluginBasename, type PluginsJsEntry } from '../../../../services/plugins/PluginsJsReader.ts';
+import { checkPluginCommandRegistration, type PluginCommandRegistration } from './pluginCommandRegistration.ts';
 import type { PluginCommandSchema, PluginHeader, PluginStructSchema } from './pluginHeader.ts';
 
 /**
  * The plugin headers the editor has read, looked up the ways the plugin command editor needs: by plugin, by
- * command, and a struct by the plugin that declares it.
+ * command, and a struct by the plugin that declares it. Also keeps every entry {@code js/plugins.js} lists,
+ * enabled or not, since telling a disabled or unknown plugin apart from an enabled one that simply does not
+ * declare a command needs the whole list, not only the enabled headers.
  */
 class PluginHeaderLibrary
 {
@@ -11,13 +14,17 @@ class PluginHeaderLibrary
 
   #byPlugin: ReadonlyMap<string, PluginHeader>;
 
+  #entries: readonly PluginsJsEntry[];
+
   /**
    * @param {readonly PluginHeader[]} headers The headers, in {@code js/plugins.js} order.
+   * @param {readonly PluginsJsEntry[]} entries Every entry {@code js/plugins.js} lists, enabled or not.
    */
-  constructor(headers: readonly PluginHeader[] = [])
+  constructor(headers: readonly PluginHeader[] = [], entries: readonly PluginsJsEntry[] = [])
   {
     this.#headers = headers;
     this.#byPlugin = new Map(headers.map(header => [ header.plugin, header ]));
+    this.#entries = entries;
   }
 
   /**
@@ -57,6 +64,19 @@ class PluginHeaderLibrary
   command(plugin: string, command: string): PluginCommandSchema | null
   {
     return this.header(plugin)?.commands.find(each => each.command === command) ?? null;
+  }
+
+  /**
+   * Checks whether a plugin command is registered: its plugin must be one {@code js/plugins.js} lists and
+   * enables, and that plugin's header must declare a command by this exact name. The command list and the
+   * plugin command editor both read this to flag a stale or mistyped command before it ships silently broken.
+   * @param {string} plugin The plugin's name, as the command stores it.
+   * @param {string} command The command's name, as the command stores it.
+   * @returns {PluginCommandRegistration} Registered, or not, with why.
+   */
+  registrationOf(plugin: string, command: string): PluginCommandRegistration
+  {
+    return checkPluginCommandRegistration(plugin, command, this.#entries, (p, c) => this.command(p, c) !== null);
   }
 
   /**
@@ -101,12 +121,13 @@ class PluginHeaderStore
   }
 
   /**
-   * Replaces the headers and tells every listener.
+   * Replaces the headers and the full plugin list, and tells every listener.
    * @param {readonly PluginHeader[]} headers The headers.
+   * @param {readonly PluginsJsEntry[]} entries Every entry {@code js/plugins.js} lists, enabled or not.
    */
-  set(headers: readonly PluginHeader[]): void
+  set(headers: readonly PluginHeader[], entries: readonly PluginsJsEntry[] = []): void
   {
-    this.#library = new PluginHeaderLibrary(headers);
+    this.#library = new PluginHeaderLibrary(headers, entries);
     [ ...this.#listeners ].forEach(listener => listener());
   }
 
