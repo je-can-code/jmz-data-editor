@@ -269,6 +269,30 @@ describe('useEnemyPlacements', () =>
       .toEqual({ status: 'loaded', groups: groupPlacementsByMap(answers[ 1 ]), summary: 'Placed 2 times across 2 maps.' });
   });
 
+  it('reloads the enemy on screen now, through a reload handed out before that enemy came on screen', async () =>
+  {
+    // Arrange- the board holds on to reload across its own reload from disk, during which enemy 5 leaves the
+    // table and enemy 6 takes its place on screen.
+    const read = vi.fn<PlacementsReader>(async (enemyId) => [ placementOf(enemyId, `Enemy ${enemyId}`) ]);
+    const { result, rerender } = renderFor(5, read);
+    await act(async () => {});
+    const { reload } = result.current;
+    rerender({ enemyId: 6 });
+    await act(async () => {});
+
+    // Act
+    await act(async () =>
+    {
+      reload();
+    });
+
+    // Assert- asked about enemy 6, whose placements stand.
+    expect(read)
+      .toHaveBeenLastCalledWith(6);
+    expect(result.current.state)
+      .toEqual({ status: 'loaded', groups: groupPlacementsByMap([ placementOf(6, 'Enemy 6') ]), summary: 'Placed once.' });
+  });
+
   it('forgets the last enemy\'s placements once no enemy is on screen', async () =>
   {
     // Arrange

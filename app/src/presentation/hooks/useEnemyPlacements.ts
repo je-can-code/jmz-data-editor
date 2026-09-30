@@ -84,6 +84,10 @@ const useEnemyPlacements = (enemyId: number | null, read: PlacementsReader = rea
   // counts questions, so an answer can tell whether a later question has replaced its own.
   const latestQuestion = useRef(0);
 
+  // the enemy on screen as of the latest render, for a reload the board kept hold of from an earlier one.
+  const enemyOnScreen = useRef(enemyId);
+  enemyOnScreen.current = enemyId;
+
   const search = useCallback((id: number | null) =>
   {
     latestQuestion.current += 1;
@@ -134,7 +138,10 @@ const useEnemyPlacements = (enemyId: number | null, read: PlacementsReader = rea
     };
   }, [ enemyId, search ]);
 
-  const reload = useCallback(() => search(enemyId), [ enemyId, search ]);
+  // the board calls reload after waiting on its own reload from disk, which can bring another enemy on screen
+  // in the meantime; asking about the enemy the reload was handed out with would put its list under the new
+  // enemy's name, so ask about whichever enemy is on screen when it runs.
+  const reload = useCallback(() => search(enemyOnScreen.current), [ search ]);
 
   return { state, reload };
 };
