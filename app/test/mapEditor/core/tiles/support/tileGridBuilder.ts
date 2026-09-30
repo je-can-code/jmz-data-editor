@@ -19,14 +19,14 @@ const blankGrid = (width: number, height: number): TestGrid =>
 
 /**
  * Writes one tile into a grid.
- * @param {TestGrid} grid The grid.
+ * @param {G} grid The grid.
  * @param {number} x The column.
  * @param {number} y The row.
  * @param {number} z The layer, 0 to 5.
  * @param {number} tileId The value to write.
- * @returns {TestGrid} The same grid, for chaining.
+ * @returns {G} The same grid, for chaining.
  */
-const put = (grid: TestGrid, x: number, y: number, z: number, tileId: number): TestGrid =>
+const put = <G extends TestGrid>(grid: G, x: number, y: number, z: number, tileId: number): G =>
 {
   grid.cells[(z * grid.height + y) * grid.width + x] = tileId;
   return grid;
@@ -34,16 +34,16 @@ const put = (grid: TestGrid, x: number, y: number, z: number, tileId: number): T
 
 /**
  * Writes one tile into every cell of a rectangle on one layer.
- * @param {TestGrid} grid The grid.
+ * @param {G} grid The grid.
  * @param {number} x0 The left column.
  * @param {number} y0 The top row.
  * @param {number} x1 The right column, included.
  * @param {number} y1 The bottom row, included.
  * @param {number} z The layer.
  * @param {number} tileId The value to write.
- * @returns {TestGrid} The same grid, for chaining.
+ * @returns {G} The same grid, for chaining.
  */
-const fill = (grid: TestGrid, x0: number, y0: number, x1: number, y1: number, z: number, tileId: number): TestGrid =>
+const fill = <G extends TestGrid>(grid: G, x0: number, y0: number, x1: number, y1: number, z: number, tileId: number): G =>
 {
   for (let y = y0; y <= y1; y++)
   {
