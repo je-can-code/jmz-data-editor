@@ -1,11 +1,16 @@
 import type { MapDocument } from '../model/MapDocument.ts';
+import type { PassabilityRule } from '../modules/PluginModule.ts';
 import { cellAtPoint, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from './camera.ts';
 import { FrameTimeRecorder, type FrameTimings } from './FrameTimeRecorder.ts';
 import {
   GAME_LOOK,
+  NO_OVERLAY_STATE,
   type LayerVisibility,
+  type MapContextMenu,
   type MapRenderer,
   type OverlaySet,
+  type OverlayState,
+  type RendererInfo,
   type TextureSource,
   type TilesetTextures,
 } from './MapRenderer.ts';
@@ -31,9 +36,19 @@ class HeadlessMapRenderer implements MapRenderer
 
   #overlays: OverlaySet = { enabled: new Set(), definitions: [] };
 
+  #overlayState: OverlayState = NO_OVERLAY_STATE;
+
+  #rules: readonly PassabilityRule[] = [];
+
+  #overlayRefreshes = 0;
+
   #frames = new FrameTimeRecorder();
 
   #destroyed = false;
+
+  #contextMenuListeners = new Set<(menu: MapContextMenu) => void>();
+
+  #cameraListeners = new Set<(camera: Camera) => void>();
 
   /**
    * Everything the renderer was last given, for tests to read back.
@@ -49,6 +64,9 @@ class HeadlessMapRenderer implements MapRenderer
       camera: this.#camera,
       visibility: this.#visibility,
       overlays: this.#overlays,
+      overlayState: this.#overlayState,
+      passabilityRules: this.#rules,
+      overlayRefreshes: this.#overlayRefreshes,
       destroyed: this.#destroyed,
     };
   }
@@ -76,6 +94,7 @@ class HeadlessMapRenderer implements MapRenderer
   setCamera(camera: Camera): void
   {
     this.#camera = camera;
+    this.#cameraListeners.forEach(listener => listener(camera));
   }
 
   setLayerVisibility(visibility: LayerVisibility): void
@@ -86,6 +105,57 @@ class HeadlessMapRenderer implements MapRenderer
   setOverlays(overlays: OverlaySet): void
   {
     this.#overlays = overlays;
+  }
+
+  setOverlayState(state: OverlayState): void
+  {
+    this.#overlayState = state;
+  }
+
+  setPassabilityRules(rules: readonly PassabilityRule[]): void
+  {
+    this.#rules = rules;
+  }
+
+  refreshOverlays(): void
+  {
+    this.#overlayRefreshes += 1;
+  }
+
+  onContextMenu(listener: (menu: MapContextMenu) => void): () => void
+  {
+    this.#contextMenuListeners.add(listener);
+    return () =>
+    {
+      this.#contextMenuListeners.delete(listener);
+    };
+  }
+
+  onCameraChange(listener: (camera: Camera) => void): () => void
+  {
+    this.#cameraListeners.add(listener);
+    return () =>
+    {
+      this.#cameraListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Raises a right click that did not move, as a drawing renderer would, answering the cell and the event there.
+   * @param {ScreenPoint} point The view point clicked.
+   * @returns {MapContextMenu} What the listeners heard.
+   */
+  rightClick(point: ScreenPoint): MapContextMenu
+  {
+    const menu: MapContextMenu = { point, cell: this.cellAt(point), eventId: this.eventAt(point) };
+    this.#contextMenuListeners.forEach(listener => listener(menu));
+    return menu;
+  }
+
+  rendererInfo(): RendererInfo | null
+  {
+    // nothing draws, so there is no GPU to name.
+    return null;
   }
 
   /**
