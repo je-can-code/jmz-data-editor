@@ -8,7 +8,9 @@ import { locateShippedGame, readShippedMaps, readShippedTilesets } from './shipp
  *
  * Run it after the game's maps change and the oracle reports mismatches it does not know, then read the diff before
  * committing it: every new cell should be one somebody drew with Shift held, stamped with the eyedropper, or a map
- * resized since, and a cell that fits no reason stops the run instead of being written down.
+ * resized since. Between runs, the committed list is what the oracle holds the maps to, so a mismatch nobody has
+ * written down fails the test. A cell holding a shape no map placement can hold fits no reason, and stops the run
+ * instead of being written down.
  *
  * Usage, from app/: JMZ_PROJECT_ROOT=/path/to/game bun test/mapEditor/core/tiles/support/writeOracleExceptions.ts
  */

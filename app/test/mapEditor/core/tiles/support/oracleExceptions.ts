@@ -185,6 +185,31 @@ const cellHoldsKind = (map: ShippedMap, x: number, y: number, kind: number): boo
 };
 
 /**
+ * Compares which neighbours the stored and the expected shape join.
+ * @param {ShapeMismatch} cell The mismatch.
+ * @returns {'superset' | 'subset' | 'mixed' | 'unreadable'} Whether the stored shape joins everything the expected
+ * one does and more, a part of it, some of each, or is no shape a map placement holds (such as the palette picture).
+ */
+const compareJoins = (cell: ShapeMismatch): 'superset' | 'subset' | 'mixed' | 'unreadable' =>
+{
+  const stored = shapeJoins(cell.kind, cell.stored);
+  const expected = shapeJoins(cell.kind, cell.expected);
+  if (stored < 0)
+  {
+    return 'unreadable';
+  }
+
+  if ((stored & expected) === expected)
+  {
+    return 'superset';
+  }
+
+  return (stored & expected) === stored
+    ? 'subset'
+    : 'mixed';
+};
+
+/**
  * Lists the offsets of the neighbours whose join differs between the stored and the expected shape.
  * @param {ShapeMismatch} cell The mismatch.
  * @returns {(readonly [ number, number ])[]} The differing neighbours' dx and dy.
@@ -209,7 +234,7 @@ const REASON_TESTS: Readonly<Record<ExceptionReason, (map: ShippedMap, cell: Sha
   'map-edge': (map, cell) =>
   {
     const neighbours = differingNeighbours(cell);
-    return neighbours.length > 0 && neighbours.every(([ dx, dy ]) =>
+    return compareJoins(cell) !== 'unreadable' && neighbours.length > 0 && neighbours.every(([ dx, dy ]) =>
     {
       const x = cell.x + dx;
       const y = cell.y + dy;
@@ -228,26 +253,22 @@ const REASON_TESTS: Readonly<Record<ExceptionReason, (map: ShippedMap, cell: Sha
       ? 8
       : 0;
     const neighbours = differingNeighbours(cell);
-    return neighbours.length > 0 && neighbours.every(([ dx, dy ]) =>
+    return compareJoins(cell) !== 'unreadable' && neighbours.length > 0 && neighbours.every(([ dx, dy ]) =>
     {
       return cellHoldsKind(map, cell.x + dx, cell.y + dy, other) && cellHoldsKind(map, cell.x + dx, cell.y + dy, cell.kind) === false;
     });
   },
   'suspended-autotiling': (_map, cell) =>
   {
-    const stored = shapeJoins(cell.kind, cell.stored);
-    const expected = shapeJoins(cell.kind, cell.expected);
-    return (stored & expected) === expected;
+    return compareJoins(cell) === 'superset';
   },
   'stale-open': (_map, cell) =>
   {
-    const stored = shapeJoins(cell.kind, cell.stored);
-    const expected = shapeJoins(cell.kind, cell.expected);
-    return (stored & expected) === stored;
+    return compareJoins(cell) === 'subset';
   },
   'stamped': (_map, cell) =>
   {
-    return cell.stored !== cell.expected;
+    return compareJoins(cell) === 'mixed';
   },
 };
 
