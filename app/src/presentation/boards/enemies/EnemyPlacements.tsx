@@ -64,13 +64,15 @@ const EnemyPlacements = (props: EnemyPlacementsProps) =>
           primary: { variant: 'body2' },
           secondary: { variant: 'caption' },
         }}
+        sx={{ my: 0 }}
       />
     );
 
+    // rows sit close together, since a common enemy can stand on hundreds of events.
     const key = `${placement.mapId}-${placement.eventId}`;
     return onOpenEvent === undefined
-      ? <ListItem key={key} dense>{text}</ListItem>
-      : <ListItemButton key={key} dense onClick={() => onOpenEvent(placement)}>{text}</ListItemButton>;
+      ? <ListItem key={key} dense sx={{ py: 0.25 }}>{text}</ListItem>
+      : <ListItemButton key={key} dense sx={{ py: 0.25 }} onClick={() => onOpenEvent(placement)}>{text}</ListItemButton>;
   };
 
   /**
