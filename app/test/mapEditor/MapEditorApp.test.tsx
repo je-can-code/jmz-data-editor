@@ -6,6 +6,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { WindowShell, type OpenBrowserWindow } from '../../src/core/infrastructure/shell/WindowShell.ts';
+import { CommandCatalog } from '../../src/mapEditor/core/commands/CommandCatalog.ts';
+import { CommandEditorRegistry } from '../../src/mapEditor/core/commands/CommandEditorRegistry.ts';
+import { registerBuiltInCommands } from '../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { DocumentHub } from '../../src/mapEditor/core/history/DocumentHub.ts';
 import { MapEditorApp } from '../../src/mapEditor/MapEditorApp.tsx';
 import type { MapEditorServices } from '../../src/mapEditor/services/MapEditorServices.ts';
@@ -87,6 +90,40 @@ describe('MapEditorApp', () =>
     // Assert.
     expect([ screen.getByText('Event 5').textContent, screen.getByText('Map 12').textContent, screen.queryByTestId('map-editor-workspace') ])
       .toStrictEqual([ 'Event 5', 'Map 12', null ]);
+  });
+
+  it('opens the common events from the workspace through the window shell', () =>
+  {
+    // Arrange.
+    const { openWindow } = renderApp({ kind: 'workspace' });
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Common events' }));
+
+    // Assert: the browser fallback opens the named window first, as it does for the data editor.
+    expect(openWindow.mock.calls)
+      .toStrictEqual([ [ '', 'jmz-common-events', 'popup,width=1280,height=860' ] ]);
+  });
+
+  it('shows the common events for a common events view', () =>
+  {
+    // Arrange: a window holding the common events, with the catalog the list reads with.
+    const catalog = new CommandCatalog();
+    registerBuiltInCommands(catalog);
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    hub.adopt('common-events', [ null, { id: 1, list: [ { code: 230, indent: 0, parameters: [ 30 ] }, { code: 0, indent: 0, parameters: [] } ], name: 'Heal Party', switchId: 1, trigger: 0 } ]);
+    const services = { view: { kind: 'common-events' }, hub, catalog, commandEditors: new CommandEditorRegistry(), api: null, resolveConflict: vi.fn() } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapEditorApp/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert.
+    expect([ screen.queryByText('Wait 30 frames') !== null, screen.queryByTestId('map-editor-workspace') ])
+      .toStrictEqual([ true, null ]);
   });
 
   it('shows a conflict with another window the moment it is flagged, and settles it only as the author picks', () =>
