@@ -1,7 +1,12 @@
 /**
- * How long one engine frame lasts: the game updates at 60 frames a second.
+ * How many frames the engine updates a second.
  */
-const ENGINE_FRAME_MS = 1000 / 60;
+const ENGINE_FPS = 60;
+
+/**
+ * How long one engine frame lasts.
+ */
+const ENGINE_FRAME_MS = 1000 / ENGINE_FPS;
 
 /**
  * How many engine frames each step of the tile animation lasts. Tilemap#update counts frames and steps the
@@ -31,7 +36,8 @@ type TileAnimationKind = typeof TileAnimation[keyof typeof TileAnimation];
  */
 const engineFramesAt = (elapsedMs: number): number =>
 {
-  return Math.floor(elapsedMs / ENGINE_FRAME_MS);
+  // multiply first: dividing by a sixtieth of a second lands a hair under whole frames (500 ms would be 29.999...).
+  return Math.floor((elapsedMs * ENGINE_FPS) / 1000);
 };
 
 /**
