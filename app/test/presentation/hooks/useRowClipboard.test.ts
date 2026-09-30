@@ -12,11 +12,12 @@ import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
 
 /**
  * `useRowClipboard` is the only thing standing between a board's list and the clipboard, and what it routes
- * ends up written over rows on disk. It owes the boards four things. Ctrl+C and Ctrl+V act on the rows only
+ * ends up written over rows on disk. It owes the boards five things. Ctrl+C and Ctrl+V act on the rows only
  * while the list has focus, so copying a formula out of a field, or pasting one into a field, never touches a
  * row. A paste reaches the board through the board's own edit path, so it saves like any other change. A
- * Shift click widens the selection, so several rows copy at once. And the menu's paste reports a refused
- * clipboard rather than pasting anything remembered from before, which could be stale.
+ * Shift click widens the selection, so several rows copy at once. The menu's paste reports a refused
+ * clipboard rather than pasting anything remembered from before, which could be stale. And the Del key, or
+ * the menu's Clear item, resets the selection to the table's blank row through that same edit path.
  */
 describe('useRowClipboard', () =>
 {
@@ -69,6 +70,7 @@ describe('useRowClipboard', () =>
         getRows: () => rows,
         toRow: (row) => ({ ...row }),
         fromRow: (row) => ({ ...row }),
+        blankRow: { id: 0, name: '' },
         applyPaste,
         notify,
       }),
@@ -76,6 +78,18 @@ describe('useRowClipboard', () =>
     );
 
     return { ...rendered, onSelectIndex, applyPaste, notify };
+  };
+
+  /**
+   * A Del key event as the list hands it on, carrying a spy on whether the default action was held back.
+   * @param {string} key The key pressed.
+   * @returns The key event, and a spy on whether it was prevented.
+   */
+  const keyDown = (key: string) =>
+  {
+    const preventDefault = vi.fn();
+    const event = { key, preventDefault } as unknown as React.KeyboardEvent<HTMLDivElement>;
+    return { event, preventDefault };
   };
 
   /**
@@ -626,6 +640,118 @@ describe('useRowClipboard', () =>
     });
   });
 
+  describe('clearing rows', () =>
+  {
+    it('resets the selected row through the board\'s own edit path from the Del key', () =>
+    {
+      // Arrange- the board shows the middle row of three.
+      const rows = tableOf([ 'Herb', 'Tonic', 'Salve' ]);
+      const { result, applyPaste, notify } = renderOver(rows, 1);
+      const { event, preventDefault } = keyDown('Delete');
+
+      // Act
+      act(() =>
+      {
+        result.current.onListKeyDown(event);
+      });
+
+      // Assert- the board's updater blanks the row under its own id, and the rest stay put.
+      const [ [ update ] ] = applyPaste.mock.calls;
+      expect(update(rows))
+        .toEqual([ { id: 1, name: 'Herb' }, { id: 2, name: '' }, { id: 3, name: 'Salve' } ]);
+      expect(notify)
+        .toHaveBeenCalledWith('Cleared 1 row.', MuiSnackbarSeverity.Success);
+      expect(preventDefault)
+        .toHaveBeenCalled();
+    });
+
+    it('leaves every other key alone, for the board\'s own key handling to see', () =>
+    {
+      // Arrange
+      const { result, applyPaste, notify } = renderOver(tableOf([ 'Herb', 'Tonic' ]), 0);
+      const { event, preventDefault } = keyDown('ArrowDown');
+
+      // Act
+      act(() =>
+      {
+        result.current.onListKeyDown(event);
+      });
+
+      // Assert
+      expect(applyPaste)
+        .not.toHaveBeenCalled();
+      expect(notify)
+        .not.toHaveBeenCalled();
+      expect(preventDefault)
+        .not.toHaveBeenCalled();
+    });
+
+    it('clears every row of a run', () =>
+    {
+      // Arrange- a run over the first two rows of three.
+      const rows = tableOf([ 'Herb', 'Tonic', 'Salve' ]);
+      const rendered = renderOver(rows, 0);
+      shiftClickRun(rendered, 0, 1);
+
+      // Act
+      act(() =>
+      {
+        rendered.result.current.onListKeyDown(keyDown('Delete').event);
+      });
+
+      // Assert
+      const [ [ update ] ] = rendered.applyPaste.mock.calls;
+      expect(update(rows))
+        .toEqual([ { id: 1, name: '' }, { id: 2, name: '' }, { id: 3, name: 'Salve' } ]);
+      expect(rendered.notify)
+        .toHaveBeenCalledWith('Cleared 2 rows.', MuiSnackbarSeverity.Success);
+    });
+
+    it('asks for a row to clear when the list has none', () =>
+    {
+      // Arrange- a table that has not loaded yet.
+      const { result, applyPaste, notify } = renderOver([], 0);
+
+      // Act
+      act(() =>
+      {
+        result.current.onListKeyDown(keyDown('Delete').event);
+      });
+
+      // Assert
+      expect(applyPaste)
+        .not.toHaveBeenCalled();
+      expect(notify)
+        .toHaveBeenCalledWith('Select a row to clear.', MuiSnackbarSeverity.Warning);
+    });
+
+    it('clears the selected row from the menu, and closes it', () =>
+    {
+      // Arrange
+      const rows = tableOf([ 'Herb', 'Tonic' ]);
+      const { result, applyPaste, notify } = renderOver(rows, 0);
+      act(() =>
+      {
+        result.current.onRowContextMenu(0, rightClick().event);
+      });
+
+      // Act
+      act(() =>
+      {
+        result.current.menu.onClear();
+      });
+
+      // Assert
+      const [ [ update ] ] = applyPaste.mock.calls;
+      expect(update(rows))
+        .toEqual([ { id: 1, name: '' }, { id: 2, name: 'Tonic' } ]);
+      expect(notify)
+        .toHaveBeenCalledWith('Cleared 1 row.', MuiSnackbarSeverity.Success);
+      expect(result.current.menu.position)
+        .toBeNull();
+    });
+  });
+
   describe('the paste revision', () =>
   {
     it('changes when a paste writes over the row the board shows, so that row\'s editors start over', () =>
@@ -678,6 +804,44 @@ describe('useRowClipboard', () =>
       // Assert- refused, and nothing on the row to start over.
       expect(rendered.notify)
         .toHaveBeenCalledWith('Skills rows cannot be pasted into Items.', MuiSnackbarSeverity.Warning);
+      expect(rendered.result.current.pasteRevision)
+        .toBe(0);
+    });
+  });
+
+  describe('the clear revision', () =>
+  {
+    it('changes when a clear resets the row the board shows, so that row\'s editors start over', () =>
+    {
+      // Arrange- the board shows the second row, about to be cleared.
+      const rendered = renderOver(tableOf([ 'Herb', 'Tonic', 'Salve' ]), 1);
+      const revisionBefore = rendered.result.current.pasteRevision;
+
+      // Act
+      act(() =>
+      {
+        rendered.result.current.onListKeyDown(keyDown('Delete').event);
+      });
+
+      // Assert
+      expect(revisionBefore)
+        .toBe(0);
+      expect(rendered.result.current.pasteRevision)
+        .toBe(1);
+    });
+
+    it('stays put when there is nothing to clear', () =>
+    {
+      // Arrange- a table that has not loaded yet.
+      const rendered = renderOver([], 0);
+
+      // Act
+      act(() =>
+      {
+        rendered.result.current.onListKeyDown(keyDown('Delete').event);
+      });
+
+      // Assert
       expect(rendered.result.current.pasteRevision)
         .toBe(0);
     });

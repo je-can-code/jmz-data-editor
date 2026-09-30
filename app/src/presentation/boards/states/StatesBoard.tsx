@@ -59,6 +59,7 @@ import {
 } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { BLANK_STATE_ROW } from '@services/rows/RowClear.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import { RMMZ_STATE_MOTION_OPTIONS, } from '@core/enums/RmmzStateMotion.ts';
 import { RMMZ_STATE_OVERLAY_OPTIONS, } from '@core/enums/RmmzStateOverlay.ts';
@@ -2975,6 +2976,7 @@ const StatesBoard = () =>
     getRows: () => states,
     toRow: (state) => state.toRmmz(),
     fromRow: (row) => new RPG_StateDomainModel(row),
+    blankRow: BLANK_STATE_ROW,
     applyPaste: (update) =>
     {
       setStates(update);

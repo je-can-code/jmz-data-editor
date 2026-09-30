@@ -50,6 +50,7 @@ import { FoodTypeSelect } from '@presentation/components/crafting/FoodTypeSelect
 import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 import { useJabs } from '@presentation/context/resources/jabs.context.tsx';
 import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { BLANK_ITEM_ROW } from '@services/rows/RowClear.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_UsableEffect = Rmmz.Data.RPG_UsableEffect;
 
@@ -194,6 +195,7 @@ function ItemsBoard()
     getRows: () => items,
     toRow: (item) => item.toRmmz(),
     fromRow: (row) => new RPG_ItemDomainModel(row),
+    blankRow: BLANK_ITEM_ROW,
     applyPaste: setData,
     notify: (message, severity) => setSnackbar({ open: true, message, severity, variant: MuiSnackbarVariant.Filled }),
   });
