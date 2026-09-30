@@ -100,7 +100,8 @@ const cellTiles = (source: PassageSource, x: number, y: number, tileEvents: read
 
 /**
  * Collects the tile ids of the events that count toward passage, as Game_Map#tileEventsXy picks them: a tile image
- * with priority below characters. The editor reads each event's first page, the page it draws.
+ * with priority below characters, standing there without Through (Game_CharacterBase#posNt skips an event with it on).
+ * The editor reads each event's first page, the page it draws.
  * @param {MapDocument} document The map.
  * @returns {Map<number, number[]>} Tile ids by cell ({@code y * width + x}), in event id order.
  */
@@ -111,7 +112,7 @@ const tileEventsByCell = (document: MapDocument): Map<number, number[]> =>
   {
     const event = document.event(id);
     const page = event?.pages[0];
-    if (event === null || page === undefined || page.image.tileId <= 0 || page.priorityType !== 0)
+    if (event === null || page === undefined || page.image.tileId <= 0 || page.priorityType !== 0 || page.through)
     {
       return;
     }

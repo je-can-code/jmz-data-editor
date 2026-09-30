@@ -136,6 +136,30 @@ describe('passability', () =>
       expect([ ...cells.entries() ])
         .toStrictEqual([ [ 4, [ 40, 42 ] ] ]);
     });
+
+    it('leaves out a tile image with Through on, which the engine\'s posNt skips', () =>
+    {
+      // Arrange: two tile images below characters on (1, 1), the same but for Through, and a third, with Through, alone
+      // on (2, 1).
+      const json = buildMapJson();
+      const tile = (id: number, x: number, tileId: number, through: boolean) =>
+      {
+        const event = createMapEvent(id, x, 1);
+        event.pages[0].image = { ...event.pages[0].image, tileId };
+        event.pages[0].priorityType = 0;
+        event.pages[0].through = through;
+        return event;
+      };
+      json.events = [ null, tile(1, 1, 40, true), tile(2, 1, 41, false), tile(3, 2, 42, true) ];
+      const document = MapDocument.fromJson('map:1', json);
+
+      // Act.
+      const cells = tileEventsByCell(document);
+
+      // Assert: only the event without Through counts, and the cell holding only a Through event holds nothing.
+      expect([ ...cells.entries() ])
+        .toStrictEqual([ [ 4, [ 41 ] ] ]);
+    });
   });
 
   describe('cellPassage', () =>
