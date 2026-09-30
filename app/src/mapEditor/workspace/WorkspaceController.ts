@@ -253,7 +253,13 @@ class WorkspaceController
     const open = api.panels.find(panel => panel.api.component === PANEL_COMPONENTS.map && isMapPanelParams(panel.params) && panel.params.mapId === mapId);
     if (open !== undefined && options.newView !== true && options.beside !== true && options.at === undefined)
     {
+      // a map already open in a torn-out window brings that window forward with it.
       open.api.setActive();
+      if (open.api.location.type === 'popout')
+      {
+        open.api.getWindow().focus();
+      }
+
       return open;
     }
 
@@ -303,14 +309,15 @@ class WorkspaceController
   }
 
   /**
-   * Finds the group maps open into: the one that last showed a focused map, or any holding a map.
+   * Finds the group maps open into: in the main window, the one that last showed a focused map, or any holding a
+   * map. A torn-out window was torn out for what it shows, so new maps never open inside one.
    * @param {DockviewApi} api The dock.
-   * @returns {DockviewGroupPanel | null} The group, or null when no map is open.
+   * @returns {DockviewGroupPanel | null} The group, or null when no map is open in the main window.
    */
   #mapGroup(api: DockviewApi): DockviewGroupPanel | null
   {
     const groups = api.panels
-      .filter(panel => panel.api.component === PANEL_COMPONENTS.map)
+      .filter(panel => panel.api.component === PANEL_COMPONENTS.map && panel.group.api.location.type === 'grid')
       .map(panel => panel.group);
     if (this.#lastMapGroup !== null && groups.includes(this.#lastMapGroup))
     {
