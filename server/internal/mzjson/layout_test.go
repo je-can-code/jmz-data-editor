@@ -80,11 +80,6 @@ func TestMapLayoutMatchesMzsMapFiles(t *testing.T) {
 			expected: "{\n\"width\":1,\n\"data\":[5],\n\"events\":[\nnull\n]\n}",
 		},
 		{
-			name:     "a null event list stays on one line",
-			document: `{"width":1,"data":[],"events":null}`,
-			expected: "{\n\"width\":1,\n\"data\":[],\n\"events\":null\n}",
-		},
-		{
 			name:     "no properties besides tiles and events",
 			document: `{"data":[],"events":[]}`,
 			expected: "{\n\"data\":[],\n\"events\":[\n]\n}",
@@ -110,17 +105,31 @@ func TestMapLayoutMatchesMzsMapFiles(t *testing.T) {
 	}
 }
 
-// TestMapLayoutRefusesAnythingButAnObject keeps a map from being written as something else.
-func TestMapLayoutRefusesAnythingButAnObject(t *testing.T) {
-	// Arrange.
-	value := mustParse(t, `[1,2]`)
+// TestMapLayoutRefusesMapsTheEngineCannotEnter keeps a map without tiles or events, or one that is
+// not an object at all, from ever being laid out into a file.
+func TestMapLayoutRefusesMapsTheEngineCannotEnter(t *testing.T) {
+	documents := map[string]string{
+		"not an object":    `[1,2]`,
+		"null events":      `{"width":1,"data":[],"events":null}`,
+		"no events":        `{"width":1,"data":[]}`,
+		"null tiles":       `{"width":1,"data":null,"events":[]}`,
+		"no tiles":         `{"width":1,"events":[]}`,
+		"events an object": `{"width":1,"data":[],"events":{}}`,
+	}
 
-	// Act.
-	_, err := MapLayout(value)
+	for name, document := range documents {
+		t.Run(name, func(t *testing.T) {
+			// Arrange.
+			value := mustParse(t, document)
 
-	// Assert.
-	if err == nil {
-		t.Error("expected a non-object map to be refused")
+			// Act.
+			_, err := MapLayout(value)
+
+			// Assert.
+			if err == nil {
+				t.Errorf("expected %s to be refused", document)
+			}
+		})
 	}
 }
 

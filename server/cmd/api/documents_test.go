@@ -169,6 +169,57 @@ func TestPutMapRefusesFieldsTheModelCannotAccountFor(t *testing.T) {
 	}
 }
 
+// TestSavesRefuseDocumentsWithKeysMissing is the other half of the strict decode: a key the body
+// leaves out, or sends as null, would reach the file as a zero value, so it is named in a 400 and the
+// file on disk is left alone. The cases are the ones that would each break the game: a map with no
+// tiles or events, a map from an empty object, a silent sound, a tileset with no flags, and a map
+// tree wiped by an empty array.
+func TestSavesRefuseDocumentsWithKeysMissing(t *testing.T) {
+	withoutTilesOrEvents := mapFixture[:strings.Index(mapFixture, ",\n\"data\"")] + "\n}"
+	cases := []struct {
+		name     string
+		route    string
+		file     string
+		body     string
+		expected string
+	}{
+		{name: "a map without tiles or events", route: "/api/maps/1", file: "data/Map001.json", body: withoutTilesOrEvents, expected: `missing key "data"`},
+		{name: "a map from an empty object", route: "/api/maps/1", file: "data/Map001.json", body: `{}`, expected: `missing key "autoplayBgm"`},
+		{name: "a map whose music has no volume", route: "/api/maps/1", file: "data/Map001.json",
+			body: strings.Replace(mapFixture, `"bgm":{"name":"","pan":0,"pitch":100,"volume":90}`, `"bgm":{"name":"","pan":0,"pitch":100}`, 1), expected: `missing key "volume" in bgm`},
+		{name: "a map whose events are null", route: "/api/maps/1", file: "data/Map001.json",
+			body: mapFixture[:strings.Index(mapFixture, "\"events\":")] + "\"events\":null}", expected: `events must not be null`},
+		{name: "a new map from an empty object", route: "/api/maps/7", file: "data/Map001.json", body: `{}`, expected: `missing key "autoplayBgm"`},
+		{name: "a map that is null", route: "/api/maps/1", file: "data/Map001.json", body: `null`, expected: `the body must not be null`},
+		{name: "a tileset without flags", route: "/api/tilesets", file: "data/Tilesets.json", body: `[null,{"id":1}]`, expected: `missing key "flags" in [1]`},
+		{name: "tilesets that are null", route: "/api/tilesets", file: "data/Tilesets.json", body: `null`, expected: "the body must be a JSON array"},
+		{name: "an empty map tree", route: "/api/mapinfos", file: "data/MapInfos.json", body: `[]`, expected: "the body must start with null, as MZ's tables do"},
+		{name: "a map tree without its leading null", route: "/api/mapinfos", file: "data/MapInfos.json",
+			body: `[{"id":1,"expanded":false,"name":"A","order":1,"parentId":0,"scrollX":0,"scrollY":0}]`, expected: "the body must start with null, as MZ's tables do"},
+		{name: "a map tree with no maps", route: "/api/mapinfos", file: "data/MapInfos.json", body: `[null]`, expected: "the body holds no rows after the leading null"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange.
+			current := newProject(t)
+			before := current.read(t, testCase.file)
+
+			// Act.
+			response := current.call(t, http.MethodPut, testCase.route, testCase.body)
+
+			// Assert- a 400 naming what is wrong, and nothing written, not even a new map's file.
+			assertStatus(t, response, http.StatusBadRequest)
+			if message := strings.TrimSpace(response.Body.String()); message != testCase.expected {
+				t.Errorf("said %q, expected %q", message, testCase.expected)
+			}
+			if current.read(t, testCase.file) != before || current.exists("data/Map007.json") {
+				t.Error("a refused save still wrote a file")
+			}
+		})
+	}
+}
+
 // TestPutMapRefusesMoreThanOneDocument keeps anything after the map from being silently ignored.
 func TestPutMapRefusesMoreThanOneDocument(t *testing.T) {
 	// Arrange.

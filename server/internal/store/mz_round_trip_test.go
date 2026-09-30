@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -32,12 +33,12 @@ func TestSaveInMzLayoutReproducesEveryFile(t *testing.T) {
 
 	t.Run("MapInfos.json", func(t *testing.T) {
 		// Arrange, Act and Assert all live in the helper; this names the file and its model.
-		assertSaveReproduces[[]*db.RpgMapInfo](t, filepath.Join(folder, "MapInfos.json"), mzjson.TableLayout)
+		assertSaveReproduces[[]*db.RpgMapInfo](t, filepath.Join(folder, "MapInfos.json"), mzjson.TableLayout, tableOf[*db.RpgMapInfo])
 	})
 
 	t.Run("Tilesets.json", func(t *testing.T) {
 		// Arrange, Act and Assert all live in the helper; this names the file and its model.
-		assertSaveReproduces[[]*db.RpgTileset](t, filepath.Join(folder, "Tilesets.json"), mzjson.TableLayout)
+		assertSaveReproduces[[]*db.RpgTileset](t, filepath.Join(folder, "Tilesets.json"), mzjson.TableLayout, tableOf[*db.RpgTileset])
 	})
 
 	t.Run("every map", func(t *testing.T) {
@@ -56,7 +57,7 @@ func TestSaveInMzLayoutReproducesEveryFile(t *testing.T) {
 			if strings.HasPrefix(name, "Map") == false || strings.HasSuffix(name, ".json") == false || name == "MapInfos.json" {
 				continue
 			}
-			if assertSaveReproduces[*db.RpgMap](t, filepath.Join(folder, name), mzjson.MapLayout) {
+			if assertSaveReproduces[*db.RpgMap](t, filepath.Join(folder, name), mzjson.MapLayout, objectOf[*db.RpgMap]) {
 				rewritten = append(rewritten, name)
 			}
 			checked++
@@ -73,8 +74,9 @@ func TestSaveInMzLayoutReproducesEveryFile(t *testing.T) {
 }
 
 // assertSaveReproduces saves one real file through the same steps a PUT takes and checks the result,
-// reporting true when the file came back in MZ's layout rather than its own.
-func assertSaveReproduces[T any](t *testing.T, path string, layout mzjson.Layout) bool {
+// reporting true when the file came back in MZ's layout rather than its own. whole is the PUT's check
+// that a body is complete, which an unchanged real document must pass or it could never be saved.
+func assertSaveReproduces[T any](t *testing.T, path string, layout mzjson.Layout, whole func(*mzjson.Value) error) bool {
 	t.Helper()
 
 	// Arrange- the file, loaded strictly the way GET loads it.
@@ -90,12 +92,19 @@ func assertSaveReproduces[T any](t *testing.T, path string, layout mzjson.Layout
 	// what comes back from a client: the same document with every object's keys sorted.
 	body := sortedKeys(t, loaded)
 
-	// the PUT's strict decode.
+	// the PUT's checks: strict decode, then every key present and null only where it may be.
 	var decoded T
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&decoded); err != nil {
 		t.Fatalf("%s: the body did not decode: %v", filepath.Base(path), err)
+	}
+	parsed, err := mzjson.Parse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := whole(parsed); err != nil {
+		t.Fatalf("%s: a save of the unchanged document would be refused: %v", filepath.Base(path), err)
 	}
 
 	// the save replaces a copy of the file, so the copy is what lends its key order.
@@ -134,6 +143,16 @@ func assertSaveReproduces[T any](t *testing.T, path string, layout mzjson.Layout
 	t.Errorf("%s changed across a save at byte %d:\n  file:  %s\n  saved: %s",
 		filepath.Base(path), offset, excerpt(relaid, offset), excerpt(written, offset))
 	return false
+}
+
+// objectOf is the PUT's completeness check for an object document of model T.
+func objectOf[T any](document *mzjson.Value) error {
+	return mzjson.RequireEveryKey(document, reflect.TypeFor[T]())
+}
+
+// tableOf is the PUT's completeness check for a table of rows of type T.
+func tableOf[T any](document *mzjson.Value) error {
+	return mzjson.RequireTable(document, reflect.TypeFor[T]())
 }
 
 // sortedKeys re-encodes a document with the keys of every object in alphabetical order, numbers

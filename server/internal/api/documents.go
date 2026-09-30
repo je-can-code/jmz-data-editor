@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strconv"
 
 	"jmz-data-editor/server/internal/models/db"
@@ -38,7 +40,7 @@ func LoadMapInfos(responseWriter http.ResponseWriter, httpRequest *http.Request)
 // SaveMapInfos serves PUT /api/mapinfos: the body is the complete map tree.
 func SaveMapInfos(announcer WriteAnnouncer) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
-		saveDocument[[]*db.RpgMapInfo](responseWriter, httpRequest, announcer, "data/MapInfos.json", mzjson.TableLayout)
+		saveDocument[[]*db.RpgMapInfo](responseWriter, httpRequest, announcer, "data/MapInfos.json", mzjson.TableLayout, wholeTable[[]*db.RpgMapInfo])
 	}
 }
 
@@ -50,7 +52,7 @@ func LoadTilesets(responseWriter http.ResponseWriter, httpRequest *http.Request)
 // SaveTilesets serves PUT /api/tilesets: the body is the complete tileset table.
 func SaveTilesets(announcer WriteAnnouncer) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
-		saveDocument[[]*db.RpgTileset](responseWriter, httpRequest, announcer, "data/Tilesets.json", mzjson.TableLayout)
+		saveDocument[[]*db.RpgTileset](responseWriter, httpRequest, announcer, "data/Tilesets.json", mzjson.TableLayout, wholeTable[[]*db.RpgTileset])
 	}
 }
 
@@ -64,8 +66,18 @@ func SaveMap(announcer WriteAnnouncer) http.HandlerFunc {
 			return
 		}
 
-		saveDocument[*db.RpgMap](responseWriter, httpRequest, announcer, mapFileName(id), mzjson.MapLayout)
+		saveDocument[*db.RpgMap](responseWriter, httpRequest, announcer, mapFileName(id), mzjson.MapLayout, wholeObject[*db.RpgMap])
 	}
+}
+
+// wholeObject checks that a body spells out every key of its model, T.
+func wholeObject[T any](document *mzjson.Value) error {
+	return mzjson.RequireEveryKey(document, reflect.TypeFor[T]())
+}
+
+// wholeTable checks that a body is one of MZ's tables of T's rows: null first, then whole rows.
+func wholeTable[T any](document *mzjson.Value) error {
+	return mzjson.RequireTable(document, reflect.TypeFor[T]().Elem())
 }
 
 // mapIdFromPath reads the {mapId} path value, answering 400 itself when it is not an integer of at
@@ -116,27 +128,42 @@ func loadDocument[T any](responseWriter http.ResponseWriter, httpRequest *http.R
 // saveDocument decodes the body strictly into T and writes it to relativePath in MZ's layout,
 // answering 204 with no body.
 //
-// Strict for the same reason every write here is: whatever this decodes into is what reaches the
-// disk, so a field the model does not declare would be dropped from the file without a word. A 400
-// naming the field is the better outcome. The body must also be exactly one JSON value; anything
-// after it is refused rather than ignored.
-func saveDocument[T any](responseWriter http.ResponseWriter, httpRequest *http.Request, announcer WriteAnnouncer, relativePath string, layout mzjson.Layout) {
+// Strict in both directions, because whatever this decodes into is what reaches the disk. A key the
+// model does not declare would be dropped from the file without a word; a key the body leaves out,
+// or sends as null, would be written as a zero value just as quietly, and a map written without its
+// tiles crashes the engine. Either is refused with a 400 naming the key, before anything is written.
+// The body must also be exactly one JSON value; anything after it is refused rather than ignored.
+func saveDocument[T any](responseWriter http.ResponseWriter, httpRequest *http.Request, announcer WriteAnnouncer, relativePath string, layout mzjson.Layout, whole func(*mzjson.Value) error) {
 	projectPath, pathErr := GetProjectPath()
 	if pathErr != nil {
 		http.Error(responseWriter, pathErr.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// decode the body, refusing what the model cannot account for.
+	// read the body once, as one JSON document with nothing after it.
+	body, err := io.ReadAll(http.MaxBytesReader(responseWriter, httpRequest.Body, maxBodyBytes))
+	if err != nil {
+		refuseBody(responseWriter, err)
+		return
+	}
+	document, err := mzjson.Parse(body)
+	if err != nil {
+		refuseBody(responseWriter, err)
+		return
+	}
+
+	// refuse any key the model cannot account for...
 	var data T
-	decoder := json.NewDecoder(http.MaxBytesReader(responseWriter, httpRequest.Body, maxBodyBytes))
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&data); err != nil {
 		refuseBody(responseWriter, err)
 		return
 	}
-	if _, err := decoder.Token(); errors.Is(err, io.EOF) == false {
-		refuseBody(responseWriter, errors.New("the body must hold exactly one JSON document"))
+
+	// ...and any key of the model's the body left out or sent as null.
+	if err := whole(document); err != nil {
+		refuseBody(responseWriter, err)
 		return
 	}
 

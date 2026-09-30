@@ -38,10 +38,15 @@ func TableLayout(root *Value) ([]byte, error) {
 //
 // The properties keep their own order, `meta` included where a file carries one. An empty event
 // list is written as an opening and closing bracket on consecutive lines, which is what MZ does
-// for a map it has never placed an event on.
+// for a map it has never placed an event on. A map without an array of tiles and an array of events
+// is refused: the engine cannot enter one, so no file should ever hold it.
 func MapLayout(root *Value) ([]byte, error) {
 	if root.Kind != Object {
 		return nil, errors.New("a map must be a JSON object")
+	}
+	data, events := root.Member("data"), root.Member("events")
+	if data == nil || data.Kind != Array || events == nil || events.Kind != Array {
+		return nil, errors.New("a map must hold its tiles and its events as arrays")
 	}
 
 	// the properties MZ writes on one line are every member but the two it gives lines of their own.
@@ -58,12 +63,8 @@ func MapLayout(root *Value) ([]byte, error) {
 		compact := Compact(properties)
 		lines = append(lines, compact[1:len(compact)-1])
 	}
-	if data := root.Member("data"); data != nil {
-		lines = append(lines, append([]byte(`"data":`), Compact(data)...))
-	}
-	if events := root.Member("events"); events != nil {
-		lines = append(lines, eventsLine(events))
-	}
+	lines = append(lines, append([]byte(`"data":`), Compact(data)...))
+	lines = append(lines, appendLines([]byte(`"events":`), events.Items))
 
 	out := []byte("{\n")
 	for index, line := range lines {
@@ -74,16 +75,6 @@ func MapLayout(root *Value) ([]byte, error) {
 	}
 
 	return append(out, "\n}"...), nil
-}
-
-// eventsLine writes the events member, one event per line when it is the array MZ always writes.
-func eventsLine(events *Value) []byte {
-	out := []byte(`"events":`)
-	if events.Kind != Array {
-		return append(out, Compact(events)...)
-	}
-
-	return appendLines(out, events.Items)
 }
 
 // appendLines appends an array with each element on its own line, as MZ writes its tables and a
