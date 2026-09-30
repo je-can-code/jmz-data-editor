@@ -31,7 +31,7 @@ class ParallaxLayer
   #loading = false;
 
   /**
-   * @param {() => void} onChange Called when a picture finishes loading, so a frame draws it.
+   * @param {() => void} onChange Called when a picture finishes loading, or fails to, so a frame draws the result.
    */
   constructor(onChange: () => void)
   {
@@ -76,7 +76,9 @@ class ParallaxLayer
       return;
     }
 
+    // a picture still loading for the map before is no longer waited on.
     this.#clear();
+    this.#loading = false;
     if (settings.name === '' || images === null)
     {
       return;
@@ -95,14 +97,15 @@ class ParallaxLayer
         this.#sprite = new TilingSprite({ texture: new Texture({ source: this.#source }), width, height });
         this.layer.addChild(this.#sprite);
         this.#lastOffset = { x: Number.NaN, y: Number.NaN };
-        this.#onChange();
       })
       .catch(() => undefined)
       .finally(() =>
       {
+        // draw a frame whether the picture came or not, so whatever waits on the loading sees it end.
         if (generation === this.#generation)
         {
           this.#loading = false;
+          this.#onChange();
         }
       });
   }

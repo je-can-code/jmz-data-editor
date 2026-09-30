@@ -13,6 +13,7 @@ import {
   type OverlayState,
 } from '../core/renderer/MapRenderer.ts';
 import { centerCamera, fitZoom } from './cameraControls.ts';
+import { whenMapDrawn } from './openTiming.ts';
 import type { PixiMapRenderer } from './PixiMapRenderer.ts';
 
 /**
@@ -229,7 +230,7 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
   };
 
   const hooks = {
-    ready: () => context.timings['firstFrameAt'] !== undefined,
+    ready: () => context.timings['drawnAt'] !== undefined,
     timings: context.timings,
     info: () =>
     {
@@ -305,20 +306,14 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     extract: (rect: { x: number; y: number; width: number; height: number }) => renderer.extract(rect),
     paintState: () => ({ steps, redrawnFrames, painting: painting !== null }),
     undoPaint: () => hub.undo(mapHistoryKey(context.map()?.mapId ?? 0)),
+    // a warm open ends where a cold one does: at the first frame showing the map complete, sprites and parallax included.
     openMap: async (mapId: number) =>
     {
       const started = performance.now();
       await context.openMap(mapId);
       const drawn = await new Promise<number>(resolve =>
       {
-        const stop = renderer.onFrame(report =>
-        {
-          if (report.rebuiltChunks > 0)
-          {
-            stop();
-            resolve(performance.now());
-          }
-        });
+        whenMapDrawn(renderer, resolve);
       });
       return { ms: drawn - started, key: mapDocumentKey(mapId) };
     },

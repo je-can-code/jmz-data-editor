@@ -12,7 +12,7 @@
  *
  * Every map in every run gets a fresh browser, so every open is cold. Per map it measures, with the game look and
  * every overlay on:
- *   - the cold open: navigation start to the first frame that drew the map;
+ *   - the cold open: navigation start to the first frame that showed the map complete, sprites and parallax loaded;
  *   - three camera paths driven from the page's own frame clock: a pan at zoom 1, a zoom sweep from 2x out to the
  *     whole map and back, and the whole map held on screen and drifting;
  *   - a brush stroke: real pointer moves with the left button held, each painting a 3x3 patch through the paint
@@ -361,7 +361,7 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
     }
 
     const timings = await page.evaluate(() => ({ ...(window as unknown as HookWindow).__jmzMapView.timings }));
-    const coldOpenMs = timings['firstFrameAt'] ?? -1;
+    const coldOpenMs = timings['drawnAt'] ?? -1;
     await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.enableEveryOverlay());
     await page.waitForTimeout(1000);
 

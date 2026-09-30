@@ -12,6 +12,7 @@ import {
   type MapViewSettings,
 } from './mapViewSettings.ts';
 import { MapViewController } from './MapViewController.ts';
+import { whenMapDrawn } from './openTiming.ts';
 import { PixiMapRenderer } from './PixiMapRenderer.ts';
 import { projectImagesFor } from './projectImages.ts';
 import { installSpeedHooks, wantsSpeedHooks } from './speedHooks.ts';
@@ -110,16 +111,12 @@ const MapView = (props: MapViewProps) =>
       setStatus(current => (current.zoom === camera.zoom ? current : { ...current, zoom: camera.zoom }));
     }));
 
-    // the first frame that drew a map is when the page's first open finished, which is what a cold open times.
-    const stopFirstFrame = renderer.onFrame(report =>
+    // the first frame that shows the map complete, sprites and parallax included, ends the page's first open: the cold
+    // open the speed script times.
+    stops.push(whenMapDrawn(renderer, at =>
     {
-      if (report.rebuiltChunks > 0)
-      {
-        speedTimings['firstFrameAt'] ??= performance.now();
-        stopFirstFrame();
-      }
-    });
-    stops.push(stopFirstFrame);
+      speedTimings['drawnAt'] ??= at;
+    }));
 
     // the tile under the pointer, for the status line; React hears only when it changes.
     const onPointerMove = (event: PointerEvent) =>
@@ -257,7 +254,8 @@ const MapView = (props: MapViewProps) =>
 };
 
 /**
- * The page's open timings, shared with the speed hooks: when the first open began, landed, and first drew.
+ * The page's open timings, shared with the speed hooks: when the first open began, landed, and first drew the map
+ * complete (drawnAt).
  */
 const speedTimings: Record<string, number> = {};
 

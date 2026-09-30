@@ -18,7 +18,7 @@ const BUDGETS = {
   /** No frame is dropped between the stroke's first input and its last. */
   strokeDroppedFrames: 0,
 
-  /** A map opens in under half a second cold: from navigation start to the first frame that drew it. */
+  /** A map opens in under half a second cold: from navigation start to the first frame that showed it complete. */
   coldOpenMs: 500,
 
   /**
