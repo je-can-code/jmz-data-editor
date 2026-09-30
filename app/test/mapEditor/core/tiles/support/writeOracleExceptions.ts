@@ -1,7 +1,8 @@
 import { writeFileSync } from 'node:fs';
 import { auditShapes } from '../../../../../src/mapEditor/core/tiles/shapeAudit.ts';
 import { classifyMismatch, EXCEPTION_REASONS, EXCEPTIONS_FILE, type ExceptionReason } from './oracleExceptions.ts';
-import { locateShippedGame, readShippedMaps, readShippedTilesets } from './shippedGame.ts';
+import { locateGameProject } from '../../../../support/gameProject.ts';
+import { readShippedMaps, readShippedTilesets } from './shippedGame.ts';
 
 /*
  * Rewrites the autotile oracle's exceptions file from the shipped maps as they stand.
@@ -14,7 +15,7 @@ import { locateShippedGame, readShippedMaps, readShippedTilesets } from './shipp
  *
  * Usage, from app/: JMZ_PROJECT_ROOT=/path/to/game bun test/mapEditor/core/tiles/support/writeOracleExceptions.ts
  */
-const root = locateShippedGame();
+const root = locateGameProject();
 if (root === null)
 {
   throw new Error('no game to read: set JMZ_PROJECT_ROOT to the RMMZ project');

@@ -1,11 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-
-/**
- * Chef Adventure, when it sits beside this repository in the workspace. Resolved from this file rather than the
- * working directory, so it holds wherever vitest runs.
- */
-const SIBLING_GAME = fileURLToPath(new URL('../../../../../../../ca/chef-adventure', import.meta.url));
+import { readdirSync, readFileSync } from 'node:fs';
 
 /**
  * One shipped map, as the tile tests need it: its id, size, tileset, and the six layers.
@@ -25,43 +18,6 @@ type ShippedTileset = {
   readonly id: number;
   readonly mode: number;
   readonly name: string;
-};
-
-/**
- * Reports whether a folder holds an RMMZ project.
- * @param {string} root The candidate root.
- * @returns {boolean} True when it has a map tree.
- */
-const isGameFolder = (root: string): boolean =>
-{
-  return existsSync(`${root}/data/MapInfos.json`);
-};
-
-/**
- * Finds the game whose shipped maps the tile tests check.
- *
- * {@code JMZ_PROJECT_ROOT} comes first, since it is what the server reads and the only way a worktree, where the
- * sibling path resolves to nothing, can reach the game. When it is set it must be right: a mistyped path throws
- * rather than quietly skipping the very tests it was set to run. Unset, the sibling checkout is used, and the tests
- * skip when that is absent too, since the game is not part of this repository.
- * @returns {string | null} The game's root, or null when none is configured or beside the repository.
- */
-const locateShippedGame = (): string | null =>
-{
-  const configured = process.env['JMZ_PROJECT_ROOT'] ?? '';
-  if (configured !== '')
-  {
-    if (isGameFolder(configured) === false)
-    {
-      throw new Error(`JMZ_PROJECT_ROOT is set to ${configured}, which holds no RMMZ project`);
-    }
-
-    return configured;
-  }
-
-  return isGameFolder(SIBLING_GAME)
-    ? SIBLING_GAME
-    : null;
 };
 
 /**
@@ -115,5 +71,5 @@ const readShippedTilesets = (root: string): Map<number, ShippedTileset> =>
   return tilesets;
 };
 
-export { locateShippedGame, readShippedMaps, readShippedTilesets };
+export { readShippedMaps, readShippedTilesets };
 export type { ShippedMap, ShippedTileset };

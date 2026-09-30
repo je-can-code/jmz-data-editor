@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes.ts';
 import { makeAutotileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
 import { EXCEPTION_REASONS, judgeMap, readExceptionList } from './support/oracleExceptions.ts';
-import { locateShippedGame, readShippedMaps, readShippedTilesets, type ShippedMap } from './support/shippedGame.ts';
+import { locateGameProject } from '../../../support/gameProject.ts';
+import { readShippedMaps, readShippedTilesets, type ShippedMap } from './support/shippedGame.ts';
 
 /*
  * The autotile oracle.
@@ -25,7 +26,7 @@ import { locateShippedGame, readShippedMaps, readShippedTilesets, type ShippedMa
  * The game is not part of this repository: set JMZ_PROJECT_ROOT to it. When that is unset and the game does not sit
  * beside the repository, the oracle skips; when it is set and wrong, it fails.
  */
-const game = locateShippedGame();
+const game = locateGameProject();
 const maps: ShippedMap[] = game === null
   ? []
   : readShippedMaps(game);

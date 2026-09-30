@@ -1,17 +1,18 @@
+import { TILESET_MARKS } from '../editorData/editorData.ts';
 import type { TileGrid } from './tileGrid.ts';
 import { autotileKind, isA5Tile, isAutotile } from './tileIds.ts';
 import { autoLayerOf, isASheetTile } from './tileRoles.ts';
 
 /**
  * The editor-data key the marks are saved under, so they live in {@code <project>/jmz-editor/tileset-marks.json}
- * and are versioned with the game. It is the key the map editor's editor-data definitions reserve for them.
+ * and are versioned with the game. Read from the editor-data definition, so there is one place it is written down.
  */
-const TILESET_MARKS_KEY = 'tileset-marks';
+const TILESET_MARKS_KEY = TILESET_MARKS.name;
 
 /**
  * The version of the marks document's shape, stored beside it by the editor-data client.
  */
-const TILESET_MARKS_SCHEMA_VERSION = 1;
+const TILESET_MARKS_SCHEMA_VERSION = TILESET_MARKS.schemaVersion;
 
 /**
  * One tileset's marks as saved: the plain tiles marked (A5 tile ids), and the autotile kinds marked (A1 to A4, a

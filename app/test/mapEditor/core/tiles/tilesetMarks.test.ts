@@ -13,7 +13,8 @@ import {
   type TilesetMarksDocument,
 } from '../../../../src/mapEditor/core/tiles/tilesetMarks.ts';
 import { blankGrid, fill, put } from './support/tileGridBuilder.ts';
-import { locateShippedGame, readShippedMaps, readShippedTilesets } from './support/shippedGame.ts';
+import { locateGameProject } from '../../../support/gameProject.ts';
+import { readShippedMaps, readShippedTilesets } from './support/shippedGame.ts';
 
 /*
  * The goes-on-top marks.
@@ -276,7 +277,7 @@ describe('deriveTilesetMarks', () =>
   });
 });
 
-const game = locateShippedGame();
+const game = locateGameProject();
 
 describe.skipIf(game === null)('the marks Chef Adventure starts with', () =>
 {
