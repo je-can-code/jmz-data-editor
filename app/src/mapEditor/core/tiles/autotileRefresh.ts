@@ -1,6 +1,6 @@
-import { autotileShapeFor } from './autotileShapes.ts';
+import { autotileShapeFor, isRunKind } from './autotileShapes.ts';
 import { isInside, TileDraft, type CellChange, type TileGrid, type TileReader } from './tileGrid.ts';
-import { autotileKind, isAutotile, isWallSideKind, makeAutotileId } from './tileIds.ts';
+import { autotileKind, isAutotile, makeAutotileId } from './tileIds.ts';
 
 /**
  * A cell by its column and row.
@@ -8,18 +8,18 @@ import { autotileKind, isAutotile, isWallSideKind, makeAutotileId } from './tile
 type CellPosition = readonly [ x: number, y: number ];
 
 /**
- * Reports whether any tile layer of a cell holds a wall face.
+ * Reports whether any tile layer of a cell holds a kind whose whole vertical run some shape reads.
  * @param {TileReader} reader The map.
  * @param {number} x The column.
  * @param {number} y The row.
- * @returns {boolean} True when some layer holds an A3 building wall or A4 wall side.
+ * @returns {boolean} True when some layer holds a wall face or a roof.
  */
-const holdsWallFace = (reader: TileReader, x: number, y: number): boolean =>
+const holdsRunKind = (reader: TileReader, x: number, y: number): boolean =>
 {
   for (let z = 0; z < 4; z++)
   {
     const tileId = reader.tileAt(x, y, z);
-    if (isAutotile(tileId) && isWallSideKind(autotileKind(tileId)))
+    if (isAutotile(tileId) && isRunKind(autotileKind(tileId)))
     {
       return true;
     }
@@ -30,8 +30,13 @@ const holdsWallFace = (reader: TileReader, x: number, y: number): boolean =>
 
 /**
  * Lists every cell whose autotiles a change to the given cells could reshape. That is each changed cell and its
- * eight neighbours, since every shape reads its neighbours; and, because a wall face's sides depend on where its
- * column's wall starts, every wall face hanging below a changed cell, with the cells either side of it.
+ * eight neighbours, since every shape reads its neighbours; and every row of the wall and roof runs reaching up and
+ * down from a changed cell, with the cells either side of each, since those shapes read where their column's run
+ * starts and ends and where the run beside them does (see {@link isRunKind}).
+ *
+ * Walking the map as it stands after the change is enough. A run whose ends moved is one the change lengthened,
+ * shortened, split or joined, so it still reaches the changed cell, or the cell just above or below it, through
+ * cells that hold it afterwards.
  * @param {TileReader} reader The map, after the change.
  * @param {Iterable<CellPosition>} changed The cells whose tiles changed.
  * @returns {CellPosition[]} The cells to reshape, each once, inside the map.
@@ -50,6 +55,14 @@ const cellsToReshape = (reader: TileReader, changed: Iterable<CellPosition>): Ce
     }
   };
 
+  // a row of a run, and the cells either side that read it.
+  const addRow = (x: number, row: number): void =>
+  {
+    add(x - 1, row);
+    add(x, row);
+    add(x + 1, row);
+  };
+
   for (const [ x, y ] of changed)
   {
     // every neighbour reads this cell.
@@ -61,12 +74,15 @@ const cellsToReshape = (reader: TileReader, changed: Iterable<CellPosition>): Ce
       }
     }
 
-    // the wall faces below may now start somewhere else, which moves their side edges and their neighbours'.
-    for (let row = y + 1; row < reader.height && holdsWallFace(reader, x, row); row++)
+    // the runs above and below may now end or start somewhere else, which moves the side edges of every row.
+    for (let row = y - 1; row >= 0 && holdsRunKind(reader, x, row); row--)
     {
-      add(x - 1, row);
-      add(x, row);
-      add(x + 1, row);
+      addRow(x, row);
+    }
+
+    for (let row = y + 1; row < reader.height && holdsRunKind(reader, x, row); row++)
+    {
+      addRow(x, row);
     }
   }
 

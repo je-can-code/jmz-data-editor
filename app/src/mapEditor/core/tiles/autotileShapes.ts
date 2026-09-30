@@ -536,6 +536,20 @@ const roofRunsMatch = (reader: TileReader, x: number, y: number, dx: number, kin
 };
 
 /**
+ * Reports whether some shape rule reads a whole vertical run of a kind, not only the cells beside a tile: a wall
+ * face's sides compare where its column's wall starts and ends with the wall beside it (see
+ * {@link wallSideNeighbourJoins}), and a roof joins the roof beside it only when both span the same rows (see
+ * {@link roofRunsMatch}). So a change to one cell of such a run can reshape every row of that run, and the rows
+ * beside it, however far they reach from the change; reshaping after a stroke follows these runs for that reason.
+ * @param {number} kind The autotile kind.
+ * @returns {boolean} True for wall faces and roofs.
+ */
+const isRunKind = (kind: number): boolean =>
+{
+  return isWallSideKind(kind) || isRoofKind(kind);
+};
+
+/**
  * Works out a waterfall's shape from the cells either side of it; see {@link waterfallNeighbourJoins}.
  * @param {TileReader} reader The map.
  * @param {number} x The column.
@@ -654,6 +668,7 @@ export {
   floorNeighbourJoins,
   floorShape,
   holdsKind,
+  isRunKind,
   Neighbour,
   NEIGHBOUR_OFFSETS,
   roofNeighbourJoins,
