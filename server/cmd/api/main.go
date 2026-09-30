@@ -6,6 +6,7 @@ import (
 	"jmz-data-editor/server/internal/middleware"
 	"jmz-data-editor/server/internal/models/db"
 	"jmz-data-editor/server/internal/models/plugins"
+	"jmz-data-editor/server/internal/placements"
 	"jmz-data-editor/server/internal/store"
 	"jmz-data-editor/server/internal/watch"
 	"net/http"
@@ -135,6 +136,11 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 
 	mux.HandleFunc("GET /api/file-changes", api.StreamFileChanges(changes, api.DefaultStreamTiming))
 	//endregion map editor endpoints
+
+	//region cross references
+	// the index listens to the change stream from its first answer on, to know which maps to read again.
+	mux.HandleFunc("GET /api/enemies/{enemyId}/placements", api.LoadEnemyPlacements(placements.NewIndex(changes)))
+	//endregion cross references
 
 	return middleware.CORS(mux, policy)
 }

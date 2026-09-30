@@ -82,6 +82,7 @@ func TestOtherSitesPagesAreRefused(t *testing.T) {
 		{name: "a read", method: http.MethodGet, target: "/api/mapinfos"},
 		{name: "a plugin's source", method: http.MethodGet, target: "/api/plugin-source/Hello"},
 		{name: "the change stream", method: http.MethodGet, target: "/api/file-changes"},
+		{name: "an enemy's placements", method: http.MethodGet, target: "/api/enemies/1/placements"},
 		{name: "a map save", method: http.MethodPut, target: "/api/maps/1", body: mapFixture},
 		{name: "a form posting to a database route", method: http.MethodPost, target: "/api/system", body: `{}`, header: []string{"Content-Type", "text/plain"}},
 		{name: "a preflight", method: http.MethodOptions, target: "/api/maps/1", header: []string{"Access-Control-Request-Method", "PUT"}},
