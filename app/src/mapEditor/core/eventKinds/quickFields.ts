@@ -259,6 +259,34 @@ const sharedActions = (models: readonly QuickModel[]): SharedAction[] =>
 };
 
 /**
+ * One heading of a quick panel and what sits under it.
+ */
+type QuickSection = {
+  readonly title: string;
+  readonly fields: readonly SharedField[];
+  readonly actions: readonly SharedAction[];
+};
+
+/**
+ * Files shared settings and actions under their headings, each heading where its first entry appears, settings
+ * before actions. Entries with no heading come first, under an empty title.
+ * @param {readonly SharedField[]} fields The shared settings.
+ * @param {readonly SharedAction[]} actions The shared actions.
+ * @returns {QuickSection[]} The sections, in order.
+ */
+const quickSections = (fields: readonly SharedField[], actions: readonly SharedAction[]): QuickSection[] =>
+{
+  const titles = [ ...new Set([ '', ...fields.map(field => field.section), ...actions.map(action => action.section) ]) ];
+  return titles
+    .map(title => ({
+      title,
+      fields: fields.filter(field => field.section === title),
+      actions: actions.filter(action => action.section === title),
+    }))
+    .filter(section => section.fields.length > 0 || section.actions.length > 0);
+};
+
+/**
  * Applies one event's edits inside a transaction, addressed to the event's slot in the map.
  * @param {Transaction} tx The open transaction.
  * @param {MapDocumentKey} key The map's document.
@@ -478,6 +506,7 @@ export {
   graphicEdits,
   graphicValue,
   groupSelection,
+  quickSections,
   runQuickAction,
   sharedActions,
   sharedFields,
@@ -493,6 +522,7 @@ export type {
   QuickModel,
   QuickModelSource,
   QuickOption,
+  QuickSection,
   SelectionGroups,
   SharedAction,
   SharedField,

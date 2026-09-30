@@ -17,6 +17,7 @@ import { SharedFileChangeFeed, type LockManagerLike } from '../core/sync/SharedF
 import { SyncPeer } from '../core/sync/SyncPeer.ts';
 import { parseMapEditorView, type MapEditorView } from '../views/mapEditorViews.ts';
 import { wireCommandEditing } from './commandEditing.ts';
+import { registerCoreEventKinds } from './coreEventKinds.ts';
 
 /**
  * Everything one map editor window runs on. Later packages reach these through the services context rather than
@@ -70,7 +71,8 @@ type MapEditorServices = {
   readonly pluginHeaders: PluginHeaderStore;
 
   /**
-   * The event kinds and plugin modules.
+   * The event kinds and plugin modules; the core's kinds (chests, transfers, dialogue, decor) are registered from
+   * the start.
    */
   readonly modules: PluginModuleRegistry;
 
@@ -209,6 +211,8 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   registerBuiltInCommands(catalog);
   const commandEditors = new CommandEditorRegistry();
   const commandEditing = wireCommandEditing(api, catalog, commandEditors);
+  const modules = new PluginModuleRegistry(catalog);
+  registerCoreEventKinds(modules);
 
   // the change stream is shared by every window, and only exists with a server to stream from.
   const feed = api === null
@@ -239,7 +243,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     catalog,
     commandEditors,
     pluginHeaders: commandEditing.headers,
-    modules: new PluginModuleRegistry(catalog),
+    modules,
     loadCommandResources: commandEditing.load,
     openDocument: async (key: DocumentKey) =>
     {

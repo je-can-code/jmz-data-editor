@@ -144,7 +144,7 @@ describe('MapEditorServices', () =>
     return { services, window };
   };
 
-  it('builds a whole window: its view, its client, a hub over the server, the built-in commands, and empty registries ready to fill', () =>
+  it('builds a whole window: its view, its client, a hub over the server, the built-in commands, and the core\'s event kinds with no module on yet', () =>
   {
     // Arrange.
     const { environment } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
@@ -159,9 +159,18 @@ describe('MapEditorServices', () =>
       services.api?.clientId,
       services.hub.clientId,
       services.catalog.entries().map(entry => entry.id),
-      services.modules.eventKinds(),
+      services.modules.eventKinds().map(kind => kind.id),
+      services.modules.paletteEntries(),
     ])
-      .toStrictEqual([ 'window-a', { kind: 'event', mapId: 1, eventId: 3 }, 'window-a', 'window-a', BUILT_IN_ENTRIES.map(entry => entry.id), [] ]);
+      .toStrictEqual([
+        'window-a',
+        { kind: 'event', mapId: 1, eventId: 3 },
+        'window-a',
+        'window-a',
+        BUILT_IN_ENTRIES.map(entry => entry.id),
+        [ 'core.chest', 'core.transfer', 'core.dialogue', 'core.decor' ],
+        [],
+      ]);
   });
 
   it('wires command editing: every hand-built editor registered, and the plugin headers read into the catalog once a list asks', async () =>
