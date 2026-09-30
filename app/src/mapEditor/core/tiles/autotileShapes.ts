@@ -3,6 +3,7 @@ import { isInside, type TileReader } from './tileGrid.ts';
 import {
   autotileKind,
   isA1Kind,
+  isA5Tile,
   isAutotile,
   isFloorTypeKind,
   isRoofKind,
@@ -229,6 +230,26 @@ const holdsKindWhere = (reader: TileReader, x: number, y: number, test: (kind: n
 };
 
 /**
+ * Reports whether an A5 tile lies over a cell, on any layer above the ground layer.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @returns {boolean} True when layer 2, 3 or 4 holds an A5 tile.
+ */
+const holdsA5Above = (reader: TileReader, x: number, y: number): boolean =>
+{
+  for (let z = 1; z < 4; z++)
+  {
+    if (isA5Tile(reader.tileAt(x, y, z)))
+    {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+/**
  * Reports whether a neighbouring cell joins a floor tile (A1 water, A2 ground, or an A4 wall top). These are MZ's
  * rules as the shipped maps show them; the counts are the edges between a floor tile and a neighbour, across every
  * shipped map, that MZ stored joined and open:
@@ -240,20 +261,25 @@ const holdsKindWhere = (reader: TileReader, x: number, y: number, test: (kind: n
  * - open water (the ocean, and the plain water kinds) joins every waterfall, since a waterfall pours into it (304 to
  *   3);
  * - open water joins other open water kinds too, as MZ's help says A1 tiles do not draw a boundary where they touch
- *   (365 to 57), except on a Field-mode tileset, where every A1 kind keeps its own shore (0 to 84).
+ *   (363 to 21), except where an A5 tile lies over either of the two cells, which keeps a shore between them (36 open
+ *   to 2), and except on a Field-mode tileset, where every A1 kind keeps its own shore (0 to 84).
  *
  * Nothing else joins: a different ground kind, a wall, an A5 tile or an empty cell all draw an edge (162,774 open;
  * the 6,772 stored joined are tiles drawn or neighbours changed while MZ's autotiling was suspended).
  * @param {TileReader} reader The map.
- * @param {number} x The neighbour's column.
- * @param {number} y The neighbour's row.
+ * @param {number} x The floor tile's column.
+ * @param {number} y The floor tile's row.
+ * @param {number} dx The neighbour's offset across, -1 to 1.
+ * @param {number} dy The neighbour's offset down, -1 to 1.
  * @param {number} kind The floor tile's kind.
  * @param {number} mode The tileset's mode.
  * @returns {boolean} True when the neighbour joins.
  */
-const floorNeighbourJoins = (reader: TileReader, x: number, y: number, kind: number, mode: number): boolean =>
+const floorNeighbourJoins = (reader: TileReader, x: number, y: number, dx: number, dy: number, kind: number, mode: number): boolean =>
 {
-  if (isInside(reader, x, y) === false || holdsKind(reader, x, y, kind))
+  const nx = x + dx;
+  const ny = y + dy;
+  if (isInside(reader, nx, ny) === false || holdsKind(reader, nx, ny, kind))
   {
     return true;
   }
@@ -264,12 +290,16 @@ const floorNeighbourJoins = (reader: TileReader, x: number, y: number, kind: num
     return false;
   }
 
-  if (holdsKindWhere(reader, x, y, isWaterfallKind))
+  if (holdsKindWhere(reader, nx, ny, isWaterfallKind))
   {
     return true;
   }
 
-  return mode !== TilesetMode.field && holdsKindWhere(reader, x, y, isWaterKind);
+  // other open water joins, unless the tileset keeps A1 shores or an A5 tile lies over either cell.
+  return mode !== TilesetMode.field
+    && holdsKindWhere(reader, nx, ny, isWaterKind)
+    && holdsA5Above(reader, x, y) === false
+    && holdsA5Above(reader, nx, ny) === false;
 };
 
 /**
@@ -496,7 +526,7 @@ const floorShapeAt = (reader: TileReader, x: number, y: number, kind: number, mo
   let joins = 0;
   NEIGHBOUR_OFFSETS.forEach(([ dx, dy ], bit) =>
   {
-    if (floorNeighbourJoins(reader, x + dx, y + dy, kind, mode))
+    if (floorNeighbourJoins(reader, x, y, dx, dy, kind, mode))
     {
       joins |= 1 << bit;
     }

@@ -15,7 +15,7 @@ import type { ShippedMap } from './shippedGame.ts';
  * Why a stored autotile shape may differ from what its neighbours call for. Each reason carries a test the oracle
  * applies to every cell filed under it, so a cell can never be excused by a reason its data does not support.
  */
-type ExceptionReason = 'mapgen' | 'map-edge' | 'water-boundary' | 'suspended-autotiling' | 'stale-open' | 'stamped';
+type ExceptionReason = 'mapgen' | 'map-edge' | 'suspended-autotiling' | 'stale-open' | 'stamped';
 
 /**
  * The reasons, in the order a mismatch is tried against them, each with the explanation the exceptions file carries.
@@ -32,12 +32,6 @@ const EXCEPTION_REASONS: readonly { readonly reason: ExceptionReason; readonly e
     explanation: 'Every edge that differs faces beyond the map. Across the shipped maps these edges are stored both '
       + 'ways, each map consistently, which points at a map resized or shifted after it was drawn: MZ resizes from the '
       + 'bottom-right corner, and its Shift command moves tiles, and neither reshapes the tiles left at the new edge.',
-  },
-  {
-    reason: 'water-boundary',
-    explanation: 'Maps 215 and 216 keep an edge between water kind 8 and the ocean, on both sides, where every other '
-      + 'map joins open water kinds. The region is consistent with itself, so it is not a stale edge; why MZ drew it '
-      + 'is unknown.',
   },
   {
     reason: 'suspended-autotiling',
@@ -163,28 +157,6 @@ const mapgenWallShape = (map: ShippedMap, cell: ShapeMismatch): number =>
 };
 
 /**
- * Reports whether a map cell holds a kind on any tile layer.
- * @param {ShippedMap} map The map.
- * @param {number} x The column.
- * @param {number} y The row.
- * @param {number} kind The kind.
- * @returns {boolean} True when some layer holds it.
- */
-const cellHoldsKind = (map: ShippedMap, x: number, y: number, kind: number): boolean =>
-{
-  for (let z = 0; z < 4; z++)
-  {
-    const tileId = map.cells[(z * map.height + y) * map.width + x];
-    if (isAutotile(tileId) && autotileKind(tileId) === kind)
-    {
-      return true;
-    }
-  }
-
-  return false;
-};
-
-/**
  * Compares which neighbours the stored and the expected shape join.
  * @param {ShapeMismatch} cell The mismatch.
  * @returns {'superset' | 'subset' | 'mixed' | 'unreadable'} Whether the stored shape joins everything the expected
@@ -239,23 +211,6 @@ const REASON_TESTS: Readonly<Record<ExceptionReason, (map: ShippedMap, cell: Sha
       const x = cell.x + dx;
       const y = cell.y + dy;
       return x < 0 || y < 0 || x >= map.width || y >= map.height;
-    });
-  },
-  'water-boundary': (map, cell) =>
-  {
-    // only the ocean and water kind 8, on the two maps that keep a shore between them.
-    if ((map.id !== 215 && map.id !== 216) || (cell.kind !== 0 && cell.kind !== 8))
-    {
-      return false;
-    }
-
-    const other = cell.kind === 0
-      ? 8
-      : 0;
-    const neighbours = differingNeighbours(cell);
-    return compareJoins(cell) !== 'unreadable' && neighbours.length > 0 && neighbours.every(([ dx, dy ]) =>
-    {
-      return cellHoldsKind(map, cell.x + dx, cell.y + dy, other) && cellHoldsKind(map, cell.x + dx, cell.y + dy, cell.kind) === false;
     });
   },
   'suspended-autotiling': (_map, cell) =>

@@ -247,6 +247,21 @@ describe('floor tiles', () =>
       .toEqual([ 0, floorShape(0xff & ~Neighbour.east & ~Neighbour.northEast & ~Neighbour.southEast) ]);
   });
 
+  it('keep a shore between open water kinds where an A5 tile lies over either cell', () =>
+  {
+    // Arrange: ocean beside a pond twice, once with an A5 tile over the pond and once over the ocean.
+    const overPond = put(put(put(blankGrid(2, 1), 0, 0, 0, kindTile(OCEAN)), 1, 0, 0, kindTile(POND)), 1, 0, 1, TileId.A5 + 8);
+    const overOcean = put(put(put(blankGrid(2, 1), 0, 0, 0, kindTile(OCEAN)), 1, 0, 0, kindTile(POND)), 0, 0, 1, TileId.A5 + 8);
+
+    // Act.
+    const shapes = [ shapeOf(overPond, 0, 0, OCEAN), shapeOf(overOcean, 0, 0, OCEAN) ];
+
+    // Assert: both keep the east shore that the pair without an A5 tile joins across.
+    const eastShore = floorShape(0xff & ~Neighbour.east & ~Neighbour.northEast & ~Neighbour.southEast);
+    expect(shapes)
+      .toEqual([ eastShore, eastShore ]);
+  });
+
   it('keep deep sea bordered against the ocean around it, even on an Area tileset', () =>
   {
     // Arrange: ocean on layer 1 of both cells, deep sea on layer 2 of the western one.
