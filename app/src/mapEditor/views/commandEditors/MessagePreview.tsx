@@ -88,7 +88,7 @@ const useTextColors = (): readonly string[] =>
         const canvas = document.createElement('canvas');
         canvas.width = image.width;
         canvas.height = image.height;
-        const context = canvas.getContext('2d');
+        const context = canvas.getContext('2d', { willReadFrequently: true });
         context?.drawImage(image, 0, 0);
         const sampled = DEFAULT_TEXT_COLORS.map((fallback, index) =>
         {
