@@ -1,8 +1,7 @@
 import type { MapEditorApi } from '../core/api/MapEditorApi.ts';
 import type { CommandCatalog } from '../core/commands/CommandCatalog.ts';
 import type { CommandEditorRegistry } from '../core/commands/CommandEditorRegistry.ts';
-import { loadPluginHeaders } from '../core/commands/pluginHeaders/loadPluginHeaders.ts';
-import type { PluginHeader } from '../core/commands/pluginHeaders/pluginHeader.ts';
+import { loadPluginHeaders, type PluginHeaders } from '../core/commands/pluginHeaders/loadPluginHeaders.ts';
 import { pluginHeaderEntries } from '../core/commands/pluginHeaders/pluginHeaderEntries.ts';
 import { PluginHeaderStore } from '../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { namedRows, type DatabaseNamesJson } from '../core/commandList/databaseNames.ts';
@@ -63,17 +62,17 @@ const wireCommandEditing = (api: MapEditorApi | null, catalog: CommandCatalog, r
   const read = async (server: MapEditorApi): Promise<void> =>
   {
     // a project whose headers cannot be read still edits every command, plugin commands as their raw parameters.
-    const [ loaded, names ] = await Promise.all([
-      loadPluginHeaders(server).catch((): PluginHeader[] => []),
+    const [ { headers: loadedHeaders, entries }, names ] = await Promise.all([
+      loadPluginHeaders(server).catch((): PluginHeaders => ({ headers: [], entries: [] })),
       commandListResourcesOf(server).names,
     ]);
     databaseNames = names;
 
     // an entry some module already registered for the same command keeps its place.
-    pluginHeaderEntries(loaded)
+    pluginHeaderEntries(loadedHeaders)
       .filter(entry => catalog.entry(entry.id) === null)
       .forEach(entry => catalog.register(entry));
-    headers.set(loaded);
+    headers.set(loadedHeaders, entries);
   };
 
   let reading: Promise<void> | null = null;

@@ -44,7 +44,8 @@ const UnlistedArgs = (props: { names: readonly string[]; model: PluginCommandMod
 /**
  * Edits a plugin command: the plugin, the command, and its arguments as a form built from the plugin's header,
  * structs and lists included. A command the header does not list, or a plugin whose header is not available,
- * still opens: its values show as text and every one of them is kept.
+ * still opens: its values show as text and every one of them is kept. An unregistered plugin or command shows
+ * an error banner naming why, above the form.
  * @param {CommandEditorProps} props The command, its lines and what to do with a change.
  * @returns {React.JSX.Element} The editor.
  */
@@ -59,6 +60,7 @@ const PluginCommandEditor = (props: CommandEditorProps) =>
   }
 
   const schema = library.command(model.plugin, model.command);
+  const registration = library.registrationOf(model.plugin, model.command);
   const change = (next: PluginCommandModel) =>
   {
     const written = writePluginCommand(command, continuation, next, library.command(next.plugin, next.command));
@@ -73,6 +75,9 @@ const PluginCommandEditor = (props: CommandEditorProps) =>
 
   return (
     <EditorStack>
+      {registration.registered === false && (
+        <Alert severity={'error'}>{registration.message}</Alert>
+      )}
       <FieldRow>
         <TextField select size={'small'} label={'Plugin'} value={model.plugin} sx={{ width: 260 }} onChange={event =>
         {
