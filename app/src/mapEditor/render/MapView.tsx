@@ -1,7 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Box, Typography } from '@mui/material';
-import type { Camera } from '../core/renderer/camera.ts';
+import { Box, Chip, Divider, Typography } from '@mui/material';
+import type { Camera, MapCell } from '../core/renderer/camera.ts';
+import { GAME_LOOK, type OverlayId } from '../core/renderer/MapRenderer.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
+import {
+  flipSwitch,
+  isSwitchOn,
+  SETTING_SWITCHES,
+  TILE_LAYERS,
+  toggleHighlight,
+  type MapViewSettings,
+} from './mapViewSettings.ts';
 import { MapViewController } from './MapViewController.ts';
 import { PixiMapRenderer } from './PixiMapRenderer.ts';
 import { projectImagesFor } from './projectImages.ts';
@@ -23,8 +32,14 @@ type MapViewProps = {
 type MapViewStatus = {
   readonly gpu: string;
   readonly zoom: number;
+  readonly cell: MapCell | null;
   readonly problem: string | null;
 };
+
+/**
+ * The overlays the tools draw into, on from the start: they draw nothing until a tool gives them something.
+ */
+const TOOL_OVERLAYS: readonly OverlayId[] = [ 'selection', 'hover', 'ghost' ];
 
 /**
  * Reads the map to open from a page's query string: the map editor page opens one straight away with {@code ?map=102},
@@ -58,7 +73,8 @@ const zoomLabel = (zoom: number): string =>
 
 /**
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
- * component mounts a renderer, opens the map into it, and shows a status line with the zoom and the GPU drawing it.
+ * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look,
+ * with a status line naming the zoom, the tile under the pointer and the GPU drawing it.
  * @param {MapViewProps} props The map to show.
  * @returns {React.JSX.Element} The view.
  */
@@ -67,8 +83,10 @@ const MapView = (props: MapViewProps) =>
   const { mapId } = props;
   const services = useMapEditorServices();
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const rendererRef = useRef<PixiMapRenderer | null>(null);
   const controllerRef = useRef<MapViewController | null>(null);
-  const [ status, setStatus ] = useState<MapViewStatus>({ gpu: '', zoom: 1, problem: null });
+  const [ status, setStatus ] = useState<MapViewStatus>({ gpu: '', zoom: 1, cell: null, problem: null });
+  const [ settings, setSettings ] = useState<MapViewSettings>({ visibility: GAME_LOOK, overlays: new Set(TOOL_OVERLAYS) });
 
   // one renderer for the life of the view, whatever map it shows.
   useEffect(() =>
@@ -83,6 +101,7 @@ const MapView = (props: MapViewProps) =>
 
     const renderer = new PixiMapRenderer();
     renderer.mount(host);
+    rendererRef.current = renderer;
     const controller = new MapViewController(renderer, services, projectImagesFor(api));
     controllerRef.current = controller;
     const stops: (() => void)[] = [];
@@ -101,6 +120,17 @@ const MapView = (props: MapViewProps) =>
       }
     });
     stops.push(stopFirstFrame);
+
+    // the tile under the pointer, for the status line; React hears only when it changes.
+    const onPointerMove = (event: PointerEvent) =>
+    {
+      const bounds = host.getBoundingClientRect();
+      const cell = renderer.cellAt({ x: event.clientX - bounds.left, y: event.clientY - bounds.top });
+      setStatus(current => (current.cell?.x === cell?.x && current.cell?.y === cell?.y ? current : { ...current, cell }));
+    };
+    host.addEventListener('pointermove', onPointerMove);
+    stops.push(() => host.removeEventListener('pointermove', onPointerMove));
+
     renderer.whenReady()
       .then(() => setStatus(current => ({ ...current, gpu: renderer.rendererInfo()?.renderer ?? '' })))
       .catch(() => setStatus(current => ({ ...current, problem: 'This window cannot draw with the GPU.' })));
@@ -125,6 +155,7 @@ const MapView = (props: MapViewProps) =>
       stops.forEach(stop => stop());
       controller.close();
       controllerRef.current = null;
+      rendererRef.current = null;
       renderer.destroy();
     };
   }, [ services ]);
@@ -143,12 +174,10 @@ const MapView = (props: MapViewProps) =>
       .then(map =>
       {
         speedTimings['openedAt'] = performance.now();
-        if (map === null)
+        if (map !== null)
         {
-          return;
+          setStatus(current => ({ ...current, problem: null }));
         }
-
-        setStatus(current => ({ ...current, problem: null }));
       })
       .catch((error: unknown) =>
       {
@@ -156,8 +185,51 @@ const MapView = (props: MapViewProps) =>
       });
   }, [ mapId ]);
 
+  // hand the renderer the switches, the modules' overlays and their passability rules.
+  useEffect(() =>
+  {
+    const renderer = rendererRef.current;
+    if (renderer === null)
+    {
+      return;
+    }
+
+    const definitions = services.modules.overlays();
+    const enabled = new Set<OverlayId>(settings.overlays);
+    definitions.filter(definition => definition.defaultOn).forEach(definition => enabled.add(definition.id));
+    renderer.setLayerVisibility(settings.visibility);
+    renderer.setOverlays({ enabled, definitions });
+    renderer.setPassabilityRules(services.modules.passabilityRules());
+  }, [ services, settings ]);
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5, px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
+        {SETTING_SWITCHES.map(setting => (
+          <Chip
+            color={isSwitchOn(settings, setting) ? 'primary' : 'default'}
+            key={setting.label}
+            label={setting.label}
+            onClick={() => setSettings(current => flipSwitch(current, setting))}
+            size={'small'}
+            variant={isSwitchOn(settings, setting) ? 'filled' : 'outlined'}
+          />
+        ))}
+        <Divider flexItem orientation={'vertical'} sx={{ mx: 0.5 }}/>
+        <Typography variant={'caption'} color={'text.secondary'}>
+          Highlight layer
+        </Typography>
+        {TILE_LAYERS.map((layer, index) => (
+          <Chip
+            color={settings.visibility.highlighted === layer ? 'primary' : 'default'}
+            key={layer}
+            label={String(index + 1)}
+            onClick={() => setSettings(current => toggleHighlight(current, layer))}
+            size={'small'}
+            variant={settings.visibility.highlighted === layer ? 'filled' : 'outlined'}
+          />
+        ))}
+      </Box>
       <Box
         data-testid={'map-view'}
         ref={hostRef}
@@ -169,6 +241,9 @@ const MapView = (props: MapViewProps) =>
         </Typography>
         <Typography variant={'caption'} color={'text.secondary'}>
           {zoomLabel(status.zoom)}
+        </Typography>
+        <Typography variant={'caption'} color={'text.secondary'}>
+          {status.cell === null ? '' : `${status.cell.x}, ${status.cell.y}`}
         </Typography>
         <Typography variant={'caption'} color={status.problem === null ? 'text.secondary' : 'error'} sx={{ flex: 1 }}>
           {status.problem ?? ''}

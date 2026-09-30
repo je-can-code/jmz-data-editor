@@ -1,7 +1,6 @@
 import { Container, Graphics, Rectangle, WebGLRenderer, type TextureSource } from 'pixi.js';
 import type { DocumentChange } from '../core/model/EditorDocument.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
-import type { Patch } from '../core/model/patches.ts';
 import type { PassabilityRule } from '../core/modules/PluginModule.ts';
 import { cellAtPoint, panBy, screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../core/renderer/camera.ts';
 import { FrameTimeRecorder, type FrameTimings } from '../core/renderer/FrameTimeRecorder.ts';
@@ -29,6 +28,7 @@ import {
   type ViewSize,
 } from './cameraControls.ts';
 import { chunkGrid, chunkRangeFor, dirtyChunksForCells, type ChunkGrid, type ChunkRange } from './chunkMath.ts';
+import { changeEffect, loopsOf } from './documentChanges.ts';
 import { animationFrameAt, animationVector, engineFramesAt } from './engine/animation.ts';
 import { cellPassage, passabilityQuery, tileEventsByCell } from './engine/passability.ts';
 import type { TileSource } from './engine/spotWriter.ts';
@@ -134,39 +134,6 @@ const VIEW_BACKGROUND = 0x121212;
  * How dark the layer highlight makes everything but the highlighted layer.
  */
 const DIM_ALPHA = 0.6;
-
-/**
- * The map properties the parallax reads.
- */
-const PARALLAX_FIELDS: ReadonlySet<string> = new Set([ 'parallaxName', 'parallaxLoopX', 'parallaxLoopY', 'parallaxSx', 'parallaxSy' ]);
-
-/**
- * Reads a map's loop settings, as Game_Map#isLoopHorizontal and #isLoopVertical.
- * @param {number} scrollType The map's scroll type: 0 none, 1 loops down, 2 loops across, 3 both.
- * @returns {{ horizontal: boolean, vertical: boolean }} Which ways it loops.
- */
-const loopsOf = (scrollType: number): { horizontal: boolean; vertical: boolean } =>
-{
-  return { horizontal: scrollType === 2 || scrollType === 3, vertical: scrollType === 1 || scrollType === 3 };
-};
-
-/**
- * Reads which event a patch changed, when it changed exactly one.
- * @param {Patch} patch The patch.
- * @returns {number | null} The event id, or null when the patch reaches the event list as a whole.
- */
-const patchedEventId = (patch: Patch): number | null =>
-{
-  if (patch.kind !== 'set' && patch.kind !== 'splice')
-  {
-    return null;
-  }
-
-  const [ , id ] = patch.path;
-  return patch.path.length >= 2 && typeof id === 'number'
-    ? id
-    : null;
-};
 
 /**
  * Draws a map with pixi and the vendored tilemap exactly as the engine does, on its own frame loop: nothing here goes
@@ -1123,32 +1090,24 @@ class PixiMapRenderer implements MapRenderer
   {
     this.#needsRender = true;
     this.#modulesDirty = true;
-
-    // a swapped file or a new size rebuilds everything, once, in the next frame.
-    if (change.kind === 'replaced' || change.patch.kind === 'resize')
+    const effect = changeEffect(change);
+    switch (effect.kind)
     {
-      this.#mapDirty = true;
-      return;
-    }
-
-    const { patch } = change;
-    if (patch.kind === 'tiles')
-    {
-      this.#markTiles(patch.indices);
-      return;
-    }
-
-    const [ field ] = patch.path;
-    if (field === 'events')
-    {
-      this.#eventsChanged(patch);
-      return;
-    }
-
-    // the loop settings change how the edges read; the parallax fields change the parallax.
-    if (field === 'scrollType' || PARALLAX_FIELDS.has(String(field)))
-    {
-      this.#mapDirty = true;
+      case 'rebuild':
+        // rebuilt once, in the next frame, however many changes arrive before it.
+        this.#mapDirty = true;
+        break;
+      case 'tiles':
+        this.#markTiles(effect.indices);
+        break;
+      case 'event':
+        this.#eventsChanged(effect.id);
+        break;
+      case 'events':
+        this.#eventsChanged(null);
+        break;
+      case 'overlays':
+        break;
     }
   }
 
@@ -1171,12 +1130,11 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Redraws the events a patch touched, and the passability their tile images feed.
-   * @param {Patch} patch The patch.
+   * Redraws the events a change touched, and the passability their tile images feed.
+   * @param {number | null} id The event, or null when the list itself changed.
    */
-  #eventsChanged(patch: Patch): void
+  #eventsChanged(id: number | null): void
   {
-    const id = patchedEventId(patch);
     if (id === null)
     {
       this.#events.rebuild();

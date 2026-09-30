@@ -54,7 +54,8 @@ type LayerVisibility = {
 };
 
 /**
- * The game look, the renderer's default.
+ * The game look, the renderer's default. Auto-shadows start off because the game never draws them: J-Base turns
+ * Tilemap#_addShadow into nothing. A switch shows them for editing.
  */
 const GAME_LOOK: LayerVisibility = {
   layers: {
@@ -62,7 +63,7 @@ const GAME_LOOK: LayerVisibility = {
     tiles2: true,
     tiles3: true,
     tiles4: true,
-    shadows: true,
+    shadows: false,
     events: true,
     parallax: true,
     lighting: true,
