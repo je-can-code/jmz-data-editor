@@ -3,6 +3,7 @@ import { chestQuickModel, readChest } from '../../../../src/mapEditor/core/event
 import {
   editQuickField,
   groupSelection,
+  quickSections,
   runQuickAction,
   sharedActions,
   sharedFields,
@@ -215,6 +216,34 @@ describe('quickFields', () =>
       // Assert.
       expect([ step?.label, counts, none, eventIn(hub, 1), eventIn(hub, 3), eventIn(hub, 4) ])
         .toStrictEqual([ 'Add chest reward', [ 2, 2 ], null, chests[0], chests[1], door ]);
+    });
+  });
+
+  describe('quickSections', () =>
+  {
+    it('files settings and actions under their headings where each first appears, unheaded ones first', () =>
+    {
+      // Arrange: a chest with two rewards offers headed settings, a headed removal, and an unheaded addition.
+      const two = oreChest(1, [
+        command(250, [ { name: 'Chest1', volume: 90, pitch: 100, pan: 0 } ]),
+        command(205, [ 0, { repeat: false, skippable: false, wait: true, list: [ { code: 0 } ] } ]),
+        command(123, [ 'A', 0 ]),
+        command(126, [ 1, 0, 0, 1 ]),
+        command(125, [ 0, 0, 50 ]),
+      ]);
+      const model = chestQuickModel(two);
+
+      // Act.
+      const sections = quickSections(sharedFields([ model ]), sharedActions([ model ]));
+
+      // Assert.
+      expect(sections.map(section => [ section.title, section.fields.map(field => field.key), section.actions.map(action => action.key) ]))
+        .toStrictEqual([
+          [ '', [], [ 'reward.add' ] ],
+          [ 'Reward 1', [ 'reward.0.kind', 'reward.0.item', 'reward.0.amount' ], [ 'reward.0.remove' ] ],
+          [ 'Reward 2', [ 'reward.1.kind', 'reward.1.amount' ], [ 'reward.1.remove' ] ],
+          [ 'Look', [ 'look.closed.graphic', 'look.closed.direction', 'look.closed.pattern', 'look.opened.graphic', 'look.opened.direction', 'look.opened.pattern' ], [] ],
+        ]);
     });
   });
 

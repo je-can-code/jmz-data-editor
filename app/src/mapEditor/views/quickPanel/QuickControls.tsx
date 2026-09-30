@@ -358,17 +358,20 @@ const GraphicPreview = (props: { api: MapEditorApi | null; image: RmmzEventImage
     return <Box sx={box} data-testid={'graphic-preview'}/>;
   }
 
+  // the frame's numbers change with every picture, so they go inline rather than into a style class each.
   const scale = Math.min(1, PREVIEW_SIZE / Math.max(frame.width, frame.height));
   return (
     <Box sx={box} data-testid={'graphic-preview'}>
-      <Box sx={{
-        width: frame.width * scale,
-        height: frame.height * scale,
-        backgroundImage: `url("${url}")`,
-        backgroundPosition: `-${frame.sx * scale}px -${frame.sy * scale}px`,
-        backgroundSize: `${loaded.width * scale}px ${loaded.height * scale}px`,
-        imageRendering: 'pixelated',
-      }}/>
+      <Box
+        sx={{ imageRendering: 'pixelated' }}
+        style={{
+          width: `${frame.width * scale}px`,
+          height: `${frame.height * scale}px`,
+          backgroundImage: `url("${url}")`,
+          backgroundPosition: `-${frame.sx * scale}px -${frame.sy * scale}px`,
+          backgroundSize: `${loaded.width * scale}px ${loaded.height * scale}px`,
+        }}
+      />
     </Box>
   );
 };
