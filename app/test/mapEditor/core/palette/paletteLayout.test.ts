@@ -10,6 +10,7 @@ import {
   rectBetween,
   rectCells,
   sheetOfRow,
+  sheetsOnTab,
 } from '../../../../src/mapEditor/core/palette/paletteLayout.ts';
 import { autotileKind, isWallSideKind, isWallTopKind, makeAutotileId, TileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
 
@@ -84,6 +85,21 @@ describe('displayTileOf', () =>
     // Assert.
     expect(drawn)
       .toStrictEqual([ TileId.A5 + 11, 5 ]);
+  });
+});
+
+describe('sheetsOnTab', () =>
+{
+  it('lists the A sheets a tileset names in order, the one upper sheet of its tab, and no sheet for the regions', () =>
+  {
+    // Arrange: the dungeon tileset names no A3 and no D.
+
+    // Act.
+    const sheets = [ 'A', 'C', 'D', 'R' ].map(tab => sheetsOnTab(tab as 'A' | 'C' | 'D' | 'R', DUNGEON_SHEETS).map(sheet => sheet.sheet));
+
+    // Assert.
+    expect(sheets)
+      .toStrictEqual([ [ 'A1', 'A2', 'A4', 'A5' ], [ 'C' ], [], [] ]);
   });
 });
 
