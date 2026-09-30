@@ -128,8 +128,9 @@ const homeDocumentOf = (key: HistoryKey): DocumentKey =>
 
 /**
  * Lists the common events one patch to the common events document reaches: the one its path starts inside, or, for
- * a splice of the list itself, every one it takes out or puts in. Slot 0 is never a common event, and a tiles patch
- * reaches none, having no path at all.
+ * a splice of the list itself, every one it takes out or puts in. A place in the list is a common event's id, since
+ * MZ keeps every slot, emptying a common event rather than taking it out, and only grows or shrinks the list at its
+ * end. Slot 0 is never a common event, and a tiles patch reaches none, having no path at all.
  * @param {Patch} patch The patch.
  * @returns {number[]} The common event ids, ascending.
  */

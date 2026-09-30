@@ -1891,7 +1891,7 @@ class DocumentHub
   //endregion internals
 }
 
-export { diskOperationId, DocumentHub, OUTSIDE_CHANGE_LABEL };
+export { diskOperationId, DocumentHub };
 export type {
   DocumentConflict,
   DocumentHubOptions,
