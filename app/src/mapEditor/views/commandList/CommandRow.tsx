@@ -3,9 +3,12 @@ import { Box, Chip, IconButton, Tooltip, Typography } from '@mui/material';
 import { Add, ChevronRight, DragIndicator, ExpandMore, PlayArrow } from '@mui/icons-material';
 import type { AudioFolder, MapEditorApi } from '../../core/api/MapEditorApi.ts';
 import type { CommandCatalogEntry } from '../../core/commands/catalogTypes.ts';
+import { parsePluginCommand } from '../../core/commands/editors/pluginCommand.ts';
 import { readFieldValue, type CommandDraft } from '../../core/commands/fieldValues.ts';
 import { areaEventTag, joinsChoicesAbove } from '../../core/commandList/commandGuards.ts';
 import type { ListRow } from '../../core/commandList/listRows.ts';
+import type { PluginCommandRegistration } from '../../core/commands/pluginHeaders/pluginCommandRegistration.ts';
+import type { PluginHeaderLibrary } from '../../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { isJsonObject } from '../../core/model/json.ts';
 import type { RmmzEventCommand } from '../../core/model/rmmzTypes.ts';
 import type { SoundPlayer } from './commandListResources.ts';
@@ -33,6 +36,7 @@ type CommandRowProps = {
   readonly focused: boolean;
   readonly open: boolean;
   readonly api: MapEditorApi | null;
+  readonly pluginLibrary: PluginHeaderLibrary;
   readonly playSound: SoundPlayer;
   readonly onClick: (event: React.MouseEvent) => void;
   readonly onContextMenu: (event: React.MouseEvent) => void;
@@ -185,6 +189,21 @@ const soundOf = (entry: CommandCatalogEntry, draft: CommandDraft) =>
 };
 
 /**
+ * Checks a plugin command's row for the angry-red flag: whether its plugin and command actually resolve to
+ * something the game would run, or null when the command is not MZ-shaped enough to say.
+ * @param {CommandDraft} draft The command and its lines.
+ * @param {PluginHeaderLibrary} pluginLibrary The plugin headers read so far, and every plugin {@code js/plugins.js} lists.
+ * @returns {PluginCommandRegistration | null} The check, or null when there is nothing to check.
+ */
+const pluginRegistrationOf = (draft: CommandDraft, pluginLibrary: PluginHeaderLibrary): PluginCommandRegistration | null =>
+{
+  const model = parsePluginCommand(draft.command, draft.continuation);
+  return model === null
+    ? null
+    : pluginLibrary.registrationOf(model.plugin, model.command);
+};
+
+/**
  * What a command's row shows: its own rendering for the commands that read better that way, and its sentence for
  * every other, with the lines MZ lists under a plugin command and a play button on a sound.
  * @param {CommandRowProps} props The row's props.
@@ -192,7 +211,7 @@ const soundOf = (entry: CommandCatalogEntry, draft: CommandDraft) =>
  */
 const CommandContent = (props: CommandRowProps) =>
 {
-  const { row, list, entry, draft, sentence, api, playSound } = props;
+  const { row, list, entry, draft, sentence, api, pluginLibrary, playSound } = props;
   const { code } = draft.command;
   if (code === 101)
   {
@@ -210,6 +229,9 @@ const CommandContent = (props: CommandRowProps) =>
   }
 
   const sound = soundOf(entry, draft);
+  const registration = code === 357
+    ? pluginRegistrationOf(draft, pluginLibrary)
+    : null;
   return (
     <Box sx={{ minWidth: 0 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
@@ -230,6 +252,11 @@ const CommandContent = (props: CommandRowProps) =>
           </Tooltip>
         )}
         {code === 102 && joinsChoicesAbove(list, row.index) && <Chip size={'small'} label={'Shown with the choices above'}/>}
+        {registration !== null && registration.registered === false && (
+          <Tooltip title={registration.message}>
+            <Chip size={'small'} color={'error'} label={'Unregistered plugin command'}/>
+          </Tooltip>
+        )}
       </Box>
       {code === 357 && draft.continuation.map((line, position) => (
         <Typography key={position} variant={'caption'} component={'div'} color={'text.secondary'}>
