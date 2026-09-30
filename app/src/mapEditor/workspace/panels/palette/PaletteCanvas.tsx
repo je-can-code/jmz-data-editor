@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box } from '@mui/material';
-import { cellAtPoint, edgeAtPoint, isOnBadge, paletteCellSize } from '../../../core/palette/paletteGeometry.ts';
+import { cellAtPoint, flagClickAt, isOnBadge, paletteCellSize } from '../../../core/palette/paletteGeometry.ts';
 import { PALETTE_COLUMNS, rectBetween, type PaletteLayout, type PaletteRect } from '../../../core/palette/paletteLayout.ts';
 import type { FlagClick, FlagMode } from '../../../core/palette/passabilityEdits.ts';
 import type { TextureImage } from '../../../core/renderer/MapRenderer.ts';
@@ -47,28 +47,6 @@ type PaletteCanvasProps = {
   readonly onToggleMark: (tileId: number) => void;
   readonly onFlagClick: (tileId: number, click: FlagClick) => void;
   readonly onHover: (hover: PaletteHover | null) => void;
-};
-
-/**
- * Works out what a click in the passability editor asks for, from its mode, where it landed and how.
- * @param {FlagMode} mode The flags shown.
- * @param {number} x The point across, from the palette's left edge.
- * @param {number} y The point down.
- * @param {number} size The cell size.
- * @param {boolean} backwards Whether the click counts down: a right click, or Shift held.
- * @returns {FlagClick} The click.
- */
-const flagClickAt = (mode: FlagMode, x: number, y: number, size: number, backwards: boolean): FlagClick =>
-{
-  switch (mode)
-  {
-    case 'directions':
-      return { mode, direction: edgeAtPoint(x, y, size) };
-    case 'terrain':
-      return { mode, delta: backwards ? -1 : 1 };
-    default:
-      return { mode };
-  }
 };
 
 /**
@@ -284,5 +262,5 @@ const PaletteCanvas = (props: PaletteCanvasProps) =>
   );
 };
 
-export { flagClickAt, PaletteCanvas };
+export { PaletteCanvas };
 export type { PaletteCanvasProps, PaletteHover };

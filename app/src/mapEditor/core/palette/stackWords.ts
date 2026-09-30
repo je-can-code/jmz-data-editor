@@ -1,5 +1,44 @@
-import type { CellStack } from './cellStack.ts';
-import { PASSAGE_DIRECTIONS } from './tileFlags.ts';
+import { isMarkedTile, type TilesetMarks } from '../tiles/tilesetMarks.ts';
+import type { CellStack, StackLayer } from './cellStack.ts';
+import { FlagBit, PASSAGE_DIRECTIONS } from './tileFlags.ts';
+
+/**
+ * One chip the stack view shows on a layer: its words, and whether it names what the cell itself comes to.
+ */
+type LayerChip = {
+  readonly label: string;
+  readonly strong: boolean;
+};
+
+/**
+ * Lists what a layer's own tile carries, as the stack view's chips: whether it decides passage, draws above
+ * characters, is a ladder, bush, counter or damage floor, carries a terrain tag (and whether that tag is the cell's or
+ * covered by one higher up), and goes on top. An empty layer carries nothing.
+ * @param {StackLayer} layer The layer.
+ * @param {TilesetMarks | null} marks The tileset's marks, when read.
+ * @returns {LayerChip[]} The chips, in that order; strong ones are what the cell's passage and terrain come from.
+ */
+const layerChips = (layer: StackLayer, marks: TilesetMarks | null): LayerChip[] =>
+{
+  const { flags, tileId, terrainTag, decidesTerrain } = layer;
+  if (tileId === 0)
+  {
+    return [];
+  }
+
+  const chips = [
+    { label: 'Decides passage', strong: true, on: layer.passage === 'decides' },
+    { label: 'Above characters', strong: false, on: (flags & FlagBit.star) !== 0 },
+    { label: 'Ladder', strong: false, on: (flags & FlagBit.ladder) !== 0 },
+    { label: 'Bush', strong: false, on: (flags & FlagBit.bush) !== 0 },
+    { label: 'Counter', strong: false, on: (flags & FlagBit.counter) !== 0 },
+    { label: 'Damage floor', strong: false, on: (flags & FlagBit.damage) !== 0 },
+    { label: decidesTerrain ? `Terrain tag ${terrainTag}` : `Terrain tag ${terrainTag}, covered`, strong: decidesTerrain, on: terrainTag > 0 },
+    { label: 'Goes on top', strong: false, on: marks !== null && isMarkedTile(marks, tileId) },
+  ];
+
+  return chips.filter(chip => chip.on).map(({ label, strong }) => ({ label, strong }));
+};
 
 /**
  * Says which ways out of a cell are blocked, as the stack view reads it out.
@@ -61,4 +100,5 @@ const shadowSummary = (shadow: number): string =>
     : `Shadow at ${quarters.join(', ')}`;
 };
 
-export { cellFlagsSummary, passageSummary, shadowSummary };
+export { cellFlagsSummary, layerChips, passageSummary, shadowSummary };
+export type { LayerChip };

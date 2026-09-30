@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { CellStack } from '../../../../src/mapEditor/core/palette/cellStack.ts';
-import { cellFlagsSummary, passageSummary, shadowSummary } from '../../../../src/mapEditor/core/palette/stackWords.ts';
+import type { CellStack, StackLayer } from '../../../../src/mapEditor/core/palette/cellStack.ts';
+import { cellFlagsSummary, layerChips, passageSummary, shadowSummary } from '../../../../src/mapEditor/core/palette/stackWords.ts';
+import { TileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
 
 /*
  * The stack view's sentences about a cell: which ways out are blocked, what else the cell counts as, and where its
@@ -81,6 +82,71 @@ describe('cellFlagsSummary', () =>
     // Assert.
     expect(sentence)
       .toBe('Counts as a bush, a counter.');
+  });
+});
+
+describe('layerChips', () =>
+{
+  /**
+   * Builds one layer of a cell.
+   * @param {Partial<StackLayer>} changes What differs from an open A5 tile on layer 1 that decides nothing.
+   * @returns {StackLayer} The layer.
+   */
+  const layerWith = (changes: Partial<StackLayer>): StackLayer => ({
+    z: 0,
+    tileId: TileId.A5 + 2,
+    flags: 0,
+    passage: 'unread',
+    terrainTag: 0,
+    decidesTerrain: false,
+    ...changes,
+  });
+
+  it('lists every flag the tile carries, with what the cell comes from marked strong', () =>
+  {
+    // Arrange: a starred ladder deciding passage, with the cell's terrain tag, marked to go on top.
+    const layer = layerWith({ flags: 0x10 | 0x20 | 0x3000, passage: 'decides', terrainTag: 3, decidesTerrain: true });
+    const marks = { tiles: new Set([ TileId.A5 + 2 ]), kinds: new Set<number>() };
+
+    // Act.
+    const chips = layerChips(layer, marks);
+
+    // Assert.
+    expect(chips)
+      .toStrictEqual([
+        { label: 'Decides passage', strong: true },
+        { label: 'Above characters', strong: false },
+        { label: 'Ladder', strong: false },
+        { label: 'Terrain tag 3', strong: true },
+        { label: 'Goes on top', strong: false },
+      ]);
+  });
+
+  it('says a terrain tag is covered when one higher up is the cell\'s, and names bushes, counters and damage floors', () =>
+  {
+    // Arrange: a bush, counter and damage floor with a covered tag, and marks that name another tile.
+    const layer = layerWith({ flags: 0x40 | 0x80 | 0x100 | 0x5000, terrainTag: 5 });
+    const marks = { tiles: new Set([ TileId.A5 + 3 ]), kinds: new Set<number>() };
+
+    // Act.
+    const chips = layerChips(layer, marks);
+
+    // Assert.
+    expect(chips.map(chip => chip.label))
+      .toStrictEqual([ 'Bush', 'Counter', 'Damage floor', 'Terrain tag 5, covered' ]);
+  });
+
+  it('shows nothing for an empty layer, whatever its flags', () =>
+  {
+    // Arrange: the empty tile carries MZ's star.
+    const layer = layerWith({ tileId: 0, flags: 0x10, passage: 'lookedPast' });
+
+    // Act.
+    const chips = layerChips(layer, null);
+
+    // Assert.
+    expect(chips)
+      .toStrictEqual([]);
   });
 });
 

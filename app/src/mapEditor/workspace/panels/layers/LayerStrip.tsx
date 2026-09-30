@@ -1,33 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { Box, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
 import { LAYER_STRIP, paintSelection, WheelStepper } from '../../../core/palette/paintSelection.ts';
-import type { LayerChoice } from '../../../core/tiles/layering.ts';
-import type { TileLayerIndex } from '../../../core/tiles/tileGrid.ts';
+import { choiceOf, layerLabel } from '../../../core/palette/paletteWords.ts';
 import { usePaintSelection } from '../palette/paletteHooks.ts';
-
-/**
- * Names a layer choice on its button: automatic layering, or the layer as people count them, 1 to 4.
- * @param {LayerChoice} choice The choice.
- * @returns {string} The label.
- */
-const layerLabel = (choice: LayerChoice): string =>
-{
-  return choice === 'auto'
-    ? 'Auto'
-    : String(choice + 1);
-};
-
-/**
- * Reads a button's value back into a layer choice.
- * @param {string} value The value: "auto", or a tile layer 0 to 3.
- * @returns {LayerChoice} The choice.
- */
-const choiceOf = (value: string): LayerChoice =>
-{
-  return value === 'auto'
-    ? 'auto'
-    : Number.parseInt(value, 10) as TileLayerIndex;
-};
 
 /**
  * The layer strip: automatic layering, or one of layers 1 to 4 painted exactly, with the other layers dimmed on the
@@ -92,4 +67,4 @@ const LayerStrip = () =>
   );
 };
 
-export { choiceOf, LayerStrip, layerLabel };
+export { LayerStrip };

@@ -5,20 +5,12 @@ import { TILESETS_KEY } from '../../../core/model/documentKeys.ts';
 import type { RmmzTileset } from '../../../core/model/rmmzTypes.ts';
 import { paintSelection } from '../../../core/palette/paintSelection.ts';
 import { brushForPick, type PalettePick } from '../../../core/palette/paletteGeometry.ts';
-import {
-  describeTile,
-  isTabAvailable,
-  layoutPaletteTab,
-  PALETTE_COLUMNS,
-  PALETTE_TABS,
-  type PaletteRect,
-  type PaletteTab,
-} from '../../../core/palette/paletteLayout.ts';
+import { isTabAvailable, layoutPaletteTab, PALETTE_TABS, type PaletteRect, type PaletteTab } from '../../../core/palette/paletteLayout.ts';
 import { paletteMode, type PaletteEditing } from '../../../core/palette/paletteMode.ts';
+import { describeHover, describePick, FLAG_MODE_WORDS, paletteHint } from '../../../core/palette/paletteWords.ts';
 import { editTilesetFlags, FLAG_MODES, planFlagEdit, type FlagClick, type FlagMode } from '../../../core/palette/passabilityEdits.ts';
-import { isMarkableTile, TILESET_MARKS_DOCUMENT, toggleTileMark } from '../../../core/palette/tilesetMarkEdits.ts';
+import { TILESET_MARKS_DOCUMENT, toggleTileMark } from '../../../core/palette/tilesetMarkEdits.ts';
 import { isAutotile } from '../../../core/tiles/tileIds.ts';
-import { isMarkedTile, type TilesetMarks } from '../../../core/tiles/tilesetMarks.ts';
 import { useHeldMap, useTilesets, useWorkspace, useWorkspaceState } from '../../workspaceHooks.tsx';
 import { AutotilePreview } from './AutotilePreview.tsx';
 import { PaletteCanvas, type PaletteHover } from './PaletteCanvas.tsx';
@@ -62,90 +54,6 @@ const memoryFor = (tileset: RmmzTileset): PaletteMemory =>
 };
 
 /**
- * What each set of flags is called, and what a click does to it, in the passability editor.
- */
-const FLAG_MODE_WORDS: Readonly<Record<FlagMode, { readonly label: string; readonly hint: string }>> = {
-  passage: { label: 'Passage', hint: 'Click a tile to make it open, blocked, or drawn above characters.' },
-  directions: { label: 'Directions', hint: 'Click near a tile\'s edge to block or open the way out across it.' },
-  ladder: { label: 'Ladder', hint: 'Click a tile to make it a ladder, climbed facing up, or not.' },
-  bush: { label: 'Bush', hint: 'Click a tile to make it a bush, which hides the feet of whoever stands in it, or not.' },
-  counter: { label: 'Counter', hint: 'Click a tile to make it a counter, which people can be spoken to across, or not.' },
-  damage: { label: 'Damage floor', hint: 'Click a tile to make it hurt whoever walks on it, or not.' },
-  terrain: { label: 'Terrain tag', hint: 'Click a tile to count its terrain tag up; right-click or Shift-click to count down.' },
-};
-
-/**
- * Names one palette cell for the line under the palette.
- * @param {PaletteTab} tab The tab it is on.
- * @param {number} id The cell's id: a tile id, or a region id on the regions tab.
- * @returns {string} The name.
- */
-const describeCell = (tab: PaletteTab, id: number): string =>
-{
-  if (tab !== 'R')
-  {
-    return describeTile(id);
-  }
-
-  return id === 0
-    ? 'Clears the region'
-    : `Region ${id}`;
-};
-
-/**
- * Says what painting with a pick lays down, for the line under the palette.
- * @param {PalettePick | null} pick What was picked.
- * @param {readonly string[]} sheetNames The tileset's sheets.
- * @returns {string} The words.
- */
-const describePick = (pick: PalettePick | null, sheetNames: readonly string[]): string =>
-{
-  if (pick === null)
-  {
-    return 'Pick a tile to paint with.';
-  }
-
-  if (pick.kind === 'shadow')
-  {
-    return 'Shadow pen: shades the quarter of a tile under the pointer.';
-  }
-
-  const { rect, tab } = pick;
-  if (rect.columns === 1 && rect.rows === 1)
-  {
-    const layout = layoutPaletteTab(tab, sheetNames);
-    const cell = layout.cells[rect.row * PALETTE_COLUMNS + rect.column];
-    return cell === undefined ? 'Pick a tile to paint with.' : `Painting with ${describeCell(tab, cell.id)}.`;
-  }
-
-  return `Painting with ${rect.columns} by ${rect.rows} ${tab === 'R' ? 'regions' : 'tiles'}.`;
-};
-
-/**
- * Says what the cell under the pointer is, and for an A tile whether it goes on top.
- * @param {PaletteTab} tab The tab on show.
- * @param {PaletteHover} hover The cell under the pointer.
- * @param {TilesetMarks | null} marks The tileset's marks, when they apply.
- * @returns {string} The words.
- */
-const describeHover = (tab: PaletteTab, hover: PaletteHover, marks: TilesetMarks | null): string =>
-{
-  const name = describeCell(tab, hover.id);
-  if (marks === null || isMarkableTile(hover.id) === false)
-  {
-    return name;
-  }
-
-  const marked = isMarkedTile(marks, hover.id);
-  if (hover.onBadge)
-  {
-    return marked ? `${name}: click to paint it as ground again` : `${name}: click to have it go on top`;
-  }
-
-  return marked ? `${name} · goes on top` : name;
-};
-
-/**
  * A line in place of the palette, while there is nothing to show.
  * @param {{ line: string }} props What to say.
  * @returns {React.JSX.Element} The message.
@@ -159,26 +67,6 @@ const PaletteMessage = (props: { readonly line: string }) =>
       </Typography>
     </Box>
   );
-};
-
-/**
- * Says how to use what the palette shows: the passability editor's mode, or how to mark a tile to go on top.
- * @param {boolean} editing Whether the passability editor is open.
- * @param {FlagMode} flagMode The flags it shows.
- * @param {boolean} marksShown Whether the "goes on top" badges show.
- * @returns {string} The hint, or an empty string when there is nothing to say.
- */
-const paletteHint = (editing: boolean, flagMode: FlagMode, marksShown: boolean): string =>
-{
-  if (editing)
-  {
-    const { hint } = FLAG_MODE_WORDS[flagMode];
-    return hint;
-  }
-
-  return marksShown
-    ? 'Right-click a tile, or click its corner, to have it go on top of the ground.'
-    : '';
 };
 
 /**
@@ -459,4 +347,4 @@ const PalettePanel = () =>
   return <TilesetPalette key={tileset.id} tileset={tileset}/>;
 };
 
-export { describeCell, describeHover, describePick, PalettePanel };
+export { PalettePanel };

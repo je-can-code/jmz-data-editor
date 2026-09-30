@@ -6,6 +6,7 @@ import {
   brushFromRect,
   cellAtPoint,
   edgeAtPoint,
+  flagClickAt,
   isOnBadge,
   paletteCellSize,
 } from '../../../../src/mapEditor/core/palette/paletteGeometry.ts';
@@ -113,6 +114,37 @@ describe('edgeAtPoint', () =>
     // Assert.
     expect(edge)
       .toBe('down');
+  });
+});
+
+describe('flagClickAt', () =>
+{
+  it('reads a directions click as the way out nearest the point, and a terrain click as counting up or down', () =>
+  {
+    // Arrange: 40-pixel cells.
+
+    // Act.
+    const clicks = [
+      flagClickAt('directions', 21, 39, 40, false),
+      flagClickAt('terrain', 20, 20, 40, false),
+      flagClickAt('terrain', 20, 20, 40, true),
+    ];
+
+    // Assert.
+    expect(clicks)
+      .toStrictEqual([ { mode: 'directions', direction: 'down' }, { mode: 'terrain', delta: 1 }, { mode: 'terrain', delta: -1 } ]);
+  });
+
+  it('reads any other click as the mode alone', () =>
+  {
+    // Arrange.
+
+    // Act.
+    const clicks = [ flagClickAt('passage', 5, 5, 40, true), flagClickAt('bush', 5, 5, 40, false) ];
+
+    // Assert.
+    expect(clicks)
+      .toStrictEqual([ { mode: 'passage' }, { mode: 'bush' } ]);
   });
 });
 

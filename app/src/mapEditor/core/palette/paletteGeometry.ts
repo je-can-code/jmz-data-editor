@@ -1,5 +1,6 @@
 import { EMPTY_BRUSH, shadowBrush, type PaletteBrush } from './paintSelection.ts';
 import { layoutPaletteTab, PALETTE_COLUMNS, rectCells, type PaletteLayout, type PaletteRect, type PaletteTab } from './paletteLayout.ts';
+import type { FlagClick, FlagMode } from './passabilityEdits.ts';
 import type { PassageDirection } from './tileFlags.ts';
 
 /**
@@ -110,6 +111,29 @@ const edgeAtPoint = (x: number, y: number, size: number): PassageDirection =>
 };
 
 /**
+ * Works out what a click in the passability editor asks for, from its mode, where it landed and how: the way out
+ * nearest the point for directions, and for terrain tags which way to count.
+ * @param {FlagMode} mode The flags shown.
+ * @param {number} x The point across, from the palette's left edge.
+ * @param {number} y The point down, from its top edge.
+ * @param {number} size The cell size.
+ * @param {boolean} backwards Whether the click counts down: a right click, or Shift held.
+ * @returns {FlagClick} The click.
+ */
+const flagClickAt = (mode: FlagMode, x: number, y: number, size: number, backwards: boolean): FlagClick =>
+{
+  switch (mode)
+  {
+    case 'directions':
+      return { mode, direction: edgeAtPoint(x, y, size) };
+    case 'terrain':
+      return { mode, delta: backwards ? -1 : 1 };
+    default:
+      return { mode };
+  }
+};
+
+/**
  * Builds the brush a rectangle of the palette makes: region ids from the regions tab, tile ids from any other, and
  * nothing when no rectangle is chosen.
  * @param {PaletteLayout} layout The tab on show.
@@ -150,5 +174,16 @@ const brushForPick = (sheetNames: readonly string[], pick: PalettePick | null, t
     : brushFromRect(layoutPaletteTab(pick.tab, sheetNames), pick.rect, tilesetId);
 };
 
-export { badgeSize, brushForPick, brushFromRect, cellAtPoint, edgeAtPoint, isOnBadge, MAX_CELL_SIZE, MIN_CELL_SIZE, paletteCellSize };
+export {
+  badgeSize,
+  brushForPick,
+  brushFromRect,
+  cellAtPoint,
+  edgeAtPoint,
+  flagClickAt,
+  isOnBadge,
+  MAX_CELL_SIZE,
+  MIN_CELL_SIZE,
+  paletteCellSize,
+};
 export type { PaletteCellPosition, PalettePick };

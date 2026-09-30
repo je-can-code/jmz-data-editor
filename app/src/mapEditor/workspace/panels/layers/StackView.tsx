@@ -17,10 +17,9 @@ import {
   type StackLayer,
 } from '../../../core/palette/cellStack.ts';
 import { describeTile } from '../../../core/palette/paletteLayout.ts';
-import { cellFlagsSummary, passageSummary, shadowSummary } from '../../../core/palette/stackWords.ts';
-import { FlagBit } from '../../../core/palette/tileFlags.ts';
+import { cellFlagsSummary, layerChips, passageSummary, shadowSummary } from '../../../core/palette/stackWords.ts';
 import type { TextureImage } from '../../../core/renderer/MapRenderer.ts';
-import { isMarkedTile, type TilesetMarks } from '../../../core/tiles/tilesetMarks.ts';
+import type { TilesetMarks } from '../../../core/tiles/tilesetMarks.ts';
 import { regionHue } from '../../../render/scene/overlayAtlases.ts';
 import { useDocumentRevision, useTilesets, useWorkspace } from '../../workspaceHooks.tsx';
 import { useInspectedCell, usePaintSelection, useTilesetMarks, useTilesetSheets } from '../palette/paletteHooks.ts';
@@ -30,35 +29,6 @@ import { TileThumb } from '../palette/TileThumb.tsx';
  * The size the stack view draws each layer's tile at, in CSS pixels.
  */
 const THUMB_SIZE = 32;
-
-/**
- * The flags a layer's own tile carries, as chips: whether it decides passage, draws above characters, is a ladder,
- * bush, counter or damage floor, carries a terrain tag (and whether that tag is the cell's), and goes on top.
- * @param {StackLayer} layer The layer.
- * @param {TilesetMarks | null} marks The tileset's marks, when read.
- * @returns {{ label: string, strong: boolean }[]} The chips; strong ones are what the cell's flags come from.
- */
-const layerChips = (layer: StackLayer, marks: TilesetMarks | null): { label: string; strong: boolean }[] =>
-{
-  const { flags, tileId } = layer;
-  if (tileId === 0)
-  {
-    return [];
-  }
-
-  const chips = [
-    { label: 'Decides passage', strong: true, on: layer.passage === 'decides' },
-    { label: 'Above characters', strong: false, on: (flags & FlagBit.star) !== 0 },
-    { label: 'Ladder', strong: false, on: (flags & FlagBit.ladder) !== 0 },
-    { label: 'Bush', strong: false, on: (flags & FlagBit.bush) !== 0 },
-    { label: 'Counter', strong: false, on: (flags & FlagBit.counter) !== 0 },
-    { label: 'Damage floor', strong: false, on: (flags & FlagBit.damage) !== 0 },
-    { label: layer.decidesTerrain ? `Terrain tag ${layer.terrainTag}` : `Terrain tag ${layer.terrainTag}, covered`, strong: layer.decidesTerrain, on: layer.terrainTag > 0 },
-    { label: 'Goes on top', strong: false, on: marks !== null && isMarkedTile(marks, tileId) },
-  ];
-
-  return chips.filter(chip => chip.on).map(({ label, strong }) => ({ label, strong }));
-};
 
 /**
  * One layer of the cell: its tile, what its flags come to, and the fixes: move it up or down a layer, put the tile
@@ -297,4 +267,4 @@ const StackView = () =>
   return <CellStackCard map={map} tileset={tileset} cell={cell} held={held}/>;
 };
 
-export { layerChips, StackView };
+export { StackView };
