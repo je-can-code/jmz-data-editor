@@ -26,6 +26,8 @@ const documentLabel = (key: DocumentKey): string =>
       return 'The map tree';
     case 'tilesets':
       return 'The tilesets';
+    case 'common-events':
+      return 'The common events';
     case 'editor-data':
       return EDITOR_DATA_LABELS[parsed.name] ?? parsed.name;
   }

@@ -1,14 +1,14 @@
 import React from 'react';
 import { Alert, AppBar, Button, Snackbar, Toolbar, Typography } from '@mui/material';
-import { Save, Storage } from '@mui/icons-material';
+import { ListAlt, Save, Storage } from '@mui/icons-material';
 import { openDataEditor } from '../../core/infrastructure/shell/WindowShell.ts';
-import { APP_TITLE } from '../views/mapEditorViews.ts';
+import { APP_TITLE, openCommonEventsWindow } from '../views/mapEditorViews.ts';
 import type { NoticeSeverity } from './WorkspaceController.ts';
 import { useHubVersion, useWorkspace, useWorkspaceState } from './workspaceHooks.tsx';
 
 /**
  * The strip across the top of the workspace: the app's name, saving (with how many documents have unsaved edits),
- * the layout reset and the way to the data editor.
+ * the layout reset and the way to the common events and the data editor.
  * @param {{ onResetLayout: () => void }} props What resetting the layout does.
  * @returns {React.JSX.Element} The bar.
  */
@@ -37,6 +37,9 @@ const WorkspaceBar = (props: { onResetLayout: () => void }) =>
         </Button>
         <Button color={'inherit'} size={'small'} onClick={onResetLayout}>
           Reset layout
+        </Button>
+        <Button color={'inherit'} onClick={() => openCommonEventsWindow(shell)} size={'small'} startIcon={<ListAlt/>} variant={'outlined'}>
+          Common events
         </Button>
         <Button color={'inherit'} onClick={() => openDataEditor(shell)} size={'small'} startIcon={<Storage/>} variant={'outlined'}>
           Data editor

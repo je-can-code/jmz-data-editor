@@ -1,7 +1,7 @@
 import { isJsonObject, type JsonValue } from '../model/json.ts';
 import type { RmmzEventCommand } from '../model/rmmzTypes.ts';
 import type { CommandCatalogEntry, CommandField, CommandFieldKind, SentenceParts } from './catalogTypes.ts';
-import { readField } from './commandFields.ts';
+import { readFieldValue } from './fieldValues.ts';
 
 /**
  * Names database rows for sentences: a switch's name, an actor's name. The event window builds one from
@@ -49,6 +49,55 @@ const asNumber = (value: JsonValue | undefined): number | null =>
 };
 
 /**
+ * Names a character the way commands address one: below zero the player, zero the event running the command, and
+ * anything above an event of the map by id.
+ * @param {number} id The character id.
+ * @returns {string} Such as "Player", "This Event" or "Event #5".
+ */
+const characterName = (id: number): string =>
+{
+  if (id < 0)
+  {
+    return 'Player';
+  }
+
+  return id === 0
+    ? 'This Event'
+    : `Event #${id}`;
+};
+
+/**
+ * Writes the value of a field whose kind reads in its own way: a character, a tone or color, a sound.
+ * @param {CommandField} field The field.
+ * @param {JsonValue | undefined} value Its value.
+ * @returns {string | null} The text, or null when the kind has no way of its own.
+ */
+const formatKindValue = (field: CommandField, value: JsonValue | undefined): string | null =>
+{
+  // a character reads as who it is: the player, the event running the command, or another event.
+  if (field.kind === 'event' && typeof value === 'number')
+  {
+    return characterName(value);
+  }
+
+  // a tone or a color reads as its channels.
+  if (field.kind === 'color' && Array.isArray(value))
+  {
+    return `(${value.map(channel => String(channel)).join(', ')})`;
+  }
+
+  // a sound reads as its file name.
+  if (field.kind === 'audio' && isJsonObject(value) && typeof value['name'] === 'string')
+  {
+    return value['name'] === ''
+      ? 'None'
+      : value['name'];
+  }
+
+  return null;
+};
+
+/**
  * Writes a field's value the way a row reads it.
  * @param {CommandField} field The field.
  * @param {JsonValue | undefined} value Its value.
@@ -77,12 +126,10 @@ const formatValue = (field: CommandField, value: JsonValue | undefined, names: N
       : `${number} ${name}`;
   }
 
-  // a sound reads as its file name.
-  if (field.kind === 'audio' && isJsonObject(value) && typeof value['name'] === 'string')
+  const kindText = formatKindValue(field, value);
+  if (kindText !== null)
   {
-    return value['name'] === ''
-      ? 'None'
-      : value['name'];
+    return kindText;
   }
 
   if (typeof value === 'boolean')
@@ -129,11 +176,13 @@ const sentenceParts = (
     return field;
   };
 
+  // a field spanning lines reads as its joined lines, so a template can name Show Text's text like any field.
+  const draft = { command, continuation };
   return {
     command,
     continuation,
-    value: key => readField(command, fieldOf(key)),
-    text: key => formatValue(fieldOf(key), readField(command, fieldOf(key)), names),
+    value: key => readFieldValue(draft, fieldOf(key)),
+    text: key => formatValue(fieldOf(key), readFieldValue(draft, fieldOf(key)), names),
   };
 };
 

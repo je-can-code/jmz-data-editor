@@ -41,6 +41,11 @@ func TestSaveInMzLayoutReproducesEveryFile(t *testing.T) {
 		assertSaveReproduces[[]*db.RpgTileset](t, filepath.Join(folder, "Tilesets.json"), mzjson.TableLayout, tableOf[*db.RpgTileset])
 	})
 
+	t.Run("CommonEvents.json", func(t *testing.T) {
+		// Arrange, Act and Assert all live in the helper; this names the file and its model.
+		assertSaveReproduces[[]*db.RpgCommonEvent](t, filepath.Join(folder, "CommonEvents.json"), mzjson.TableLayout, tableOf[*db.RpgCommonEvent])
+	})
+
 	t.Run("every map", func(t *testing.T) {
 		// Arrange- every map file in the folder, because they differ: `meta` sits on two maps, three
 		// orders of event image keys run through one file, and a few maps were written by tools.

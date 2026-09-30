@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapDocumentKey, MAP_INFOS_KEY, TILESETS_KEY } from '../../../../src/mapEditor/core/model/documentKeys.ts';
+import { COMMON_EVENTS_KEY, mapDocumentKey, MAP_INFOS_KEY, TILESETS_KEY } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createDocument } from '../../../../src/mapEditor/core/model/createDocument.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
@@ -73,6 +73,19 @@ describe.skipIf(project === null)('map documents lose nothing', () =>
 
     // Act.
     const saved = createDocument(TILESETS_KEY, original).toJson();
+
+    // Assert.
+    expect(saved)
+      .toStrictEqual(original);
+  });
+
+  it('carries the common events back exactly as they went in', () =>
+  {
+    // Arrange.
+    const original = readDataFile(project as string, 'CommonEvents.json') as JsonValue;
+
+    // Act.
+    const saved = createDocument(COMMON_EVENTS_KEY, original).toJson();
 
     // Assert.
     expect(saved)

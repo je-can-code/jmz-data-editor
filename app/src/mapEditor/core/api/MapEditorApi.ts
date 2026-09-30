@@ -1,6 +1,8 @@
+import type { CommandUsageCounts } from '../commandList/commandUsage.ts';
+import type { DatabaseNamesJson } from '../commandList/databaseNames.ts';
 import { isEditorDataName } from '../model/documentKeys.ts';
 import { isJsonObject, type JsonValue } from '../model/json.ts';
-import type { RmmzMap, RmmzMapInfo, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { RmmzCommonEvent, RmmzMap, RmmzMapInfo, RmmzTileset } from '../model/rmmzTypes.ts';
 import type { MapArrival } from '../properties/arrivals.ts';
 
 /**
@@ -167,6 +169,32 @@ interface MapEditorApi
    * @returns {string} The URL.
    */
   fileChangesUrl(): string;
+
+  /**
+   * Reads the common events, {@code data/CommonEvents.json}, through the database route the data editor uses.
+   * @returns {Promise<(RmmzCommonEvent | null)[]>} The rows, index 0 null.
+   */
+  loadCommonEvents(): Promise<(RmmzCommonEvent | null)[]>;
+
+  /**
+   * Writes the common events the way every map editor save is written: in MZ's own layout, and announced on the
+   * change stream as this window's, so its own save never comes back as an outside change.
+   * @param {readonly (RmmzCommonEvent | null)[]} commonEvents The complete array.
+   * @returns {Promise<void>} Settles once written.
+   */
+  saveCommonEvents(commonEvents: readonly (RmmzCommonEvent | null)[]): Promise<void>;
+
+  /**
+   * Reads how many of the project's events use each command, which the command search ranks by.
+   * @returns {Promise<CommandUsageCounts>} The counts.
+   */
+  loadCommandUsage(): Promise<CommandUsageCounts>;
+
+  /**
+   * Reads the names of the project's switches, variables and database rows, which command rows read with.
+   * @returns {Promise<DatabaseNamesJson>} The names, each list indexed by id.
+   */
+  loadDatabaseNames(): Promise<DatabaseNamesJson>;
 }
 
 /**
@@ -418,6 +446,26 @@ class HttpMapEditorApi implements MapEditorApi
     return `${this.#base}/api/file-changes`;
   }
 
+  async loadCommonEvents(): Promise<(RmmzCommonEvent | null)[]>
+  {
+    return this.#getJson<(RmmzCommonEvent | null)[]>('/api/common-events');
+  }
+
+  async saveCommonEvents(commonEvents: readonly (RmmzCommonEvent | null)[]): Promise<void>
+  {
+    return this.#put('/api/common-events', commonEvents);
+  }
+
+  async loadCommandUsage(): Promise<CommandUsageCounts>
+  {
+    return this.#getJson<CommandUsageCounts>('/api/command-usage');
+  }
+
+  async loadDatabaseNames(): Promise<DatabaseNamesJson>
+  {
+    return this.#getJson<DatabaseNamesJson>('/api/database-names');
+  }
+
   /**
    * Reads a JSON route and unwraps the server's envelope.
    * @param {string} route The route, from {@code /api} on.
@@ -460,7 +508,8 @@ class HttpMapEditorApi implements MapEditorApi
   }
 
   /**
-   * Writes a whole document with a PUT, carrying this window's id.
+   * Writes a whole document with a PUT, carrying this window's id, which the change stream hands back on the
+   * change the write causes.
    * @param {string} route The route, from {@code /api} on.
    * @param {unknown} body The complete document.
    * @returns {Promise<void>} Settles once the server confirms the write.

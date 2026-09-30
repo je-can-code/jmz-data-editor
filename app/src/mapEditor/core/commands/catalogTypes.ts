@@ -104,7 +104,8 @@ type CommandField = {
   readonly options?: readonly FieldOption[];
 
   /**
-   * The bounds of a number field.
+   * The bounds of a number field. On a character field, a lowest id of 0 (this event) leaves out the player,
+   * which the commands address as -1.
    */
   readonly min?: number;
   readonly max?: number;
@@ -123,6 +124,14 @@ type CommandField = {
    * A line of help under the control.
    */
   readonly help?: string;
+
+  /**
+   * For text that runs over several lines, where the lines live: {@code continuation} keeps one line per
+   * continuation command (Show Text's 401s), {@code first-and-continuation} starts on the command itself and
+   * carries on in continuation commands (a comment's 108, then its 408s). {@code param} then points at the text
+   * inside each line's parameters, and the value is the lines joined with newlines. Absent for everything else.
+   */
+  readonly lines?: 'continuation' | 'first-and-continuation';
 };
 
 /**
@@ -254,6 +263,27 @@ type CommandCatalogEntry = {
    * The plugin and command a plugin command entry stands for.
    */
   readonly plugin?: { readonly name: string; readonly command: string };
+
+  /**
+   * The parameters a new command starts with, exactly as MZ would write a fresh one. Without it, a new command is
+   * built from its fields' defaults.
+   */
+  readonly defaultParameters?: readonly JsonValue[];
+
+  /**
+   * The inputs of each continuation line, for commands whose lines are rows of data rather than text (a shop's
+   * further goods, one 605 per item). The generated form shows one row of these per line.
+   */
+  readonly continuationFields?: readonly CommandField[];
+
+  /**
+   * Rebuilds the continuation lines from the command itself, for commands whose lines only mirror a parameter
+   * (Set Movement Route's 505s repeat its route, one per step). Called after every generated-form edit, so the
+   * lines MZ shows never go stale.
+   * @param {RmmzEventCommand} command The command, as edited.
+   * @returns {RmmzEventCommand[]} Its continuation lines.
+   */
+  readonly deriveContinuation?: (command: RmmzEventCommand) => RmmzEventCommand[];
 };
 
 export type {

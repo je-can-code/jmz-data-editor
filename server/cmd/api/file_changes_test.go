@@ -44,6 +44,25 @@ func TestFileChangesEchoesTheClientOfASave(t *testing.T) {
 	}
 }
 
+// TestFileChangesEchoesTheClientOfACommonEventsSave covers the common events, which the map editor saves
+// like its maps: the save comes back on the stream carrying the saving window's id, so that window
+// never mistakes it for an outside change, and an unchanged table is written back byte for byte.
+func TestFileChangesEchoesTheClientOfACommonEventsSave(t *testing.T) {
+	// Arrange- the table as the data editor's GET hands it out.
+	current, server := serve(t)
+	stream := openStream(t, server.URL)
+	body := envelopeData(t, server.URL+"/api/common-events")
+
+	// Act.
+	put(t, server.URL+"/api/common-events", body, "window-a")
+
+	// Assert.
+	assertEvent(t, stream.next(t), watch.Change{Path: "data/CommonEvents.json", Kind: watch.KindWrite, Client: "window-a"})
+	if current.read(t, "data/CommonEvents.json") != commonEventsFixture {
+		t.Error("the save changed unchanged common events")
+	}
+}
+
 // TestFileChangesAnnouncesOutsideEditsWithNoClient covers a change made by anything other than this
 // server, such as MZ or a script, which every window must act on.
 func TestFileChangesAnnouncesOutsideEditsWithNoClient(t *testing.T) {
@@ -144,7 +163,14 @@ func asTheUi(request *http.Request) *http.Request {
 func mapBody(t *testing.T, base string) string {
 	t.Helper()
 
-	request, err := http.NewRequest(http.MethodGet, base+"/api/maps/1", nil)
+	return envelopeData(t, base+"/api/maps/1")
+}
+
+// envelopeData fetches a document the way the editor would, and returns what the envelope holds.
+func envelopeData(t *testing.T, target string) string {
+	t.Helper()
+
+	request, err := http.NewRequest(http.MethodGet, target, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

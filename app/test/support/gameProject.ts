@@ -2,10 +2,18 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /**
- * Chef Adventure, when it sits beside this repository in the workspace; the Go round-trip tests look in the
- * same place. Resolved from this file rather than the working directory, so it holds wherever vitest runs.
+ * Finds Chef Adventure where it sits beside this repository in the workspace; the Go round-trip tests look in the
+ * same place. Resolved from this file rather than the working directory, so it holds wherever vitest runs. A test
+ * running under a DOM environment is not served from a file, so it has no sibling to find.
+ * @returns {string | null} The sibling project's path, or null when this file is not on disk.
  */
-const SIBLING_PROJECT = fileURLToPath(new URL('../../../../ca/chef-adventure', import.meta.url));
+const siblingProject = (): string | null =>
+{
+  const url = new URL('../../../../ca/chef-adventure', import.meta.url);
+  return url.protocol === 'file:'
+    ? fileURLToPath(url)
+    : null;
+};
 
 /**
  * Reports whether a folder holds an RMMZ project.
@@ -39,8 +47,9 @@ const locateGameProject = (): string | null =>
     return configured;
   }
 
-  return isProject(SIBLING_PROJECT)
-    ? SIBLING_PROJECT
+  const sibling = siblingProject();
+  return sibling !== null && isProject(sibling)
+    ? sibling
     : null;
 };
 

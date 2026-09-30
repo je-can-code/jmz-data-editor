@@ -197,6 +197,8 @@ func TestSavesRefuseDocumentsWithKeysMissing(t *testing.T) {
 		{name: "a map tree without its leading null", route: "/api/mapinfos", file: "data/MapInfos.json",
 			body: `[{"id":1,"expanded":false,"name":"A","order":1,"parentId":0,"scrollX":0,"scrollY":0}]`, expected: "the body must start with null, as MZ's tables do"},
 		{name: "a map tree with no maps", route: "/api/mapinfos", file: "data/MapInfos.json", body: `[null]`, expected: "the body holds no rows after the leading null"},
+		{name: "a common event without its commands", route: "/api/common-events", file: "data/CommonEvents.json",
+			body: `[null,{"id":1,"name":"A","switchId":1,"trigger":0}]`, expected: `missing key "list" in [1]`},
 	}
 
 	for _, testCase := range cases {
@@ -235,8 +237,10 @@ func TestPutMapRefusesMoreThanOneDocument(t *testing.T) {
 	}
 }
 
-// TestTableRoutesRoundTripTheirFiles covers GET and PUT of MapInfos.json and Tilesets.json together,
-// since they share one shape: an array with null at index 0, written one row per line.
+// TestTableRoutesRoundTripTheirFiles covers GET and PUT of MapInfos.json, Tilesets.json and
+// CommonEvents.json together, since they share one shape: an array with null at index 0, written one
+// row per line. The common events are read through the data editor's GET, whose answer Go escapes,
+// and still come back exactly as MZ wrote them.
 func TestTableRoutesRoundTripTheirFiles(t *testing.T) {
 	cases := []struct {
 		route   string
@@ -245,6 +249,7 @@ func TestTableRoutesRoundTripTheirFiles(t *testing.T) {
 	}{
 		{route: "/api/mapinfos", file: "data/MapInfos.json", fixture: mapInfosFixture},
 		{route: "/api/tilesets", file: "data/Tilesets.json", fixture: tilesetsFixture},
+		{route: "/api/common-events", file: "data/CommonEvents.json", fixture: commonEventsFixture},
 	}
 
 	for _, testCase := range cases {
@@ -323,6 +328,10 @@ func TestTableRoutesRefuseFieldsTheModelsCannotAccountFor(t *testing.T) {
 		{
 			name: "an unknown tileset field", route: "/api/tilesets", file: "data/Tilesets.json",
 			body: `[null,{"id":1,"flags":[],"mode":1,"name":"A","note":"","tilesetNames":[],"animated":true}]`, fragment: `unknown field "animated"`,
+		},
+		{
+			name: "an unknown common event field", route: "/api/common-events", file: "data/CommonEvents.json",
+			body: `[null,{"id":1,"list":[],"name":"A","switchId":1,"trigger":0,"sparkle":true}]`, fragment: `unknown field "sparkle"`,
 		},
 	}
 

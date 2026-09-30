@@ -68,6 +68,19 @@ describe('WorkspaceChrome', () =>
       .toStrictEqual([ [ '', 'jmz-data-editor', 'popup,width=1600,height=1000' ] ]);
   });
 
+  it('opens the common events through the window shell', () =>
+  {
+    // Arrange.
+    const { openWindow } = renderChrome();
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Common events' }));
+
+    // Assert.
+    expect(openWindow.mock.calls)
+      .toStrictEqual([ [ '', 'jmz-common-events', 'popup,width=1280,height=860' ] ]);
+  });
+
   it('says everything is saved while nothing is waiting', () =>
   {
     // Arrange: nothing edited.

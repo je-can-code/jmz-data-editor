@@ -84,7 +84,10 @@ func TestOtherSitesPagesAreRefused(t *testing.T) {
 		{name: "an image folder's listing", method: http.MethodGet, target: "/api/img/faces"},
 		{name: "the change stream", method: http.MethodGet, target: "/api/file-changes"},
 		{name: "an enemy's placements", method: http.MethodGet, target: "/api/enemies/1/placements"},
+		{name: "the command usage counts", method: http.MethodGet, target: "/api/command-usage"},
+		{name: "the database names", method: http.MethodGet, target: "/api/database-names"},
 		{name: "a map save", method: http.MethodPut, target: "/api/maps/1", body: mapFixture},
+		{name: "a common events save", method: http.MethodPut, target: "/api/common-events", body: commonEventsFixture},
 		{name: "a form posting to a database route", method: http.MethodPost, target: "/api/system", body: `{}`, header: []string{"Content-Type", "text/plain"}},
 		{name: "a preflight", method: http.MethodOptions, target: "/api/maps/1", header: []string{"Access-Control-Request-Method", "PUT"}},
 	}
@@ -107,7 +110,10 @@ func TestOtherSitesPagesAreRefused(t *testing.T) {
 				if strings.Contains(response.Body.String(), "Cellar") || strings.Contains(response.Body.String(), "hello") {
 					t.Error("a refused request still received project data")
 				}
-				if current.read(t, "data/Map001.json") != mapFixture || current.read(t, "data/System.json") != secret {
+				written := current.read(t, "data/Map001.json") != mapFixture ||
+					current.read(t, "data/System.json") != secret ||
+					current.read(t, "data/CommonEvents.json") != commonEventsFixture
+				if written {
 					t.Error("a refused request still wrote a file")
 				}
 			})

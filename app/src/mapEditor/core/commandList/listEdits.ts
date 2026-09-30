@@ -1,0 +1,257 @@
+import { jsonEquals, type JsonValue } from '../model/json.ts';
+import type { RmmzEventCommand } from '../model/rmmzTypes.ts';
+import type { CommandNode } from './commandTree.ts';
+import { insertionIndex, pointAfterUnit, type InsertionPoint } from './insertionPoints.ts';
+
+/**
+ * The one splice that turns a list into another: remove {@code deleteCount} commands at {@code index} and insert
+ * {@code inserted} there. Every list edit becomes one of these, so it lands in history as one reversible patch.
+ */
+type ListSplice = {
+  readonly index: number;
+  readonly deleteCount: number;
+  readonly inserted: readonly RmmzEventCommand[];
+};
+
+/**
+ * Keeps only the outermost of some units, in list order: a unit inside another selected unit already moves,
+ * copies and deletes with it.
+ * @param {readonly CommandNode[]} nodes The units, in any order.
+ * @returns {CommandNode[]} The outermost ones, by position.
+ */
+const outermostNodes = (nodes: readonly CommandNode[]): CommandNode[] =>
+{
+  const sorted = [ ...new Set(nodes) ].sort((left, right) => left.start - right.start || right.end - left.end);
+  const kept: CommandNode[] = [];
+  sorted.forEach(node =>
+  {
+    const last = kept[kept.length - 1];
+    if (last === undefined || node.start >= last.end)
+    {
+      kept.push(node);
+    }
+  });
+
+  return kept;
+};
+
+/**
+ * Moves commands to another indent, keeping how they nest. Each command is copied; nothing it holds is shared
+ * with a command that stays behind.
+ * @param {readonly RmmzEventCommand[]} commands The commands.
+ * @param {number} delta How far to move them; negative moves them out.
+ * @returns {RmmzEventCommand[]} The moved copies.
+ */
+const reindent = (commands: readonly RmmzEventCommand[], delta: number): RmmzEventCommand[] =>
+{
+  return commands.map(command => ({ ...command, indent: command.indent + delta }));
+};
+
+/**
+ * Collects the commands of some units, in list order, each unit moved by its own depth so its first command sits at
+ * one indent. A selection can gather units from different depths (a line at the top, a command deep inside a
+ * branch), and wherever they go they go as siblings, each keeping how it nests inside itself; moving them all by
+ * the shallowest one's depth would leave the deeper ones at indents no block explains.
+ * @param {readonly RmmzEventCommand[]} list The list.
+ * @param {readonly CommandNode[]} nodes The units, in any order.
+ * @param {number} indent The indent each unit's first command lands at.
+ * @returns {RmmzEventCommand[]} Their commands, moved copies.
+ */
+const unitsAtIndent = (list: readonly RmmzEventCommand[], nodes: readonly CommandNode[], indent: number): RmmzEventCommand[] =>
+{
+  return outermostNodes(nodes).flatMap(node => reindent(list.slice(node.start, node.end), indent - node.indent));
+};
+
+/**
+ * Moves commands so the shallowest of them sits at indent 0, the shape they travel in (copied, pasted, dragged).
+ * @param {readonly RmmzEventCommand[]} commands The commands.
+ * @returns {RmmzEventCommand[]} The moved copies.
+ */
+const toRelativeIndent = (commands: readonly RmmzEventCommand[]): RmmzEventCommand[] =>
+{
+  if (commands.length === 0)
+  {
+    return [];
+  }
+
+  const shallowest = Math.min(...commands.map(command => command.indent));
+  return reindent(commands, -shallowest);
+};
+
+/**
+ * Inserts commands at a place, moved to that place's indent.
+ * @param {readonly RmmzEventCommand[]} list The list.
+ * @param {InsertionPoint} point The place.
+ * @param {readonly RmmzEventCommand[]} commands The commands, at any indent.
+ * @returns {RmmzEventCommand[]} The new list.
+ */
+const insertAt = (list: readonly RmmzEventCommand[], point: InsertionPoint, commands: readonly RmmzEventCommand[]): RmmzEventCommand[] =>
+{
+  const index = insertionIndex(point);
+  const placed = reindent(toRelativeIndent(commands), point.body.indent);
+  return [ ...list.slice(0, index), ...placed, ...list.slice(index) ];
+};
+
+/**
+ * Removes some units.
+ * @param {readonly RmmzEventCommand[]} list The list.
+ * @param {readonly CommandNode[]} nodes The units.
+ * @returns {RmmzEventCommand[]} The new list.
+ */
+const removeNodes = (list: readonly RmmzEventCommand[], nodes: readonly CommandNode[]): RmmzEventCommand[] =>
+{
+  const gone = new Set(outermostNodes(nodes).flatMap(node => Array.from({ length: node.end - node.start }, (_, offset) => node.start + offset)));
+  return list.filter((_, index) => gone.has(index) === false);
+};
+
+/**
+ * Finds where moved units land: the place's index, pulled up by every moved command that sat above it.
+ * @param {readonly CommandNode[]} nodes The units moved.
+ * @param {InsertionPoint} point The place, as the list stands before the move.
+ * @returns {number} The index the first moved command lands at.
+ */
+const landingIndex = (nodes: readonly CommandNode[], point: InsertionPoint): number =>
+{
+  const index = insertionIndex(point);
+  const removedAbove = outermostNodes(nodes)
+    .filter(node => node.end <= index)
+    .reduce((sum, node) => sum + node.end - node.start, 0);
+  return index - removedAbove;
+};
+
+/**
+ * Moves some units to a place, as a drag drops them, each re-indented to fit it however deep it came from. The
+ * place must not lie inside any of the units moved.
+ * @param {readonly RmmzEventCommand[]} list The list.
+ * @param {readonly CommandNode[]} nodes The units.
+ * @param {InsertionPoint} point The place, as the list stands before the move.
+ * @returns {RmmzEventCommand[]} The new list.
+ */
+const moveNodes = (list: readonly RmmzEventCommand[], nodes: readonly CommandNode[], point: InsertionPoint): RmmzEventCommand[] =>
+{
+  const outer = outermostNodes(nodes);
+  const index = insertionIndex(point);
+  if (outer.some(node => index > node.start && index < node.end))
+  {
+    throw new Error('cannot move commands into themselves');
+  }
+
+  const moving = unitsAtIndent(list, outer, point.body.indent);
+  const remaining = removeNodes(list, outer);
+  const at = landingIndex(outer, point);
+  return [ ...remaining.slice(0, at), ...moving, ...remaining.slice(at) ];
+};
+
+/**
+ * Finds where a duplicate's copies start: right after the last unit copied, or after the whole merged Show Choices
+ * run it ends, so copies never split one choice window into two.
+ * @param {readonly RmmzEventCommand[]} list The list.
+ * @param {readonly CommandNode[]} nodes The units copied.
+ * @returns {number} The index the copies start at; 0 when nothing is copied.
+ */
+const duplicateIndex = (list: readonly RmmzEventCommand[], nodes: readonly CommandNode[]): number =>
+{
+  const outer = outermostNodes(nodes);
+  const last = outer[outer.length - 1];
+  if (last === undefined)
+  {
+    return 0;
+  }
+
+  const after = pointAfterUnit(list, last);
+  return after === null
+    ? last.end
+    : insertionIndex(after);
+};
+
+/**
+ * Copies some units right after the last of them (after the merged Show Choices run it ends, when it ends one),
+ * each at the indent of the body the copies land in, however deep it came from.
+ * @param {readonly RmmzEventCommand[]} list The list.
+ * @param {readonly CommandNode[]} nodes The units.
+ * @returns {RmmzEventCommand[]} The new list.
+ */
+const duplicateNodes = (list: readonly RmmzEventCommand[], nodes: readonly CommandNode[]): RmmzEventCommand[] =>
+{
+  const outer = outermostNodes(nodes);
+  const last = outer[outer.length - 1];
+  if (last === undefined)
+  {
+    return [ ...list ];
+  }
+
+  const copies = unitsAtIndent(list, outer, last.parent.indent);
+  const at = duplicateIndex(list, outer);
+  return [ ...list.slice(0, at), ...copies, ...list.slice(at) ];
+};
+
+/**
+ * Replaces a run of commands.
+ * @param {readonly RmmzEventCommand[]} list The list.
+ * @param {number} start The first command replaced.
+ * @param {number} end One past the last.
+ * @param {readonly RmmzEventCommand[]} commands What goes in their place.
+ * @returns {RmmzEventCommand[]} The new list.
+ */
+const replaceRange = (list: readonly RmmzEventCommand[], start: number, end: number, commands: readonly RmmzEventCommand[]): RmmzEventCommand[] =>
+{
+  return [ ...list.slice(0, start), ...commands, ...list.slice(end) ];
+};
+
+/**
+ * Finds the smallest splice turning one list into another: whatever both start and end with stays, so an edit to
+ * one command in a long list records just that command.
+ * @param {readonly RmmzEventCommand[]} before The list as it is.
+ * @param {readonly RmmzEventCommand[]} after The list as it should be.
+ * @returns {ListSplice | null} The splice, or null when the lists are the same.
+ */
+const spliceBetween = (before: readonly RmmzEventCommand[], after: readonly RmmzEventCommand[]): ListSplice | null =>
+{
+  let start = 0;
+  while (start < before.length && start < after.length && jsonEquals(before[start], after[start]))
+  {
+    start += 1;
+  }
+
+  if (start === before.length && start === after.length)
+  {
+    return null;
+  }
+
+  let beforeEnd = before.length;
+  let afterEnd = after.length;
+  while (beforeEnd > start && afterEnd > start && jsonEquals(before[beforeEnd - 1], after[afterEnd - 1]))
+  {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+  }
+
+  return { index: start, deleteCount: beforeEnd - start, inserted: after.slice(start, afterEnd) };
+};
+
+/**
+ * Turns commands into the plain values a patch carries.
+ * @param {readonly RmmzEventCommand[]} commands The commands.
+ * @returns {JsonValue[]} The same commands, typed as JSON.
+ */
+const asJsonCommands = (commands: readonly RmmzEventCommand[]): JsonValue[] =>
+{
+  return commands as unknown as JsonValue[];
+};
+
+export {
+  asJsonCommands,
+  duplicateIndex,
+  duplicateNodes,
+  insertAt,
+  landingIndex,
+  moveNodes,
+  outermostNodes,
+  reindent,
+  removeNodes,
+  replaceRange,
+  spliceBetween,
+  toRelativeIndent,
+  unitsAtIndent,
+};
+export type { ListSplice };

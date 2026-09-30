@@ -58,6 +58,16 @@ func SaveTilesets(announcer WriteAnnouncer) http.HandlerFunc {
 	}
 }
 
+// SaveCommonEvents serves PUT /api/common-events: the body is the complete common event table. It is
+// the map editor's save, held to the same rules as its maps: strict, written atomically in MZ's own
+// layout, and announced on the change stream with the saving window's id, so the window that saved
+// knows the change for its own. The data editor keeps its POST route to the same file.
+func SaveCommonEvents(announcer WriteAnnouncer) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+		saveDocument[[]*db.RpgCommonEvent](responseWriter, httpRequest, announcer, "data/CommonEvents.json", mzjson.TableLayout, wholeTable[[]*db.RpgCommonEvent])
+	}
+}
+
 // SaveMap serves PUT /api/maps/{mapId}: the body is a complete map, written to data/Map###.json and
 // creating the file when the map is new.
 func SaveMap(announcer WriteAnnouncer) http.HandlerFunc {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"jmz-data-editor/server/internal/api"
+	"jmz-data-editor/server/internal/commandlist"
 	"jmz-data-editor/server/internal/middleware"
 	"jmz-data-editor/server/internal/models/db"
 	"jmz-data-editor/server/internal/models/plugins"
@@ -204,6 +205,9 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	mux.HandleFunc("GET /api/tilesets", api.LoadTilesets)
 	mux.HandleFunc("PUT /api/tilesets", api.SaveTilesets(changes))
 
+	// the common events read through the data editor's GET above; the map editor saves them here.
+	mux.HandleFunc("PUT /api/common-events", api.SaveCommonEvents(changes))
+
 	mux.HandleFunc("GET /api/img/{folder}", api.ListImages)
 	mux.HandleFunc("GET /api/img/{folder}/{name}", api.LoadImage)
 	mux.HandleFunc("GET /api/audio/{folder}/{name}", api.LoadAudio)
@@ -222,6 +226,12 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	mux.HandleFunc("GET /api/enemies/{enemyId}/placements", api.LoadEnemyPlacements(index))
 	mux.HandleFunc("GET /api/maps/{mapId}/arrivals", api.LoadMapArrivals(index))
 	//endregion cross references
+
+	//region command list
+	// the counter keeps each file's counts until the file changes on disk.
+	mux.HandleFunc("GET /api/command-usage", api.LoadCommandUsage(commandlist.NewCounter()))
+	mux.HandleFunc("GET /api/database-names", api.LoadDatabaseNames)
+	//endregion command list
 
 	return middleware.CORS(mux, policy)
 }
