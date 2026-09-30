@@ -204,6 +204,7 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	mux.HandleFunc("GET /api/tilesets", api.LoadTilesets)
 	mux.HandleFunc("PUT /api/tilesets", api.SaveTilesets(changes))
 
+	mux.HandleFunc("GET /api/img/{folder}", api.ListImages)
 	mux.HandleFunc("GET /api/img/{folder}/{name}", api.LoadImage)
 	mux.HandleFunc("GET /api/audio/{folder}/{name}", api.LoadAudio)
 	mux.HandleFunc("GET /api/plugin-source/{path...}", api.LoadPluginSource)
