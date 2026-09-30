@@ -5,7 +5,7 @@ import { jsonEquals, type JsonValue } from '../model/json.ts';
 import { MapDocument } from '../model/MapDocument.ts';
 import { invertPatch, PatchConflictError, type Patch } from '../model/patches.ts';
 import { History, type HistoryView } from './History.ts';
-import { homeDocumentOf, type HistoryKey } from './historyKeys.ts';
+import { homeDocumentOf, outsideChangeHistories, type HistoryKey } from './historyKeys.ts';
 import {
   documentsOfStep,
   documentsTouchedBy,
@@ -40,8 +40,8 @@ type DocumentStore = {
  * Two copies of a document that disagree, both kept until the person chooses. The editor never settles one of
  * these by itself, because either choice throws work away.
  *
- * - {@code disk}: the file changed outside the editor while this window held unsaved edits. {@code content} is
- *   the file's new content, or null when the file was removed.
+ * - {@code disk}: the file changed outside the editor while this window held unsaved edits, or changed into
+ *   something no patch can say. {@code content} is the file's new content, or null when the file was removed.
  * - {@code window}: another window's copy went its own way at the same time as this one. {@code theirs} is that
  *   window's copy, histories included, ready to adopt.
  */
@@ -154,11 +154,13 @@ type DocumentSnapshot = {
  * What happened when a document's file changed outside the editor.
  *
  * - {@code ignored}: this window does not hold the document.
- * - {@code unchanged}: the file matches what the window holds.
- * - {@code reloaded}: the window held no unsaved edits, so it took the file's content.
- * - {@code conflicted}: the window holds unsaved edits, so it kept them and flagged the document.
+ * - {@code unchanged}: the file holds nothing the window lacks: what it holds now, or what it last saved or loaded.
+ * - {@code recorded}: the window held no unsaved edits, so it took the file's content as one undoable step, named
+ *   {@link OUTSIDE_CHANGE_LABEL}, and the document stays saved.
+ * - {@code conflicted}: the window holds unsaved edits, so it kept them and flagged the document; or the file changed
+ *   into something no patch can reach, which is left for the person to choose too.
  */
-type ExternalChangeResult = 'ignored' | 'unchanged' | 'reloaded' | 'conflicted';
+type ExternalChangeResult = 'ignored' | 'unchanged' | 'recorded' | 'conflicted';
 
 /**
  * Options for a hub.
@@ -209,6 +211,40 @@ const diskOperationId = (content: JsonValue): string =>
   }
 
   return `disk:${text.length.toString(36)}:${hash.toString(36)}`;
+};
+
+/**
+ * What the history panel calls the step a document's file changing outside the editor is recorded as.
+ */
+const OUTSIDE_CHANGE_LABEL = 'Externally modified';
+
+/**
+ * Names the step an outside change to a file is recorded as, the same way in every window: the document, the latest
+ * operation its copy had seen, and the version of the file it took. Every window hears each change on its own, and
+ * every window holding the document at that head records the very same step from the very same file, so their
+ * lineages stay one however the change reaches them. An operation's id is never used twice, so the same file arriving
+ * again after anything else happened to the document is a step of its own.
+ * @param {DocumentKey} key The document.
+ * @param {string} head The id of the latest operation on its copy, just before the change.
+ * @param {JsonValue} content The file's new content.
+ * @returns {string} The step's id.
+ */
+const outsideStepId = (key: DocumentKey, head: string, content: JsonValue): string =>
+{
+  return `outside:${key}:${head}>${diskOperationId(content)}`;
+};
+
+/**
+ * Lists a step's patches on one document, in the order they were applied.
+ * @param {HistoryStep} step The step.
+ * @param {DocumentKey} key The document.
+ * @returns {Patch[]} The patches.
+ */
+const patchesOn = (step: HistoryStep, key: DocumentKey): Patch[] =>
+{
+  return step.entries
+    .filter(entry => entry.document === key)
+    .map(entry => entry.patch);
 };
 
 /**
@@ -291,12 +327,8 @@ const stepsTurnedOverBy = (moves: readonly HistoryStep[]): HistoryStep[] =>
  */
 const interferenceOn = (key: DocumentKey, earlier: HistoryStep, later: HistoryStep): Interference | null =>
 {
-  const patchesOn = (step: HistoryStep): Patch[] => step.entries
-    .filter(entry => entry.document === key)
-    .map(entry => entry.patch);
-
-  const laterPatches = patchesOn(later);
-  const found = patchesOn(earlier)
+  const laterPatches = patchesOn(later, key);
+  const found = patchesOn(earlier, key)
     .flatMap(earlierPatch => laterPatches.map(laterPatch => patchInterference(earlierPatch, laterPatch)))
     .find(interference => interference !== null);
 
@@ -354,6 +386,11 @@ const carriedStepFinder = (snapshot: DocumentSnapshot): (id: string) => HistoryS
  *
  * Saving writes a document's committed content and records which steps the file now reflects; it never touches
  * history, so undo after a save works, and undoing back to the saved state makes the document clean again.
+ *
+ * A file changed outside the editor never clears history either. On a document with no unsaved edits, the file's
+ * version arrives as one more step, named {@link OUTSIDE_CHANGE_LABEL}, which the file already reflects: undoing it
+ * brings back the version the editor had, as an unsaved edit, and redoing it takes the file's version again. A
+ * document with unsaved edits is only flagged, never merged into.
  *
  * Every operation on a document is logged by id in its lineage. Other windows holding the same documents repeat
  * this window's operations through {@link applyRemote}, and check each against the head of their own lineage, so
@@ -1184,9 +1221,21 @@ class DocumentHub
   //region external changes
 
   /**
-   * Responds to a document's file changing outside the editor (in MZ, a script, another editor): a clean
-   * document takes the new content, and one with unsaved edits keeps them and is flagged with the file's content
-   * beside it, so nothing is ever thrown away without the person choosing to.
+   * Responds to a document's file changing outside the editor (in MZ, a script, another editor).
+   *
+   * A file that holds nothing this window lacks needs nothing: what the window holds now, or what it last saved or
+   * loaded, which is what the echo of a save looks like when it comes back without its window's name. Any flag an
+   * earlier change to the file raised is cleared, since the file no longer holds anything to choose between.
+   *
+   * A clean document takes the file's version as one step named {@link OUTSIDE_CHANGE_LABEL}, recorded in the
+   * history of whatever the change touched and marked saved, since the file holds it: undoing the step brings back
+   * the version the editor had, as an unsaved edit, and redoing it takes the file's version again. Every window
+   * holding the document records the same step ({@link outsideStepId}), and posts it to the others like any step, so
+   * they all end on it whichever hears the change first.
+   *
+   * A document with unsaved edits keeps them and is flagged with the file's content beside it, so nothing is merged
+   * into work the person has not saved, and nothing is thrown away without them choosing to. So is a file whose
+   * whole value changed kind, which no patch can say.
    * @param {DocumentKey} key The document.
    * @returns {Promise<ExternalChangeResult>} What was done.
    */
@@ -1203,8 +1252,10 @@ class DocumentHub
       return 'ignored';
     }
 
-    if (jsonEquals(this.#committedContent(key), content))
+    // a flag an earlier change raised (the file removed, or a version since written over) no longer stands.
+    if (this.#holdsFile(key, content))
     {
+      this.#clearDiskConflict(key);
       return 'unchanged';
     }
 
@@ -1215,8 +1266,136 @@ class DocumentHub
       return 'conflicted';
     }
 
-    this.reload(key, content);
-    return 'reloaded';
+    // a file whose whole value changed kind cannot be said by any patch, so it is the person's to settle.
+    if (this.#recordOutsideChange(key, content) === null)
+    {
+      this.flagConflict(key, { kind: 'disk', content });
+      return 'conflicted';
+    }
+
+    return 'recorded';
+  }
+
+  /**
+   * Reports whether a document's file holds nothing this window lacks: exactly its committed content, or, while it
+   * has unsaved edits, exactly what it last saved or loaded, the unsaved edits having been made on top of that.
+   * @param {DocumentKey} key The document.
+   * @param {JsonValue} content The file's content.
+   * @returns {boolean} True when the file needs nothing done.
+   */
+  #holdsFile(key: DocumentKey, content: JsonValue): boolean
+  {
+    if (jsonEquals(this.#committedContent(key), content))
+    {
+      return true;
+    }
+
+    // a clean document's committed content is the saved content, already compared.
+    if (this.isDirty(key) === false)
+    {
+      return false;
+    }
+
+    const saved = this.#savedContent(key);
+    return saved !== null && jsonEquals(saved, content);
+  }
+
+  /**
+   * Works out the content a document's file was last known to hold: its committed content with every step applied
+   * since the last save or load taken back out, newest first, and every step the save reflected that has since been
+   * undone put back in, in the order the save had them. Nothing live is touched; the work happens on a copy.
+   * @param {DocumentKey} key The document, which has unsaved edits.
+   * @returns {JsonValue | null} The content, or null when a step the save reflected is no longer known here, or a
+   * patch no longer fits the copy.
+   */
+  #savedContent(key: DocumentKey): JsonValue | null
+  {
+    // every held document keeps both lists.
+    const applied = this.#applied.get(key) as HistoryStep[];
+    const saved = this.#saved.get(key) as string[];
+    let shared = 0;
+    while (shared < applied.length && shared < saved.length && applied[shared].id === saved[shared])
+    {
+      shared += 1;
+    }
+
+    const putBack = saved.slice(shared).map(id => this.#steps.get(id));
+    if (putBack.some(step => step === undefined))
+    {
+      return null;
+    }
+
+    try
+    {
+      const copy = createDocument(key, this.#committedContent(key));
+      applied.slice(shared).reverse().forEach(step => patchesOn(step, key).reverse().forEach(patch => copy.apply(invertPatch(patch))));
+      (putBack as HistoryStep[]).forEach(step => patchesOn(step, key).forEach(patch => copy.apply(patch)));
+      return copy.toJson();
+    }
+    catch (error)
+    {
+      if ((error instanceof PatchConflictError) === false)
+      {
+        throw error;
+      }
+
+      return null;
+    }
+  }
+
+  /**
+   * Records a file's new content on a clean document as one step: the patches that turn what the document holds into
+   * what the file holds, applied at once, in the history of whatever they touch, with the document left saved, since
+   * the file holds exactly that now. A flag an earlier change raised, such as the file's removal, is settled by the
+   * file arriving.
+   * @param {DocumentKey} key The document, clean, with no edit open.
+   * @param {JsonValue} content The file's new content, which differs from what the document holds.
+   * @returns {HistoryStep | null} The step, or null when no patch can say the change, in which case nothing changed.
+   */
+  #recordOutsideChange(key: DocumentKey, content: JsonValue): HistoryStep | null
+  {
+    const patches = this.document(key).patchesTo(content);
+    if (patches === null)
+    {
+      return null;
+    }
+
+    const step: HistoryStep = {
+      id: outsideStepId(key, this.head(key) as string, content),
+      label: OUTSIDE_CHANGE_LABEL,
+      histories: outsideChangeHistories(key, patches),
+      entries: patches.map(patch => ({ document: key, patch })),
+      origin: this.clientId,
+      at: this.#now(),
+    };
+
+    // the patches were worked out from this very content a moment ago, so one that does not fit is a fault here.
+    const bases = this.#headsOf(step);
+    const failed = this.#applyEntries(step, 'forward');
+    if (failed !== null)
+    {
+      throw new Error(`the outside version of ${key} does not fit the copy it was worked out from: ${failed.message}`);
+    }
+
+    this.#record(step);
+    this.#markApplied(step);
+    this.#extendLineage(step, step.id);
+    this.#emit({ type: 'committed', step, bases, opId: step.id, source: 'local' });
+    this.#markSaved(key, (this.#applied.get(key) as HistoryStep[]).map(each => each.id), 'local');
+    this.#clearDiskConflict(key);
+    return step;
+  }
+
+  /**
+   * Clears a document's conflict with its file, leaving a conflict with another window's copy for its owner.
+   * @param {DocumentKey} key The document.
+   */
+  #clearDiskConflict(key: DocumentKey): void
+  {
+    if (this.#conflicts.get(key)?.kind === 'disk')
+    {
+      this.clearConflict(key);
+    }
   }
 
   /**
@@ -1712,7 +1891,7 @@ class DocumentHub
   //endregion internals
 }
 
-export { diskOperationId, DocumentHub };
+export { diskOperationId, DocumentHub, OUTSIDE_CHANGE_LABEL };
 export type {
   DocumentConflict,
   DocumentHubOptions,

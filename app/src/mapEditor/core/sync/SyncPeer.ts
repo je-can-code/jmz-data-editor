@@ -103,7 +103,10 @@ const HEAD_EVENTS: ReadonlySet<HubEvent['type']> = new Set([
  *
  * Everything that happens to the hub here (a step, an undo, a redo, a forget, a save) is posted on the channel,
  * and every such operation posted by another window is repeated here through {@link DocumentHub.applyRemote},
- * which checks it against the head of this window's lineage for each document.
+ * which checks it against the head of this window's lineage for each document. That includes the step a file
+ * changed outside the editor is recorded as, with the save that says the file holds it: every window hears the
+ * change and records that same step itself, so whichever window gets there first, the others either repeat its step
+ * or already have it.
  *
  * When the two copies are found to differ, their lineages decide, and nothing is ever settled by throwing work
  * away. A copy that is only behind (its lineage a prefix of the other's) takes the other copy, which holds

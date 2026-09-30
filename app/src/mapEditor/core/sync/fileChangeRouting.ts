@@ -26,9 +26,9 @@ type SessionClients = {
 /**
  * Decides what one change on the server's stream means for this window. A save made by any window of this
  * session comes back carrying that window's id and is ignored, since the windows share the document it wrote.
- * A change from anywhere else (MZ, a script, another copy of the editor) goes to the hub, which reloads a clean
- * document and flags one holding unsaved edits. A removed file is always flagged: the document's content is the
- * only copy left, so nothing reloads over it.
+ * A change from anywhere else (MZ, a script, another copy of the editor) goes to the hub, which records it on a
+ * clean document as one undoable step, "Externally modified", and flags one holding unsaved edits. A removed file is
+ * always flagged: the document's content is the only copy left, so nothing is taken over it.
  * @param {FileChange} change The change.
  * @param {DocumentHub} hub This window's documents.
  * @param {SessionClients} session Which client ids belong to the session.

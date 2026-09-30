@@ -22,7 +22,8 @@ import { buildTreeRows } from '../../support/treeFixtures.ts';
  * the history as they were, putting back only what it touched. When even that fails, nothing is lost: the step
  * stays in the history holding every file, the tree never lists a map whose file is missing, the outcome is an
  * alarm, and moving the step again once the disk recovers finishes the job. A stray file the tree does not list is
- * never written over.
+ * never written over. A change made to MapInfos.json outside the editor arrives as a step of its own, and undoes and
+ * redoes, written through, like any other.
  *
  * The disk holds five maps whose files all differ, in a tree with a branch two deep and a free slot (4).
  */
@@ -390,6 +391,26 @@ describe('MapTreeService', () =>
       // Assert.
       expect([ outcome, historyOf(hub), writes ])
         .toStrictEqual([ { ok: false, message: 'A map cannot move inside itself.' }, [], [] ]);
+    });
+
+    it('undoes a change made to the tree outside the editor like any tree step, writing the tree back, and redoes it', async () =>
+    {
+      // Arrange: the town is renamed in MapInfos.json by something else, and the window records it.
+      const { service, hub, state, writes } = buildService();
+      await service.tree();
+      const changed = buildTreeRows();
+      (changed[2] as RmmzMapInfo).name = 'Renamed outside';
+      state.infos = changed;
+      const recorded = await hub.handleExternalChange('mapinfos');
+
+      // Act.
+      succeeded(await service.undo());
+      const afterUndo = [ structuredClone(state.infos), historyOf(hub) ];
+      succeeded(await service.redo());
+
+      // Assert.
+      expect([ recorded, afterUndo, state.infos[2]?.name, historyOf(hub), writes, hub.isDirty('mapinfos') ])
+        .toStrictEqual([ 'recorded', [ buildTreeRows(), [ '(Externally modified)' ] ], 'Renamed outside', [ 'Externally modified' ], [ 'write tree', 'write tree' ], false ]);
     });
   });
 

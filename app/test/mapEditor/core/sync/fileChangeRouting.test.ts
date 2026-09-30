@@ -9,9 +9,10 @@ import { buildMapJson } from '../../support/fixtures.ts';
 /*
  * Routing decides what a change on the server's stream means for one window. Echoes of session saves are ignored
  * (the sync suite proves that across two windows); what remains is covered here. A file backing nothing this
- * window holds is none of its business. A removed file never reloads, since the window now holds the only copy.
- * And after the stream reconnects, only clean documents are re-read: a document with unsaved edits differs from
- * disk by definition, and flagging it for that would cry wolf on every reconnect.
+ * window holds is none of its business. A removed file is only flagged, never taken, since the window now holds the
+ * only copy. And after the stream reconnects, only clean documents are re-read, each change found becoming an
+ * "Externally modified" step: a document with unsaved edits differs from disk by definition, and flagging it for
+ * that would cry wolf on every reconnect.
  */
 describe('fileChangeRouting', () =>
 {
@@ -89,8 +90,10 @@ describe('fileChangeRouting', () =>
     // Act.
     const outcomes = await recheckCleanDocuments(hub);
 
-    // Assert.
+    // Assert: the unsaved map is left as it was, with its own step only.
     expect([ outcomes, hub.isConflicted('map:1'), (hub.document('map:2').toJson() as { note: string }).note ])
-      .toStrictEqual([ [ 'reloaded' ], false, 'changed while the stream was down' ]);
+      .toStrictEqual([ [ 'recorded' ], false, 'changed while the stream was down' ]);
+    expect([ hub.history(mapHistoryKey(1)).rows.map(row => row.label), hub.history(mapHistoryKey(2)).rows.map(row => row.label) ])
+      .toStrictEqual([ [ 'Rename' ], [ 'Externally modified' ] ]);
   });
 });
