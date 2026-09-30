@@ -6,10 +6,38 @@ import (
 	"jmz-data-editor/server/internal/middleware"
 	"jmz-data-editor/server/internal/models/db"
 	"jmz-data-editor/server/internal/models/plugins"
+	"jmz-data-editor/server/internal/store"
+	"jmz-data-editor/server/internal/watch"
 	"net/http"
 )
 
+// listenAddress is where the API listens: the loopback address only, on the port the UI expects
+// (nw-app/main.js and the dev scripts both default to http://127.0.0.1:8080).
+const listenAddress = "127.0.0.1:8080"
+
 func main() {
+	// one change stream for the whole server: every window's saves pass through it.
+	changes := watch.NewHub("data", store.EditorDataFolder)
+
+	fmt.Println("Server running on http://localhost:8080")
+	err := http.ListenAndServe(listenAddress, routes(changes, accessPolicy()))
+	if err != nil {
+		panic(err)
+	}
+}
+
+// accessPolicy is who may talk to the API: pages from the UI's Vite server, which app/vite.config.ts
+// pins to port 3000 and nw-app/main.js opens as http://127.0.0.1:3000, under either name for the
+// loopback address; and requests addressed to the API by either of those names on its own port.
+func accessPolicy() middleware.Policy {
+	return middleware.Policy{
+		AllowedOrigins: []string{"http://127.0.0.1:3000", "http://localhost:3000"},
+		AllowedHosts:   []string{listenAddress, "localhost:8080"},
+	}
+}
+
+// routes registers every endpoint the API serves, behind the access policy.
+func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	mux := http.NewServeMux()
 
 	//region health
@@ -89,9 +117,24 @@ func main() {
 	mux.HandleFunc("POST /api/config/notetag-lines", api.Save[plugins.NotetagLinesConfiguration]("data/config.notetag-lines.json"))
 	//endregion plugin config endpoints
 
-	fmt.Println("Server running on http://localhost:8080")
-	err := http.ListenAndServe("127.0.0.1:8080", middleware.CORS(mux))
-	if err != nil {
-		panic(err)
-	}
+	//region map editor endpoints
+	mux.HandleFunc("PUT /api/maps/{mapId}", api.SaveMap(changes))
+
+	mux.HandleFunc("GET /api/mapinfos", api.LoadMapInfos)
+	mux.HandleFunc("PUT /api/mapinfos", api.SaveMapInfos(changes))
+
+	mux.HandleFunc("GET /api/tilesets", api.LoadTilesets)
+	mux.HandleFunc("PUT /api/tilesets", api.SaveTilesets(changes))
+
+	mux.HandleFunc("GET /api/img/{folder}/{name}", api.LoadImage)
+	mux.HandleFunc("GET /api/audio/{folder}/{name}", api.LoadAudio)
+	mux.HandleFunc("GET /api/plugin-source/{path...}", api.LoadPluginSource)
+
+	mux.HandleFunc("GET /api/editor-data/{key}", api.LoadEditorData)
+	mux.HandleFunc("PUT /api/editor-data/{key}", api.SaveEditorData(changes))
+
+	mux.HandleFunc("GET /api/file-changes", api.StreamFileChanges(changes, api.DefaultStreamTiming))
+	//endregion map editor endpoints
+
+	return middleware.CORS(mux, policy)
 }

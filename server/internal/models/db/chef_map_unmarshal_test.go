@@ -5,11 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"jmz-data-editor/server/internal/gametest"
 )
 
 // TestChefAdventureMap001JSON checks Map001.json against RpgMap (optional dev check).
 func TestChefAdventureMap001JSON(t *testing.T) {
-	caMap := filepath.Join("..", "..", "..", "..", "..", "ca", "chef-adventure", "data", "Map001.json")
+	caMap := filepath.Join(gametest.DataDir(t), "Map001.json")
 	if _, err := os.Stat(caMap); err != nil {
 		t.Skip("ca/chef-adventure/data/Map001.json not present beside jmz-data-editor (optional)")
 	}
@@ -34,7 +36,7 @@ func TestChefAdventureMap001JSON(t *testing.T) {
 
 // TestChefAdventureMap236Encounters checks a map with encounterList populated.
 func TestChefAdventureMap236Encounters(t *testing.T) {
-	caMap := filepath.Join("..", "..", "..", "..", "..", "ca", "chef-adventure", "data", "Map236.json")
+	caMap := filepath.Join(gametest.DataDir(t), "Map236.json")
 	if _, err := os.Stat(caMap); err != nil {
 		t.Skip("Map236.json not present (optional)")
 	}

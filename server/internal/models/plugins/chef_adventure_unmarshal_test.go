@@ -5,15 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"jmz-data-editor/server/internal/gametest"
 )
 
 // TestChefAdventurePluginConfigsJSON unmarshals Chef Adventure exports beside this repo (optional dev check).
 func TestChefAdventurePluginConfigsJSON(t *testing.T) {
-	// plugins -> … -> jmz repo root -> sibling `ca` repo (see workspace layout under gaming/).
-	caData := filepath.Join("..", "..", "..", "..", "..", "ca", "chef-adventure", "data")
-	if _, err := os.Stat(caData); err != nil {
-		t.Skip("ca/chef-adventure/data not present beside jmz-data-editor (optional)")
-	}
+	// the sibling `ca` repo, or the project JMZ_PROJECT_ROOT names; see gametest.
+	caData := gametest.DataDir(t)
 
 	cases := []struct {
 		name string

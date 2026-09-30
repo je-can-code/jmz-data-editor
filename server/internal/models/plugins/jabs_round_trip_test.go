@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"jmz-data-editor/server/internal/gametest"
 )
 
 // TestJabsConfigurationRoundTripPreservesEveryBlock is the guard for the failure mode JabsConfiguration's
@@ -52,11 +54,8 @@ func TestJabsConfigurationRoundTripPreservesEveryBlock(t *testing.T) {
 // TestJabsConfigurationRoundTripPreservesChefAdventureBlocks runs the same guard against the real file
 // beside this repo, so a block Jeremy adds to the live config is caught here rather than at game boot.
 func TestJabsConfigurationRoundTripPreservesChefAdventureBlocks(t *testing.T) {
-	// Arrange- the sibling `ca` repo is optional; skip when it is not checked out beside this one.
-	caData := filepath.Join("..", "..", "..", "..", "..", "ca", "chef-adventure", "data")
-	if _, err := os.Stat(caData); err != nil {
-		t.Skip("ca/chef-adventure/data not present beside jmz-data-editor (optional)")
-	}
+	// Arrange- the game is optional; gametest decides whether its absence skips or fails.
+	caData := gametest.DataDir(t)
 
 	bytes, err := os.ReadFile(filepath.Join(caData, "config.jabs.json"))
 	if err != nil {

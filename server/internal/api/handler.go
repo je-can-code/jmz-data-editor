@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"jmz-data-editor/server/internal/models/db"
 	"jmz-data-editor/server/internal/store"
 	"net/http"
@@ -136,17 +135,15 @@ func LoadAll[RPG any](filename string) http.HandlerFunc {
 	}
 }
 
-// LoadMap serves GET /api/maps/{mapId} by delegating to the same JSON read path as Load, after MZ padding rules.
+// LoadMap serves GET /api/maps/{mapId} through the same strict JSON read path as Load, after MZ's
+// padding rules, answering 404 for a map that has no file.
 func LoadMap(responseWriter http.ResponseWriter, httpRequest *http.Request) {
-	raw := httpRequest.PathValue("mapId")
-	id, err := strconv.Atoi(raw)
-	if err != nil || id < 0 {
-		http.Error(responseWriter, "mapId must be a non-negative integer", http.StatusBadRequest)
+	id, ok := mapIdFromPath(responseWriter, httpRequest, 0)
+	if ok == false {
 		return
 	}
 
-	filename := fmt.Sprintf("data/Map%03d.json", id)
-	Load[db.RpgMap](filename)(responseWriter, httpRequest)
+	loadDocument[*db.RpgMap](responseWriter, httpRequest, mapFileName(id))
 }
 
 func LoadIconset(responseWriter http.ResponseWriter, _ *http.Request) {
