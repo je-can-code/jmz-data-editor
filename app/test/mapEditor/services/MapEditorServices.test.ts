@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WindowShell } from '../../../src/core/infrastructure/shell/WindowShell.ts';
 import type { CloseTarget } from '../../../src/mapEditor/core/closeGuard.ts';
+import { BUILT_IN_ENTRIES } from '../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import { createMapEditorServices, type MapEditorEnvironment } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { buildMapJson } from '../support/fixtures.ts';
@@ -143,7 +144,7 @@ describe('MapEditorServices', () =>
     return { services, window };
   };
 
-  it('builds a whole window: its view, its client, a hub over the server, and empty registries ready to fill', () =>
+  it('builds a whole window: its view, its client, a hub over the server, the built-in commands, and empty registries ready to fill', () =>
   {
     // Arrange.
     const { environment } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
@@ -152,8 +153,15 @@ describe('MapEditorServices', () =>
     const services = createMapEditorServices(environment);
 
     // Assert.
-    expect([ services.clientId, services.view, services.api?.clientId, services.hub.clientId, services.catalog.entries(), services.modules.eventKinds() ])
-      .toStrictEqual([ 'window-a', { kind: 'event', mapId: 1, eventId: 3 }, 'window-a', 'window-a', [], [] ]);
+    expect([
+      services.clientId,
+      services.view,
+      services.api?.clientId,
+      services.hub.clientId,
+      services.catalog.entries().map(entry => entry.id),
+      services.modules.eventKinds(),
+    ])
+      .toStrictEqual([ 'window-a', { kind: 'event', mapId: 1, eventId: 3 }, 'window-a', 'window-a', BUILT_IN_ENTRIES.map(entry => entry.id), [] ]);
   });
 
   it('opens a document from the file when no other window holds it, and hands back the same one after', async () =>

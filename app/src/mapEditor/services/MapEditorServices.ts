@@ -3,6 +3,7 @@ import { pageWindowShell, type WindowShell } from '../../core/infrastructure/she
 import { apiDocumentStore } from '../core/api/apiDocumentStore.ts';
 import { HttpMapEditorApi, type MapEditorApi } from '../core/api/MapEditorApi.ts';
 import { installCloseGuard, unsavedOnlyHere, type CloseTarget } from '../core/closeGuard.ts';
+import { registerBuiltInCommands } from '../core/commands/builtin/builtInCommands.ts';
 import { CommandCatalog } from '../core/commands/CommandCatalog.ts';
 import { CommandEditorRegistry } from '../core/commands/CommandEditorRegistry.ts';
 import { DocumentHub } from '../core/history/DocumentHub.ts';
@@ -189,6 +190,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   const hub = new DocumentHub({ clientId, store: api === null ? undefined : apiDocumentStore(api) });
   const sync = new SyncPeer({ hub, channel: environment.openChannel(CHANNEL_NAMES.sync) });
   const catalog = new CommandCatalog();
+  registerBuiltInCommands(catalog);
 
   // the change stream is shared by every window, and only exists with a server to stream from.
   const feed = api === null
