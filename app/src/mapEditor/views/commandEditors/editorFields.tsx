@@ -227,6 +227,33 @@ const IdField = (props: { label: string; kind: CommandFieldKind; value: number; 
 };
 
 /**
+ * Who a character id names: the player, the event running the command, or another event on the map.
+ */
+const CHARACTER_TARGETS = [
+  { value: -1, label: 'Player' },
+  { value: 0, label: 'This event' },
+  { value: 1, label: 'Another event' },
+];
+
+/**
+ * Picks a character: the player (-1), this event (0), or another event by its id.
+ * @param {{ label: string, value: number, onChange: (characterId: number) => void }} props The character and what to do with a new one.
+ * @returns {React.JSX.Element} The picker.
+ */
+const CharacterField = (props: { label: string; value: number; onChange: (characterId: number) => void }) =>
+{
+  const { label, value, onChange } = props;
+  const target = Math.min(1, value);
+  return (
+    <>
+      <SelectField label={label} value={target} options={CHARACTER_TARGETS} width={150}
+        onChange={picked => onChange(picked === 1 ? Math.max(1, value) : picked)}/>
+      {target === 1 ? <NumberField label={'Event id'} value={value} min={1} onChange={onChange}/> : null}
+    </>
+  );
+};
+
+/**
  * Says a command is shaped in a way its editor does not know, so it is left exactly as it is, and shows it raw.
  * @param {{ command: RmmzEventCommand }} props The command.
  * @returns {React.JSX.Element} The notice.
@@ -245,5 +272,5 @@ const UneditableCommand = (props: { command: RmmzEventCommand }) =>
   );
 };
 
-export { CheckField, clamp, EditorStack, FieldRow, IdField, NumberField, SelectField, UneditableCommand };
+export { CharacterField, CheckField, clamp, EditorStack, FieldRow, IdField, NumberField, SelectField, UneditableCommand };
 export type { SelectOption };
