@@ -3,6 +3,7 @@ import { Alert, AppBar, Button, Snackbar, Toolbar, Typography } from '@mui/mater
 import { Save, Storage } from '@mui/icons-material';
 import { openDataEditor } from '../../core/infrastructure/shell/WindowShell.ts';
 import { APP_TITLE } from '../views/mapEditorViews.ts';
+import type { NoticeSeverity } from './WorkspaceController.ts';
 import { useHubVersion, useWorkspace, useWorkspaceState } from './workspaceHooks.tsx';
 
 /**
@@ -46,13 +47,33 @@ const WorkspaceBar = (props: { onResetLayout: () => void }) =>
 };
 
 /**
- * The short message at the foot of the workspace: what a tree operation did, or why an undo could not happen.
+ * How long each kind of notice stays up on its own, in milliseconds; an alarm stays until dismissed.
+ */
+const NOTICE_DURATIONS: Readonly<Record<NoticeSeverity, number | null>> = {
+  info: 3000,
+  error: 8000,
+  alarm: null,
+};
+
+/**
+ * How each kind of notice is coloured.
+ */
+const NOTICE_COLOURS: Readonly<Record<NoticeSeverity, 'info' | 'warning' | 'error'>> = {
+  info: 'info',
+  error: 'warning',
+  alarm: 'error',
+};
+
+/**
+ * The short message at the foot of the workspace: what a tree operation did, or why an undo could not happen. An
+ * alarm (a failed write that could not be put back) stays, in red, until the author dismisses it.
  * @returns {React.JSX.Element} The message.
  */
 const NoticeBar = () =>
 {
   const controller = useWorkspace();
   const notice = useWorkspaceState(state => state.notice);
+  const severity = notice?.severity ?? 'info';
 
   /**
    * Hides the message showing.
@@ -69,11 +90,18 @@ const NoticeBar = () =>
     <Snackbar
       key={notice?.id ?? 0}
       open={notice !== null}
-      autoHideDuration={notice?.severity === 'error' ? 8000 : 3000}
-      onClose={close}
+      autoHideDuration={NOTICE_DURATIONS[severity]}
+      onClose={(_, reason) =>
+      {
+        // an alarm goes only when dismissed, never with a click elsewhere.
+        if (severity !== 'alarm' || reason !== 'clickaway')
+        {
+          close();
+        }
+      }}
       anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
     >
-      <Alert severity={notice?.severity === 'error' ? 'warning' : 'info'} variant={'filled'} onClose={close} data-testid={'workspace-notice'}>
+      <Alert severity={NOTICE_COLOURS[severity]} variant={'filled'} onClose={close} data-testid={'workspace-notice'}>
         {notice?.text ?? ''}
       </Alert>
     </Snackbar>

@@ -6,11 +6,12 @@ import { documentLabel } from '../../views/documentLabels.ts';
 /**
  * What an undo, a redo or a history jump came to. {@code nothing} marks the quiet failure (there was no step that
  * way), which a keypress should not nag about; {@code stuckStepId} names a step a later edit blocks, which the
- * history panel offers to forget so the person can go on past it.
+ * history panel offers to forget so the person can go on past it; {@code alarm} marks a tree step whose failed
+ * write could not be put back, which must stay on screen until the person dismisses it.
  */
 type HistoryOutcome =
   | { readonly ok: true }
-  | { readonly ok: false; readonly nothing: boolean; readonly message: string; readonly stuckStepId: string | null };
+  | { readonly ok: false; readonly nothing: boolean; readonly message: string; readonly stuckStepId: string | null; readonly alarm?: true };
 
 /**
  * Which way a history moves.
@@ -52,9 +53,19 @@ const fromHubFailure = (failure: HistoryFailure, direction: Direction): HistoryO
  */
 const fromTreeOutcome = (outcome: TreeOutcome): HistoryOutcome =>
 {
-  return outcome.ok
-    ? { ok: true }
-    : { ok: false, nothing: false, message: outcome.message, stuckStepId: null };
+  if (outcome.ok)
+  {
+    return { ok: true };
+  }
+
+  // an alarm rides along only on the failures that raise one, so every other outcome keeps its exact shape.
+  return {
+    ok: false,
+    nothing: false,
+    message: outcome.message,
+    stuckStepId: null,
+    ...(outcome.alarm === true ? { alarm: true as const } : {}),
+  };
 };
 
 /**

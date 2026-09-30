@@ -26,12 +26,18 @@ type MapClipboard =
   | { readonly kind: 'cut'; readonly mapIds: readonly number[] };
 
 /**
- * A short message for the author, shown for a moment at the foot of the workspace.
+ * How a notice reads: news, a refusal, or an alarm, which stays until dismissed because something on disk is short
+ * of what the history holds.
+ */
+type NoticeSeverity = 'info' | 'error' | 'alarm';
+
+/**
+ * A short message for the author, shown at the foot of the workspace: for a moment, or until dismissed for an alarm.
  */
 type Notice = {
   readonly id: number;
   readonly text: string;
-  readonly severity: 'info' | 'error';
+  readonly severity: NoticeSeverity;
 };
 
 /**
@@ -432,7 +438,7 @@ class WorkspaceController
   {
     if (outcome.ok === false && outcome.nothing === false)
     {
-      this.notify(outcome.message, 'error');
+      this.notify(outcome.message, outcome.alarm === true ? 'alarm' : 'error');
     }
   }
 
@@ -608,7 +614,7 @@ class WorkspaceController
     const outcome = await call(this.tree);
     if (outcome.ok === false)
     {
-      this.notify(outcome.message, 'error');
+      this.notify(outcome.message, outcome.alarm === true ? 'alarm' : 'error');
       return outcome;
     }
 
@@ -629,9 +635,9 @@ class WorkspaceController
   /**
    * Shows a short message.
    * @param {string} text The message.
-   * @param {'info' | 'error'} severity How it reads.
+   * @param {NoticeSeverity} severity How it reads.
    */
-  notify(text: string, severity: 'info' | 'error' = 'info'): void
+  notify(text: string, severity: NoticeSeverity = 'info'): void
   {
     this.#noticeCount += 1;
     this.#update({ notice: { id: this.#noticeCount, text, severity } });
@@ -653,4 +659,4 @@ class WorkspaceController
 }
 
 export { TREE_ROOT, WorkspaceController };
-export type { MapClipboard, Notice, OpenMapOptions, WorkspaceState };
+export type { MapClipboard, Notice, NoticeSeverity, OpenMapOptions, WorkspaceState };

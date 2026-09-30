@@ -146,7 +146,7 @@ describe('WorkspaceController', () =>
     hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
     hub.adopt('map:2', buildMapJson() as unknown as JsonValue);
     const services = { hub, api, openDocument: (key: string) => hub.load(key as never) } as unknown as MapEditorServices;
-    return { controller: new WorkspaceController(services), hub, maps, state, saves };
+    return { controller: new WorkspaceController(services), hub, api, maps, state, saves };
   };
 
   const MAIN: FakeGroup = { id: 'main-maps', api: { location: { type: 'grid' } } };
@@ -389,6 +389,35 @@ describe('WorkspaceController', () =>
 
   describe('undo and saving', () =>
   {
+    it('raises an alarm, not a passing notice, when a failed delete cannot be put back', async () =>
+    {
+      // Arrange: the inn's file cannot be removed, and then no removed file can be written back.
+      const { controller, api, state } = buildController();
+      const { deleteMap } = api;
+      api.deleteMap = async (mapId: number) =>
+      {
+        if (mapId === 3)
+        {
+          throw new MapEditorApiError('the disk is full', 500);
+        }
+
+        await deleteMap(mapId);
+      };
+      const diskFull = async () =>
+      {
+        throw new MapEditorApiError('the disk is full', 500);
+      };
+      api.restoreMapFile = diskFull;
+      api.saveMap = diskFull;
+
+      // Act.
+      await controller.deleteMaps([ 2 ]);
+
+      // Assert.
+      expect([ controller.getState().notice?.severity, state.infos[2] ])
+        .toStrictEqual([ 'alarm', null ]);
+    });
+
     it('undoes and redoes the history with focus, and stays quiet with nothing to undo', async () =>
     {
       // Arrange.

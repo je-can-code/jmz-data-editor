@@ -19,7 +19,10 @@ import { buildTreeRows } from '../../support/treeFixtures.ts';
  * tree still lists the map; the disk here refuses the same way). Undo and redo write the files back and take them
  * away again, byte for byte, and refuse, changing nothing, when a file is no longer what the step left there, so an
  * edited map is never silently deleted or written over. A write that fails partway leaves the tree, the files and
- * the history as they were. A stray file the tree does not list is never written over.
+ * the history as they were, putting back only what it touched. When even that fails, nothing is lost: the step
+ * stays in the history holding every file, the tree never lists a map whose file is missing, the outcome is an
+ * alarm, and moving the step again once the disk recovers finishes the job. A stray file the tree does not list is
+ * never written over.
  *
  * The disk holds five maps whose files all differ, in a tree with a branch two deep and a free slot (4).
  */
@@ -108,7 +111,7 @@ describe('MapTreeService', () =>
       },
       deleteMap: async (mapId: number) =>
       {
-        writes.push(`delete ${mapId}`);
+        maybeFail(`delete ${mapId}`);
         if (state.infos[mapId] !== null && state.infos[mapId] !== undefined)
         {
           throw new MapEditorApiError(`map ${mapId} is still in the map tree`, 409);
@@ -499,6 +502,66 @@ describe('MapTreeService', () =>
       // Assert: the file was never removed, so putting it back leaves its text exactly as it was.
       expect([ outcome.ok, maps.get(5), texts.get(5), state.infos, hub.document('mapinfos').toJson(), historyOf(hub) ])
         .toStrictEqual([ false, fileFor(5), oddText(fileFor(5)), buildTreeRows(), buildTreeRows(), [] ]);
+    });
+
+    it('puts back only the file it removed when a later file of the branch cannot be removed, then forgets the step', async () =>
+    {
+      // Arrange: the town's file goes, then the inn's cannot.
+      const { service, hub, maps, texts, state, writes, failing } = buildService();
+      failing.add('delete 3');
+
+      // Act.
+      const outcome = await service.remove([ 2 ]);
+
+      // Assert: the town comes back byte for byte, the inn was never touched, and the tree lists both again.
+      expect([ outcome, writes ])
+        .toStrictEqual([
+          { ok: false, message: '"Delete "Town" and 1 map inside" could not be saved: the disk is full' },
+          [ 'write tree', 'delete 2', 'delete 3', 'restore 2', 'write tree' ],
+        ]);
+      expect([ texts.get(2), maps.get(3), state.infos, historyOf(hub) ])
+        .toStrictEqual([ oddText(fileFor(2)), fileFor(3), buildTreeRows(), [] ]);
+    });
+
+    it('keeps the step and never lists a missing map when a failed delete cannot be put back either', async () =>
+    {
+      // Arrange: the inn's file cannot be removed, and then the town's cannot be written back.
+      const { service, hub, maps, state, failing } = buildService();
+      failing.add('delete 3');
+      failing.add('restore 2');
+
+      // Act.
+      const outcome = await service.remove([ 2 ]);
+
+      // Assert: the town's only copy stays with the step, and the tree agrees with the disk about it.
+      expect(outcome)
+        .toStrictEqual({
+          ok: false,
+          alarm: true,
+          message: '"Delete "Town" and 1 map inside" could not be saved: the disk is full. Putting it back failed too: map 2\'s file '
+            + 'could not be written back (the disk is full). Nothing is lost: the map tree\'s history still holds every map it touched. '
+            + 'Keep this window open, and undo or redo it once saving works again.',
+        });
+      expect([ maps.has(2), maps.has(3), state.infos[2], state.infos[3], hub.document('mapinfos').toJson(), historyOf(hub) ])
+        .toStrictEqual([ false, true, null, null, state.infos, [ 'Delete "Town" and 1 map inside' ] ]);
+    });
+
+    it('brings a branch whose put-back failed back on undo once saving works, keeping the file still in place', async () =>
+    {
+      // Arrange: the double failure above, then the disk recovers.
+      const { service, maps, texts, state, writes, failing } = buildService();
+      failing.add('delete 3');
+      failing.add('restore 2');
+      await service.remove([ 2 ]);
+      failing.clear();
+      writes.length = 0;
+
+      // Act.
+      const outcome = succeeded(await service.undo());
+
+      // Assert: the town is written back byte for byte; the inn, still there as it was, is left alone.
+      expect([ outcome.selection, writes, texts.get(2), texts.get(3), maps.get(3), state.infos ])
+        .toStrictEqual([ [ 2, 3 ], [ 'restore 2', 'write tree' ], oddText(fileFor(2)), oddText(fileFor(3)), fileFor(3), buildTreeRows() ]);
     });
 
     it('moves an undo back when its files cannot be written', async () =>

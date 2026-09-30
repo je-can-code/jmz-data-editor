@@ -24,11 +24,13 @@ import {
 
 /**
  * What a tree operation, an undo or a redo came to: the step it recorded or moved and the maps worth selecting
- * afterwards, or why nothing changed, worded for the author.
+ * afterwards, or why nothing changed, worded for the author. {@code alarm} marks a failure that could not be put
+ * back cleanly, leaving the disk short of what the tree's history holds, which the author must see until they
+ * dismiss it.
  */
 type TreeOutcome =
   | { readonly ok: true; readonly step: HistoryStep | null; readonly selection: readonly number[] }
-  | { readonly ok: false; readonly message: string };
+  | { readonly ok: false; readonly message: string; readonly alarm?: true };
 
 /**
  * What copying came to: the maps captured for the clipboard, or why nothing was.
@@ -44,6 +46,25 @@ type CapturedFile = {
   readonly content: RmmzMap | null;
   readonly text: string | undefined;
 };
+
+/**
+ * How far a step's write-through got: the files it wrote and removed, and whether the tree moved and was saved. A
+ * failure puts back exactly these and nothing else, so a file the step never reached is never touched.
+ */
+type WriteProgress = {
+  readonly written: FileEffect[];
+  readonly deleted: FileEffect[];
+  rowsMoved: boolean;
+  treeSaved: boolean;
+};
+
+/**
+ * What checking a step's files came to: why the step cannot move, or the files that already hold what the step
+ * brings, which moving it leaves as they are.
+ */
+type FileCheck =
+  | { readonly refusal: string }
+  | { readonly refusal: null; readonly inPlace: ReadonlySet<DocumentKey> };
 
 /**
  * What the tree service needs from the window.
@@ -130,6 +151,30 @@ const describeFailure = (failure: HistoryFailure, direction: 'backward' | 'forwa
 };
 
 /**
+ * Words a write-through that failed and was put back, cleanly or not. A clean put-back is an ordinary failure; one
+ * that could not finish is an alarm, naming what is missing and, while the step is still in the history, saying
+ * that its files are safe there for as long as the window stays open.
+ * @param {string} label The step's label.
+ * @param {unknown} error Why the write-through failed.
+ * @param {readonly string[]} problems What the put-back could not do; empty when it did everything.
+ * @param {boolean} kept True when the step is still in the tree's history, holding its files.
+ * @returns {TreeOutcome} The failure.
+ */
+const failedWrite = (label: string, error: unknown, problems: readonly string[], kept: boolean): TreeOutcome =>
+{
+  const failure = `"${label}" could not be saved: ${messageOf(error)}`;
+  if (problems.length === 0)
+  {
+    return { ok: false, message: failure };
+  }
+
+  const safety = kept
+    ? ' Nothing is lost: the map tree\'s history still holds every map it touched. Keep this window open, and undo or redo it once saving works again.'
+    : '';
+  return { ok: false, alarm: true, message: `${failure}. Putting it back failed too: ${problems.join('; ')}.${safety}` };
+};
+
+/**
  * The map tree's one way in. Every tree operation (create, rename, nest, reorder, delete, copy and paste,
  * duplicate) is worked out as a plan, recorded as one step in the tree history and written through at once, so
  * MapInfos.json and the map files always agree with the tree on screen; and every undo, redo and history jump of
@@ -140,7 +185,10 @@ const describeFailure = (failure: HistoryFailure, direction: 'backward' | 'forwa
  * first, then MapInfos.json, then removed maps' files are deleted, which the server allows only once the tree no
  * longer lists them. Before undoing or redoing a step that creates or removes files, each file is checked to still
  * hold what the step left there, so a map edited since is never silently deleted or written over. A write that
- * fails partway puts the tree and every file back the way the step found them.
+ * fails partway puts back exactly what it had changed, removed files first, so the tree never lists a map whose
+ * file is missing. When even that cannot finish, the step stays in the history holding every file, the tree stays
+ * where it agrees with the disk, and the outcome is an alarm; moving the step again once the disk recovers finishes
+ * the job, keeping any file that already holds what the step brings.
  *
  * Operations queue one behind another, since each one reads the tree, waits on the server, then records its step.
  */
@@ -410,16 +458,22 @@ class MapTreeService
       return { ok: true, step: null, selection: plan.selection };
     }
 
+    const progress: WriteProgress = { written: [], deleted: [], rowsMoved: true, treeSaved: false };
     try
     {
-      await this.#writeThrough(step, 'forward');
+      await this.#writeThrough(step, 'forward', progress, new Set());
     }
     catch (error)
     {
-      // part of the step never reached the disk, so it goes from history as well as from the tree.
-      await this.#restore(step, 'forward');
-      this.#hub.forgetStep(step.id);
-      return { ok: false, message: `"${plan.label}" could not be saved: ${messageOf(error)}` };
+      // part of the step never reached the disk, so once everything is back it goes from history as well; a step
+      // that could not be put back is kept, since it may hold the only copy of a map.
+      const problems = await this.#restore('forward', progress);
+      if (problems.length === 0)
+      {
+        this.#hub.forgetStep(step.id);
+      }
+
+      return failedWrite(plan.label, error, problems, problems.length > 0);
     }
 
     return { ok: true, step, selection: plan.selection };
@@ -441,10 +495,10 @@ class MapTreeService
       return { ok: false, message: describeFailure(check, direction) };
     }
 
-    const refusal = await this.#checkFiles(check.step, direction);
-    if (refusal !== null)
+    const checked = await this.#checkFiles(check.step, direction);
+    if (checked.refusal !== null)
     {
-      return { ok: false, message: refusal };
+      return { ok: false, message: checked.refusal };
     }
 
     const moved = direction === 'backward'
@@ -455,14 +509,15 @@ class MapTreeService
       return { ok: false, message: describeFailure(moved, direction) };
     }
 
+    const progress: WriteProgress = { written: [], deleted: [], rowsMoved: true, treeSaved: false };
     try
     {
-      await this.#writeThrough(moved.step, direction);
+      await this.#writeThrough(moved.step, direction, progress, checked.inPlace);
     }
     catch (error)
     {
-      await this.#restore(moved.step, direction);
-      return { ok: false, message: `"${moved.step.label}" could not be saved: ${messageOf(error)}` };
+      const problems = await this.#restore(direction, progress);
+      return failedWrite(moved.step.label, error, problems, true);
     }
 
     const arriving = (moved.step.files ?? []).filter(file => this.#arriving(file, direction) !== null);
@@ -470,56 +525,72 @@ class MapTreeService
   }
 
   /**
-   * Checks every file a step creates or removes still holds what the step left there, before the step moves.
+   * Checks every file a step creates or removes still holds what the step left there, before the step moves. A file
+   * that already holds exactly what the step brings has nothing to lose, and is noted to be left as it is: a step
+   * whose failed write-through could not be put back leaves such files behind, and moving it again keeps them.
    * @param {HistoryStep} step The step.
    * @param {'backward' | 'forward'} direction Undo or redo.
-   * @returns {Promise<string | null>} Why the step cannot move, or null when every file is as the step left it.
+   * @returns {Promise<FileCheck>} Why the step cannot move, or the files already in place.
    */
-  async #checkFiles(step: HistoryStep, direction: 'backward' | 'forward'): Promise<string | null>
+  async #checkFiles(step: HistoryStep, direction: 'backward' | 'forward'): Promise<FileCheck>
   {
+    const inPlace = new Set<DocumentKey>();
     for (const file of step.files ?? [])
     {
       const mapId = mapIdOf(file.document);
       const leaving = this.#leaving(file, direction);
+      const arriving = this.#arriving(file, direction);
       const current = await this.#fileOf(mapId);
       if (jsonEquals(current, leaving))
       {
         continue;
       }
 
+      if (leaving === null && arriving !== null && jsonEquals(current, arriving))
+      {
+        inPlace.add(file.document);
+        continue;
+      }
+
       const verb = direction === 'backward' ? 'undo' : 'redo';
       if (leaving === null)
       {
-        return `"${step.label}" cannot ${verb}: map ${mapId} has a file again, which it would write over.`;
+        return { refusal: `"${step.label}" cannot ${verb}: map ${mapId} has a file again, which it would write over.` };
       }
 
-      return current === null
-        ? `"${step.label}" cannot ${verb}: map ${mapId}'s file is gone.`
-        : `"${step.label}" cannot ${verb}: map ${mapId} has changed since, and those changes would be lost.`;
+      return {
+        refusal: current === null
+          ? `"${step.label}" cannot ${verb}: map ${mapId}'s file is gone.`
+          : `"${step.label}" cannot ${verb}: map ${mapId} has changed since, and those changes would be lost.`,
+      };
     }
 
-    return null;
+    return { refusal: null, inPlace };
   }
 
   /**
    * Writes a moved step through to disk: arriving files first, then the tree, then the removals, releasing each
-   * removed map from this window before its file goes.
+   * removed map from this window before its file goes. Everything done is noted in the progress as it happens.
    * @param {HistoryStep} step The step.
    * @param {'backward' | 'forward'} direction Which way it moved.
+   * @param {WriteProgress} progress Where to note what was done.
+   * @param {ReadonlySet<DocumentKey>} inPlace Arriving files already on disk as the step brings them, left alone.
    */
-  async #writeThrough(step: HistoryStep, direction: 'backward' | 'forward'): Promise<void>
+  async #writeThrough(step: HistoryStep, direction: 'backward' | 'forward', progress: WriteProgress, inPlace: ReadonlySet<DocumentKey>): Promise<void>
   {
     const files = step.files ?? [];
     for (const file of files)
     {
       const content = this.#arriving(file, direction);
-      if (content !== null)
+      if (content !== null && inPlace.has(file.document) === false)
       {
-        await this.#writeFile(mapIdOf(file.document), content, direction === 'forward' ? file.afterText : file.beforeText);
+        await this.#writeFile(mapIdOf(file.document), content, this.#arrivingText(file, direction));
+        progress.written.push(file);
       }
     }
 
     await this.#hub.save(MAP_INFOS_KEY);
+    progress.treeSaved = true;
 
     const removals = files.filter(file => this.#arriving(file, direction) === null);
     removals.forEach(file =>
@@ -532,43 +603,85 @@ class MapTreeService
     for (const file of removals)
     {
       await this.#deleteFile(mapIdOf(file.document));
+      progress.deleted.push(file);
     }
   }
 
   /**
-   * Puts the tree and every file of a step back the way the step found them, after its write-through failed.
-   * Each part is attempted whatever became of the others, since this is already the way out of a failure.
-   * @param {HistoryStep} step The step.
-   * @param {'backward' | 'forward'} direction Which way it had moved.
+   * Puts back what a failed write-through changed, and only that, in the order that never lets the tree list a map
+   * without a file: every file it removed comes back first, then the tree, then the files it wrote go. It stops at
+   * the first part that cannot be done, since each later part leans on it: while a removed file is missing, the tree
+   * stays where the step left it, which does not list that map, and while the tree cannot be put back, the files it
+   * lists stay. Nothing here is swallowed; whatever could not be done is handed back for the author.
+   * @param {'backward' | 'forward'} direction Which way the step had moved.
+   * @param {WriteProgress} progress What the write-through had done.
+   * @returns {Promise<string[]>} What could not be put back, worded for the author; empty when everything was.
    */
-  async #restore(step: HistoryStep, direction: 'backward' | 'forward'): Promise<void>
+  async #restore(direction: 'backward' | 'forward', progress: WriteProgress): Promise<string[]>
   {
-    // move the step back in the history, then make the disk agree with the tree again.
-    const back = direction === 'forward'
-      ? this.#hub.undo(TREE_HISTORY_KEY)
-      : this.#hub.redo(TREE_HISTORY_KEY);
-    const leavingFiles = step.files ?? [];
-    for (const file of leavingFiles.filter(each => this.#leaving(each, direction) !== null))
+    const problems: string[] = [];
+    for (const file of progress.deleted)
     {
-      const text = direction === 'forward' ? file.beforeText : file.afterText;
-      await this.#writeFile(mapIdOf(file.document), this.#leaving(file, direction) as JsonValue, text).catch(() => undefined);
+      const mapId = mapIdOf(file.document);
+      try
+      {
+        await this.#writeFile(mapId, this.#leaving(file, direction) as JsonValue, this.#leavingText(file, direction));
+      }
+      catch (error)
+      {
+        problems.push(`map ${mapId}'s file could not be written back (${messageOf(error)})`);
+      }
     }
 
-    if (back.ok)
+    if (problems.length > 0)
     {
-      await this.#hub.save(MAP_INFOS_KEY).catch(() => undefined);
+      return problems;
     }
 
-    for (const file of leavingFiles.filter(each => this.#leaving(each, direction) === null))
+    // move the step back in the history, then make the tree's file agree again if the step had reached it.
+    if (progress.rowsMoved)
     {
-      await this.#deleteFile(mapIdOf(file.document)).catch(() => undefined);
+      const back = direction === 'forward'
+        ? this.#hub.undo(TREE_HISTORY_KEY)
+        : this.#hub.redo(TREE_HISTORY_KEY);
+      if (back.ok === false)
+      {
+        return [ 'the map tree could not be moved back past a change made to it meanwhile' ];
+      }
+
+      if (progress.treeSaved)
+      {
+        try
+        {
+          await this.#hub.save(MAP_INFOS_KEY);
+        }
+        catch (error)
+        {
+          return [ `the map tree could not be saved again (${messageOf(error)})` ];
+        }
+      }
     }
+
+    for (const file of progress.written)
+    {
+      const mapId = mapIdOf(file.document);
+      try
+      {
+        await this.#deleteFile(mapId);
+      }
+      catch (error)
+      {
+        problems.push(`map ${mapId}'s new file could not be removed again (${messageOf(error)})`);
+      }
+    }
+
+    return problems;
   }
 
   /**
    * Writes a map file: from its exact text when that is known, which the server writes back byte for byte where no
-   * file is, or from its content otherwise. A file already there when the text is known (a failed step being put
-   * back before it removed anything) takes the content instead, which the server writes in that file's own layout.
+   * file is, or from its content otherwise. A file already there when the text is known takes the content instead,
+   * which the server writes in that file's own layout.
    * @param {number} mapId The map.
    * @param {JsonValue} content The file's content.
    * @param {string | undefined} text The file's exact text, when known.
@@ -775,6 +888,32 @@ class MapTreeService
     return direction === 'forward'
       ? file.before
       : file.after;
+  }
+
+  /**
+   * Reads the exact text a file holds once a step has moved, when the step read it.
+   * @param {FileEffect} file The file effect.
+   * @param {'backward' | 'forward'} direction Which way the step moves.
+   * @returns {string | undefined} The text, or undefined when only the content is known.
+   */
+  #arrivingText(file: FileEffect, direction: 'backward' | 'forward'): string | undefined
+  {
+    return direction === 'forward'
+      ? file.afterText
+      : file.beforeText;
+  }
+
+  /**
+   * Reads the exact text a file holds before a step moves, when the step read it.
+   * @param {FileEffect} file The file effect.
+   * @param {'backward' | 'forward'} direction Which way the step moves.
+   * @returns {string | undefined} The text, or undefined when only the content is known.
+   */
+  #leavingText(file: FileEffect, direction: 'backward' | 'forward'): string | undefined
+  {
+    return direction === 'forward'
+      ? file.beforeText
+      : file.afterText;
   }
 }
 

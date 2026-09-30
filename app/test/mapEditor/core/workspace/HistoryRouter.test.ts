@@ -72,6 +72,21 @@ describe('HistoryRouter', () =>
       .toStrictEqual({ ok: false, nothing: false, message: 'map 4 has changed since', stuckStepId: null });
   });
 
+  it('passes on the tree service\'s alarm, so a failed write it could not put back stays on screen', async () =>
+  {
+    // Arrange.
+    const { router, hub, tree } = buildRouter();
+    recordTreeStep(hub);
+    tree.undo.mockResolvedValueOnce({ ok: false, message: 'map 2 is missing', alarm: true } as never);
+
+    // Act.
+    const outcome = await router.undo(TREE_HISTORY_KEY);
+
+    // Assert.
+    expect(outcome)
+      .toStrictEqual({ ok: false, nothing: false, message: 'map 2 is missing', stuckStepId: null, alarm: true });
+  });
+
   it('keeps an empty tree history quiet without asking the tree service', async () =>
   {
     // Arrange.

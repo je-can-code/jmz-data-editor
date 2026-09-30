@@ -112,6 +112,29 @@ describe('WorkspaceChrome', () =>
       .toBe(1);
   });
 
+  it('keeps an alarm up, in red, long after any other message would have gone', () =>
+  {
+    // Arrange.
+    vi.useFakeTimers();
+    try
+    {
+      const { controller } = renderChrome();
+      act(() => controller.notify('Map 2\'s file could not be written back.', 'alarm'));
+
+      // Act: far longer than the longest any other message stays.
+      act(() => vi.advanceTimersByTime(60000));
+
+      // Assert.
+      const notice = screen.getByTestId('workspace-notice');
+      expect([ notice.textContent, notice.classList.contains('MuiAlert-filledError') ])
+        .toStrictEqual([ 'Map 2\'s file could not be written back.', true ]);
+    }
+    finally
+    {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows a message until it is dismissed', async () =>
   {
     // Arrange.
