@@ -80,11 +80,13 @@ func SaveMap(announcer WriteAnnouncer) http.HandlerFunc {
 // the file. A map with no file is a 404, the same answer GET gives it, and a tree that cannot be read
 // is a 500, because without it nothing can say the map is safe to remove.
 //
-// The removal is a single unlink, which no reader can ever see half done. It reaches the change
-// stream with no client, even when the request names one: the stream credits a change to a save only
-// when the file settles holding the bytes that save announced, and a removed file holds nothing. That
-// is the answer every window needs anyway, since any window still holding the map must learn its file
-// is gone, and the window that removed it has already let it go.
+// The tree is read and the file removed under the lock every write in MZ's layout takes, so a save of
+// the tree that lists the map again, or a save or restore of the map's own file, lands wholly before the
+// check or wholly after the removal, never between them. The removal is a single unlink, which no reader
+// can ever see half done. It reaches the change stream with no client, even when the request names one:
+// the stream credits a change to a save only when the file settles holding the bytes that save announced,
+// and a removed file holds nothing. That is the answer every window needs anyway, since any window still
+// holding the map must learn its file is gone, and the window that removed it has already let it go.
 func DeleteMap(responseWriter http.ResponseWriter, httpRequest *http.Request) {
 	// map ids start at 1, and being digits only, a valid id can never name a file outside data/.
 	id, ok := mapIdFromPath(responseWriter, httpRequest, 1)
@@ -99,30 +101,47 @@ func DeleteMap(responseWriter http.ResponseWriter, httpRequest *http.Request) {
 	}
 
 	// the tree is the authority on which maps exist, so it is read before anything is removed.
-	infos, readErr := store.Load[[]*db.RpgMapInfo](filepath.Join(projectPath, "data", "MapInfos.json"))
-	if readErr != nil {
-		var res RestResponse[*db.RpgMapInfo]
-		res.ToRestResponse(responseWriter, projectPath, "the map tree cannot be read: "+readErr.Error(), nil, http.StatusInternalServerError)
-		return
-	}
-	if id < len(infos) && infos[id] != nil {
-		http.Error(responseWriter, fmt.Sprintf("map %d is still in the map tree; remove its row from MapInfos.json first", id), http.StatusConflict)
-		return
-	}
-
 	relativePath := mapFileName(id)
-	removeErr := os.Remove(filepath.Join(projectPath, filepath.FromSlash(relativePath)))
-	if errors.Is(removeErr, fs.ErrNotExist) {
+	removeErr := store.RemoveFile(filepath.Join(projectPath, filepath.FromSlash(relativePath)), func() error {
+		infos, readErr := store.Load[[]*db.RpgMapInfo](filepath.Join(projectPath, "data", "MapInfos.json"))
+		if readErr != nil {
+			return unreadableTreeError{cause: readErr}
+		}
+		if id < len(infos) && infos[id] != nil {
+			return errStillListed
+		}
+
+		return nil
+	})
+
+	var unreadable unreadableTreeError
+	switch {
+	case removeErr == nil:
+		responseWriter.WriteHeader(http.StatusNoContent)
+	case errors.As(removeErr, &unreadable):
+		var res RestResponse[*db.RpgMapInfo]
+		res.ToRestResponse(responseWriter, projectPath, unreadable.Error(), nil, http.StatusInternalServerError)
+	case errors.Is(removeErr, errStillListed):
+		http.Error(responseWriter, fmt.Sprintf("map %d is still in the map tree; remove its row from MapInfos.json first", id), http.StatusConflict)
+	case errors.Is(removeErr, fs.ErrNotExist):
 		http.Error(responseWriter, relativePath+" does not exist", http.StatusNotFound)
-		return
-	}
-	if removeErr != nil {
+	default:
 		var res RestResponse[*db.RpgMapInfo]
 		res.ToRestResponse(responseWriter, projectPath, removeErr.Error(), nil, http.StatusInternalServerError)
-		return
 	}
+}
 
-	responseWriter.WriteHeader(http.StatusNoContent)
+// errStillListed is a delete's refusal of a map the tree still lists, whose file must stay.
+var errStillListed = errors.New("the map is still in the map tree")
+
+// unreadableTreeError is a map tree a delete could not read, so nothing can say the map is safe to remove.
+type unreadableTreeError struct {
+	cause error
+}
+
+// Error words the failure the way the delete answers it.
+func (err unreadableTreeError) Error() string {
+	return "the map tree cannot be read: " + err.cause.Error()
 }
 
 // LoadMapFile serves GET /api/maps/{mapId}/file: the map's file exactly as it sits on disk, byte for byte and

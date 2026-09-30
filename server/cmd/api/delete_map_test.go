@@ -2,17 +2,22 @@ package main
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"jmz-data-editor/server/internal/api"
 	"jmz-data-editor/server/internal/watch"
 )
 
 // The delete route owes the map tree one promise: MapInfos.json never names a map whose file is gone.
 // So DELETE removes a map's file only once the tree no longer lists it, refusing a map the tree still
-// holds with a 409 and touching nothing, and answers 404 for a map with no file, as GET does. Like
+// holds with a 409 and touching nothing, and answers 404 for a map with no file, as GET does. The check
+// and the removal are one step against every save, so a tree being saved as the delete arrives is the
+// tree it judges by. Like
 // every route that writes, it refuses ids that are not map ids, pages from other sites, and requests
 // addressed to a name the server does not go by, all before anything is removed. These run through
 // the real route table, so a route missing from main or registered under the wrong method fails here.
@@ -81,6 +86,66 @@ func TestDeleteMapRefusesAMapTheTreeStillLists(t *testing.T) {
 				t.Error("a refused delete still changed the map")
 			}
 		})
+	}
+}
+
+// pausingAnnouncer holds up the one write it hears of, at the moment the write is about to land and while the
+// write holds the lock every write in MZ's layout takes, until the test lets it go.
+type pausingAnnouncer struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+// Expect says the write has arrived, then waits to be let go.
+func (announcer *pausingAnnouncer) Expect(path string, client string, content []byte) func() {
+	close(announcer.entered)
+	<-announcer.release
+	return func() {}
+}
+
+// TestDeleteMapWaitsForATreeSaveInFlight covers a delete arriving while a save of the tree listing the map
+// is being written: the delete must wait for the save and judge by the tree the save wrote, refusing, rather
+// than read the old tree and remove a file the new one lists.
+func TestDeleteMapWaitsForATreeSaveInFlight(t *testing.T) {
+	// Arrange: map 3's file is there, and a save of a tree listing map 3 is paused just before it writes.
+	current := newProject(t)
+	writeOrphan(t, current)
+	listingMap3 := strings.Replace(mapInfosFixture, "\n]",
+		",\n"+`{"id":3,"expanded":false,"name":"Orphan","order":3,"parentId":0,"scrollX":0,"scrollY":0}`+"\n]", 1)
+	announcer := &pausingAnnouncer{entered: make(chan struct{}), release: make(chan struct{})}
+	saved := make(chan int, 1)
+	go func() {
+		request := httptest.NewRequest(http.MethodPut, "/api/mapinfos", strings.NewReader(listingMap3))
+		recorder := httptest.NewRecorder()
+		api.SaveMapInfos(announcer).ServeHTTP(recorder, request)
+		saved <- recorder.Code
+	}()
+	<-announcer.entered
+
+	// Act: the delete arrives while the save holds the tree.
+	deleted := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		request := httptest.NewRequest(http.MethodDelete, "/api/maps/3", nil)
+		request.Host = current.host
+		recorder := httptest.NewRecorder()
+		current.handler.ServeHTTP(recorder, request)
+		deleted <- recorder
+	}()
+	select {
+	case early := <-deleted:
+		close(announcer.release)
+		t.Fatalf("the delete answered %d while a save of the tree was being written", early.Code)
+	case <-time.After(250 * time.Millisecond):
+	}
+	close(announcer.release)
+
+	// Assert: the save landed, and the delete, seeing the tree it wrote, kept the file.
+	if code := <-saved; code != http.StatusNoContent {
+		t.Fatalf("the save answered %d", code)
+	}
+	assertStatus(t, <-deleted, http.StatusConflict)
+	if current.exists("data/Map003.json") == false {
+		t.Error("the delete removed a map the tree lists")
 	}
 }
 
