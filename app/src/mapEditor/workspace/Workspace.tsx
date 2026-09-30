@@ -127,6 +127,9 @@ const GroupActions = (props: IDockviewHeaderActionsProps) =>
  * tabs, closed, or torn out into windows of their own, still live and in sync. The layout is kept with the project
  * and comes back as it was left, torn-out windows included.
  *
+ * Tabs drag with pointer events, never the browser's drag and drop, so a dragged tab never leaves the app for the
+ * desktop to take; one let go beyond the window's edge opens in a window of its own there instead.
+ *
  * Undo, redo and save listen on every window, torn-out ones included, and act on whatever has focus. A map dragged
  * from the tree into any pane opens there, and a map the data editor asks for opens with its event picked out.
  * @returns {React.JSX.Element} The workspace.
@@ -226,6 +229,7 @@ const Workspace = () =>
     teardown.current.push(
       () => subscriptions.forEach(subscription => subscription.dispose()),
       attachShortcutsToPopouts(api, onShortcut),
+      controller.popouts.attach(api),
     );
 
     restoreLayout(api, controller.layouts, isCurrent)
@@ -314,6 +318,7 @@ const Workspace = () =>
           <DockviewReact
             components={PANELS}
             theme={themeDark}
+            dndStrategy={'pointer'}
             popoutUrl={POPOUT_URL}
             rightHeaderActionsComponent={GroupActions}
             onReady={onReady}

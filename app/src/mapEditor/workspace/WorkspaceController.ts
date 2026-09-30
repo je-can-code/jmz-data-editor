@@ -17,6 +17,8 @@ import { MAP_INFOS_KEY } from '../core/model/documentKeys.ts';
 import type { RmmzMapInfo } from '../core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../services/MapEditorServices.ts';
 import { documentLabel } from '../views/documentLabels.ts';
+import { POPOUT_URL } from './defaultLayout.ts';
+import { PopoutKeeper } from './PopoutKeeper.ts';
 
 /**
  * What the map tree's clipboard holds: maps copied with their files, or maps marked to move on the next paste.
@@ -121,6 +123,11 @@ class WorkspaceController
   readonly router: HistoryRouter;
 
   readonly layouts: LayoutStore;
+
+  /**
+   * Tears panels out into windows of their own.
+   */
+  readonly popouts = new PopoutKeeper({ popoutUrl: POPOUT_URL });
 
   #dockview: DockviewApi | null = null;
 
