@@ -804,6 +804,19 @@ class DocumentHub
   }
 
   /**
+   * Flags a held document as changed on disk behind the editor's back, as when its file was removed, keeping
+   * everything it holds.
+   * @param {DocumentKey} key The document.
+   */
+  flagConflict(key: DocumentKey): void
+  {
+    if (this.has(key))
+    {
+      this.#setConflicted(key, true);
+    }
+  }
+
+  /**
    * Clears a document's conflict flag, keeping the edits it holds.
    * @param {DocumentKey} key The document.
    */

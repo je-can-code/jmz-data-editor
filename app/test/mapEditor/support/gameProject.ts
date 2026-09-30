@@ -8,16 +8,40 @@ import { fileURLToPath } from 'node:url';
 const SIBLING_PROJECT = fileURLToPath(new URL('../../../../../ca/chef-adventure', import.meta.url));
 
 /**
- * Finds a real RMMZ project for the tests that read shipped files: {@code JMZ_PROJECT_ROOT} first (the variable
- * the server reads, which also lets a worktree point at the checkout), then the sibling checkout. Those tests
- * skip when neither exists, since the project is not part of this repository.
- * @returns {string | null} The project root, or null when no project is present.
+ * Reports whether a folder holds an RMMZ project.
+ * @param {string} root The candidate root.
+ * @returns {boolean} True when it has a map tree.
+ */
+const isProject = (root: string): boolean =>
+{
+  return existsSync(`${root}/data/MapInfos.json`);
+};
+
+/**
+ * Finds a real RMMZ project for the tests that read shipped files.
+ *
+ * {@code JMZ_PROJECT_ROOT} comes first: it is the variable the server reads, and the only way a worktree, where
+ * the sibling path resolves to nothing, can reach the game. When it is set it must be right; a mistyped path
+ * throws rather than quietly skipping the very tests it was set to run. Unset, the sibling checkout is used,
+ * and the tests skip when that is absent too, since the game is not part of this repository.
+ * @returns {string | null} The project root, or null when none is configured or beside the repository.
  */
 const locateGameProject = (): string | null =>
 {
-  const candidates = [ process.env['JMZ_PROJECT_ROOT'] ?? '', SIBLING_PROJECT ];
-  const found = candidates.find(candidate => candidate !== '' && existsSync(`${candidate}/data/MapInfos.json`));
-  return found ?? null;
+  const configured = process.env['JMZ_PROJECT_ROOT'] ?? '';
+  if (configured !== '')
+  {
+    if (isProject(configured) === false)
+    {
+      throw new Error(`JMZ_PROJECT_ROOT is set to ${configured}, which holds no RMMZ project`);
+    }
+
+    return configured;
+  }
+
+  return isProject(SIBLING_PROJECT)
+    ? SIBLING_PROJECT
+    : null;
 };
 
 /**

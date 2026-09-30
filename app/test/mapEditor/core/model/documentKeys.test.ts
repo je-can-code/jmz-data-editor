@@ -114,7 +114,7 @@ describe('documentKeys', () =>
 
       // Assert.
       expect(paths)
-        .toStrictEqual([ 'data/Map007.json', 'data/Map1000.json', 'data/MapInfos.json', 'data/Tilesets.json', null ]);
+        .toStrictEqual([ 'data/Map007.json', 'data/Map1000.json', 'data/MapInfos.json', 'data/Tilesets.json', 'jmz-editor/blueprints.json' ]);
     });
   });
 
@@ -122,7 +122,7 @@ describe('documentKeys', () =>
   {
     it('maps each backing file to its document', () =>
     {
-      // Arrange: the three kinds of file the stream can name.
+      // Arrange: every kind of file the stream can name.
 
       // Act.
       const keys = [
@@ -130,16 +130,17 @@ describe('documentKeys', () =>
         documentKeyForProjectPath('data/Map1000.json'),
         documentKeyForProjectPath('data/MapInfos.json'),
         documentKeyForProjectPath('data/Tilesets.json'),
+        documentKeyForProjectPath('jmz-editor/tileset-marks.json'),
       ];
 
       // Assert.
       expect(keys)
-        .toStrictEqual([ 'map:12', 'map:1000', 'mapinfos', 'tilesets' ]);
+        .toStrictEqual([ 'map:12', 'map:1000', 'mapinfos', 'tilesets', 'editor-data:tileset-marks' ]);
     });
 
     it('maps near misses to nothing', () =>
     {
-      // Arrange: files that look like map files but back no document.
+      // Arrange: files that look like backing files but back no document.
 
       // Act.
       const keys = [
@@ -148,11 +149,27 @@ describe('documentKeys', () =>
         documentKeyForProjectPath('img/Map012.json'),
         documentKeyForProjectPath('data/Map012.json.bak'),
         documentKeyForProjectPath('data/Actors.json'),
+        documentKeyForProjectPath('jmz-editor/Layouts.json'),
+        documentKeyForProjectPath('jmz-editor/nested/layouts.json'),
+        documentKeyForProjectPath('data/blueprints.json'),
       ];
 
       // Assert.
       expect(keys)
-        .toStrictEqual([ null, null, null, null, null ]);
+        .toStrictEqual([ null, null, null, null, null, null, null, null ]);
+    });
+
+    it('maps every document to a path that maps back to it', () =>
+    {
+      // Arrange: one key of each kind.
+      const keys = [ 'map:7', 'map:1000', 'mapinfos', 'tilesets', 'editor-data:layouts' ] as const;
+
+      // Act.
+      const roundTripped = keys.map(key => documentKeyForProjectPath(projectPathForDocument(key)));
+
+      // Assert.
+      expect(roundTripped)
+        .toStrictEqual([ ...keys ]);
     });
   });
 });

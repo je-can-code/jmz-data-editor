@@ -44,6 +44,16 @@ const EDITOR_DATA_NAME_PATTERN = /^[a-z0-9-]+$/u;
 const MAP_FILE_PATTERN = /^data\/Map(\d{3,})\.json$/u;
 
 /**
+ * The project folder the server keeps editor-only documents in, one file per key; the game never reads it.
+ */
+const EDITOR_DATA_FOLDER = 'jmz-editor';
+
+/**
+ * Where an editor-only document lives inside the project, relative to its root.
+ */
+const EDITOR_DATA_FILE_PATTERN = /^jmz-editor\/([a-z0-9-]+)\.json$/u;
+
+/**
  * Builds the key of a map's document.
  * @param {number} mapId The map id.
  * @returns {MapDocumentKey} The key.
@@ -107,9 +117,9 @@ const parseDocumentKey = (key: DocumentKey): ParsedDocumentKey =>
  * Names the project file a document is saved to, relative to the project root, as the file-change stream
  * reports it.
  * @param {DocumentKey} key The document.
- * @returns {string | null} The path, or null for editor-only documents, whose location is the server's to decide.
+ * @returns {string} The path.
  */
-const projectPathForDocument = (key: DocumentKey): string | null =>
+const projectPathForDocument = (key: DocumentKey): string =>
 {
   const parsed = parseDocumentKey(key);
   switch (parsed.kind)
@@ -121,7 +131,7 @@ const projectPathForDocument = (key: DocumentKey): string | null =>
     case 'tilesets':
       return 'data/Tilesets.json';
     case 'editor-data':
-      return null;
+      return `${EDITOR_DATA_FOLDER}/${parsed.name}.json`;
   }
 };
 
@@ -142,6 +152,12 @@ const documentKeyForProjectPath = (path: string): DocumentKey | null =>
     return TILESETS_KEY;
   }
 
+  const editorData = EDITOR_DATA_FILE_PATTERN.exec(path);
+  if (editorData !== null)
+  {
+    return editorDataDocumentKey(editorData[1]);
+  }
+
   const match = MAP_FILE_PATTERN.exec(path);
   if (match === null)
   {
@@ -157,6 +173,7 @@ const documentKeyForProjectPath = (path: string): DocumentKey | null =>
 
 export {
   documentKeyForProjectPath,
+  EDITOR_DATA_FOLDER,
   editorDataDocumentKey,
   isEditorDataName,
   MAP_INFOS_KEY,
