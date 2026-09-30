@@ -91,11 +91,12 @@ type SpeedBrowser = {
 const DESKTOP_VIEWPORT = { width: 2560, height: 1440, deviceScaleFactor: 1.5 };
 
 /**
- * The flags per renderer. SwiftShader is named explicitly so the comparison cannot drift onto the GPU.
+ * The flags per renderer. SwiftShader is named explicitly so the comparison cannot drift onto the GPU. Every launch is
+ * muted: a headless browser has no window, but it can still play sound through the machine's speakers.
  */
 const MODE_ARGS: Record<RenderMode, string[]> = {
-  gpu: [ '--use-angle=vulkan' ],
-  swiftshader: [ '--use-angle=swiftshader', '--enable-unsafe-swiftshader' ],
+  gpu: [ '--use-angle=vulkan', '--mute-audio', '--disable-audio-output' ],
+  swiftshader: [ '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--mute-audio', '--disable-audio-output' ],
 };
 
 /**

@@ -9,7 +9,8 @@
     "build": "cd app && bun run build",
     "test": "cd app && bun run test",
     "lint": "oxlint app/src app/test scripts nw-app",
-    "speed": "bun scripts/speed/runSpeed.ts"
+    "speed": "bun scripts/speed/runSpeed.ts",
+    "parity": "bun scripts/parity/runParity.ts"
   },
   "devDependencies": {
     "@types/node": "^22.9.3",

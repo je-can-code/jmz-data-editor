@@ -28,12 +28,23 @@ class ParallaxLayer
 
   #lastOffset = { x: Number.NaN, y: Number.NaN };
 
+  #loading = false;
+
   /**
    * @param {() => void} onChange Called when a picture finishes loading, so a frame draws it.
    */
   constructor(onChange: () => void)
   {
     this.#onChange = onChange;
+  }
+
+  /**
+   * Whether the picture is still loading.
+   * @returns {boolean} True between asking for a picture and having it.
+   */
+  get loading(): boolean
+  {
+    return this.#loading;
   }
 
   /**
@@ -71,6 +82,7 @@ class ParallaxLayer
       return;
     }
 
+    this.#loading = true;
     images.image('parallaxes', settings.name)
       .then(image =>
       {
@@ -85,7 +97,14 @@ class ParallaxLayer
         this.#lastOffset = { x: Number.NaN, y: Number.NaN };
         this.#onChange();
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() =>
+      {
+        if (generation === this.#generation)
+        {
+          this.#loading = false;
+        }
+      });
   }
 
   /**

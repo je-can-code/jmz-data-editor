@@ -70,7 +70,11 @@ type RendererStats = {
   readonly quads: number;
   readonly chunks: number;
   readonly eventSprites: number;
-  readonly loadingSheets: number;
+
+  /**
+   * Pictures still loading: character sheets, and the parallax.
+   */
+  readonly loadingImages: number;
   readonly moduleOverlays: number;
 };
 
@@ -372,7 +376,7 @@ class PixiMapRenderer implements MapRenderer
       quads: scene?.tiles.quadCount ?? 0,
       chunks: scene === null ? 0 : scene.grid.columns * scene.grid.rows,
       eventSprites: this.#events.spriteCount,
-      loadingSheets: this.#events.pendingLoads,
+      loadingImages: this.#events.pendingLoads + (this.#parallax.loading ? 1 : 0),
       moduleOverlays: this.#modules.count,
     };
   }
