@@ -33,8 +33,9 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * came after it on any of those maps, and is refused, naming the later edit and changing nothing, when that edit
  * changed the same target or moved where it sits: a resize moves every tile, and adding or removing items in a
  * list moves every item after them. An undo that wrote to where a target used to be would quietly damage
- * something else. The maps' own histories stay coherent around a step undone out of order, and a refused step
- * never leaves a history stuck: it can be forgotten.
+ * something else. Redo holds to the same rule forwards: a step comes back only when no edit made or undone since
+ * its undo changed what it changes, moved it, or would be moved by its return. The maps' own histories stay
+ * coherent around a step undone out of order, and a refused step never leaves a history stuck: it can be forgotten.
  *
  * Saving never touches history. Jeremy: "saving is just saving data, not resetting the undo history." Neither a
  * save nor another window ever sees an edit that is still open, since it may yet be cancelled.
@@ -249,6 +250,33 @@ describe('DocumentHub', () =>
    * @returns {number[]} The triggers.
    */
   const triggersOf = (hub: DocumentHub): number[] => (hub.map('map:1').event(1) as RmmzMapEvent).pages.map(page => page.trigger);
+
+  /**
+   * Renames map 1's door and adds event 5 to the end of map 2's list, as one step on both maps.
+   * @param {DocumentHub} hub The hub.
+   * @returns {HistoryStep} The step.
+   */
+  const placeDoorPair = (hub: DocumentHub): HistoryStep => hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+  {
+    tx.set(MAP_A, [ 'events', 1, 'name' ], 'Door to cave');
+    tx.apply(MAP_B, hub.map('map:2').placeEventPatch(createMapEvent(5, 0, 1)));
+  }) as HistoryStep;
+
+  /**
+   * Places an event named "Newer" on map 2, in the slot its id names.
+   * @param {DocumentHub} hub The hub.
+   * @param {number} id The event id.
+   * @returns {HistoryStep} The step.
+   */
+  const placeNewerEvent = (hub: DocumentHub, id: number): HistoryStep => hub.edit('Place event', [ mapHistoryKey(2) ], tx =>
+    tx.apply(MAP_B, hub.map('map:2').placeEventPatch({ ...createMapEvent(id, 1, 1), name: 'Newer' }))) as HistoryStep;
+
+  /**
+   * Lists map 2's event slots as id and name, empty slots as null.
+   * @param {DocumentHub} hub The hub.
+   * @returns {(string | null)[]} The slots.
+   */
+  const slotsOf = (hub: DocumentHub): (string | null)[] => fileOf(hub, MAP_B).events.map(event => (event === null ? null : `${event.id}:${event.name}`));
 
   describe('editing', () =>
   {
@@ -1032,11 +1060,237 @@ describe('DocumentHub', () =>
       // Assert.
       expect([ refusal, afterRefusal, fileOf(target, MAP_A), [ ...target.lineage(MAP_A) ] ])
         .toStrictEqual([
-          `the copy of map:1 names ${resize.id} as applied but does not carry it`,
+          `the copy of map:1 names ${resize.id} without carrying it`,
           before,
           fileOf(source, MAP_A),
           [ ...source.lineage(MAP_A) ],
         ]);
+    });
+  });
+
+  describe('redoing a step past edits made since its undo', () =>
+  {
+    it('refuses to redo a placement that would push an event placed since its undo out of its slot, and changes nothing', () =>
+    {
+      // Arrange: the pair is undone from map 1, then map 2 places a newer event 5 in the slot the pair had used, so
+      // putting the pair's event 5 back would push the newer one into slot 6 while it still says it is event 5.
+      const hub = buildHub();
+      placeDoorPair(hub);
+      hub.undo(mapHistoryKey(1));
+      placeNewerEvent(hub, 5);
+      const histories = [ mapHistoryKey(1), mapHistoryKey(2) ];
+      const before = stateOf(hub, histories);
+
+      // Act: redo the pair from map 1, where it is still the next redo.
+      const asked = hub.canRedo(mapHistoryKey(1));
+      const result = hub.redo(mapHistoryKey(1));
+
+      // Assert: refused and named before anything is tried, the same answer both ways, and nothing touched.
+      expect([
+        result.ok === false && result.reason,
+        result.ok === false && 'blockedBy' in result && result.blockedBy?.label,
+        result.ok === false && 'message' in result && result.message,
+        asked,
+        stateOf(hub, histories),
+      ])
+        .toStrictEqual([ 'moved', 'Place event', 'redoing "Place door pair" would move what "Place event" changed', result, before ]);
+    });
+
+    it('refuses to redo a pair while one of its maps is not held, before checking anything else', () =>
+    {
+      // Arrange: the pair is undone from map 1, and map 2 is let go.
+      const hub = buildHub();
+      placeDoorPair(hub);
+      hub.undo(mapHistoryKey(1));
+      hub.release(MAP_B);
+
+      // Act.
+      const result = hub.redo(mapHistoryKey(1));
+
+      // Assert.
+      expect([ result.ok, result.ok === false && result.reason, result.ok === false && 'documents' in result && result.documents ])
+        .toStrictEqual([ false, 'missing-documents', [ 'map:2' ] ]);
+    });
+
+    it('redoes a placement after edits since its undo that leave its slot alone', () =>
+    {
+      // Arrange: after the undo, map 2's newer event goes into its empty slot 2, and a cell is painted.
+      const hub = buildHub();
+      placeDoorPair(hub);
+      hub.undo(mapHistoryKey(1));
+      placeNewerEvent(hub, 2);
+      hub.edit('Paint cave', [ mapHistoryKey(2) ], tx => tx.tiles(MAP_B, [ [ 0, 800 ] ]));
+
+      // Act.
+      const result = hub.redo(mapHistoryKey(1));
+
+      // Assert: the pair is back on both maps, and the newer event and the painting keep their places.
+      expect([ result.ok, slotsOf(hub), fileOf(hub, MAP_A).events[1]?.name, fileOf(hub, MAP_B).data[0] ])
+        .toStrictEqual([ true, [ null, '1:Door', '2:Newer', '3:Chest', null, '5:EV005' ], 'Door to cave', 800 ]);
+    });
+
+    it('refuses to redo a change after the edit it was made on top of was undone since, and changes nothing', () =>
+    {
+      // Arrange: map 1 deletes the first page, and the event window then makes the page now first autorun. Both are
+      // undone, the event window's first, so the page the change addressed is second again, and the index it wrote
+      // to holds the first page, which does not autorun either.
+      const hub = buildPagedHub();
+      hub.edit('Delete page', [ mapHistoryKey(1) ], tx => tx.splice(MAP_A, [ 'events', 1, 'pages' ], 0, 1, []));
+      hub.edit('Autorun page', [ eventHistoryKey(1, 1) ], tx => tx.set(MAP_A, [ 'events', 1, 'pages', 0, 'trigger' ], 3));
+      hub.undo(eventHistoryKey(1, 1));
+      hub.undo(mapHistoryKey(1));
+      const histories = [ eventHistoryKey(1, 1), mapHistoryKey(1) ];
+      const before = stateOf(hub, histories);
+
+      // Act.
+      const result = hub.redo(eventHistoryKey(1, 1));
+
+      // Assert.
+      expect([
+        result.ok === false && result.reason,
+        result.ok === false && 'blockedBy' in result && result.blockedBy?.label,
+        result.ok === false && 'message' in result && result.message,
+        triggersOf(hub),
+        stateOf(hub, histories),
+      ])
+        .toStrictEqual([ 'moved', 'Delete page', 'undoing "Delete page" moved what "Autorun page" changes', [ 0, 0, 3 ], before ]);
+    });
+
+    it('redoes a change after an edit behind it was undone since', () =>
+    {
+      // Arrange: the same, but the deleted page was the last, behind the page the change addressed.
+      const hub = buildPagedHub();
+      hub.edit('Delete page', [ mapHistoryKey(1) ], tx => tx.splice(MAP_A, [ 'events', 1, 'pages' ], 2, 1, []));
+      hub.edit('Autorun page', [ eventHistoryKey(1, 1) ], tx => tx.set(MAP_A, [ 'events', 1, 'pages', 0, 'trigger' ], 3));
+      hub.undo(eventHistoryKey(1, 1));
+      hub.undo(mapHistoryKey(1));
+
+      // Act.
+      const result = hub.redo(eventHistoryKey(1, 1));
+
+      // Assert: the first page autoruns, and the restored last page keeps its own trigger.
+      expect([ result.ok, triggersOf(hub) ])
+        .toStrictEqual([ true, [ 3, 0, 3 ] ]);
+    });
+
+    it('redoes a change whose own edit underneath was undone and redone since, putting it back where it was', () =>
+    {
+      // Arrange: one history adds a page and makes it autorun, undoes both, and redoes the page.
+      const hub = buildPagedHub();
+      hub.edit('Add page', [ eventHistoryKey(1, 1) ], tx => tx.splice(MAP_A, [ 'events', 1, 'pages' ], 1, 0, [ createEventPage() as unknown as JsonValue ]));
+      hub.edit('Autorun new page', [ eventHistoryKey(1, 1) ], tx => tx.set(MAP_A, [ 'events', 1, 'pages', 1, 'trigger' ], 3));
+      hub.undo(eventHistoryKey(1, 1));
+      hub.undo(eventHistoryKey(1, 1));
+      hub.redo(eventHistoryKey(1, 1));
+
+      // Act.
+      const result = hub.redo(eventHistoryKey(1, 1));
+
+      // Assert.
+      expect([ result.ok, triggersOf(hub) ])
+        .toStrictEqual([ true, [ 0, 3, 0, 3 ] ]);
+    });
+
+    it('refuses the same redo in a window that repeated every operation', () =>
+    {
+      // Arrange: the pair, its undo and the newer event all happen in the first window and are repeated in the second.
+      const source = buildHub();
+      const target = buildHub(undefined, 'window-b');
+      mirror(source, target);
+      placeDoorPair(source);
+      source.undo(mapHistoryKey(1));
+      placeNewerEvent(source, 5);
+
+      // Act.
+      const result = target.redo(mapHistoryKey(1));
+
+      // Assert.
+      expect([ result.ok === false && result.reason, result.ok === false && 'blockedBy' in result && result.blockedBy?.label, slotsOf(target) ])
+        .toStrictEqual([ 'moved', 'Place event', [ null, '1:Door', null, '3:Chest', null, '5:Newer' ] ]);
+    });
+
+    it('hands another window an undone edit that no history lists any more, so the same redo is refused there', () =>
+    {
+      // Arrange: after both undos, map 1 records something new, which drops the deletion from every history; the map
+      // then goes to a second window.
+      const source = buildPagedHub();
+      source.edit('Delete page', [ mapHistoryKey(1) ], tx => tx.splice(MAP_A, [ 'events', 1, 'pages' ], 0, 1, []));
+      source.edit('Autorun page', [ eventHistoryKey(1, 1) ], tx => tx.set(MAP_A, [ 'events', 1, 'pages', 0, 'trigger' ], 3));
+      source.undo(eventHistoryKey(1, 1));
+      source.undo(mapHistoryKey(1));
+      source.edit('Retitle', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      const snapshot = structuredClone(source.snapshot(MAP_A));
+      const target = new DocumentHub({ clientId: 'window-b' });
+      target.adoptSnapshot(snapshot);
+
+      // Act.
+      const result = target.redo(eventHistoryKey(1, 1));
+
+      // Assert: the deletion travels beside the histories, and the second window refuses the redo as the first would.
+      expect([
+        snapshot.unlisted.map(step => step.label),
+        result.ok === false && result.reason,
+        result.ok === false && 'blockedBy' in result && result.blockedBy?.label,
+      ])
+        .toStrictEqual([ [ 'Delete page' ], 'moved', 'Delete page' ]);
+    });
+
+    it('refuses as untracked a redo on a copy whose record does not reach back to the undo, and redoes it with the whole record', () =>
+    {
+      // Arrange: map 2 is taken back from a copy that records nothing since the pair's undo, as a window that had
+      // stopped tracking the pair would send it.
+      const hub = buildHub();
+      placeDoorPair(hub);
+      hub.undo(mapHistoryKey(1));
+      const whole = structuredClone(hub.snapshot(MAP_B));
+      hub.adoptSnapshot({ ...whole, moves: [] });
+      const histories = [ mapHistoryKey(1), mapHistoryKey(2) ];
+      const before = stateOf(hub, histories);
+
+      // Act: redo on the untracked copy, then take the whole copy and redo again.
+      const refused = hub.redo(mapHistoryKey(1));
+      const afterRefusal = stateOf(hub, histories);
+      hub.adoptSnapshot(whole);
+      const redone = hub.redo(mapHistoryKey(1));
+
+      // Assert.
+      expect([
+        refused.ok === false && refused.reason,
+        refused.ok === false && 'blockedBy' in refused && refused.blockedBy,
+        refused.ok === false && 'message' in refused && refused.message,
+        afterRefusal,
+        redone.ok,
+        slotsOf(hub),
+      ])
+        .toStrictEqual([
+          'untracked',
+          null,
+          'this window cannot tell what changed in map:2 since "Place door pair" was undone',
+          before,
+          true,
+          [ null, '1:Door', null, '3:Chest', null, '5:EV005' ],
+        ]);
+    });
+
+    it('keeps its record of moves only as far back as the oldest undo a history can still redo', () =>
+    {
+      // Arrange: a reader for the record a copy of map 1 would carry.
+      const hub = buildHub();
+      const recorded = () => [ ...hub.snapshot(MAP_A).moves ];
+
+      // Act: two steps, an undo, a step in the event's history, then a map step that drops the undone one.
+      hub.edit('One', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'One'));
+      const two = hub.edit('Two', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Two')) as HistoryStep;
+      const nothingUndone = recorded();
+      hub.undo(mapHistoryKey(1));
+      const afterUndo = recorded();
+      const three = hub.edit('Three', [ eventHistoryKey(1, 1) ], tx => tx.set(MAP_A, [ 'note' ], 'three')) as HistoryStep;
+      const afterAnother = recorded();
+      hub.edit('Four', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'parallaxName' ], 'Sky'));
+
+      // Assert.
+      expect([ nothingUndone, afterUndo, afterAnother, recorded() ])
+        .toStrictEqual([ [], [ two.id ], [ two.id, three.id ], [] ]);
     });
   });
 

@@ -54,21 +54,24 @@ type DocumentConflict =
  *
  * - {@code nothing}: the history has no step in that direction.
  * - {@code missing-documents}: the step touches documents this window does not hold; open them and retry.
- * - {@code conflict}: a later edit changed something the step changed, so undoing it would overwrite that edit.
- * - {@code moved}: a later edit moved where something the step changed now sits, or undoing the step would move
- *   where a later edit's changes sit: a resize moves every tile, and adding or removing items in a list moves every
- *   item after them. Undoing it would change the wrong thing.
+ * - {@code conflict}: another edit changed something the step changes, so moving the step would overwrite it. For
+ *   an undo that edit came later; for a redo it was made, or undone, since the step's undo.
+ * - {@code moved}: that edit moved where something the step changes sits, or moving the step would move where the
+ *   edit's changes sit: a resize moves every tile, and adding or removing items in a list moves every item after
+ *   them. Moving the step would change the wrong thing.
+ * - {@code untracked}: a redo on a document whose record of edits does not reach back to the step's undo, as when
+ *   its copy came from a window that no longer tracked the step, so nothing there can be checked.
  *
- * For both of the last two, {@code blockedBy} names the later step when the window can tell which one it was,
- * and the step stays where it is, having changed nothing anywhere; the person can undo the blocking step first,
- * or forget this one ({@link DocumentHub.forgetStep}) and go on past it.
+ * For the last three, {@code blockedBy} names the edit in the way when the window can tell which one it was, and
+ * the step stays where it is, having changed nothing anywhere; the person can move the blocking edit first, or
+ * forget this step ({@link DocumentHub.forgetStep}) and go on past it.
  */
 type HistoryFailure =
   | { readonly ok: false; readonly reason: 'nothing'; readonly historyKey: HistoryKey }
   | { readonly ok: false; readonly reason: 'missing-documents'; readonly step: HistoryStep; readonly documents: readonly DocumentKey[] }
   | {
     readonly ok: false;
-    readonly reason: 'conflict' | 'moved';
+    readonly reason: 'conflict' | 'moved' | 'untracked';
     readonly step: HistoryStep;
     readonly blockedBy: HistoryStep | null;
     readonly message: string;
@@ -129,16 +132,18 @@ type RemoteOperation =
  * lineage of operations that produced it, whether it is saved, and every history that lives on it. An edit still
  * open is never part of it. Plain data, so it crosses a BroadcastChannel.
  *
- * {@code applied} names every step whose patches the content holds, in the order they went in. Most of them sit
- * in the histories; {@code unlisted} carries the rest (steps forgotten, and steps kept only by histories that live
- * on other documents). No history can move those any more, but their patches are still in the content, and an
- * undo of an older step must still be checked against them.
+ * {@code applied} names every step whose patches the content holds, in the order they went in, which is what an
+ * undo is checked against. {@code moves} names every step whose patches went in or came out since the oldest undo
+ * a history can still redo, oldest first, which is what a redo is checked against. Most of those steps sit in the
+ * histories; {@code unlisted} carries the rest (steps forgotten, steps dropped from every history, and steps kept
+ * only by histories that live on other documents), since no history can move them but a check still needs them.
  */
 type DocumentSnapshot = {
   readonly document: DocumentKey;
   readonly content: JsonValue;
   readonly lineage: readonly string[];
   readonly applied: readonly string[];
+  readonly moves: readonly string[];
   readonly saved: readonly string[];
   readonly histories: readonly { key: HistoryKey; done: readonly HistoryStep[]; undone: readonly HistoryStep[] }[];
   readonly unlisted: readonly HistoryStep[];
@@ -233,6 +238,49 @@ const BLOCKED_UNDO: Readonly<Record<Interference, BlockedUndoReport>> = {
 };
 
 /**
+ * How one kind of blocked redo is reported: the reason it gives, and the sentence naming the step and the edit in
+ * its way. The edit comes already phrased: its name when it was made since the undo, or undoing it when it was
+ * undone since.
+ */
+type BlockedRedoReport = {
+  readonly reason: 'conflict' | 'moved';
+  readonly describe: (step: HistoryStep, edit: string) => string;
+};
+
+/**
+ * How a redo refused by an edit made or undone since its undo is reported, by the way that edit bears on the step.
+ * The edit is the earlier one here, its patches having been in place (or taken out) first, and the step is what
+ * would go back on top.
+ */
+const BLOCKED_REDO: Readonly<Record<Interference, BlockedRedoReport>> = {
+  overlap: {
+    reason: 'conflict',
+    describe: (step, edit) => `${edit} changed what "${step.label}" changes`,
+  },
+  moved: {
+    reason: 'moved',
+    describe: (step, edit) => `redoing "${step.label}" would move what ${edit} changed`,
+  },
+  'would-move': {
+    reason: 'moved',
+    describe: (step, edit) => `${edit} moved what "${step.label}" changes`,
+  },
+};
+
+/**
+ * Lists the steps whose patches went in or came out an odd number of times across a run of moves, newest move
+ * first. Every move turns a step's patches over, so these are exactly the steps whose state differs from before the
+ * run; a step undone and redone within it is back as it was, and leaves nothing to check.
+ * @param {readonly HistoryStep[]} moves The moves, oldest first.
+ * @returns {HistoryStep[]} The steps, by their newest move first.
+ */
+const stepsTurnedOverBy = (moves: readonly HistoryStep[]): HistoryStep[] =>
+{
+  const newestFirst = [ ...new Map([ ...moves ].reverse().map(step => [ step.id, step ])).values() ];
+  return newestFirst.filter(step => moves.filter(each => each.id === step.id).length % 2 === 1);
+};
+
+/**
  * Relates a later step to an earlier one on one document: how the first pair of their patches there that bear on
  * each other do.
  * @param {DocumentKey} key The document.
@@ -255,28 +303,28 @@ const interferenceOn = (key: DocumentKey, earlier: HistoryStep, later: HistorySt
 };
 
 /**
- * Finds the step behind every id a snapshot names as applied, among the steps it carries in its histories and
- * beside them.
+ * Builds the lookup from the step ids a snapshot names (in its applied list and its moves) to the steps it carries,
+ * in its histories and beside them.
  * @param {DocumentSnapshot} snapshot The snapshot.
- * @returns {HistoryStep[]} The steps, in the order their patches went in; throws when the snapshot names a step it
- * does not carry, since the content could then not be checked against it.
+ * @returns {(id: string) => HistoryStep} Finds one step; throws when the snapshot names a step it does not carry,
+ * since the content could then not be checked against it.
  */
-const stepsInPlace = (snapshot: DocumentSnapshot): HistoryStep[] =>
+const carriedStepFinder = (snapshot: DocumentSnapshot): (id: string) => HistoryStep =>
 {
   const carried = new Map<string, HistoryStep>();
   snapshot.histories.forEach(({ done, undone }) => [ ...done, ...undone ].forEach(step => carried.set(step.id, step)));
   snapshot.unlisted.forEach(step => carried.set(step.id, step));
 
-  return snapshot.applied.map(id =>
+  return (id: string): HistoryStep =>
   {
     const step = carried.get(id);
     if (step === undefined)
     {
-      throw new Error(`the copy of ${snapshot.document} names ${id} as applied but does not carry it`);
+      throw new Error(`the copy of ${snapshot.document} names ${id} without carrying it`);
     }
 
     return step;
-  });
+  };
 };
 
 /**
@@ -295,9 +343,13 @@ const stepsInPlace = (snapshot: DocumentSnapshot): HistoryStep[] =>
  * and go on past it. In the other histories a transaction belongs to, it may be undone out of order; each of those
  * histories then lists it as its next redo, keeps its own newer steps undoable in their order, and drops it from
  * its redo list the moment it records something new, while the step stays redoable from any history that has
- * not. Redo puts a step's patches back on top of whatever the documents hold now, once each target is found
- * holding exactly what the step replaced, and a redone step becomes the newest done step in every history it
- * belongs to.
+ * not.
+ *
+ * The redo rule is the same rule forwards: a history's next redo goes back on top of whatever its documents hold
+ * now, unless an edit made since its undo, or undone since, on any document it changes, changed the same data,
+ * moved where it sits, or would be moved by its return. An undo and redo of the same edit in between cancel out.
+ * A step that fails is refused before anything is applied, naming the edit in the way, and a redone step becomes
+ * the newest done step in every history it belongs to.
  *
  * Saving writes a document's committed content and records which steps the file now reflects; it never touches
  * history, so undo after a save works, and undoing back to the saved state makes the document clean again.
@@ -326,6 +378,14 @@ class DocumentHub
    * was let go) still has its patches in the document, and an undo of an older step must be checked against them.
    */
   #applied = new Map<DocumentKey, HistoryStep[]>();
+
+  /**
+   * For each held document, every step whose patches went in or came out of it, oldest first, reaching back only as
+   * far as the oldest undo some held history can still redo. A redo is checked against what moved after its own
+   * undo; steps are kept whole for the same reason as in {@link #applied}, since one may have left every history
+   * by now.
+   */
+  #moves = new Map<DocumentKey, HistoryStep[]>();
 
   #saved = new Map<DocumentKey, string[]>();
 
@@ -480,6 +540,7 @@ class DocumentHub
     this.#documents.set(key, document);
     this.#lineage.set(key, [ diskOperationId(content) ]);
     this.#applied.set(key, []);
+    this.#moves.set(key, []);
     this.#saved.set(key, []);
     this.#emit({ type: 'adopted', document: key, source: 'local' });
     return document;
@@ -493,27 +554,34 @@ class DocumentHub
    */
   snapshot(key: DocumentKey): DocumentSnapshot
   {
+    // reading the content first refuses a document this window does not hold, naming it, and every held document
+    // keeps both lists.
+    const content = this.#committedContent(key);
+    const applied = this.#applied.get(key) as HistoryStep[];
+    const moves = this.#moves.get(key) as HistoryStep[];
+
     const histories = [ ...this.#histories.values() ]
       .filter(history => homeDocumentOf(history.key) === key)
       .map(history => ({ key: history.key, done: [ ...history.done ], undone: [ ...history.undone ] }));
     const listed = new Set(histories.flatMap(({ done, undone }) => [ ...done, ...undone ]).map(step => step.id));
-    const applied = this.#applied.get(key) ?? [];
+    const unlisted = [ ...applied, ...moves ].filter(step => listed.has(step.id) === false);
 
     return {
       document: key,
-      content: this.#committedContent(key),
+      content,
       lineage: [ ...this.lineage(key) ],
       applied: applied.map(step => step.id),
+      moves: moves.map(step => step.id),
       saved: [ ...this.#saved.get(key) ?? [] ],
       histories,
-      unlisted: applied.filter(step => listed.has(step.id) === false),
+      unlisted: [ ...new Map(unlisted.map(step => [ step.id, step ])).values() ],
     };
   }
 
   /**
    * Takes on another window's copy of a document, with its lineage and histories, replacing any copy held here.
-   * A copy that names a step as applied without carrying it is refused whole, before anything changes, since
-   * undo could not check older steps against it. Conflicts are left for their owner to clear.
+   * A copy that names a step, as applied or among its moves, without carrying it is refused whole, before anything
+   * changes, since undo or redo could not be checked against that step. Conflicts are left for their owner to clear.
    * @param {DocumentSnapshot} snapshot The snapshot.
    * @returns {EditorDocument} The document.
    */
@@ -526,7 +594,9 @@ class DocumentHub
       this.#requireIdle();
     }
 
-    const inPlace = stepsInPlace(snapshot);
+    const findCarried = carriedStepFinder(snapshot);
+    const inPlace = snapshot.applied.map(findCarried);
+    const moves = snapshot.moves.map(findCarried);
     if (held !== undefined)
     {
       held.replace(snapshot.content);
@@ -554,7 +624,9 @@ class DocumentHub
     });
 
     // steps no history here lists stay out of the registry, so nothing here can move them.
-    this.#applied.set(key, inPlace.map(step => this.#steps.get(step.id) ?? step));
+    const known = (step: HistoryStep): HistoryStep => this.#steps.get(step.id) ?? step;
+    this.#applied.set(key, inPlace.map(known));
+    this.#moves.set(key, moves.map(known));
     this.#prune();
 
     this.#emit({ type: 'adopted', document: key, source: 'remote' });
@@ -575,6 +647,7 @@ class DocumentHub
 
     this.#lineage.delete(key);
     this.#applied.delete(key);
+    this.#moves.delete(key);
     this.#saved.delete(key);
     this.#conflicts.delete(key);
     this.#dropHistoriesOn(key);
@@ -737,16 +810,24 @@ class DocumentHub
   }
 
   /**
-   * Reports whether a redo in a history can be attempted.
+   * Reports whether a redo in a history can happen: it has a step to redo, this window holds every document that
+   * step touches, and no edit made or undone since its undo changed the same data, moved where it sits, or would be
+   * moved by its return. A refusal here names the edit in the way before anything is tried.
    * @param {HistoryKey} key The history.
    * @returns {HistoryCheck} The step it would redo, or why it cannot.
    */
   canRedo(key: HistoryKey): HistoryCheck
   {
     const step = this.#histories.get(key)?.nextRedo() ?? null;
-    return step === null
-      ? { ok: false, reason: 'nothing', historyKey: key }
-      : this.#checkHeld(step);
+    if (step === null)
+    {
+      return { ok: false, reason: 'nothing', historyKey: key };
+    }
+
+    const held = this.#checkHeld(step);
+    return held.ok
+      ? this.#checkMovesSinceUndo(step)
+      : held;
   }
 
   /**
@@ -761,7 +842,8 @@ class DocumentHub
   }
 
   /**
-   * Redoes the most recently undone step of a history, whenever each of its patches applies again.
+   * Redoes the most recently undone step of a history, on top of whatever its documents hold now; an edit made or
+   * undone since in its way refuses it, as {@link canRedo} describes.
    * @param {HistoryKey} key The history.
    * @returns {HistoryCheck} The step redone, or why nothing was.
    */
@@ -862,13 +944,8 @@ class DocumentHub
     const failed = this.#applyEntries(step, direction);
     if (failed !== null)
     {
-      return {
-        ok: false,
-        reason: 'conflict',
-        step,
-        blockedBy: this.#laterStepTouching(step, failed.entry),
-        message: failed.message,
-      };
+      // every recorded edit was checked before trying, so whatever changed the target was never recorded.
+      return { ok: false, reason: 'conflict', step, blockedBy: null, message: failed.message };
     }
 
     const opId = this.#nextId();
@@ -942,25 +1019,43 @@ class DocumentHub
   }
 
   /**
-   * Finds the recorded edit that explains why one of a step's patches did not fit: the newest step applied to the
-   * same document, after the given one when it is applied, that bears on that patch. An undo has already been
-   * checked against every later edit, so for one this finds nothing, which is the truth: whatever changed the target
-   * was never recorded.
-   * @param {HistoryStep} step The step that could not move.
-   * @param {StepEntry} entry The patch of it that failed.
-   * @returns {HistoryStep | null} The blocking step, or null when no recorded step explains it.
+   * Checks an undone step against every edit whose patches went in or came out of a document it changes since its
+   * undo: edits made since, and edits undone since, forgotten ones included. A step whose patches went in and out
+   * again in that time is back as it was and counts for nothing. The step can go back on top only if none of the
+   * rest changed its data, moved it, or would be moved by its return; otherwise the newest such edit on the first
+   * document that has one is named. A document whose record does not reach back to the undo is refused as untracked,
+   * since nothing there can be checked.
+   * @param {HistoryStep} step The step, undone.
+   * @returns {HistoryCheck} The step, or the edit in its way.
    */
-  #laterStepTouching(step: HistoryStep, entry: StepEntry): HistoryStep | null
+  #checkMovesSinceUndo(step: HistoryStep): HistoryCheck
   {
-    const applied = this.#applied.get(entry.document) ?? [];
-    const position = applied.findLastIndex(each => each.id === step.id);
-    const later = applied.slice(position + 1).reverse();
+    for (const key of documentsOfStep(step))
+    {
+      // every document the step changes is held, as checked first, and every held document keeps both lists.
+      const moves = this.#moves.get(key) as HistoryStep[];
+      const applied = this.#applied.get(key) as HistoryStep[];
+      const undoneAt = moves.findLastIndex(each => each.id === step.id);
+      if (undoneAt < 0)
+      {
+        const message = `this window cannot tell what changed in ${key} since "${step.label}" was undone`;
+        return { ok: false, reason: 'untracked', step, blockedBy: null, message };
+      }
 
-    // whether two patches bear on each other does not depend on which is taken as the earlier one.
-    const blocking = later.find(candidate => candidate.entries
-      .some(each => each.document === entry.document && patchInterference(entry.patch, each.patch) !== null));
+      for (const edit of stepsTurnedOverBy(moves.slice(undoneAt + 1)))
+      {
+        const interference = interferenceOn(key, edit, step);
+        if (interference !== null)
+        {
+          const inPlace = applied.some(each => each.id === edit.id);
+          const phrase = inPlace ? `"${edit.label}"` : `undoing "${edit.label}"`;
+          const { reason, describe } = BLOCKED_REDO[interference];
+          return { ok: false, reason, step, blockedBy: edit, message: describe(step, phrase) };
+        }
+      }
+    }
 
-    return blocking ?? null;
+    return { ok: true, step };
   }
 
   //endregion history
@@ -1129,6 +1224,7 @@ class DocumentHub
     this.#dropHistoriesOn(key);
 
     this.#applied.set(key, []);
+    this.#moves.set(key, []);
     this.#saved.set(key, []);
     this.#lineage.set(key, [ diskOperationId(content) ]);
     this.clearConflict(key);
@@ -1428,6 +1524,7 @@ class DocumentHub
     documentsOfStep(step).filter(key => this.has(key)).forEach(key =>
     {
       this.#applied.get(key)?.push(step);
+      this.#logMove(key, step);
     });
   }
 
@@ -1445,7 +1542,30 @@ class DocumentHub
       {
         applied.splice(index, 1);
       }
+
+      this.#logMove(key, step);
     });
+  }
+
+  /**
+   * Logs that a step's patches went into or came out of a held document, once its histories already say which, and
+   * lets go of every earlier move no redo can need: whatever came before the oldest undo that some held history can
+   * still redo. With nothing left to redo, the record is empty.
+   * @param {DocumentKey} key The document.
+   * @param {HistoryStep} step The step that moved.
+   */
+  #logMove(key: DocumentKey, step: HistoryStep): void
+  {
+    const moves = [ ...(this.#moves.get(key) as HistoryStep[]), step ];
+    const undoneAt = [ ...this.#histories.values() ]
+      .flatMap(history => history.undone)
+      .filter(each => each.entries.some(entry => entry.document === key))
+      .map(each => moves.findLastIndex(move => move.id === each.id));
+
+    // with nothing left to redo, the oldest place needed is Infinity and the record empties. A redoable step whose
+    // undo is not recorded here will be refused as untracked; trimming by its missing place could drop moves another
+    // step needs, so it keeps the whole record instead.
+    this.#moves.set(key, moves.slice(Math.max(0, Math.min(...undoneAt))));
   }
 
   /**
