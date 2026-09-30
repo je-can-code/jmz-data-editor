@@ -171,6 +171,18 @@ type RmmzMapInfo = {
 };
 
 /**
+ * One row of {@code data/CommonEvents.json}: a command list any event can call by id, or that runs by itself
+ * while its switch is on ({@code trigger} 1 runs it automatically, 2 in parallel, 0 only when called).
+ */
+type RmmzCommonEvent = {
+  id: number;
+  list: RmmzEventCommand[];
+  name: string;
+  switchId: number;
+  trigger: number;
+};
+
+/**
  * One row of {@code data/Tilesets.json}. {@code tilesetNames} holds the nine sheets in RMMZ order (A1, A2, A3,
  * A4, A5, B, C, D, E), and {@code flags} the passability and terrain bits for every tile id.
  */
@@ -185,6 +197,7 @@ type RmmzTileset = {
 
 export type {
   RmmzAudio,
+  RmmzCommonEvent,
   RmmzEncounter,
   RmmzEventCommand,
   RmmzEventConditions,
