@@ -21,7 +21,7 @@ import {
   type CommandStructure,
   type CommandTree,
 } from './commandTree.ts';
-import { insertionIndex, settleInsertion, type InsertionPoint } from './insertionPoints.ts';
+import { insertionIndex, pointBeforeNode, settleInsertion, type InsertionPoint } from './insertionPoints.ts';
 import {
   asJsonCommands,
   duplicateNodes,
@@ -150,6 +150,42 @@ class CommandListEditor
     const location = this.locate(start);
     const node = location?.node ?? null;
     return node !== null && node.start === start && location?.role !== 'terminator'
+      ? node
+      : null;
+  }
+
+  /**
+   * Finds the place right before a command as the list stands now: before the unit it heads, or at the end of the
+   * body it closes. A place found while the list was different (another window edited it mid-drag) is found again
+   * this way, by the command it sat before.
+   * @param {RmmzEventCommand} command A unit's first command, or the empty command closing a body.
+   * @returns {InsertionPoint | null} The place, or null when the command is gone or heads nothing.
+   */
+  placeBefore(command: RmmzEventCommand): InsertionPoint | null
+  {
+    const index = this.commands().indexOf(command);
+    const location = this.locate(index);
+    if (location !== null && location.role === 'terminator')
+    {
+      return { body: location.body, position: location.body.nodes.length };
+    }
+
+    const node = this.nodeAt(index);
+    return node === null
+      ? null
+      : pointBeforeNode(node);
+  }
+
+  /**
+   * Finds the block a command opens as the list stands now, for an action chosen while the list may have changed
+   * under it (a menu left open while another window edited the list).
+   * @param {RmmzEventCommand} command The block's first command.
+   * @returns {CommandBlockNode | null} The block, or null when the command is gone or opens no block.
+   */
+  blockOpenedBy(command: RmmzEventCommand): CommandBlockNode | null
+  {
+    const node = this.nodeAt(this.commands().indexOf(command));
+    return node !== null && node.kind === 'block'
       ? node
       : null;
   }

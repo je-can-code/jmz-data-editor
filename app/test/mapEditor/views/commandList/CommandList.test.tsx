@@ -457,6 +457,56 @@ describe('CommandList', () =>
       .toStrictEqual([ [ cmd(108, 0, [ '<areaEvent:3x1>' ]), cmd(230, 0, [ 77 ]) ], true ]);
   });
 
+  /**
+   * Lays the rows out one above the other, 20 pixels each, as a browser would, since the test page has no layout.
+   * @returns {{ mockRestore: () => void }} The stand-in, to restore after the test.
+   */
+  const layOutRows = () => vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function measure(this: HTMLElement)
+  {
+    const top = [ ...document.querySelectorAll('[role="listitem"]') ].indexOf(this) * 20;
+    return { top, bottom: top + 20, height: 20, left: 0, right: 400, width: 400, x: 0, y: top, toJSON: () => ({}) } as DOMRect;
+  });
+
+  it('drops where the marker was even when another window changed the list mid-drag', async () =>
+  {
+    // Arrange: the sound picked up and held over the lower half of the loop's end row, below the loop.
+    const { hub } = await renderList();
+    const layout = layOutRows();
+    const [ handle ] = screen.getAllByLabelText('Drag to move');
+    fireEvent.pointerDown(handle, { button: 0, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientY: 135, pointerId: 1 });
+    act(() =>
+    {
+      hub.edit('Elsewhere', [ eventHistoryKey(1, 1) ], tx => tx.splice('map:1', PATH, 1, 1, []));
+    });
+
+    // Act.
+    fireEvent.pointerUp(handle, { clientY: 135, pointerId: 1 });
+    layout.mockRestore();
+
+    // Assert: the sound follows the loop, just before the list's end, where the marker was.
+    expect(commandsOf(hub).map(command => command.code))
+      .toStrictEqual([ 111, 101, 401, 0, 412, 112, 0, 413, 250, 0 ]);
+  });
+
+  it('adds the else from the menu to the branch as it stands, when another window changed the list meanwhile', async () =>
+  {
+    // Arrange: the menu opened on the branch, then two waits arrive above it from another window.
+    const { hub } = await renderList();
+    fireEvent.contextMenu(screen.getByText('If switch #0001 Door Open is ON'), { clientX: 5, clientY: 5 });
+    act(() =>
+    {
+      hub.edit('Elsewhere', [ eventHistoryKey(1, 1) ], tx => tx.splice('map:1', PATH, 0, 0, [ cmd(230, 0, [ 1 ]), cmd(230, 0, [ 2 ]) ] as never));
+    });
+
+    // Act.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add an else branch' }));
+
+    // Assert: the else closes the branch where it is now.
+    expect(commandsOf(hub).slice(4, 11).map(command => `${command.code}@${command.indent}`))
+      .toStrictEqual([ '111@0', '101@1', '401@1', '0@1', '411@0', '0@1', '412@0' ]);
+  });
+
   it('plays a command\'s sound through the window\'s player', async () =>
   {
     // Arrange.

@@ -5,9 +5,10 @@ import type { CommandCatalogEntry } from '../../core/commands/catalogTypes.ts';
 import { renderSentence, type NameLookup } from '../../core/commands/sentence.ts';
 import { hasElseBranch } from '../../core/commandList/blockReconcile.ts';
 import { CommandListEditor } from '../../core/commandList/CommandListEditor.ts';
-import { isBodyInside, type CommandBlockNode, type CommandNode } from '../../core/commandList/commandTree.ts';
+import { isBodyInside, type CommandBlockNode, type CommandNode, type CommandTree } from '../../core/commandList/commandTree.ts';
 import { nameLookup } from '../../core/commandList/databaseNames.ts';
 import {
+  canDropAt,
   dropTargetAt,
   insertionIndex,
   pointAtRow,
@@ -61,6 +62,15 @@ type CommandListProps = {
 };
 
 /**
+ * Where a drag would land, and what finds that place again should the list change before the drop: the tree the
+ * place was found in, and the command it sits before.
+ */
+type DragTarget = DropTarget & {
+  readonly tree: CommandTree;
+  readonly anchor: RmmzEventCommand | null;
+};
+
+/**
  * A drag in progress: the units dragged (by their first command), where it started, whether it has moved far
  * enough to be a drag, and where it would land.
  */
@@ -68,7 +78,7 @@ type DragState = {
   readonly heads: readonly RmmzEventCommand[];
   readonly originY: number;
   readonly active: boolean;
-  readonly target: DropTarget | null;
+  readonly target: DragTarget | null;
 };
 
 /**
@@ -80,12 +90,13 @@ type SearchState = {
 };
 
 /**
- * The open context menu: where, and for which row.
+ * The open context menu: where, and for which command's row. The command, not the row, is kept, since the row is
+ * of one reading of the list and another window may change the list while the menu is open.
  */
 type MenuState = {
   readonly x: number;
   readonly y: number;
-  readonly row: ListRow;
+  readonly head: RmmzEventCommand;
 };
 
 /**
@@ -211,6 +222,11 @@ type CommandListMenuProps = {
   readonly menu: MenuState | null;
 
   /**
+   * The menu's row as the list stands now, or null when its command is gone, which closes the menu.
+   */
+  readonly row: ListRow | null;
+
+  /**
    * Whether anything is selected, for the choices that act on the selection.
    */
   readonly hasSelection: boolean;
@@ -239,11 +255,10 @@ type CommandListMenuProps = {
  */
 const CommandListMenu = (props: CommandListMenuProps) =>
 {
-  const { menu, hasSelection, hasElse } = props;
-  const row = menu?.row ?? null;
+  const { menu, row, hasSelection, hasElse } = props;
   return (
     <Menu
-      open={menu !== null}
+      open={menu !== null && row !== null}
       onClose={props.onClose}
       anchorReference={'anchorPosition'}
       anchorPosition={menu === null ? undefined : { top: menu.y, left: menu.x }}
@@ -423,7 +438,15 @@ const CommandList = (props: CommandListProps) =>
    */
   const toggleFold = (row: ListRow) =>
   {
-    const head = list[row.index];
+    toggleFoldOf(list[row.index]);
+  };
+
+  /**
+   * Folds or unfolds the block under a head, found by the head itself, which stays right however the list changes.
+   * @param {RmmzEventCommand} head The head.
+   */
+  const toggleFoldOf = (head: RmmzEventCommand) =>
+  {
     setToggled(current =>
     {
       const next = new Set(current);
@@ -477,8 +500,18 @@ const CommandList = (props: CommandListProps) =>
    */
   const openSearch = (row: ListRow, query: string) =>
   {
+    openSearchAt(list[row.index], query);
+  };
+
+  /**
+   * Opens the search at the row of a command, found by the command itself.
+   * @param {RmmzEventCommand} at The command whose row it adds at.
+   * @param {string} query What is already typed.
+   */
+  const openSearchAt = (at: RmmzEventCommand, query: string) =>
+  {
     setMenu(null);
-    setSearch({ at: list[row.index], query });
+    setSearch({ at, query });
   };
 
   /**
@@ -932,14 +965,41 @@ const CommandList = (props: CommandListProps) =>
     }
 
     const hit = rowAtPointer(event.clientY);
-    const target = hit === null
+    const found = hit === null
       ? null
       : dropTargetAt(tree, rows, hit.position, hit.upperHalf, dragNodes(drag));
+    const target = found === null
+      ? null
+      : { ...found, tree, anchor: list[insertionIndex(found.point)] ?? null };
     setDrag({ ...drag, active: true, target });
   };
 
   /**
-   * Finishes a drag, moving the units where the marker was.
+   * Finds where a finished drag lands in the list as it stands at the drop. The place marked was found in one
+   * reading of the list; when another window changed the list since, the place is found again by the command it
+   * sat before, at the same depth, or not at all.
+   * @param {DragTarget} target Where the marker was.
+   * @param {readonly CommandNode[]} nodes The units dropped, as the list stands now.
+   * @returns {InsertionPoint | null} The place, or null when it is gone or no longer takes the drop.
+   */
+  const landingOf = (target: DragTarget, nodes: readonly CommandNode[]): InsertionPoint | null =>
+  {
+    const current = editor.tree();
+    if (target.tree === current)
+    {
+      return target.point;
+    }
+
+    const again = target.anchor === null
+      ? null
+      : editor.placeBefore(target.anchor);
+    return again !== null && again.body.indent === target.point.body.indent && canDropAt(current, again, nodes)
+      ? again
+      : null;
+  };
+
+  /**
+   * Finishes a drag, moving the units where the marker was, as the list stands at the drop.
    * @param {React.PointerEvent} event The release.
    */
   const onHandlePointerUp = (event: React.PointerEvent) =>
@@ -952,8 +1012,18 @@ const CommandList = (props: CommandListProps) =>
       return;
     }
 
-    const nodes = dragNodes(finished);
-    const { point } = finished.target;
+    // the units and the place are both read off the list as it is now, not as the last redraw saw it.
+    const live = indexCommands(editor.commands());
+    const nodes = finished.heads
+      .map(head => editor.nodeAt(live.get(head) ?? -1))
+      .filter((node): node is CommandNode => node !== null);
+    const point = landingOf(finished.target, nodes);
+    if (point === null || nodes.length === 0)
+    {
+      setNotice('The list changed while you were dragging, so nothing moved. Drag again to move it.');
+      return;
+    }
+
     run(() =>
     {
       const { index } = editor.move(nodes, point);
@@ -1011,7 +1081,7 @@ const CommandList = (props: CommandListProps) =>
       applySelection({ selected: [ node.start ], anchor: node.start });
     }
 
-    setMenu({ x: event.clientX, y: event.clientY, row });
+    setMenu({ x: event.clientX, y: event.clientY, head: list[row.index] });
   };
 
   /**
@@ -1055,7 +1125,7 @@ const CommandList = (props: CommandListProps) =>
       : null;
     const elseBranch = branch === null
       ? null
-      : { present: hasElseBranch(list, branch), set: (wanted: boolean) => run(() => editor.setElse(branch, wanted)) };
+      : { present: hasElseBranch(list, branch), set: (wanted: boolean) => setElseOf(list[index], () => wanted) };
 
     return (
       <CommandRowEditor
@@ -1142,15 +1212,34 @@ const CommandList = (props: CommandListProps) =>
 
   /**
    * Finds the conditional branch the context menu's row belongs to, for its else choice.
+   * @param {ListRow | null} row The menu's row, as the list stands now.
    * @returns {CommandBlockNode | null} The branch, or null when the row is no conditional branch's.
    */
-  const menuBranchOf = (): CommandBlockNode | null =>
+  const menuBranchOf = (row: ListRow | null): CommandBlockNode | null =>
   {
-    const node = menu?.row.node ?? null;
+    const node = row?.node ?? null;
     return node !== null && node.kind === 'block' && list[node.start].code === 111
       ? node
       : null;
   };
+
+  /**
+   * Gives the conditional branch a command opens an else, or takes it away, as the list stands when the choice is
+   * made rather than as it stood when the choice was drawn: another window may have changed the list meanwhile.
+   * @param {RmmzEventCommand} head The branch's first command.
+   * @param {(hasElse: boolean) => boolean} wanted Whether it should have one, given whether it has one now.
+   */
+  const setElseOf = (head: RmmzEventCommand, wanted: (hasElse: boolean) => boolean) => run(() =>
+  {
+    // a branch another window removed meanwhile has no else left to change.
+    const branch = editor.blockOpenedBy(head);
+    if (branch === null || head.code !== 111)
+    {
+      return;
+    }
+
+    editor.setElse(branch, wanted(hasElseBranch(editor.commands(), branch)));
+  });
 
   /**
    * Closes the menu, then runs a choice.
@@ -1165,7 +1254,11 @@ const CommandList = (props: CommandListProps) =>
 
   //endregion rows
 
-  const menuBranch = menuBranchOf();
+  // the menu keeps its command, so its row is read afresh on every redraw; a command gone takes the menu with it.
+  const menuRow = menu === null
+    ? null
+    : rows.find(row => list[row.index] === menu.head) ?? null;
+  const menuBranch = menuBranchOf(menuRow);
 
   return (
     <Box
@@ -1194,10 +1287,11 @@ const CommandList = (props: CommandListProps) =>
       {marker?.gap === rows.length && <DropMarker indent={marker.indent}/>}
       <CommandListMenu
         menu={menu}
+        row={menuRow}
         hasSelection={chosen.length > 0}
         hasElse={menuBranch === null ? null : hasElseBranch(list, menuBranch)}
         onClose={() => setMenu(null)}
-        onAdd={fromMenu(() => menu !== null && openSearch(menu.row, ''))}
+        onAdd={fromMenu(() => menu !== null && openSearchAt(menu.head, ''))}
         onCopy={() => withClipboard(clipboard => clipboard.writeText(editor.copy(chosen)))}
         onCut={() => withClipboard(async clipboard =>
         {
@@ -1207,8 +1301,8 @@ const CommandList = (props: CommandListProps) =>
         onPaste={() => withClipboard(async clipboard => pasteText(await clipboard.readText()))}
         onDuplicate={fromMenu(duplicateSelection)}
         onDelete={fromMenu(deleteSelection)}
-        onToggleElse={fromMenu(() => menuBranch !== null && run(() => editor.setElse(menuBranch, hasElseBranch(list, menuBranch) === false)))}
-        onToggleFold={fromMenu(() => menu !== null && toggleFold(menu.row))}
+        onToggleElse={fromMenu(() => menu !== null && setElseOf(menu.head, hasElse => hasElse === false))}
+        onToggleFold={fromMenu(() => menu !== null && toggleFoldOf(menu.head))}
       />
     </Box>
   );

@@ -133,6 +133,37 @@ describe('CommandListEditor', () =>
         .toStrictEqual([ [ 101, 2 ], [ 111, 0 ], [ undefined, 0 ] ]);
     });
 
+    it('finds a place again by the command it sits before, after the list changed', () =>
+    {
+      // Arrange: the choices' first command and the branch body's end, then Show Text removed above both.
+      const { hub, editor } = build();
+      const [ choices, bodyEnd ] = [ editor.commands()[13], editor.commands()[5] ];
+      hub.edit('Elsewhere', [ eventHistoryKey(1, 1) ], tx => tx.splice('map:1', PATH, 0, 3, []));
+
+      // Act.
+      const places = [ editor.placeBefore(choices), editor.placeBefore(bodyEnd), editor.placeBefore(editor.commands()[3]), editor.placeBefore(cmd(0, 0)) ];
+
+      // Assert: before the choices (second at the top now), at the branch body's end, nothing at an else, nothing
+      // for a command not in the list.
+      expect(places.map(place => (place === null ? null : [ place.body.indent, place.position ])))
+        .toStrictEqual([ [ 0, 1 ], [ 1, 1 ], null, null ]);
+    });
+
+    it('finds the block a command opens as the list stands now, and none for a line or a command gone', () =>
+    {
+      // Arrange: the branch, then Show Text removed above it.
+      const { hub, editor } = build();
+      const [ text, branch ] = [ editor.commands()[0], editor.commands()[3] ];
+      hub.edit('Elsewhere', [ eventHistoryKey(1, 1) ], tx => tx.splice('map:1', PATH, 0, 3, []));
+
+      // Act.
+      const blocks = [ editor.blockOpenedBy(branch), editor.blockOpenedBy(text), editor.blockOpenedBy(editor.commands()[1]) ];
+
+      // Assert.
+      expect(blocks.map(block => (block === null ? null : [ block.start, block.end ])))
+        .toStrictEqual([ [ 0, 10 ], null, null ]);
+    });
+
     it('resolves a command\'s entry', () =>
     {
       // Arrange.
