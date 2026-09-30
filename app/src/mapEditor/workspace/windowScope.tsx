@@ -100,6 +100,27 @@ const useTrackedWindow = (api: IDockviewPanelProps['api']): Window =>
 };
 
 /**
+ * Follows whether a panel is on screen: false while it is a tab behind another in its group, or its group is hidden.
+ * Anything holding something scarce for as long as it shows, such as a map view's GPU context, lets it go meanwhile.
+ * @param {IDockviewPanelProps['api']} api The panel's dockview api.
+ * @returns {boolean} True while the panel shows.
+ */
+const usePanelVisible = (api: IDockviewPanelProps['api']): boolean =>
+{
+  const [ visible, setVisible ] = useState<boolean>(() => api.isVisible);
+
+  useEffect(() =>
+  {
+    // read again as the listener starts, in case the panel moved between rendering and now.
+    setVisible(api.isVisible);
+    const subscription = api.onDidVisibilityChange(event => setVisible(event.isVisible));
+    return () => subscription.dispose();
+  }, [ api ]);
+
+  return visible;
+};
+
+/**
  * Points MUI's portals at a popout's body; the main window keeps the theme untouched.
  * @param {Theme} outer The app's theme.
  * @param {Window} host The panel's window.
@@ -189,4 +210,4 @@ const attachShortcutsToPopouts = (api: DockviewApi, handler: (event: KeyboardEve
   };
 };
 
-export { attachShortcutsToPopouts, usePanelWindow, withWindowScope };
+export { attachShortcutsToPopouts, usePanelVisible, usePanelWindow, withWindowScope };

@@ -17,6 +17,11 @@ type MapSurfaceProps = {
    * The event to pick out, such as the one the data editor asked to see, or null.
    */
   readonly focusEventId: number | null;
+
+  /**
+   * Whether the panel is on screen; false while it is a tab behind another.
+   */
+  readonly visible: boolean;
 };
 
 /**
@@ -57,12 +62,15 @@ const identityKey = (value: object): number =>
  * come from the document it was mounted in. Tearing the panel out or putting it back moves it to another window, so
  * the view starts afresh there instead of drawing on for a window it has left. It starts afresh too when the panel's
  * map comes back as a new document, so it never draws a copy the window has let go of.
- * @param {MapSurfaceProps} props The map and the event to pick out.
+ *
+ * A panel behind another tab keeps its view, and tells it it is off screen, so the view lets its GPU context go (a
+ * window keeps only so many) and draws again, as it was, when the panel is shown.
+ * @param {MapSurfaceProps} props The map, the event to pick out, and whether the panel is on screen.
  * @returns {React.JSX.Element} The surface.
  */
 const MapSurface = (props: MapSurfaceProps) =>
 {
-  const { document, focusEventId } = props;
+  const { document, focusEventId, visible } = props;
   const panelWindow = usePanelWindow();
 
   // a new window or a new document is a new key, which mounts a new view in place of the old one.
@@ -70,7 +78,7 @@ const MapSurface = (props: MapSurfaceProps) =>
 
   return (
     <Box data-testid={'map-surface'} sx={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-      <MapView key={viewKey} mapId={document.mapId} pickedEventId={focusEventId}/>
+      <MapView key={viewKey} mapId={document.mapId} pickedEventId={focusEventId} visible={visible}/>
     </Box>
   );
 };

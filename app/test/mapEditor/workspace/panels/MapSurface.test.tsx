@@ -11,28 +11,29 @@ import { withWindowScope } from '../../../../src/mapEditor/workspace/windowScope
 import { buildMapJson } from '../../support/fixtures.ts';
 
 /**
- * Every map view the surface mounted, in order: which map it was asked for, each event it was handed to pick out, and
- * whether it has been taken down since.
+ * Every map view the surface mounted, in order: which map it was asked for, each event it was handed to pick out,
+ * whether it was on screen each time that changed, and whether it has been taken down since.
  */
 const views = vi.hoisted(() => ({
-  lives: [] as { mapId: number; picks: (number | null)[]; unmounted: boolean }[],
+  lives: [] as { mapId: number; picks: (number | null)[]; shown: boolean[]; unmounted: boolean }[],
 }));
 
 // the map view draws on the GPU, which a test page has none of; what the surface owes is which views it mounts, for
-// which map, in which window and with which event picked out, so each view's life is recorded instead.
+// which map, in which window, with which event picked out and whether on screen, so each view's life is recorded.
 vi.mock('../../../../src/mapEditor/render/MapView.tsx', async () =>
 {
   const { useEffect, useState } = await import('react');
 
   /**
    * Stands in for the map view, recording its life.
-   * @param {{ mapId: number, pickedEventId?: number | null }} props The map and the event to pick out.
+   * @param {{ mapId: number, pickedEventId?: number | null, visible?: boolean }} props The map, the event to pick out,
+   * and whether the view is on screen.
    * @returns {React.JSX.Element} A line naming the map.
    */
-  const MapView = (props: { mapId: number; pickedEventId?: number | null }) =>
+  const MapView = (props: { mapId: number; pickedEventId?: number | null; visible?: boolean }) =>
   {
-    const { mapId, pickedEventId = null } = props;
-    const [ life ] = useState(() => ({ mapId, picks: [] as (number | null)[], unmounted: false }));
+    const { mapId, pickedEventId = null, visible = true } = props;
+    const [ life ] = useState(() => ({ mapId, picks: [] as (number | null)[], shown: [] as boolean[], unmounted: false }));
 
     useEffect(() =>
     {
@@ -48,6 +49,11 @@ vi.mock('../../../../src/mapEditor/render/MapView.tsx', async () =>
       life.picks.push(pickedEventId);
     }, [ life, pickedEventId ]);
 
+    useEffect(() =>
+    {
+      life.shown.push(visible);
+    }, [ life, visible ]);
+
     return <div data-testid={'map-view'}>{`Map ${mapId}`}</div>;
   };
 
@@ -60,7 +66,9 @@ vi.mock('../../../../src/mapEditor/render/MapView.tsx', async () =>
  * size and frames all come from the window it was mounted in, so tearing the panel out, or putting it back, takes the
  * old view down and mounts a fresh one in the window the panel now lives in. The same goes for the panel's map coming
  * back as a new document. A newly picked event, on the other hand, goes to the view already there, which must not
- * start again for it, or the map would reload and lose its place.
+ * start again for it, or the map would reload and lose its place. So does the panel going behind another tab and
+ * coming back: the view hears it, to let its GPU context go and take it back, and keeps everything else, its camera
+ * included, which a fresh view would lose.
  */
 describe('MapSurface', () =>
 {
@@ -74,8 +82,8 @@ describe('MapSurface', () =>
    */
   const ScopedSurface = withWindowScope((props: IDockviewPanelProps) =>
   {
-    const { document, focusEventId } = props.params as { document: MapDocument; focusEventId: number | null };
-    return <MapSurface document={document} focusEventId={focusEventId}/>;
+    const { document, focusEventId, visible } = props.params as { document: MapDocument; focusEventId: number | null; visible: boolean };
+    return <MapSurface document={document} focusEventId={focusEventId} visible={visible}/>;
   });
 
   /**
@@ -120,15 +128,16 @@ describe('MapSurface', () =>
   };
 
   /**
-   * Builds the panel's props for a map and an event to pick out.
+   * Builds the panel's props for a map, an event to pick out, and whether the panel is on screen.
    * @param {IDockviewPanelProps['api']} api The panel's api.
    * @param {MapDocument} map The map.
    * @param {number | null} focusEventId The event to pick out.
+   * @param {boolean} visible Whether the panel is on screen.
    * @returns {IDockviewPanelProps} The props.
    */
-  const panelProps = (api: IDockviewPanelProps['api'], map: MapDocument, focusEventId: number | null): IDockviewPanelProps =>
+  const panelProps = (api: IDockviewPanelProps['api'], map: MapDocument, focusEventId: number | null, visible = true): IDockviewPanelProps =>
   {
-    return { api, containerApi: {}, params: { document: map, focusEventId } } as unknown as IDockviewPanelProps;
+    return { api, containerApi: {}, params: { document: map, focusEventId, visible } } as unknown as IDockviewPanelProps;
   };
 
   it('mounts one map view of the panel\'s map, handing it the event to pick out', () =>
@@ -142,7 +151,23 @@ describe('MapSurface', () =>
 
     // Assert.
     expect(views.lives)
-      .toStrictEqual([ { mapId: 5, picks: [ 3 ], unmounted: false } ]);
+      .toStrictEqual([ { mapId: 5, picks: [ 3 ], shown: [ true ], unmounted: false } ]);
+  });
+
+  it('tells its view when the panel goes behind another tab and comes back, without mounting another', () =>
+  {
+    // Arrange: the panel opens behind another tab, as the layout restores it.
+    const { api } = buildPanel();
+    const map = MapDocument.fromJson('map:5', buildMapJson());
+    const { rerender } = render(<ScopedSurface {...panelProps(api, map, null, false)}/>);
+
+    // Act.
+    rerender(<ScopedSurface {...panelProps(api, map, null, true)}/>);
+    rerender(<ScopedSurface {...panelProps(api, map, null, false)}/>);
+
+    // Assert.
+    expect(views.lives)
+      .toStrictEqual([ { mapId: 5, picks: [ null ], shown: [ false, true, false ], unmounted: false } ]);
   });
 
   it('takes its view down and mounts a fresh one when the panel is torn out, and again when it comes back', () =>
@@ -175,7 +200,7 @@ describe('MapSurface', () =>
 
     // Assert.
     expect(views.lives)
-      .toStrictEqual([ { mapId: 5, picks: [ 3, 1 ], unmounted: false } ]);
+      .toStrictEqual([ { mapId: 5, picks: [ 3, 1 ], shown: [ true ], unmounted: false } ]);
   });
 
   it('mounts a fresh view when the panel\'s map comes back as a new document', () =>

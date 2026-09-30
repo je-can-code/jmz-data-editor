@@ -26,6 +26,12 @@ const BUDGETS = {
    * frames) is this script's reading of "near-instantly".
    */
   warmOpenMs: 100,
+
+  /**
+   * A map panel brought back from behind another tab, whose view let its GPU context go while hidden, draws as fast as
+   * a warm open: from being shown to its first frame drawn on the context it got back.
+   */
+  shownAgainMs: 100,
 } as const;
 
 /**

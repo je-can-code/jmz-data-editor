@@ -28,6 +28,8 @@ import {
   type ViewSize,
 } from './cameraControls.ts';
 import { chunkGrid, chunkRangeFor, dirtyChunksForCells, type ChunkGrid, type ChunkRange } from './chunkMath.ts';
+import { mapViewContexts } from './ContextBudget.ts';
+import { ContextKeeper, type DrawState } from './ContextKeeper.ts';
 import { changeEffect, loopsOf } from './documentChanges.ts';
 import { animationFrameAt, animationVector, engineFramesAt } from './engine/animation.ts';
 import { cellPassage, passabilityQuery, tileEventsByCell } from './engine/passability.ts';
@@ -136,6 +138,18 @@ const VIEW_BACKGROUND = 0x121212;
 const DIM_ALPHA = 0.6;
 
 /**
+ * Runs a callback after a delay on the page's timers, for the context keeper.
+ * @param {() => void} callback What to run.
+ * @param {number} delayMs How long to wait.
+ * @returns {() => void} Cancels it.
+ */
+const scheduleOnTimers = (callback: () => void, delayMs: number): (() => void) =>
+{
+  const handle = setTimeout(callback, delayMs);
+  return () => clearTimeout(handle);
+};
+
+/**
  * Draws a map with pixi and the vendored tilemap exactly as the engine does, on its own frame loop: nothing here goes
  * through React. It listens to its document and redraws only what an edit touched, inside the frame that shows the
  * edit, and draws a frame only when something changed. Frames are scheduled on whichever window hosts it, so a
@@ -144,6 +158,11 @@ const DIM_ALPHA = 0.6;
  * The game look is the default: water animates, the parallax scrolls, events stand where the engine stands them and
  * auto-shadows stay off, since the game never draws them. The camera is its own: the wheel zooms about the pointer,
  * the right button held pans, and a right click that does not move raises a context-menu event.
+ *
+ * Its WebGL context is held only while the view is on screen, through a {@link ContextKeeper}: a view behind another
+ * tab lets it go and asks for it back when shown, keeping its map, its camera and everything else, and a context the
+ * browser takes anyway is asked back on its own. Every view of the window shares one budget of contexts, below what
+ * Chromium keeps per process, and a view shown when all of them are taken says so through its draw state.
  */
 class PixiMapRenderer implements MapRenderer
 {
@@ -153,7 +172,15 @@ class PixiMapRenderer implements MapRenderer
 
   #pixi: WebGLRenderer | null = null;
 
-  #ready: Promise<void> | null = null;
+  #ready: Promise<void>;
+
+  #settleReady: { resolve: () => void; reject: (error: unknown) => void } = { resolve: () => undefined, reject: () => undefined };
+
+  #keeper: ContextKeeper;
+
+  #visible = true;
+
+  #sized = false;
 
   #destroyed = false;
 
@@ -240,6 +267,20 @@ class PixiMapRenderer implements MapRenderer
   constructor()
   {
     this.#loop = new FrameLoop(() => this.#hostWindow(), time => this.#frame(time));
+    this.#ready = new Promise<void>((resolve, reject) =>
+    {
+      this.#settleReady = { resolve, reject };
+    });
+
+    // a window that cannot draw rejects this for whoever waits on it, and is no unhandled failure when nobody does.
+    this.#ready.catch(() => undefined);
+    this.#keeper = new ContextKeeper({
+      create: () => this.#createContext(),
+      release: () => this.#releaseContext(),
+      restore: () => this.#restoreContext(),
+      resume: () => this.#resumeDrawing(),
+      suspend: () => this.#loop.stop(),
+    }, { budget: mapViewContexts, schedule: scheduleOnTimers, now: () => performance.now() });
     const invalidate = () =>
     {
       this.#needsRender = true;
@@ -361,16 +402,64 @@ class PixiMapRenderer implements MapRenderer
     this.#measureView();
     this.#observeSize(host);
     this.#listenForInput(canvas);
-    this.#ready = this.#initPixi(canvas);
+
+    // a view mounted behind another tab makes no context until it shows.
+    if (this.#visible)
+    {
+      this.#keeper.show();
+    }
   }
 
   /**
-   * Settles once the GPU context is up and the renderer draws.
+   * Settles once the GPU context is first up and the renderer draws, which for a view mounted behind another tab is
+   * when it first shows.
    * @returns {Promise<void>} Settles when ready; rejects when WebGL is unavailable.
    */
   whenReady(): Promise<void>
   {
-    return this.#ready ?? Promise.reject(new Error('mount the renderer before waiting for it'));
+    return this.#ready;
+  }
+
+  /**
+   * Says whether the view is on screen. A view behind another tab lets its GPU context go, since the window may keep
+   * only so many, and draws again, as it was, when it shows.
+   * @param {boolean} visible True while the view is on screen.
+   */
+  setVisible(visible: boolean): void
+  {
+    this.#visible = visible;
+    if (this.#host === null)
+    {
+      return;
+    }
+
+    if (visible)
+    {
+      this.#keeper.show();
+    }
+    else
+    {
+      this.#keeper.hide();
+    }
+  }
+
+  /**
+   * Where the view's drawing stands: drawing, waiting for a context, getting one back, and so on.
+   * @returns {DrawState} The state.
+   */
+  get drawState(): DrawState
+  {
+    return this.#keeper.state;
+  }
+
+  /**
+   * Listens for the draw state changing, so the view can say why a map is not drawing.
+   * @param {(state: DrawState) => void} listener Called with each new state.
+   * @returns {() => void} Stops listening.
+   */
+  onDrawStateChange(listener: (state: DrawState) => void): () => void
+  {
+    return this.#keeper.onStateChange(listener);
   }
 
   setDocument(document: MapDocument): void
@@ -640,6 +729,7 @@ class PixiMapRenderer implements MapRenderer
   destroy(): void
   {
     this.#destroyed = true;
+    this.#keeper.destroy();
     this.#loop.stop();
     this.#unsubscribe?.();
     this.#unsubscribe = null;
@@ -675,12 +765,32 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Starts the WebGL renderer on the canvas, then the frame loop.
+   * Makes the WebGL context and starts the renderer on the canvas, the first time the view shows; the keeper starts
+   * the drawing. It settles the renderer's readiness either way.
+   * @returns {Promise<void>} Settles once the renderer can draw; rejects when WebGL is unavailable.
+   */
+  async #createContext(): Promise<void>
+  {
+    try
+    {
+      await this.#initPixi(this.#canvas as HTMLCanvasElement);
+      this.#settleReady.resolve();
+    }
+    catch (error)
+    {
+      this.#settleReady.reject(error);
+      throw error;
+    }
+  }
+
+  /**
+   * Starts the WebGL renderer on the canvas, then listens for the context going and coming back.
    * @param {HTMLCanvasElement} canvas The canvas.
-   * @returns {Promise<void>} Settles once drawing.
+   * @returns {Promise<void>} Settles once the renderer can draw.
    */
   async #initPixi(canvas: HTMLCanvasElement): Promise<void>
   {
+    this.#measureView();
     const pixi = new WebGLRenderer();
     await pixi.init({
       canvas,
@@ -699,23 +809,85 @@ class PixiMapRenderer implements MapRenderer
     }
 
     this.#pixi = pixi;
+    this.#listenForContext(canvas);
+  }
+
+  /**
+   * Passes the canvas's context events to the keeper, after pixi's own listeners, which ready its systems for a
+   * restored context. A lost context can be asked back only once its lost event has been handled and its loss
+   * prevented from being final, so the keeper hears of a loss in a task of its own, after the event is done.
+   * @param {HTMLCanvasElement} canvas The canvas.
+   */
+  #listenForContext(canvas: HTMLCanvasElement): void
+  {
+    const onLost = (event: Event) =>
+    {
+      event.preventDefault();
+      setTimeout(() => this.#keeper.contextLost(), 0);
+    };
+    const onRestored = () => this.#keeper.contextRestored();
+    canvas.addEventListener('webglcontextlost', onLost);
+    canvas.addEventListener('webglcontextrestored', onRestored);
+    this.#listeners.push(
+      () => canvas.removeEventListener('webglcontextlost', onLost),
+      () => canvas.removeEventListener('webglcontextrestored', onRestored),
+    );
+  }
+
+  /**
+   * Lets go of the live context, freeing its place in the process at once; pixi keeps everything it drew with, to
+   * draw with again once the context is back.
+   * @returns {boolean} True when the context is going; false when the browser offers no way to let go of it.
+   */
+  #releaseContext(): boolean
+  {
+    const lose = this.#pixi?.context.extensions.loseContext ?? null;
+    if (lose === null)
+    {
+      return false;
+    }
+
+    lose.loseContext();
+    return true;
+  }
+
+  /**
+   * Asks the browser for the lost context back, through the extension pixi fetched while the context was live: a lost
+   * context hands out no extensions.
+   */
+  #restoreContext(): void
+  {
+    this.#pixi?.context.extensions.loseContext?.restoreContext();
+  }
+
+  /**
+   * Draws again on a context that has just come up. Pixi uploads every texture and buffer afresh as the first frame
+   * draws, and edits made meanwhile, in this window or another, are already marked in the chunks they touched.
+   */
+  #resumeDrawing(): void
+  {
+    this.#measureView();
+    this.#pixi?.resize(this.#view.width, this.#view.height, this.#resolution);
     this.#needsRender = true;
+    this.#pointerDirty = true;
     this.#loop.start();
   }
 
   /**
-   * Reads the host's size and pixel ratio.
+   * Reads the host's size and pixel ratio. A host with no size, as a panel behind another tab has while it is out of
+   * the page, keeps the size it last had, so the view comes back as it was rather than squeezed to a point.
    */
   #measureView(): void
   {
     const host = this.#host;
-    if (host === null)
+    if (host === null || host.clientWidth === 0 || host.clientHeight === 0)
     {
       return;
     }
 
-    this.#view = { width: Math.max(1, host.clientWidth), height: Math.max(1, host.clientHeight) };
+    this.#view = { width: host.clientWidth, height: host.clientHeight };
     this.#resolution = host.ownerDocument.defaultView?.devicePixelRatio ?? 1;
+    this.#sized = true;
   }
 
   /**
@@ -1237,9 +1409,9 @@ class PixiMapRenderer implements MapRenderer
     }
 
     const document = this.#document;
-    if (document !== null && this.#cameraPlaced === false && this.#scene !== null)
+    if (document !== null && this.#cameraPlaced === false && this.#scene !== null && this.#sized)
     {
-      // a map shown for the first time starts whole on screen.
+      // a map shown for the first time starts whole on screen, once the view has a size to fit it to.
       this.#cameraPlaced = true;
       this.#moveCamera(fitCamera(this.#view, document, TILE_SIZE));
     }
