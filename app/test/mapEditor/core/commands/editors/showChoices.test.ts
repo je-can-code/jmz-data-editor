@@ -184,6 +184,21 @@ describe('show choices', () =>
         .toStrictEqual(models.map(() => null));
     });
 
+    it('reads an empty cancel branch on a command whose cancel does not run it, and leaves it out when written', () =>
+    {
+      // Arrange: cancel picks "No", yet an empty cancel branch follows, which the game never enters.
+      const valid = block([ 'Yes', 'No' ], [ 1, 0, 2, 0 ]);
+      const empty = [ ...valid.slice(0, 7), command(403, 0, [ 6, null ]), command(0, 1), valid[7] ];
+
+      // Act.
+      const model = parseChoiceList(empty);
+      const written = writeChoiceList(model as ChoiceListModel);
+
+      // Assert: read with its branch, written as MZ writes the list, nothing lost but the empty branch.
+      expect([ model?.cancelType, model?.blocks[0].cancelBranch?.body, written ])
+        .toStrictEqual([ 1, [ command(0, 1) ], valid ]);
+    });
+
     it('reads a cancel branch kept on a command whose cancel no longer runs it, and writes it back as it was', () =>
     {
       // Arrange: cancel picks "No", and a branch the editor kept after cancel stopped running it follows.
@@ -481,6 +496,19 @@ describe('show choices', () =>
           1,
           [ command(403, 0, [ 6, null ]), command(355, 1, [ 'first();' ]), command(355, 1, [ 'second();' ]), command(0, 1), command(404, 0) ],
         ]);
+    });
+
+    it('moves cancel with its choice when a command left empty drops out of a merged list', () =>
+    {
+      // Arrange: "a" alone in the first command, cancel picking "c" from the second command.
+      const commands = [ ...block([ 'a' ], [ -1, 0, 2, 0 ]), ...block([ 'b', 'c' ], [ 1, -1, 2, 0 ]) ];
+
+      // Act.
+      const shrunk = removeChoice(read(commands), 0);
+
+      // Assert: cancel still picks "c", now second in the one command left, and the highlight on "a" went with it.
+      expect([ shrunk.cancelType, shrunk.defaultType, openers(writeChoiceList(shrunk)) ])
+        .toStrictEqual([ 1, -1, [ [ [ 'b', 'c' ], 1, -1, 2, 0 ] ] ]);
     });
 
     it('keeps the only command even when its last choice goes, and ignores a place with no choice', () =>
