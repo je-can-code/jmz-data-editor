@@ -1,4 +1,4 @@
-import { FLOOR_AUTOTILE_TABLE, type Quadrant } from './autotileTables.ts';
+import { FLOOR_AUTOTILE_TABLE, WALL_AUTOTILE_TABLE, WATERFALL_AUTOTILE_TABLE, type Quadrant } from './autotileTables.ts';
 import { isInside, type TileReader } from './tileGrid.ts';
 import {
   autotileKind,
@@ -536,6 +536,25 @@ const floorShapeAt = (reader: TileReader, x: number, y: number, kind: number, mo
 };
 
 /**
+ * Finds how many shapes the engine's table holds for a kind: 48 for floor kinds, 16 for roofs and wall faces, 4 for
+ * waterfalls. The engine reads a shape straight out of that table, so a stored shape at or past the count leaves it
+ * nothing to draw and breaks the map.
+ * @param {number} kind The autotile kind.
+ * @returns {number} The number of shapes in the kind's table.
+ */
+const autotileTableSize = (kind: number): number =>
+{
+  if (isFloorTypeKind(kind))
+  {
+    return FLOOR_AUTOTILE_TABLE.length;
+  }
+
+  return isWaterfallKind(kind)
+    ? WATERFALL_AUTOTILE_TABLE.length
+    : WALL_AUTOTILE_TABLE.length;
+};
+
+/**
  * Works out the shape MZ's editor would store for an autotile of a given kind at a position, from what surrounds
  * it. The tile's own layer does not matter, because every rule reads its neighbours on all four layers. A2 table
  * tiles (ground with the counter flag) shape exactly like other ground, as all 202 in the shipped maps do; only the
@@ -588,6 +607,7 @@ const shapedTileAt = (reader: TileReader, x: number, y: number, z: number, mode:
 
 export {
   autotileShapeFor,
+  autotileTableSize,
   floorJoins,
   floorNeighbourJoins,
   floorShape,

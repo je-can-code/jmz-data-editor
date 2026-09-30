@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { floorJoins, NEIGHBOUR_OFFSETS } from '../../../../../src/mapEditor/core/tiles/autotileShapes.ts';
-import type { ShapeMismatch } from '../../../../../src/mapEditor/core/tiles/shapeAudit.ts';
+import { autotileTableSize, floorJoins, NEIGHBOUR_OFFSETS } from '../../../../../src/mapEditor/core/tiles/autotileShapes.ts';
+import { auditShapes, type ShapeMismatch } from '../../../../../src/mapEditor/core/tiles/shapeAudit.ts';
 import {
   autotileKind,
   isA4Kind,
@@ -100,13 +100,19 @@ const neighboursRead = (kind: number): readonly (readonly [ number, number, numb
  * Finds which neighbours a shape joins, as a bit set over {@link neighboursRead}.
  * @param {number} kind The autotile kind.
  * @param {number} shape The shape.
- * @returns {number} The joined bits.
+ * @returns {number} The joined bits, or -1 for a shape no neighbourhood produces: the floor palette picture, or
+ * anything past the end of the kind's table.
  */
 const shapeJoins = (kind: number, shape: number): number =>
 {
   if (isFloorTypeKind(kind))
   {
     return floorJoins(shape);
+  }
+
+  if (shape < 0 || shape >= autotileTableSize(kind))
+  {
+    return -1;
   }
 
   return isWaterfallKind(kind)
@@ -253,5 +259,60 @@ const readExceptionList = (): ExceptionList =>
   return JSON.parse(readFileSync(EXCEPTIONS_FILE, 'utf8')) as ExceptionList;
 };
 
-export { classifyMismatch, EXCEPTION_REASONS, EXCEPTIONS_FILE, readExceptionList, REASON_TESTS };
-export type { ExceptionList, ExceptionReason };
+/**
+ * What the oracle finds wrong with one map, list by list; every list is empty on a map that passes.
+ */
+type OracleVerdict = {
+  /**
+   * Autotiles holding a shape past the end of their kind's table, which the engine cannot draw at all. No reason
+   * excuses these.
+   */
+  readonly pastTable: string[];
+
+  /**
+   * Mismatches the exceptions list does not name.
+   */
+  readonly unexplained: string[];
+
+  /**
+   * Listed cells that fail the test of the reason they are filed under.
+   */
+  readonly misfiled: string[];
+
+  /**
+   * Listed cells that no longer differ, so the list has fallen behind the map.
+   */
+  readonly settled: number[];
+};
+
+/**
+ * Holds one map to the exceptions listed for it: recomputes every autotile, and reports anything the list does not
+ * account for.
+ * @param {ShippedMap} map The map.
+ * @param {number} mode The map's tileset's mode.
+ * @param {Partial<Record<ExceptionReason, readonly number[]>>} listed The map's entry in the exceptions list.
+ * @returns {OracleVerdict} The findings.
+ */
+const judgeMap = (map: ShippedMap, mode: number, listed: Readonly<Partial<Record<ExceptionReason, readonly number[]>>>): OracleVerdict =>
+{
+  const reasonOf = new Map<number, ExceptionReason>();
+  EXCEPTION_REASONS.forEach(({ reason }) =>
+  {
+    (listed[reason] ?? []).forEach(index => reasonOf.set(index, reason));
+  });
+
+  const { mismatches } = auditShapes(map, mode);
+  const describe = (cell: ShapeMismatch): string => `(${cell.x},${cell.y}) layer ${cell.z + 1}: kind ${cell.kind} stored ${cell.stored}, expected ${cell.expected}`;
+  const differing = new Set(mismatches.map(cell => cell.index));
+  return {
+    pastTable: mismatches.filter(cell => cell.stored >= autotileTableSize(cell.kind)).map(describe),
+    unexplained: mismatches.filter(cell => reasonOf.has(cell.index) === false).map(describe),
+    misfiled: mismatches
+      .filter(cell => reasonOf.has(cell.index) && REASON_TESTS[reasonOf.get(cell.index) as ExceptionReason](map, cell) === false)
+      .map(cell => `${describe(cell)} does not fit ${reasonOf.get(cell.index)}`),
+    settled: [ ...reasonOf.keys() ].filter(index => differing.has(index) === false),
+  };
+};
+
+export { classifyMismatch, EXCEPTION_REASONS, EXCEPTIONS_FILE, judgeMap, readExceptionList, REASON_TESTS };
+export type { ExceptionList, ExceptionReason, OracleVerdict };

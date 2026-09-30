@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { auditShapes } from '../../../../src/mapEditor/core/tiles/shapeAudit.ts';
-import { EXCEPTION_REASONS, readExceptionList, REASON_TESTS, type ExceptionReason } from './support/oracleExceptions.ts';
+import { TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes.ts';
+import { makeAutotileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
+import { EXCEPTION_REASONS, judgeMap, readExceptionList } from './support/oracleExceptions.ts';
 import { locateShippedGame, readShippedMaps, readShippedTilesets, type ShippedMap } from './support/shippedGame.ts';
 
 /*
@@ -63,29 +64,15 @@ describe.skipIf(game === null)('autotile shapes in every shipped map', () =>
 
   it.each(maps.length > 0 ? maps : [ { id: 0 } as ShippedMap ])('Map$id holds the shape MZ would store, or a known exception', (map) =>
   {
-    // Arrange: this map's listed exceptions, cell by cell.
-    const listed = new Map<number, ExceptionReason>();
-    const byReason = exceptions.maps[String(map.id)] ?? {};
-    EXCEPTION_REASONS.forEach(({ reason }) =>
-    {
-      (byReason[reason] ?? []).forEach(index => listed.set(index, reason));
-    });
+    // Arrange: this map's listed exceptions.
+    const listed = exceptions.maps[String(map.id)] ?? {};
 
     // Act.
-    const { mismatches } = auditShapes(map, modeOf(map));
+    const verdict = judgeMap(map, modeOf(map), listed);
 
-    // Assert: every mismatch is listed under a reason it passes, and every listed cell still differs.
-    const unexplained = mismatches
-      .filter(cell => listed.has(cell.index) === false)
-      .map(cell => `(${cell.x},${cell.y}) layer ${cell.z + 1}: kind ${cell.kind} stored ${cell.stored}, expected ${cell.expected}`);
-    const misfiled = mismatches
-      .filter(cell => listed.has(cell.index) && REASON_TESTS[listed.get(cell.index) as ExceptionReason](map, cell) === false)
-      .map(cell => `cell ${cell.index} does not fit ${listed.get(cell.index)}`);
-    const differing = new Set(mismatches.map(cell => cell.index));
-    const settled = [ ...listed.keys() ].filter(index => differing.has(index) === false);
-
-    expect({ unexplained, misfiled, settled })
-      .toEqual({ unexplained: [], misfiled: [], settled: [] });
+    // Assert: nothing past a table's end, every mismatch listed under a reason it passes, every listed cell differing.
+    expect(verdict)
+      .toEqual({ pastTable: [], unexplained: [], misfiled: [], settled: [] });
   });
 
   it('lists exceptions only for maps the game ships', () =>
@@ -99,6 +86,74 @@ describe.skipIf(game === null)('autotile shapes in every shipped map', () =>
     // Assert.
     expect(strays)
       .toEqual([]);
+  });
+});
+
+describe('judgeMap', () =>
+{
+  /**
+   * Builds a one-row test map on an Area tileset.
+   * @param {number} width The width in tiles.
+   * @returns {ShippedMap} The map, all layers empty.
+   */
+  const testMap = (width: number): ShippedMap => ({ id: 1, width, height: 1, tilesetId: 1, cells: new Uint16Array(width * 6) });
+
+  it('passes a map whose autotiles all hold the shape their neighbours call for', () =>
+  {
+    // Arrange: two grass tiles side by side, joined.
+    const map = testMap(2);
+    map.cells[0] = makeAutotileId(16, 0);
+    map.cells[1] = makeAutotileId(16, 0);
+
+    // Act.
+    const verdict = judgeMap(map, TilesetMode.area, {});
+
+    // Assert.
+    expect(verdict)
+      .toEqual({ pastTable: [], unexplained: [], misfiled: [], settled: [] });
+  });
+
+  it('fails a mismatch the list does not name, and a listed cell that no longer differs', () =>
+  {
+    // Arrange: grass in shape 0 beside an empty cell (the map's edges join it on three sides, calling for shape 24),
+    // and cell 1 listed though it is empty.
+    const map = testMap(2);
+    map.cells[0] = makeAutotileId(16, 0);
+
+    // Act.
+    const verdict = judgeMap(map, TilesetMode.area, { 'stale-open': [ 1 ] });
+
+    // Assert.
+    expect([ verdict.unexplained, verdict.settled ])
+      .toEqual([ [ '(0,0) layer 1: kind 16 stored 0, expected 24' ], [ 1 ] ]);
+  });
+
+  it('fails a cell filed under a reason its shapes contradict', () =>
+  {
+    // Arrange: grass joined all round (shape 0) where it should be open to the east: it joins more, not less.
+    const map = testMap(2);
+    map.cells[0] = makeAutotileId(16, 0);
+
+    // Act.
+    const verdict = judgeMap(map, TilesetMode.area, { 'stale-open': [ 0 ] });
+
+    // Assert.
+    expect(verdict.misfiled)
+      .toEqual([ '(0,0) layer 1: kind 16 stored 0, expected 24 does not fit stale-open' ]);
+  });
+
+  it('fails a shape past the end of its table outright, whatever reason it is filed under', () =>
+  {
+    // Arrange: a roof stored in shape 20, which the 16-shape wall table does not hold.
+    const map = testMap(1);
+    map.cells[0] = makeAutotileId(48, 20);
+
+    // Act.
+    const filed = EXCEPTION_REASONS.map(({ reason }) => judgeMap(map, TilesetMode.area, { [reason]: [ 0 ] }));
+
+    // Assert: flagged every time, and no reason accepts it.
+    expect(filed.map(verdict => [ verdict.pastTable.length, verdict.misfiled.length ]))
+      .toEqual(EXCEPTION_REASONS.map(() => [ 1, 1 ]));
   });
 });
 
