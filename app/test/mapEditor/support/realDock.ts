@@ -87,12 +87,12 @@ const openFakePopout = (features: string): FakePopout =>
 };
 
 /**
- * Stands a real dock up in the page under test, dragging with pointers as the workspace's does, with plain elements for
- * panel content and every window it opens faked. The page gets what the dock needs and jsdom lacks: a resize observer
- * that never reports, hit-testing that finds nothing (so a drag drops nowhere), and a 2560 by 1440 screen.
- * @returns {RealDock} The dock and the windows it opens.
+ * Readies the page under test for a real dock, giving it what the dock needs and jsdom lacks: a resize observer that
+ * never reports, hit-testing that finds nothing (so a drag drops nowhere), a 2560 by 1440 screen, and a stand-in for
+ * every window the dock opens.
+ * @returns {{ popouts: FakePopout[], restore: () => void }} The windows opened so far, and how to put the page back.
  */
-const createRealDock = (): RealDock =>
+const installDockPage = (): { popouts: FakePopout[]; restore: () => void } =>
 {
   const popouts: FakePopout[] = [];
   const saved = {
@@ -129,22 +129,10 @@ const createRealDock = (): RealDock =>
     return popout.window;
   });
 
-  const element = document.createElement('div');
-  document.body.appendChild(element);
-  const api = createDockview(element, {
-    createComponent: () => ({ element: document.createElement('div'), init: () => undefined }),
-    dndStrategy: 'pointer',
-    popoutUrl: '/popout.html',
-  });
-  api.layout(1600, 900);
-
   return {
-    api,
     popouts,
-    dispose: () =>
+    restore: () =>
     {
-      api.dispose();
-      element.remove();
       open.mockRestore();
       globalThis.ResizeObserver = saved.resizeObserver;
       document.elementsFromPoint = saved.elementsFromPoint;
@@ -157,6 +145,35 @@ const createRealDock = (): RealDock =>
       {
         Object.defineProperty(window, 'screen', saved.screen);
       }
+    },
+  };
+};
+
+/**
+ * Stands a real dock up in the page under test, dragging with pointers as the workspace's does, with plain elements for
+ * panel content and every window it opens faked (see installDockPage).
+ * @returns {RealDock} The dock and the windows it opens.
+ */
+const createRealDock = (): RealDock =>
+{
+  const page = installDockPage();
+  const element = document.createElement('div');
+  document.body.appendChild(element);
+  const api = createDockview(element, {
+    createComponent: () => ({ element: document.createElement('div'), init: () => undefined }),
+    dndStrategy: 'pointer',
+    popoutUrl: '/popout.html',
+  });
+  api.layout(1600, 900);
+
+  return {
+    api,
+    popouts: page.popouts,
+    dispose: () =>
+    {
+      api.dispose();
+      element.remove();
+      page.restore();
     },
   };
 };
@@ -206,5 +223,5 @@ const dragTab = (panel: IDockviewPanel, to: { x: number; y: number }): void =>
   window.dispatchEvent(new PointerEvent('pointerup', { ...pointer, clientX: to.x, clientY: to.y, screenX: to.x, screenY: to.y }));
 };
 
-export { createRealDock, describeGroups, dragTab, SCREEN, settle };
+export { createRealDock, describeGroups, dragTab, installDockPage, SCREEN, settle };
 export type { FakePopout, RealDock };
