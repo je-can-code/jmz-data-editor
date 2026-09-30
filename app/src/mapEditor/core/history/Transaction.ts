@@ -177,12 +177,19 @@ class Transaction
    * @param {DocumentKey} document The document the file backs, such as a map's.
    * @param {JsonValue | null} before The file's content before the step, or null when there was no file.
    * @param {JsonValue | null} after The file's content after the step, or null when the step removes it.
+   * @param {{ before?: string, after?: string }} texts The file's exact text on either side, where it was read.
    * @returns {Transaction} This transaction, for chaining.
    */
-  file(document: DocumentKey, before: JsonValue | null, after: JsonValue | null): this
+  file(document: DocumentKey, before: JsonValue | null, after: JsonValue | null, texts: { before?: string; after?: string } = {}): this
   {
     this.#requireOpen();
-    this.#files.push({ document, before: cloneJson(before), after: cloneJson(after) });
+    this.#files.push({
+      document,
+      before: cloneJson(before),
+      after: cloneJson(after),
+      ...(texts.before === undefined ? {} : { beforeText: texts.before }),
+      ...(texts.after === undefined ? {} : { afterText: texts.after }),
+    });
     return this;
   }
 

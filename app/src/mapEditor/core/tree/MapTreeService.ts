@@ -38,6 +38,14 @@ type CopyOutcome =
   | { readonly ok: false; readonly message: string };
 
 /**
+ * A map file as a delete finds it: its content, and its exact text when that is known to be the same file.
+ */
+type CapturedFile = {
+  readonly content: RmmzMap | null;
+  readonly text: string | undefined;
+};
+
+/**
  * What the tree service needs from the window.
  */
 type MapTreeServiceOptions = {
@@ -232,10 +240,10 @@ class MapTreeService
     {
       const base = this.rows();
       const plan = planDelete(base, mapIds);
-      const files = new Map<number, RmmzMap | null>();
+      const files = new Map<number, CapturedFile>();
       for (const mapId of plan.removed)
       {
-        files.set(mapId, await this.#fileOf(mapId));
+        files.set(mapId, await this.#capture(mapId));
       }
 
       return this.#commit(base, plan, files);
@@ -369,10 +377,10 @@ class MapTreeService
    * change with it.
    * @param {MapInfoRows} base The rows the plan was worked out from.
    * @param {TreePlan} plan The plan.
-   * @param {ReadonlyMap<number, RmmzMap | null>} removedFiles Each removed map's file as it stood, null when it had none.
+   * @param {ReadonlyMap<number, CapturedFile>} removedFiles Each removed map's file as it stood.
    * @returns {Promise<TreeOutcome>} The step.
    */
-  async #commit(base: MapInfoRows, plan: TreePlan, removedFiles: ReadonlyMap<number, RmmzMap | null>): Promise<TreeOutcome>
+  async #commit(base: MapInfoRows, plan: TreePlan, removedFiles: ReadonlyMap<number, CapturedFile>): Promise<TreeOutcome>
   {
     if (jsonEquals(this.rows(), base) === false)
     {
@@ -385,12 +393,12 @@ class MapTreeService
       plan.created.forEach(({ mapId, content }) => tx.file(mapDocumentKey(mapId), null, content as unknown as JsonValue));
       plan.removed.forEach(mapId =>
       {
-        const file = removedFiles.get(mapId) ?? null;
+        const file = removedFiles.get(mapId);
 
         // a map listed with no file behind it leaves nothing to write back.
-        if (file !== null)
+        if (file !== undefined && file.content !== null)
         {
-          tx.file(mapDocumentKey(mapId), file as unknown as JsonValue, null);
+          tx.file(mapDocumentKey(mapId), file.content as unknown as JsonValue, null, { before: file.text });
         }
       });
     });
@@ -505,7 +513,7 @@ class MapTreeService
       const content = this.#arriving(file, direction);
       if (content !== null)
       {
-        await this.#api.saveMap(mapIdOf(file.document), content as unknown as RmmzMap);
+        await this.#writeFile(mapIdOf(file.document), content, direction === 'forward' ? file.afterText : file.beforeText);
       }
     }
 
@@ -540,7 +548,8 @@ class MapTreeService
     const leavingFiles = step.files ?? [];
     for (const file of leavingFiles.filter(each => this.#leaving(each, direction) !== null))
     {
-      await this.#api.saveMap(mapIdOf(file.document), this.#leaving(file, direction) as unknown as RmmzMap).catch(() => undefined);
+      const text = direction === 'forward' ? file.beforeText : file.afterText;
+      await this.#writeFile(mapIdOf(file.document), this.#leaving(file, direction) as JsonValue, text).catch(() => undefined);
     }
 
     if (back.ok)
@@ -551,6 +560,73 @@ class MapTreeService
     for (const file of leavingFiles.filter(each => this.#leaving(each, direction) === null))
     {
       await this.#deleteFile(mapIdOf(file.document)).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Writes a map file: from its exact text when that is known, which the server writes back byte for byte where no
+   * file is, or from its content otherwise. A file already there when the text is known (a failed step being put
+   * back before it removed anything) takes the content instead, which the server writes in that file's own layout.
+   * @param {number} mapId The map.
+   * @param {JsonValue} content The file's content.
+   * @param {string | undefined} text The file's exact text, when known.
+   */
+  async #writeFile(mapId: number, content: JsonValue, text: string | undefined): Promise<void>
+  {
+    if (text !== undefined)
+    {
+      try
+      {
+        await this.#api.restoreMapFile(mapId, text);
+        return;
+      }
+      catch (error)
+      {
+        if ((error instanceof MapEditorApiError && error.status === 409) === false)
+        {
+          throw error;
+        }
+      }
+    }
+
+    await this.#api.saveMap(mapId, content as unknown as RmmzMap);
+  }
+
+  /**
+   * Reads a map file as a delete finds it: its content as this window has it, and its exact text when the text is
+   * that same content. A map with unsaved edits here has an older file on disk, so only its content can come back.
+   * @param {number} mapId The map.
+   * @returns {Promise<CapturedFile>} The file.
+   */
+  async #capture(mapId: number): Promise<CapturedFile>
+  {
+    const content = await this.#fileOf(mapId);
+    const key = mapDocumentKey(mapId);
+    if (content === null || (this.#hub.has(key) && this.#hub.isDirty(key)))
+    {
+      return { content, text: undefined };
+    }
+
+    const text = await this.#api.loadMapFile(mapId);
+    return { content, text: text !== null && this.#sameContent(text, content) ? text : undefined };
+  }
+
+  /**
+   * Reports whether a file's text holds a given content: what makes a text read separately from its content safe to
+   * write back in its place.
+   * @param {string} text The text.
+   * @param {RmmzMap} content The content.
+   * @returns {boolean} True when the text parses to exactly that content.
+   */
+  #sameContent(text: string, content: RmmzMap): boolean
+  {
+    try
+    {
+      return jsonEquals(JSON.parse(text), content);
+    }
+    catch
+    {
+      return false;
     }
   }
 

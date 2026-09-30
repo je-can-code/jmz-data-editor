@@ -222,6 +222,64 @@ describe('HttpMapEditorApi', () =>
     });
   });
 
+  describe('map files byte for byte', () =>
+  {
+    const TEXT = '{\n"autoplayBgm":false,"displayName":"\\u003cb\\u003e",\n"data":[],\n"events":[\n]\n}';
+
+    it('reads a map file\'s exact text, and null for a missing one', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(url => (url.includes('/12/') ? new Response(TEXT, { status: 200 }) : new Response('missing', { status: 404 })));
+
+      // Act.
+      const read = [ await api.loadMapFile(12), await api.loadMapFile(13) ];
+
+      // Assert.
+      expect([ read, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ [ TEXT, null ], [ `GET ${BASE}/api/maps/12/file`, `GET ${BASE}/api/maps/13/file` ] ]);
+    });
+
+    it('raises a server failure on a map file rather than calling it missing', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response('disk error', { status: 500 }));
+
+      // Act.
+      const read = api.loadMapFile(12);
+
+      // Assert.
+      await expect(read)
+        .rejects.toThrow('GET /api/maps/12/file answered 500: disk error');
+    });
+
+    it('restores a map file from its text untouched, with this window\'s id', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+
+      // Act.
+      await api.restoreMapFile(12, TEXT);
+
+      // Assert.
+      const [ request ] = requests;
+      expect([ request.method, request.url, request.headers['x-jmz-client'], request.headers['content-type'], request.body ])
+        .toStrictEqual([ 'PUT', `${BASE}/api/maps/12/file`, 'window-7', 'application/json', TEXT ]);
+    });
+
+    it('raises the server\'s refusal to restore over a file that is there', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response('data/Map012.json already exists; only a removed map can be restored', { status: 409 }));
+
+      // Act.
+      const failure = await api.restoreMapFile(12, TEXT).catch((error: unknown) => error);
+
+      // Assert.
+      expect((failure as MapEditorApiError).status)
+        .toBe(409);
+    });
+  });
+
   describe('assets', () =>
   {
     it('builds image and sound addresses with names encoded', () =>

@@ -299,6 +299,25 @@ describe('DocumentHub', () =>
         .toStrictEqual([]);
     });
 
+    it('carries a side\'s exact text only when it was read', () =>
+    {
+      // Arrange.
+      const hub = buildTreeHub();
+
+      // Act.
+      const step = hub.edit('Delete map', [ 'tree' ], tx =>
+      {
+        tx.set('mapinfos', [ 1 ], null);
+        tx.file('map:1', buildMapJson() as unknown as JsonValue, null, { before: '{"exact":"bytes"}' });
+        tx.file('map:2', null, buildMapJson() as unknown as JsonValue);
+      }) as HistoryStep;
+
+      // Assert.
+      const [ removed, created ] = step.files ?? [];
+      expect([ removed.beforeText, Object.keys(removed), Object.keys(created) ])
+        .toStrictEqual([ '{"exact":"bytes"}', [ 'document', 'before', 'after', 'beforeText' ], [ 'document', 'before', 'after' ] ]);
+    });
+
     it('leaves a step without files exactly its old shape', () =>
     {
       // Arrange.

@@ -19,11 +19,17 @@ type StepEntry = {
  * The hub records these with the step and never performs them, and they are not among the documents the step
  * touches: a deleted map is not held anywhere, and undoing its deletion must not wait for it to be. Whoever moves
  * such a step performs its files, after checking each one still holds what the step left there.
+ *
+ * A side may also carry the file's exact text, when the step read it: putting the file back then writes those very
+ * bytes, so a delete that is undone leaves the file exactly as it was, key order and spelling included, where its
+ * content alone would come back in the server's layout.
  */
 type FileEffect = {
   readonly document: DocumentKey;
   readonly before: JsonValue | null;
   readonly after: JsonValue | null;
+  readonly beforeText?: string;
+  readonly afterText?: string;
 };
 
 /**

@@ -6,6 +6,7 @@ import {
   themeDark,
   type DockviewApi,
   type DockviewDidDropEvent,
+  type DockviewDndOverlayEvent,
   type DockviewReadyEvent,
   type IDockviewHeaderActionsProps,
   type IDockviewPanelProps,
@@ -13,7 +14,7 @@ import {
 import { CHANNEL_NAMES, openBroadcastChannel } from '../../core/infrastructure/messaging/MessageChannelLike.ts';
 import { MapLinkHost } from '../../core/infrastructure/shell/MapLink.ts';
 import type { SavedLayout } from '../core/workspace/LayoutStore.ts';
-import { decodeDraggedMaps, directionForDrop, MAP_DRAG_TYPE, PANEL_COMPONENTS } from '../core/workspace/panels.ts';
+import { decodeDraggedMaps, directionForDrop, MAP_DRAG_TYPE, PANEL_COMPONENTS, SINGLE_PANEL_IDS } from '../core/workspace/panels.ts';
 import { APP_WIDE_COMMANDS, appShortcutFor, type KeyTarget, type ShortcutCommand } from '../core/workspace/shortcuts.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import { addDefaultPanels, POPOUT_URL, restoreLayout } from './defaultLayout.ts';
@@ -60,6 +61,18 @@ const PANELS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
 const carriesMaps = (event: DragEvent | PointerEvent): boolean =>
 {
   return 'dataTransfer' in event && event.dataTransfer !== null && event.dataTransfer.types.includes(MAP_DRAG_TYPE);
+};
+
+/**
+ * Reports whether a group holds the map tree. A map dragged over the tree's own group is being nested or reordered,
+ * which the tree handles itself; the dock offering its drop target there too would leave its overlay behind once
+ * the tree took the drop.
+ * @param {DockviewDndOverlayEvent['group']} group The group under the drag, if any.
+ * @returns {boolean} True for the tree's group.
+ */
+const holdsTheTree = (group: DockviewDndOverlayEvent['group']): boolean =>
+{
+  return group !== undefined && group.panels.some(panel => panel.id === SINGLE_PANEL_IDS.mapTree);
 };
 
 /**
@@ -204,7 +217,7 @@ const Workspace = () =>
       api.onDidLayoutChange(keepLayout),
       api.onUnhandledDragOver(drag =>
       {
-        if (carriesMaps(drag.nativeEvent))
+        if (carriesMaps(drag.nativeEvent) && holdsTheTree(drag.group) === false)
         {
           drag.accept();
         }

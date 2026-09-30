@@ -3,6 +3,7 @@ import { apiDocumentStore } from '../../../../src/mapEditor/core/api/apiDocument
 import { MapEditorApiError, type MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { TREE_HISTORY_KEY, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import { jsonEquals } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapInfo } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { TREE_ROOT } from '../../../../src/mapEditor/core/tree/MapTreeModel.ts';
 import { MapTreeService, type TreeOutcome } from '../../../../src/mapEditor/core/tree/MapTreeService.ts';
@@ -32,17 +33,45 @@ describe('MapTreeService', () =>
   const fileFor = (mapId: number): RmmzMap => ({ ...buildMapJson(), displayName: `file ${mapId}`, tilesetId: mapId + 10 });
 
   /**
-   * An in-memory project behind a stand-in server that keeps the real routes' rules: 404 for a missing map, and
-   * no removing a map the tree still lists.
-   * @returns {object} The server, its files and tree, a log of its writes, and switches to make writes fail.
+   * Writes a map file's text with its keys in reverse order, the way no writer of ours would: a text that comes back
+   * exactly can only have been kept, never rebuilt.
+   * @param {RmmzMap} map The map.
+   * @returns {string} The text.
+   */
+  const oddText = (map: RmmzMap): string =>
+  {
+    const reversed = Object.fromEntries(Object.entries(map).reverse());
+    return JSON.stringify(reversed, null, 1);
+  };
+
+  /**
+   * An in-memory project behind a stand-in server that keeps the real routes' rules: 404 for a missing map, no
+   * removing a map the tree still lists, a restore only where no file is, and a save of unchanged content keeping
+   * the file's text as it was.
+   * @returns {object} The server, its files, their texts and the tree, a log of its writes, and switches to make writes fail.
    */
   const buildDisk = () =>
   {
     const maps = new Map<number, RmmzMap>([ 1, 2, 3, 5, 6 ].map(id => [ id, fileFor(id) ]));
+    const texts = new Map<number, string>([ ...maps.entries() ].map(([ id, map ]) => [ id, oddText(map) ]));
     const state = { infos: buildTreeRows() };
     const writes: string[] = [];
     const failing = new Set<string>();
     const missing = (mapId: number) => new MapEditorApiError(`GET /api/maps/${mapId} answered 404`, 404);
+
+    /**
+     * Fails a write when the test asked it to.
+     * @param {string} write The write, as the log names it.
+     */
+    const maybeFail = (write: string) =>
+    {
+      writes.push(write);
+      if (failing.has(write))
+      {
+        throw new MapEditorApiError('the disk is full', 500);
+      }
+    };
+
     const api = {
       clientId: 'window-a',
       loadMap: async (mapId: number) =>
@@ -55,15 +84,27 @@ describe('MapTreeService', () =>
 
         return structuredClone(map);
       },
+      loadMapFile: async (mapId: number) => texts.get(mapId) ?? null,
       saveMap: async (mapId: number, map: RmmzMap) =>
       {
-        writes.push(`write ${mapId}`);
-        if (failing.has(`write ${mapId}`))
+        maybeFail(`write ${mapId}`);
+        if (jsonEquals(maps.get(mapId), map) === false)
         {
-          throw new MapEditorApiError('the disk is full', 500);
+          texts.set(mapId, JSON.stringify(map));
         }
 
         maps.set(mapId, structuredClone(map));
+      },
+      restoreMapFile: async (mapId: number, text: string) =>
+      {
+        maybeFail(`restore ${mapId}`);
+        if (maps.has(mapId))
+        {
+          throw new MapEditorApiError(`data/Map${mapId}.json already exists; only a removed map can be restored`, 409);
+        }
+
+        maps.set(mapId, JSON.parse(text) as RmmzMap);
+        texts.set(mapId, text);
       },
       deleteMap: async (mapId: number) =>
       {
@@ -73,6 +114,7 @@ describe('MapTreeService', () =>
           throw new MapEditorApiError(`map ${mapId} is still in the map tree`, 409);
         }
 
+        texts.delete(mapId);
         if (maps.delete(mapId) === false)
         {
           throw missing(mapId);
@@ -91,7 +133,7 @@ describe('MapTreeService', () =>
       },
     } as unknown as MapEditorApi;
 
-    return { api, maps, state, writes, failing };
+    return { api, maps, texts, state, writes, failing };
   };
 
   /**
@@ -275,39 +317,71 @@ describe('MapTreeService', () =>
         .toStrictEqual([ [ 'write tree', 'delete 2', 'delete 3' ], false, false, true, null, null, false ]);
     });
 
-    it('writes every file back on undo, exactly as it was, and takes them away again on redo', async () =>
+    it('writes every file back on undo, byte for byte as it was, and takes them away again on redo', async () =>
     {
       // Arrange.
-      const { service, hub, maps, state, writes } = buildService();
+      const { service, hub, maps, texts, state, writes } = buildService();
       await service.remove([ 2 ]);
       writes.length = 0;
 
       // Act.
       const undone = succeeded(await service.undo());
-      const afterUndo = [ maps.get(2), maps.get(3), structuredClone(state.infos), [ ...writes ] ];
+      const afterUndo = [ texts.get(2), texts.get(3), structuredClone(state.infos), [ ...writes ] ];
       succeeded(await service.redo());
 
-      // Assert.
+      // Assert: the files come back as their own texts, key order and all.
       expect([ undone.selection, afterUndo ])
-        .toStrictEqual([ [ 2, 3 ], [ fileFor(2), fileFor(3), buildTreeRows(), [ 'write 2', 'write 3', 'write tree' ] ] ]);
+        .toStrictEqual([ [ 2, 3 ], [ oddText(fileFor(2)), oddText(fileFor(3)), buildTreeRows(), [ 'restore 2', 'restore 3', 'write tree' ] ] ]);
       expect([ maps.has(2), maps.has(3), historyOf(hub) ])
         .toStrictEqual([ false, false, [ 'Delete "Town" and 1 map inside' ] ]);
     });
 
-    it('keeps a held map\'s unsaved edits in what the undo writes back', async () =>
+    it('writes a file back from its content when the text read was not that same file', async () =>
+    {
+      // Arrange: the text on disk differs from the content handed out, as if it changed between the two reads.
+      const { service, maps, texts, writes } = buildService();
+      texts.set(6, oddText({ ...fileFor(6), displayName: 'changed between reads' }));
+      await service.remove([ 6 ]);
+      writes.length = 0;
+
+      // Act.
+      succeeded(await service.undo());
+
+      // Assert.
+      expect([ writes[0], maps.get(6) ])
+        .toStrictEqual([ 'write 6', fileFor(6) ]);
+    });
+
+    it('keeps a held map\'s unsaved edits in what the undo writes back, from its content since its file is older', async () =>
     {
       // Arrange.
-      const { service, hub, maps } = buildService();
+      const { service, hub, maps, writes } = buildService();
       await hub.load('map:5');
       hub.edit('Rename map', [ mapHistoryKey(5) ], tx => tx.set('map:5', [ 'displayName' ], 'Edited, never saved'));
+      await service.remove([ 5 ]);
+      writes.length = 0;
+
+      // Act.
+      succeeded(await service.undo());
+
+      // Assert.
+      expect([ maps.get(5)?.displayName, writes[0] ])
+        .toStrictEqual([ 'Edited, never saved', 'write 5' ]);
+    });
+
+    it('writes a held map back byte for byte when it had no unsaved edits', async () =>
+    {
+      // Arrange.
+      const { service, hub, texts } = buildService();
+      await hub.load('map:5');
       await service.remove([ 5 ]);
 
       // Act.
       succeeded(await service.undo());
 
       // Assert.
-      expect(maps.get(5)?.displayName)
-        .toBe('Edited, never saved');
+      expect(texts.get(5))
+        .toBe(oddText(fileFor(5)));
     });
 
     it('refuses to redo a delete once the map it would remove has been edited, and changes nothing', async () =>
@@ -413,18 +487,18 @@ describe('MapTreeService', () =>
         .toStrictEqual([ false, buildTreeRows(), buildTreeRows(), [] ]);
     });
 
-    it('puts removed files back when the tree cannot be written during a delete', async () =>
+    it('puts removed files back when the tree cannot be written during a delete, leaving the file untouched', async () =>
     {
       // Arrange.
-      const { service, hub, maps, state, failing } = buildService();
+      const { service, hub, maps, texts, state, failing } = buildService();
       failing.add('write tree');
 
       // Act.
       const outcome = await service.remove([ 5 ]);
 
-      // Assert.
-      expect([ outcome.ok, maps.get(5), state.infos, hub.document('mapinfos').toJson(), historyOf(hub) ])
-        .toStrictEqual([ false, fileFor(5), buildTreeRows(), buildTreeRows(), [] ]);
+      // Assert: the file was never removed, so putting it back leaves its text exactly as it was.
+      expect([ outcome.ok, maps.get(5), texts.get(5), state.infos, hub.document('mapinfos').toJson(), historyOf(hub) ])
+        .toStrictEqual([ false, fileFor(5), oddText(fileFor(5)), buildTreeRows(), buildTreeRows(), [] ]);
     });
 
     it('moves an undo back when its files cannot be written', async () =>
@@ -432,7 +506,7 @@ describe('MapTreeService', () =>
       // Arrange.
       const { service, hub, maps, state, failing } = buildService();
       await service.remove([ 5 ]);
-      failing.add('write 5');
+      failing.add('restore 5');
 
       // Act.
       const outcome = await service.undo();
