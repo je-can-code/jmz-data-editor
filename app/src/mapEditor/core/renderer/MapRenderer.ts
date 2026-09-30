@@ -1,6 +1,7 @@
 import type { ImageFolder } from '../api/MapEditorApi.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
-import type { RmmzTileset } from '../model/rmmzTypes.ts';
+import type { RmmzEventImage, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { PassabilityRule } from '../modules/PluginModule.ts';
 import type { Camera, MapCell, ScreenPoint } from './camera.ts';
 import type { FrameTimings } from './FrameTimeRecorder.ts';
 
@@ -53,7 +54,8 @@ type LayerVisibility = {
 };
 
 /**
- * The game look, the renderer's default.
+ * The game look, the renderer's default. Auto-shadows start off because the game never draws them: J-Base turns
+ * Tilemap#_addShadow into nothing. A switch shows them for editing.
  */
 const GAME_LOOK: LayerVisibility = {
   layers: {
@@ -61,7 +63,7 @@ const GAME_LOOK: LayerVisibility = {
     tiles2: true,
     tiles3: true,
     tiles4: true,
-    shadows: true,
+    shadows: false,
     events: true,
     parallax: true,
     lighting: true,
@@ -167,6 +169,90 @@ type OverlaySet = {
 };
 
 /**
+ * A rectangle of cells: its top-left cell and its size in cells.
+ */
+type CellRect = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+/**
+ * A rectangle in world pixels.
+ */
+type WorldRect = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+/**
+ * A tile a ghost preview shows: where a click would put it, on which layer (0 to 3), and which tile it is, shape
+ * included.
+ */
+type GhostTile = {
+  readonly x: number;
+  readonly y: number;
+  readonly layer: number;
+  readonly tileId: number;
+};
+
+/**
+ * An event a ghost preview shows, such as one being dragged: where it would land and how it looks there.
+ */
+type GhostEvent = {
+  readonly x: number;
+  readonly y: number;
+  readonly image: RmmzEventImage;
+  readonly priorityType: number;
+};
+
+/**
+ * What the tools are pointing at, which the core overlays show: the cell or brush footprint under the pointer
+ * (hover), the selected events, tile area and the box being dragged (selection), and what a click would place (ghost).
+ * The tools own this state and hand the renderer all of it whenever any part changes.
+ */
+type OverlayState = {
+  readonly hover: CellRect | null;
+  readonly selectedEvents: readonly number[];
+  readonly selectedCells: CellRect | null;
+  readonly selectionBox: WorldRect | null;
+  readonly ghostTiles: readonly GhostTile[];
+  readonly ghostEvents: readonly GhostEvent[];
+};
+
+/**
+ * Nothing pointed at, selected or previewed.
+ */
+const NO_OVERLAY_STATE: OverlayState = {
+  hover: null,
+  selectedEvents: [],
+  selectedCells: null,
+  selectionBox: null,
+  ghostTiles: [],
+  ghostEvents: [],
+};
+
+/**
+ * A right click that did not move: where it landed, and what is there.
+ */
+type MapContextMenu = {
+  readonly point: ScreenPoint;
+  readonly cell: MapCell | null;
+  readonly eventId: number | null;
+};
+
+/**
+ * What the graphics driver reports about the GPU drawing the map, so the editor can show which card it runs on.
+ */
+type RendererInfo = {
+  readonly vendor: string;
+  readonly renderer: string;
+};
+
+/**
  * The contract every map renderer keeps. Drawing never goes through React: a pane hands the renderer a host
  * element and the things below, and the renderer draws on its own loop, listening to the document for changes
  * so an edit redraws only what it touched.
@@ -214,10 +300,48 @@ interface MapRenderer
   setLayerVisibility(visibility: LayerVisibility): void;
 
   /**
-   * Chooses the overlays.
+   * Chooses the overlays. The layer highlight dims everything but the highlighted layer only while this set enables
+   * {@code layer-highlight} and the layer visibility names a layer.
    * @param {OverlaySet} overlays The overlays.
    */
   setOverlays(overlays: OverlaySet): void;
+
+  /**
+   * Shows what the tools point at: hover, selection and ghost previews.
+   * @param {OverlayState} state The whole state.
+   */
+  setOverlayState(state: OverlayState): void;
+
+  /**
+   * Adds the plugin modules' passability rules to the engine's own, for the passability overlay.
+   * @param {readonly PassabilityRule[]} rules The active rules.
+   */
+  setPassabilityRules(rules: readonly PassabilityRule[]): void;
+
+  /**
+   * Redraws the plugin modules' overlays, for a change the renderer cannot see, such as the clock moving.
+   */
+  refreshOverlays(): void;
+
+  /**
+   * Listens for right clicks that did not move, which open the context menu.
+   * @param {(menu: MapContextMenu) => void} listener Called with where the click landed.
+   * @returns {() => void} Stops listening.
+   */
+  onContextMenu(listener: (menu: MapContextMenu) => void): () => void;
+
+  /**
+   * Listens for camera moves, whether the pointer made them or {@link setCamera} did.
+   * @param {(camera: Camera) => void} listener Called with the new camera.
+   * @returns {() => void} Stops listening.
+   */
+  onCameraChange(listener: (camera: Camera) => void): () => void;
+
+  /**
+   * Names the GPU drawing the map.
+   * @returns {RendererInfo | null} The driver's report, or null before drawing starts.
+   */
+  rendererInfo(): RendererInfo | null;
 
   /**
    * Sums up recent frame durations.
@@ -250,20 +374,27 @@ interface MapRenderer
   destroy(): void;
 }
 
-export { GAME_LOOK };
+export { GAME_LOOK, NO_OVERLAY_STATE };
 export type {
+  CellRect,
   CoreOverlayId,
+  GhostEvent,
+  GhostTile,
   LayerVisibility,
+  MapContextMenu,
   MapRenderer,
   OverlayContext,
   OverlayDefinition,
   OverlayId,
   OverlayPainter,
   OverlaySet,
+  OverlayState,
   OverlayStyle,
+  RendererInfo,
   RenderLayer,
   TextureImage,
   TextureSource,
   TileLayer,
   TilesetTextures,
+  WorldRect,
 };

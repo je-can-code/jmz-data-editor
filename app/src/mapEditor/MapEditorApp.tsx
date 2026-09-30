@@ -1,4 +1,6 @@
 import React from 'react';
+import { Box } from '@mui/material';
+import { MapView, mapIdFromQuery } from './render/MapView.tsx';
 import { useMapEditorServices } from './services/MapEditorServicesContext.tsx';
 import { ConflictBanner } from './views/ConflictBanner.tsx';
 import { EventWindowView } from './views/EventWindowView.tsx';
@@ -12,11 +14,21 @@ const MapEditorApp = () =>
 {
   const { view } = useMapEditorServices();
 
+  // ?map=102 opens that map alone across the whole window instead of the workspace: one map and one canvas on the
+  // page, which is what the speed script and the parity check measure.
+  const openedMap = view.kind === 'workspace'
+    ? mapIdFromQuery(window.location.search)
+    : null;
+
   return (
     <>
-      {view.kind === 'event'
-        ? <EventWindowView mapId={view.mapId} eventId={view.eventId}/>
-        : <Workspace/>}
+      {view.kind === 'event' && <EventWindowView mapId={view.mapId} eventId={view.eventId}/>}
+      {view.kind === 'workspace' && openedMap === null && <Workspace/>}
+      {openedMap !== null && (
+        <Box sx={{ height: '100vh' }}>
+          <MapView mapId={openedMap}/>
+        </Box>
+      )}
       <ConflictBanner/>
     </>
   );
