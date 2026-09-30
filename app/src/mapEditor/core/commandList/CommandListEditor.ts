@@ -8,6 +8,7 @@ import type { DocumentKey } from '../model/documentKeys.ts';
 import type { PatchPath } from '../model/patches.ts';
 import type { RmmzEventCommand } from '../model/rmmzTypes.ts';
 import { reconcileBlock, setElseBranch } from './blockReconcile.ts';
+import { blockSpanOf, type BlockSpan } from './blockSpans.ts';
 import { readClipboard, writeClipboard, type ClipboardRead } from './commandClipboard.ts';
 import {
   catalogStructure,
@@ -29,6 +30,7 @@ import {
   landingIndex,
   moveNodes,
   outermostNodes,
+  reindent,
   removeNodes,
   replaceRange,
   spliceBetween,
@@ -293,6 +295,37 @@ class CommandListEditor
     const replaced = replaceRange(list, index, index + 1 + current.continuation.length, placed);
     const reconciled = reconcileBlock(replaced, this.structure, index);
     return this.#commit(`Edit ${this.#catalog.resolve(draft.command).name}`, reconciled);
+  }
+
+  /**
+   * Finds the whole block the editor of a block's opener works on: a conditional branch through its end, or a
+   * Show Choices list across the blocks HIME_LargeChoices merges.
+   * @param {number} index The opener's index.
+   * @returns {BlockSpan | null} The span, or null when the command opens no such block.
+   */
+  blockSpanAt(index: number): BlockSpan | null
+  {
+    return blockSpanOf(this.commands(), this.locate(index));
+  }
+
+  /**
+   * Replaces a whole block with an edited version, as the editors that change a block's shape hand it back (Show
+   * Choices adding a choice, Conditional Branch taking its else away). The block keeps its indent.
+   * @param {BlockSpan} span Where the block is.
+   * @param {readonly RmmzEventCommand[]} commands The edited block, its first command its opener.
+   * @returns {HistoryStep | null} The step, or null when nothing changed.
+   */
+  editBlock(span: BlockSpan, commands: readonly RmmzEventCommand[]): HistoryStep | null
+  {
+    const list = this.commands();
+    const [ first ] = commands;
+    if (first === undefined)
+    {
+      throw new Error('a block needs its opener');
+    }
+
+    const placed = reindent(commands, list[span.start].indent - first.indent);
+    return this.#commit(`Edit ${this.#catalog.resolve(first).name}`, replaceRange(list, span.start, span.end, placed));
   }
 
   /**

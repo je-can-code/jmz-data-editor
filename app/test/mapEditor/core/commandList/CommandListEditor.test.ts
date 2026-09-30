@@ -345,6 +345,46 @@ describe('CommandListEditor', () =>
     });
   });
 
+  describe('blockSpanAt and editBlock', () =>
+  {
+    it('hands out a block\'s span and replaces the block with an edited one as one step, at its own indent', () =>
+    {
+      // Arrange: a block editor hands back the branch without its else, at the wrong indent.
+      const { hub, editor } = build();
+      const span = editor.blockSpanAt(3)!;
+      const edited = [ cmd(111, 4, [ 0, 2, 0 ]), cmd(250, 5, [ { name: 'Heal1', volume: 90, pitch: 100, pan: 0 } ]), cmd(0, 5), cmd(412, 4) ];
+
+      // Act.
+      const step = editor.editBlock(span, edited);
+
+      // Assert.
+      expect([ span, step?.label, describeList(editor.commands().slice(3, 8)), historyLabels(hub) ])
+        .toStrictEqual([
+          { start: 3, end: 13 },
+          'Edit Conditional Branch',
+          [ '111@0', '250@1', '0@1', '412@0', '102@0' ],
+          [ 'Edit Conditional Branch' ],
+        ]);
+    });
+
+    it('records nothing when the block comes back the same, and refuses a block with no opener', () =>
+    {
+      // Arrange.
+      const { hub, editor } = build();
+      const span = editor.blockSpanAt(13)!;
+
+      // Act.
+      const step = editor.editBlock(span, editor.commands().slice(span.start, span.end));
+      const empty = () => editor.editBlock(span, []);
+
+      // Assert.
+      expect([ step, historyLabels(hub) ])
+        .toStrictEqual([ null, [] ]);
+      expect(empty)
+        .toThrow('a block needs its opener');
+    });
+  });
+
   describe('setElse', () =>
   {
     it('removes and restores an else, each as a named step', () =>
