@@ -63,8 +63,15 @@ const carriesMaps = (event: DragEvent | PointerEvent): boolean =>
 };
 
 /**
- * The button on each docked group's tab strip that tears the group out into a window of its own. A torn-out group
- * goes back when its window is closed.
+ * The smallest a torn-out window opens, in pixels, however narrow its group was docked.
+ */
+const POPOUT_MIN_WIDTH = 720;
+const POPOUT_MIN_HEIGHT = 540;
+
+/**
+ * The button on each docked group's tab strip that tears the group out into a window of its own, opened a little
+ * off where the group sat and never smaller than a comfortable size. A torn-out group goes back when its window is
+ * closed.
  * @param {IDockviewHeaderActionsProps} props The group's header props.
  * @returns {React.JSX.Element | null} The button, or nothing for a group already torn out.
  */
@@ -76,14 +83,25 @@ const GroupActions = (props: IDockviewHeaderActionsProps) =>
     return null;
   }
 
+  /**
+   * Tears the group out, sized from where it sits.
+   */
+  const tearOut = () =>
+  {
+    const host = group.element.ownerDocument.defaultView ?? window;
+    const bounds = group.element.getBoundingClientRect();
+    const position = {
+      left: Math.round(host.screenX + bounds.left + 32),
+      top: Math.round(host.screenY + bounds.top + 32),
+      width: Math.round(Math.max(bounds.width, POPOUT_MIN_WIDTH)),
+      height: Math.round(Math.max(bounds.height, POPOUT_MIN_HEIGHT)),
+    };
+    containerApi.addPopoutGroup(group, { popoutUrl: POPOUT_URL, position }).catch(() => undefined);
+  };
+
   return (
     <Tooltip title={'Open in its own window'}>
-      <IconButton
-        size={'small'}
-        aria-label={'Open in its own window'}
-        onClick={() => containerApi.addPopoutGroup(group, { popoutUrl: POPOUT_URL }).catch(() => undefined)}
-        sx={{ mx: 0.5, p: 0.25 }}
-      >
+      <IconButton size={'small'} aria-label={'Open in its own window'} onClick={tearOut} sx={{ mx: 0.5, p: 0.25 }}>
         <OpenInNew sx={{ fontSize: 16 }}/>
       </IconButton>
     </Tooltip>
