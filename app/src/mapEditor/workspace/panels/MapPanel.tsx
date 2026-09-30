@@ -85,6 +85,7 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
 {
   const { api, params } = props;
   const { mapId } = params;
+  const controller = useWorkspace();
   const held = useHeldMap(mapId);
   const focusEventId = useWorkspaceState(state => state.eventFocus[mapId] ?? null);
   const visible = usePanelVisible(api);
@@ -107,7 +108,15 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
       <Box sx={{ flex: 1, position: 'relative', minHeight: 0 }}>
         {held.map === null
           ? <MapAbsent held={held} onClose={() => api.close()}/>
-          : <MapSurface document={held.map} focusEventId={focusEventId} visible={visible}/>}
+          : (
+            <MapSurface
+              document={held.map}
+              focusEventId={focusEventId}
+              visible={visible}
+              selection={controller.selection}
+              onNotice={(text, severity) => controller.notify(text, severity)}
+            />
+          )}
       </Box>
     </Box>
   );

@@ -1,4 +1,5 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
+import { EventSelection } from '../core/events/EventSelection.ts';
 import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
 import { MapTreeService, type TreeOutcome } from '../core/tree/MapTreeService.ts';
 import { TREE_ROOT } from '../core/tree/MapTreeModel.ts';
@@ -121,6 +122,12 @@ class WorkspaceController
   readonly router: HistoryRouter;
 
   readonly layouts: LayoutStore;
+
+  /**
+   * The events selected in this window, on one map at a time: every map panel draws and changes it, torn-out ones
+   * included, and the quick panel reads it (see {@link EventSelection} for how to read and follow it).
+   */
+  readonly selection = new EventSelection();
 
   #dockview: DockviewApi | null = null;
 

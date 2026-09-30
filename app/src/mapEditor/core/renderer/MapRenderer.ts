@@ -213,6 +213,10 @@ type GhostEvent = {
  * What the tools are pointing at, which the core overlays show: the cell or brush footprint under the pointer
  * (hover), the selected events, tile area and the box being dragged (selection), and what a click would place (ghost).
  * The tools own this state and hand the renderer all of it whenever any part changes.
+ *
+ * Every ghost event also shows its tile outlined, so an event with no picture still shows where it would land, and
+ * {@code blockedCells} marks in red the tiles a ghost cannot land on (another event holds them), for as long as the
+ * drop would be refused. Left out, nothing is blocked.
  */
 type OverlayState = {
   readonly hover: CellRect | null;
@@ -221,6 +225,7 @@ type OverlayState = {
   readonly selectionBox: WorldRect | null;
   readonly ghostTiles: readonly GhostTile[];
   readonly ghostEvents: readonly GhostEvent[];
+  readonly blockedCells?: readonly MapCell[];
 };
 
 /**

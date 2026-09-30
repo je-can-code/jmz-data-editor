@@ -11,7 +11,7 @@ import { MAP_INFOS_KEY, mapDocumentKey, type DocumentKey } from '../../../src/ma
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { WorkspaceController } from '../../../src/mapEditor/workspace/WorkspaceController.ts';
-import { useHeldMap, WorkspaceProvider } from '../../../src/mapEditor/workspace/workspaceHooks.tsx';
+import { useEventSelection, useHeldMap, WorkspaceProvider } from '../../../src/mapEditor/workspace/workspaceHooks.tsx';
 import { buildMapJson } from '../support/fixtures.ts';
 import { buildTreeRows } from '../support/treeFixtures.ts';
 
@@ -109,5 +109,47 @@ describe('useHeldMap', () =>
     // Assert.
     expect([ asked, screen.getByTestId('held-map').textContent ])
       .toStrictEqual([ [], 'waiting' ]);
+  });
+});
+
+/*
+ * The quick panel reads the window's event selection through this hook, and every map panel writes it, so a panel
+ * reading it must re-render on each change, whichever map the events were picked on, and show nothing once the
+ * selection is cleared.
+ */
+describe('useEventSelection', () =>
+{
+  /**
+   * Shows the selection the hook reads.
+   * @returns {React.JSX.Element} The line.
+   */
+  const Probe = () =>
+  {
+    const { mapId, eventIds } = useEventSelection();
+    return <div data-testid={'selection'}>{`${mapId ?? 'none'}: ${eventIds.join(',')}`}</div>;
+  };
+
+  it('re-renders with every change to the window\'s selection, on any map, and with nothing once it is cleared', () =>
+  {
+    // Arrange.
+    const controller = new WorkspaceController({ hub: new DocumentHub({ clientId: 'window-a' }), api: null } as unknown as MapEditorServices);
+    render(
+      <WorkspaceProvider controller={controller}>
+        <Probe/>
+      </WorkspaceProvider>
+    );
+
+    // Act.
+    const seen = [ screen.getByTestId('selection').textContent ];
+    act(() => controller.selection.select(12, [ 4, 2 ]));
+    seen.push(screen.getByTestId('selection').textContent);
+    act(() => controller.selection.select(30, [ 7 ]));
+    seen.push(screen.getByTestId('selection').textContent);
+    act(() => controller.selection.clear());
+    seen.push(screen.getByTestId('selection').textContent);
+
+    // Assert.
+    expect(seen)
+      .toStrictEqual([ 'none: ', '12: 4,2', '30: 7', 'none: ' ]);
   });
 });

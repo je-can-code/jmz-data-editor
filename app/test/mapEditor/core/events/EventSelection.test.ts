@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EventSelection, NOTHING_SELECTED } from '../../../../src/mapEditor/core/events/EventSelection.ts';
+import { EventSelection, NO_EVENTS, NOTHING_SELECTED } from '../../../../src/mapEditor/core/events/EventSelection.ts';
 
 /*
  * A window has one event selection, on one map at a time: the map views draw it and act on it, and the quick panel
@@ -129,6 +129,20 @@ describe('EventSelection', () =>
       // Assert.
       expect([ onIt, elsewhere ])
         .toStrictEqual([ [ 4, 2 ], [] ]);
+    });
+
+    it('hands back the same lists while nothing changes, so a view comparing them redraws nothing', () =>
+    {
+      // Arrange.
+      const selection = new EventSelection();
+      selection.select(12, [ 4, 2 ]);
+
+      // Act.
+      const pairs = [ [ selection.eventsOn(12), selection.eventsOn(12) ], [ selection.eventsOn(13), selection.eventsOn(14) ] ];
+
+      // Assert.
+      expect([ pairs[0][0] === pairs[0][1], pairs[1][0] === pairs[1][1], pairs[1][0] === NO_EVENTS ])
+        .toStrictEqual([ true, true, true ]);
     });
   });
 

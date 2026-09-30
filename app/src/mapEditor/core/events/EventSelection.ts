@@ -13,9 +13,14 @@ type SelectedEvents = {
 type SelectionListener = () => void;
 
 /**
+ * No events: one shared list, so anything comparing lists by identity sees nothing change while nothing is selected.
+ */
+const NO_EVENTS: readonly number[] = Object.freeze([]);
+
+/**
  * Nothing selected, anywhere.
  */
-const NOTHING_SELECTED: SelectedEvents = { mapId: null, eventIds: [] };
+const NOTHING_SELECTED: SelectedEvents = { mapId: null, eventIds: NO_EVENTS };
 
 /**
  * Reports whether two id lists hold the same ids in the same order.
@@ -91,7 +96,8 @@ class EventSelection
   }
 
   /**
-   * Reads the events selected on one map.
+   * Reads the events selected on one map. The list is the selection's own, the same object until the selection changes,
+   * and one shared empty list whenever nothing is selected there.
    * @param {number} mapId The map.
    * @returns {readonly number[]} The selected ids, or none when the selection is on another map or empty.
    */
@@ -99,7 +105,7 @@ class EventSelection
   {
     return this.#current.mapId === mapId
       ? this.#current.eventIds
-      : [];
+      : NO_EVENTS;
   }
 
   /**
@@ -135,5 +141,5 @@ class EventSelection
   }
 }
 
-export { EventSelection, NOTHING_SELECTED };
+export { EventSelection, NO_EVENTS, NOTHING_SELECTED };
 export type { SelectedEvents, SelectionListener };

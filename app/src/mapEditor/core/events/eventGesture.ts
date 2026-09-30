@@ -19,15 +19,25 @@ type GesturePress = {
 };
 
 /**
+ * A box being drawn: from the tile where the press landed to the tile under the pointer, the selection when the press
+ * started, and the modifiers held then, which decide how the events inside change that selection.
+ */
+type GestureBox = {
+  readonly from: MapCell;
+  readonly to: MapCell;
+  readonly before: readonly number[];
+  readonly modifiers: SelectModifiers;
+};
+
+/**
  * What one step of a left-button gesture asks the map view to do.
  *
  * - {@code none}: nothing.
  * - {@code select}: make these events the selection, now.
  * - {@code drag}: show the selection being dragged, shifted by some tiles.
  * - {@code drop}: move the selection by some tiles.
- * - {@code box}: show a box from one tile to another, and what it would select: the selection when the press started
- *   ({@code before}), changed as the modifiers say by the events inside.
- * - {@code boxed}: select what that box holds, the same way.
+ * - {@code box}: show a box, and what it would select.
+ * - {@code boxed}: select what that box holds.
  * - {@code cancel}: forget any drag or box on show.
  */
 type GestureStep =
@@ -35,7 +45,8 @@ type GestureStep =
   | { readonly kind: 'select'; readonly eventIds: readonly number[] }
   | { readonly kind: 'drag'; readonly dx: number; readonly dy: number }
   | { readonly kind: 'drop'; readonly dx: number; readonly dy: number }
-  | { readonly kind: 'box' | 'boxed'; readonly from: MapCell; readonly to: MapCell; readonly before: readonly number[]; readonly modifiers: SelectModifiers }
+  | ({ readonly kind: 'box' } & GestureBox)
+  | ({ readonly kind: 'boxed' } & GestureBox)
   | { readonly kind: 'cancel' };
 
 /**
@@ -243,4 +254,4 @@ class EventGesture
 }
 
 export { DRAG_SLOP, EventGesture };
-export type { GesturePress, GestureStep };
+export type { GestureBox, GesturePress, GestureStep };
