@@ -1123,9 +1123,11 @@ const CommandList = (props: CommandListProps) =>
     const branch = row.node !== null && row.node.kind === 'block' && code === 111
       ? row.node
       : null;
+    // the branch is found again by its own command when the box is ticked, since the list may change before then.
+    const head = list[index];
     const elseBranch = branch === null
       ? null
-      : { present: hasElseBranch(list, branch), set: (wanted: boolean) => setElseOf(list[index], () => wanted) };
+      : { present: hasElseBranch(list, branch), set: (wanted: boolean) => setElseOf(head, () => wanted) };
 
     return (
       <CommandRowEditor

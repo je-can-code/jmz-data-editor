@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
@@ -505,6 +505,29 @@ describe('CommandList', () =>
     // Assert: the else closes the branch where it is now.
     expect(commandsOf(hub).slice(4, 11).map(command => `${command.code}@${command.indent}`))
       .toStrictEqual([ '111@0', '101@1', '401@1', '0@1', '411@0', '0@1', '412@0' ]);
+  });
+
+  it('closes the menu when another window removes the command it was opened on', async () =>
+  {
+    // Arrange: the menu opened on the wait.
+    const { hub } = await renderList();
+    fireEvent.contextMenu(screen.getByText('Wait 30 frames'), { clientX: 5, clientY: 5 });
+    const openBefore = screen.queryByRole('menuitem', { name: 'Add a command here' }) !== null;
+
+    // Act.
+    act(() =>
+    {
+      hub.edit('Elsewhere', [ eventHistoryKey(1, 1) ], tx => tx.splice('map:1', PATH, 1, 1, []));
+    });
+
+    // Assert: open before, and gone once its closing settles.
+    expect(openBefore)
+      .toBe(true);
+    await waitFor(() =>
+    {
+      expect(screen.queryByRole('menu'))
+        .toBeNull();
+    });
   });
 
   it('plays a command\'s sound through the window\'s player', async () =>
