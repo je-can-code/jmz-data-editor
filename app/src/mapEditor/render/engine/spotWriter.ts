@@ -1,10 +1,10 @@
-import { TileAnimation, waterfallIndex, waterSurfaceIndex, type TileAnimationKind } from './animation.ts';
 import {
   FLOOR_AUTOTILE_TABLE,
   WALL_AUTOTILE_TABLE,
   WATERFALL_AUTOTILE_TABLE,
   type ShapeQuadrants,
-} from './autotileTables.ts';
+} from '../../core/tiles/autotileTables.ts';
+import { TileAnimation, waterfallIndex, waterSurfaceIndex, type TileAnimationKind } from './animation.ts';
 import {
   autotileKind,
   autotileShape,

@@ -4,13 +4,14 @@ import {
   FLOOR_AUTOTILE_TABLE,
   WALL_AUTOTILE_TABLE,
   WATERFALL_AUTOTILE_TABLE,
-} from '../../../../src/mapEditor/render/engine/autotileTables.ts';
+} from '../../../../src/mapEditor/core/tiles/autotileTables.ts';
 import { locateGameProject } from '../../../support/gameProject.ts';
 
 /*
- * The quadrant tables decide which quarter of a sheet every autotile quarter is cut from; one wrong pair and a wall
- * corner draws the wrong corner. The editor's copies are held to the engine's own file, js/rmmz_core.js in the game,
- * rather than to a hand-typed expectation, so they cannot drift from what the game draws.
+ * The quadrant tables decide which quarter of a sheet every autotile quarter is cut from, both for the shapes the
+ * autotile services store and for the renderer that draws them; one wrong pair and a wall corner draws the wrong
+ * corner. The editor's copies are held to the engine's own file, js/rmmz_core.js in the game, rather than to a
+ * hand-typed expectation, so they cannot drift from what the game draws.
  */
 const project = locateGameProject();
 
