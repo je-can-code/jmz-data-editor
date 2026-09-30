@@ -221,9 +221,9 @@ describe('quickFields', () =>
 
   describe('quickSections', () =>
   {
-    it('files settings and actions under their headings where each first appears, unheaded ones first', () =>
+    it('files settings and actions under their headings where each first appears, settings before actions', () =>
     {
-      // Arrange: a chest with two rewards offers headed settings, a headed removal, and an unheaded addition.
+      // Arrange: a chest with two rewards offers headed settings, a removal under each reward, and the addition under the last.
       const two = oreChest(1, [
         command(250, [ { name: 'Chest1', volume: 90, pitch: 100, pan: 0 } ]),
         command(205, [ 0, { repeat: false, skippable: false, wait: true, list: [ { code: 0 } ] } ]),
@@ -239,9 +239,8 @@ describe('quickFields', () =>
       // Assert.
       expect(sections.map(section => [ section.title, section.fields.map(field => field.key), section.actions.map(action => action.key) ]))
         .toStrictEqual([
-          [ '', [], [ 'reward.add' ] ],
           [ 'Reward 1', [ 'reward.0.kind', 'reward.0.item', 'reward.0.amount' ], [ 'reward.0.remove' ] ],
-          [ 'Reward 2', [ 'reward.1.kind', 'reward.1.amount' ], [ 'reward.1.remove' ] ],
+          [ 'Reward 2', [ 'reward.1.kind', 'reward.1.amount' ], [ 'reward.1.remove', 'reward.add' ] ],
           [ 'Look', [ 'look.closed.graphic', 'look.closed.direction', 'look.closed.pattern', 'look.opened.graphic', 'look.opened.direction', 'look.opened.pattern' ], [] ],
         ]);
     });

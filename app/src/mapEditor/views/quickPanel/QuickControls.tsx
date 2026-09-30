@@ -245,21 +245,17 @@ const RowControl = (props: ControlProps & { list: 'item' | 'weapon' | 'armor' })
     : rows.find(row => row.id === field.value) ?? { id: field.value as number, name: '' };
   const options = value === null || rows.some(row => row.id === value.id) ? rows : [ value, ...rows ];
 
+  // a mixed field holds no row, which the picker shows as an empty box reading "Mixed"; there is nothing to clear.
   return (
-    <Autocomplete<NamedRow>
+    <Autocomplete<NamedRow, false, true>
       size={'small'}
       sx={{ width: 250 }}
+      disableClearable
       options={options}
-      value={value}
+      value={value as NamedRow}
       isOptionEqualToValue={(option, current) => option.id === current.id}
       getOptionLabel={row => `${row.id} ${row.name}`.trim()}
-      onChange={(_event, picked) =>
-      {
-        if (picked !== null)
-        {
-          onChange(picked.id);
-        }
-      }}
+      onChange={(_event, picked) => onChange(picked.id)}
       renderInput={params => <TextField {...params} label={field.label} placeholder={field.mixed ? MIXED : undefined} slotProps={raisedWhenMixed(field.mixed)}/>}
     />
   );
@@ -285,11 +281,12 @@ const MapControl = (props: ControlProps) =>
   const options = value === null || maps.some(map => map.id === value.id) ? maps : [ value, ...maps ];
 
   return (
-    <Autocomplete<MapOption>
+    <Autocomplete<MapOption, false, true>
       size={'small'}
       sx={{ width: 280 }}
+      disableClearable
       options={options}
-      value={value}
+      value={value as MapOption}
       isOptionEqualToValue={(option, current) => option.id === current.id}
       getOptionLabel={map => mapLabel(map.id, map.name)}
       renderOption={(optionProps, map) =>
@@ -301,13 +298,7 @@ const MapControl = (props: ControlProps) =>
           </Box>
         );
       }}
-      onChange={(_event, picked) =>
-      {
-        if (picked !== null)
-        {
-          onChange(picked.id);
-        }
-      }}
+      onChange={(_event, picked) => onChange(picked.id)}
       renderInput={params => <TextField {...params} label={field.label} placeholder={field.mixed ? MIXED : undefined} slotProps={raisedWhenMixed(field.mixed)}/>}
     />
   );
@@ -414,7 +405,7 @@ const GraphicControl = (props: ControlProps) =>
         size={'small'}
         sx={{ flex: 1, minWidth: 160 }}
         options={sheets}
-        value={current ?? undefined}
+        value={current as string}
         disableClearable
         getOptionLabel={name => (name === '' ? '(None)' : name)}
         onChange={(_event, picked) => pickSheet(picked)}

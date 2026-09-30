@@ -689,12 +689,12 @@ const rewardActions = (chest: ChestModel, sectionOf: (ordinal: number) => string
     run: () => [ { kind: 'splice', path: [ 'pages', 0, 'list' ], index: spot.listIndex, deleteCount: 1, inserted: [] } ],
   }));
 
-  // a new reward goes right after the last one, so it is given with the others.
+  // a new reward goes right after the last one, so it is given with the others, and its button sits under it.
   const after = (rewards.at(-1)?.listIndex ?? 0) + 1;
   const addition: QuickAction = {
     key: 'reward.add',
     label: 'Add a reward',
-    section: '',
+    section: sectionOf(rewards.length - 1),
     step: 'Add chest reward',
     run: () => [ {
       kind: 'splice',
