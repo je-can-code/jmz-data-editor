@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import {
   LAYER_KNOBS,
   MOTION_KNOBS,
   STAGE_KNOBS,
 } from '../../../../src/core/domain/valueObjects/weather-knobs.ts';
+import { locateGameProject } from '../../../support/gameProject.ts';
 
-/** Chef Adventure sits beside this repo in the workspace; see the Go unmarshal test for the same path. */
-const CHEF_ADVENTURE_CONFIG = '../../ca/chef-adventure/data/config.weather.json';
+/** Chef Adventure, found the way every real-file test finds it: JMZ_PROJECT_ROOT first, then beside this repo. */
+const PROJECT = locateGameProject();
+
+/** The real weather configuration, when the game is present. */
+const CHEF_ADVENTURE_CONFIG = PROJECT === null
+  ? ''
+  : `${PROJECT}/data/config.weather.json`;
 
 /**
  * The knob catalogue owes its callers one thing: **an author must never have to open the JSON.**
@@ -65,9 +71,9 @@ describe('weather-knobs', () =>
     });
   });
 
-  // reported as a skip rather than a silent pass when the sibling repo is not checked out, which
-  // is the same thing the Go unmarshal test does with `t.Skip`.
-  describe.skipIf(existsSync(CHEF_ADVENTURE_CONFIG) === false)('against the real configuration', () =>
+  // reported as a skip rather than a silent pass when the game is not present, which is the same
+  // thing the Go unmarshal test does with `t.Skip`.
+  describe.skipIf(PROJECT === null)('against the real configuration', () =>
   {
     it('has a control for every motion knob in use', () =>
     {

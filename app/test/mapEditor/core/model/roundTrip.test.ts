@@ -4,7 +4,7 @@ import { createDocument } from '../../../../src/mapEditor/core/model/createDocum
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
-import { listMapFiles, locateGameProject, readDataFile } from '../../support/gameProject.ts';
+import { listMapFiles, locateGameProject, readDataFile } from '../../../support/gameProject.ts';
 
 /*
  * Nothing is lost.

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
  * Chef Adventure, when it sits beside this repository in the workspace; the Go round-trip tests look in the
  * same place. Resolved from this file rather than the working directory, so it holds wherever vitest runs.
  */
-const SIBLING_PROJECT = fileURLToPath(new URL('../../../../../ca/chef-adventure', import.meta.url));
+const SIBLING_PROJECT = fileURLToPath(new URL('../../../../ca/chef-adventure', import.meta.url));
 
 /**
  * Reports whether a folder holds an RMMZ project.
