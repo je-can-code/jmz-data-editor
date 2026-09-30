@@ -502,6 +502,30 @@ const EnemiesBoard = () =>
   //endregion updates
 
   //region render
+  /**
+   * Picks the marker at the start of an enemy's row. The family colors cover the list's selected background,
+   * so the marker is what shows which rows are selected: the row the editor shows, and the rest of a
+   * Shift-click run.
+   * @param {number} index The row's index in the list.
+   * @returns {JSX.Element} The row's marker icon.
+   */
+  const renderEnemyListIcon = (index: number) =>
+  {
+    // the row the editor is showing.
+    if (selectedEnemyIndex === index)
+    {
+      return <DoubleArrow color={'success'} fontSize={'small'}/>;
+    }
+
+    // the other rows of a run, which a copy takes along with it.
+    if (rowClipboard.isSelected(index))
+    {
+      return <DoubleArrow fontSize={'small'}/>;
+    }
+
+    return <KeyboardArrowRight color={'warning'} fontSize={'small'}/>;
+  };
+
   const renderEnemyListItem = (props: ListChildComponentProps) =>
   {
     const {
@@ -585,11 +609,7 @@ const EnemiesBoard = () =>
           <ListItemIcon
             sx={{ minWidth: '24px' }}
           >
-            {(
-              selectedEnemyIndex === index
-            )
-              ? <DoubleArrow color={'success'} fontSize={'small'}/>
-              : <KeyboardArrowRight color={'warning'} fontSize={'small'}/>}
+            {renderEnemyListIcon(index)}
           </ListItemIcon>
           <ListItemText
             disableTypography
