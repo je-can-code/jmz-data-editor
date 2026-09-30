@@ -214,6 +214,20 @@ describe('HttpMapEditorApi', () =>
         .toStrictEqual([ 4, null ]);
     });
 
+    it('lists a folder\'s images, and nothing when the server leaves an empty list out of its envelope', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(url => envelope(url.endsWith('faces') ? [ 'Actor1', 'face_je' ] : undefined));
+
+      // Act.
+      const faces = await api.listImages('faces');
+      const none = await api.listImages('parallaxes');
+
+      // Assert.
+      expect([ faces, none, requests.map(request => request.url) ])
+        .toStrictEqual([ [ 'Actor1', 'face_je' ], [], [ `${BASE}/api/img/faces`, `${BASE}/api/img/parallaxes` ] ]);
+    });
+
     it('raises a server failure on an image rather than calling it missing', async () =>
     {
       // Arrange.

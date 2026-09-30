@@ -87,6 +87,14 @@ interface MapEditorApi
   loadImage(folder: ImageFolder, name: string): Promise<Blob | null>;
 
   /**
+   * Lists the images in a folder, for pickers such as the face picker. Optional, so a client that cannot list
+   * folders still serves everything else; a picker without it takes a typed name instead.
+   * @param {ImageFolder} folder The folder under {@code img/}.
+   * @returns {Promise<string[]>} The file names without {@code .png}, sorted; empty when the folder is missing.
+   */
+  listImages?(folder: ImageFolder): Promise<string[]>;
+
+  /**
    * Builds the address of a project sound, for anything that plays sounds by URL.
    * @param {AudioFolder} folder The folder under {@code audio/}.
    * @param {string} name The file name without {@code .ogg}.
@@ -280,6 +288,13 @@ class HttpMapEditorApi implements MapEditorApi
 
     await this.#requireOk(response, `GET img/${folder}/${name}`);
     return response.blob();
+  }
+
+  async listImages(folder: ImageFolder): Promise<string[]>
+  {
+    // the server leaves an empty list out of its envelope, as it does every empty answer.
+    const names = await this.#getJson<string[] | undefined>(`/api/img/${encodeURIComponent(folder)}`);
+    return names ?? [];
   }
 
   audioUrl(folder: AudioFolder, name: string): string
