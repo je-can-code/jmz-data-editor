@@ -169,5 +169,20 @@ const describePages = (placement: EnemyPlacement): string =>
   return `${label} ${joinAsList(numbers)} of ${pageCount}`;
 };
 
+/**
+ * The line under an event in the list: where it starts, then its pages when they are worth a word.
+ * @param {EnemyPlacement} placement The placement.
+ * @returns {string} Such as "(10, 12)" or "(10, 12), page 2 of 2".
+ */
+const describeDetails = (placement: EnemyPlacement): string =>
+{
+  const position = describePosition(placement);
+  const pages = describePages(placement);
+
+  return pages === ''
+    ? position
+    : `${position}, ${pages.charAt(0).toLowerCase()}${pages.slice(1)}`;
+};
+
 export type { MapPlacements };
-export { describeEvent, describePages, describePosition, groupPlacementsByMap, summarizePlacements };
+export { describeDetails, describeEvent, describePages, describePosition, groupPlacementsByMap, summarizePlacements };

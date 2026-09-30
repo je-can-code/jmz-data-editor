@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EnemyPlacement } from '@services/placements/EnemyPlacementsReader.ts';
 import {
+  describeDetails,
   describeEvent,
   describePages,
   describePosition,
@@ -272,6 +273,35 @@ describe('EnemyPlacementsList', () =>
       // Assert
       expect(description)
         .toBe('Pages 1, 2 and 4 of 5');
+    });
+  });
+
+  describe('describeDetails', () =>
+  {
+    it('gives only the position of an event whose only page makes it the enemy', () =>
+    {
+      // Arrange
+      const placement = placementOf({ x: 10, y: 12, pageIndexes: [ 0 ], pageCount: 1 });
+
+      // Act
+      const details = describeDetails(placement);
+
+      // Assert
+      expect(details)
+        .toBe('(10, 12)');
+    });
+
+    it('follows the position with the pages when they are worth a word', () =>
+    {
+      // Arrange
+      const placement = placementOf({ x: 10, y: 12, pageIndexes: [ 1 ], pageCount: 2 });
+
+      // Act
+      const details = describeDetails(placement);
+
+      // Assert
+      expect(details)
+        .toBe('(10, 12), page 2 of 2');
     });
   });
 });
