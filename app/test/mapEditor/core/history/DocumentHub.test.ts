@@ -1992,6 +1992,72 @@ describe('DocumentHub', () =>
         .toStrictEqual([ 'unchanged', [], [ 'Rename', 'Retitle' ], true, 'unsaved' ]);
     });
 
+    it('finds nothing to do when the file holds a state its latest edits passed through, as a save\'s echo overtaking its message does', async () =>
+    {
+      // Arrange: another window saved once the rename and the retag had reached this one, and the file holds that save;
+      // a later edit is here too, and the save's own message has not arrived, so this window still counts all three unsaved.
+      const { store, files } = buildStore();
+      const hub = buildHub(store);
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      hub.edit('Retag', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'saved elsewhere'));
+      files.set(MAP_A, fileOf(hub, MAP_A) as unknown as JsonValue);
+      hub.edit('Retitle', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'parallaxName' ], 'Sky'));
+
+      // Act.
+      const result = await hub.handleExternalChange(MAP_A);
+
+      // Assert: nothing flagged, and the edits stay as they were.
+      expect([ result, hub.isConflicted(MAP_A), rowsOf(hub, mapHistoryKey(1)), hub.isDirty(MAP_A), fileOf(hub, MAP_A).parallaxName ])
+        .toStrictEqual([ 'unchanged', false, [ 'Rename', 'Retag', 'Retitle' ], true, 'Sky' ]);
+    });
+
+    it('still finds the file holding what it was last loaded as, however many edits came since', async () =>
+    {
+      // Arrange: forty unsaved edits over a file nobody touched.
+      const { store } = buildStore();
+      const hub = buildHub(store);
+      for (let count = 1; count <= 40; count++)
+      {
+        hub.edit(`Retag ${count}`, [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], `edit ${count}`));
+      }
+
+      // Act.
+      const result = await hub.handleExternalChange(MAP_A);
+
+      // Assert.
+      expect([ result, hub.isConflicted(MAP_A), fileOf(hub, MAP_A).note ])
+        .toStrictEqual([ 'unchanged', false, 'edit 40' ]);
+    });
+
+    it('flags a removed file where it is held, keeping what it holds, and a document it does not hold not at all', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      const before = fileOf(hub, MAP_A);
+
+      // Act.
+      const results = [ hub.applyOutsideContent(MAP_A, null), hub.applyOutsideContent('map:40', null) ];
+
+      // Assert.
+      expect([ results, hub.conflict(MAP_A), fileOf(hub, MAP_A), hub.isConflicted(MAP_B) ])
+        .toStrictEqual([ [ 'conflicted', 'ignored' ], { kind: 'disk', content: null }, before, false ]);
+    });
+
+    it('leaves a document with unsaved edits alone when its file is only re-read, and takes a clean one\'s change', () =>
+    {
+      // Arrange: map 1 has an unsaved rename; both files changed while the change stream was down.
+      const hub = buildHub();
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      const changed = { ...buildMapJson(), note: 'changed while down' } as unknown as JsonValue;
+
+      // Act.
+      const results = [ hub.applyOutsideContent(MAP_A, changed, true), hub.applyOutsideContent(MAP_B, changed, true) ];
+
+      // Assert.
+      expect([ results, hub.isConflicted(MAP_A), fileOf(hub, MAP_A).note, fileOf(hub, MAP_B).note, rowsOf(hub, mapHistoryKey(2)) ])
+        .toStrictEqual([ [ 'ignored', 'recorded' ], false, '', 'changed while down', [ 'Externally modified' ] ]);
+    });
+
     it('works out what it last saved past a step undone since, and finds nothing to do then either', async () =>
     {
       // Arrange: two renames saved, the second then undone; the file still holds both.

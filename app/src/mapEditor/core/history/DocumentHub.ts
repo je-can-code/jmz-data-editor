@@ -153,12 +153,14 @@ type DocumentSnapshot = {
 /**
  * What happened when a document's file changed outside the editor.
  *
- * - {@code ignored}: this window does not hold the document.
- * - {@code unchanged}: the file holds nothing the window lacks: what it holds now, or what it last saved or loaded.
+ * - {@code ignored}: this window does not hold the document, or it was only being re-read after the change stream
+ *   came back and the document holds unsaved edits, which differ from the file by definition.
+ * - {@code unchanged}: the file holds nothing the window lacks: what it holds now, what it last saved or loaded, or a
+ *   state its latest edits passed through, as the echo of a save does.
  * - {@code recorded}: the window held no unsaved edits, so it took the file's content as one undoable step, named
  *   {@link OUTSIDE_CHANGE_LABEL}, and the document stays saved.
- * - {@code conflicted}: the window holds unsaved edits, so it kept them and flagged the document; or the file changed
- *   into something no patch can reach, which is left for the person to choose too.
+ * - {@code conflicted}: the window holds unsaved edits, so it kept them and flagged the document; or the file was
+ *   removed, or changed into something no patch can reach, which is left for the person to choose too.
  */
 type ExternalChangeResult = 'ignored' | 'unchanged' | 'recorded' | 'conflicted';
 
@@ -217,6 +219,13 @@ const diskOperationId = (content: JsonValue): string =>
  * What the history panel calls the step a document's file changing outside the editor is recorded as.
  */
 const OUTSIDE_CHANGE_LABEL = 'Externally modified';
+
+/**
+ * How many of a document's newest unsaved states a file arriving from outside is compared against, besides the state
+ * it was last saved as. A save's echo can overtake the message saying which steps the save held by a moment, and only
+ * the edits of that moment lie between; comparing every state would cost a copy of the document per unsaved step.
+ */
+const RECENT_STATES_COMPARED = 32;
 
 /**
  * Names the step an outside change to a file is recorded as, the same way in every window: the document, the latest
@@ -1221,21 +1230,19 @@ class DocumentHub
   //region external changes
 
   /**
-   * Responds to a document's file changing outside the editor (in MZ, a script, another editor).
-   *
-   * A file that holds nothing this window lacks needs nothing: what the window holds now, or what it last saved or
-   * loaded, which is what the echo of a save looks like when it comes back without its window's name. Any flag an
-   * earlier change to the file raised is cleared, since the file no longer holds anything to choose between.
-   *
-   * A clean document takes the file's version as one step named {@link OUTSIDE_CHANGE_LABEL}, recorded in the
-   * history of whatever the change touched and marked saved, since the file holds it: undoing the step brings back
-   * the version the editor had, as an unsaved edit, and redoing it takes the file's version again. Every window
-   * holding the document records the same step ({@link outsideStepId}), and posts it to the others like any step, so
-   * they all end on it whichever hears the change first.
-   *
-   * A document with unsaved edits keeps them and is flagged with the file's content beside it, so nothing is merged
-   * into work the person has not saved, and nothing is thrown away without them choosing to. So is a file whose
-   * whole value changed kind, which no patch can say.
+   * Reads a document's file as it stands on disk, whether or not this window holds the document.
+   * @param {DocumentKey} key The document.
+   * @returns {Promise<JsonValue>} The file's content.
+   */
+  async readFile(key: DocumentKey): Promise<JsonValue>
+  {
+    return this.#requireStore().load(key);
+  }
+
+  /**
+   * Reads a document's file and takes it as a change made outside the editor, in this window alone (see
+   * {@link applyOutsideContent}). Where several windows hold the document, one reads each change for all of them
+   * instead, so they all take the very same version of the file.
    * @param {DocumentKey} key The document.
    * @returns {Promise<ExternalChangeResult>} What was done.
    */
@@ -1246,10 +1253,46 @@ class DocumentHub
       return 'ignored';
     }
 
-    const content = await this.#requireStore().load(key);
-    if (this.has(key) === false)
+    const content = await this.readFile(key);
+    return this.applyOutsideContent(key, content);
+  }
+
+  /**
+   * Takes one version of a document's file that changed outside the editor (in MZ, a script, another editor), as it
+   * was read, once, for every window holding the document.
+   *
+   * A file that holds nothing this window lacks needs nothing: what the window holds now, what it last saved or
+   * loaded, or a state its latest edits passed through, which is what the echo of a save looks like when it comes back
+   * without its window's name, perhaps ahead of the message saying which steps that save held. Any flag an earlier
+   * change to the file raised is cleared, since the file no longer holds anything to choose between.
+   *
+   * A clean document takes the file's version as one step named {@link OUTSIDE_CHANGE_LABEL}, recorded in the
+   * history of whatever the change touched and marked saved, since the file holds it: undoing the step brings back
+   * the version the editor had, as an unsaved edit, and redoing it takes the file's version again. Every window
+   * holding the document at the same state records the same step from the same version ({@link outsideStepId}), so
+   * they all end on it; a later version is a later step on top.
+   *
+   * A document with unsaved edits keeps them and is flagged with the file's content beside it, so nothing is merged
+   * into work the person has not saved, and nothing is thrown away without them choosing to. So is a removed file,
+   * and a file whose whole value changed kind, which no patch can say.
+   * @param {DocumentKey} key The document.
+   * @param {JsonValue | null} content The file's content, or null when the file was removed.
+   * @param {boolean} recheck True when the file was re-read because the change stream came back, not because it
+   * changed: a document with unsaved edits differs from its file by definition then, and is left alone.
+   * @returns {ExternalChangeResult} What was done.
+   */
+  applyOutsideContent(key: DocumentKey, content: JsonValue | null, recheck = false): ExternalChangeResult
+  {
+    if (this.has(key) === false || (recheck && this.isDirty(key)))
     {
       return 'ignored';
+    }
+
+    // the document's content is the only copy left of a removed file, so nothing is taken over it.
+    if (content === null)
+    {
+      this.flagConflict(key, { kind: 'disk', content: null });
+      return 'conflicted';
     }
 
     // a file holding nothing new needs nothing done, and a flag an earlier change raised (the file removed, or a
@@ -1279,7 +1322,7 @@ class DocumentHub
 
   /**
    * Reports whether a document's file holds nothing this window lacks: exactly its committed content, or, while it
-   * has unsaved edits, exactly what it last saved or loaded, the unsaved edits having been made on top of that.
+   * has unsaved edits, a state it passed through since it was last saved or loaded (see {@link #passedThrough}).
    * @param {DocumentKey} key The document.
    * @param {JsonValue} content The file's content.
    * @returns {boolean} True when the file needs nothing done.
@@ -1292,24 +1335,22 @@ class DocumentHub
     }
 
     // a clean document's committed content is the saved content, already compared.
-    if (this.isDirty(key) === false)
-    {
-      return false;
-    }
-
-    const saved = this.#savedContent(key);
-    return saved !== null && jsonEquals(saved, content);
+    return this.isDirty(key) && this.#passedThrough(key, content);
   }
 
   /**
-   * Works out the content a document's file was last known to hold: its committed content with every step applied
-   * since the last save or load taken back out, newest first, and every step the save reflected that has since been
-   * undone put back in, in the order the save had them. Nothing live is touched; the work happens on a copy.
+   * Reports whether a file holds a state a document with unsaved edits already passed through: the state after one
+   * of its newest unsaved steps, or what it was last saved or loaded as. The steps applied since that save are taken
+   * back out of a copy newest first, comparing as each goes, then every step the save held that was undone since is
+   * put back in, in the order the save had them. The echo of a save made in another window can arrive before the
+   * message saying which steps that save held, and then only the edits of that moment lie between, so only the newest
+   * {@link RECENT_STATES_COMPARED} states are compared besides the saved one. Nothing live is touched.
    * @param {DocumentKey} key The document, which has unsaved edits.
-   * @returns {JsonValue | null} The content, or null when a step the save reflected is no longer known here, or a
-   * patch no longer fits the copy.
+   * @param {JsonValue} content The file's content.
+   * @returns {boolean} True when the file holds one of those states; false too when a step the save held is no longer
+   * known here, or a patch no longer fits the copy, since the saved state cannot then be worked out.
    */
-  #savedContent(key: DocumentKey): JsonValue | null
+  #passedThrough(key: DocumentKey, content: JsonValue): boolean
   {
     // every held document keeps both lists.
     const applied = this.#applied.get(key) as HistoryStep[];
@@ -1320,28 +1361,35 @@ class DocumentHub
       shared += 1;
     }
 
-    const putBack = saved.slice(shared).map(id => this.#steps.get(id));
-    if (putBack.some(step => step === undefined))
-    {
-      return null;
-    }
-
     try
     {
-      // take the unsaved steps back out, newest first, each one's patches in reverse.
+      // take the unsaved steps back out, newest first, each one's patches in reverse, comparing the newest states and
+      // the one the save and these steps share.
       const copy = createDocument(key, this.#committedContent(key));
-      applied.slice(shared).reverse().forEach(step =>
+      const unsaved = applied.slice(shared).reverse();
+      for (const [ index, step ] of unsaved.entries())
       {
         patchesOn(step, key).reverse().forEach(patch => copy.apply(invertPatch(patch)));
-      });
+        const compared = index < RECENT_STATES_COMPARED || index === unsaved.length - 1;
+        if (compared && jsonEquals(copy.toJson(), content))
+        {
+          return true;
+        }
+      }
 
-      // then put back the steps the save held that were undone since, in the order they went in.
+      // then put back the steps the save held that were undone since, when there are any and all are still known.
+      const putBack = saved.slice(shared).map(id => this.#steps.get(id));
+      if (putBack.length === 0 || putBack.some(step => step === undefined))
+      {
+        return false;
+      }
+
       (putBack as HistoryStep[]).forEach(step =>
       {
         patchesOn(step, key).forEach(patch => copy.apply(patch));
       });
 
-      return copy.toJson();
+      return jsonEquals(copy.toJson(), content);
     }
     catch (error)
     {
@@ -1350,7 +1398,7 @@ class DocumentHub
         throw error;
       }
 
-      return null;
+      return false;
     }
   }
 
@@ -1471,12 +1519,36 @@ class DocumentHub
         this.#applyRemoteForget(operation.stepId, operation.bases, operation.origin, operation.opId);
         break;
       case 'saved':
-        if (this.has(operation.document))
-        {
-          this.#markSaved(operation.document, operation.marker, 'remote');
-        }
+        this.#applyRemoteSave(operation.document, operation.marker, operation.origin);
         break;
     }
+  }
+
+  /**
+   * Takes another window's save of a document held here: the steps its file now holds. A save naming a step this
+   * window has never seen means the two copies went different ways, which is announced as {@code out-of-sync} and
+   * changes nothing; taking it would mark this copy saved against a file that holds something it does not.
+   * @param {DocumentKey} key The document.
+   * @param {readonly string[]} marker The steps the file holds, as the saving window had them.
+   * @param {string} origin The window that saved.
+   */
+  #applyRemoteSave(key: DocumentKey, marker: readonly string[], origin: string): void
+  {
+    if (this.has(key) === false)
+    {
+      return;
+    }
+
+    // a step can be known while undone (in the registry) or while no history lists it any more (still applied).
+    const applied = this.#applied.get(key) as HistoryStep[];
+    const known = marker.every(id => this.#steps.has(id) || applied.some(step => step.id === id));
+    if (known === false)
+    {
+      this.#reportOutOfSync([ key ], origin);
+      return;
+    }
+
+    this.#markSaved(key, marker, 'remote');
   }
 
   /**
