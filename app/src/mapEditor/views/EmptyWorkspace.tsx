@@ -1,9 +1,9 @@
 import React from 'react';
 import { AppBar, Box, Button, Toolbar, Typography } from '@mui/material';
-import { Storage } from '@mui/icons-material';
+import { ListAlt, Storage } from '@mui/icons-material';
 import { openDataEditor } from '../../core/infrastructure/shell/WindowShell.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
-import { APP_TITLE } from './mapEditorViews.ts';
+import { APP_TITLE, openCommonEventsWindow } from './mapEditorViews.ts';
 
 /**
  * The map editor's workspace before any map is open. The panels, the map tree and the tabs arrive with the
@@ -21,6 +21,15 @@ const EmptyWorkspace = () =>
           <Typography variant={'h6'} sx={{ flex: 1 }}>
             {APP_TITLE}
           </Typography>
+          <Button
+            color={'inherit'}
+            onClick={() => openCommonEventsWindow(shell)}
+            size={'small'}
+            startIcon={<ListAlt/>}
+            variant={'outlined'}
+          >
+            Common events
+          </Button>
           <Button
             color={'inherit'}
             onClick={() => openDataEditor(shell)}
