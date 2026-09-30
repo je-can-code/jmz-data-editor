@@ -246,29 +246,43 @@ const drawInEditor = async (page: Page, capture: ProbeCapture, screen: { width: 
 };
 
 /**
- * Explains a differing cell of the events pass by the events around it that the game shows differently from the
- * editor's first page.
+ * Explains a differing cell of the events pass by an event around it that the game draws differently from a plain
+ * drawing of its first page, which is what the editor draws. A cell with only plainly drawn events around it stays
+ * unexplained: that would be the editor's own mistake.
  * @param {CellDifference} cell The cell.
  * @param {readonly ProbeEvent[]} events The game's events on the map.
  * @returns {string | null} Why it differs, or null when nothing explains it.
  */
 const explainCell = (cell: CellDifference, events: readonly ProbeEvent[]): string | null =>
 {
-  // a character sprite covers its own cell and can reach up two cells and across one on each side.
-  const nearby = events.filter(event => Math.abs(event.x - cell.x) <= 1 && cell.y <= event.y && cell.y >= event.y - 2);
-  const hidden = nearby.find(event => event.visible === false);
-  if (hidden !== undefined)
+  // the cells a sprite covers, standing bottom-centre on its cell (6 pixels up for a character), plus a margin.
+  const covers = (event: ProbeEvent, margin: number): boolean =>
   {
-    return `event ${hidden.id} is hidden in the game`;
+    const centre = event.x * TILE + TILE / 2;
+    const bottom = event.y * TILE + TILE - 6;
+    const left = Math.floor((centre - event.width / 2) / TILE) - margin;
+    const right = Math.floor((centre + event.width / 2 - 1) / TILE) + margin;
+    const top = Math.floor((bottom - event.height) / TILE) - margin;
+    return cell.x >= left && cell.x <= right && cell.y >= top && cell.y <= event.y + margin;
+  };
+
+  // a difference on a plainly drawn event is the editor's own, however much the neighbours move.
+  const departs = (event: ProbeEvent): boolean => event.visible === false || event.departures.length > 0;
+  if (events.some(event => departs(event) === false && event.visible && covers(event, 0)))
+  {
+    return null;
   }
 
-  const otherPage = nearby.find(event => event.page !== 0);
-  if (otherPage !== undefined)
+  // what hangs off a departing sprite (gauges, a squash) reaches a cell further.
+  const departing = events.find(event => departs(event) && covers(event, 1));
+  if (departing === undefined)
   {
-    return `event ${otherPage.id} shows page ${otherPage.page + 1} in the game; the editor shows page 1`;
+    return null;
   }
 
-  return null;
+  return departing.visible
+    ? `event ${departing.id} ${departing.departures.join(', ')}`
+    : `event ${departing.id} is hidden in the game`;
 };
 
 /**

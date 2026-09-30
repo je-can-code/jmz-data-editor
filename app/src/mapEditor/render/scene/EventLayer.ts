@@ -363,9 +363,11 @@ class EventLayer
       return;
     }
 
+    // the engine smooths character sheets (a Bitmap is smooth unless told otherwise), which only shows on a sheet
+    // whose width does not divide into whole frames; tiles, which its tilemap samples nearest, stay crisp.
     this.#pending += 1;
     const loading = images.image('characters', name)
-      .then(image => (image === null ? null : textureSourceFor(image)))
+      .then(image => (image === null ? null : textureSourceFor(image, 'linear')))
       .catch(() => null);
     this.#characterSources.set(name, loading);
     loading.then(source =>

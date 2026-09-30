@@ -97,13 +97,28 @@ const eventFrame = (image: RmmzEventImage, sheet: SheetSize | null, tileSize: nu
   const height = big ? sheet.height / 4 : sheet.height / 8;
   const blockX = big ? 0 : (image.characterIndex % 4) * 3;
   const blockY = big ? 0 : Math.floor(image.characterIndex / 4) * 4;
+  const x = wholeFrameEdge((blockX + image.pattern) * width, width, sheet.width);
+  const y = wholeFrameEdge((blockY + (image.direction - 2) / 2) * height, height, sheet.height);
+  return { source: 'character', sheet: 0, sx: x.start, sy: y.start, width: x.size, height: y.size };
+};
+
+/**
+ * Cuts one edge of a frame as Sprite#_refresh does before the engine draws it: the start and the size are floored to
+ * whole pixels, then kept inside the sheet. A sheet whose size does not divide into whole frames therefore draws
+ * frames a pixel narrower than its share, which the anchor then centres on a half pixel.
+ * @param {number} start Where the frame starts, possibly fractional.
+ * @param {number} size How long it is, possibly fractional.
+ * @param {number} sheetSize The sheet's size along the same edge.
+ * @returns {{ start: number, size: number }} The edge the engine draws.
+ */
+const wholeFrameEdge = (start: number, size: number, sheetSize: number): { start: number; size: number } =>
+{
+  const floorStart = Math.floor(start);
+  const floorSize = Math.floor(size);
+  const clampedStart = Math.min(sheetSize, Math.max(0, floorStart));
   return {
-    source: 'character',
-    sheet: 0,
-    sx: (blockX + image.pattern) * width,
-    sy: (blockY + (image.direction - 2) / 2) * height,
-    width,
-    height,
+    start: clampedStart,
+    size: Math.min(sheetSize - clampedStart, Math.max(0, floorSize - clampedStart + floorStart)),
   };
 };
 

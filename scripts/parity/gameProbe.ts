@@ -56,6 +56,19 @@ type ProbeEvent = {
   tileId: number;
   x: number;
   y: number;
+
+  /**
+   * The sprite's drawn size in pixels, scale included, for working out which cells it covers.
+   */
+  width: number;
+  height: number;
+
+  /**
+   * Every way the game's sprite departs from a plain drawing of the event's first page, as the editor draws it:
+   * another page, another image, facing or pattern, a tone, a blend colour, an opacity or a scale, or sprites a plugin
+   * hung on it. Empty when the game draws exactly the first page.
+   */
+  departures: string[];
 };
 
 /**
@@ -256,7 +269,43 @@ const parityProbe = (config: ProbeConfig): void =>
       });
   };
 
-  // records each event's active page and whether the game draws it, before any pass hides anything.
+  // lists how the game's sprite for an event departs from a plain drawing of its first page.
+  const departuresOf = (sprite: any): string[] =>
+  {
+    const character = sprite._character;
+    const data = engine.$dataMap.events[character.eventId()];
+    if (data === undefined || data === null)
+    {
+      return [ 'is not in the map file' ];
+    }
+
+    const first = data.pages[0].image;
+    const departures: string[] = [];
+    const tone = sprite.getColorTone();
+    const blend = sprite.getBlendColor();
+    const checks: [ boolean, string ][] = [
+      [ character._pageIndex !== 0, `shows page ${character._pageIndex + 1}` ],
+      [ character.characterName() !== first.characterName || character.characterIndex() !== first.characterIndex || character.tileId() !== first.tileId,
+        `draws "${character.characterName()}" ${character.characterIndex()} instead of its page image` ],
+      [ character.direction() !== first.direction, `faces ${character.direction()} instead of ${first.direction}` ],
+      [ character.pattern() !== first.pattern, `shows pattern ${character.pattern()} instead of ${first.pattern}` ],
+      [ tone.some((value: number) => value !== 0), `tinted ${JSON.stringify(tone)}` ],
+      [ blend[3] !== 0, `blended ${JSON.stringify(blend)}` ],
+      [ sprite.opacity !== 255, `opacity ${sprite.opacity}` ],
+      [ sprite.scale.x !== 1 || sprite.scale.y !== 1, `scaled ${sprite.scale.x}x${sprite.scale.y}` ],
+      [ sprite.children.some((child: any) => child.visible), `carries ${sprite.children.filter((child: any) => child.visible).length} plugin sprites` ],
+    ];
+    checks.forEach(([ departs, words ]) =>
+    {
+      if (departs)
+      {
+        departures.push(words);
+      }
+    });
+    return departures;
+  };
+
+  // records each event's active page, whether the game draws it and how, before any pass hides anything.
   const recordEvents = (map: ProbeMap): void =>
   {
     const spriteset = engine.SceneManager._scene._spriteset;
@@ -273,6 +322,9 @@ const parityProbe = (config: ProbeConfig): void =>
           tileId: character.tileId(),
           x: character.x,
           y: character.y,
+          width: Math.abs(sprite._frame.width * sprite.scale.x),
+          height: Math.abs(sprite._frame.height * sprite.scale.y),
+          departures: departuresOf(sprite),
         };
       });
   };
