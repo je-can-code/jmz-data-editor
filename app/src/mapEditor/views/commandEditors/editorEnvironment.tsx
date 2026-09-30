@@ -19,6 +19,21 @@ type NamedOption = {
 type DatabaseNames = (kind: CommandFieldKind) => readonly NamedOption[];
 
 /**
+ * A place on a map: which map, and the tile.
+ */
+type MapLocation = {
+  readonly mapId: number;
+  readonly x: number;
+  readonly y: number;
+};
+
+/**
+ * Lets the author pick a place by clicking it on a map, starting from where a transfer goes now. It settles on
+ * the place picked, or null when the author gives up.
+ */
+type LocationPicker = (current: MapLocation) => Promise<MapLocation | null>;
+
+/**
  * What the hand-built editors run on besides the command they edit: the server (faces, maps and plugin sources
  * come through it), the plugin headers, and the database names pickers offer.
  */
@@ -37,6 +52,11 @@ type HandBuiltEditorEnvironment = {
    * Database names for pickers; ids are typed as numbers without them.
    */
   readonly names?: DatabaseNames;
+
+  /**
+   * Picks a transfer's landing spot on a map; the transfer editor offers it only when present.
+   */
+  readonly pickLocation?: LocationPicker;
 };
 
 /**
@@ -156,4 +176,4 @@ export {
   useMapInfos,
   usePluginHeaders,
 };
-export type { DatabaseNames, HandBuiltEditorEnvironment, NamedOption };
+export type { DatabaseNames, HandBuiltEditorEnvironment, LocationPicker, MapLocation, NamedOption };
