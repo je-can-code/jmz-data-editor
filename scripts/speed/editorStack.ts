@@ -3,9 +3,13 @@
  * Stands the map editor up for measuring, the way it ships: the Go API built from source, and the UI as a
  * production build served over HTTP, each on its own port, with the API allowing exactly the UI's origin.
  *
- * The API never sees the real game. It is pointed at a mirror in the scratch folder: a fresh copy of `data/`, the
- * only folder the API writes, with `img/`, `audio/` and `js/` linked in read-only. Nothing a measurement does,
- * whatever goes wrong, can reach the game's own files.
+ * Both are built afresh on every start, into the run's own folder, so what gets timed or compared is always the code as
+ * it stands: a build left over from an earlier run can never be measured by mistake. The Go build cache keeps the API's
+ * rebuild to a second or two, and the UI builds in under one.
+ *
+ * The API never sees the real game. It is pointed at a mirror in the run's folder: a fresh copy of `data/`, the only
+ * folder the API writes, with `img/`, `audio/` and `js/` linked in read-only. Nothing a measurement does, whatever
+ * goes wrong, can reach the game's own files. Stopping the stack removes the builds and the mirror.
  */
 import { cpSync, existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -17,7 +21,7 @@ type EditorStackOptions = {
   /** The real game, read from and never written. */
   projectRoot: string;
 
-  /** A folder of this run's own for builds and the mirror. */
+  /** The run's own folder, from createRunFolder, which no other run uses, for the builds and the mirror. */
   scratch: string;
 
   /** The port the UI is served on. */
@@ -25,9 +29,6 @@ type EditorStackOptions = {
 
   /** The port the API listens on. */
   apiPort: number;
-
-  /** Builds again even when a build from this run is already there. */
-  rebuild?: boolean;
 };
 
 /**
@@ -40,7 +41,7 @@ type EditorStack = {
   /** The API's origin. */
   apiBase: string;
 
-  /** Stops the API and the UI server. */
+  /** Stops the API and the UI server, and removes the builds and the mirror. */
   stop: () => Promise<void>;
 };
 
@@ -159,15 +160,9 @@ const startEditorStack = async (options: EditorStackOptions): Promise<EditorStac
   const mirror = `${scratch}/project`;
   mkdirSync(`${scratch}/bin`, { recursive: true });
 
-  if (options.rebuild === true || existsSync(binary) === false)
-  {
-    await run([ 'go', 'build', '-o', binary, './cmd/api' ], `${REPO_ROOT}/server`);
-  }
-
-  if (options.rebuild === true || existsSync(`${ui}/map.html`) === false)
-  {
-    await run([ 'bunx', '--bun', 'vite', 'build', '--outDir', ui, '--emptyOutDir' ], `${REPO_ROOT}/app`, { VITE_JMZ_API_BASE: apiBase });
-  }
+  // build both every time: the UI also bakes in this run's API origin, so no earlier build could stand in for it.
+  await run([ 'go', 'build', '-o', binary, './cmd/api' ], `${REPO_ROOT}/server`);
+  await run([ 'bunx', '--bun', 'vite', 'build', '--outDir', ui, '--emptyOutDir' ], `${REPO_ROOT}/app`, { VITE_JMZ_API_BASE: apiBase });
 
   buildMirror(projectRoot, mirror);
   const api = Bun.spawn([ binary ], {
@@ -186,6 +181,9 @@ const startEditorStack = async (options: EditorStackOptions): Promise<EditorStac
     await server.stop(true);
     api.kill();
     await api.exited;
+
+    // the mirror is a whole copy of the game's data; nothing in this run reads it or the builds again.
+    [ `${scratch}/bin`, ui, mirror ].forEach(folder => rmSync(folder, { recursive: true, force: true }));
   };
 
   try

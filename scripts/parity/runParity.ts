@@ -4,8 +4,11 @@
  * draws each fixture map view by view, and the editor draws the same views; the two are compared pixel by pixel inside
  * the map.
  *
- *   bun run parity [--maps 102,31,94,316] [--mode game|snapshot|both] [--scratch <folder>] [--project <game>]
- *                  [--ui-port 18200] [--api-port 18201] [--display :90] [--nw <binary>] [--rebuild]
+ *   bun run parity [--maps 102,31,94,316] [--mode game|snapshot|both] [--scratch <base folder>] [--project <game>]
+ *                  [--ui-port 18200] [--api-port 18201] [--display :90] [--nw <binary>]
+ *
+ * Each invocation works in a folder of its own inside the base folder (the system's temporary folder unless --scratch
+ * names another), builds the editor afresh there, and leaves its pictures and report there; it prints where.
  *
  * Two passes per view. The tiles pass hides every character on both sides, so what remains is the parallax and the
  * tiles: it must match, within 2 per channel for compositing rounding, and it decides the exit code. The events pass
@@ -14,7 +17,7 @@
  * shows differently (another page, or hidden) or listed as unexplained.
  *
  * Maps with water or waterfalls are compared at all four animation steps. The game draws on SwiftShader, which is
- * fine for pictures and meaningless for timing. The game runs from a copy in the scratch folder, muted, on a virtual
+ * fine for pictures and meaningless for timing. The game runs from a copy in the run's folder, muted, on a virtual
  * display; nothing here writes to the game's own folder.
  *
  * The snapshot mode is the cheaper day-to-day comparator: ca/tools/mapgen/snapshot.js draws each map whole, and the
@@ -26,6 +29,7 @@ import { tmpdir } from 'node:os';
 import type { Page } from 'playwright-core';
 import { startEditorStack } from '../speed/editorStack.ts';
 import { openSpeedBrowser } from '../speed/gpuChromium.ts';
+import { createRunFolder } from '../speed/runFolder.ts';
 import { comparePictures, decodePng, differencePicture, writePng, type CellDifference, type Comparison } from './compareImages.ts';
 import type { ProbeCapture, ProbeReport } from './probeTypes.ts';
 import { runHeadlessGame } from './headlessGame.ts';
@@ -43,7 +47,6 @@ type Options = {
   apiPort: number;
   display: string;
   nw: string;
-  rebuild: boolean;
 };
 
 /**
@@ -104,13 +107,12 @@ const parseOptions = (argv: string[]): Options =>
   return {
     maps: (flags.get('maps') ?? Object.keys(FIXTURES).join(',')).split(',').map(Number),
     mode: (flags.get('mode') ?? 'both') as Options['mode'],
-    scratch: flags.get('scratch') ?? `${tmpdir()}/jmz-parity`,
+    scratch: flags.get('scratch') ?? tmpdir(),
     project: flags.get('project') ?? process.env['JMZ_PROJECT_ROOT'] ?? '',
     uiPort: Number(flags.get('ui-port') ?? 18200),
     apiPort: Number(flags.get('api-port') ?? 18201),
     display: flags.get('display') ?? ':90',
     nw: flags.get('nw') ?? 'nw',
-    rebuild: flags.has('rebuild'),
   };
 };
 
@@ -233,7 +235,7 @@ const runGameParity = async (options: Options): Promise<boolean> =>
     throw new Error(`the game's probe ended in "${report.phase}": ${report.errors.join('; ')}`);
   }
 
-  const stack = await startEditorStack({ projectRoot: options.project, scratch: `${options.scratch}/editor`, uiPort: options.uiPort, apiPort: options.apiPort, rebuild: options.rebuild });
+  const stack = await startEditorStack({ projectRoot: options.project, scratch: `${options.scratch}/editor`, uiPort: options.uiPort, apiPort: options.apiPort });
   const { browser } = await openSpeedBrowser({ mode: 'swiftshader' });
   try
   {
@@ -316,7 +318,7 @@ const runSnapshotParity = async (options: Options): Promise<boolean> =>
   mkdirSync(folder, { recursive: true });
   const tilesets = await Bun.file(`${options.project}/data/Tilesets.json`).json() as ({ flags: number[] } | null)[];
   const snapshotScript = `${options.project}/../tools/mapgen/snapshot.js`;
-  const stack = await startEditorStack({ projectRoot: options.project, scratch: `${options.scratch}/editor`, uiPort: options.uiPort, apiPort: options.apiPort, rebuild: options.rebuild });
+  const stack = await startEditorStack({ projectRoot: options.project, scratch: `${options.scratch}/editor`, uiPort: options.uiPort, apiPort: options.apiPort });
   const { browser } = await openSpeedBrowser({ mode: 'swiftshader' });
   let allPredicted = true;
   try
@@ -380,11 +382,15 @@ const runSnapshotParity = async (options: Options): Promise<boolean> =>
  */
 const main = async (): Promise<void> =>
 {
-  const options = parseOptions(process.argv.slice(2));
-  if (options.project === '')
+  const parsed = parseOptions(process.argv.slice(2));
+  if (parsed.project === '')
   {
     throw new Error('name the game with --project or JMZ_PROJECT_ROOT');
   }
+
+  // this run's own folder, built into afresh, so no earlier build is compared and no other run can wipe this one's copy.
+  const options = { ...parsed, scratch: createRunFolder(parsed.scratch, 'jmz-parity-') };
+  console.log(`pictures and report in ${options.scratch}`);
 
   let pass = true;
   if (options.mode !== 'snapshot')

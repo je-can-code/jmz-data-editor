@@ -2,8 +2,9 @@
 /**
  * Runs the real game headlessly with the parity probe injected, the way rmmz-plugins' headless-playtesting guide
  * describes, with one change: the guide writes the probe and its manifest key into the game folder, so this runs a
- * copy of the game in the scratch folder instead and never touches the game's own files. The copy links the big
- * read-only folders (img, audio, movies), copies the rest, and starts with an empty save folder of its own.
+ * copy of the game in the run's own folder instead and never touches the game's own files. The copy links the big
+ * read-only folders (img, audio, movies), copies the rest, and starts with an empty save folder of its own. The copy
+ * and the game's profile are removed once the game has stopped; the pictures, the report and the log stay.
  *
  * The game runs on a virtual X display with WAYLAND_DISPLAY removed and ozone forced to X11, so no window can reach
  * the desktop, with its own profile, on SwiftShader: parity screenshots may use software rendering; timings may not.
@@ -180,6 +181,11 @@ const runHeadlessGame = async (options: HeadlessGameOptions, config: ProbeConfig
 
     await game.exited;
     stopDisplay?.();
+
+    // the copy holds the game's data and scripts; removing it takes only the links to img, audio and movies, never
+    // what they point at.
+    rmSync(copy, { recursive: true, force: true });
+    rmSync(profile, { recursive: true, force: true });
   }
 };
 

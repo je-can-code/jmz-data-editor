@@ -4,7 +4,11 @@
  * the machine's real GPU (spike S3's recipe), and fails on any speed budget from the plan's D3.
  *
  *   bun run speed [--runs 3] [--seconds 5] [--maps 102,361] [--ui-port 18200] [--api-port 18201]
- *                 [--scratch <folder>] [--project <game>] [--rebuild] [--json <file>]
+ *                 [--scratch <base folder>] [--project <game>] [--json <file>]
+ *
+ * Each invocation builds the editor afresh in a folder of its own inside the base folder (the system's temporary
+ * folder unless --scratch names another), so it always times the code as it stands and never shares a build or a
+ * mirror with another run; the folder is removed when the run ends.
  *
  * Every map in every run gets a fresh browser, so every open is cold. Per map it measures, with the game look and
  * every overlay on:
@@ -19,6 +23,7 @@
  * It refuses to time anywhere but the RX 6950 XT: the browser's WebGL renderer and the page's own must both name it
  * (JMZ_SPEED_GPU, or --gpu, overrides the pattern). The exit code is non-zero when any budget is missed.
  */
+import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { Page } from 'playwright-core';
 import { BUDGETS, judgeCameraPath, judgeOpen, judgeStrokeFrames } from './budgets.ts';
@@ -29,6 +34,7 @@ import { REFRESH_60_HZ, summarize, summarizeFrames } from './frameStats.ts';
 import type { RunSummary, Verdict } from './frameStats.ts';
 import { newSpeedPage, openSpeedBrowser } from './gpuChromium.ts';
 import type { GpuReport } from './gpuChromium.ts';
+import { createRunFolder } from './runFolder.ts';
 
 /**
  * The script's settings.
@@ -41,7 +47,6 @@ type Options = {
   apiPort: number;
   scratch: string;
   project: string;
-  rebuild: boolean;
   expectRenderer: RegExp;
   jsonPath: string | undefined;
 };
@@ -143,9 +148,8 @@ const parseOptions = (argv: string[]): Options =>
     maps: (flags.get('maps') ?? '102,361').split(',').map(Number),
     uiPort: Number(flags.get('ui-port') ?? 18200),
     apiPort: Number(flags.get('api-port') ?? 18201),
-    scratch: flags.get('scratch') ?? `${tmpdir()}/jmz-speed`,
+    scratch: flags.get('scratch') ?? tmpdir(),
     project: flags.get('project') ?? process.env['JMZ_PROJECT_ROOT'] ?? '',
-    rebuild: flags.has('rebuild'),
     expectRenderer: new RegExp(gpu),
     jsonPath: flags.get('json'),
   };
@@ -495,12 +499,17 @@ const main = async (): Promise<void> =>
     throw new Error('name the game with --project or JMZ_PROJECT_ROOT');
   }
 
+  // this run's own folder, built into afresh, so nothing another run left or is doing can reach what gets timed.
+  const runFolder = createRunFolder(options.scratch, 'jmz-speed-');
   const stack = await startEditorStack({
     projectRoot: options.project,
-    scratch: options.scratch,
+    scratch: runFolder,
     uiPort: options.uiPort,
     apiPort: options.apiPort,
-    rebuild: options.rebuild,
+  }).catch((error: unknown) =>
+  {
+    rmSync(runFolder, { recursive: true, force: true });
+    throw error;
   });
   const results: MapResult[] = [];
   try
@@ -523,6 +532,7 @@ const main = async (): Promise<void> =>
   finally
   {
     await stack.stop();
+    rmSync(runFolder, { recursive: true, force: true });
   }
 
   printSpread(results, options.maps);
