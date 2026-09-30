@@ -110,6 +110,37 @@ describe('JsonDocument', () =>
       .toStrictEqual({ names: [ 'a' ] });
   });
 
+  it('works out the patches to other content without applying them, and they reach it exactly', () =>
+  {
+    // Arrange: the second map is renamed and a third arrives; the first row stays as it was.
+    const document = new MapInfosDocument('mapinfos', buildInfos());
+    const next = buildInfos() as { name: string }[];
+    next[2].name = 'Deep Cave';
+    next.push({ id: 3, expanded: false, name: 'Peak', order: 3, parentId: 0, scrollX: 0, scrollY: 0 } as never);
+
+    // Act.
+    const patches = document.patchesTo(next as unknown as JsonValue) ?? [];
+    const untouched = document.toJson();
+    patches.forEach(patch => document.apply(patch));
+
+    // Assert.
+    expect([ patches.map(patch => [ patch.kind, 'path' in patch ? patch.path : null ]), untouched, document.toJson() ])
+      .toStrictEqual([ [ [ 'set', [ 2, 'name' ] ], [ 'splice', [] ] ], buildInfos(), next ]);
+  });
+
+  it('has no patches for content whose whole value changed kind', () =>
+  {
+    // Arrange: a list that became an object.
+    const document = new JsonDocument('mapinfos', buildInfos());
+
+    // Act.
+    const patches = document.patchesTo({ rows: [] });
+
+    // Assert.
+    expect(patches)
+      .toBeNull();
+  });
+
   describe('MapInfosDocument', () =>
   {
     it('reads a map row by id and answers null for the empty slot and beyond', () =>
