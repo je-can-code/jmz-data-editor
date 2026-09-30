@@ -77,6 +77,7 @@ import {
 } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { BLANK_SKILL_ROW } from '@services/rows/RowClear.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import {
   type UsableItemDamageEditorValue,
@@ -1905,6 +1906,7 @@ const SkillsBoard = () =>
     getRows: skillsWithPendingEditApplied,
     toRow: (skill) => skill.toRmmz(),
     fromRow: (row) => new RPG_SkillDomainModel(row),
+    blankRow: BLANK_SKILL_ROW,
     applyPaste: (update) =>
     {
       setSkills(update);

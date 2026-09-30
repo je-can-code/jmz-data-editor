@@ -56,6 +56,7 @@ import { EnemyJabsConfigs } from '@boards/enemies/EnemyJabsConfigs.tsx';
 import { EnemyPassiveAbs } from '@boards/enemies/EnemyPassiveAbs.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { BLANK_ENEMY_ROW } from '@services/rows/RowClear.ts';
 import { RowClipboardMenu } from '@presentation/components/board/RowClipboardMenu.tsx';
 import { useEnemyPlacements } from '@presentation/hooks/useEnemyPlacements.ts';
 import { EnemyPlacements } from '@boards/enemies/EnemyPlacements.tsx';
@@ -385,6 +386,9 @@ const EnemiesBoard = () =>
 
   const handleListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) =>
   {
+    // let the row clipboard's own key handling- Del clears the selection- see the key first.
+    rowClipboard.onListKeyDown(event);
+
     if (event.key === 'ArrowDown')
     {
       event.preventDefault();
@@ -493,6 +497,7 @@ const EnemiesBoard = () =>
     getRows: () => enemies,
     toRow: (enemy) => enemy.toRmmz(),
     fromRow: (row) => new RPG_EnemyDomainModel(row),
+    blankRow: BLANK_ENEMY_ROW,
     applyPaste: (update) =>
     {
       setEnemies(update);
