@@ -59,7 +59,8 @@ func TestGetMapFileAnswers404ForAMapWithNoFile(t *testing.T) {
 // TestRestoreMapFileWritesTheFormerTextVerbatim is the promise itself: the text comes back byte for byte, its
 // escapes and its key order included, where MZ's layout would have changed both.
 func TestRestoreMapFileWritesTheFormerTextVerbatim(t *testing.T) {
-	// Arrange: map 2 is listed in the tree but has no file, as after a delete's row came back and before its file.
+	// Arrange: map 2 has no file, as when a delete is being undone: the editor writes the file back first, and lists
+	// the map in the tree again only once the file is there. The restore never consults the tree.
 	current := newProject(t)
 
 	// Act.
