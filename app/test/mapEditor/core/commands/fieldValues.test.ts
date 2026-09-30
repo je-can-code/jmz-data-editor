@@ -429,7 +429,7 @@ describe('fieldValues', () =>
     it('writes each field\'s default where the field lives, leaving text on lines out', () =>
     {
       // Arrange.
-      const fields = entryOf(101).fields;
+      const { fields } = entryOf(101);
 
       // Act.
       const parameters = parametersFromDefaults(fields);

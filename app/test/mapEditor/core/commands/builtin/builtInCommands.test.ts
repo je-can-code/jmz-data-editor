@@ -323,7 +323,7 @@ describe('built-in commands', () =>
     it('reads a move route by its first steps and sums up the rest', () =>
     {
       // Arrange.
-      const route = {
+      const route: JsonValue = {
         list: [ { code: 17 }, { code: 14, parameters: [ 1, -2 ] }, { code: 15, parameters: [ 30 ] }, { code: 1 }, { code: 2 }, { code: 0 } ],
         repeat: false,
         skippable: true,
