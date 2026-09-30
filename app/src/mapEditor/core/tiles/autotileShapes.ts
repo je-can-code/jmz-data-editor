@@ -1,0 +1,562 @@
+import { FLOOR_AUTOTILE_TABLE, type Quadrant } from './autotileTables.ts';
+import { isInside, type TileReader } from './tileGrid.ts';
+import {
+  autotileKind,
+  isA1Kind,
+  isAutotile,
+  isFloorTypeKind,
+  isRoofKind,
+  isWallSideKind,
+  isWallTopKind,
+  isWaterfallKind,
+  isWaterKind,
+  makeAutotileId,
+} from './tileIds.ts';
+
+/**
+ * A tileset's mode, as {@code Tilesets.json} stores it. Field is MZ's world-map mode, where the A2 base columns pair
+ * up and A1 water kinds keep their boundaries; Area is every other map. VX-compatible behaves as Area here.
+ */
+const TilesetMode = {
+  field: 0,
+  area: 1,
+  vxCompatible: 2,
+} as const;
+
+/**
+ * The bits of a floor tile's neighbour mask: one per neighbour, set when that neighbour joins the tile.
+ */
+const Neighbour = {
+  northWest: 1,
+  north: 2,
+  northEast: 4,
+  west: 8,
+  east: 16,
+  southWest: 32,
+  south: 64,
+  southEast: 128,
+} as const;
+
+/**
+ * The offsets of the eight neighbours, in the order of their bits in {@link Neighbour}.
+ */
+const NEIGHBOUR_OFFSETS: readonly (readonly [ number, number ])[] = [
+  [ -1, -1 ], [ 0, -1 ], [ 1, -1 ],
+  [ -1, 0 ], [ 1, 0 ],
+  [ -1, 1 ], [ 0, 1 ], [ 1, 1 ],
+];
+
+/**
+ * The bits of a wall or waterfall shape. For these the shape number is simply its open edges added up: a wall face
+ * open on the left and at the top is shape 3. Waterfalls use only {@code left} and {@code right}, as bits 1 and 2.
+ */
+const WallEdge = {
+  left: 1,
+  top: 2,
+  right: 4,
+  bottom: 8,
+} as const;
+
+/**
+ * What one corner of a floor shape draws, by which of its neighbours join: the corner's vertical neighbour (north or
+ * south), its horizontal one (west or east) and the diagonal between them. The pictures are the quarters of the
+ * kind's block, in this order: everything joined, only the diagonal open, the vertical side open, the horizontal
+ * side open, both sides open. The diagonal only matters when both sides join, which is why there are exactly 47
+ * distinct floor shapes rather than 256.
+ */
+const FLOOR_CORNERS: readonly { vertical: number; horizontal: number; diagonal: number; pictures: readonly Quadrant[] }[] = [
+  { vertical: Neighbour.north, horizontal: Neighbour.west, diagonal: Neighbour.northWest, pictures: [ [ 2, 4 ], [ 2, 0 ], [ 2, 2 ], [ 0, 4 ], [ 0, 2 ] ] },
+  { vertical: Neighbour.north, horizontal: Neighbour.east, diagonal: Neighbour.northEast, pictures: [ [ 1, 4 ], [ 3, 0 ], [ 1, 2 ], [ 3, 4 ], [ 3, 2 ] ] },
+  { vertical: Neighbour.south, horizontal: Neighbour.west, diagonal: Neighbour.southWest, pictures: [ [ 2, 3 ], [ 2, 1 ], [ 2, 5 ], [ 0, 3 ], [ 0, 5 ] ] },
+  { vertical: Neighbour.south, horizontal: Neighbour.east, diagonal: Neighbour.southEast, pictures: [ [ 1, 3 ], [ 3, 1 ], [ 1, 5 ], [ 3, 3 ], [ 3, 5 ] ] },
+];
+
+/**
+ * Picks which picture a floor corner draws.
+ * @param {number} joins The tile's neighbour mask.
+ * @param {number} vertical The bit of the corner's vertical neighbour.
+ * @param {number} horizontal The bit of the corner's horizontal neighbour.
+ * @param {number} diagonal The bit of the corner's diagonal neighbour.
+ * @returns {number} The index into the corner's pictures.
+ */
+const cornerPicture = (joins: number, vertical: number, horizontal: number, diagonal: number): number =>
+{
+  const verticalJoined = (joins & vertical) !== 0;
+  const horizontalJoined = (joins & horizontal) !== 0;
+
+  // both sides joined: the diagonal decides between a full interior and an inner corner.
+  if (verticalJoined && horizontalJoined)
+  {
+    return (joins & diagonal) !== 0
+      ? 0
+      : 1;
+  }
+
+  // one side joined: an edge along the open side.
+  if (horizontalJoined)
+  {
+    return 2;
+  }
+
+  if (verticalJoined)
+  {
+    return 3;
+  }
+
+  // neither side joined: an outer corner.
+  return 4;
+};
+
+/**
+ * Builds the lookup from every neighbour mask to the floor shape the engine's table draws for it, by working out
+ * each corner's picture and finding the shape made of those four pictures.
+ * @returns {Uint8Array} The shape for each of the 256 masks.
+ */
+const buildFloorShapes = (): Uint8Array =>
+{
+  // index every shape by its four quarters, so a set of pictures finds its shape directly.
+  const shapeByQuarters = new Map<string, number>();
+  FLOOR_AUTOTILE_TABLE.forEach((quarters, shape) =>
+  {
+    shapeByQuarters.set(JSON.stringify(quarters), shape);
+  });
+
+  const shapes = new Uint8Array(256);
+  for (let joins = 0; joins < 256; joins++)
+  {
+    const quarters = FLOOR_CORNERS.map(({ vertical, horizontal, diagonal, pictures }) =>
+    {
+      return pictures[cornerPicture(joins, vertical, horizontal, diagonal)];
+    });
+
+    // every mask must land on a real shape; anything else means the corner pictures above are wrong.
+    const shape = shapeByQuarters.get(JSON.stringify(quarters));
+    if (shape === undefined)
+    {
+      throw new Error(`no floor shape draws the corners of neighbour mask ${joins}`);
+    }
+
+    shapes[joins] = shape;
+  }
+
+  return shapes;
+};
+
+/**
+ * The floor shape for every neighbour mask, derived once from the engine's own table.
+ */
+const FLOOR_SHAPE_BY_JOINS = buildFloorShapes();
+
+/**
+ * The smallest neighbour mask that draws each floor shape, which is the mask with only the corners that count; -1
+ * for shape 47, which no mask draws.
+ */
+const FLOOR_JOINS_BY_SHAPE = ((): Int16Array =>
+{
+  const joinsByShape = new Int16Array(48).fill(-1);
+  for (let joins = 255; joins >= 0; joins--)
+  {
+    joinsByShape[FLOOR_SHAPE_BY_JOINS[joins]] = joins;
+  }
+
+  return joinsByShape;
+})();
+
+/**
+ * Finds the floor shape for a neighbour mask.
+ * @param {number} joins The neighbour mask: a {@link Neighbour} bit set for every neighbour that joins.
+ * @returns {number} The shape, 0 to 46.
+ */
+const floorShape = (joins: number): number =>
+{
+  return FLOOR_SHAPE_BY_JOINS[joins & 0xff];
+};
+
+/**
+ * Finds which neighbours a floor shape joins, counting a diagonal only where both of its sides join too.
+ * @param {number} shape The floor shape.
+ * @returns {number} The neighbour mask, or -1 for shape 47 and anything that is not a floor shape.
+ */
+const floorJoins = (shape: number): number =>
+{
+  return shape >= 0 && shape < 48
+    ? FLOOR_JOINS_BY_SHAPE[shape]
+    : -1;
+};
+
+/**
+ * Reports whether any of a cell's four tile layers holds an autotile of the given kind.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {number} kind The autotile kind.
+ * @returns {boolean} True when one of the layers holds that kind.
+ */
+const holdsKind = (reader: TileReader, x: number, y: number, kind: number): boolean =>
+{
+  for (let z = 0; z < 4; z++)
+  {
+    const tileId = reader.tileAt(x, y, z);
+    if (isAutotile(tileId) && autotileKind(tileId) === kind)
+    {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+/**
+ * Reports whether any of a cell's four tile layers holds an autotile whose kind passes a test.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {(kind: number) => boolean} test The test.
+ * @returns {boolean} True when one of the layers holds such a kind.
+ */
+const holdsKindWhere = (reader: TileReader, x: number, y: number, test: (kind: number) => boolean): boolean =>
+{
+  for (let z = 0; z < 4; z++)
+  {
+    const tileId = reader.tileAt(x, y, z);
+    if (isAutotile(tileId) && test(autotileKind(tileId)))
+    {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+/**
+ * Reports whether a neighbouring cell joins a floor tile (A1 water, A2 ground, or an A4 wall top). These are MZ's
+ * rules as the shipped maps show them:
+ *
+ * - beyond the edge of the map counts as joined, so a map's border never draws a coastline;
+ * - a neighbour holding the same kind on any of its four layers joins, not only one on the tile's own layer, so a
+ *   wall top laid on layer 2 joins the same wall top on layer 1 beside it;
+ * - open water (the ocean, and the plain water kinds) joins every waterfall, since a waterfall pours into it;
+ * - open water joins other open water kinds too, as MZ's help says A1 tiles do not draw a boundary where they touch,
+ *   except on a Field-mode tileset, where every A1 kind keeps its own shore.
+ *
+ * Nothing else joins: a different ground kind, a wall, an A5 tile or an empty cell all draw an edge.
+ * @param {TileReader} reader The map.
+ * @param {number} x The neighbour's column.
+ * @param {number} y The neighbour's row.
+ * @param {number} kind The floor tile's kind.
+ * @param {number} mode The tileset's mode.
+ * @returns {boolean} True when the neighbour joins.
+ */
+const floorNeighbourJoins = (reader: TileReader, x: number, y: number, kind: number, mode: number): boolean =>
+{
+  if (isInside(reader, x, y) === false || holdsKind(reader, x, y, kind))
+  {
+    return true;
+  }
+
+  // only open water joins anything but its own kind.
+  if (isWaterKind(kind) === false)
+  {
+    return false;
+  }
+
+  if (holdsKindWhere(reader, x, y, isWaterfallKind))
+  {
+    return true;
+  }
+
+  return mode !== TilesetMode.field && holdsKindWhere(reader, x, y, isWaterKind);
+};
+
+/**
+ * Reports whether the cell beside a waterfall joins it. A waterfall only looks sideways: beyond the edge of the
+ * map, the same waterfall on any layer, or any other A1 tile (water, ocean or another waterfall) joins; anything
+ * else draws the waterfall's edge.
+ * @param {TileReader} reader The map.
+ * @param {number} x The neighbour's column.
+ * @param {number} y The neighbour's row.
+ * @returns {boolean} True when the neighbour joins.
+ */
+const waterfallNeighbourJoins = (reader: TileReader, x: number, y: number): boolean =>
+{
+  return isInside(reader, x, y) === false || holdsKindWhere(reader, x, y, isA1Kind);
+};
+
+/**
+ * Reports whether a neighbouring cell joins a roof. Roofs join only their own kind, on any layer; a building wall
+ * beside or below a roof draws the roof's edge. Beyond the edge of the map, a roof joins downwards but shows its
+ * edge at the top and the sides.
+ * @param {TileReader} reader The map.
+ * @param {number} x The neighbour's column.
+ * @param {number} y The neighbour's row.
+ * @param {number} kind The roof's kind.
+ * @param {boolean} beyondEdge Whether a neighbour beyond the map joins in this direction.
+ * @returns {boolean} True when the neighbour joins.
+ */
+const roofNeighbourJoins = (reader: TileReader, x: number, y: number, kind: number, beyondEdge: boolean): boolean =>
+{
+  return isInside(reader, x, y)
+    ? holdsKind(reader, x, y, kind)
+    : beyondEdge;
+};
+
+/**
+ * Finds the row where a wall face's run starts: walking up from a cell while the cell above holds the same kind.
+ * The walk stops at the top of the map.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row to start from.
+ * @param {number} kind The wall face's kind.
+ * @returns {number} The top row of the run.
+ */
+const wallRunTop = (reader: TileReader, x: number, y: number, kind: number): number =>
+{
+  let top = y;
+  while (top > 0 && holdsKind(reader, x, top - 1, kind))
+  {
+    top -= 1;
+  }
+
+  return top;
+};
+
+/**
+ * Finds the wall face kind a cell holds, preferring a given kind when the cell holds it on any layer.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {number} preferred The kind to answer if the cell holds it.
+ * @returns {number} The wall face kind, or -1 when the cell holds none.
+ */
+const wallSideKindAt = (reader: TileReader, x: number, y: number, preferred: number): number =>
+{
+  if (holdsKind(reader, x, y, preferred))
+  {
+    return preferred;
+  }
+
+  for (let z = 0; z < 4; z++)
+  {
+    const tileId = reader.tileAt(x, y, z);
+    if (isAutotile(tileId) && isWallSideKind(autotileKind(tileId)))
+    {
+      return autotileKind(tileId);
+    }
+  }
+
+  return -1;
+};
+
+/**
+ * Reports whether a kind is a wall top or a roof: the tops a wall face runs into sideways.
+ * @param {number} kind The autotile kind.
+ * @returns {boolean} True for wall tops and roofs.
+ */
+const isTopKind = (kind: number): boolean =>
+{
+  return isWallTopKind(kind) || isRoofKind(kind);
+};
+
+/**
+ * Reports whether the cell beside a wall face (an A3 building wall or A4 wall side) joins it. A wall face is a
+ * column that hangs down from its top edge, and its sides follow that:
+ *
+ * - a wall face beside it, of this kind or any other, joins unless that column's wall starts higher up, in which
+ *   case every row of the shorter wall draws its edge against the taller one;
+ * - a wall top (ceiling) or a roof beside it always joins, so a wall face runs cleanly into the ceiling that turns
+ *   the corner beside it;
+ * - beyond the edge of the map counts as the same wall, starting at the map's top row.
+ * @param {TileReader} reader The map.
+ * @param {number} x The wall face's column.
+ * @param {number} y The wall face's row.
+ * @param {number} dx -1 for the left neighbour, 1 for the right.
+ * @param {number} kind The wall face's kind.
+ * @returns {boolean} True when the neighbour joins.
+ */
+const wallSideNeighbourJoins = (reader: TileReader, x: number, y: number, dx: number, kind: number): boolean =>
+{
+  const nx = x + dx;
+  if (isInside(reader, nx, y) === false)
+  {
+    return wallRunTop(reader, x, y, kind) === 0;
+  }
+
+  // a neighbouring wall face joins unless its own wall starts higher than this one.
+  const neighbourKind = wallSideKindAt(reader, nx, y, kind);
+  if (neighbourKind >= 0)
+  {
+    return wallRunTop(reader, nx, y, neighbourKind) >= wallRunTop(reader, x, y, kind);
+  }
+
+  return holdsKindWhere(reader, nx, y, isTopKind);
+};
+
+/**
+ * Works out a wall face's shape. Its sides follow {@link wallSideNeighbourJoins}. Its top edge shows unless the cell
+ * above holds the same kind, the map's top row included; its bottom edge shows unless the cell below holds the same
+ * kind or lies beyond the map's bottom row.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {number} kind The wall face's kind.
+ * @returns {number} The shape, 0 to 15.
+ */
+const wallSideShape = (reader: TileReader, x: number, y: number, kind: number): number =>
+{
+  let shape = 0;
+  if (wallSideNeighbourJoins(reader, x, y, -1, kind) === false)
+  {
+    shape |= WallEdge.left;
+  }
+
+  if (y === 0 || holdsKind(reader, x, y - 1, kind) === false)
+  {
+    shape |= WallEdge.top;
+  }
+
+  if (wallSideNeighbourJoins(reader, x, y, 1, kind) === false)
+  {
+    shape |= WallEdge.right;
+  }
+
+  if (y + 1 < reader.height && holdsKind(reader, x, y + 1, kind) === false)
+  {
+    shape |= WallEdge.bottom;
+  }
+
+  return shape;
+};
+
+/**
+ * Works out a roof's shape from its four neighbours; see {@link roofNeighbourJoins}.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {number} kind The roof's kind.
+ * @returns {number} The shape, 0 to 15.
+ */
+const roofShape = (reader: TileReader, x: number, y: number, kind: number): number =>
+{
+  // each side: its offset, its edge bit, and whether the map's edge joins on that side.
+  const sides: readonly (readonly [ number, number, number, boolean ])[] = [
+    [ -1, 0, WallEdge.left, false ],
+    [ 0, -1, WallEdge.top, false ],
+    [ 1, 0, WallEdge.right, false ],
+    [ 0, 1, WallEdge.bottom, true ],
+  ];
+
+  return sides.reduce((shape, [ dx, dy, edge, beyondEdge ]) =>
+  {
+    return roofNeighbourJoins(reader, x + dx, y + dy, kind, beyondEdge)
+      ? shape
+      : shape | edge;
+  }, 0);
+};
+
+/**
+ * Works out a waterfall's shape from the cells either side of it; see {@link waterfallNeighbourJoins}.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @returns {number} The shape, 0 to 3.
+ */
+const waterfallShape = (reader: TileReader, x: number, y: number): number =>
+{
+  const left = waterfallNeighbourJoins(reader, x - 1, y)
+    ? 0
+    : WallEdge.left;
+  const right = waterfallNeighbourJoins(reader, x + 1, y)
+    ? 0
+    : 2;
+
+  return left | right;
+};
+
+/**
+ * Works out a floor tile's shape from its eight neighbours; see {@link floorNeighbourJoins}.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {number} kind The floor tile's kind.
+ * @param {number} mode The tileset's mode.
+ * @returns {number} The shape, 0 to 46.
+ */
+const floorShapeAt = (reader: TileReader, x: number, y: number, kind: number, mode: number): number =>
+{
+  let joins = 0;
+  NEIGHBOUR_OFFSETS.forEach(([ dx, dy ], bit) =>
+  {
+    if (floorNeighbourJoins(reader, x + dx, y + dy, kind, mode))
+    {
+      joins |= 1 << bit;
+    }
+  });
+
+  return floorShape(joins);
+};
+
+/**
+ * Works out the shape MZ's editor would store for an autotile of a given kind at a position, from what surrounds
+ * it. The tile's own layer does not matter, because every rule reads its neighbours on all four layers.
+ * @param {TileReader} reader The map, holding the neighbours as they should be judged.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {number} kind The autotile kind being shaped.
+ * @param {number} mode The tileset's mode.
+ * @returns {number} The shape.
+ */
+const autotileShapeFor = (reader: TileReader, x: number, y: number, kind: number, mode: number): number =>
+{
+  if (isFloorTypeKind(kind))
+  {
+    return floorShapeAt(reader, x, y, kind, mode);
+  }
+
+  if (isWaterfallKind(kind))
+  {
+    return waterfallShape(reader, x, y);
+  }
+
+  return isWallSideKind(kind)
+    ? wallSideShape(reader, x, y, kind)
+    : roofShape(reader, x, y, kind);
+};
+
+/**
+ * Works out the tile id MZ's editor would store for the autotile on a layer of a cell: the same kind, in the shape
+ * its neighbours call for.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {number} z The tile layer, 0 to 3.
+ * @param {number} mode The tileset's mode.
+ * @returns {number} The shaped tile id, or the tile as it stands when it is not an autotile.
+ */
+const shapedTileAt = (reader: TileReader, x: number, y: number, z: number, mode: number): number =>
+{
+  const tileId = reader.tileAt(x, y, z);
+  if (isAutotile(tileId) === false)
+  {
+    return tileId;
+  }
+
+  const kind = autotileKind(tileId);
+  return makeAutotileId(kind, autotileShapeFor(reader, x, y, kind, mode));
+};
+
+export {
+  autotileShapeFor,
+  floorJoins,
+  floorNeighbourJoins,
+  floorShape,
+  holdsKind,
+  Neighbour,
+  NEIGHBOUR_OFFSETS,
+  roofNeighbourJoins,
+  shapedTileAt,
+  TilesetMode,
+  wallRunTop,
+  wallSideNeighbourJoins,
+  WallEdge,
+  waterfallNeighbourJoins,
+};
