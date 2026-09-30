@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Button, TextField, Typography } from '@mui/material';
+import { Alert, Button, Typography } from '@mui/material';
 import type { CommandEditorProps } from '../../core/commands/CommandEditorRegistry.ts';
 import type { CommandFieldKind } from '../../core/commands/catalogTypes.ts';
 import {
@@ -18,7 +18,7 @@ import {
   type BranchCondition,
   type BranchConditionKind,
 } from '../../core/commands/editors/conditionalBranch.ts';
-import { CharacterField, CheckField, EditorStack, FieldRow, IdField, NumberField, SelectField, UneditableCommand } from './editorFields.tsx';
+import { CharacterField, CheckField, DraftTextField, EditorStack, FieldRow, IdField, NumberField, SelectField, UneditableCommand } from './editorFields.tsx';
 
 /**
  * Builds the choices of a list of labels, numbered from 0.
@@ -85,7 +85,7 @@ const ActorForm = ({ condition, onChange }: ConditionFormProps<'actor'>) =>
       <SelectField label={'Check'} value={condition.check} options={indexed(ACTOR_CHECKS)} width={140}
         onChange={check => onChange(setActorCheck(condition, check))}/>
       {condition.check === 1
-        ? <TextField size={'small'} label={'Name'} value={String(condition.operand ?? '')} onChange={event => onChange({ ...condition, operand: event.target.value })}/>
+        ? <DraftTextField size={'small'} label={'Name'} value={String(condition.operand ?? '')} onText={operand => onChange({ ...condition, operand })}/>
         : null}
       {kind === null || typeof condition.operand !== 'number'
         ? null
@@ -215,9 +215,9 @@ const ConditionFields = (props: { condition: BranchCondition; onChange: (conditi
       );
     case 'script':
       return (
-        <TextField size={'small'} fullWidth label={'Script'} value={condition.script}
+        <DraftTextField size={'small'} fullWidth label={'Script'} value={condition.script}
           slotProps={{ htmlInput: { spellCheck: false, style: { fontFamily: 'monospace' } } }}
-          onChange={event => onChange({ ...condition, script: event.target.value })}/>
+          onText={script => onChange({ ...condition, script })}/>
       );
     case 'vehicle':
       return <SelectField label={'Riding'} value={condition.vehicleId} options={indexed([ 'Boat', 'Ship', 'Airship' ])} width={130}

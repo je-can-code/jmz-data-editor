@@ -15,7 +15,8 @@ import {
 } from '../../core/commands/editors/pluginArgValues.ts';
 import type { PluginArgSchema } from '../../core/commands/pluginHeaders/pluginHeader.ts';
 import type { PluginHeaderLibrary } from '../../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
-import { IdField } from './editorFields.tsx';
+import { DraftTextField, IdField } from './editorFields.tsx';
+import { useDraftText } from './useDraftText.ts';
 
 /**
  * The database kind each header type names.
@@ -60,26 +61,28 @@ const TextInput = (props: ArgInputProps & { multiline?: boolean }) =>
 {
   const { arg, value, onChange, label, multiline = false } = props;
   return (
-    <TextField size={'small'} fullWidth label={label} value={value} multiline={multiline} minRows={multiline ? 2 : undefined}
-      placeholder={arg.default} onChange={event => onChange(event.target.value)}/>
+    <DraftTextField size={'small'} fullWidth label={label} value={value} multiline={multiline} minRows={multiline ? 2 : undefined}
+      placeholder={arg.default} onText={onChange}/>
   );
 };
 
 /**
- * A number, kept as the text MZ stores it; the bounds and decimals the header gives show beneath it.
+ * A number, kept as the text MZ stores it; the bounds and decimals the header gives show beneath it, and what is
+ * typed outside them is marked.
  * @param {ArgInputProps} props The argument and what to do with a change.
  * @returns {React.JSX.Element} The input.
  */
 const NumberInput = (props: ArgInputProps) =>
 {
   const { arg, value, onChange, label } = props;
+  const [ draft, change ] = useDraftText(value, onChange);
   const bounds = [ arg.min === undefined ? null : `at least ${arg.min}`, arg.max === undefined ? null : `at most ${arg.max}` ].filter(Boolean).join(', ');
-  const number = Number(value);
-  const invalid = value.trim() !== '' && (Number.isFinite(number) === false || (arg.min !== undefined && number < arg.min) || (arg.max !== undefined && number > arg.max));
+  const number = Number(draft);
+  const invalid = draft.trim() !== '' && (Number.isFinite(number) === false || (arg.min !== undefined && number < arg.min) || (arg.max !== undefined && number > arg.max));
   return (
-    <TextField size={'small'} label={label} value={value} error={invalid} helperText={bounds === '' ? undefined : bounds} sx={{ width: 180 }}
+    <TextField size={'small'} label={label} value={draft} error={invalid} helperText={bounds === '' ? undefined : bounds} sx={{ width: 180 }}
       placeholder={arg.default} slotProps={{ htmlInput: { inputMode: (arg.decimals ?? 0) > 0 ? 'decimal' : 'numeric' } }}
-      onChange={event => onChange(event.target.value)}/>
+      onChange={event => change(event.target.value)}/>
   );
 };
 
@@ -102,6 +105,21 @@ const BooleanInput = (props: ArgInputProps) =>
 };
 
 /**
+ * A combo: one of the header's options, or text of its own, kept on screen as typed.
+ * @param {ArgInputProps} props The argument and what to do with a change.
+ * @returns {React.JSX.Element} The input.
+ */
+const ComboInput = (props: ArgInputProps) =>
+{
+  const { arg, value, onChange, label } = props;
+  const [ draft, change ] = useDraftText(value, onChange);
+  return (
+    <Autocomplete freeSolo size={'small'} sx={{ width: 260 }} options={(arg.options ?? []).map(option => String(option.value))}
+      inputValue={draft} onInputChange={(_event, text) => change(text)} renderInput={params => <TextField {...params} label={label}/>}/>
+  );
+};
+
+/**
  * One of the header's options; a combo also takes text of its own.
  * @param {ArgInputProps} props The argument and what to do with a change.
  * @returns {React.JSX.Element} The input.
@@ -109,15 +127,12 @@ const BooleanInput = (props: ArgInputProps) =>
 const OptionInput = (props: ArgInputProps) =>
 {
   const { arg, type, value, onChange, label } = props;
-  const options = (arg.options ?? []).map(option => ({ value: String(option.value), label: option.label }));
   if (type.kind === 'simple' && type.name === 'combo')
   {
-    return (
-      <Autocomplete freeSolo size={'small'} sx={{ width: 260 }} options={options.map(option => option.value)} value={value}
-        onInputChange={(_event, text) => onChange(text)} renderInput={params => <TextField {...params} label={label}/>}/>
-    );
+    return <ComboInput {...props}/>;
   }
 
+  const options = (arg.options ?? []).map(option => ({ value: String(option.value), label: option.label }));
   const shown = options.some(option => option.value === value) ? options : [ ...options, { value, label: value === '' ? 'Not set' : value } ];
   return (
     <TextField select size={'small'} label={label} value={value} sx={{ width: 260 }} onChange={event => onChange(event.target.value)}>
@@ -147,8 +162,8 @@ const NoteInput = (props: ArgInputProps) =>
 {
   const { value, onChange, label } = props;
   return (
-    <TextField size={'small'} fullWidth multiline minRows={2} label={label} value={value === '' ? '' : decodeNote(value)}
-      onChange={event => onChange(encodeNote(event.target.value))}/>
+    <DraftTextField size={'small'} fullWidth multiline minRows={2} label={label} value={value === '' ? '' : decodeNote(value)}
+      onText={note => onChange(encodeNote(note))}/>
   );
 };
 

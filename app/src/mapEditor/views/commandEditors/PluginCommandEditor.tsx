@@ -10,7 +10,7 @@ import {
 } from '../../core/commands/editors/pluginCommand.ts';
 import { PluginHeaderLibrary } from '../../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { usePluginHeaders } from './editorEnvironment.tsx';
-import { EditorStack, FieldRow, UneditableCommand } from './editorFields.tsx';
+import { DraftTextField, EditorStack, FieldRow, UneditableCommand } from './editorFields.tsx';
 import { PluginArgField } from './PluginArgField.tsx';
 
 /**
@@ -33,8 +33,8 @@ const UnlistedArgs = (props: { names: readonly string[]; model: PluginCommandMod
         const value = model.args[name];
         const text = typeof value === 'string' ? value : JSON.stringify(value);
         return (
-          <TextField key={name} size={'small'} fullWidth label={name} value={text}
-            onChange={event => change(setPluginArg(model, name, event.target.value))}/>
+          <DraftTextField key={name} size={'small'} fullWidth label={name} value={text}
+            onText={next => change(setPluginArg(model, name, next))}/>
         );
       })}
     </Box>

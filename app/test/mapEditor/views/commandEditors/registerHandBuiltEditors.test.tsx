@@ -258,6 +258,43 @@ describe('registerHandBuiltEditors', () =>
       .toHaveValue('["COOK_ERO"]');
   });
 
+  it.each([
+    {
+      name: 'a speaker',
+      opened: command(101, [ '', 0, 0, 2, 'Chef' ]),
+      label: 'Speaker',
+      headers: new PluginHeaderStore(),
+    },
+    {
+      name: 'a script condition',
+      opened: command(111, [ 12, 'ready()' ]),
+      label: 'Script',
+      headers: new PluginHeaderStore(),
+    },
+    {
+      name: 'a plugin argument',
+      opened: command(357, [ 'P', 'go', 'Go', { key: 'a' } ]),
+      label: 'key',
+      headers: (() =>
+      {
+        const store = new PluginHeaderStore();
+        store.set([ { plugin: 'P', description: '', commands: [ { plugin: 'P', command: 'go', args: [ { name: 'key', type: 'string' } ] } ], structs: [] } ]);
+        return store;
+      })(),
+    },
+  ])('keeps what is typed in $name while history has not answered yet', ({ opened, label, headers }) =>
+  {
+    // Arrange: history never answers, so the command handed in stays as it was.
+    const { onChange } = open(opened, [], { headers });
+
+    // Act.
+    fireEvent.change(screen.getByRole('textbox', { name: label }), { target: { value: 'typed text' } });
+
+    // Assert: the change went out, and the field still shows what was typed.
+    expect([ onChange.mock.calls.length, (screen.getByRole('textbox', { name: label }) as HTMLInputElement).value ])
+      .toStrictEqual([ 1, 'typed text' ]);
+  });
+
   it('opens a command it cannot read as a notice, and hands nothing back', () =>
   {
     // Arrange: a transfer with a parameter missing.

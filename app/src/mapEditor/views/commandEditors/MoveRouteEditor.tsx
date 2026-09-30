@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Button, IconButton, List, ListItemButton, ListItemText, TextField, Tooltip, Typography } from '@mui/material';
+import { Box, Button, IconButton, List, ListItemButton, ListItemText, Tooltip, Typography } from '@mui/material';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -20,7 +20,7 @@ import {
   type MoveParameter,
   type MoveRouteMode,
 } from '../../core/commands/editors/moveRoute.ts';
-import { CheckField, FieldRow, IdField, NumberField, SelectField } from './editorFields.tsx';
+import { CheckField, DraftTextField, FieldRow, IdField, NumberField, SelectField } from './editorFields.tsx';
 
 /**
  * The groups the step palette shows, in MZ's order.
@@ -38,7 +38,7 @@ const SoundFields = (props: { value: JsonObject; onChange: (value: JsonObject) =
   const number = (key: string, fallback: number) => (typeof value[key] === 'number' ? value[key] : fallback);
   return (
     <FieldRow>
-      <TextField size={'small'} label={'Sound effect'} value={String(value['name'] ?? '')} onChange={event => onChange({ ...value, name: event.target.value })}/>
+      <DraftTextField size={'small'} label={'Sound effect'} value={String(value['name'] ?? '')} onText={name => onChange({ ...value, name })}/>
       <NumberField label={'Volume'} value={number('volume', 90)} min={0} max={100} width={90} onChange={volume => onChange({ ...value, volume })}/>
       <NumberField label={'Pitch'} value={number('pitch', 100)} min={50} max={150} width={90} onChange={pitch => onChange({ ...value, pitch })}/>
       <NumberField label={'Pan'} value={number('pan', 0)} min={-100} max={100} width={90} onChange={pan => onChange({ ...value, pan })}/>
@@ -68,9 +68,9 @@ const StepInput = (props: { parameter: MoveParameter; value: JsonValue | undefin
     case 'character':
     case 'script':
       return (
-        <TextField size={'small'} label={parameter.label} value={String(value ?? '')} fullWidth={parameter.kind === 'script'}
+        <DraftTextField size={'small'} label={parameter.label} value={String(value ?? '')} fullWidth={parameter.kind === 'script'}
           slotProps={{ htmlInput: { spellCheck: false, style: parameter.kind === 'script' ? { fontFamily: 'monospace' } : undefined } }}
-          onChange={event => onChange(event.target.value)}/>
+          onText={onChange}/>
       );
   }
 };

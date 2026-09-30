@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { Box, TextField } from '@mui/material';
 import type { CommandEditorProps } from '../../core/commands/CommandEditorRegistry.ts';
 import { linesToText, parseShowText, textToLines, writeShowText, type ShowTextModel } from '../../core/commands/editors/showText.ts';
-import { EditorStack, FieldRow, SelectField, UneditableCommand } from './editorFields.tsx';
+import { DraftTextField, EditorStack, FieldRow, SelectField, UneditableCommand } from './editorFields.tsx';
 import { FacePicker } from './FacePicker.tsx';
 import { MessagePreview } from './MessagePreview.tsx';
 import { useDraftText } from './useDraftText.ts';
@@ -79,8 +79,8 @@ const ShowTextEditor = (props: CommandEditorProps) =>
         <FacePicker faceName={model.faceName} faceIndex={model.faceIndex}
           onChange={(faceName, faceIndex) => change({ ...model, faceName, faceIndex })}/>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, flex: 1, minWidth: 240 }}>
-          <TextField size={'small'} label={'Speaker'} value={model.speakerName}
-            onChange={event => change({ ...model, speakerName: event.target.value })}/>
+          <DraftTextField size={'small'} label={'Speaker'} value={model.speakerName}
+            onText={speakerName => change({ ...model, speakerName })}/>
           <FieldRow>
             <SelectField label={'Window'} value={model.background} options={BACKGROUNDS} width={150}
               onChange={background => change({ ...model, background })}/>

@@ -1,8 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Autocomplete, Box, Checkbox, FormControlLabel, MenuItem, TextField, Typography } from '@mui/material';
+import { Alert, Autocomplete, Box, Checkbox, FormControlLabel, MenuItem, TextField, Typography, type TextFieldProps } from '@mui/material';
 import type { CommandFieldKind } from '../../core/commands/catalogTypes.ts';
 import type { RmmzEventCommand } from '../../core/model/rmmzTypes.ts';
 import { useDatabaseOptions, type NamedOption } from './editorEnvironment.tsx';
+import { useDraftText } from './useDraftText.ts';
+
+/**
+ * A text input that keeps its own copy of what is typed while handing every change on, so the caret never jumps
+ * however long the change takes to come back through history. A change made elsewhere replaces the copy.
+ * @param {Omit<TextFieldProps, 'value' | 'onChange'> & { value: string, onText: (text: string) => void }} props The text, what to do with a change, and the input's other props.
+ * @returns {React.JSX.Element} The input.
+ */
+const DraftTextField = (props: Omit<TextFieldProps, 'value' | 'onChange'> & { value: string; onText: (text: string) => void }) =>
+{
+  const { value, onText, ...rest } = props;
+  const [ draft, change ] = useDraftText(value, onText);
+  return <TextField {...rest} value={draft} onChange={event => change(event.target.value)}/>;
+};
 
 /**
  * Lays an editor's inputs out in a wrapping row, so a short command stays on one line and a long one flows.
@@ -60,8 +74,9 @@ type NumberFieldProps = {
 
 /**
  * A number input that lets the author type freely: a half-typed number ("-", "1.") stays on screen, a complete
- * one inside the bounds is kept as it is typed, and leaving the input brings anything outside the bounds back
- * inside them.
+ * one inside the bounds is kept as it is typed, and leaving the input brings a typed number outside the bounds
+ * back inside them. A stored number is never changed just by passing through the input: only what was typed is
+ * brought inside the bounds.
  * @param {NumberFieldProps} props The value, its bounds and what to do with a new one.
  * @returns {React.JSX.Element} The input.
  */
@@ -103,6 +118,12 @@ const NumberField = (props: NumberFieldProps) =>
       }}
       onBlur={() =>
       {
+        // nothing typed since the value arrived: leave the stored number exactly as it is.
+        if (draft === String(value))
+        {
+          return;
+        }
+
         const number = parse(draft);
         const kept = number === null ? value : clamp(number, min, max);
         if (kept !== value)
@@ -272,5 +293,5 @@ const UneditableCommand = (props: { command: RmmzEventCommand }) =>
   );
 };
 
-export { CharacterField, CheckField, clamp, EditorStack, FieldRow, IdField, NumberField, SelectField, UneditableCommand };
+export { CharacterField, CheckField, clamp, DraftTextField, EditorStack, FieldRow, IdField, NumberField, SelectField, UneditableCommand };
 export type { SelectOption };

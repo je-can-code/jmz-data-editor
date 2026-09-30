@@ -1,5 +1,4 @@
 import React, { useMemo } from 'react';
-import { TextField } from '@mui/material';
 import type { CommandEditorProps } from '../../core/commands/CommandEditorRegistry.ts';
 import {
   GAME_DATA_TYPES,
@@ -14,7 +13,7 @@ import {
   type ControlVariablesModel,
   type VariableOperand,
 } from '../../core/commands/editors/controlVariables.ts';
-import { CharacterField, EditorStack, FieldRow, IdField, NumberField, SelectField, UneditableCommand } from './editorFields.tsx';
+import { CharacterField, DraftTextField, EditorStack, FieldRow, IdField, NumberField, SelectField, UneditableCommand } from './editorFields.tsx';
 
 /**
  * The largest number MZ's dialog lets a constant or a random bound reach, either way.
@@ -107,9 +106,9 @@ const OperandFields = (props: { model: ControlVariablesModel; change: (next: Con
       return <GameDataFields operand={operand} model={model} change={change}/>;
     case 'script':
       return (
-        <TextField size={'small'} fullWidth label={'Script'} value={operand.script}
+        <DraftTextField size={'small'} fullWidth label={'Script'} value={operand.script}
           slotProps={{ htmlInput: { spellCheck: false, style: { fontFamily: 'monospace' } } }}
-          onChange={event => set({ ...operand, script: event.target.value })}/>
+          onText={script => set({ ...operand, script })}/>
       );
   }
 };

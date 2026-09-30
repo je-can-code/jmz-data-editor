@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Autocomplete, Box, Button, Collapse, TextField, Typography } from '@mui/material';
 import { useEditorEnvironment, useFaceNames } from './editorEnvironment.tsx';
-import { FieldRow, NumberField } from './editorFields.tsx';
+import { DraftTextField, FieldRow, NumberField } from './editorFields.tsx';
 
 /**
  * How many faces a sheet holds across, and down; MZ draws every face sheet as this grid.
@@ -82,7 +82,7 @@ const FacePicker = (props: FacePickerProps) =>
         {sheets === null
           ? (
             <FieldRow>
-              <TextField size={'small'} label={'Face sheet'} value={faceName} onChange={event => onChange(event.target.value, faceIndex)}/>
+              <DraftTextField size={'small'} label={'Face sheet'} value={faceName} onText={name => onChange(name, faceIndex)}/>
               <NumberField label={'Face'} value={faceIndex} min={0} max={7} onChange={index => onChange(faceName, index)}/>
             </FieldRow>
           )
