@@ -413,6 +413,110 @@ describe('built-in commands', () =>
         .toStrictEqual([ 'When Heal me!', 'When cancelled', 'Else', 'End', 'Repeat above' ]);
     });
 
+    it('reads every kind of conditional branch in its own words', () =>
+    {
+      // Arrange: one of each test, and every check an actor or an enemy can make.
+      const cases: [ unknown[], string ][] = [
+        [ [ 1, 2, 1, 3, 5 ], 'If variable #0002 Coins ≠ #0003' ],
+        [ [ 2, 'B', 1 ], 'If self switch B is OFF' ],
+        [ [ 3, 65, 1 ], 'If the timer ≤ 1:05' ],
+        [ [ 4, 1, 0 ], 'If #1 Harold is in the party' ],
+        [ [ 4, 1, 1, 'Bob' ], 'If #1 Harold is named "Bob"' ],
+        [ [ 4, 1, 2, 3 ], 'If #1 Harold is class #3' ],
+        [ [ 4, 1, 3, 4 ], 'If #1 Harold knows #4' ],
+        [ [ 4, 1, 4, 5 ], 'If #1 Harold has #5 equipped' ],
+        [ [ 4, 1, 5, 6 ], 'If #1 Harold has #6 equipped' ],
+        [ [ 4, 1, 9 ], 'If #1 Harold (9)' ],
+        [ [ 5, 0, 0 ], 'If enemy #1 has appeared' ],
+        [ [ 5, 1, 1, 9 ], 'If enemy #2 is affected by #9 Poison' ],
+        [ [ 6, -1, 8 ], 'If Player is facing Up' ],
+        [ [ 7, 500, 2 ], 'If gold < 500' ],
+        [ [ 8, 45 ], 'If the party has #45 Potion' ],
+        [ [ 9, 2, true ], 'If the party has #2 (counting equipped)' ],
+        [ [ 10, 3, false ], 'If the party has #3' ],
+        [ [ 11, 'ok', 1 ], 'If the OK button is being triggered' ],
+        [ [ 11, 'cancel' ], 'If the Cancel button is being pressed' ],
+        [ [ 13, 2 ], 'If the player is riding the Airship' ],
+        [ [ 99 ], 'If (99)' ],
+      ];
+
+      // Act.
+      const read = cases.map(([ parameters ]) => sentenceOf(111, parameters as JsonValue[]));
+
+      // Assert.
+      expect(read)
+        .toStrictEqual(cases.map(([ , sentence ]) => sentence));
+    });
+
+    it('reads every kind of game data and operation a variable can take', () =>
+    {
+      // Arrange.
+      const cases: [ unknown[], string ][] = [
+        [ [ 2, 2, 0, 3, 0, 45 ], 'Variable #0002 Coins = the number of #45 Potion' ],
+        [ [ 2, 2, 0, 3, 1, 2 ], 'Variable #0002 Coins = the number of #2' ],
+        [ [ 2, 2, 0, 3, 2, 3 ], 'Variable #0002 Coins = the number of #3' ],
+        [ [ 2, 2, 0, 3, 4, 1, 3 ], 'Variable #0002 Coins = Max MP of enemy #2' ],
+        [ [ 2, 2, 0, 3, 5, -1, 2 ], 'Variable #0002 Coins = Direction of Player' ],
+        [ [ 2, 2, 0, 3, 6, 2 ], 'Variable #0002 Coins = the actor id of party Member #3' ],
+        [ [ 2, 2, 0, 3, 7, 2 ], 'Variable #0002 Coins = Gold' ],
+        [ [ 2, 2, 0, 3, 8, 0 ], 'Variable #0002 Coins = Last Used Skill ID' ],
+        [ [ 2, 2, 0, 3, 9 ], 'Variable #0002 Coins = 9' ],
+        [ [ 2, 2, 3, 0, 2 ], 'Variable #0002 Coins *= 2' ],
+        [ [ 2, 2, 4, 0, 2 ], 'Variable #0002 Coins /= 2' ],
+        [ [ 2, 2, 5, 0, 2 ], 'Variable #0002 Coins %= 2' ],
+        [ [ 2, 2, 9, 0, 2 ], 'Variable #0002 Coins 9 2' ],
+        [ [ 2, 2, 0, 9 ], 'Variable #0002 Coins = 9' ],
+        [ [ 1, 2, 0, 0, 7 ], 'Variables #0001 to #0002 Coins = 7' ],
+      ];
+
+      // Act.
+      const read = cases.map(([ parameters ]) => sentenceOf(122, parameters as JsonValue[]));
+
+      // Assert.
+      expect(read)
+        .toStrictEqual(cases.map(([ , sentence ]) => sentence));
+    });
+
+    it('reads the party, actor and battle commands with their notes only when they apply', () =>
+    {
+      // Arrange.
+      const cases: [ number, unknown[], string ][] = [
+        [ 127, [ 2, 1, 0, 1, true ], 'Weapons: #2 - 1 (including equipped)' ],
+        [ 128, [ 3, 0, 0, 1, true ], 'Armors: #3 + 1' ],
+        [ 129, [ 1, 0, true ], 'Add #1 Harold to the party (initialized)' ],
+        [ 129, [ 1, 1, false ], 'Remove #1 Harold from the party' ],
+        [ 313, [ 1, 2, 1, 9 ], 'Remove #9 Poison from the actor in #0002 Coins' ],
+        [ 314, [ 0, 1 ], 'Recover all: #1 Harold' ],
+        [ 316, [ 0, 0, 0, 0, 1, true ], 'Level of Entire Party + 1 (show level up)' ],
+        [ 317, [ 0, 1, 2, 0, 0, 5 ], 'Attack of #1 Harold + 5' ],
+        [ 318, [ 0, 1, 1, 4 ], '#1 Harold forgets #4' ],
+        [ 319, [ 1, 1, 2 ], 'Equip #1 Harold with #2 in slot 1' ],
+        [ 319, [ 1, 2, 0 ], 'Equip #1 Harold with None in slot 2' ],
+        [ 321, [ 1, 3, true ], 'Change #1 Harold\'s class to #3 (keeping EXP)' ],
+        [ 325, [ 1, 'Line one\nline two' ], 'Profile of #1 Harold: "Line one line two"' ],
+        [ 331, [ -1, 1, 0, 50, true ], 'HP of enemy Entire Troop - 50 (can knock out)' ],
+        [ 333, [ 0, 1, 9 ], 'Remove #9 Poison from enemy #1' ],
+        [ 337, [ 0, 5, true ], 'Show animation #5 on the entire troop' ],
+        [ 339, [ 1, 1, 7, -1 ], 'Force #1 Harold to use #7 on Random' ],
+        [ 339, [ 0, 2, 7, 0 ], 'Force enemy #3 to use #7 on Index 1' ],
+        [ 301, [ 1, 5, false, true ], 'Battle: the troop in #0005 (can lose)' ],
+        [ 301, [ 2, 0, true, false ], 'Battle: a random encounter (can escape)' ],
+        [ 285, [ 3, 6, 2, -1, 0 ], '#0003 = Region ID at Player' ],
+        [ 285, [ 3, 1, 1, 4, 5 ], '#0003 = Event ID at (#0004, #0005)' ],
+        [ 203, [ 5, 2, 7, 0, 4 ], 'Swap Event #5 with Event #7 (facing Left)' ],
+        [ 203, [ 0, 1, 4, 5, 0 ], 'Move This Event to (#0004, #0005)' ],
+        [ 124, [ 1 ], 'Stop the timer' ],
+        [ 124, [ 0, 125 ], 'Start the timer at 2:05' ],
+      ];
+
+      // Act.
+      const read = cases.map(([ code, parameters ]) => sentenceOf(code, parameters as JsonValue[]));
+
+      // Assert.
+      expect(read)
+        .toStrictEqual(cases.map(([ , , sentence ]) => sentence));
+    });
+
     it('reads a common event call by name', () =>
     {
       // Arrange.
