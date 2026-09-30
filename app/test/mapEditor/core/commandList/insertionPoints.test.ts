@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readCommandTree, type CommandBlockNode, type CommandTree } from '../../../../src/mapEditor/core/commandList/commandTree.ts';
+import { readCommandTree, type CommandBlockNode } from '../../../../src/mapEditor/core/commandList/commandTree.ts';
 import {
   canDropAt,
   dropTargetAt,
@@ -265,7 +265,7 @@ describe('insertionPoints', () =>
     {
       // Arrange: dragging the whole branch over its own first body row.
       const { tree, rows } = build();
-      const branch = tree.root.nodes[1];
+      const [ , branch ] = tree.root.nodes;
 
       // Act.
       const target = dropTargetAt(tree, rows, 2, true, [ branch ]);

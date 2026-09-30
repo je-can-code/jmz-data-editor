@@ -71,7 +71,7 @@ describe('listSelection', () =>
       // Arrange: from Show Text to the wait inside the first choice.
       const { tree } = build();
       const [ text, , choices ] = tree.root.nodes;
-      const wait = (choices as CommandBlockNode).segments[1].body!.nodes[0];
+      const [ wait ] = (choices as CommandBlockNode).segments[1].body!.nodes;
 
       // Act.
       const range = nodesBetween(text, wait).map(node => node.start);
@@ -85,7 +85,7 @@ describe('listSelection', () =>
     {
       // Arrange: the loop and itself, inside the else.
       const { tree } = build();
-      const loop = (tree.root.nodes[1] as CommandBlockNode).segments[1].body!.nodes[0];
+      const [ loop ] = (tree.root.nodes[1] as CommandBlockNode).segments[1].body!.nodes;
 
       // Act.
       const range = nodesBetween(loop, loop).map(node => node.start);

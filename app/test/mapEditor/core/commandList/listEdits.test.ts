@@ -38,7 +38,7 @@ describe('listEdits', () =>
       // Arrange: the branch, the loop inside it, Show Text, and the branch again.
       const tree = readCommandTree(buildMixedList(), MZ_STRUCTURE);
       const [ text, branch ] = tree.root.nodes;
-      const loop = (branch as CommandBlockNode).segments[1].body!.nodes[0];
+      const [ loop ] = (branch as CommandBlockNode).segments[1].body!.nodes;
 
       // Act.
       const outer = outermostNodes([ branch, loop, text, branch ]);
@@ -122,7 +122,7 @@ describe('listEdits', () =>
       const list = buildMixedList();
       const tree = readCommandTree(list, MZ_STRUCTURE);
       const [ text, branch ] = tree.root.nodes;
-      const loop = (branch as CommandBlockNode).segments[1].body!.nodes[0];
+      const [ loop ] = (branch as CommandBlockNode).segments[1].body!.nodes;
 
       // Act.
       const removed = removeNodes(list, [ loop, branch, text ]);
@@ -156,7 +156,7 @@ describe('listEdits', () =>
       // Arrange: the loop inside the else, dropped at the very top.
       const list = buildMixedList();
       const tree = readCommandTree(list, MZ_STRUCTURE);
-      const loop = (tree.root.nodes[1] as CommandBlockNode).segments[1].body!.nodes[0];
+      const [ loop ] = (tree.root.nodes[1] as CommandBlockNode).segments[1].body!.nodes;
 
       // Act.
       const moved = moveNodes(list, [ loop ], { body: tree.root, position: 0 });
@@ -204,7 +204,7 @@ describe('listEdits', () =>
       // Arrange: the wait inside the first choice.
       const list = buildMixedList();
       const tree = readCommandTree(list, MZ_STRUCTURE);
-      const wait = (tree.root.nodes[2] as CommandBlockNode).segments[1].body!.nodes[0];
+      const [ wait ] = (tree.root.nodes[2] as CommandBlockNode).segments[1].body!.nodes;
 
       // Act.
       const duplicated = duplicateNodes(list, [ wait ]);

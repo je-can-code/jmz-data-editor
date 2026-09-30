@@ -102,7 +102,7 @@ describe('blockReconcile', () =>
       const reconciled = reconcileBlock(list, MZ_STRUCTURE, 0);
 
       // Assert: the second block keeps its own numbering and follows the first at once.
-      expect([ describeList(reconciled), reconciled[6].parameters ])
+      expect([ describeList(reconciled), reconciled[7].parameters ])
         .toStrictEqual([
           [ '102@0', '402@0 A', '0@1', '402@0 B', '0@1', '404@0', '102@0', '402@0 C', '0@1', '404@0', '0@0' ],
           [ 0, 'C' ],
