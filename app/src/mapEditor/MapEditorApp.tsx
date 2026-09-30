@@ -1,8 +1,8 @@
 import React from 'react';
 import { useMapEditorServices } from './services/MapEditorServicesContext.tsx';
 import { ConflictBanner } from './views/ConflictBanner.tsx';
-import { EmptyWorkspace } from './views/EmptyWorkspace.tsx';
 import { EventWindowView } from './views/EventWindowView.tsx';
+import { Workspace } from './workspace/Workspace.tsx';
 
 /**
  * The map editor's root: shows whatever this window is for, with any document conflict above it.
@@ -16,7 +16,7 @@ const MapEditorApp = () =>
     <>
       {view.kind === 'event'
         ? <EventWindowView mapId={view.mapId} eventId={view.eventId}/>
-        : <EmptyWorkspace/>}
+        : <Workspace/>}
       <ConflictBanner/>
     </>
   );

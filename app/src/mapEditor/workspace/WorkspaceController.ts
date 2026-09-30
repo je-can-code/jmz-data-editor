@@ -235,13 +235,14 @@ class WorkspaceController
    * Opens a map, or brings forward the view of it already open.
    * @param {number} mapId The map.
    * @param {OpenMapOptions} options Where and how.
+   * @returns {IDockviewPanel | null} The panel showing the map, or null before the dock is ready.
    */
-  openMap(mapId: number, options: OpenMapOptions = {}): void
+  openMap(mapId: number, options: OpenMapOptions = {}): IDockviewPanel | null
   {
     const api = this.#dockview;
     if (api === null)
     {
-      return;
+      return null;
     }
 
     if (options.focusEventId !== undefined && options.focusEventId !== null)
@@ -253,10 +254,10 @@ class WorkspaceController
     if (open !== undefined && options.newView !== true && options.beside !== true && options.at === undefined)
     {
       open.api.setActive();
-      return;
+      return open;
     }
 
-    api.addPanel({
+    return api.addPanel({
       id: mapPanelId(mapId, api.panels.map(panel => panel.id)),
       component: PANEL_COMPONENTS.map,
       title: this.mapName(mapId),
