@@ -456,6 +456,30 @@ describe('MapTreeService', () =>
         .toStrictEqual([ true, 'Cave', [ '(Externally modified)' ] ]);
     });
 
+    it('leaves an undo whose rows no longer fit the tree for the history to refuse, writing nothing', async () =>
+    {
+      // Arrange: an outside rename is recorded, then the same row changes behind the history's back.
+      const { service, hub, state, writes } = buildService();
+      await service.tree();
+      const changed = buildTreeRows();
+      (changed[2] as RmmzMapInfo).name = 'Renamed outside';
+      state.infos = changed;
+      await hub.handleExternalChange('mapinfos');
+      hub.document('mapinfos').apply({ kind: 'set', path: [ 2, 'name' ], before: 'Renamed outside', after: 'Elsewhere' });
+
+      // Act.
+      const outcome = await service.undo();
+
+      // Assert.
+      expect([ outcome, (hub.document('mapinfos').toJson() as RmmzMapInfo[])[2].name, historyOf(hub), writes ])
+        .toStrictEqual([
+          { ok: false, message: '"Externally modified" cannot undo: 2/name no longer holds the value this change replaced.' },
+          'Elsewhere',
+          [ 'Externally modified' ],
+          [],
+        ]);
+    });
+
     it('refuses to redo an outside change that added a map whose file has gone since, rather than list it', async () =>
     {
       // Arrange: a map arrives in slot 4 with its file, the window records it, the step is undone, and the file goes.
