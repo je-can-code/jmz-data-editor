@@ -71,14 +71,21 @@ const speakerHint = (model: ShowTextModel): string =>
 
 /**
  * Works out the edit that gives a message new text: the Show Text and its lines replaced by the same message with
- * the new lines, so its face, window and speaker stay as they were, however many lines the text now runs to.
+ * the new lines, so its face, window and speaker stay as they were, however many lines the text now runs to. Text
+ * the message already says changes nothing: a message holding one empty line reads as an empty box, and writing
+ * that box back must not take the line away.
  * @param {PageMessage} message The message, as the page holds it.
  * @param {number} pageIndex The page it is on.
  * @param {string} text The new text, lines separated by newlines.
- * @returns {EventEdit[]} The edit.
+ * @returns {EventEdit[]} The edit, or none when the text is unchanged.
  */
 const messageTextEdits = (message: PageMessage, pageIndex: number, text: string): EventEdit[] =>
 {
+  if (text === linesToText(message.model.lines))
+  {
+    return [];
+  }
+
   const written = writeShowText(message.command, message.lines, { ...message.model, lines: textToLines(text) });
   return [ {
     kind: 'splice',
