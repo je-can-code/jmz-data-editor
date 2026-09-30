@@ -15,6 +15,7 @@ import {
 } from './mapViewSettings.ts';
 import { MapViewController } from './MapViewController.ts';
 import { whenMapDrawn } from './openTiming.ts';
+import { usePaletteLinks } from './paletteLinks.ts';
 import { pickEvent } from './pickedEvent.ts';
 import { PixiMapRenderer } from './PixiMapRenderer.ts';
 import { projectImagesFor } from './projectImages.ts';
@@ -309,6 +310,9 @@ const MapView = (props: MapViewProps) =>
   {
     rendererRef.current?.setVisible(visible);
   }, [ visible ]);
+
+  // the layer strip, the stack view and the passability editor, followed from this view.
+  usePaletteLinks({ host: hostRef, renderer: rendererRef, mapId, settings, setSettings });
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>

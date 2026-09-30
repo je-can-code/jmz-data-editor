@@ -19,10 +19,12 @@ import { APP_WIDE_COMMANDS, appShortcutFor, type KeyTarget, type ShortcutCommand
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import { addDefaultPanels, POPOUT_URL, restoreLayout } from './defaultLayout.ts';
 import { HistoryPanel } from './panels/HistoryPanel.tsx';
+import { LayersPanel } from './panels/layers/LayersPanel.tsx';
 import { MapPanel } from './panels/MapPanel.tsx';
 import { MapPropertiesPanel } from './panels/MapPropertiesPanel.tsx';
 import { MapTreePanel } from './panels/MapTreePanel.tsx';
-import { LayersPanel, PalettePanel, QuickSettingsPanel, StartPanel } from './panels/PlaceholderPanels.tsx';
+import { PalettePanel } from './panels/palette/PalettePanel.tsx';
+import { QuickSettingsPanel, StartPanel } from './panels/PlaceholderPanels.tsx';
 import { attachShortcutsToPopouts, withWindowScope } from './windowScope.tsx';
 import { NoticeBar, WorkspaceBar } from './WorkspaceChrome.tsx';
 import { WorkspaceController } from './WorkspaceController.ts';
