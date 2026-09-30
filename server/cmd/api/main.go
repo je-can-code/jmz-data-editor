@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"jmz-data-editor/server/internal/api"
+	"jmz-data-editor/server/internal/commandlist"
 	"jmz-data-editor/server/internal/middleware"
 	"jmz-data-editor/server/internal/models/db"
 	"jmz-data-editor/server/internal/models/plugins"
@@ -215,6 +216,12 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	// the index listens to the change stream from its first answer on, to know which maps to read again.
 	mux.HandleFunc("GET /api/enemies/{enemyId}/placements", api.LoadEnemyPlacements(placements.NewIndex(changes)))
 	//endregion cross references
+
+	//region command list
+	// the counter keeps each file's counts until the file changes on disk.
+	mux.HandleFunc("GET /api/command-usage", api.LoadCommandUsage(commandlist.NewCounter()))
+	mux.HandleFunc("GET /api/database-names", api.LoadDatabaseNames)
+	//endregion command list
 
 	return middleware.CORS(mux, policy)
 }
