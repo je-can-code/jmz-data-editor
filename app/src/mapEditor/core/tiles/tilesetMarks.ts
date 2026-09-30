@@ -198,10 +198,65 @@ const setTileMarked = (document: TilesetMarksDocument, tilesetId: number, tileId
 };
 
 /**
- * Works out the marks a project starts with: every A-sheet tile found somewhere above the layer MZ's auto mode puts
- * it on, which is the fingerprint of somebody layering it by hand. The kinds auto mode already lays over the ground
- * (the A2 decorations, the ocean overlays, and a Field tileset's paired base columns) are left out, since auto
- * mode already puts them on top.
+ * How often one tile was placed on the ground layer and above it.
+ */
+type PlacementCount = { onGround: number; above: number };
+
+/**
+ * Counts, per tileset, where each ground-role A-sheet tile sits: on layer 1, where MZ's auto mode puts it, or above
+ * it, where only somebody layering it by hand could have put it. Autotiles count by kind.
+ * @param {Iterable<MarkSourceMap>} maps Every map in the project.
+ * @param {(tilesetId: number) => number} modeOf The mode of a tileset.
+ * @returns {Map<number, Map<number, PlacementCount>>} The counts, by tileset and then by tile id or kind; a kind is
+ * keyed as its negative minus one, so it never collides with a tile id.
+ */
+const countPlacements = (maps: Iterable<MarkSourceMap>, modeOf: (tilesetId: number) => number): Map<number, Map<number, PlacementCount>> =>
+{
+  const counts = new Map<number, Map<number, PlacementCount>>();
+  for (const map of maps)
+  {
+    const { width, height, cells, tilesetId } = map;
+    const mode = modeOf(tilesetId);
+    const plane = width * height;
+    const tileset = counts.get(tilesetId) ?? new Map<number, PlacementCount>();
+    counts.set(tilesetId, tileset);
+
+    for (let index = 0; index < plane * 4; index++)
+    {
+      // only tiles auto mode lays on the ground can be found above it by hand.
+      const tileId = cells[index];
+      if (isASheetTile(tileId) === false || autoLayerOf(tileId, mode) !== 0)
+      {
+        continue;
+      }
+
+      const key = isAutotile(tileId)
+        ? -1 - autotileKind(tileId)
+        : tileId;
+      const count = tileset.get(key) ?? { onGround: 0, above: 0 };
+      if (index < plane)
+      {
+        count.onGround += 1;
+      }
+      else
+      {
+        count.above += 1;
+      }
+
+      tileset.set(key, count);
+    }
+  }
+
+  return counts;
+};
+
+/**
+ * Works out the marks a project starts with: every A-sheet tile its maps place above the layer MZ's auto mode puts
+ * it on more often than on it. Being found above at all is the fingerprint of layering by hand, but a tile mostly
+ * painted as ground is ground (Chef Adventure's wall top 98 on tileset 16 sits on layer 1 8,220 times against 643
+ * above), and marking it would bury every wall later painted under it. The kinds auto mode already lays over the
+ * ground (the A2 decorations, the ocean overlays, and a Field tileset's paired base columns) are left out, since
+ * auto mode already puts them on top.
  *
  * A project with no saved marks is seeded with this once, and the result saved; after that the saved document is
  * the only source, so a tile unmarked by hand stays unmarked.
@@ -211,44 +266,36 @@ const setTileMarked = (document: TilesetMarksDocument, tilesetId: number, tileId
  */
 const deriveTilesetMarks = (maps: Iterable<MarkSourceMap>, modeOf: (tilesetId: number) => number): TilesetMarksDocument =>
 {
-  const found = new Map<number, { tiles: Set<number>; kinds: Set<number> }>();
-  for (const map of maps)
-  {
-    const { width, height, cells, tilesetId } = map;
-    const mode = modeOf(tilesetId);
-    const plane = width * height;
-    const marks = found.get(tilesetId) ?? { tiles: new Set<number>(), kinds: new Set<number>() };
-
-    // layers 2 to 4 only: nothing on layer 1 is above anything.
-    for (let index = plane; index < plane * 4; index++)
-    {
-      const tileId = cells[index];
-      if (isASheetTile(tileId) && autoLayerOf(tileId, mode) === 0)
-      {
-        if (isAutotile(tileId))
-        {
-          marks.kinds.add(autotileKind(tileId));
-        }
-        else
-        {
-          marks.tiles.add(tileId);
-        }
-      }
-    }
-
-    found.set(tilesetId, marks);
-  }
-
-  // write the tilesets in id order, each list ascending, leaving out tilesets nobody layered by hand.
   const document = emptyTilesetMarks();
-  [ ...found.keys() ].sort((a, b) => a - b).forEach((tilesetId) =>
+  const counts = countPlacements(maps, modeOf);
+
+  // write the tilesets in id order, each list ascending, leaving out tilesets with nothing mostly layered by hand.
+  [ ...counts.keys() ].sort((a, b) => a - b).forEach((tilesetId) =>
   {
-    const { tiles, kinds } = found.get(tilesetId) as { tiles: Set<number>; kinds: Set<number> };
-    if (tiles.size > 0 || kinds.size > 0)
+    const tiles: number[] = [];
+    const kinds: number[] = [];
+    (counts.get(tilesetId) as Map<number, PlacementCount>).forEach(({ onGround, above }, key) =>
+    {
+      if (above <= onGround)
+      {
+        return;
+      }
+
+      if (key < 0)
+      {
+        kinds.push(-1 - key);
+      }
+      else
+      {
+        tiles.push(key);
+      }
+    });
+
+    if (tiles.length > 0 || kinds.length > 0)
     {
       document.tilesets[String(tilesetId)] = {
-        tiles: [ ...tiles ].sort((a, b) => a - b),
-        kinds: [ ...kinds ].sort((a, b) => a - b),
+        tiles: tiles.sort((a, b) => a - b),
+        kinds: kinds.sort((a, b) => a - b),
       };
     }
   });

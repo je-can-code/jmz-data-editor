@@ -12,7 +12,7 @@ import {
   TILESET_MARKS_SCHEMA_VERSION,
   type TilesetMarksDocument,
 } from '../../../../src/mapEditor/core/tiles/tilesetMarks.ts';
-import { blankGrid, put } from './support/tileGridBuilder.ts';
+import { blankGrid, fill, put } from './support/tileGridBuilder.ts';
 import { locateShippedGame, readShippedMaps, readShippedTilesets } from './support/shippedGame.ts';
 
 /*
@@ -24,9 +24,10 @@ import { locateShippedGame, readShippedMaps, readShippedTilesets } from './suppo
  * document is tidied on the way in and refused loudly when it is not a marks document, rather than read as "no
  * marks" and then saved over.
  *
- * A project starts from the tiles its own maps already layer by hand: every A-sheet tile found above the layer MZ's
- * auto mode would give it, minus the kinds auto mode already lays on top. For Chef Adventure that is 80 tiles and
- * kinds across seven tilesets (S5's 88, less the three Field-mode pairs MZ lays itself and the five decoration kinds).
+ * A project starts from the tiles its own maps mostly layer by hand: every A-sheet tile placed above the layer MZ's
+ * auto mode would give it more often than on it, minus the kinds auto mode already lays on top. For Chef Adventure
+ * that is 59 tiles and kinds across four tilesets. S5 counted 88 found above at all; three of those are Field-mode
+ * pairs MZ lays itself, five are decoration kinds, and 21 are mostly painted as ground.
  */
 const CLIFF_CORNER = TileId.A5 + 122;
 const ROCK = TileId.A5 + 123;
@@ -240,6 +241,26 @@ describe('deriveTilesetMarks', () =>
       .toEqual({ tilesets: { '12': { tiles: [ CLIFF_CORNER ], kinds: [ 5 ] } } });
   });
 
+  it('marks a tile placed above more often than on the ground, but not one mostly painted as ground', () =>
+  {
+    // Arrange: the cliff corner above twice and on the ground once; the rock above twice and on the ground three times.
+    const map = { ...blankGrid(3, 1), tilesetId: 12 };
+    put(map, 0, 0, 1, CLIFF_CORNER);
+    put(map, 1, 0, 2, CLIFF_CORNER);
+    put(map, 2, 0, 0, CLIFF_CORNER);
+    put(map, 0, 0, 3, ROCK);
+    put(map, 1, 0, 1, ROCK);
+    fill(map, 0, 0, 1, 0, 0, ROCK);
+    const ground = put({ ...blankGrid(1, 1), tilesetId: 12 }, 0, 0, 0, ROCK);
+
+    // Act.
+    const document = deriveTilesetMarks([ map, ground ], () => TilesetMode.area);
+
+    // Assert.
+    expect(document)
+      .toEqual({ tilesets: { '12': { tiles: [ CLIFF_CORNER ], kinds: [] } } });
+  });
+
   it('leaves out a Field tileset\'s paired base column on layer 2, but not the same kind on an Area tileset', () =>
   {
     // Arrange: kind 17 on layer 2 of a map on tileset 1 (Field) and of one on tileset 2 (Area).
@@ -259,7 +280,7 @@ const game = locateShippedGame();
 
 describe.skipIf(game === null)('the marks Chef Adventure starts with', () =>
 {
-  it('pre-fills the 80 tiles and kinds its maps layer by hand, across seven tilesets', () =>
+  it('pre-fills the 59 tiles and kinds its maps mostly layer by hand, across four tilesets', () =>
   {
     // Arrange.
     const root = game as string;
@@ -278,7 +299,8 @@ describe.skipIf(game === null)('the marks Chef Adventure starts with', () =>
     // Act.
     const document = deriveTilesetMarks(readShippedMaps(root), modeOf);
 
-    // Assert: the count, the tilesets, the cliff corner S5 used, and the overlay kinds and Field pairs left out.
+    // Assert: the count, the tilesets, the cliff corner S5 used, and the overlay kinds, the Field pairs and tileset
+    // 16's wall top 98 (mostly painted as ground) left out.
     const entries = Object.values(document.tilesets);
     const count = entries.reduce((sum, entry) => sum + entry.tiles.length + entry.kinds.length, 0);
     const outside = document.tilesets['12'];
@@ -288,7 +310,8 @@ describe.skipIf(game === null)('the marks Chef Adventure starts with', () =>
       cliffCorner: outside.tiles.includes(1658),
       tallGrass: outside.kinds.includes(36),
       fieldPairs: document.tilesets['1'] === undefined,
+      wallTop: document.tilesets['16'] === undefined,
     })
-      .toEqual({ count: 80, tilesets: [ '4', '12', '14', '15', '16', '18', '19' ], cliffCorner: true, tallGrass: false, fieldPairs: true });
+      .toEqual({ count: 59, tilesets: [ '12', '14', '15', '19' ], cliffCorner: true, tallGrass: false, fieldPairs: true, wallTop: true });
   });
 });
