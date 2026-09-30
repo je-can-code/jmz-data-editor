@@ -6,6 +6,11 @@ import type { EventSourceLike, StreamEvent } from '../../../src/mapEditor/core/s
 import type { LockManagerLike } from '../../../src/mapEditor/core/sync/SharedFileChangeFeed.ts';
 
 /**
+ * More messages than any real exchange between windows needs in one go.
+ */
+const MAX_DELIVERIES_PER_FLUSH = 1000;
+
+/**
  * A stand-in for BroadcastChannel across windows: channels opened with the same name hear each other's messages,
  * never their own, structured-cloned, in the order each was posted. Delivery waits for {@link flush}, so a test
  * decides exactly when windows hear each other.
@@ -52,7 +57,9 @@ class MemoryChannelNetwork
   }
 
   /**
-   * Delivers every queued message, including the ones handlers post while it runs.
+   * Delivers every queued message, including the ones handlers post while it runs. Windows that answer each
+   * other forever would never let this return, so it gives up loudly after far more messages than any real
+   * exchange needs.
    * @returns {number} How many messages were delivered.
    */
   flush(): number
@@ -60,6 +67,11 @@ class MemoryChannelNetwork
     let delivered = 0;
     while (this.#queue.length > 0)
     {
+      if (delivered >= MAX_DELIVERIES_PER_FLUSH)
+      {
+        throw new Error(`the windows were still messaging each other after ${delivered} messages`);
+      }
+
       const next = this.#queue.shift() as () => void;
       next();
       delivered += 1;

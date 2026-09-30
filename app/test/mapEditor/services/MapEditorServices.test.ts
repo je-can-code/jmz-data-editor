@@ -89,7 +89,9 @@ describe('MapEditorServices', () =>
   };
 
   /**
-   * Delivers channel messages while a promise runs, as a real channel would, until it settles.
+   * Delivers channel messages while a promise runs, as a real channel would, until it settles. A real channel
+   * delivers each message as a task, after whatever the page was already doing, so each round yields first and
+   * delivers second; delivering at once would answer questions before the page had even asked them.
    * @param {MemoryChannelNetwork} network The channel network.
    * @param {Promise<T>} promise The work.
    * @returns {Promise<T>} Its result.
@@ -105,11 +107,11 @@ describe('MapEditorServices', () =>
     promise.then(markSettled, markSettled);
     while (settled === false)
     {
-      network.flush();
       await new Promise(resolve =>
       {
         setTimeout(resolve, 5);
       });
+      network.flush();
     }
 
     network.flush();
