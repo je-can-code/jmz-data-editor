@@ -82,6 +82,21 @@ func TestEnemyOnPageKeepsATagWhenALaterLineIsDropped(t *testing.T) {
 	}
 }
 
+// TestEnemyOnPageLetsAnIdTooLongForAnyRowWin covers a last tag whose id has more digits than any row
+// could: it still wins over the tag before it, as it does in the game, and so names no enemy at all.
+func TestEnemyOnPageLetsAnIdTooLongForAnyRowWin(t *testing.T) {
+	// Arrange.
+	list := []json.RawMessage{commentOf(t, "<enemyId:5>"), commentOf(t, "<enemyId:99999999999999999999>"), endOfList()}
+
+	// Act.
+	enemyId, err := enemyOnPage(list)
+
+	// Assert- enemy 5 does not survive.
+	if err != nil || enemyId != 0 {
+		t.Errorf("named enemy %d (%v), expected none", enemyId, err)
+	}
+}
+
 // TestEnemyOnPageReadsEveryLineOfAComment covers a tag on a comment's second line, which MZ stores as a
 // command of its own.
 func TestEnemyOnPageReadsEveryLineOfAComment(t *testing.T) {

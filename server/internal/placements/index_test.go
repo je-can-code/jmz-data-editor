@@ -104,6 +104,67 @@ func TestPlacementsReadsEachMapOnce(t *testing.T) {
 	assertReads(t, reads, map[string]int{"Map001.json": 1, "Map002.json": 1, "Map003.json": 1})
 }
 
+// TestPlacementsSkipsAMapRemovedAfterTheFolderWasListed covers a map deleted between the folder being
+// listed and the map being read, before the change stream has had time to say so: it has simply gone,
+// which is no reason to fail the answer about every other map.
+func TestPlacementsSkipsAMapRemovedAfterTheFolderWasListed(t *testing.T) {
+	// Arrange- the cave is deleted just as the index goes to read it.
+	root := newFixtureProject(t)
+	index, _ := newCountingIndex(t, watch.NewHub("data"))
+	read := index.readMap
+	index.readMap = func(path string) (*db.RpgMap, error) {
+		if filepath.Base(path) == "Map002.json" {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return read(path)
+	}
+
+	// Act.
+	found, err := index.Placements(root, 5)
+
+	// Assert- every placement but the cave's.
+	assertPlacements(t, found, err, []Placement{meadowSlime, meadowAmbush, strayOutcast})
+}
+
+// TestPlacementsListsMapsInIdOrderPastMap999 covers map ids of four digits, whose file names sort among
+// the three-digit ones by name: Map1000.json comes before Map101.json in the folder, and after it here.
+func TestPlacementsListsMapsInIdOrderPastMap999(t *testing.T) {
+	// Arrange.
+	root := newFixtureProject(t)
+	writeMap(t, root, 1000, mapOf(eventOf(1, "Latecomer", 0, 0, pageOf(commentOf(t, "<enemyId:5>")))))
+	writeMap(t, root, 101, mapOf(eventOf(1, "Regular", 0, 0, pageOf(commentOf(t, "<enemyId:5>")))))
+	index, _ := newCountingIndex(t, watch.NewHub("data"))
+
+	// Act.
+	found, err := index.Placements(root, 5)
+
+	// Assert.
+	regular := Placement{MapId: 101, MapName: "", EventId: 1, EventName: "Regular", X: 0, Y: 0, PageIndexes: []int{0}, PageCount: 1}
+	latecomer := Placement{MapId: 1000, MapName: "", EventId: 1, EventName: "Latecomer", X: 0, Y: 0, PageIndexes: []int{0}, PageCount: 1}
+	assertPlacements(t, found, err, []Placement{meadowSlime, meadowAmbush, caveSlime, strayOutcast, regular, latecomer})
+}
+
+// TestPlacementsKeepsWhatItKnowsFromWhatIsDoneWithAnAnswer covers the answer's page lists, which must be
+// the answer's own: a caller changing one cannot reach into the cache and change the next answer.
+func TestPlacementsKeepsWhatItKnowsFromWhatIsDoneWithAnAnswer(t *testing.T) {
+	// Arrange- a first answer, changed after the fact.
+	root := newFixtureProject(t)
+	index, _ := newCountingIndex(t, watch.NewHub("data"))
+	first, err := index.Placements(root, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first[0].PageIndexes[0] = 99
+
+	// Act.
+	second, err := index.Placements(root, 5)
+
+	// Assert.
+	assertPlacements(t, second, err, []Placement{meadowSlime, meadowAmbush, caveSlime, strayOutcast})
+}
+
 // TestPlacementsRereadsOnlyAMapThatChanged covers a map edited outside the editor, in MZ or by a
 // script: its placements follow the file, and the maps that did not change are not read again.
 func TestPlacementsRereadsOnlyAMapThatChanged(t *testing.T) {
