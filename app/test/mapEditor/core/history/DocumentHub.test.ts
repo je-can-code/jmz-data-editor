@@ -2011,6 +2011,48 @@ describe('DocumentHub', () =>
         .toStrictEqual([ 'unchanged', false, [ 'Rename', 'Retag', 'Retitle' ], true, 'Sky' ]);
     });
 
+    it('counts the document saved exactly as far as the state its file matches, so undoing back past it reads as unsaved', async () =>
+    {
+      // Arrange: two unsaved retags over the loaded file; the file then comes to hold the first of them, as a save's
+      // echo would, or a write that happens to match it.
+      const { store, files } = buildStore();
+      const hub = buildHub(store);
+      hub.edit('Retag once', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'first'));
+      const first = fileOf(hub, MAP_A);
+      hub.edit('Retag twice', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'second'));
+      files.set(MAP_A, first as unknown as JsonValue);
+
+      // Act: the change arrives, then both retags are undone one at a time.
+      const result = await hub.handleExternalChange(MAP_A);
+      const atSecond = hub.isDirty(MAP_A);
+      hub.undo(mapHistoryKey(1));
+      const atFirst = hub.isDirty(MAP_A);
+      hub.undo(mapHistoryKey(1));
+      const atLoaded = hub.isDirty(MAP_A);
+
+      // Assert: unsaved on either side of the state the file holds, and saved exactly at it.
+      expect([ result, hub.isConflicted(MAP_A), atSecond, atFirst, atLoaded, fileOf(hub, MAP_A).note ])
+        .toStrictEqual([ 'unchanged', false, true, false, true, '' ]);
+    });
+
+    it('counts a document with unsaved edits saved once its file comes to hold exactly what it holds', async () =>
+    {
+      // Arrange: a rename not yet saved here, which the file already holds, as when another window's save of it
+      // arrives ahead of the message saying so.
+      const { store, files } = buildStore();
+      const hub = buildHub(store);
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      files.set(MAP_A, fileOf(hub, MAP_A) as unknown as JsonValue);
+      const before = hub.isDirty(MAP_A);
+
+      // Act.
+      const result = await hub.handleExternalChange(MAP_A);
+
+      // Assert: saved, with the rename still the only step and nothing recorded for the file.
+      expect([ before, result, hub.isDirty(MAP_A), rowsOf(hub, mapHistoryKey(1)) ])
+        .toStrictEqual([ true, 'unchanged', false, [ 'Rename' ] ]);
+    });
+
     it('still finds the file holding what it was last loaded as, however many edits came since', async () =>
     {
       // Arrange: forty unsaved edits over a file nobody touched.

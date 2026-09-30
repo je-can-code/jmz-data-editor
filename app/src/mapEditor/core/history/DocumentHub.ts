@@ -156,7 +156,8 @@ type DocumentSnapshot = {
  * - {@code ignored}: this window does not hold the document, or it was only being re-read after the change stream
  *   came back and the document holds unsaved edits, which differ from the file by definition.
  * - {@code unchanged}: the file holds nothing the window lacks: what it holds now, what it last saved or loaded, or a
- *   state its latest edits passed through, as the echo of a save does.
+ *   state its latest edits passed through, as the echo of a save does. The document is saved as far as that state
+ *   and no further.
  * - {@code recorded}: the window held no unsaved edits, so it took the file's content as one undoable step, named
  *   {@link OUTSIDE_CHANGE_LABEL}, and the document stays saved.
  * - {@code conflicted}: the window holds unsaved edits, so it kept them and flagged the document; or the file was
@@ -1263,8 +1264,10 @@ class DocumentHub
    *
    * A file that holds nothing this window lacks needs nothing: what the window holds now, what it last saved or
    * loaded, or a state its latest edits passed through, which is what the echo of a save looks like when it comes back
-   * without its window's name, perhaps ahead of the message saying which steps that save held. Any flag an earlier
-   * change to the file raised is cleared, since the file no longer holds anything to choose between.
+   * without its window's name, perhaps ahead of the message saying which steps that save held. The document is then
+   * saved exactly as far as that state, since the file holds that state's steps and no others: undoing back past it
+   * reads as unsaved, and redoing up to it reads as saved. Any flag an earlier change to the file raised is cleared,
+   * since the file no longer holds anything to choose between.
    *
    * A clean document takes the file's version as one step named {@link OUTSIDE_CHANGE_LABEL}, recorded in the
    * history of whatever the change touched and marked saved, since the file holds it: undoing the step brings back
@@ -1295,10 +1298,12 @@ class DocumentHub
       return 'conflicted';
     }
 
-    // a file holding nothing new needs nothing done, and a flag an earlier change raised (the file removed, or a
-    // version since written over) no longer stands.
-    if (this.#holdsFile(key, content))
+    // a file holding nothing new needs nothing done but noting how far the document is saved, and a flag an earlier
+    // change raised (the file removed, or a version since written over) no longer stands.
+    const held = this.#stepsHeldByFile(key, content);
+    if (held !== null)
     {
+      this.#noteFileHolds(key, held);
       this.#clearDiskConflict(key);
       return 'unchanged';
     }
@@ -1321,36 +1326,42 @@ class DocumentHub
   }
 
   /**
-   * Reports whether a document's file holds nothing this window lacks: exactly its committed content, or, while it
-   * has unsaved edits, a state it passed through since it was last saved or loaded (see {@link #passedThrough}).
+   * Works out which steps a document's file holds, when it holds nothing this window lacks: exactly its committed
+   * content, or, while it has unsaved edits, a state it passed through since it was last saved or loaded (see
+   * {@link #passedThrough}).
    * @param {DocumentKey} key The document.
    * @param {JsonValue} content The file's content.
-   * @returns {boolean} True when the file needs nothing done.
+   * @returns {string[] | null} The steps the file's state holds, oldest first, or null when the file holds something
+   * this window lacks.
    */
-  #holdsFile(key: DocumentKey, content: JsonValue): boolean
+  #stepsHeldByFile(key: DocumentKey, content: JsonValue): string[] | null
   {
+    // every held document keeps its applied list.
     if (jsonEquals(this.#committedContent(key), content))
     {
-      return true;
+      return (this.#applied.get(key) as HistoryStep[]).map(step => step.id);
     }
 
     // a clean document's committed content is the saved content, already compared.
-    return this.isDirty(key) && this.#passedThrough(key, content);
+    return this.isDirty(key)
+      ? this.#passedThrough(key, content)
+      : null;
   }
 
   /**
-   * Reports whether a file holds a state a document with unsaved edits already passed through: the state after one
-   * of its newest unsaved steps, or what it was last saved or loaded as. The steps applied since that save are taken
-   * back out of a copy newest first, comparing as each goes, then every step the save held that was undone since is
-   * put back in, in the order the save had them. The echo of a save made in another window can arrive before the
-   * message saying which steps that save held, and then only the edits of that moment lie between, so only the newest
+   * Finds which state a document with unsaved edits already passed through a file holds: the state after one of its
+   * newest unsaved steps, or what it was last saved or loaded as. The steps applied since that save are taken back
+   * out of a copy newest first, comparing as each goes, then every step the save held that was undone since is put
+   * back in, in the order the save had them. The echo of a save made in another window can arrive before the message
+   * saying which steps that save held, and then only the edits of that moment lie between, so only the newest
    * {@link RECENT_STATES_COMPARED} states are compared besides the saved one. Nothing live is touched.
    * @param {DocumentKey} key The document, which has unsaved edits.
    * @param {JsonValue} content The file's content.
-   * @returns {boolean} True when the file holds one of those states; false too when a step the save held is no longer
-   * known here, or a patch no longer fits the copy, since the saved state cannot then be worked out.
+   * @returns {string[] | null} The steps that state holds, oldest first; null when the file holds none of those
+   * states, and when a step the save held is no longer known here, or a patch no longer fits the copy, since the saved
+   * state cannot then be worked out.
    */
-  #passedThrough(key: DocumentKey, content: JsonValue): boolean
+  #passedThrough(key: DocumentKey, content: JsonValue): string[] | null
   {
     // every held document keeps both lists.
     const applied = this.#applied.get(key) as HistoryStep[];
@@ -1373,7 +1384,8 @@ class DocumentHub
         const compared = index < RECENT_STATES_COMPARED || index === unsaved.length - 1;
         if (compared && jsonEquals(copy.toJson(), content))
         {
-          return true;
+          // the copy now holds every applied step older than the one just taken out, and nothing newer.
+          return applied.slice(0, applied.length - 1 - index).map(each => each.id);
         }
       }
 
@@ -1381,7 +1393,7 @@ class DocumentHub
       const putBack = saved.slice(shared).map(id => this.#steps.get(id));
       if (putBack.length === 0 || putBack.some(step => step === undefined))
       {
-        return false;
+        return null;
       }
 
       (putBack as HistoryStep[]).forEach(step =>
@@ -1389,7 +1401,10 @@ class DocumentHub
         patchesOn(step, key).forEach(patch => copy.apply(patch));
       });
 
-      return jsonEquals(copy.toJson(), content);
+      // the copy now holds exactly the steps the save held.
+      return jsonEquals(copy.toJson(), content)
+        ? [ ...saved ]
+        : null;
     }
     catch (error)
     {
@@ -1398,7 +1413,23 @@ class DocumentHub
         throw error;
       }
 
-      return false;
+      return null;
+    }
+  }
+
+  /**
+   * Notes that a document's file holds exactly the given steps, when that differs from what it was known to hold. A
+   * file found holding a state the document passed through is saved as far as that state and no further, so the
+   * document reads as unsaved on either side of it and saved at it, however it moves through its history after.
+   * @param {DocumentKey} key The document.
+   * @param {readonly string[]} marker The steps the file holds, oldest first.
+   */
+  #noteFileHolds(key: DocumentKey, marker: readonly string[]): void
+  {
+    // every held document keeps its saved list; one already holding these steps needs no word to anyone.
+    if (sameSequence(this.#saved.get(key) as string[], marker) === false)
+    {
+      this.#markSaved(key, marker, 'local');
     }
   }
 
