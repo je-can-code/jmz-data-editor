@@ -59,6 +59,7 @@ import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
 import { RowClipboardMenu } from '@presentation/components/board/RowClipboardMenu.tsx';
 import { useEnemyPlacements } from '@presentation/hooks/useEnemyPlacements.ts';
 import { EnemyPlacements } from '@boards/enemies/EnemyPlacements.tsx';
+import { pageMapLink } from '@core/infrastructure/shell/MapLink.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
@@ -979,7 +980,11 @@ const EnemiesBoard = () =>
                         updateEnemy={updateEnemy}
                         handleSnack={handleSnack}
                       />
-                      <EnemyPlacements state={enemyPlacements.state}/>
+                      {/* a row opens its map in the map editor with the event picked out. */}
+                      <EnemyPlacements
+                        state={enemyPlacements.state}
+                        onOpenEvent={placement => pageMapLink().openMap(placement.mapId, placement.eventId)}
+                      />
                     </Stack>
                   </Grid>
                 </Grid>

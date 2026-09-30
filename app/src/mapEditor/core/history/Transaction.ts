@@ -3,8 +3,9 @@ import type { EditorDocument } from '../model/EditorDocument.ts';
 import { cloneJson, type JsonValue } from '../model/json.ts';
 import { MapDocument } from '../model/MapDocument.ts';
 import { invertPatch, isNoopPatch, type MapTiles, type Patch, type PatchPath } from '../model/patches.ts';
+import type { DocumentSnapshot } from './DocumentHub.ts';
 import type { HistoryKey } from './historyKeys.ts';
-import type { HistoryStep, StepEntry } from './HistoryStep.ts';
+import type { FileEffect, HistoryStep, StepEntry } from './HistoryStep.ts';
 
 /**
  * What a transaction needs from the hub that opened it.
@@ -49,6 +50,8 @@ class Transaction
 
   #entries: StepEntry[] = [];
 
+  #files: FileEffect[] = [];
+
   #open = true;
 
   /**
@@ -79,6 +82,15 @@ class Transaction
   get entries(): readonly StepEntry[]
   {
     return this.#entries;
+  }
+
+  /**
+   * The whole files recorded so far, in order.
+   * @returns {readonly FileEffect[]} The file effects.
+   */
+  get files(): readonly FileEffect[]
+  {
+    return this.#files;
   }
 
   /**
@@ -158,6 +170,35 @@ class Transaction
   resize(document: DocumentKey, next: MapTiles): this
   {
     return this.apply(document, this.#mapDocument(document).resizePatch(next));
+  }
+
+  /**
+   * Records a whole file the step creates or removes. Nothing is written here: the file travels with the step,
+   * and whoever moves the step performs it (see {@link FileEffect}). A step still needs at least one patch.
+   * @param {DocumentKey} document The document the file backs, such as a map's.
+   * @param {JsonValue | null} before The file's content before the step, or null when there was no file.
+   * @param {JsonValue | null} after The file's content after the step, or null when the step removes it.
+   * @param {{ before?: string, after?: string, beforeHeld?: DocumentSnapshot }} sides The file's exact text on either
+   * side, where it was read, and the copy the window held before the step, where it held one.
+   * @returns {Transaction} This transaction, for chaining.
+   */
+  file(
+    document: DocumentKey,
+    before: JsonValue | null,
+    after: JsonValue | null,
+    sides: { before?: string; after?: string; beforeHeld?: DocumentSnapshot } = {},
+  ): this
+  {
+    this.#requireOpen();
+    this.#files.push({
+      document,
+      before: cloneJson(before),
+      after: cloneJson(after),
+      ...(sides.before === undefined ? {} : { beforeText: sides.before }),
+      ...(sides.after === undefined ? {} : { afterText: sides.after }),
+      ...(sides.beforeHeld === undefined ? {} : { beforeHeld: cloneJson(sides.beforeHeld) }),
+    });
+    return this;
   }
 
   /**

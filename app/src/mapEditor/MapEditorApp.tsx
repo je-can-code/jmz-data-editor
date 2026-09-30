@@ -3,8 +3,8 @@ import { Box } from '@mui/material';
 import { MapView, mapIdFromQuery } from './render/MapView.tsx';
 import { useMapEditorServices } from './services/MapEditorServicesContext.tsx';
 import { ConflictBanner } from './views/ConflictBanner.tsx';
-import { EmptyWorkspace } from './views/EmptyWorkspace.tsx';
 import { EventWindowView } from './views/EventWindowView.tsx';
+import { Workspace } from './workspace/Workspace.tsx';
 
 /**
  * The map editor's root: shows whatever this window is for, with any document conflict above it.
@@ -14,7 +14,8 @@ const MapEditorApp = () =>
 {
   const { view } = useMapEditorServices();
 
-  // until the workspace shell mounts map views in its panels, ?map=102 opens that map across the whole window.
+  // ?map=102 opens that map alone across the whole window instead of the workspace: one map and one canvas on the
+  // page, which is what the speed script and the parity check measure.
   const openedMap = view.kind === 'workspace'
     ? mapIdFromQuery(window.location.search)
     : null;
@@ -22,7 +23,7 @@ const MapEditorApp = () =>
   return (
     <>
       {view.kind === 'event' && <EventWindowView mapId={view.mapId} eventId={view.eventId}/>}
-      {view.kind === 'workspace' && openedMap === null && <EmptyWorkspace/>}
+      {view.kind === 'workspace' && openedMap === null && <Workspace/>}
       {openedMap !== null && (
         <Box sx={{ height: '100vh' }}>
           <MapView mapId={openedMap}/>

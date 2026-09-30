@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -68,6 +69,173 @@ func SaveMap(announcer WriteAnnouncer) http.HandlerFunc {
 		}
 
 		saveDocument[*db.RpgMap](responseWriter, httpRequest, announcer, mapFileName(id), mzjson.MapLayout, wholeObject[*db.RpgMap])
+	}
+}
+
+// DeleteMap serves DELETE /api/maps/{mapId}: removes data/Map###.json, answering 204 with no body.
+//
+// A map leaves the project in two writes, its row in MapInfos.json and its file, and the tree must
+// never name a map that has no file, since MZ and the game both trust the tree. So a map the tree
+// still lists is refused with a 409 and nothing is removed: the editor takes the row out first, then
+// the file. A map with no file is a 404, the same answer GET gives it, and a tree that cannot be read
+// is a 500, because without it nothing can say the map is safe to remove.
+//
+// The tree is read and the file removed under the lock every write in MZ's layout takes, so a save of
+// the tree that lists the map again, or a save or restore of the map's own file, lands wholly before the
+// check or wholly after the removal, never between them. The removal is a single unlink, which no reader
+// can ever see half done. It reaches the change stream with no client, even when the request names one:
+// the stream credits a change to a save only when the file settles holding the bytes that save announced,
+// and a removed file holds nothing. That is the answer every window needs anyway, since any window still
+// holding the map must learn its file is gone, and the window that removed it has already let it go.
+func DeleteMap(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+	// map ids start at 1, and being digits only, a valid id can never name a file outside data/.
+	id, ok := mapIdFromPath(responseWriter, httpRequest, 1)
+	if ok == false {
+		return
+	}
+
+	projectPath, pathErr := GetProjectPath()
+	if pathErr != nil {
+		http.Error(responseWriter, pathErr.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// the tree is the authority on which maps exist, so it is read before anything is removed.
+	relativePath := mapFileName(id)
+	removeErr := store.RemoveFile(filepath.Join(projectPath, filepath.FromSlash(relativePath)), func() error {
+		infos, readErr := store.Load[[]*db.RpgMapInfo](filepath.Join(projectPath, "data", "MapInfos.json"))
+		if readErr != nil {
+			return unreadableTreeError{cause: readErr}
+		}
+		if id < len(infos) && infos[id] != nil {
+			return errStillListed
+		}
+
+		return nil
+	})
+
+	var unreadable unreadableTreeError
+	switch {
+	case removeErr == nil:
+		responseWriter.WriteHeader(http.StatusNoContent)
+	case errors.As(removeErr, &unreadable):
+		var res RestResponse[*db.RpgMapInfo]
+		res.ToRestResponse(responseWriter, projectPath, unreadable.Error(), nil, http.StatusInternalServerError)
+	case errors.Is(removeErr, errStillListed):
+		http.Error(responseWriter, fmt.Sprintf("map %d is still in the map tree; remove its row from MapInfos.json first", id), http.StatusConflict)
+	case errors.Is(removeErr, fs.ErrNotExist):
+		http.Error(responseWriter, relativePath+" does not exist", http.StatusNotFound)
+	default:
+		var res RestResponse[*db.RpgMapInfo]
+		res.ToRestResponse(responseWriter, projectPath, removeErr.Error(), nil, http.StatusInternalServerError)
+	}
+}
+
+// errStillListed is a delete's refusal of a map the tree still lists, whose file must stay.
+var errStillListed = errors.New("the map is still in the map tree")
+
+// unreadableTreeError is a map tree a delete could not read, so nothing can say the map is safe to remove.
+type unreadableTreeError struct {
+	cause error
+}
+
+// Error words the failure the way the delete answers it.
+func (err unreadableTreeError) Error() string {
+	return "the map tree cannot be read: " + err.cause.Error()
+}
+
+// LoadMapFile serves GET /api/maps/{mapId}/file: the map's file exactly as it sits on disk, byte for byte and
+// with no envelope, the way plugin sources are served. Deleting a map keeps these bytes with the step, so undoing
+// the delete can put the very same file back; a map decoded and encoded again would come back in a key order
+// and spelling of the server's choosing. A file that does not exist is a 404.
+func LoadMapFile(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+	id, ok := mapIdFromPath(responseWriter, httpRequest, 1)
+	if ok == false {
+		return
+	}
+
+	projectPath, pathErr := GetProjectPath()
+	if pathErr != nil {
+		http.Error(responseWriter, pathErr.Error(), http.StatusBadRequest)
+		return
+	}
+
+	relativePath := mapFileName(id)
+	content, readErr := os.ReadFile(filepath.Join(projectPath, filepath.FromSlash(relativePath)))
+	if errors.Is(readErr, fs.ErrNotExist) {
+		http.Error(responseWriter, relativePath+" does not exist", http.StatusNotFound)
+		return
+	}
+	if readErr != nil {
+		http.Error(responseWriter, readErr.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	responseWriter.Header().Set("Content-Type", "application/json; charset=utf-8")
+	responseWriter.WriteHeader(http.StatusOK)
+	_, _ = responseWriter.Write(content)
+}
+
+// RestoreMapFile serves PUT /api/maps/{mapId}/file: brings a removed map's file back exactly as it was. The body
+// is the file's former text, as GET /api/maps/{mapId}/file handed it out; it is held to every check a map save
+// is (one JSON document, no key the model cannot account for, none of its keys missing) and then written byte for
+// byte, never re-rendered, so a delete that is undone leaves no trace in the game's history. It answers 204.
+//
+// Only a removed map can be restored: a map whose file exists is refused with a 409, and nothing is written.
+func RestoreMapFile(announcer WriteAnnouncer) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+		id, ok := mapIdFromPath(responseWriter, httpRequest, 1)
+		if ok == false {
+			return
+		}
+
+		projectPath, pathErr := GetProjectPath()
+		if pathErr != nil {
+			http.Error(responseWriter, pathErr.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// the body gets every check a map save gets, before anything touches the disk.
+		body, err := io.ReadAll(http.MaxBytesReader(responseWriter, httpRequest.Body, maxBodyBytes))
+		if err != nil {
+			refuseBody(responseWriter, err)
+			return
+		}
+		document, err := mzjson.Parse(body)
+		if err != nil {
+			refuseBody(responseWriter, err)
+			return
+		}
+		var data db.RpgMap
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&data); err != nil {
+			refuseBody(responseWriter, err)
+			return
+		}
+		if err := wholeObject[*db.RpgMap](document); err != nil {
+			refuseBody(responseWriter, err)
+			return
+		}
+
+		relativePath := mapFileName(id)
+		withdraw := func() {}
+		announce := func(content []byte) {
+			withdraw = announcer.Expect(relativePath, httpRequest.Header.Get(ClientHeader), content)
+		}
+		writeErr := store.RestoreFile(filepath.Join(projectPath, filepath.FromSlash(relativePath)), body, announce)
+		if errors.Is(writeErr, fs.ErrExist) {
+			http.Error(responseWriter, relativePath+" already exists; only a removed map can be restored", http.StatusConflict)
+			return
+		}
+		if writeErr != nil {
+			withdraw()
+			var res RestResponse[*db.RpgMap]
+			res.ToRestResponse(responseWriter, projectPath, writeErr.Error(), nil, http.StatusInternalServerError)
+			return
+		}
+
+		responseWriter.WriteHeader(http.StatusNoContent)
 	}
 }
 

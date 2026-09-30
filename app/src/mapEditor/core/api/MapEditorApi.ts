@@ -1,6 +1,7 @@
 import { isEditorDataName } from '../model/documentKeys.ts';
 import { isJsonObject, type JsonValue } from '../model/json.ts';
 import type { RmmzMap, RmmzMapInfo, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { MapArrival } from '../properties/arrivals.ts';
 
 /**
  * The image folders the map editor draws from: tilesets, character sheets, faces, parallaxes and system sheets.
@@ -43,6 +44,37 @@ interface MapEditorApi
    * @returns {Promise<void>} Settles once written.
    */
   saveMap(mapId: number, map: RmmzMap): Promise<void>;
+
+  /**
+   * Removes a map file. The server refuses while the map tree still lists the map, so the tree's row goes first.
+   * @param {number} mapId The map id.
+   * @returns {Promise<void>} Settles once the file is gone.
+   */
+  deleteMap(mapId: number): Promise<void>;
+
+  /**
+   * Reads a map file exactly as it sits on disk, byte for byte, for putting it back exactly after a delete.
+   * @param {number} mapId The map id.
+   * @returns {Promise<string | null>} The file's text, or null when the file is missing.
+   */
+  loadMapFile(mapId: number): Promise<string | null>;
+
+  /**
+   * Brings a removed map's file back from its former text, written byte for byte. The server refuses while the file
+   * exists.
+   * @param {number} mapId The map id.
+   * @param {string} text The file's former text, as {@link loadMapFile} read it.
+   * @returns {Promise<void>} Settles once the file is back.
+   */
+  restoreMapFile(mapId: number, text: string): Promise<void>;
+
+  /**
+   * Reads every transfer on disk, on any map, that names outright a tile of a map as where it lands: what a resize
+   * of that map must warn about, since it leaves them pointing at the old spots.
+   * @param {number} mapId The map landed on.
+   * @returns {Promise<MapArrival[]>} The transfers, by the map they are on, then event and page; empty when none.
+   */
+  loadArrivals(mapId: number): Promise<MapArrival[]>;
 
   /**
    * Reads the map tree.
@@ -251,6 +283,56 @@ class HttpMapEditorApi implements MapEditorApi
   async saveMap(mapId: number, map: RmmzMap): Promise<void>
   {
     return this.#put(`/api/maps/${requireMapId(mapId)}`, map);
+  }
+
+  async deleteMap(mapId: number): Promise<void>
+  {
+    const route = `/api/maps/${requireMapId(mapId)}`;
+    const response = await this.#fetch(`${this.#base}${route}`, {
+      method: 'DELETE',
+      headers: { [CLIENT_HEADER]: this.clientId },
+    });
+    await this.#requireOk(response, `DELETE ${route}`);
+  }
+
+  async loadMapFile(mapId: number): Promise<string | null>
+  {
+    const route = `/api/maps/${requireMapId(mapId)}/file`;
+    const response = await this.#fetch(`${this.#base}${route}`, { method: 'GET' });
+    if (response.status === 404)
+    {
+      return null;
+    }
+
+    await this.#requireOk(response, `GET ${route}`);
+    return response.text();
+  }
+
+  async restoreMapFile(mapId: number, text: string): Promise<void>
+  {
+    // the text goes as it is, never parsed and encoded again, since its exact bytes are the point.
+    const route = `/api/maps/${requireMapId(mapId)}/file`;
+    const response = await this.#fetch(`${this.#base}${route}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        [CLIENT_HEADER]: this.clientId,
+      },
+      body: text,
+    });
+    await this.#requireOk(response, `PUT ${route}`);
+  }
+
+  async loadArrivals(mapId: number): Promise<MapArrival[]>
+  {
+    // the answer names the map it is about, so a late answer for another map is never taken for this one's.
+    const answer = await this.#getJson<{ mapId: number; arrivals: MapArrival[] }>(`/api/maps/${requireMapId(mapId)}/arrivals`);
+    if (answer.mapId !== mapId)
+    {
+      throw new MapEditorApiError(`GET /api/maps/${mapId}/arrivals answered about map ${answer.mapId}`, 0);
+    }
+
+    return answer.arrivals;
   }
 
   async loadMapInfos(): Promise<(RmmzMapInfo | null)[]>

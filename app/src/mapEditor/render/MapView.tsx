@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Chip, Divider, Typography } from '@mui/material';
+import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { Camera, MapCell } from '../core/renderer/camera.ts';
 import { GAME_LOOK, type OverlayId } from '../core/renderer/MapRenderer.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
@@ -13,6 +14,7 @@ import {
 } from './mapViewSettings.ts';
 import { MapViewController } from './MapViewController.ts';
 import { whenMapDrawn } from './openTiming.ts';
+import { pickEvent } from './pickedEvent.ts';
 import { PixiMapRenderer } from './PixiMapRenderer.ts';
 import { projectImagesFor } from './projectImages.ts';
 import { installSpeedHooks, wantsSpeedHooks } from './speedHooks.ts';
@@ -25,7 +27,18 @@ type MapViewProps = {
    * The map to show.
    */
   readonly mapId: number;
+
+  /**
+   * The event to pick out once the map is open, such as the battler the data editor asked to see: it shows selected,
+   * and the view centres on it. Null, or left out, picks out nothing.
+   */
+  readonly pickedEventId?: number | null;
 };
+
+/**
+ * How far in the view sits when it centres on a picked event: the game's own scale.
+ */
+const PICKED_EVENT_ZOOM = 1;
 
 /**
  * What the status line under the map says.
@@ -44,7 +57,8 @@ const TOOL_OVERLAYS: readonly OverlayId[] = [ 'selection', 'hover', 'ghost' ];
 
 /**
  * Reads the map to open from a page's query string: the map editor page opens one straight away with {@code ?map=102},
- * so maps can be seen before the workspace shell mounts map views in its panels.
+ * alone across the whole window in place of the workspace, which is the view the speed script and the parity check
+ * measure.
  * @param {string} search The query string.
  * @returns {number | null} The map id, or null when none is asked for.
  */
@@ -75,17 +89,19 @@ const zoomLabel = (zoom: number): string =>
 /**
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
  * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look,
- * with a status line naming the zoom, the tile under the pointer and the GPU drawing it.
- * @param {MapViewProps} props The map to show.
+ * with a status line naming the zoom, the tile under the pointer and the GPU drawing it. An event picked out is shown
+ * selected, with the view centred on it.
+ * @param {MapViewProps} props The map to show, and the event to pick out.
  * @returns {React.JSX.Element} The view.
  */
 const MapView = (props: MapViewProps) =>
 {
-  const { mapId } = props;
+  const { mapId, pickedEventId = null } = props;
   const services = useMapEditorServices();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<PixiMapRenderer | null>(null);
   const controllerRef = useRef<MapViewController | null>(null);
+  const [ openMap, setOpenMap ] = useState<MapDocument | null>(null);
   const [ status, setStatus ] = useState<MapViewStatus>({ gpu: '', zoom: 1, cell: null, problem: null });
   const [ settings, setSettings ] = useState<MapViewSettings>({ visibility: GAME_LOOK, overlays: new Set(TOOL_OVERLAYS) });
 
@@ -173,6 +189,7 @@ const MapView = (props: MapViewProps) =>
         speedTimings['openedAt'] = performance.now();
         if (map !== null)
         {
+          setOpenMap(map);
           setStatus(current => ({ ...current, problem: null }));
         }
       })
@@ -181,6 +198,24 @@ const MapView = (props: MapViewProps) =>
         setStatus(current => ({ ...current, problem: `Map ${mapId} could not be opened: ${String(error)}` }));
       });
   }, [ mapId ]);
+
+  // pick out the event asked for once the map is open, and again whenever another is asked for; only a new pick moves
+  // the view, so panning away from it afterwards is never undone.
+  useEffect(() =>
+  {
+    const renderer = rendererRef.current;
+    if (renderer === null || openMap === null)
+    {
+      return;
+    }
+
+    const picked = pickEvent(openMap, pickedEventId);
+    renderer.setOverlayState(picked.overlay);
+    if (picked.cell !== null)
+    {
+      renderer.lookAt(picked.cell, PICKED_EVENT_ZOOM);
+    }
+  }, [ openMap, pickedEventId ]);
 
   // hand the renderer the switches, the modules' overlays and their passability rules.
   useEffect(() =>

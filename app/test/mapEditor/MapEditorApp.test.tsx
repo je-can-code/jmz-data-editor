@@ -14,11 +14,15 @@ import { documentLabel } from '../../src/mapEditor/views/documentLabels.ts';
 import type { MapEditorView } from '../../src/mapEditor/views/mapEditorViews.ts';
 import { buildMapJson } from './support/fixtures.ts';
 
+// the workspace lays itself out with a docking engine a test page cannot measure; its own tests cover it.
+vi.mock('../../src/mapEditor/workspace/Workspace.tsx', () => ({
+  Workspace: () => <div data-testid={'map-editor-workspace'}>The workspace</div>,
+}));
+
 /*
- * The map editor's window shows one of two things, decided by its URL: the workspace, empty until the workspace
- * shell arrives, or one event's window. The app owes the window the right one, a way back to the data editor from
- * the workspace (opened through the window shell, so under NW.js it gets its own process), and a loud failure for
- * any component that reaches for the services outside their provider.
+ * The map editor's window shows one of two things, decided by its URL: the workspace, or one event's window. The
+ * app owes the window the right one, and a loud failure for any component that reaches for the services outside
+ * their provider.
  *
  * Above either view it owes the author every conflict, visibly and at once: a document whose two copies disagree
  * (the file on disk and this window's, or another window's and this one's) is shown with both choices, and
@@ -48,7 +52,7 @@ describe('MapEditorApp', () =>
     return { openWindow, hub, resolveConflict };
   };
 
-  it('shows the empty workspace under the app\'s name, and no conflict', () =>
+  it('shows the workspace for a workspace view, and no conflict', () =>
   {
     // Arrange: nothing beyond the render below.
 
@@ -56,25 +60,8 @@ describe('MapEditorApp', () =>
     renderApp({ kind: 'workspace' });
 
     // Assert.
-    expect(screen.getByText('jmz-map-editor'))
-      .toBeInTheDocument();
-    expect(screen.getByTestId('map-editor-workspace'))
-      .toHaveTextContent('No map open');
-    expect(screen.queryByTestId('document-conflict'))
-      .toBeNull();
-  });
-
-  it('opens the data editor from the workspace through the window shell', () =>
-  {
-    // Arrange.
-    const { openWindow } = renderApp({ kind: 'workspace' });
-
-    // Act.
-    fireEvent.click(screen.getByRole('button', { name: 'Data editor' }));
-
-    // Assert.
-    expect(openWindow.mock.calls)
-      .toStrictEqual([ [ '', 'jmz-data-editor', 'popup,width=1600,height=1000' ] ]);
+    expect([ screen.getByTestId('map-editor-workspace').textContent, screen.queryByTestId('document-conflict') ])
+      .toStrictEqual([ 'The workspace', null ]);
   });
 
   it('shows an event window for an event view', () =>
