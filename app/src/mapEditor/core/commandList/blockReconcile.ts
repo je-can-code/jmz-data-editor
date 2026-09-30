@@ -1,6 +1,7 @@
+import type { JsonValue } from '../model/json.ts';
 import type { RmmzEventCommand } from '../model/rmmzTypes.ts';
 import { textList } from '../commands/builtin/phrases.ts';
-import { writeParameter } from '../commands/fieldValues.ts';
+import { writeParameter, type ListOrigins } from '../commands/fieldValues.ts';
 import {
   END_CODE,
   locateCommands,
@@ -20,9 +21,16 @@ const WHEN_CANCEL = 403;
 const END_CHOICES = 404;
 
 /**
- * What a Show Choices' cancel setting holds when cancelling has a branch of its own.
+ * What a Show Choices' cancel setting holds when cancelling has a branch of its own, and when cancelling does
+ * nothing.
  */
 const CANCEL_BRANCH = -2;
+const CANCEL_DISALLOWED = -1;
+
+/**
+ * What a Show Choices' default setting holds when no choice is highlighted first.
+ */
+const NO_DEFAULT = -1;
 
 /**
  * The parameters MZ writes on a cancel branch: 6, from the days of six choices at most, and nothing.
@@ -71,27 +79,45 @@ const segmentCommands = (list: readonly RmmzEventCommand[], segment: BlockSegmen
 };
 
 /**
- * Builds the branches a Show Choices' own settings call for: one per choice, keeping each existing branch (and
- * everything under it) by its choice number with its text brought up to date, then a cancel branch when cancelling
- * has one. A branch whose choice is gone goes with it, as in MZ.
+ * Finds the choice an entry of the edited choices was before the edit: the one at its own place when nothing says
+ * otherwise, the one its origin names, or none for a choice just added.
+ * @param {number} choice The entry's place in the edited choices.
+ * @param {ListOrigins | undefined} origins Where each entry came from, when the choices were reshaped.
+ * @returns {number | null} The choice it was, or null when it is new.
+ */
+const originOf = (choice: number, origins: ListOrigins | undefined): number | null =>
+{
+  return origins === undefined
+    ? choice
+    : origins[choice] ?? null;
+};
+
+/**
+ * Builds the branches a Show Choices' own settings call for: one per choice, each keeping the branch (and everything
+ * under it) of the choice it was before the edit, renumbered and with its text brought up to date, then a cancel
+ * branch when cancelling has one. A branch whose choice is gone goes with it, as in MZ.
  * @param {readonly RmmzEventCommand[]} list The list.
  * @param {CommandBlockNode} block The Show Choices block.
+ * @param {ListOrigins | undefined} origins Where each choice came from, when the choices were reshaped; by place without.
  * @returns {RmmzEventCommand[]} The branches, in order.
  */
-const choiceBranches = (list: readonly RmmzEventCommand[], block: CommandBlockNode): RmmzEventCommand[] =>
+const choiceBranches = (list: readonly RmmzEventCommand[], block: CommandBlockNode, origins: ListOrigins | undefined): RmmzEventCommand[] =>
 {
   const [ choicesValue, cancelType ] = list[block.start].parameters;
   const branches = block.segments.slice(1);
   const built = textList(choicesValue).flatMap((text, choice) =>
   {
-    const existing = branches.find(segment => list[segment.head].code === WHEN_CHOICE && list[segment.head].parameters[0] === choice);
+    const origin = originOf(choice, origins);
+    const existing = origin === null
+      ? undefined
+      : branches.find(segment => list[segment.head].code === WHEN_CHOICE && list[segment.head].parameters[0] === origin);
     if (existing === undefined)
     {
       return emptyBranch(WHEN_CHOICE, block.indent, [ choice, text ]);
     }
 
     const [ head, ...rest ] = segmentCommands(list, existing);
-    return [ { ...head, parameters: writeParameter(head.parameters, [ 1 ], text) }, ...rest ];
+    return [ { ...head, parameters: writeParameter(writeParameter(head.parameters, [ 0 ], choice), [ 1 ], text) }, ...rest ];
   });
 
   if (cancelType !== CANCEL_BRANCH)
@@ -104,6 +130,54 @@ const choiceBranches = (list: readonly RmmzEventCommand[], block: CommandBlockNo
     ...built,
     ...(cancel === undefined ? emptyBranch(WHEN_CANCEL, block.indent, CANCEL_PARAMETERS) : segmentCommands(list, cancel)),
   ];
+};
+
+/**
+ * Moves one of a Show Choices' choice settings (cancel, or the choice highlighted first) to follow the choice it
+ * named through a reshape. A setting that names no choice stays; one naming an empty slot past the last choice
+ * becomes what the game already does with it; one naming a choice that went falls back.
+ * @param {JsonValue} setting The setting as stored.
+ * @param {ListOrigins} origins Where each choice came from.
+ * @param {number} before How many choices there were before the reshape.
+ * @param {number} stray What an empty slot past the last choice amounts to in the game.
+ * @param {number} fallback What the setting becomes when its choice went.
+ * @returns {JsonValue} The setting, following its choice.
+ */
+const followChoice = (setting: JsonValue, origins: ListOrigins, before: number, stray: number, fallback: number): JsonValue =>
+{
+  if (typeof setting !== 'number' || setting < 0)
+  {
+    return setting;
+  }
+
+  if (setting >= before)
+  {
+    return stray;
+  }
+
+  const moved = origins.indexOf(setting);
+  return moved === -1
+    ? fallback
+    : moved;
+};
+
+/**
+ * Moves a Show Choices' cancel and default settings to follow the choices they named when its choices were
+ * reshaped (one removed from the middle, one added), as its own editor does. Cancel naming a removed choice then
+ * does nothing, and a default naming one highlights nothing. The game runs a cancel naming an empty slot as the
+ * cancel branch and highlights nothing for such a default, so those are written as exactly that, where a new choice
+ * can never take them over.
+ * @param {RmmzEventCommand} opener The Show Choices command, its choices already edited.
+ * @param {ListOrigins} origins Where each choice came from.
+ * @param {number} before How many choices it had before the edit.
+ * @returns {RmmzEventCommand} The command, its settings following their choices.
+ */
+const followChoices = (opener: RmmzEventCommand, origins: ListOrigins, before: number): RmmzEventCommand =>
+{
+  const [ texts, cancelType, defaultType, ...rest ] = opener.parameters;
+  const cancel = followChoice(cancelType, origins, before, CANCEL_BRANCH, CANCEL_DISALLOWED);
+  const highlighted = followChoice(defaultType, origins, before, NO_DEFAULT, NO_DEFAULT);
+  return { ...opener, parameters: [ texts, cancel, highlighted, ...rest ] };
 };
 
 /**
@@ -161,12 +235,17 @@ const battleBranches = (list: readonly RmmzEventCommand[], start: number, block:
  *
  * The runs of Show Choices that HIME_LargeChoices merges into one list are separate blocks here, each with its own
  * choice numbers, so reconciling one never touches the next.
+ *
+ * Branches follow their choices by place unless the edit says where each choice came from: a choice removed from
+ * the middle takes its own branch with it, the later choices keep theirs, and the cancel and default settings follow
+ * the choices they named.
  * @param {readonly RmmzEventCommand[]} list The list, with the opener already edited.
  * @param {CommandStructure} structure How commands nest.
  * @param {number} index The opener's index.
+ * @param {ListOrigins} origins Where each of a Show Choices' choices came from, when the edit reshaped them.
  * @returns {RmmzEventCommand[]} The list with the block's branches in line.
  */
-const reconcileBlock = (list: readonly RmmzEventCommand[], structure: CommandStructure, index: number): RmmzEventCommand[] =>
+const reconcileBlock = (list: readonly RmmzEventCommand[], structure: CommandStructure, index: number, origins?: ListOrigins): RmmzEventCommand[] =>
 {
   const { code } = list[index];
   if (code !== SHOW_CHOICES && code !== BATTLE)
@@ -189,9 +268,17 @@ const reconcileBlock = (list: readonly RmmzEventCommand[], structure: CommandStr
   }
 
   // a Show Choices that never closed is left as it is, rather than guessed at.
-  return block === null
-    ? [ ...list ]
-    : replaceRange(list, index + 1, block.closer, choiceBranches(list, block));
+  if (block === null)
+  {
+    return [ ...list ];
+  }
+
+  // the branches still stand as they were before the edit, so they say how many choices there were.
+  const before = block.segments.filter(segment => list[segment.head].code === WHEN_CHOICE).length;
+  const opened = origins === undefined
+    ? list
+    : replaceRange(list, index, index + 1, [ followChoices(list[index], origins, before) ]);
+  return replaceRange(opened, index + 1, block.closer, choiceBranches(opened, block, origins));
 };
 
 /**

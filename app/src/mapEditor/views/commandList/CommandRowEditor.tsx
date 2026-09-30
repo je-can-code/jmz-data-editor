@@ -8,7 +8,7 @@ import type {
   CommandEditorProps,
   CommandEditorRegistry,
 } from '../../core/commands/CommandEditorRegistry.ts';
-import type { CommandDraft } from '../../core/commands/fieldValues.ts';
+import type { CommandDraft, ListOrigins } from '../../core/commands/fieldValues.ts';
 import type { DatabaseNamesJson } from '../../core/commandList/databaseNames.ts';
 import { chooseRowEditor } from '../../core/commandList/rowEditors.ts';
 import type { SoundPlayer } from './commandListResources.ts';
@@ -30,7 +30,11 @@ type ElseBranchControl = {
 type CommandRowEditorProps = {
   readonly entry: CommandCatalogEntry;
   readonly draft: CommandDraft;
-  readonly onChange: (draft: CommandDraft) => void;
+
+  /**
+   * Takes the edited command; when the generated form reshaped a list input, also where each entry came from.
+   */
+  readonly onChange: (draft: CommandDraft, origins?: ListOrigins) => void;
 
   /**
    * The whole block, for the hand-built editors that change a block's shape (Show Choices, Conditional Branch).

@@ -332,6 +332,31 @@ describe('CommandListEditor', () =>
         ]);
     });
 
+    it('keeps each branch with its own choice when the edit says a choice was removed from the front', () =>
+    {
+      // Arrange: Buy and Sell, each saying so; Buy removed, so Sell slides into its place.
+      const { editor } = build([
+        cmd(102, 0, [ [ 'Buy', 'Sell' ], -1, 0, 2, 0 ]),
+        cmd(402, 0, [ 0, 'Buy' ]), cmd(101, 1, [ '', 0, 0, 2, '' ]), cmd(401, 1, [ 'You chose to BUY.' ]), cmd(0, 1),
+        cmd(402, 0, [ 1, 'Sell' ]), cmd(101, 1, [ '', 0, 0, 2, '' ]), cmd(401, 1, [ 'You chose to SELL.' ]), cmd(0, 1),
+        cmd(404, 0),
+        cmd(0, 0),
+      ]);
+      const draft = { command: cmd(102, 0, [ [ 'Sell' ], -1, 0, 2, 0 ]), continuation: [] };
+
+      // Act.
+      editor.edit(0, draft, [ 1 ]);
+
+      // Assert: "When Sell" still says so, and Buy's message went with Buy.
+      expect(editor.commands())
+        .toStrictEqual([
+          cmd(102, 0, [ [ 'Sell' ], -1, -1, 2, 0 ]),
+          cmd(402, 0, [ 0, 'Sell' ]), cmd(101, 1, [ '', 0, 0, 2, '' ]), cmd(401, 1, [ 'You chose to SELL.' ]), cmd(0, 1),
+          cmd(404, 0),
+          cmd(0, 0),
+        ]);
+    });
+
     it('records nothing when the edit changes nothing', () =>
     {
       // Arrange.

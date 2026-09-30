@@ -1035,9 +1035,9 @@ const CommandList = (props: CommandListProps) =>
       <CommandRowEditor
         entry={editor.entryAt(index)}
         draft={draft}
-        onChange={next => run(() =>
+        onChange={(next, origins) => run(() =>
         {
-          editor.edit(index, next);
+          editor.edit(index, next, origins);
           keepOpenAt(index);
         })}
         block={block}

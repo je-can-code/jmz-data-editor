@@ -325,6 +325,29 @@ describe('CommandList', () =>
       .toStrictEqual([ 'choices of 8', [ 102, 402, 0, 402, 0, 404 ], true ]);
   });
 
+  it('keeps Sell\'s commands under Sell when the generated form removes Buy from before it', async () =>
+  {
+    // Arrange: Buy and Sell, each branch waiting its own time, edited in the generated form.
+    const { hub } = await renderList();
+    act(() =>
+    {
+      hub.edit('Shop', [ eventHistoryKey(1, 1) ], tx => tx.splice('map:1', PATH, 0, 0, [
+        cmd(102, 0, [ [ 'Buy', 'Sell' ], -1, 0, 2, 0 ]),
+        cmd(402, 0, [ 0, 'Buy' ]), cmd(230, 1, [ 11 ]), cmd(0, 1),
+        cmd(402, 0, [ 1, 'Sell' ]), cmd(230, 1, [ 22 ]), cmd(0, 1),
+        cmd(404, 0),
+      ] as never));
+    });
+    fireEvent.click(screen.getByText('Choices: Buy / Sell (cannot cancel)'));
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove #1' }));
+
+    // Assert.
+    expect(commandsOf(hub).slice(0, 5))
+      .toStrictEqual([ cmd(102, 0, [ [ 'Sell' ], -1, -1, 2, 0 ]), cmd(402, 0, [ 0, 'Sell' ]), cmd(230, 1, [ 22 ]), cmd(0, 1), cmd(404, 0) ]);
+  });
+
   it('plays a command\'s sound through the window\'s player', async () =>
   {
     // Arrange.

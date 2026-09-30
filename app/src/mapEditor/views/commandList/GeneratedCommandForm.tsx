@@ -12,6 +12,7 @@ import {
   lineValues,
   removeContinuationLine,
   type CommandDraft,
+  type ListOrigins,
 } from '../../core/commands/fieldValues.ts';
 import type { DatabaseNamesJson } from '../../core/commandList/databaseNames.ts';
 import type { JsonValue } from '../../core/model/json.ts';
@@ -24,7 +25,11 @@ import { FieldControl, isWideField } from './FieldControl.tsx';
 type GeneratedCommandFormProps = {
   readonly entry: CommandCatalogEntry;
   readonly draft: CommandDraft;
-  readonly onChange: (draft: CommandDraft) => void;
+
+  /**
+   * Takes the edited command; when a list input changed, also where each of its entries came from.
+   */
+  readonly onChange: (draft: CommandDraft, origins?: ListOrigins) => void;
   readonly names: DatabaseNamesJson | null;
   readonly api: MapEditorApi | null;
   readonly playSound: SoundPlayer;
@@ -38,7 +43,7 @@ type GeneratedCommandFormProps = {
 const FieldGrid = (props: {
   readonly fields: readonly CommandField[];
   readonly values: FieldValues;
-  readonly onField: (key: string, value: JsonValue) => void;
+  readonly onField: (key: string, value: JsonValue, origins?: ListOrigins) => void;
   readonly shared: Pick<GeneratedCommandFormProps, 'names' | 'api' | 'playSound'>;
 }) =>
 {
@@ -53,7 +58,7 @@ const FieldGrid = (props: {
     <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 1.5, alignItems: 'start' }}>
       {shown.map(field => (
         <Box key={field.key} sx={{ gridColumn: isWideField(field) ? '1 / -1' : undefined }}>
-          <FieldControl {...shared} field={field} value={values[field.key]} onChange={value => onField(field.key, value)}/>
+          <FieldControl {...shared} field={field} value={values[field.key]} onChange={(value, origins) => onField(field.key, value, origins)}/>
         </Box>
       ))}
     </Box>
@@ -78,7 +83,7 @@ const GeneratedCommandForm = (props: GeneratedCommandFormProps) =>
       <FieldGrid
         fields={entry.fields}
         values={formValues(entry, draft)}
-        onField={(key, value) => onChange(applyFieldChange(entry, draft, key, value))}
+        onField={(key, value, origins) => onChange(applyFieldChange(entry, draft, key, value), origins)}
         shared={shared}
       />
       {lineFields.length > 0 && (

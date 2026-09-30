@@ -1,7 +1,7 @@
 import type { CommandCatalogEntry } from '../commands/catalogTypes.ts';
 import type { CommandCatalog } from '../commands/CommandCatalog.ts';
 import { blockSpanAt, type CommandSpan } from '../commands/editors/blockSpan.ts';
-import type { CommandDraft } from '../commands/fieldValues.ts';
+import type { CommandDraft, ListOrigins } from '../commands/fieldValues.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import type { HistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
@@ -284,16 +284,18 @@ class CommandListEditor
    * its opener (a choice added or removed, a battle's outcomes switched on or off).
    * @param {number} index The command's index.
    * @param {CommandDraft} draft The edited command and lines; the command keeps its indent.
+   * @param {ListOrigins} origins Where each of a Show Choices' choices came from, when the edit reshaped them, so
+   * each branch goes with its own choice; by place without.
    * @returns {HistoryStep | null} The step, or null when nothing changed.
    */
-  edit(index: number, draft: CommandDraft): HistoryStep | null
+  edit(index: number, draft: CommandDraft, origins?: ListOrigins): HistoryStep | null
   {
     const list = this.commands();
     const current = this.draftAt(index);
     const { indent } = current.command;
     const placed = [ draft.command, ...draft.continuation ].map(command => ({ ...command, indent }));
     const replaced = replaceRange(list, index, index + 1 + current.continuation.length, placed);
-    const reconciled = reconcileBlock(replaced, this.structure, index);
+    const reconciled = reconcileBlock(replaced, this.structure, index, origins);
     return this.#commit(`Edit ${this.#catalog.resolve(draft.command).name}`, reconciled);
   }
 

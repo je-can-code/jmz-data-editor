@@ -18,6 +18,7 @@ import {
 import { Add, Close, PlayArrow } from '@mui/icons-material';
 import type { AudioFolder, MapEditorApi } from '../../core/api/MapEditorApi.ts';
 import type { CommandField, CommandFieldKind } from '../../core/commands/catalogTypes.ts';
+import type { ListOrigins } from '../../core/commands/fieldValues.ts';
 import { isNamedKind, namedRows, type DatabaseNamesJson } from '../../core/commandList/databaseNames.ts';
 import { isJsonObject, type JsonValue } from '../../core/model/json.ts';
 import { CommitTextField } from './CommitTextField.tsx';
@@ -29,7 +30,12 @@ import type { SoundPlayer } from './commandListResources.ts';
 type FieldControlProps = {
   readonly field: CommandField;
   readonly value: JsonValue | undefined;
-  readonly onChange: (value: JsonValue) => void;
+
+  /**
+   * Takes the new value; a list's control also says where each entry came from, so what follows a list's entries
+   * (Show Choices' branches) can follow them through a removal.
+   */
+  readonly onChange: (value: JsonValue, origins?: ListOrigins) => void;
   readonly names: DatabaseNamesJson | null;
   readonly api: MapEditorApi | null;
   readonly playSound: SoundPlayer;
@@ -450,7 +456,9 @@ const JsonControl = (props: FieldControlProps) =>
 };
 
 /**
- * Edits a list of texts (choices) one per line, with rows added and taken away. Any other list edits as JSON.
+ * Edits a list of texts (choices) one per line, with rows added and taken away. Every change says where each entry
+ * came from, so a choice removed from the middle takes its own branch with it rather than handing it to the choice
+ * sliding into its place. Any other list edits as JSON.
  * @param {FieldControlProps} props The control's props.
  * @returns {React.JSX.Element} The control.
  */
@@ -463,6 +471,7 @@ const ListControl = (props: FieldControlProps) =>
   }
 
   const texts = value as string[];
+  const places = texts.map((_, at) => at);
   return (
     <Stack spacing={1}>
       <Box sx={{ typography: 'caption', color: 'text.secondary' }}>{field.label}</Box>
@@ -473,15 +482,19 @@ const ListControl = (props: FieldControlProps) =>
             fullWidth
             label={`#${position + 1}`}
             value={text}
-            onCommit={next => onChange(texts.map((each, at) => (at === position ? next : each)))}
+            onCommit={next => onChange(texts.map((each, at) => (at === position ? next : each)), places)}
           />
-          <IconButton aria-label={`Remove #${position + 1}`} size={'small'} onClick={() => onChange(texts.filter((_, at) => at !== position))}>
+          <IconButton
+            aria-label={`Remove #${position + 1}`}
+            size={'small'}
+            onClick={() => onChange(texts.filter((_, at) => at !== position), places.filter(at => at !== position))}
+          >
             <Close fontSize={'small'}/>
           </IconButton>
         </Stack>
       ))}
       <Box>
-        <Button size={'small'} startIcon={<Add/>} onClick={() => onChange([ ...texts, '' ])}>
+        <Button size={'small'} startIcon={<Add/>} onClick={() => onChange([ ...texts, '' ], [ ...places, null ])}>
           Add
         </Button>
       </Box>

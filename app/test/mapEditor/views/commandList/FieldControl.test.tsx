@@ -260,7 +260,7 @@ describe('FieldControl', () =>
       .toStrictEqual([ true, null ]);
   });
 
-  it('edits a list of choices, adding and taking rows away', () =>
+  it('edits a list of choices, adding and taking rows away, saying where each entry came from', () =>
   {
     // Arrange.
     const { onChange } = renderControl({ key: 'choices', label: 'Choices', param: [ 0 ], kind: 'list' }, [ 'Yes', 'No' ]);
@@ -272,9 +272,9 @@ describe('FieldControl', () =>
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     fireEvent.click(screen.getByRole('button', { name: 'Remove #1' }));
 
-    // Assert.
+    // Assert: removing the first says the one left was the second.
     expect(onChange.mock.calls)
-      .toStrictEqual([ [ [ 'Yes', 'Never' ] ], [ [ 'Yes', 'No', '' ] ], [ [ 'No' ] ] ]);
+      .toStrictEqual([ [ [ 'Yes', 'Never' ], [ 0, 1 ] ], [ [ 'Yes', 'No', '' ], [ 0, 1, null ] ], [ [ 'No' ], [ 1 ] ] ]);
   });
 
   it('edits anything else as JSON, refusing text that is not JSON', () =>

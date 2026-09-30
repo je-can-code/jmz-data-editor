@@ -13,6 +13,14 @@ type CommandDraft = {
 };
 
 /**
+ * Where each entry of a list field came from when the field changed: the entry's place before the change, or null
+ * for one just added. Removing the first of three texts gives {@code [1, 2]}; adding one gives {@code [0, 1, 2,
+ * null]}. A block whose branches follow such a list (Show Choices' branches follow its choices) needs it, since the
+ * texts alone cannot say whether a choice was removed or two were renamed.
+ */
+type ListOrigins = readonly (number | null)[];
+
+/**
  * Reads the text one line holds at a path, as text.
  * @param {RmmzEventCommand} line The line.
  * @param {CommandParamPath} path Where its text sits in its parameters.
@@ -423,4 +431,4 @@ export {
   writeFieldValue,
   writeParameter,
 };
-export type { CommandDraft };
+export type { CommandDraft, ListOrigins };

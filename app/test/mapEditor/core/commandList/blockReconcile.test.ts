@@ -76,6 +76,65 @@ describe('blockReconcile', () =>
         .toStrictEqual([ '102@0', '402@0 Sure', '230@1', '0@1', '404@0', '0@0' ]);
     });
 
+    /**
+     * Buy, Sell and Rent, each branch waiting its own number of frames, cancel picking Rent and Sell highlighted.
+     * @param {unknown[]} parameters The opener's parameters after the edit.
+     * @returns {RmmzEventCommand[]} The list, the opener edited and the branches as they were.
+     */
+    const shopWith = (parameters: unknown[]): RmmzEventCommand[] => [
+      cmd(102, 0, parameters as never),
+      cmd(402, 0, [ 0, 'Buy' ]), cmd(230, 1, [ 11 ]), cmd(0, 1),
+      cmd(402, 0, [ 1, 'Sell' ]), cmd(230, 1, [ 22 ]), cmd(0, 1),
+      cmd(402, 0, [ 2, 'Rent' ]), cmd(230, 1, [ 33 ]), cmd(0, 1),
+      cmd(404, 0),
+      cmd(0, 0),
+    ];
+
+    it('keeps every branch with its own choice when a choice is removed from the middle, renumbering the later ones', () =>
+    {
+      // Arrange: Sell removed, so Rent slides up into its place.
+      const list = shopWith([ [ 'Buy', 'Rent' ], 2, 1, 2, 0 ]);
+
+      // Act.
+      const reconciled = reconcileBlock(list, MZ_STRUCTURE, 0, [ 0, 2 ]);
+
+      // Assert: Rent runs its own wait, numbered 1 now, and Sell's wait went with it.
+      expect(reconciled.slice(1, 7))
+        .toStrictEqual([
+          cmd(402, 0, [ 0, 'Buy' ]), cmd(230, 1, [ 11 ]), cmd(0, 1),
+          cmd(402, 0, [ 1, 'Rent' ]), cmd(230, 1, [ 33 ]), cmd(0, 1),
+        ]);
+    });
+
+    it('moves cancel and the highlighted choice with their choices, falling back when theirs was removed', () =>
+    {
+      // Arrange: Sell removed; cancel picked Rent, and Sell was highlighted.
+      const list = shopWith([ [ 'Buy', 'Rent' ], 2, 1, 2, 0 ]);
+
+      // Act.
+      const reconciled = reconcileBlock(list, MZ_STRUCTURE, 0, [ 0, 2 ]);
+
+      // Assert: cancel still picks Rent, now at 1, and nothing is highlighted.
+      expect(reconciled[0].parameters)
+        .toStrictEqual([ [ 'Buy', 'Rent' ], 1, -1, 2, 0 ]);
+    });
+
+    it('writes a setting naming an empty slot as what the game does with it, so a new choice cannot take it over', () =>
+    {
+      // Arrange: a choice added; cancel named the empty fourth slot, the highlight the empty fifth.
+      const list = shopWith([ [ 'Buy', 'Sell', 'Rent', 'Lend' ], 3, 4, 2, 0 ]);
+
+      // Act.
+      const reconciled = reconcileBlock(list, MZ_STRUCTURE, 0, [ 0, 1, 2, null ]);
+
+      // Assert: cancel runs the cancel branch (which it gains), nothing is highlighted, and Lend starts empty.
+      expect([ reconciled[0].parameters, describeList(reconciled.slice(10)) ])
+        .toStrictEqual([
+          [ [ 'Buy', 'Sell', 'Rent', 'Lend' ], -2, -1, 2, 0 ],
+          [ '402@0 Lend', '0@1', '403@0', '0@1', '404@0', '0@0' ],
+        ]);
+    });
+
     it('adds a cancel branch when cancelling gets one', () =>
     {
       // Arrange: a Show Choices with no cancel branch, switched to have one.
