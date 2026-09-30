@@ -263,7 +263,9 @@ const IdControl = (props: FieldControlProps) =>
 };
 
 /**
- * Picks the character a command acts on: the player, the event running it, or another event by id.
+ * Picks the character a command acts on: the player, the event running it, or another event by id. A field whose
+ * lowest id is this event (Set Event Location only ever moves events) leaves the player out, unless the command
+ * already names the player, which stays offered so showing the control never changes the command.
  * @param {FieldControlProps} props The control's props.
  * @returns {React.JSX.Element} The control.
  */
@@ -272,6 +274,7 @@ const CharacterControl = (props: FieldControlProps) =>
   const { field, value, onChange } = props;
   const labelId = useId();
   const id = numberOf(value) ?? 0;
+  const offersPlayer = (field.min ?? -1) < 0 || id < 0;
   let choice = 'event';
   if (id < 0)
   {
@@ -296,7 +299,7 @@ const CharacterControl = (props: FieldControlProps) =>
             onChange(picked);
           }}
         >
-          <MenuItem value={'player'}>Player</MenuItem>
+          {offersPlayer && <MenuItem value={'player'}>Player</MenuItem>}
           <MenuItem value={'self'}>This Event</MenuItem>
           <MenuItem value={'event'}>Another event</MenuItem>
         </Select>

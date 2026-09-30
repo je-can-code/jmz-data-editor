@@ -202,6 +202,32 @@ describe('FieldControl', () =>
       .toStrictEqual([ '5', [ [ -1 ], [ 0 ] ] ]);
   });
 
+  it('leaves the player out of a character field that starts at this event, as Set Event Location does', () =>
+  {
+    // Arrange: an event field whose lowest id is this event.
+    renderControl({ key: 'character', label: 'Event', param: [ 0 ], kind: 'event', min: 0 }, 0);
+
+    // Act.
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Event' }));
+
+    // Assert.
+    expect(screen.getAllByRole('option').map(option => option.textContent))
+      .toStrictEqual([ 'This Event', 'Another event' ]);
+  });
+
+  it('still offers the player in such a field when the command already names the player', () =>
+  {
+    // Arrange: a command another tool wrote with the player in it.
+    renderControl({ key: 'character', label: 'Event', param: [ 0 ], kind: 'event', min: 0 }, -1);
+
+    // Act.
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Event' }));
+
+    // Assert.
+    expect(screen.getAllByRole('option').map(option => option.textContent))
+      .toStrictEqual([ 'Player', 'This Event', 'Another event' ]);
+  });
+
   it('edits a sound\'s name and volume, and plays it as the game would', () =>
   {
     // Arrange.

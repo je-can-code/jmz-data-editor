@@ -111,13 +111,13 @@ const MOVEMENT_ENTRIES: readonly CommandCatalogEntry[] = [
     category: 'Movement',
     keywords: [ 'event', 'move', 'place', 'position', 'swap', 'relocate', 'teleport event' ],
     fields: [
-      field('character', 'Event', 0, 'event', { default: 0 }),
+      field('character', 'Event', 0, 'event', { default: 0, min: 0 }),
       field('designation', 'Location', 1, 'select', { options: EVENT_LOCATION_DESIGNATIONS, default: 0 }),
       field('x', 'X', 2, 'number', { min: 0, default: 0, visibleWhen: { field: 'designation', equals: 0 } }),
       field('y', 'Y', 3, 'number', { min: 0, default: 0, visibleWhen: { field: 'designation', equals: 0 } }),
       field('xVariable', 'X from', 2, 'variable', { default: 1, visibleWhen: { field: 'designation', equals: 1 } }),
       field('yVariable', 'Y from', 3, 'variable', { default: 1, visibleWhen: { field: 'designation', equals: 1 } }),
-      field('other', 'Swap with', 2, 'event', { default: 0, visibleWhen: { field: 'designation', equals: 2 } }),
+      field('other', 'Swap with', 2, 'event', { default: 0, min: 0, visibleWhen: { field: 'designation', equals: 2 } }),
       field('direction', 'Direction', 4, 'select', { options: DIRECTIONS_OR_RETAIN, default: 0 }),
     ],
     sentence: parts =>

@@ -104,7 +104,8 @@ type CommandField = {
   readonly options?: readonly FieldOption[];
 
   /**
-   * The bounds of a number field.
+   * The bounds of a number field. On a character field, a lowest id of 0 (this event) leaves out the player,
+   * which the commands address as -1.
    */
   readonly min?: number;
   readonly max?: number;

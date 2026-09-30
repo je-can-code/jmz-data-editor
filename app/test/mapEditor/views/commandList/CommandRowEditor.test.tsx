@@ -202,4 +202,23 @@ describe('CommandRowEditor', () =>
     expect(onChange.mock.calls.map(([ changed ]) => changed.continuation.map(line => line.parameters)))
       .toStrictEqual([ [ [ 0, 2, 1, 75 ] ], [ [ 0, 2, 1, 50 ], [ 0, 1, 0, 0 ] ], [] ]);
   });
+
+  it('offers only events to move or swap with in Set Event Location, never the player, as MZ does', () =>
+  {
+    // Arrange: an event swapped with this event.
+    renderEditor(entryOf(203), { command: cmd(203, 0, [ 5, 2, 0, 0, 0 ]), continuation: [] });
+
+    // Act.
+    const offered = [ 'Event', 'Swap with' ].map(label =>
+    {
+      fireEvent.mouseDown(screen.getByRole('combobox', { name: label }));
+      const options = screen.getAllByRole('option').map(option => option.textContent);
+      fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
+      return options;
+    });
+
+    // Assert.
+    expect(offered)
+      .toStrictEqual([ [ 'This Event', 'Another event' ], [ 'This Event', 'Another event' ] ]);
+  });
 });
