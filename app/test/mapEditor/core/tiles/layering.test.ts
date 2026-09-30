@@ -373,6 +373,94 @@ describe('goes-on-top marks', () =>
   });
 });
 
+describe('tiles laid over the ground survive later strokes', () =>
+{
+  it('keep a marked tile on layer 2 when a decoration is painted, which lies over it on layer 3', () =>
+  {
+    // Arrange: grass under the marked cliff corner; and grass under tall grass, a decoration, for the near miss.
+    const marked = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, CLIFF_CORNER);
+    const decorated = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, kindTile(TALL_GRASS));
+    const layering = layeringWith([ CLIFF_CORNER ]);
+
+    // Act.
+    const overMarked = paintOne(marked, 0, 0, kindTile(FLOWERS), layering);
+    const overDecoration = paintOne(decorated, 0, 0, kindTile(FLOWERS), layering);
+
+    // Assert: the cliff corner stays; the tall grass, a decoration, is replaced as MZ does.
+    expect([ stackOf(overMarked, 0, 0), stackOf(overDecoration, 0, 0) ])
+      .toEqual([ [ 'k16', CLIFF_CORNER, 'k21', 0 ], [ 'k16', 'k21', 0, 0 ] ]);
+  });
+
+  it('keep an unmarked A tile somebody laid on layer 2 by hand, and give up when layer 3 is taken too', () =>
+  {
+    // Arrange: rock laid on layer 2 by hand; and the same with the cliff corner on layer 3.
+    const byHand = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, SOLID_ROCK);
+    const full = put({ width: 1, height: 1, cells: Uint16Array.from(byHand.cells) }, 0, 0, 2, CLIFF_CORNER);
+
+    // Act.
+    const over = paintOne(byHand, 0, 0, kindTile(FLOWERS));
+    const noRoom = paintTiles(full, [ { x: 0, y: 0, tileId: kindTile(FLOWERS) } ], layeringWith(), 'auto');
+
+    // Assert.
+    expect([ stackOf(over, 0, 0), noRoom, planPlacement(gridReader(full), 0, 0, kindTile(FLOWERS), layeringWith(), 'auto').landing ])
+      .toEqual([ [ 'k16', SOLID_ROCK, 'k21', 0 ], [], -1 ]);
+  });
+
+  it('keep a marked tile on layer 3 when B\'s empty tile clears the tile above it', () =>
+  {
+    // Arrange: the marked cliff corner on layer 3 under a tree.
+    const grid = put(put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 2, CLIFF_CORNER), 0, 0, 3, TREE);
+
+    // Act.
+    const after = paintOne(grid, 0, 0, 0, layeringWith([ CLIFF_CORNER ]));
+
+    // Assert.
+    expect(stackOf(after, 0, 0))
+      .toEqual([ 'k16', 0, CLIFF_CORNER, 0 ]);
+  });
+
+  it('move an A tile on layer 4 down when a B to E tile pushes, and give up when layer 3 holds one too', () =>
+  {
+    // Arrange: the cliff corner laid on layer 4; and rock on layer 3 below it.
+    const top = put(blankGrid(1, 1), 0, 0, 3, CLIFF_CORNER);
+    const both = put({ width: 1, height: 1, cells: Uint16Array.from(top.cells) }, 0, 0, 2, SOLID_ROCK);
+
+    // Act.
+    const pushed = paintOne(top, 0, 0, TREE);
+    const noRoom = paintTiles(both, [ { x: 0, y: 0, tileId: TREE } ], layeringWith(), 'auto');
+
+    // Assert.
+    expect([ stackOf(pushed, 0, 0), noRoom ])
+      .toEqual([ [ 0, 0, CLIFF_CORNER, TREE ], [] ]);
+  });
+
+  it('keep a tile laid on layer 3 when a marked tile finds layers 2 and 3 taken', () =>
+  {
+    // Arrange: grass, tall grass, and rock laid on layer 3.
+    const grid = put(put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, kindTile(TALL_GRASS)), 0, 0, 2, SOLID_ROCK);
+
+    // Act.
+    const changes = paintTiles(grid, [ { x: 0, y: 0, tileId: CLIFF_CORNER } ], layeringWith([ CLIFF_CORNER ]), 'auto');
+
+    // Assert.
+    expect(changes)
+      .toEqual([]);
+  });
+
+  it('lay a marked tile over a decoration on a cell with no ground, not beneath it', () =>
+  {
+    // Arrange: tall grass on layer 2 with nothing on layer 1.
+    const grid = put(blankGrid(1, 1), 0, 0, 1, kindTile(TALL_GRASS));
+
+    // Act.
+    const after = paintOne(grid, 0, 0, CLIFF_CORNER, layeringWith([ CLIFF_CORNER ]));
+
+    // Assert.
+    expect(stackOf(after, 0, 0))
+      .toEqual([ 0, 'k20', CLIFF_CORNER, 0 ]);
+  });
+});
+
 describe('manual layering and the one-stroke override', () =>
 {
   it('paints exactly the chosen layer, whatever the tile', () =>

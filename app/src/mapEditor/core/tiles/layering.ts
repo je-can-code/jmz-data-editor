@@ -55,18 +55,51 @@ type PlacementPlan = {
 };
 
 /**
+ * A plan that changes nothing: the tile finds no room in the cell.
+ */
+const NO_ROOM: PlacementPlan = { landing: -1, writes: [] };
+
+/**
+ * Reports whether a tile above the ground layer is one automatic layering never deletes: an A-sheet tile laid over
+ * the ground by hand or by a "goes on top" mark. Only a decoration auto mode itself lays on layer 2 (an A2
+ * decoration, a Field tileset's paired column, an ocean overlay) may be replaced, and only while it is unmarked, the
+ * way MZ replaces one decoration with another. B to E tiles are never laid over; the stack handles them.
+ * @param {number} tileId The tile on the layer.
+ * @param {number} z The layer it is on, 1 to 3.
+ * @param {TilesetLayering} layering The tileset's mode and marks.
+ * @returns {boolean} True when automatic layering must keep the tile.
+ */
+const isLaidOver = (tileId: number, z: number, layering: TilesetLayering): boolean =>
+{
+  if (isASheetTile(tileId) === false)
+  {
+    return false;
+  }
+
+  // auto mode never puts an A tile on layer 3 or 4, so one there was laid by hand or by a mark.
+  if (z !== 1)
+  {
+    return true;
+  }
+
+  return isMarkedTile(layering.marks, tileId) || tileRole(tileId, layering.mode) === 'ground';
+};
+
+/**
  * Plans a B to E tile: a two-slot stack on layers 3 and 4, newest on top, as MZ does it. Painting the tile already
- * on top changes nothing, and a third tile drops the oldest. Two choices this editor makes where MZ says nothing: a
- * free top slot is filled without pushing anything down, and the stack never pushes a B to E tile down over an
- * A-sheet tile on layer 3 (one layered there by hand or by a "goes on top" mark); the new tile replaces the top
- * instead, so painting a tree never deletes a cliff corner.
+ * on top changes nothing, and a third tile drops the oldest. Choices this editor makes where MZ says nothing: a free
+ * top slot is filled without pushing anything down, and the stack never deletes an A tile laid on layers 3 or 4
+ * (see {@link isLaidOver}). It never pushes a tile down over one on layer 3, replacing the top instead, so painting a
+ * tree never deletes a cliff corner; one on layer 4 moves down to layer 3 when pushed; and with A tiles on both, the
+ * B to E tile finds no room.
  * @param {TileReader} reader The map.
  * @param {number} x The column.
  * @param {number} y The row.
  * @param {number} tileId The B to E tile.
+ * @param {TilesetLayering} layering The tileset's mode and marks.
  * @returns {PlacementPlan} The plan.
  */
-const planUpperTile = (reader: TileReader, x: number, y: number, tileId: number): PlacementPlan =>
+const planUpperTile = (reader: TileReader, x: number, y: number, tileId: number, layering: TilesetLayering): PlacementPlan =>
 {
   const top = reader.tileAt(x, y, 3);
   const below = reader.tileAt(x, y, 2);
@@ -75,26 +108,35 @@ const planUpperTile = (reader: TileReader, x: number, y: number, tileId: number)
     return { landing: 3, writes: [] };
   }
 
-  if (top === 0 || isASheetTile(below))
+  if (top === 0)
   {
     return { landing: 3, writes: [ [ 3, tileId ] ] };
+  }
+
+  // an A tile on layer 3 is never pushed over: replace the top, unless the top is one too.
+  if (isLaidOver(below, 2, layering))
+  {
+    return isLaidOver(top, 3, layering)
+      ? NO_ROOM
+      : { landing: 3, writes: [ [ 3, tileId ] ] };
   }
 
   return { landing: 3, writes: [ [ 2, top ], [ 3, tileId ] ] };
 };
 
 /**
- * Plans a tile marked to go on top: on the ground layer when the cell has no ground, otherwise on the lowest free
- * layer above it, layer 2 and then layer 3. A cell that already holds the tile keeps it where it is. When layers 2
- * and 3 are both taken the tile replaces layer 3, the highest a marked tile goes, so what it covers stays beneath
- * it and the B to E tile on layer 4, if any, stays above.
+ * Plans a tile marked to go on top: on the ground layer when the cell has nothing on layers 1 and 2, otherwise on
+ * the lowest free layer above what is there, layer 2 and then layer 3, so it always lies over whatever it is painted
+ * on. A cell that already holds the tile keeps it where it is. When nothing above is free the tile replaces a B to
+ * E tile on layer 3, the highest a marked tile goes; if layer 3 holds an A tile laid there, it finds no room.
  * @param {TileReader} reader The map.
  * @param {number} x The column.
  * @param {number} y The row.
  * @param {number} tileId The marked tile.
+ * @param {TilesetLayering} layering The tileset's mode and marks.
  * @returns {PlacementPlan} The plan.
  */
-const planMarkedTile = (reader: TileReader, x: number, y: number, tileId: number): PlacementPlan =>
+const planMarkedTile = (reader: TileReader, x: number, y: number, tileId: number, layering: TilesetLayering): PlacementPlan =>
 {
   const already = TILE_LAYERS.find(z => isSameTile(reader.tileAt(x, y, z), tileId));
   if (already !== undefined)
@@ -102,34 +144,87 @@ const planMarkedTile = (reader: TileReader, x: number, y: number, tileId: number
     return { landing: already, writes: [] };
   }
 
-  const free = ([ 0, 1, 2 ] as const).find(z => reader.tileAt(x, y, z) === 0) ?? 2;
-  return { landing: free, writes: [ [ free, unshapedTile(tileId) ] ] };
+  // start above the highest of layers 1 and 2 that holds anything.
+  let lowest = 0;
+  if (reader.tileAt(x, y, 1) !== 0)
+  {
+    lowest = 2;
+  }
+  else if (reader.tileAt(x, y, 0) !== 0)
+  {
+    lowest = 1;
+  }
+
+  const free = ([ 0, 1, 2 ] as const).find(z => z >= lowest && reader.tileAt(x, y, z) === 0);
+  if (free !== undefined)
+  {
+    return { landing: free, writes: [ [ free, unshapedTile(tileId) ] ] };
+  }
+
+  return isLaidOver(reader.tileAt(x, y, 2), 2, layering)
+    ? NO_ROOM
+    : { landing: 2, writes: [ [ 2, unshapedTile(tileId) ] ] };
 };
 
 /**
- * Plans an A-sheet tile that is not marked, by the layer MZ's auto mode gives it. The ground goes on layer 1 and,
- * unlike MZ, which wipes every layer above, leaves layers 2 to 4 as they are, so repainting the ground under an
- * overlay or a tree keeps them. The A2 decorations go on layer 2 over whatever ground is there; on a Field tileset
- * a paired base column lays the column before it on layer 1 as well. Deep sea and the ocean decorations go on
- * layer 2 with the ocean filled in on layer 1.
- * @param {number} tileId The tile.
- * @param {number} mode The tileset's mode.
+ * Plans a decoration auto mode lays over the ground: an A2 decoration, a Field tileset's paired base column (with
+ * the column before it filled in on layer 1), or deep sea and the ocean decorations (with the ocean filled in on
+ * layer 1). It takes layer 2, replacing a decoration there as MZ does; a tile laid over the ground there is kept
+ * and the decoration lies over it on layer 3 instead, or finds no room when layer 3 is taken too.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {number} tileId The decoration.
+ * @param {TilesetLayering} layering The tileset's mode and marks.
  * @returns {PlacementPlan} The plan.
  */
-const planGroundOrOverlay = (tileId: number, mode: number): PlacementPlan =>
+const planDecoration = (reader: TileReader, x: number, y: number, tileId: number, layering: TilesetLayering): PlacementPlan =>
 {
   const tile = unshapedTile(tileId);
-  switch (tileRole(tileId, mode))
+  const companions: LayerWrite[] = [];
+  if (tileRole(tileId, layering.mode) === 'oceanOverlay')
   {
-    case 'oceanOverlay':
-      return { landing: 1, writes: [ [ 0, makeAutotileId(OCEAN_KIND, 0) ], [ 1, tile ] ] };
-    case 'overlay':
-      return isFieldPairedKind(autotileKind(tileId), mode)
-        ? { landing: 1, writes: [ [ 0, fieldBaseTile(tileId) ], [ 1, tile ] ] }
-        : { landing: 1, writes: [ [ 1, tile ] ] };
-    default:
-      return { landing: 0, writes: [ [ 0, tile ] ] };
+    companions.push([ 0, makeAutotileId(OCEAN_KIND, 0) ]);
   }
+  else if (isFieldPairedKind(autotileKind(tileId), layering.mode))
+  {
+    companions.push([ 0, fieldBaseTile(tileId) ]);
+  }
+
+  if (isLaidOver(reader.tileAt(x, y, 1), 1, layering) === false)
+  {
+    return { landing: 1, writes: [ ...companions, [ 1, tile ] ] };
+  }
+
+  return reader.tileAt(x, y, 2) === 0
+    ? { landing: 2, writes: [ ...companions, [ 2, tile ] ] }
+    : NO_ROOM;
+};
+
+/**
+ * Plans B's empty tile, which is how MZ clears layers 3 and 4. It clears the B to E tiles there and keeps any A tile
+ * laid there, which it could otherwise delete without anyone meaning to.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {TilesetLayering} layering The tileset's mode and marks.
+ * @returns {PlacementPlan} The plan.
+ */
+const planClearUpper = (reader: TileReader, x: number, y: number, layering: TilesetLayering): PlacementPlan =>
+{
+  const cleared = ([ 2, 3 ] as const).filter(z => isLaidOver(reader.tileAt(x, y, z), z, layering) === false);
+  return { landing: -1, writes: cleared.map(z => [ z, 0 ] as const) };
+};
+
+/**
+ * Plans the ground: layer 1, leaving what is above it as it is, so repainting the ground under an overlay or a tree
+ * keeps them, unlike MZ, which wipes every layer above.
+ * @param {number} tileId The ground tile.
+ * @returns {PlacementPlan} The plan.
+ */
+const planGround = (tileId: number): PlacementPlan =>
+{
+  return { landing: 0, writes: [ [ 0, unshapedTile(tileId) ] ] };
 };
 
 /**
@@ -157,17 +252,22 @@ const planPlacement = (reader: TileReader, x: number, y: number, tileId: number,
   const role = tileRole(tileId, layering.mode);
   if (role === 'clearUpper')
   {
-    return { landing: -1, writes: [ [ 2, 0 ], [ 3, 0 ] ] };
+    return planClearUpper(reader, x, y, layering);
   }
 
   if (role === 'upper')
   {
-    return planUpperTile(reader, x, y, tileId);
+    return planUpperTile(reader, x, y, tileId, layering);
   }
 
-  return isMarkedTile(layering.marks, tileId)
-    ? planMarkedTile(reader, x, y, tileId)
-    : planGroundOrOverlay(tileId, layering.mode);
+  if (isMarkedTile(layering.marks, tileId))
+  {
+    return planMarkedTile(reader, x, y, tileId, layering);
+  }
+
+  return role === 'ground'
+    ? planGround(tileId)
+    : planDecoration(reader, x, y, tileId, layering);
 };
 
 /**
