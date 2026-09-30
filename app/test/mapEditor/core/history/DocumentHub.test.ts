@@ -1066,6 +1066,105 @@ describe('DocumentHub', () =>
           [ ...source.lineage(MAP_A) ],
         ]);
     });
+
+    it('refuses as untracked an undo on a map re-opened from a disk copy whose pages moved, and changes nothing', () =>
+    {
+      // Arrange: the pair makes page 2 autorun; map 1 is closed, its first page is deleted on disk, and it re-opens
+      // from that file, which carries no record of the pair, so the page it changed now sits where page 3 was.
+      const hub = buildPagedHub();
+      hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.set(MAP_A, [ 'events', 1, 'pages', 1, 'trigger' ], 3);
+        tx.set(MAP_B, [ 'note' ], 'door');
+      });
+      const onDisk = fileOf(hub, MAP_A);
+      hub.release(MAP_A);
+      (onDisk.events[1] as RmmzMapEvent).pages.splice(0, 1);
+      hub.adopt(MAP_A, onDisk as unknown as JsonValue);
+      const histories = [ mapHistoryKey(1), mapHistoryKey(2) ];
+      const before = stateOf(hub, histories);
+
+      // Act.
+      const result = hub.undo(mapHistoryKey(2));
+
+      // Assert.
+      expect([
+        result.ok === false && result.reason,
+        result.ok === false && 'blockedBy' in result && result.blockedBy,
+        result.ok === false && 'message' in result && result.message,
+        triggersOf(hub),
+        stateOf(hub, histories),
+      ])
+        .toStrictEqual([
+          'untracked',
+          null,
+          'this window cannot tell what changed in map:1 after "Place door pair"',
+          [ 3, 3 ],
+          before,
+        ]);
+    });
+
+    it('refuses as untracked an undo on a map re-opened from a disk copy cropped by a column, and changes nothing', () =>
+    {
+      // Arrange: the pair paints water over the grass at (1, 0), beside the water at (2, 0); map 1 is closed, loses
+      // its left column on disk, and re-opens, so cell 1 now holds the water that was at (2, 0).
+      const grass = 2816;
+      const water = 2048;
+      const data = new Array<number>(3 * 2 * 6).fill(0);
+      [ grass, grass, water, grass, grass, grass ].forEach((tile, cell) =>
+      {
+        data[cell] = tile;
+      });
+      const hub = new DocumentHub({ clientId: 'window-a', now: () => 1000 });
+      hub.adopt(MAP_A, { ...buildMapJson(), data } as unknown as JsonValue);
+      hub.adopt(MAP_B, buildMapJson() as unknown as JsonValue);
+      hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.tiles(MAP_A, [ [ 1, water ] ]);
+        tx.set(MAP_B, [ 'note' ], 'door');
+      });
+      const onDisk = fileOf(hub, MAP_A);
+      hub.release(MAP_A);
+      const cropped: number[] = [];
+      for (let layer = 0; layer < 6; layer++)
+      {
+        for (let y = 0; y < 2; y++)
+        {
+          cropped.push(onDisk.data[(layer * 2 + y) * 3 + 1], onDisk.data[(layer * 2 + y) * 3 + 2]);
+        }
+      }
+      hub.adopt(MAP_A, { ...onDisk, width: 2, data: cropped } as unknown as JsonValue);
+      const histories = [ mapHistoryKey(1), mapHistoryKey(2) ];
+      const before = stateOf(hub, histories);
+
+      // Act.
+      const result = hub.undo(mapHistoryKey(2));
+
+      // Assert: refused, and the water that moved into cell 1, at (1, 0) now, stays water.
+      expect([ result.ok === false && result.reason, hub.map('map:1').cellAt(1, 0, 0), stateOf(hub, histories) ])
+        .toStrictEqual([ 'untracked', water, before ]);
+    });
+
+    it('undoes a pair on a map re-opened from a copy that carries its record of the pair', () =>
+    {
+      // Arrange: map 1 is closed and taken back from a copy made just before, which lists the pair as applied.
+      const hub = buildPagedHub();
+      hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.set(MAP_A, [ 'events', 1, 'pages', 1, 'trigger' ], 3);
+        tx.set(MAP_B, [ 'note' ], 'door');
+      });
+      const copy = structuredClone(hub.snapshot(MAP_A));
+      hub.release(MAP_A);
+      hub.adoptSnapshot(copy);
+
+      // Act.
+      const result = hub.undo(mapHistoryKey(2));
+
+      // Assert.
+      expect([ result.ok, triggersOf(hub), fileOf(hub, MAP_B).note ])
+        .toStrictEqual([ true, [ 0, 0, 3 ], '' ]);
+    });
   });
 
   describe('redoing a step past edits made since its undo', () =>

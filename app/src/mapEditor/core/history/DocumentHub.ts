@@ -59,8 +59,9 @@ type DocumentConflict =
  * - {@code moved}: that edit moved where something the step changes sits, or moving the step would move where the
  *   edit's changes sit: a resize moves every tile, and adding or removing items in a list moves every item after
  *   them. Moving the step would change the wrong thing.
- * - {@code untracked}: a redo on a document whose record of edits does not reach back to the step's undo, as when
- *   its copy came from a window that no longer tracked the step, so nothing there can be checked.
+ * - {@code untracked}: one of the step's documents does not record it: for an undo, the copy does not list the step
+ *   as applied (a map closed and opened again from disk); for a redo, its record of edits does not reach back to
+ *   the step's undo (a copy from a window that no longer tracked the step). Nothing there can be checked.
  *
  * For the last three, {@code blockedBy} names the edit in the way when the window can tell which one it was, and
  * the step stays where it is, having changed nothing anywhere; the person can move the blocking edit first, or
@@ -789,9 +790,9 @@ class DocumentHub
 
   /**
    * Reports whether an undo in a history can happen: it has a step to undo, this window holds every document that
-   * step touches, and no edit applied after it changed the same data, moved where it sits, or would be moved by
-   * taking it out. A refusal here names the edit in the way before anything is tried; only a change that nothing
-   * recorded explains is found by trying.
+   * step touches and each records the step as applied, and no edit applied after it changed the same data, moved
+   * where it sits, or would be moved by taking it out. A refusal here names the edit in the way before anything is
+   * tried; only a change that nothing recorded explains is found by trying.
    * @param {HistoryKey} key The history.
    * @returns {HistoryCheck} The step it would undo, or why it cannot.
    */
@@ -994,6 +995,8 @@ class DocumentHub
    * included, since their patches are still there. The step can be taken out only if none of them changed its data,
    * moved it, or would be moved by its going; otherwise the newest such edit on the first document that has one is
    * named. Order among these edits is the order their patches went into the document, whatever history holds them.
+   * A document that does not record the step as applied is refused as untracked: its copy came from somewhere that
+   * never had the step (a map closed and opened again from disk), so nothing there can be checked.
    * @param {HistoryStep} step The step, applied.
    * @returns {HistoryCheck} The step, or the edit in its way.
    */
@@ -1003,8 +1006,14 @@ class DocumentHub
     {
       // every document the step changed is held, as checked first, and every held document keeps this list.
       const applied = this.#applied.get(key) as HistoryStep[];
-      const later = applied.slice(applied.findLastIndex(each => each.id === step.id) + 1).reverse();
-      for (const edit of later)
+      const appliedAt = applied.findLastIndex(each => each.id === step.id);
+      if (appliedAt < 0)
+      {
+        const message = `this window cannot tell what changed in ${key} after "${step.label}"`;
+        return { ok: false, reason: 'untracked', step, blockedBy: null, message };
+      }
+
+      for (const edit of applied.slice(appliedAt + 1).reverse())
       {
         const interference = interferenceOn(key, step, edit);
         if (interference !== null)
