@@ -601,11 +601,14 @@ class DocumentHub
       return null;
     }
 
+    // whole files ride along only on the steps that have them, so every other step keeps its exact shape.
+    const { files } = transaction;
     const step: HistoryStep = {
       id: this.#nextId(),
       label: transaction.label,
       histories: [ ...transaction.histories ],
       entries: [ ...entries ],
+      ...(files.length > 0 ? { files: [ ...files ] } : {}),
       origin: this.clientId,
       at: this.#now(),
     };

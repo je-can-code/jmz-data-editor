@@ -1,4 +1,5 @@
 import type { DocumentKey } from '../model/documentKeys.ts';
+import type { JsonValue } from '../model/json.ts';
 import type { Patch } from '../model/patches.ts';
 import { homeDocumentOf, type HistoryKey } from './historyKeys.ts';
 
@@ -8,6 +9,21 @@ import { homeDocumentOf, type HistoryKey } from './historyKeys.ts';
 type StepEntry = {
   readonly document: DocumentKey;
   readonly patch: Patch;
+};
+
+/**
+ * A whole file a step creates or removes beside its patches, which is what the map tree does when it creates,
+ * deletes, pastes or duplicates a map: the map's row changes by patch, and its file appears or goes. {@code before}
+ * is the file's content before the step and {@code after} its content after, null meaning there is no file.
+ *
+ * The hub records these with the step and never performs them, and they are not among the documents the step
+ * touches: a deleted map is not held anywhere, and undoing its deletion must not wait for it to be. Whoever moves
+ * such a step performs its files, after checking each one still holds what the step left there.
+ */
+type FileEffect = {
+  readonly document: DocumentKey;
+  readonly before: JsonValue | null;
+  readonly after: JsonValue | null;
 };
 
 /**
@@ -41,6 +57,11 @@ type HistoryStep = {
    * The patches, in the order they were applied; undo applies their inverses in reverse.
    */
   readonly entries: readonly StepEntry[];
+
+  /**
+   * The whole files the step creates or removes, present only on a step that has any.
+   */
+  readonly files?: readonly FileEffect[];
 
   /**
    * The client id of the window that made the step.
@@ -81,4 +102,4 @@ const documentsTouchedBy = (step: HistoryStep): DocumentKey[] =>
 };
 
 export { documentsOfStep, documentsTouchedBy };
-export type { DocumentHeads, HistoryStep, StepEntry };
+export type { DocumentHeads, FileEffect, HistoryStep, StepEntry };

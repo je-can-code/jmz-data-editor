@@ -260,6 +260,119 @@ describe('DocumentHub', () =>
     });
   });
 
+  describe('file effects', () =>
+  {
+    /**
+     * A hub holding the map tree, whose steps create and remove whole map files.
+     * @param {DocumentStore} store The store, to prove nothing is written through it.
+     * @returns {DocumentHub} The hub.
+     */
+    const buildTreeHub = (store?: DocumentStore): DocumentHub =>
+    {
+      const hub = new DocumentHub({ clientId: 'window-a', store, now: () => 1000 });
+      hub.adopt('mapinfos', [ null, { id: 1, expanded: false, name: 'Harbor', order: 1, parentId: 0, scrollX: 0, scrollY: 0 } ]);
+      return hub;
+    };
+
+    const ROW = { id: 2, expanded: false, name: 'MAP002', order: 2, parentId: 0, scrollX: 0, scrollY: 0 };
+
+    it('carries the files a step records, copied, beside its patches, and writes none of them', () =>
+    {
+      // Arrange.
+      const { store, saves } = buildStore();
+      const hub = buildTreeHub(store);
+      const created = buildMapJson() as unknown as JsonValue;
+
+      // Act.
+      const step = hub.edit('Create map', [ 'tree' ], tx =>
+      {
+        tx.set('mapinfos', [ 2 ], ROW);
+        tx.file('map:2', null, created);
+      }) as HistoryStep;
+      (created as { displayName: string }).displayName = 'changed after the step';
+
+      // Assert: the step holds the file as it was recorded, and the store heard nothing.
+      const [ file ] = step.files ?? [];
+      expect([ step.files?.length, file.document, file.before, (file.after as { displayName: string }).displayName ])
+        .toStrictEqual([ 1, 'map:2', null, 'Test Town' ]);
+      expect(saves)
+        .toStrictEqual([]);
+    });
+
+    it('leaves a step without files exactly its old shape', () =>
+    {
+      // Arrange.
+      const hub = buildTreeHub();
+
+      // Act.
+      const step = hub.edit('Rename map', [ 'tree' ], tx => tx.set('mapinfos', [ 1, 'name' ], 'Port')) as HistoryStep;
+
+      // Assert.
+      expect(Object.keys(step))
+        .toStrictEqual([ 'id', 'label', 'histories', 'entries', 'origin', 'at' ]);
+    });
+
+    it('undoes and redoes a step with files without holding the documents the files back', () =>
+    {
+      // Arrange: the map the file backs is not held here, and never will be.
+      const hub = buildTreeHub();
+      hub.edit('Create map', [ 'tree' ], tx =>
+      {
+        tx.set('mapinfos', [ 2 ], ROW);
+        tx.file('map:2', null, buildMapJson() as unknown as JsonValue);
+      });
+
+      // Act.
+      const undone = hub.undo('tree');
+      const afterUndo = hub.document('mapinfos').toJson();
+      const redone = hub.redo('tree');
+
+      // Assert.
+      expect([ undone.ok, redone.ok, hub.has('map:2') ])
+        .toStrictEqual([ true, true, false ]);
+      expect([ afterUndo, (hub.document('mapinfos').toJson() as JsonValue[]).length ])
+        .toStrictEqual([ [ null, { id: 1, expanded: false, name: 'Harbor', order: 1, parentId: 0, scrollX: 0, scrollY: 0 } ], 3 ]);
+    });
+
+    it('hands a step\'s files to another window with the step', () =>
+    {
+      // Arrange.
+      const mine = buildTreeHub();
+      const theirs = buildTreeHub();
+      const stop = mirror(mine, theirs);
+
+      // Act.
+      mine.edit('Delete map', [ 'tree' ], tx =>
+      {
+        tx.set('mapinfos', [ 1 ], null);
+        tx.file('map:1', buildMapJson() as unknown as JsonValue, null);
+      });
+      stop();
+
+      // Assert.
+      const [ row ] = theirs.history('tree').rows;
+      const canUndo = theirs.canUndo('tree');
+      expect([ row.label, canUndo.ok && canUndo.step.files?.[0].document, canUndo.ok && canUndo.step.files?.[0].after ])
+        .toStrictEqual([ 'Delete map', 'map:1', null ]);
+    });
+
+    it('refuses a file on a finished transaction', () =>
+    {
+      // Arrange.
+      const hub = buildTreeHub();
+      const transaction = hub.begin('Rename', [ 'tree' ]);
+      transaction.set('mapinfos', [ 1, 'name' ], 'Port');
+      transaction.commit();
+
+      // Act.
+      const late = () => transaction.file('map:1', null, null);
+
+      // Assert.
+      expect(late)
+        .toThrow(/already finished/u);
+    });
+  });
+
   describe('undo and redo', () =>
   {
     it('reverses every kind of patch exactly, then puts each back', () =>
