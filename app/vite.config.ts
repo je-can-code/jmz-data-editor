@@ -25,6 +25,8 @@ export default defineConfig({
       '@mappers': path.resolve(_dirname, 'src/mappers'),
       '@services': path.resolve(_dirname, 'src/services'),
       '@types': path.resolve(_dirname, 'src/types'),
+
+      '@mapEditor': path.resolve(_dirname, 'src/mapEditor'),
     },
   },
   server: {
@@ -33,5 +35,12 @@ export default defineConfig({
   },
   build: {
     outDir: 'build',
+    rolldownOptions: {
+      // two apps from one build: the data editor, and the map editor with its own bundle.
+      input: {
+        main: path.resolve(_dirname, 'index.html'),
+        map: path.resolve(_dirname, 'map.html'),
+      },
+    },
   },
 });

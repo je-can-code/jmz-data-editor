@@ -57,6 +57,8 @@ import { EnemyPassiveAbs } from '@boards/enemies/EnemyPassiveAbs.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
 import { RowClipboardMenu } from '@presentation/components/board/RowClipboardMenu.tsx';
+import { useEnemyPlacements } from '@presentation/hooks/useEnemyPlacements.ts';
+import { EnemyPlacements } from '@boards/enemies/EnemyPlacements.tsx';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
@@ -79,6 +81,9 @@ const EnemiesBoard = () =>
   const listViewportSize = useElementClientRect(listViewportRef);
 
   const [ enemyTab, setEnemyTab ] = useState(0);
+
+  // where the enemy on screen stands on the maps, asked again as each enemy comes on screen.
+  const enemyPlacements = useEnemyPlacements(selectedEnemy?.id ?? null);
 
   const [ isSaving, setIsSaving ] = useState<boolean>(false);
   const [ canSave, setCanSave ] = useState<boolean>(false);
@@ -305,6 +310,9 @@ const EnemiesBoard = () =>
     try
     {
       await reload(); // Use the context's reload which handles mapping
+
+      // look through the maps again too, since they may have changed in another window.
+      enemyPlacements.reload();
       handleSnack('Enemy data has been reloaded successfully.', MuiSnackbarSeverity.Success);
     }
     catch (error)
@@ -971,6 +979,7 @@ const EnemiesBoard = () =>
                         updateEnemy={updateEnemy}
                         handleSnack={handleSnack}
                       />
+                      <EnemyPlacements state={enemyPlacements.state}/>
                     </Stack>
                   </Grid>
                 </Grid>

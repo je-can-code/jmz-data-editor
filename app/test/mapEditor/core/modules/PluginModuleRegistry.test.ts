@@ -1,0 +1,212 @@
+import { describe, expect, it, vi } from 'vitest';
+import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
+import { pluginCommandEntry } from '../../../../src/mapEditor/core/commands/pluginCommands.ts';
+import { createMapEvent, pageCommentText } from '../../../../src/mapEditor/core/model/eventModel.ts';
+import type { EventKindDefinition, PluginModule } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
+import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
+
+/*
+ * The core editor works on any MZ project; each plugin's awareness is its own module, switched on only when that
+ * plugin is enabled in js/plugins.js. The registry owes the editor exactly that: a module whose plugin is off (or
+ * missing, or only a near namesake like J-ABS-Metrics) contributes nothing, a module that is on contributes its
+ * kinds, palette entries, passability rules, overlays and command entries, a module can never claim a core kind,
+ * and the core's own kinds are on in every project. When several kinds recognise one event, the higher priority
+ * wins, since a battler is also a comment-only event.
+ */
+describe('PluginModuleRegistry', () =>
+{
+  /**
+   * A plugin as js/plugins.js lists it.
+   * @param {string} name The path-like name.
+   * @param {boolean} status Whether it is enabled.
+   * @returns {PluginsJsEntry} The entry.
+   */
+  const plugin = (name: string, status: boolean): PluginsJsEntry => ({ name, status, description: '', parameters: { actionMapId: '2' } });
+
+  /**
+   * An event whose first page carries a comment.
+   * @param {string} comment The comment text.
+   * @returns {RmmzMapEvent} The event.
+   */
+  const commentedEvent = (comment: string): RmmzMapEvent =>
+  {
+    const event = createMapEvent(4, 1, 1);
+    event.pages[0].list.unshift({ code: 108, indent: 0, parameters: [ comment ] });
+    return event;
+  };
+
+  /**
+   * The core's catch-all decor kind.
+   * @returns {EventKindDefinition} The kind.
+   */
+  const decor = (): EventKindDefinition => ({ id: 'core.decor', title: 'Decor', priority: 0, detect: () => true });
+
+  /**
+   * A J-ABS stand-in module contributing one of everything.
+   * @returns {PluginModule} The module.
+   */
+  const jabs = (): PluginModule => ({
+    id: 'jabs',
+    title: 'J-ABS',
+    plugins: [ 'J-ABS' ],
+    register: (contributions, context) =>
+    {
+      contributions.eventKind({
+        id: 'jabs.battler',
+        title: 'Battler',
+        priority: 10,
+        detect: event => pageCommentText(event.pages[0]).includes('<enemyId:'),
+        overlays: [ { id: 'jabs.sight', title: 'Sight', defaultOn: true, draw: () => undefined } ],
+      });
+      contributions.paletteEntry({ id: 'jabs.battler', title: 'Battler', kind: 'jabs.battler', createEvent: createMapEvent });
+      contributions.passabilityRule({ id: 'jabs.blocked', title: 'Blocked', deny: () => null });
+      contributions.overlay({ id: 'jabs.pursuit', title: `Pursuit (${context.plugins.get('J-ABS')?.parameters['actionMapId']})`, defaultOn: false, draw: () => undefined });
+      contributions.catalogEntry(pluginCommandEntry({ plugin: 'J-ABS', command: 'spawn', args: [] }));
+    },
+  });
+
+  it('switches a module on when its plugin is enabled, with everything it contributes', () =>
+  {
+    // Arrange.
+    const catalog = new CommandCatalog();
+    const registry = new PluginModuleRegistry(catalog);
+    registry.registerCoreKind(decor());
+
+    // Act.
+    const activation = registry.activate([ jabs() ], [ plugin('j/base/J-Base', true), plugin('j/abs/J-ABS', true) ]);
+
+    // Assert.
+    expect([
+      activation,
+      registry.isActive('jabs'),
+      registry.eventKinds().map(kind => kind.id),
+      registry.paletteEntries().map(entry => entry.id),
+      registry.passabilityRules().map(rule => rule.id),
+      registry.overlays().map(overlay => overlay.id),
+      registry.overlays()[0].title,
+      catalog.entry('plugin:J-ABS:spawn')?.name,
+    ])
+      .toStrictEqual([
+        { active: [ 'jabs' ], inactive: [] },
+        true,
+        [ 'jabs.battler', 'core.decor' ],
+        [ 'jabs.battler' ],
+        [ 'jabs.blocked' ],
+        [ 'jabs.pursuit', 'jabs.sight' ],
+        'Pursuit (2)',
+        'Plugin: spawn',
+      ]);
+  });
+
+  it('leaves a module off when its plugin is disabled, missing, or only a near namesake', () =>
+  {
+    // Arrange: J-ABS-Metrics is on, but J-ABS itself is off.
+    const catalog = new CommandCatalog();
+    const register = vi.fn();
+    const registry = new PluginModuleRegistry(catalog);
+    const needsTwo: PluginModule = { id: 'lighting', title: 'Lighting', plugins: [ 'J-Lighting', 'J-Lighting-Time' ], register };
+
+    // Act.
+    const activation = registry.activate([ jabs(), needsTwo ], [
+      plugin('j/abs/J-ABS', false),
+      plugin('j/abs/ext/J-ABS-Metrics', true),
+      plugin('j/lighting/J-Lighting', true),
+    ]);
+
+    // Assert.
+    expect([ activation, register.mock.calls.length, registry.eventKinds(), catalog.entries() ])
+      .toStrictEqual([
+        { active: [], inactive: [ { id: 'jabs', missing: [ 'J-ABS' ] }, { id: 'lighting', missing: [ 'J-Lighting-Time' ] } ] },
+        0,
+        [],
+        [],
+      ]);
+  });
+
+  it('takes a module\'s contributions back when a later activation finds its plugin off', () =>
+  {
+    // Arrange.
+    const catalog = new CommandCatalog();
+    const registry = new PluginModuleRegistry(catalog);
+    registry.registerCoreKind(decor());
+    registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', true) ]);
+
+    // Act.
+    registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', false) ]);
+
+    // Assert.
+    expect([ registry.isActive('jabs'), registry.eventKinds().map(kind => kind.id), registry.overlays(), catalog.entry('plugin:J-ABS:spawn') ])
+      .toStrictEqual([ false, [ 'core.decor' ], [], null ]);
+  });
+
+  it('gives an event the highest-priority kind that recognises it', () =>
+  {
+    // Arrange.
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+    registry.registerCoreKind(decor());
+    registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', true) ]);
+
+    // Act.
+    const kinds = [ registry.kindOf(commentedEvent('<enemyId:12>'))?.id, registry.kindOf(commentedEvent('<light:3>'))?.id ];
+
+    // Assert.
+    expect(kinds)
+      .toStrictEqual([ 'jabs.battler', 'core.decor' ]);
+  });
+
+  it('recognises nothing when no kind claims an event', () =>
+  {
+    // Arrange.
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+
+    // Act.
+    const kind = registry.kindOf(createMapEvent(1, 0, 0));
+
+    // Assert.
+    expect(kind)
+      .toBeNull();
+  });
+
+  it('refuses a module adding anything outside its own name', () =>
+  {
+    // Arrange: one module per kind of contribution, each straying into the core's names.
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+    const strays: PluginModule[] = [
+      { id: 'a', title: 'A', plugins: [], register: add => add.eventKind({ ...decor(), id: 'core.chest' }) },
+      { id: 'b', title: 'B', plugins: [], register: add => add.paletteEntry({ id: 'chest', title: 'x', kind: 'x', createEvent: createMapEvent }) },
+      { id: 'c', title: 'C', plugins: [], register: add => add.passabilityRule({ id: 'core.x', title: 'x', deny: () => null }) },
+      { id: 'd', title: 'D', plugins: [], register: add => add.overlay({ id: 'grid.x', title: 'x', defaultOn: false, draw: () => undefined }) },
+    ];
+
+    // Act.
+    const failures = strays.map(stray => () => registry.activate([ stray ], []));
+
+    // Assert.
+    expect(failures[0])
+      .toThrow('a can only add event kinds whose id starts with "a.", not core.chest');
+    expect(failures[1])
+      .toThrow('b can only add palette entries whose id starts with "b.", not chest');
+    expect(failures[2])
+      .toThrow('c can only add passability rules whose id starts with "c.", not core.x');
+    expect(failures[3])
+      .toThrow('d can only add overlays whose id starts with "d.", not grid.x');
+  });
+
+  it('refuses a core kind that is not named as one, or registered twice', () =>
+  {
+    // Arrange.
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+    registry.registerCoreKind(decor());
+
+    // Act.
+    const attempts = [ () => registry.registerCoreKind({ ...decor(), id: 'chest' }), () => registry.registerCoreKind(decor()) ];
+
+    // Assert.
+    expect(attempts[0])
+      .toThrow('a core kind\'s id starts with "core.", not chest');
+    expect(attempts[1])
+      .toThrow('core.decor is already registered');
+  });
+});

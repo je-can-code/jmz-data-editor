@@ -1,0 +1,84 @@
+import type { DocumentKey } from '../model/documentKeys.ts';
+import type { Patch } from '../model/patches.ts';
+import { homeDocumentOf, type HistoryKey } from './historyKeys.ts';
+
+/**
+ * One patch, addressed to the document it changes.
+ */
+type StepEntry = {
+  readonly document: DocumentKey;
+  readonly patch: Patch;
+};
+
+/**
+ * One undoable step: a named group of patches, possibly across several documents, recorded in every history
+ * it belongs to.
+ *
+ * A step in more than one history is a transaction (a door pair touches two maps; a blueprint propagating
+ * touches the blueprint and every map with a copy), and it undoes as one step from any of them. A step is
+ * either applied or not: while applied it is in the done list of every history it belongs to; once undone it
+ * stays redoable from each of its histories until that history records something new.
+ *
+ * Steps are plain data, so they travel between windows and move with a torn-out panel intact.
+ */
+type HistoryStep = {
+  /**
+   * Unique across every window: the making window's client id and a counter.
+   */
+  readonly id: string;
+
+  /**
+   * What the history panel lists, such as "Paint" or "Place door pair".
+   */
+  readonly label: string;
+
+  /**
+   * Every history the step is recorded in.
+   */
+  readonly histories: readonly HistoryKey[];
+
+  /**
+   * The patches, in the order they were applied; undo applies their inverses in reverse.
+   */
+  readonly entries: readonly StepEntry[];
+
+  /**
+   * The client id of the window that made the step.
+   */
+  readonly origin: string;
+
+  /**
+   * When the step was committed, in epoch milliseconds.
+   */
+  readonly at: number;
+};
+
+/**
+ * The latest operation each touched document had seen just before an operation, by id: how another window checks
+ * it is applying the operation to the very state the maker saw, and not merely one of the same age.
+ */
+type DocumentHeads = Readonly<Partial<Record<DocumentKey, string>>>;
+
+/**
+ * Lists the documents a step's patches change, each once, in first-touched order.
+ * @param {HistoryStep} step The step.
+ * @returns {DocumentKey[]} The documents.
+ */
+const documentsOfStep = (step: HistoryStep): DocumentKey[] =>
+{
+  return [ ...new Set(step.entries.map(entry => entry.document)) ];
+};
+
+/**
+ * Lists every document an operation on a step touches: the ones its patches change, and the ones its histories
+ * live on, since a history is part of its document's state.
+ * @param {HistoryStep} step The step.
+ * @returns {DocumentKey[]} The documents.
+ */
+const documentsTouchedBy = (step: HistoryStep): DocumentKey[] =>
+{
+  return [ ...new Set([ ...documentsOfStep(step), ...step.histories.map(homeDocumentOf) ]) ];
+};
+
+export { documentsOfStep, documentsTouchedBy };
+export type { DocumentHeads, HistoryStep, StepEntry };

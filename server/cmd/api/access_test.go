@@ -82,6 +82,7 @@ func TestOtherSitesPagesAreRefused(t *testing.T) {
 		{name: "a read", method: http.MethodGet, target: "/api/mapinfos"},
 		{name: "a plugin's source", method: http.MethodGet, target: "/api/plugin-source/Hello"},
 		{name: "the change stream", method: http.MethodGet, target: "/api/file-changes"},
+		{name: "an enemy's placements", method: http.MethodGet, target: "/api/enemies/1/placements"},
 		{name: "a map save", method: http.MethodPut, target: "/api/maps/1", body: mapFixture},
 		{name: "a form posting to a database route", method: http.MethodPost, target: "/api/system", body: `{}`, header: []string{"Content-Type", "text/plain"}},
 		{name: "a preflight", method: http.MethodOptions, target: "/api/maps/1", header: []string{"Access-Control-Request-Method", "PUT"}},
@@ -128,6 +129,97 @@ func TestRequestsWithoutAnOriginAreServed(t *testing.T) {
 	assertStatus(t, saved, http.StatusNoContent)
 	if read.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Error("a request with no Origin was sent a CORS grant")
+	}
+}
+
+// environment builds a getenv over fixed values, so configuration tests never read the real shell.
+func environment(values map[string]string) func(string) string {
+	return func(name string) string {
+		return values[name]
+	}
+}
+
+// TestAConfiguredUiAndAddressAreAllowedAndTheDefaultsAreNot covers a UI moved off port 3000 and an API
+// moved off 8080, which the NW.js shell's --ui-url and --api-base allow: the server must serve exactly
+// the configured page and address, the configured address under either loopback name, and refuse the
+// defaults it would otherwise have allowed.
+func TestAConfiguredUiAndAddressAreAllowedAndTheDefaultsAreNot(t *testing.T) {
+	// Arrange.
+	config, err := configFrom(environment(map[string]string{
+		"JMZ_API_ADDRESS": "127.0.0.1:18151",
+		"JMZ_UI_ORIGINS":  "http://127.0.0.1:18150/",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name     string
+		headers  []string
+		expected int
+	}{
+		{name: "the configured page", headers: []string{"Origin", "http://127.0.0.1:18150"}, expected: http.StatusOK},
+		{name: "the configured address by its other name", headers: []string{"Host", "localhost:18151"}, expected: http.StatusOK},
+		{name: "the default page", headers: []string{"Origin", "http://127.0.0.1:3000"}, expected: http.StatusForbidden},
+		{name: "the default page's other name", headers: []string{"Origin", "http://localhost:3000"}, expected: http.StatusForbidden},
+		{name: "the default address", headers: []string{"Host", "127.0.0.1:8080"}, expected: http.StatusForbidden},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange- a server started with the configuration above.
+			current := newConfiguredProject(t, config)
+
+			// Act.
+			response := current.call(t, http.MethodGet, "/api/mapinfos", "", testCase.headers...)
+
+			// Assert.
+			assertStatus(t, response, testCase.expected)
+		})
+	}
+}
+
+// TestConfigurationDefaultsToTodaysPorts covers a server started with nothing configured, which must keep
+// allowing exactly what it always has.
+func TestConfigurationDefaultsToTodaysPorts(t *testing.T) {
+	// Arrange- nothing set.
+
+	// Act.
+	config, err := configFrom(environment(map[string]string{}))
+
+	// Assert.
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := config.policy()
+	if config.address != "127.0.0.1:8080" || strings.Join(policy.AllowedOrigins, ",") != "http://127.0.0.1:3000,http://localhost:3000" ||
+		strings.Join(policy.AllowedHosts, ",") != "127.0.0.1:8080,localhost:8080" {
+		t.Errorf("defaults were address %q, origins %v, hosts %v", config.address, policy.AllowedOrigins, policy.AllowedHosts)
+	}
+}
+
+// TestConfigurationRefusesWhatWouldExposeTheApi covers an address off the loopback interface, which would
+// hand the game's files to the network, and settings too malformed to mean anything.
+func TestConfigurationRefusesWhatWouldExposeTheApi(t *testing.T) {
+	cases := map[string]map[string]string{
+		"every interface":     {"JMZ_API_ADDRESS": "0.0.0.0:8080"},
+		"a network address":   {"JMZ_API_ADDRESS": "192.168.1.20:8080"},
+		"no port":             {"JMZ_API_ADDRESS": "127.0.0.1"},
+		"an origin with path": {"JMZ_UI_ORIGINS": "http://127.0.0.1:3000/app"},
+		"not an origin":       {"JMZ_UI_ORIGINS": "127.0.0.1:3000"},
+	}
+
+	for name, values := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Arrange- the values above.
+
+			// Act.
+			_, err := configFrom(environment(values))
+
+			// Assert.
+			if err == nil {
+				t.Errorf("%v was accepted", values)
+			}
+		})
 	}
 }
 

@@ -84,10 +84,16 @@ func wholeTable[T any](document *mzjson.Value) error {
 // mapIdFromPath reads the {mapId} path value, answering 400 itself when it is not an integer of at
 // least minimum. Being digits only, a valid id can never reach outside data/.
 func mapIdFromPath(responseWriter http.ResponseWriter, httpRequest *http.Request, minimum int) (int, bool) {
-	raw := httpRequest.PathValue("mapId")
+	return idFromPath(responseWriter, httpRequest, "mapId", minimum)
+}
+
+// idFromPath reads the path value called name as an id, answering 400 itself when it is not an
+// integer of at least minimum.
+func idFromPath(responseWriter http.ResponseWriter, httpRequest *http.Request, name string, minimum int) (int, bool) {
+	raw := httpRequest.PathValue(name)
 	id, err := strconv.Atoi(raw)
 	if err != nil || id < minimum {
-		http.Error(responseWriter, fmt.Sprintf("mapId must be an integer of at least %d", minimum), http.StatusBadRequest)
+		http.Error(responseWriter, fmt.Sprintf("%s must be an integer of at least %d", name, minimum), http.StatusBadRequest)
 		return 0, false
 	}
 
