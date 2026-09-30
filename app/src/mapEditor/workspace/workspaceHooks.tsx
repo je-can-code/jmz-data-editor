@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
+import { mapDocumentKey, TILESETS_KEY } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
+import type { MapDocument } from '../core/model/MapDocument.ts';
+import type { RmmzMapInfo, RmmzTileset } from '../core/model/rmmzTypes.ts';
 import type { WorkspaceController, WorkspaceState } from './WorkspaceController.ts';
 
 /**
@@ -129,4 +132,94 @@ const useMapTreeDocument = (): { tree: EditorDocument | null; failure: string | 
   return state;
 };
 
-export { useDocumentRevision, useHubVersion, useMapTreeDocument, useWorkspace, useWorkspaceState, WorkspaceProvider };
+/**
+ * What a panel knows about a map it shows: its row in the tree, the document once held, whether it has unsaved
+ * edits, and why it could not be opened, if it could not.
+ */
+type HeldMap = {
+  readonly row: RmmzMapInfo | null;
+  readonly map: MapDocument | null;
+  readonly dirty: boolean;
+  readonly failure: string | null;
+};
+
+/**
+ * Holds a map for as long as the tree lists it. A delete lets the document go (the tree service releases it), and
+ * an undo lists the map again, which holds it afresh from its restored file.
+ * @param {number | null} mapId The map, or null for none.
+ * @returns {HeldMap} What the panel knows.
+ */
+const useHeldMap = (mapId: number | null): HeldMap =>
+{
+  const controller = useWorkspace();
+  const { hub } = controller.services;
+  const { tree } = useMapTreeDocument();
+  const [ failure, setFailure ] = useState<string | null>(null);
+  useHubVersion(hub);
+
+  const key = mapId === null ? null : mapDocumentKey(mapId);
+  const found = key === null ? null : tree?.valueAt([ mapId as number ]) as RmmzMapInfo | null | undefined;
+  const row = found ?? null;
+  const map = key !== null && row !== null && hub.has(key) ? hub.map(key) : null;
+
+  useEffect(() =>
+  {
+    setFailure(null);
+    if (key === null || row === null || map !== null)
+    {
+      return undefined;
+    }
+
+    let live = true;
+    controller.services.openDocument(key).catch((error: unknown) =>
+    {
+      if (live)
+      {
+        setFailure(error instanceof Error ? error.message : String(error));
+      }
+    });
+
+    return () =>
+    {
+      live = false;
+    };
+  }, [ controller, key, row, map ]);
+
+  return { row, map, dirty: key !== null && map !== null && hub.isDirty(key), failure };
+};
+
+/**
+ * Holds the tilesets for a panel, loading them the first time.
+ * @returns {readonly (RmmzTileset | null)[]} The tilesets by id, or none while they load.
+ */
+const useTilesets = (): readonly (RmmzTileset | null)[] =>
+{
+  const controller = useWorkspace();
+  const { hub } = controller.services;
+  useHubVersion(hub);
+
+  useEffect(() =>
+  {
+    if (controller.services.api !== null && hub.has(TILESETS_KEY) === false)
+    {
+      controller.services.openDocument(TILESETS_KEY).catch(() => undefined);
+    }
+  }, [ controller, hub ]);
+
+  // the live rows, read in place: each tileset carries thousands of flags, far too many to copy per render.
+  return hub.has(TILESETS_KEY)
+    ? hub.document(TILESETS_KEY).valueAt([]) as unknown as (RmmzTileset | null)[]
+    : [];
+};
+
+export {
+  useDocumentRevision,
+  useHeldMap,
+  useHubVersion,
+  useMapTreeDocument,
+  useTilesets,
+  useWorkspace,
+  useWorkspaceState,
+  WorkspaceProvider,
+};
+export type { HeldMap };

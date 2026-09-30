@@ -1,69 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Box, Button, Chip, CircularProgress, Stack, Typography } from '@mui/material';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { mapDocumentKey, TILESETS_KEY } from '../../core/model/documentKeys.ts';
-import type { MapDocument } from '../../core/model/MapDocument.ts';
-import type { RmmzMapInfo, RmmzTileset } from '../../core/model/rmmzTypes.ts';
+import type { RmmzTileset } from '../../core/model/rmmzTypes.ts';
 import type { MapPanelParams } from '../../core/workspace/panels.ts';
 import { documentLabel } from '../../views/documentLabels.ts';
-import { useHubVersion, useMapTreeDocument, useWorkspace, useWorkspaceState } from '../workspaceHooks.tsx';
+import { useHeldMap, useWorkspace, useWorkspaceState, type HeldMap } from '../workspaceHooks.tsx';
 import { MapSurface } from './MapSurface.tsx';
-
-/**
- * What a map panel knows about its map: its row in the tree, the document once held, whether it has unsaved edits,
- * and why it could not be opened, if it could not.
- */
-type HeldMap = {
-  readonly row: RmmzMapInfo | null;
-  readonly map: MapDocument | null;
-  readonly dirty: boolean;
-  readonly failure: string | null;
-};
-
-/**
- * Holds a map for as long as the tree lists it. A delete lets the document go (the tree service releases it), and
- * an undo lists the map again, which holds it afresh from its restored file.
- * @param {number} mapId The map.
- * @returns {HeldMap} What the panel knows.
- */
-const useHeldMap = (mapId: number): HeldMap =>
-{
-  const controller = useWorkspace();
-  const { hub } = controller.services;
-  const { tree } = useMapTreeDocument();
-  const [ failure, setFailure ] = useState<string | null>(null);
-  useHubVersion(hub);
-
-  const key = mapDocumentKey(mapId);
-  const found = tree?.valueAt([ mapId ]) as RmmzMapInfo | null | undefined;
-  const row = found ?? null;
-  const map = row !== null && hub.has(key) ? hub.map(key) : null;
-
-  useEffect(() =>
-  {
-    if (row === null || map !== null)
-    {
-      return undefined;
-    }
-
-    let live = true;
-    setFailure(null);
-    controller.services.openDocument(key).catch((error: unknown) =>
-    {
-      if (live)
-      {
-        setFailure(error instanceof Error ? error.message : String(error));
-      }
-    });
-
-    return () =>
-    {
-      live = false;
-    };
-  }, [ controller, key, row, map ]);
-
-  return { row, map, dirty: map !== null && hub.isDirty(key), failure };
-};
 
 /**
  * The strip across the top of a map panel: the map's name and size, its tileset, and what is going on with it.
