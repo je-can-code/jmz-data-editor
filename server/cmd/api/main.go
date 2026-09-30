@@ -195,6 +195,9 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 
 	//region map editor endpoints
 	mux.HandleFunc("PUT /api/maps/{mapId}", api.SaveMap(changes))
+	mux.HandleFunc("DELETE /api/maps/{mapId}", api.DeleteMap)
+	mux.HandleFunc("GET /api/maps/{mapId}/file", api.LoadMapFile)
+	mux.HandleFunc("PUT /api/maps/{mapId}/file", api.RestoreMapFile(changes))
 
 	mux.HandleFunc("GET /api/mapinfos", api.LoadMapInfos)
 	mux.HandleFunc("PUT /api/mapinfos", api.SaveMapInfos(changes))
@@ -217,8 +220,11 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	//endregion map editor endpoints
 
 	//region cross references
-	// the index listens to the change stream from its first answer on, to know which maps to read again.
-	mux.HandleFunc("GET /api/enemies/{enemyId}/placements", api.LoadEnemyPlacements(placements.NewIndex(changes)))
+	// the index listens to the change stream from its first answer on, to know which maps to read again. One
+	// index answers both, since both come from the same reading of every map.
+	index := placements.NewIndex(changes)
+	mux.HandleFunc("GET /api/enemies/{enemyId}/placements", api.LoadEnemyPlacements(index))
+	mux.HandleFunc("GET /api/maps/{mapId}/arrivals", api.LoadMapArrivals(index))
 	//endregion cross references
 
 	//region command list

@@ -1,5 +1,7 @@
 import type { DocumentKey } from '../model/documentKeys.ts';
+import type { JsonValue } from '../model/json.ts';
 import type { Patch } from '../model/patches.ts';
+import type { DocumentSnapshot } from './DocumentHub.ts';
 import { homeDocumentOf, type HistoryKey } from './historyKeys.ts';
 
 /**
@@ -8,6 +10,33 @@ import { homeDocumentOf, type HistoryKey } from './historyKeys.ts';
 type StepEntry = {
   readonly document: DocumentKey;
   readonly patch: Patch;
+};
+
+/**
+ * A whole file a step creates or removes beside its patches, which is what the map tree does when it creates,
+ * deletes, pastes or duplicates a map: the map's row changes by patch, and its file appears or goes. {@code before}
+ * is the file's content before the step and {@code after} its content after, null meaning there is no file.
+ *
+ * The hub records these with the step and never performs them, and they are not among the documents the step
+ * touches: a deleted map is not held anywhere, and undoing its deletion must not wait for it to be. Whoever moves
+ * such a step performs its files, after checking each one still holds what the step left there.
+ *
+ * A side may also carry the file's exact text, when the step read it: putting the file back then writes those very
+ * bytes, so a delete that is undone leaves the file exactly as it was, key order and spelling included, where its
+ * content alone would come back in the server's layout.
+ *
+ * The before side may also carry the copy of the document the window held when the step was made, histories and
+ * unsaved edits included ({@code beforeHeld}). The file is what the disk had; the held copy is what the author was
+ * working on. Putting the file back then brings that copy back too, so undoing the delete of a map being edited
+ * returns it with its own undo history, and with its unsaved edits still unsaved rather than written to disk.
+ */
+type FileEffect = {
+  readonly document: DocumentKey;
+  readonly before: JsonValue | null;
+  readonly after: JsonValue | null;
+  readonly beforeText?: string;
+  readonly afterText?: string;
+  readonly beforeHeld?: DocumentSnapshot;
 };
 
 /**
@@ -41,6 +70,11 @@ type HistoryStep = {
    * The patches, in the order they were applied; undo applies their inverses in reverse.
    */
   readonly entries: readonly StepEntry[];
+
+  /**
+   * The whole files the step creates or removes, present only on a step that has any.
+   */
+  readonly files?: readonly FileEffect[];
 
   /**
    * The client id of the window that made the step.
@@ -81,4 +115,4 @@ const documentsTouchedBy = (step: HistoryStep): DocumentKey[] =>
 };
 
 export { documentsOfStep, documentsTouchedBy };
-export type { DocumentHeads, HistoryStep, StepEntry };
+export type { DocumentHeads, FileEffect, HistoryStep, StepEntry };

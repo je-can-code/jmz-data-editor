@@ -43,15 +43,41 @@ type Placement struct {
 	PageCount int `json:"pageCount"`
 }
 
+// Arrival is one transfer, on any map, that names outright a tile of the map asked about as where it lands.
+type Arrival struct {
+	// MapId is the map the transfer is on, which may be the map asked about itself.
+	MapId int `json:"mapId"`
+
+	// MapName is that map's name in the map tree, or empty for a map file the tree has no row for.
+	MapName string `json:"mapName"`
+
+	EventId   int    `json:"eventId"`
+	EventName string `json:"eventName"`
+
+	// PageIndex is the event page holding the transfer, counted from 0.
+	PageIndex int `json:"pageIndex"`
+
+	// X and Y are the tile it lands on.
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+
+// mapFacts is what the index keeps of one map once read: its battlers, and the transfers on it.
+type mapFacts struct {
+	battlers  []battler
+	transfers []transfer
+}
+
 // Subscriber is where an index hears that files changed: the server's change stream, a *watch.Hub.
 type Subscriber interface {
 	Subscribe(root string) (*watch.Subscription, error)
 }
 
-// Index answers where an enemy is placed, from a scan of every map that it keeps until a map changes.
+// Index answers where an enemy is placed, and which transfers land on a map, from a scan of every map that it
+// keeps until a map changes.
 //
-// Finding the battlers means decoding every map, far too slow to repeat for each answer, so each map's
-// battlers are kept once found and forgotten when the change stream says that map changed. To hear
+// Finding either means decoding every map, far too slow to repeat for each answer, so each map's battlers and
+// transfers are kept once found and forgotten when the change stream says that map changed. To hear
 // every change, the index listens for as long as it lives, and starts before it reads anything, which
 // keeps the stream's watcher running from the first answer on. It applies what it heard at the start
 // of each answer rather than as changes arrive, so no answer given after a change was announced can
@@ -77,8 +103,8 @@ type Index struct {
 	// names are the map tree's names by map id, or nil when MapInfos.json must be read again.
 	names map[int]string
 
-	// scanned holds the battlers of every map read since it last changed, by map id.
-	scanned map[int][]battler
+	// scanned holds the battlers and transfers of every map read since it last changed, by map id.
+	scanned map[int]mapFacts
 }
 
 // NewIndex makes an index that hears about changed files from changes.
@@ -86,7 +112,7 @@ func NewIndex(changes Subscriber) *Index {
 	return &Index{
 		changes: changes,
 		readMap: store.Load[*db.RpgMap],
-		scanned: map[int][]battler{},
+		scanned: map[int]mapFacts{},
 	}
 }
 
@@ -100,38 +126,86 @@ func (index *Index) Placements(root string, enemyId int) ([]Placement, error) {
 	index.mu.Lock()
 	defer index.mu.Unlock()
 
-	if err := index.follow(root); err != nil {
-		return nil, err
-	}
-	mapIds, err := index.listMaps()
-	if err != nil {
-		return nil, err
-	}
-	names, err := index.mapNames()
+	found := []Placement{}
+	err := index.eachMap(root, func(mapId int, mapName string, facts mapFacts) {
+		for _, standing := range facts.battlers {
+			if standing.enemyId == enemyId {
+				found = append(found, placementOf(mapId, mapName, standing))
+			}
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	found := []Placement{}
+	return found, nil
+}
+
+// Arrivals answers every transfer in the project at root that names outright a tile of the map asked about
+// as where it lands, on any map, that one included: by map id, then event, page and command order, each
+// carrying its map's name from the map tree. The list is empty, never nil, when there are none. This is what
+// a resize of that map must warn about, since moving the map's tiles leaves every such transfer pointing at
+// the old spot.
+//
+// A map that cannot be read strictly fails the whole answer, naming its file, rather than leaving its
+// transfers out of a list that would look complete.
+func (index *Index) Arrivals(root string, targetMapId int) ([]Arrival, error) {
+	index.mu.Lock()
+	defer index.mu.Unlock()
+
+	found := []Arrival{}
+	err := index.eachMap(root, func(mapId int, mapName string, facts mapFacts) {
+		for _, landing := range facts.transfers {
+			if landing.targetMapId == targetMapId {
+				found = append(found, Arrival{
+					MapId:     mapId,
+					MapName:   mapName,
+					EventId:   landing.eventId,
+					EventName: landing.eventName,
+					PageIndex: landing.pageIndex,
+					X:         landing.x,
+					Y:         landing.y,
+				})
+			}
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return found, nil
+}
+
+// eachMap brings the cache up to date with the project at root and hands over what it knows of every map,
+// in id order, with the map's name from the map tree. The caller holds the lock.
+func (index *Index) eachMap(root string, visit func(mapId int, mapName string, facts mapFacts)) error {
+	if err := index.follow(root); err != nil {
+		return err
+	}
+	mapIds, err := index.listMaps()
+	if err != nil {
+		return err
+	}
+	names, err := index.mapNames()
+	if err != nil {
+		return err
+	}
+
 	for _, mapId := range mapIds {
-		battlers, err := index.scan(mapId)
+		facts, err := index.scan(mapId)
 
 		// a map removed since the folder was listed is gone, and the change saying so is on its way.
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		for _, standing := range battlers {
-			if standing.enemyId == enemyId {
-				found = append(found, placementOf(mapId, names[mapId], standing))
-			}
-		}
+		visit(mapId, names[mapId], facts)
 	}
 
-	return found, nil
+	return nil
 }
 
 // follow brings the cache up to date with the project at root: it starts listening when it is not yet,
@@ -169,7 +243,7 @@ func (index *Index) follow(root string) error {
 	}
 }
 
-// apply forgets whatever one change makes stale: the map tree's names, or one map's battlers along
+// apply forgets whatever one change makes stale: the map tree's names, or what one map holds along
 // with the list of maps, since a map file that changed may also be one that appeared or went away.
 func (index *Index) apply(change watch.Change) {
 	if change.Path == mapInfosPath {
@@ -197,7 +271,7 @@ func (index *Index) stopListening() {
 func (index *Index) forgetEverything() {
 	index.mapIds = nil
 	index.names = nil
-	index.scanned = map[int][]battler{}
+	index.scanned = map[int]mapFacts{}
 }
 
 // listMaps returns the id of every map file in the data folder, in id order, listing the folder only
@@ -250,25 +324,28 @@ func (index *Index) mapNames() (map[int]string, error) {
 	return names, nil
 }
 
-// scan returns a map's battlers, reading the map only when they are not already known. Only a clean
-// read is kept, so a map that failed is read afresh next time rather than failing from memory.
-func (index *Index) scan(mapId int) ([]battler, error) {
-	if battlers, known := index.scanned[mapId]; known {
-		return battlers, nil
+// scan returns a map's battlers and transfers, reading the map only when they are not already known.
+// Only a clean read is kept, so a map that failed is read afresh next time rather than failing from
+// memory.
+func (index *Index) scan(mapId int) (mapFacts, error) {
+	if facts, known := index.scanned[mapId]; known {
+		return facts, nil
 	}
 
 	relativePath := "data/" + mapFileName(mapId)
 	gameMap, err := index.readMap(filepath.Join(index.root, filepath.FromSlash(relativePath)))
 	if err != nil {
-		return nil, err
+		return mapFacts{}, err
 	}
 	battlers, err := scanMap(gameMap)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", relativePath, err)
+		return mapFacts{}, fmt.Errorf("%s: %w", relativePath, err)
 	}
 
-	index.scanned[mapId] = battlers
-	return battlers, nil
+	// a map the battler scan accepted holds a map, so its transfers can be read from it.
+	facts := mapFacts{battlers: battlers, transfers: transfersOnMap(gameMap)}
+	index.scanned[mapId] = facts
+	return facts, nil
 }
 
 // placementOf is one battler as the answer carries it, with its own copy of the page list so that

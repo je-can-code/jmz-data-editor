@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { CssBaseline, ThemeProvider } from '@mui/material';
+import 'dockview-react/dist/styles/dockview.css';
 import { getJmzHttpApiBase } from '../constants/jmzHttpApiBase.ts';
 import { appTheme } from '../presentation/theme/appTheme.ts';
 import { MapEditorApp } from './MapEditorApp.tsx';

@@ -48,3 +48,42 @@ func SaveInMzLayout[T any](data T, path string, layout mzjson.Layout, beforeWrit
 
 	return WriteFileAtomic(path, rendered)
 }
+
+// RemoveFile removes the file at path under the lock every write in MZ's layout takes, once allow has agreed
+// to it, so whatever allow reads and the removal happen as one step: no save or restore can land between the
+// check and the unlink. A refusal from allow comes back as it is, with nothing removed; a file that does not
+// exist comes back as fs.ErrNotExist.
+func RemoveFile(path string, allow func() error) error {
+	mzWriteLock.Lock()
+	defer mzWriteLock.Unlock()
+
+	if err := allow(); err != nil {
+		return err
+	}
+
+	return os.Remove(path)
+}
+
+// RestoreFile brings back a file that was removed, exactly as it was: content is written byte for byte, with
+// nothing re-rendered, but only where no file exists, answering fs.ErrExist otherwise. It shares the lock saves in
+// MZ's layout take, so a restore and a save of the same file never interleave. The write is atomic, and
+// beforeWrite, when given, is handed the bytes just before they land, as SaveInMzLayout does.
+func RestoreFile(path string, content []byte, beforeWrite func(content []byte)) error {
+	mzWriteLock.Lock()
+	defer mzWriteLock.Unlock()
+
+	// a file that is there is not a removed one; restoring over it would throw its content away.
+	_, err := os.Stat(path)
+	if err == nil {
+		return fs.ErrExist
+	}
+	if errors.Is(err, fs.ErrNotExist) == false {
+		return err
+	}
+
+	if beforeWrite != nil {
+		beforeWrite(content)
+	}
+
+	return WriteFileAtomic(path, content)
+}

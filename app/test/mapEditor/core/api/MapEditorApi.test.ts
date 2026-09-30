@@ -78,6 +78,33 @@ describe('HttpMapEditorApi', () =>
         ]);
     });
 
+    it('reads the transfers landing on a map from its route, unwrapped from the answer about that map', async () =>
+    {
+      // Arrange.
+      const door = { mapId: 2, mapName: 'Cellar', eventId: 1, eventName: 'Door', pageIndex: 0, x: 3, y: 4 };
+      const { api, requests } = buildApi(() => envelope({ mapId: 12, arrivals: [ door ] }));
+
+      // Act.
+      const arrivals = await api.loadArrivals(12);
+
+      // Assert.
+      expect([ arrivals, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ [ door ], [ `GET ${BASE}/api/maps/12/arrivals` ] ]);
+    });
+
+    it('refuses an answer about another map\'s transfers rather than take it for this one\'s', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => envelope({ mapId: 13, arrivals: [] }));
+
+      // Act.
+      const load = api.loadArrivals(12);
+
+      // Assert.
+      await expect(load)
+        .rejects.toThrow('GET /api/maps/12/arrivals answered about map 13');
+    });
+
     it('refuses a body that is not the envelope, even one carrying data', async () =>
     {
       // Arrange: the document raw, and a near miss with data but no path.
@@ -225,6 +252,107 @@ describe('HttpMapEditorApi', () =>
       // Assert.
       await expect(save)
         .rejects.toThrow('PUT /api/maps/12 answered 400: json: unknown field "extra"');
+    });
+  });
+
+  describe('deleting', () =>
+  {
+    it('deletes a map file with this window\'s id and no body', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+
+      // Act.
+      await api.deleteMap(12);
+
+      // Assert.
+      const [ request ] = requests;
+      expect([ requests.length, request.method, request.url, request.headers['x-jmz-client'], request.body ])
+        .toStrictEqual([ 1, 'DELETE', `${BASE}/api/maps/12`, 'window-7', null ]);
+    });
+
+    it('raises the server\'s refusal of a map the tree still lists, with its status', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response('map 12 is still in the map tree', { status: 409 }));
+
+      // Act.
+      const failure = await api.deleteMap(12).catch((error: unknown) => error);
+
+      // Assert.
+      expect([ (failure as MapEditorApiError).status, (failure as Error).message ])
+        .toStrictEqual([ 409, 'DELETE /api/maps/12 answered 409: map 12 is still in the map tree' ]);
+    });
+
+    it('refuses a map id no map can have, before asking the server', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+
+      // Act.
+      const failure = await api.deleteMap(0).catch((error: unknown) => error);
+
+      // Assert.
+      expect([ failure instanceof MapEditorApiError, requests.length ])
+        .toStrictEqual([ true, 0 ]);
+    });
+  });
+
+  describe('map files byte for byte', () =>
+  {
+    const TEXT = '{\n"autoplayBgm":false,"displayName":"\\u003cb\\u003e",\n"data":[],\n"events":[\n]\n}';
+
+    it('reads a map file\'s exact text, and null for a missing one', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(url => (url.includes('/12/') ? new Response(TEXT, { status: 200 }) : new Response('missing', { status: 404 })));
+
+      // Act.
+      const read = [ await api.loadMapFile(12), await api.loadMapFile(13) ];
+
+      // Assert.
+      expect([ read, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ [ TEXT, null ], [ `GET ${BASE}/api/maps/12/file`, `GET ${BASE}/api/maps/13/file` ] ]);
+    });
+
+    it('raises a server failure on a map file rather than calling it missing', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response('disk error', { status: 500 }));
+
+      // Act.
+      const read = api.loadMapFile(12);
+
+      // Assert.
+      await expect(read)
+        .rejects.toThrow('GET /api/maps/12/file answered 500: disk error');
+    });
+
+    it('restores a map file from its text untouched, with this window\'s id', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+
+      // Act.
+      await api.restoreMapFile(12, TEXT);
+
+      // Assert.
+      const [ request ] = requests;
+      expect([ request.method, request.url, request.headers['x-jmz-client'], request.headers['content-type'], request.body ])
+        .toStrictEqual([ 'PUT', `${BASE}/api/maps/12/file`, 'window-7', 'application/json', TEXT ]);
+    });
+
+    it('raises the server\'s refusal to restore over a file that is there', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response('data/Map012.json already exists; only a removed map can be restored', { status: 409 }));
+
+      // Act.
+      const failure = await api.restoreMapFile(12, TEXT).catch((error: unknown) => error);
+
+      // Assert.
+      expect((failure as MapEditorApiError).status)
+        .toBe(409);
     });
   });
 
