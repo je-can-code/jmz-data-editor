@@ -113,6 +113,16 @@ Current precedence for choosing the project root is:
 2. `JMZ_PROJECT_ROOT`
 3. `.config/jmz-data-editor.json`
 
+Flags for the wrapper, each also taking the `--flag=value` form:
+
+- `--project-root <path>` and `--api-base <origin>`, as above
+- `--ui-url <origin>`: where the UI is served (default `http://127.0.0.1:3000`); every window opens on this one origin
+- `--maps`: open the map editor instead of the data editor
+- `--attach`: use a UI and API that are already running instead of starting them
+- `--log <path>`: write one line per window event, for diagnosing the wrapper
+
+Every window opens in its own process, and the app stays open until the last window closes.
+
 ## Current support by board
 
 Legend:
