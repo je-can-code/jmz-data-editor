@@ -168,6 +168,21 @@ const pointAfterNode = (node: CommandNode): InsertionPoint | null =>
 };
 
 /**
+ * Finds the place right after a unit, or after the whole merged Show Choices run the unit belongs to, so nothing
+ * put after it (a duplicate's copies) can split the run.
+ * @param {readonly RmmzEventCommand[]} list The list.
+ * @param {CommandNode} node The unit.
+ * @returns {InsertionPoint | null} The place, or null for a unit outside every body's list (after the list's end).
+ */
+const pointAfterUnit = (list: readonly RmmzEventCommand[], node: CommandNode): InsertionPoint | null =>
+{
+  const after = pointAfterNode(node);
+  return after === null
+    ? null
+    : outOfChoiceRun(list, after, 1);
+};
+
+/**
  * Finds the place right before a unit, in the body it sits in.
  * @param {CommandNode} node The unit.
  * @returns {InsertionPoint | null} The place, or null for a unit outside every body's list.
@@ -344,6 +359,7 @@ export {
   dropTargetAt,
   insertionIndex,
   pointAfterNode,
+  pointAfterUnit,
   pointAtRow,
   pointBeforeNode,
   pointBelowRow,

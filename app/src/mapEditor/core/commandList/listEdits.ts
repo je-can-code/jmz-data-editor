@@ -1,7 +1,7 @@
 import { jsonEquals, type JsonValue } from '../model/json.ts';
 import type { RmmzEventCommand } from '../model/rmmzTypes.ts';
 import type { CommandNode } from './commandTree.ts';
-import { insertionIndex, type InsertionPoint } from './insertionPoints.ts';
+import { insertionIndex, pointAfterUnit, type InsertionPoint } from './insertionPoints.ts';
 
 /**
  * The one splice that turns a list into another: remove {@code deleteCount} commands at {@code index} and insert
@@ -143,8 +143,30 @@ const moveNodes = (list: readonly RmmzEventCommand[], nodes: readonly CommandNod
 };
 
 /**
- * Copies some units right after the last of them, each at the indent of the body the copies land in, however deep
- * it came from.
+ * Finds where a duplicate's copies start: right after the last unit copied, or after the whole merged Show Choices
+ * run it ends, so copies never split one choice window into two.
+ * @param {readonly RmmzEventCommand[]} list The list.
+ * @param {readonly CommandNode[]} nodes The units copied.
+ * @returns {number} The index the copies start at; 0 when nothing is copied.
+ */
+const duplicateIndex = (list: readonly RmmzEventCommand[], nodes: readonly CommandNode[]): number =>
+{
+  const outer = outermostNodes(nodes);
+  const last = outer[outer.length - 1];
+  if (last === undefined)
+  {
+    return 0;
+  }
+
+  const after = pointAfterUnit(list, last);
+  return after === null
+    ? last.end
+    : insertionIndex(after);
+};
+
+/**
+ * Copies some units right after the last of them (after the merged Show Choices run it ends, when it ends one),
+ * each at the indent of the body the copies land in, however deep it came from.
  * @param {readonly RmmzEventCommand[]} list The list.
  * @param {readonly CommandNode[]} nodes The units.
  * @returns {RmmzEventCommand[]} The new list.
@@ -159,7 +181,8 @@ const duplicateNodes = (list: readonly RmmzEventCommand[], nodes: readonly Comma
   }
 
   const copies = unitsAtIndent(list, outer, last.parent.indent);
-  return [ ...list.slice(0, last.end), ...copies, ...list.slice(last.end) ];
+  const at = duplicateIndex(list, outer);
+  return [ ...list.slice(0, at), ...copies, ...list.slice(at) ];
 };
 
 /**
@@ -218,6 +241,7 @@ const asJsonCommands = (commands: readonly RmmzEventCommand[]): JsonValue[] =>
 
 export {
   asJsonCommands,
+  duplicateIndex,
   duplicateNodes,
   insertAt,
   landingIndex,

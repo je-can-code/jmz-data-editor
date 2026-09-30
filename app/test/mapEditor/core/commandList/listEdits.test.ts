@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readCommandTree, type CommandBlockNode } from '../../../../src/mapEditor/core/commandList/commandTree.ts';
 import {
   asJsonCommands,
+  duplicateIndex,
   duplicateNodes,
   insertAt,
   landingIndex,
@@ -281,6 +282,26 @@ describe('listEdits', () =>
       // Assert: the copies follow the sound inside the branch, and the list reads with no strays.
       expect([ describeList(duplicated.slice(3, 10)), readCommandTree(duplicated, MZ_STRUCTURE).irregular ])
         .toStrictEqual([ [ '111@0', '250@1', '101@1', '401@1', '401@1', '250@1', '0@1' ], 0 ]);
+    });
+
+    it('copies after the whole merged Show Choices run the last unit belongs to, so the run stays one window', () =>
+    {
+      // Arrange: a wait, then two Show Choices back to back; the wait and the run's first block are copied.
+      const list = [
+        cmd(230, 0, [ 5 ]),
+        cmd(102, 0, [ [ 'A' ], -1, 0, 2, 0 ]), cmd(402, 0, [ 0, 'A' ]), cmd(0, 1), cmd(404, 0),
+        cmd(102, 0, [ [ 'B' ], -1, -1, 2, 0 ]), cmd(402, 0, [ 0, 'B' ]), cmd(0, 1), cmd(404, 0),
+        cmd(0, 0),
+      ];
+      const tree = readCommandTree(list, MZ_STRUCTURE);
+      const [ wait, first ] = tree.root.nodes;
+
+      // Act.
+      const duplicated = duplicateNodes(list, [ wait, first ]);
+
+      // Assert: the copies start after the second block, where the index says they do.
+      expect([ describeList(duplicated.slice(5, 11)), duplicateIndex(list, [ wait, first ]) ])
+        .toStrictEqual([ [ '102@0', '402@0', '0@1', '404@0', '230@0', '102@0' ], 9 ]);
     });
 
     it('copies nothing when nothing is chosen', () =>

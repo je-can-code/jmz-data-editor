@@ -24,6 +24,7 @@ import {
 import { insertionIndex, pointBeforeNode, settleInsertion, type InsertionPoint } from './insertionPoints.ts';
 import {
   asJsonCommands,
+  duplicateIndex,
   duplicateNodes,
   insertAt,
   landingIndex,
@@ -260,15 +261,16 @@ class CommandListEditor
   }
 
   /**
-   * Copies some units right after the last of them.
+   * Copies some units right after the last of them, or after the merged Show Choices run it ends.
    * @param {readonly CommandNode[]} nodes The units.
    * @returns {ListOutcome} The step, or null when there was nothing to copy, and where the copies start.
    */
   duplicate(nodes: readonly CommandNode[]): ListOutcome
   {
     const outer = outermostNodes(nodes);
-    const index = outer[outer.length - 1]?.end ?? 0;
-    return { step: this.#commit(`Duplicate ${countPhrase(outer.length)}`, duplicateNodes(this.commands(), outer)), index };
+    const list = this.commands();
+    const index = duplicateIndex(list, outer);
+    return { step: this.#commit(`Duplicate ${countPhrase(outer.length)}`, duplicateNodes(list, outer)), index };
   }
 
   /**
