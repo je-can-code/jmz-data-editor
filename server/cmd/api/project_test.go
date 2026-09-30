@@ -96,16 +96,23 @@ func newProject(t *testing.T) *project {
 	t.Setenv("JMZ_PROJECT_ROOT", root)
 	hub := watch.NewHub("data", store.EditorDataFolder)
 
-	return &project{root: root, hub: hub, handler: routes(hub)}
+	return &project{root: root, hub: hub, handler: routes(hub, accessPolicy())}
 }
 
-// call sends one request through the route table. Targets are raw request paths, so an encoded
-// traversal such as %2F reaches the server exactly as a browser would send it.
+// call sends one request through the route table, addressed to the API's own name the way curl or
+// the UI would address it. Targets are raw request paths, so an encoded traversal such as %2F
+// reaches the server exactly as a browser would send it. Headers come in name, value pairs; a "Host"
+// pair readdresses the request.
 func (current *project) call(t *testing.T, method string, target string, body string, headers ...string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
+	request.Host = listenAddress
 	for index := 0; index+1 < len(headers); index += 2 {
+		if headers[index] == "Host" {
+			request.Host = headers[index+1]
+			continue
+		}
 		request.Header.Set(headers[index], headers[index+1])
 	}
 

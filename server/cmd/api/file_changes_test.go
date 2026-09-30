@@ -132,11 +132,23 @@ func serve(t *testing.T) (*project, *httptest.Server) {
 	return current, server
 }
 
+// asTheUi dresses a request the way the UI's own page sends it: from the UI's origin, addressed to the
+// API by the name it listens on, whatever port the test server really has.
+func asTheUi(request *http.Request) *http.Request {
+	request.Host = listenAddress
+	request.Header.Set("Origin", "http://127.0.0.1:3000")
+	return request
+}
+
 // mapBody fetches map 1 the way the editor would, and returns the map inside the envelope.
 func mapBody(t *testing.T, base string) string {
 	t.Helper()
 
-	response, err := http.Get(base + "/api/maps/1")
+	request, err := http.NewRequest(http.MethodGet, base+"/api/maps/1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.DefaultClient.Do(asTheUi(request))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +173,7 @@ func put(t *testing.T, target string, body string, client string) {
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Jmz-Client", client)
 
-	response, err := http.DefaultClient.Do(request)
+	response, err := http.DefaultClient.Do(asTheUi(request))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +198,7 @@ func openStream(t *testing.T, base string) *eventStream {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := http.DefaultClient.Do(asTheUi(request))
 	if err != nil {
 		t.Fatal(err)
 	}

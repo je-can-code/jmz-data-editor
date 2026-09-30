@@ -11,19 +11,33 @@ import (
 	"net/http"
 )
 
+// listenAddress is where the API listens: the loopback address only, on the port the UI expects
+// (nw-app/main.js and the dev scripts both default to http://127.0.0.1:8080).
+const listenAddress = "127.0.0.1:8080"
+
 func main() {
 	// one change stream for the whole server: every window's saves pass through it.
 	changes := watch.NewHub("data", store.EditorDataFolder)
 
 	fmt.Println("Server running on http://localhost:8080")
-	err := http.ListenAndServe("127.0.0.1:8080", routes(changes))
+	err := http.ListenAndServe(listenAddress, routes(changes, accessPolicy()))
 	if err != nil {
 		panic(err)
 	}
 }
 
-// routes registers every endpoint the API serves, wrapped in the CORS middleware.
-func routes(changes *watch.Hub) http.Handler {
+// accessPolicy is who may talk to the API: pages from the UI's Vite server, which app/vite.config.ts
+// pins to port 3000 and nw-app/main.js opens as http://127.0.0.1:3000, under either name for the
+// loopback address; and requests addressed to the API by either of those names on its own port.
+func accessPolicy() middleware.Policy {
+	return middleware.Policy{
+		AllowedOrigins: []string{"http://127.0.0.1:3000", "http://localhost:3000"},
+		AllowedHosts:   []string{listenAddress, "localhost:8080"},
+	}
+}
+
+// routes registers every endpoint the API serves, behind the access policy.
+func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	mux := http.NewServeMux()
 
 	//region health
@@ -122,5 +136,5 @@ func routes(changes *watch.Hub) http.Handler {
 	mux.HandleFunc("GET /api/file-changes", api.StreamFileChanges(changes, api.KeepAliveInterval))
 	//endregion map editor endpoints
 
-	return middleware.CORS(mux)
+	return middleware.CORS(mux, policy)
 }

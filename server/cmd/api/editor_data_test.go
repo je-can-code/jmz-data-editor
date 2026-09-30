@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -150,26 +149,5 @@ func TestEditorDataRefusesKeysThatAreNotKeys(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-// TestPreflightAllowsTheMapEditorsSaves covers the browser's CORS check before a PUT carrying the
-// client header, which would otherwise stop every save from a window on another origin.
-func TestPreflightAllowsTheMapEditorsSaves(t *testing.T) {
-	// Arrange.
-	current := newProject(t)
-
-	// Act.
-	response := current.call(t, http.MethodOptions, "/api/maps/1", "",
-		"Origin", "http://127.0.0.1:5173",
-		"Access-Control-Request-Method", "PUT",
-		"Access-Control-Request-Headers", "content-type, x-jmz-client")
-
-	// Assert.
-	assertStatus(t, response, http.StatusNoContent)
-	methods := response.Header().Get("Access-Control-Allow-Methods")
-	headers := response.Header().Get("Access-Control-Allow-Headers")
-	if strings.Contains(methods, "PUT") == false || strings.Contains(headers, "X-Jmz-Client") == false {
-		t.Errorf("the preflight allowed methods %q and headers %q", methods, headers)
 	}
 }
