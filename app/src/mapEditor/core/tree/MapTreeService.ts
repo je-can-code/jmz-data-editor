@@ -77,6 +77,25 @@ class TreeRefusal extends Error
 }
 
 /**
+ * A file found where a step brings one back, written after the step checked there was none: someone else's, and
+ * never written over by an undo or a redo.
+ */
+class FileTakenError extends Error
+{
+  readonly mapId: number;
+
+  /**
+   * @param {number} mapId The map whose file is there.
+   */
+  constructor(mapId: number)
+  {
+    super(`map ${mapId} has a file again`);
+    this.name = 'FileTakenError';
+    this.mapId = mapId;
+  }
+}
+
+/**
  * What checking a step's files came to: why the step cannot move, or the files that already hold what the step
  * brings, which moving it leaves as they are.
  */
@@ -166,6 +185,20 @@ const describeFailure = (failure: HistoryFailure, direction: 'backward' | 'forwa
         ? `"${failure.step.label}" cannot ${verb}: ${failure.message}.`
         : `"${failure.step.label}" cannot ${verb}: "${failure.blockedBy.label}" changed the same maps since.`;
   }
+};
+
+/**
+ * Words the refusal of an undo or redo that would write a file over one that is there: found by the check before
+ * the step moves, or by the server when the file arrived after that check.
+ * @param {HistoryStep} step The step.
+ * @param {'backward' | 'forward'} direction Undo or redo.
+ * @param {number} mapId The map whose file is there.
+ * @returns {string} The words.
+ */
+const fileTakenRefusal = (step: HistoryStep, direction: 'backward' | 'forward', mapId: number): string =>
+{
+  const verb = direction === 'backward' ? 'undo' : 'redo';
+  return `"${step.label}" cannot ${verb}: map ${mapId} has a file again, which it would write over.`;
 };
 
 /**
@@ -537,6 +570,11 @@ class MapTreeService
     catch (error)
     {
       const problems = await this.#restore(direction, progress);
+      if (problems.length === 0 && error instanceof FileTakenError)
+      {
+        return { ok: false, message: fileTakenRefusal(step, direction, error.mapId) };
+      }
+
       return error instanceof TreeRefusal && problems.length === 0
         ? { ok: false, message: error.message }
         : failedWrite(step.label, error, problems, true);
@@ -653,12 +691,12 @@ class MapTreeService
         continue;
       }
 
-      const verb = direction === 'backward' ? 'undo' : 'redo';
       if (leaving === null)
       {
-        return { refusal: `"${step.label}" cannot ${verb}: map ${mapId} has a file again, which it would write over.` };
+        return { refusal: fileTakenRefusal(step, direction, mapId) };
       }
 
+      const verb = direction === 'backward' ? 'undo' : 'redo';
       return {
         refusal: current === null
           ? `"${step.label}" cannot ${verb}: map ${mapId}'s file is gone.`
@@ -685,7 +723,7 @@ class MapTreeService
       const content = this.#arriving(file, direction);
       if (content !== null && inPlace.has(file.document) === false)
       {
-        await this.#writeFile(mapIdOf(file.document), content, this.#arrivingText(file, direction));
+        await this.#writeFile(mapIdOf(file.document), content, this.#arrivingText(file, direction), false);
         progress.written.push(file);
       }
     }
@@ -737,7 +775,7 @@ class MapTreeService
       const mapId = mapIdOf(file.document);
       try
       {
-        await this.#writeFile(mapId, this.#leaving(file, direction) as JsonValue, this.#leavingText(file, direction));
+        await this.#writeFile(mapId, this.#leaving(file, direction) as JsonValue, this.#leavingText(file, direction), true);
       }
       catch (error)
       {
@@ -788,14 +826,16 @@ class MapTreeService
   }
 
   /**
-   * Writes a map file: from its exact text when that is known, which the server writes back byte for byte where no
-   * file is, or from its content otherwise. A file already there when the text is known takes the content instead,
-   * which the server writes in that file's own layout.
+   * Writes a map file: from its exact text when that is known, which the server writes back byte for byte and only
+   * where no file is, or from its content otherwise. The server's refusal of the text (a file is there) means one
+   * was written after the step checked: an undo or redo refuses rather than write over it, and only putting back a
+   * failed step, whose job is to restore what it removed, writes the content over it in that file's own layout.
    * @param {number} mapId The map.
    * @param {JsonValue} content The file's content.
    * @param {string | undefined} text The file's exact text, when known.
+   * @param {boolean} restoring True when putting back a failed step, which may write over a file found there.
    */
-  async #writeFile(mapId: number, content: JsonValue, text: string | undefined): Promise<void>
+  async #writeFile(mapId: number, content: JsonValue, text: string | undefined, restoring: boolean): Promise<void>
   {
     if (text !== undefined)
     {
@@ -809,6 +849,11 @@ class MapTreeService
         if ((error instanceof MapEditorApiError && error.status === 409) === false)
         {
           throw error;
+        }
+
+        if (restoring === false)
+        {
+          throw new FileTakenError(mapId);
         }
       }
     }

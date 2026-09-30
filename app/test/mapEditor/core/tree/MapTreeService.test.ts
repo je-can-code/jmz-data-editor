@@ -452,6 +452,32 @@ describe('MapTreeService', () =>
         .toStrictEqual([ true, 'Cave', [ '(Delete "Cave")' ] ]);
     });
 
+    it('refuses to undo a delete when a file lands where the map was just after the check, rather than write over it', async () =>
+    {
+      // Arrange: the check finds no file for the cave, and one is written the moment it has looked.
+      const { service, hub, api, maps, state } = buildService();
+      await service.remove([ 5 ]);
+      const loadMap = api.loadMap.bind(api);
+      api.loadMap = (mapId: number) =>
+      {
+        const answer = loadMap(mapId);
+        maps.set(5, fileFor(50));
+        return answer;
+      };
+
+      // Act.
+      const outcome = await service.undo();
+
+      // Assert: the newcomer is untouched, and the delete is still done.
+      expect([ outcome, maps.get(5)?.displayName, state.infos[5], historyOf(hub) ])
+        .toStrictEqual([
+          { ok: false, message: '"Delete "Cave"" cannot undo: map 5 has a file again, which it would write over.' },
+          'file 50',
+          null,
+          [ 'Delete "Cave"' ],
+        ]);
+    });
+
     it('refuses to undo a delete when a file has appeared where the map was, rather than write over it', async () =>
     {
       // Arrange.
@@ -568,6 +594,30 @@ describe('MapTreeService', () =>
         ]);
       expect([ texts.get(2), maps.get(3), state.infos, historyOf(hub) ])
         .toStrictEqual([ oddText(fileFor(2)), fileFor(3), buildTreeRows(), [] ]);
+    });
+
+    it('puts a removed file back over one written in its place meanwhile, since putting back is its whole job', async () =>
+    {
+      // Arrange: once the town's file is gone, something writes a file there, and then the inn's cannot be removed.
+      const { service, hub, api, maps, state, failing } = buildService();
+      failing.add('delete 3');
+      const deleteMap = api.deleteMap.bind(api);
+      api.deleteMap = async (mapId: number) =>
+      {
+        if (mapId === 3)
+        {
+          maps.set(2, fileFor(20));
+        }
+
+        return deleteMap(mapId);
+      };
+
+      // Act.
+      const outcome = await service.remove([ 2 ]);
+
+      // Assert.
+      expect([ outcome.ok, maps.get(2), state.infos, historyOf(hub) ])
+        .toStrictEqual([ false, fileFor(2), buildTreeRows(), [] ]);
     });
 
     it('keeps the step and never lists a missing map when a failed delete cannot be put back either', async () =>
