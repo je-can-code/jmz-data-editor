@@ -12,6 +12,7 @@ const PANEL_COMPONENTS = {
   palette: 'palette',
   layers: 'layers',
   quick: 'quick-settings',
+  start: 'start',
 } as const;
 
 /**
@@ -29,6 +30,7 @@ const SINGLE_PANEL_IDS = {
   palette: 'palette',
   layers: 'layers',
   quick: 'quick-settings',
+  start: 'start',
 } as const;
 
 /**

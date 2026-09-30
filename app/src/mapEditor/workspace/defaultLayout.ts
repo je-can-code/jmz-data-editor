@@ -16,8 +16,8 @@ const INSPECTOR_WIDTH = 360;
 
 /**
  * Lays out the workspace the first time, or after a reset: the map tree on the left (with the palette and the layer
- * strip stacked beside it until they arrive), the map properties and quick settings on the right above the history,
- * and the maps opening between them.
+ * strip stacked beside it until they arrive), the start panel in the middle where maps open, and the map properties
+ * and quick settings on the right above the history.
  * @param {DockviewApi} api The dock.
  */
 const addDefaultPanels = (api: DockviewApi): void =>
@@ -25,6 +25,7 @@ const addDefaultPanels = (api: DockviewApi): void =>
   api.addPanel({ id: SINGLE_PANEL_IDS.mapTree, component: PANEL_COMPONENTS.mapTree, title: 'Maps' });
   api.addPanel({ id: SINGLE_PANEL_IDS.palette, component: PANEL_COMPONENTS.palette, title: 'Tiles', position: { referencePanel: SINGLE_PANEL_IDS.mapTree, direction: 'within' }, inactive: true });
   api.addPanel({ id: SINGLE_PANEL_IDS.layers, component: PANEL_COMPONENTS.layers, title: 'Layers', position: { referencePanel: SINGLE_PANEL_IDS.mapTree, direction: 'within' }, inactive: true });
+  api.addPanel({ id: SINGLE_PANEL_IDS.start, component: PANEL_COMPONENTS.start, title: 'Start', position: { direction: 'right' } });
   api.addPanel({ id: SINGLE_PANEL_IDS.properties, component: PANEL_COMPONENTS.properties, title: 'Map properties', position: { direction: 'right' } });
   api.addPanel({ id: SINGLE_PANEL_IDS.quick, component: PANEL_COMPONENTS.quick, title: 'Quick settings', position: { referencePanel: SINGLE_PANEL_IDS.properties, direction: 'within' }, inactive: true });
   api.addPanel({ id: SINGLE_PANEL_IDS.history, component: PANEL_COMPONENTS.history, title: 'History', position: { referencePanel: SINGLE_PANEL_IDS.properties, direction: 'below' } });
@@ -36,14 +37,21 @@ const addDefaultPanels = (api: DockviewApi): void =>
 
 /**
  * Brings back the workspace as it was left, torn-out windows included, or lays it out afresh when there is no saved
- * layout or it no longer fits (a panel kind renamed since, say).
+ * layout or it no longer fits (a panel kind renamed since, say). A dock replaced while the saved layout was being
+ * read (the page's first render builds one, then another) is left alone.
  * @param {DockviewApi} api The dock.
  * @param {LayoutStore} layouts Where the layout is kept.
- * @returns {Promise<'restored' | 'default'>} Which it did.
+ * @param {() => boolean} isCurrent Whether the dock is still the one on the page.
+ * @returns {Promise<'restored' | 'default' | 'stale'>} Which it did.
  */
-const restoreLayout = async (api: DockviewApi, layouts: LayoutStore): Promise<'restored' | 'default'> =>
+const restoreLayout = async (api: DockviewApi, layouts: LayoutStore, isCurrent: () => boolean): Promise<'restored' | 'default' | 'stale'> =>
 {
   const saved = await layouts.load();
+  if (isCurrent() === false)
+  {
+    return 'stale';
+  }
+
   if (saved !== null)
   {
     try

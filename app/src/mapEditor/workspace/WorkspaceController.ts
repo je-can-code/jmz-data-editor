@@ -257,18 +257,22 @@ class WorkspaceController
       return open;
     }
 
-    return api.addPanel({
-      id: mapPanelId(mapId, api.panels.map(panel => panel.id)),
+    const panel = api.addPanel({
+      id: mapPanelId(mapId, api.panels.map(each => each.id)),
       component: PANEL_COMPONENTS.map,
       title: this.mapName(mapId),
       params: { mapId },
       position: this.#placeForMap(api, options),
     });
+
+    // the start panel only holds the middle of the workspace until a map is open there.
+    api.getPanel(SINGLE_PANEL_IDS.start)?.api.close();
+    return panel;
   }
 
   /**
-   * Works out where a new map panel goes: where it was dropped, beside the maps, among them, or, with none open,
-   * right of the tree.
+   * Works out where a new map panel goes: where it was dropped, beside the maps, among them, in place of the start
+   * panel, or, with none of those, right of the tree.
    * @param {DockviewApi} api The dock.
    * @param {OpenMapOptions} options Where it was asked for.
    * @returns {Parameters<DockviewApi['addPanel']>[0]['position']} The position.
@@ -286,6 +290,11 @@ class WorkspaceController
     if (mapGroup !== null)
     {
       return { referenceGroup: mapGroup, direction: options.beside === true ? 'right' : 'within' };
+    }
+
+    if (api.getPanel(SINGLE_PANEL_IDS.start) !== undefined)
+    {
+      return { referencePanel: SINGLE_PANEL_IDS.start, direction: 'within' };
     }
 
     return api.getPanel(SINGLE_PANEL_IDS.mapTree) === undefined

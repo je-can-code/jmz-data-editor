@@ -36,4 +36,10 @@ const LayersPanel = () => <Placeholder line={'The layers to paint on will appear
  */
 const QuickSettingsPanel = () => <Placeholder line={'Pick an event on a map to change its settings here.'}/>;
 
-export { LayersPanel, PalettePanel, QuickSettingsPanel };
+/**
+ * Holds the middle of the workspace until the first map opens there, when it closes itself.
+ * @returns {React.JSX.Element} The panel.
+ */
+const StartPanel = () => <Placeholder line={'Double-click a map in the tree, or drag it here, to open it.'}/>;
+
+export { LayersPanel, PalettePanel, QuickSettingsPanel, StartPanel };

@@ -21,7 +21,7 @@ import { HistoryPanel } from './panels/HistoryPanel.tsx';
 import { MapPanel } from './panels/MapPanel.tsx';
 import { MapPropertiesPanel } from './panels/MapPropertiesPanel.tsx';
 import { MapTreePanel } from './panels/MapTreePanel.tsx';
-import { LayersPanel, PalettePanel, QuickSettingsPanel } from './panels/PlaceholderPanels.tsx';
+import { LayersPanel, PalettePanel, QuickSettingsPanel, StartPanel } from './panels/PlaceholderPanels.tsx';
 import { attachShortcutsToPopouts, withWindowScope } from './windowScope.tsx';
 import { NoticeBar, WorkspaceBar } from './WorkspaceChrome.tsx';
 import { WorkspaceController } from './WorkspaceController.ts';
@@ -49,6 +49,7 @@ const PANELS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   [PANEL_COMPONENTS.palette]: withWindowScope(PalettePanel),
   [PANEL_COMPONENTS.layers]: withWindowScope(LayersPanel),
   [PANEL_COMPONENTS.quick]: withWindowScope(QuickSettingsPanel),
+  [PANEL_COMPONENTS.start]: withWindowScope(StartPanel),
 };
 
 /**
@@ -168,10 +169,13 @@ const Workspace = () =>
   {
     const { api } = event;
     controller.attach(api);
+
+    // the first render builds a dock and replaces it at once; only the one still on the page carries on.
+    const isCurrent = () => controller.dockview === api;
     let restoring = true;
     const keepLayout = () =>
     {
-      if (restoring === false)
+      if (restoring === false && isCurrent())
       {
         controller.layouts.save(api.toJSON() as unknown as SavedLayout);
       }
@@ -193,13 +197,22 @@ const Workspace = () =>
       attachShortcutsToPopouts(api, onShortcut),
     );
 
-    restoreLayout(api, controller.layouts)
-      .catch(() => addDefaultPanels(api))
+    restoreLayout(api, controller.layouts, isCurrent)
+      .catch(() =>
+      {
+        if (isCurrent())
+        {
+          addDefaultPanels(api);
+        }
+      })
       .finally(() =>
       {
-        restoring = false;
-        controller.panelActivated(api.activePanel);
-        startMapLink(api);
+        if (isCurrent())
+        {
+          restoring = false;
+          controller.panelActivated(api.activePanel);
+          startMapLink(api);
+        }
       });
   };
 
