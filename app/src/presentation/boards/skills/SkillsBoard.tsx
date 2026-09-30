@@ -1870,7 +1870,7 @@ const SkillsBoard = () =>
   );
 
   /**
-   * Maps a skill array index to a virtualized sidebar row (spacer for gaps/headers).
+   * Maps a skill array index to a virtualized sidebar row (spacer for a gap past the end of the list).
    *
    * @param index Row index in {@link skills}.
    * @returns Spacer or item descriptor for {@link VirtualizedSidebarList}.
@@ -1879,7 +1879,7 @@ const SkillsBoard = () =>
   {
     const skill = skills[index];
 
-    if (skill === undefined || skill.name.startsWith('==='))
+    if (skill === undefined)
     {
       return {
         type: 'spacer',

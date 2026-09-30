@@ -257,10 +257,6 @@ const EnemiesBoard = () =>
       {
         continue;
       }
-      if (enemy.name.startsWith('==='))
-      {
-        continue;
-      }
 
       if (enemy.name.toLowerCase()
         .includes(query))
@@ -330,10 +326,6 @@ const EnemiesBoard = () =>
       return false;
     }
     if (!enemy.name || enemy.name.length === 0)
-    {
-      return false;
-    }
-    if (enemy.name.startsWith('==='))
     {
       return false;
     }
@@ -545,11 +537,6 @@ const EnemiesBoard = () =>
     const enemy = enemies.at(index);
 
     if (!enemy)
-    {
-      return <></>;
-    }
-
-    if (enemy.name.startsWith('==='))
     {
       return <></>;
     }
