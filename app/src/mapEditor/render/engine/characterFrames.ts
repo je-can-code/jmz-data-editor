@@ -97,7 +97,12 @@ const eventFrame = (image: RmmzEventImage, sheet: SheetSize | null, tileSize: nu
   const height = big ? sheet.height / 4 : sheet.height / 8;
   const blockX = big ? 0 : (image.characterIndex % 4) * 3;
   const blockY = big ? 0 : Math.floor(image.characterIndex / 4) * 4;
-  const x = wholeFrameEdge((blockX + image.pattern) * width, width, sheet.width);
+
+  // the walking cycle runs 0, 1, 2, 3 and shows its fourth step as the middle frame (Game_CharacterBase#pattern).
+  const pattern = image.pattern < 3
+    ? image.pattern
+    : 1;
+  const x = wholeFrameEdge((blockX + pattern) * width, width, sheet.width);
   const y = wholeFrameEdge((blockY + (image.direction - 2) / 2) * height, height, sheet.height);
   return { source: 'character', sheet: 0, sx: x.start, sy: y.start, width: x.size, height: y.size };
 };

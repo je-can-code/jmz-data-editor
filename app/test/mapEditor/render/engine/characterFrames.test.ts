@@ -117,17 +117,33 @@ describe('characterFrames', () =>
         .toStrictEqual({ source: 'character', sheet: 0, sx: 99, sy: 156, width: 49, height: 78 });
     });
 
-    it('keeps a frame inside its sheet, so a pattern past the last column draws nothing', () =>
+    it('keeps a frame inside its sheet, so an index past the last row draws nothing', () =>
     {
-      // Arrange: a 100x100 $ sheet asked for pattern 3, which starts at the sheet's right edge.
-      const odd = image({ characterName: '$Odd', pattern: 3, direction: 2 });
+      // Arrange: a 576x384 sheet asked for index 8, whose block starts at the sheet's bottom edge.
+      const stray = image({ characterIndex: 8 });
 
       // Act.
-      const frame = eventFrame(odd, { width: 100, height: 100 }, 48);
+      const frame = eventFrame(stray, { width: 576, height: 384 }, 48);
 
       // Assert: the start is clamped to the edge and nothing of the sheet is left to cut.
       expect(frame)
-        .toStrictEqual({ source: 'character', sheet: 0, sx: 100, sy: 0, width: 0, height: 25 });
+        .toStrictEqual({ source: 'character', sheet: 0, sx: 48, sy: 384, width: 48, height: 0 });
+    });
+
+    it('shows pattern 3 as pattern 1, as the engine\'s walking cycle does, and pattern 2 as itself', () =>
+    {
+      // Arrange: the same character facing down at pattern 2 and at pattern 3, on a 576x384 sheet.
+      const patterns = [ image({ pattern: 2 }), image({ pattern: 3 }) ];
+
+      // Act.
+      const frames = patterns.map(each => eventFrame(each, { width: 576, height: 384 }, 48));
+
+      // Assert: pattern 2 is the third column; pattern 3 is the second, the middle frame, as Game_CharacterBase#pattern.
+      expect(frames)
+        .toStrictEqual([
+          { source: 'character', sheet: 0, sx: 96, sy: 0, width: 48, height: 48 },
+          { source: 'character', sheet: 0, sx: 48, sy: 0, width: 48, height: 48 },
+        ]);
     });
   });
 
