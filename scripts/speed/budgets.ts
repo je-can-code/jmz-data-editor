@@ -74,13 +74,23 @@ const matchStrokeFrames = (inputs: readonly InputSample[], frames: readonly Fram
 };
 
 /**
- * Judges a brush stroke: every frame that drew an input under one refresh, and no frame dropped between the frame
- * that drew the first input and the frame that drew the last.
+ * What the page's pen reports it did during a stroke: how many pointer events it painted, and how many frames
+ * rebuilt chunks. A stroke whose pen never touched the map would otherwise pass on frames with nothing to do.
+ */
+type PaintProof = {
+  readonly steps: number;
+  readonly redrawnFrames: number;
+};
+
+/**
+ * Judges a brush stroke: every input painted, every frame that drew an input under one refresh, the stroke's frames
+ * really redrawn, and no frame dropped between the frame that drew the first input and the frame that drew the last.
  * @param {readonly InputSample[]} inputs The stroke's pointer moves.
  * @param {readonly FrameSample[]} frames The recorded frames.
+ * @param {PaintProof} proof What the pen reports it did.
  * @returns {StrokeResult} What the stroke came to.
  */
-const judgeStrokeFrames = (inputs: readonly InputSample[], frames: readonly FrameSample[]): StrokeResult =>
+const judgeStrokeFrames = (inputs: readonly InputSample[], frames: readonly FrameSample[], proof: PaintProof): StrokeResult =>
 {
   const matches = matchStrokeFrames(inputs, frames);
   const drawing = [ ...new Set(matches.map(match => match.frame)) ];
@@ -95,6 +105,17 @@ const judgeStrokeFrames = (inputs: readonly InputSample[], frames: readonly Fram
   if (matches.length === 0)
   {
     reasons.push('no stroke input was matched to a frame');
+  }
+
+  // a stroke that never painted proves nothing about painting.
+  if (proof.steps < inputs.length)
+  {
+    reasons.push(`the pen painted ${proof.steps} of ${inputs.length} inputs`);
+  }
+
+  if (proof.redrawnFrames < drawing.length)
+  {
+    reasons.push(`only ${proof.redrawnFrames} of ${drawing.length} stroke frames redrew any chunk`);
   }
 
   if (cost.max >= BUDGETS.strokeFrameMs)
@@ -156,4 +177,4 @@ const judgeOpen = (ms: number, budgetMs: number, what: string): Verdict =>
 };
 
 export { BUDGETS, judgeCameraPath, judgeOpen, judgeStrokeFrames, matchStrokeFrames };
-export type { StrokeFrame, StrokeResult };
+export type { PaintProof, StrokeFrame, StrokeResult };

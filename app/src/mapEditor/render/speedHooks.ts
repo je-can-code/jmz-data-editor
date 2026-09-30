@@ -167,6 +167,16 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
   let painting: { transaction: Transaction; map: MapDocument } | null = null;
   let settings: PaintSettings = { tileIds: [ 2048 + 47, 2816 + 47 ], layer: 0, footprint: 3 };
   let steps = 0;
+
+  // the frames that rebuilt chunks since the pen was picked up: proof a stroke reached the screen.
+  let redrawnFrames = 0;
+  stops.push(renderer.onFrame(report =>
+  {
+    if (report.rebuiltChunks > 0)
+    {
+      redrawnFrames += 1;
+    }
+  }));
   const { canvas } = renderer;
   const paintAt = (x: number, y: number) =>
   {
@@ -256,6 +266,7 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     {
       settings = { ...settings, ...next };
       steps = 0;
+      redrawnFrames = 0;
       canvas?.addEventListener('pointerdown', onDown);
       canvas?.addEventListener('pointermove', onMove);
       canvas?.addEventListener('pointerup', onUp);
@@ -292,7 +303,7 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       renderer.holdAnimation({ step: options.step, frames: options.frames });
     },
     extract: (rect: { x: number; y: number; width: number; height: number }) => renderer.extract(rect),
-    paintState: () => ({ steps, painting: painting !== null }),
+    paintState: () => ({ steps, redrawnFrames, painting: painting !== null }),
     undoPaint: () => hub.undo(mapHistoryKey(context.map()?.mapId ?? 0)),
     openMap: async (mapId: number) =>
     {

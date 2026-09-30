@@ -74,6 +74,13 @@ describe('budgets', () =>
 
   describe('judgeStrokeFrames', () =>
   {
+    /**
+     * A pen that painted every input and redrew in every frame that drew one.
+     * @param {number} inputs How many inputs.
+     * @returns {{ steps: number, redrawnFrames: number }} The proof.
+     */
+    const painted = (inputs: number) => ({ steps: inputs, redrawnFrames: inputs });
+
     it('passes a stroke whose drawing frames all stayed under one refresh with none dropped', () =>
     {
       // Arrange.
@@ -81,7 +88,7 @@ describe('budgets', () =>
       const inputs = [ move(1010), move(1030) ];
 
       // Act.
-      const result = judgeStrokeFrames(inputs, recorded);
+      const result = judgeStrokeFrames(inputs, recorded, painted(2));
 
       // Assert.
       expect([ result.verdict.pass, result.matched, result.frames, result.dropped, result.cost.max ])
@@ -95,7 +102,7 @@ describe('budgets', () =>
       const inputs = [ move(1010), move(1020) ];
 
       // Act.
-      const result = judgeStrokeFrames(inputs, recorded);
+      const result = judgeStrokeFrames(inputs, recorded, painted(2));
 
       // Assert.
       expect([ result.verdict.pass, result.verdict.reasons ])
@@ -110,7 +117,7 @@ describe('budgets', () =>
       const inputs = [ move(1010), move(1030) ];
 
       // Act.
-      const results = [ judgeStrokeFrames(inputs, inside), judgeStrokeFrames(inputs, outside) ];
+      const results = [ judgeStrokeFrames(inputs, inside, painted(2)), judgeStrokeFrames(inputs, outside, painted(2)) ];
 
       // Assert.
       expect(results.map(result => [ result.verdict.pass, result.dropped ]))
@@ -123,11 +130,31 @@ describe('budgets', () =>
       const recorded = frames([ [ 1, 1 ] ]);
 
       // Act.
-      const result = judgeStrokeFrames([ move(5000) ], recorded);
+      const result = judgeStrokeFrames([ move(5000) ], recorded, painted(1));
 
       // Assert.
       expect([ result.verdict.pass, result.verdict.reasons ])
         .toStrictEqual([ false, [ 'no stroke input was matched to a frame' ] ]);
+    });
+
+    it('fails a stroke whose pen missed inputs, or whose frames never redrew, however fast its frames were', () =>
+    {
+      // Arrange: fast frames, but a pen that painted one of two inputs, and one that painted both and never redrew.
+      const recorded = frames([ [ 0, 0 ], [ 0, 0 ], [ 0, 0 ] ]);
+      const inputs = [ move(1010), move(1030) ];
+
+      // Act.
+      const results = [
+        judgeStrokeFrames(inputs, recorded, { steps: 1, redrawnFrames: 2 }),
+        judgeStrokeFrames(inputs, recorded, { steps: 2, redrawnFrames: 0 }),
+      ];
+
+      // Assert.
+      expect(results.map(result => [ result.verdict.pass, result.verdict.reasons ]))
+        .toStrictEqual([
+          [ false, [ 'the pen painted 1 of 2 inputs' ] ],
+          [ false, [ 'only 0 of 2 stroke frames redrew any chunk' ] ],
+        ]);
     });
   });
 

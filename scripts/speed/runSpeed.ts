@@ -25,7 +25,7 @@ import { BUDGETS, judgeCameraPath, judgeOpen, judgeStrokeFrames } from './budget
 import type { StrokeResult } from './budgets.ts';
 import { startEditorStack } from './editorStack.ts';
 import { addFrameRecorder, startRecording, stopRecording } from './frameRecorder.ts';
-import { summarize, summarizeFrames } from './frameStats.ts';
+import { REFRESH_60_HZ, summarize, summarizeFrames } from './frameStats.ts';
 import type { RunSummary, Verdict } from './frameStats.ts';
 import { newSpeedPage, openSpeedBrowser } from './gpuChromium.ts';
 import type { GpuReport } from './gpuChromium.ts';
@@ -47,12 +47,22 @@ type Options = {
 };
 
 /**
+ * A late frame: how long the gap before it was, and what the frames either side of the gap cost.
+ */
+type Stall = {
+  interval: number;
+  before: { work: number; gpu: number };
+  after: { work: number; gpu: number };
+};
+
+/**
  * What one camera path came to.
  */
 type PathResult = {
   summary: RunSummary;
   verdict: Verdict;
   gpuBusy: { mean: number; max: number };
+  stalls: Stall[];
 };
 
 /**
@@ -88,6 +98,7 @@ type PageHooks = {
   stopPath: () => void;
   enablePaint: (settings: Record<string, unknown>) => void;
   disablePaint: () => void;
+  paintState: () => { steps: number; redrawnFrames: number };
   enableEveryOverlay: () => void;
   openMap: (mapId: number) => Promise<{ ms: number }>;
   dragEvents: null | ((options: unknown) => Promise<unknown>);
@@ -212,7 +223,19 @@ const measurePath = async (page: Page, kind: string, seconds: number): Promise<P
   const recording = await stopRecording(page);
   await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.stopPath());
   const summary = summarizeFrames(recording.frames);
-  return { summary, verdict: judgeCameraPath(summary), gpuBusy: busy };
+
+  // every gap of more than a refresh and a half, with what the frames either side of it cost.
+  const stalls: Stall[] = [];
+  recording.frames.slice(1).forEach((frame, index) =>
+  {
+    const previous = recording.frames[index];
+    const interval = frame.time - previous.time;
+    if (interval > REFRESH_60_HZ * 1.5)
+    {
+      stalls.push({ interval, before: { work: previous.work, gpu: previous.gpu }, after: { work: frame.work, gpu: frame.gpu } });
+    }
+  });
+  return { summary, verdict: judgeCameraPath(summary), gpuBusy: busy, stalls };
 };
 
 /**
@@ -266,8 +289,16 @@ const measureStroke = async (page: Page, size: number[]): Promise<StrokeResult> 
     const hooks = (window as unknown as HookWindow).__jmzMapView;
     return [ hooks.screenOfCell(0, 0), hooks.screenOfCell(right, bottom) ];
   }, [ width - 1, height - 1 ]);
-  const viewport = page.viewportSize() ?? { width: 2560, height: 1440 };
-  const points = strokePath(topLeft, bottomRight, viewport);
+
+  // the hooks answer in the canvas's own pixels; the mouse moves in the page's, around the view's bars.
+  const canvas = await page.locator('canvas').boundingBox();
+  if (canvas === null)
+  {
+    throw new Error('the map view has no canvas to paint on');
+  }
+
+  const onPage = (point: { x: number; y: number }) => ({ x: point.x + canvas.x, y: point.y + canvas.y });
+  const points = strokePath(topLeft, bottomRight, { width: canvas.width, height: canvas.height }).map(onPage);
 
   await startRecording(page);
   await page.mouse.move(points[0].x, points[0].y);
@@ -281,9 +312,15 @@ const measureStroke = async (page: Page, size: number[]): Promise<StrokeResult> 
   await page.mouse.up();
   await page.waitForTimeout(500);
   const recording = await stopRecording(page);
-  await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.disablePaint());
+  const proof = await page.evaluate(() =>
+  {
+    const hooks = (window as unknown as HookWindow).__jmzMapView;
+    const state = hooks.paintState();
+    hooks.disablePaint();
+    return state;
+  });
   const moves = recording.inputs.filter(input => input.type === 'pointermove' || input.type === 'pointerdown');
-  return judgeStrokeFrames(moves, recording.frames);
+  return judgeStrokeFrames(moves, recording.frames, proof);
 };
 
 /**
@@ -402,10 +439,12 @@ const printMap = (result: MapResult): void =>
   console.log(`  warm open ${cell(result.warmOpenMs, 1)} ms  ${verdictText(result.verdicts['warmOpen'])}`);
   PATHS.forEach(kind =>
   {
-    const { summary, verdict, gpuBusy: busy } = result.paths[kind];
+    const { summary, verdict, gpuBusy: busy, stalls } = result.paths[kind];
     console.log(`  ${kind.padEnd(9)} frames ${String(summary.frames).padStart(4)} dropped ${summary.droppedFrames}`
       + ` int.max ${cell(summary.intervals.max, 1)} work p50 ${cell(summary.work.p50)} p99 ${cell(summary.work.p99)}`
       + ` gpu p50 ${cell(summary.gpu.p50)} p99 ${cell(summary.gpu.p99)} busy ${busy.mean.toFixed(0)}%  ${verdictText(verdict)}`);
+    stalls.forEach(stall => console.log(`            stall ${stall.interval.toFixed(1)} ms: before work ${stall.before.work.toFixed(2)} gpu`
+      + ` ${stall.before.gpu.toFixed(2)}, after work ${stall.after.work.toFixed(2)} gpu ${stall.after.gpu.toFixed(2)}`));
   });
   const { stroke } = result;
   console.log(`  stroke    inputs ${stroke.inputs} matched ${stroke.matched} frames ${stroke.frames} dropped ${stroke.dropped}`
