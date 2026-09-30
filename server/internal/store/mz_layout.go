@@ -37,6 +37,33 @@ func SaveInMzLayout[T any](data T, path string, layout mzjson.Layout, beforeWrit
 		return err
 	}
 
+	return renderInMzLayout(data, path, template, layout, beforeWrite)
+}
+
+// CreateInMzLayout writes data to path in MZ's layout, as SaveInMzLayout writes a new file, but only where no file
+// exists, answering fs.ErrExist otherwise with nothing written. It takes the lock every write in MZ's layout takes,
+// so no save or restore of the same file can land between the check and the write: a new map never lands on a file
+// that arrived first, whoever wrote it.
+func CreateInMzLayout[T any](data T, path string, layout mzjson.Layout, beforeWrite func(content []byte)) error {
+	mzWriteLock.Lock()
+	defer mzWriteLock.Unlock()
+
+	// a file that is there is somebody's; writing a new map over it would throw its content away.
+	_, err := os.Stat(path)
+	if err == nil {
+		return fs.ErrExist
+	}
+	if errors.Is(err, fs.ErrNotExist) == false {
+		return err
+	}
+
+	// a new file has no key order to lend, so it is written in MZ's own.
+	return renderInMzLayout(data, path, nil, layout, beforeWrite)
+}
+
+// renderInMzLayout renders data in MZ's layout, in the key order of template where it has one, announces the bytes
+// and writes them atomically. The caller holds mzWriteLock.
+func renderInMzLayout[T any](data T, path string, template []byte, layout mzjson.Layout, beforeWrite func(content []byte)) error {
 	rendered, err := mzjson.Render(data, template, layout)
 	if err != nil {
 		return err

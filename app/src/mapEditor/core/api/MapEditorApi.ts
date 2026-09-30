@@ -46,6 +46,15 @@ interface MapEditorApi
   saveMap(mapId: number, map: RmmzMap): Promise<void>;
 
   /**
+   * Writes a new map's file, in MZ's layout as a save would, but only where no file is: the server refuses with a 412
+   * while a file exists, whoever wrote it, and writes nothing.
+   * @param {number} mapId The map id.
+   * @param {RmmzMap} map The complete map, in its exact file shape.
+   * @returns {Promise<void>} Settles once written.
+   */
+  createMap(mapId: number, map: RmmzMap): Promise<void>;
+
+  /**
    * Removes a map file. The server refuses while the map tree still lists the map, so the tree's row goes first.
    * @param {number} mapId The map id.
    * @returns {Promise<void>} Settles once the file is gone.
@@ -285,6 +294,12 @@ class HttpMapEditorApi implements MapEditorApi
     return this.#put(`/api/maps/${requireMapId(mapId)}`, map);
   }
 
+  async createMap(mapId: number, map: RmmzMap): Promise<void>
+  {
+    // HTTP's own way of saying "only where nothing is yet", which the server checks and writes under one lock.
+    return this.#put(`/api/maps/${requireMapId(mapId)}`, map, { 'If-None-Match': '*' });
+  }
+
   async deleteMap(mapId: number): Promise<void>
   {
     const route = `/api/maps/${requireMapId(mapId)}`;
@@ -463,15 +478,17 @@ class HttpMapEditorApi implements MapEditorApi
    * Writes a whole document with a PUT, carrying this window's id.
    * @param {string} route The route, from {@code /api} on.
    * @param {unknown} body The complete document.
+   * @param {Record<string, string>} conditions Any further headers the write depends on, such as If-None-Match.
    * @returns {Promise<void>} Settles once the server confirms the write.
    */
-  async #put(route: string, body: unknown): Promise<void>
+  async #put(route: string, body: unknown, conditions: Record<string, string> = {}): Promise<void>
   {
     const response = await this.#fetch(`${this.#base}${route}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         [CLIENT_HEADER]: this.clientId,
+        ...conditions,
       },
       body: JSON.stringify(body),
     });

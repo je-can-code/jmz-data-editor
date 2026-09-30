@@ -151,6 +151,52 @@ func TestPutMapCreatesANewMap(t *testing.T) {
 	}
 }
 
+// TestPutMapThatOnlyCreatesWritesWhatASaveWould covers a new map sent with If-None-Match: *, the way the editor
+// brings a map into being: where no file is, it lands exactly as a plain save of the same body would have written it.
+func TestPutMapThatOnlyCreatesWritesWhatASaveWould(t *testing.T) {
+	// Arrange- map 12 is created only-if-absent, and map 13 plainly, from the same body.
+	current := newProject(t)
+	body := string(readEnvelope(t, current.call(t, http.MethodGet, "/api/maps/1", "")).Data)
+
+	// Act.
+	created := current.call(t, http.MethodPut, "/api/maps/12", body, "If-None-Match", "*")
+	saved := current.call(t, http.MethodPut, "/api/maps/13", body)
+
+	// Assert.
+	assertStatus(t, created, http.StatusNoContent)
+	assertStatus(t, saved, http.StatusNoContent)
+	if current.read(t, "data/Map012.json") != current.read(t, "data/Map013.json") {
+		t.Errorf("the created map was written as:\n%s", current.read(t, "data/Map012.json"))
+	}
+}
+
+// TestPutMapThatOnlyCreatesRefusesAMapWhoseFileExists covers the one place such a save never lands: over a file that
+// is there, whoever wrote it. It is refused with a 412, as HTTP answers a failed If-None-Match, and nothing changes.
+// Only the wildcard asks for that: the server hands out no entity tags, so a header naming one saves as usual.
+func TestPutMapThatOnlyCreatesRefusesAMapWhoseFileExists(t *testing.T) {
+	// Arrange- the same change, sent once only-if-absent and once naming a tag.
+	current := newProject(t)
+	body := strings.Replace(mapFixture, `"displayName":"<b>Cellar</b>"`, `"displayName":"Wine Cellar"`, 1)
+
+	// Act.
+	refused := current.call(t, http.MethodPut, "/api/maps/1", body, "If-None-Match", "*")
+	afterRefusal := current.read(t, "data/Map001.json")
+	tagged := current.call(t, http.MethodPut, "/api/maps/1", body, "If-None-Match", `"cellar-1"`)
+
+	// Assert.
+	assertStatus(t, refused, http.StatusPreconditionFailed)
+	if message := strings.TrimSpace(refused.Body.String()); message != "data/Map001.json already exists; a new file is never written over one" {
+		t.Errorf("said %q", message)
+	}
+	if afterRefusal != mapFixture {
+		t.Error("a refused create still changed the map")
+	}
+	assertStatus(t, tagged, http.StatusNoContent)
+	if current.read(t, "data/Map001.json") != body {
+		t.Errorf("a save naming an entity tag was not written:\n%s", current.read(t, "data/Map001.json"))
+	}
+}
+
 // TestPutMapRefusesFieldsTheModelCannotAccountFor is the strict decode: a field the model would drop
 // is named in a 400, and the map on disk is left alone.
 func TestPutMapRefusesFieldsTheModelCannotAccountFor(t *testing.T) {

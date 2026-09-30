@@ -49,8 +49,8 @@ describe('MapTreeService', () =>
 
   /**
    * An in-memory project behind a stand-in server that keeps the real routes' rules: 404 for a missing map, no
-   * removing a map the tree still lists, a restore only where no file is, and a save of unchanged content keeping
-   * the file's text as it was.
+   * removing a map the tree still lists, a restore or a create only where no file is, and a save of unchanged content
+   * keeping the file's text as it was.
    * @returns {object} The server, its files, their texts and the tree, a log of its writes, and switches to make writes fail.
    */
   const buildDisk = () =>
@@ -97,6 +97,17 @@ describe('MapTreeService', () =>
         }
 
         maps.set(mapId, structuredClone(map));
+      },
+      createMap: async (mapId: number, map: RmmzMap) =>
+      {
+        maybeFail(`create ${mapId}`);
+        if (maps.has(mapId))
+        {
+          throw new MapEditorApiError(`data/Map${mapId}.json already exists; a new file is never written over one`, 412);
+        }
+
+        maps.set(mapId, structuredClone(map));
+        texts.set(mapId, JSON.stringify(map));
       },
       restoreMapFile: async (mapId: number, text: string) =>
       {
@@ -188,7 +199,7 @@ describe('MapTreeService', () =>
 
       // Assert.
       expect([ outcome.selection, historyOf(hub), writes ])
-        .toStrictEqual([ [ 4 ], [ 'Create "MAP004"' ], [ 'write 4', 'write tree' ] ]);
+        .toStrictEqual([ [ 4 ], [ 'Create "MAP004"' ], [ 'create 4', 'write tree' ] ]);
       expect([ maps.get(4)?.tilesetId, maps.get(4)?.width, state.infos[4]?.parentId, hub.isDirty('mapinfos') ])
         .toStrictEqual([ 12, 17, 2, false ]);
     });
@@ -248,6 +259,60 @@ describe('MapTreeService', () =>
       // Assert.
       expect([ outcome.selection, maps.get(4)?.displayName, maps.get(7)?.width ])
         .toStrictEqual([ [ 7 ], 'file 40', 17 ]);
+    });
+
+    it('refuses to redo a create when a file lands where the map goes just after the check, rather than write over it', async () =>
+    {
+      // Arrange: the create is undone; the redo's check finds no file for the new map, and one is written the moment it
+      // has looked.
+      const { service, hub, api, maps, state } = buildService();
+      await service.create(TREE_ROOT);
+      await service.undo();
+      const loadMap = api.loadMap.bind(api);
+      api.loadMap = (mapId: number) =>
+      {
+        const answer = loadMap(mapId);
+        maps.set(4, fileFor(40));
+        return answer;
+      };
+
+      // Act.
+      const outcome = await service.redo();
+
+      // Assert: the newcomer is untouched, and the create is still undone.
+      expect([ outcome, maps.get(4)?.displayName, state.infos[4], historyOf(hub) ])
+        .toStrictEqual([
+          { ok: false, message: '"Create "MAP004"" cannot redo: map 4 has a file again, which it would write over.' },
+          'file 40',
+          null,
+          [ '(Create "MAP004")' ],
+        ]);
+    });
+
+    it('refuses a new map whose id gets a file just after it was picked, leaving that file alone', async () =>
+    {
+      // Arrange: the check for a free id finds no file in slot 4, and one is written the moment it has looked.
+      const { service, hub, api, maps, state } = buildService();
+      await service.tree();
+      const loadMap = api.loadMap.bind(api);
+      api.loadMap = (mapId: number) =>
+      {
+        const answer = loadMap(mapId);
+        maps.set(4, fileFor(40));
+        return answer;
+      };
+
+      // Act.
+      const outcome = await service.create(TREE_ROOT);
+
+      // Assert: nothing recorded, nothing listed, and the newcomer untouched.
+      expect([ outcome, maps.get(4)?.displayName, state.infos[4], historyOf(hub) ])
+        .toStrictEqual([
+          { ok: false, message: 'Map 4 got a file of its own while "Create "MAP004"" was being saved, so it was left alone; try it again.' },
+          'file 40',
+          null,
+          [],
+        ]);
     });
 
     it('refuses to undo when the new map has been edited since, and changes nothing', async () =>
@@ -386,7 +451,7 @@ describe('MapTreeService', () =>
         .toStrictEqual([ [ 'undone', true, true ], [ 'redone', true, true ] ]);
     });
 
-    it('writes a file back from its content when the text read was not that same file', async () =>
+    it('writes a file back from its content when the text read was not that same file, only where no file is', async () =>
     {
       // Arrange: the text on disk differs from the content handed out, as if it changed between the two reads.
       const { service, maps, texts, writes } = buildService();
@@ -399,7 +464,7 @@ describe('MapTreeService', () =>
 
       // Assert.
       expect([ writes[0], maps.get(6) ])
-        .toStrictEqual([ 'write 6', fileFor(6) ]);
+        .toStrictEqual([ 'create 6', fileFor(6) ]);
     });
 
     /**
@@ -626,7 +691,7 @@ describe('MapTreeService', () =>
     {
       // Arrange.
       const { service, hub, maps, state, failing } = buildService();
-      failing.add('write 4');
+      failing.add('create 4');
 
       // Act.
       const outcome = await service.create(TREE_ROOT);
@@ -776,11 +841,11 @@ describe('MapTreeService', () =>
       // Arrange: writing the new file gives another change time to land on the tree.
       const { service, hub, api, maps } = buildService();
       await service.tree();
-      const saveMap = api.saveMap.bind(api);
-      api.saveMap = async (mapId: number, map: RmmzMap) =>
+      const createMap = api.createMap.bind(api);
+      api.createMap = async (mapId: number, map: RmmzMap) =>
       {
         hub.edit('Rename elsewhere', [ TREE_HISTORY_KEY ], tx => tx.set('mapinfos', [ 6, 'name' ], 'Elsewhere'));
-        return saveMap(mapId, map);
+        return createMap(mapId, map);
       };
 
       // Act.

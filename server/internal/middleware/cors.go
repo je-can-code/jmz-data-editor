@@ -55,11 +55,11 @@ func CORS(next http.Handler, policy Policy) http.Handler {
 				return
 			}
 
-			// PUT, DELETE and X-Jmz-Client are the map editor's saves and map removals; a browser asks
-			// before sending any of them.
+			// PUT, DELETE and X-Jmz-Client are the map editor's saves and map removals, and If-None-Match
+			// is how it creates a map without ever writing over one; a browser asks before sending any of them.
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Jmz-Client")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Jmz-Client, If-None-Match")
 		}
 
 		if r.Method == http.MethodOptions {
