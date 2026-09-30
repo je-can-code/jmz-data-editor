@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { readCommandTree, type CommandBlockNode } from '../../../../src/mapEditor/core/commandList/commandTree.ts';
 import {
   asJsonCommands,
-  commandsOfNodes,
   duplicateNodes,
   insertAt,
   landingIndex,
@@ -13,6 +12,7 @@ import {
   replaceRange,
   spliceBetween,
   toRelativeIndent,
+  unitsAtIndent,
 } from '../../../../src/mapEditor/core/commandList/listEdits.ts';
 import type { RmmzEventCommand } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { buildMixedList, cmd, MZ_STRUCTURE } from '../../support/commandFixtures.ts';
@@ -50,9 +50,9 @@ describe('listEdits', () =>
     });
   });
 
-  describe('commandsOfNodes', () =>
+  describe('unitsAtIndent', () =>
   {
-    it('collects each unit\'s commands, continuation and bodies included', () =>
+    it('collects each unit\'s commands, continuation and bodies included, in list order', () =>
     {
       // Arrange.
       const list = buildMixedList();
@@ -60,11 +60,28 @@ describe('listEdits', () =>
       const [ text, , choices ] = tree.root.nodes;
 
       // Act.
-      const commands = commandsOfNodes(list, [ choices, text ]);
+      const commands = unitsAtIndent(list, [ choices, text ], 1);
 
       // Assert.
       expect(describeList(commands))
-        .toStrictEqual([ '101@0', '401@0', '401@0', '102@0', '402@0', '230@1', '0@1', '402@0', '0@1', '403@0', '0@1', '404@0' ]);
+        .toStrictEqual([ '101@1', '401@1', '401@1', '102@1', '402@1', '230@2', '0@2', '402@1', '0@2', '403@1', '0@2', '404@1' ]);
+    });
+
+    it('moves each unit by its own depth, so units from different depths line up as siblings', () =>
+    {
+      // Arrange: the sound deep in the branch, and the loop deeper in the else, with Show Text at the top.
+      const list = buildMixedList();
+      const tree = readCommandTree(list, MZ_STRUCTURE);
+      const [ text, branch ] = tree.root.nodes;
+      const [ sound ] = (branch as CommandBlockNode).segments[0].body!.nodes;
+      const [ loop ] = (branch as CommandBlockNode).segments[1].body!.nodes;
+
+      // Act.
+      const commands = unitsAtIndent(list, [ loop, text, sound ], 0);
+
+      // Assert.
+      expect(describeList(commands))
+        .toStrictEqual([ '101@0', '401@0', '401@0', '250@0', '112@0', '113@1', '0@1', '413@0' ]);
     });
   });
 
@@ -167,6 +184,22 @@ describe('listEdits', () =>
         .toStrictEqual([ [ '112@0', '113@1', '0@1', '413@0', '101@0' ], 0 ]);
     });
 
+    it('moves units chosen at different depths as siblings, each at the indent of the body it lands in', () =>
+    {
+      // Arrange: Show Text at the top and the sound deep in the branch, dropped at the list's end.
+      const list = buildMixedList();
+      const tree = readCommandTree(list, MZ_STRUCTURE);
+      const [ text, branch ] = tree.root.nodes;
+      const [ sound ] = (branch as CommandBlockNode).segments[0].body!.nodes;
+
+      // Act.
+      const moved = moveNodes(list, [ text, sound ], { body: tree.root, position: tree.root.nodes.length });
+
+      // Assert: both land at the top level, in order, and the list reads with no strays.
+      expect([ describeList(moved.slice(-5)), readCommandTree(moved, MZ_STRUCTURE).irregular ])
+        .toStrictEqual([ [ '101@0', '401@0', '401@0', '250@0', '0@0' ], 0 ]);
+    });
+
     it('leaves the list as it was when units drop where they already are', () =>
     {
       // Arrange.
@@ -232,6 +265,22 @@ describe('listEdits', () =>
       // Assert.
       expect([ describeList(duplicated.slice(14, 18)), duplicated[16] === list[15] ])
         .toStrictEqual([ [ '402@0', '230@1', '230@1', '0@1' ], false ]);
+    });
+
+    it('copies units chosen at different depths as siblings, at the indent of the body the copies land in', () =>
+    {
+      // Arrange: Show Text at the top and the sound deep in the branch, which comes last.
+      const list = buildMixedList();
+      const tree = readCommandTree(list, MZ_STRUCTURE);
+      const [ text, branch ] = tree.root.nodes;
+      const [ sound ] = (branch as CommandBlockNode).segments[0].body!.nodes;
+
+      // Act.
+      const duplicated = duplicateNodes(list, [ text, sound ]);
+
+      // Assert: the copies follow the sound inside the branch, and the list reads with no strays.
+      expect([ describeList(duplicated.slice(3, 10)), readCommandTree(duplicated, MZ_STRUCTURE).irregular ])
+        .toStrictEqual([ [ '111@0', '250@1', '101@1', '401@1', '401@1', '250@1', '0@1' ], 0 ]);
     });
 
     it('copies nothing when nothing is chosen', () =>

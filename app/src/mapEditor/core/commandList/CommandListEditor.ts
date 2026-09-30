@@ -24,7 +24,6 @@ import {
 import { insertionIndex, type InsertionPoint } from './insertionPoints.ts';
 import {
   asJsonCommands,
-  commandsOfNodes,
   duplicateNodes,
   insertAt,
   landingIndex,
@@ -34,6 +33,7 @@ import {
   removeNodes,
   replaceRange,
   spliceBetween,
+  unitsAtIndent,
 } from './listEdits.ts';
 import { createCommandUnit } from './newCommand.ts';
 
@@ -250,13 +250,14 @@ class CommandListEditor
   }
 
   /**
-   * Writes some units for the system clipboard.
+   * Writes some units for the system clipboard, each brought to the top level by its own depth, so units selected
+   * at different depths paste back as siblings.
    * @param {readonly CommandNode[]} nodes The units.
    * @returns {string} The clipboard text.
    */
   copy(nodes: readonly CommandNode[]): string
   {
-    return writeClipboard(commandsOfNodes(this.commands(), nodes));
+    return writeClipboard(unitsAtIndent(this.commands(), nodes, 0));
   }
 
   /**

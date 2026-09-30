@@ -28,7 +28,9 @@ type ClipboardRead =
 /**
  * Writes commands for the system clipboard: JSON, marked as commands, their indents made relative so they paste at
  * any depth. The system clipboard carries them across maps, windows, and copies of the editor.
- * @param {readonly RmmzEventCommand[]} commands Whole units, in order.
+ * @param {readonly RmmzEventCommand[]} commands Whole units, in order, each unit's first command at one indent
+ * (units gathered from several depths are moved there first, as {@code unitsAtIndent} does), so they read back as
+ * the siblings they paste as.
  * @returns {string} The clipboard text.
  */
 const writeClipboard = (commands: readonly RmmzEventCommand[]): string =>

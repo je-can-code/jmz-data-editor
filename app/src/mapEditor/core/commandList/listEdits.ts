@@ -36,17 +36,6 @@ const outermostNodes = (nodes: readonly CommandNode[]): CommandNode[] =>
 };
 
 /**
- * Collects the commands of some units, in list order.
- * @param {readonly RmmzEventCommand[]} list The list.
- * @param {readonly CommandNode[]} nodes The units.
- * @returns {RmmzEventCommand[]} Their commands.
- */
-const commandsOfNodes = (list: readonly RmmzEventCommand[], nodes: readonly CommandNode[]): RmmzEventCommand[] =>
-{
-  return outermostNodes(nodes).flatMap(node => list.slice(node.start, node.end));
-};
-
-/**
  * Moves commands to another indent, keeping how they nest. Each command is copied; nothing it holds is shared
  * with a command that stays behind.
  * @param {readonly RmmzEventCommand[]} commands The commands.
@@ -56,6 +45,21 @@ const commandsOfNodes = (list: readonly RmmzEventCommand[], nodes: readonly Comm
 const reindent = (commands: readonly RmmzEventCommand[], delta: number): RmmzEventCommand[] =>
 {
   return commands.map(command => ({ ...command, indent: command.indent + delta }));
+};
+
+/**
+ * Collects the commands of some units, in list order, each unit moved by its own depth so its first command sits at
+ * one indent. A selection can gather units from different depths (a line at the top, a command deep inside a
+ * branch), and wherever they go they go as siblings, each keeping how it nests inside itself; moving them all by
+ * the shallowest one's depth would leave the deeper ones at indents no block explains.
+ * @param {readonly RmmzEventCommand[]} list The list.
+ * @param {readonly CommandNode[]} nodes The units, in any order.
+ * @param {number} indent The indent each unit's first command lands at.
+ * @returns {RmmzEventCommand[]} Their commands, moved copies.
+ */
+const unitsAtIndent = (list: readonly RmmzEventCommand[], nodes: readonly CommandNode[], indent: number): RmmzEventCommand[] =>
+{
+  return outermostNodes(nodes).flatMap(node => reindent(list.slice(node.start, node.end), indent - node.indent));
 };
 
 /**
@@ -116,8 +120,8 @@ const landingIndex = (nodes: readonly CommandNode[], point: InsertionPoint): num
 };
 
 /**
- * Moves some units to a place, as a drag drops them, re-indented to fit it. The place must not lie inside any of
- * the units moved.
+ * Moves some units to a place, as a drag drops them, each re-indented to fit it however deep it came from. The
+ * place must not lie inside any of the units moved.
  * @param {readonly RmmzEventCommand[]} list The list.
  * @param {readonly CommandNode[]} nodes The units.
  * @param {InsertionPoint} point The place, as the list stands before the move.
@@ -132,14 +136,15 @@ const moveNodes = (list: readonly RmmzEventCommand[], nodes: readonly CommandNod
     throw new Error('cannot move commands into themselves');
   }
 
-  const moving = reindent(toRelativeIndent(commandsOfNodes(list, outer)), point.body.indent);
+  const moving = unitsAtIndent(list, outer, point.body.indent);
   const remaining = removeNodes(list, outer);
   const at = landingIndex(outer, point);
   return [ ...remaining.slice(0, at), ...moving, ...remaining.slice(at) ];
 };
 
 /**
- * Copies some units right after the last of them, at its indent.
+ * Copies some units right after the last of them, each at the indent of the body the copies land in, however deep
+ * it came from.
  * @param {readonly RmmzEventCommand[]} list The list.
  * @param {readonly CommandNode[]} nodes The units.
  * @returns {RmmzEventCommand[]} The new list.
@@ -153,7 +158,7 @@ const duplicateNodes = (list: readonly RmmzEventCommand[], nodes: readonly Comma
     return [ ...list ];
   }
 
-  const copies = reindent(toRelativeIndent(commandsOfNodes(list, outer)), last.indent);
+  const copies = unitsAtIndent(list, outer, last.parent.indent);
   return [ ...list.slice(0, last.end), ...copies, ...list.slice(last.end) ];
 };
 
@@ -213,7 +218,6 @@ const asJsonCommands = (commands: readonly RmmzEventCommand[]): JsonValue[] =>
 
 export {
   asJsonCommands,
-  commandsOfNodes,
   duplicateNodes,
   insertAt,
   landingIndex,
@@ -224,5 +228,6 @@ export {
   replaceRange,
   spliceBetween,
   toRelativeIndent,
+  unitsAtIndent,
 };
 export type { ListSplice };

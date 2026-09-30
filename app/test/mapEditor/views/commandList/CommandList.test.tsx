@@ -348,6 +348,51 @@ describe('CommandList', () =>
       .toStrictEqual([ cmd(102, 0, [ [ 'Sell' ], -1, -1, 2, 0 ]), cmd(402, 0, [ 0, 'Sell' ]), cmd(230, 1, [ 22 ]), cmd(0, 1), cmd(404, 0) ]);
   });
 
+  /**
+   * Puts a wait at the top and another inside a branch at the top of the list, so rows sit at two depths.
+   * @param {DocumentHub} hub The hub.
+   */
+  const addTwoDepths = (hub: DocumentHub) => act(() =>
+  {
+    hub.edit('Two depths', [ eventHistoryKey(1, 1) ], tx => tx.splice('map:1', PATH, 0, 0, [
+      cmd(230, 0, [ 12 ]), cmd(111, 0, [ 0, 2, 0 ]), cmd(230, 1, [ 34 ]), cmd(0, 1), cmd(412, 0),
+    ] as never));
+  });
+
+  it('duplicates a selection Ctrl-clicked across depths as siblings inside the body the copies land in', async () =>
+  {
+    // Arrange: both waits selected, one at the top and one inside the branch.
+    const { hub, list } = await renderList();
+    addTwoDepths(hub);
+    fireEvent.click(screen.getByText('Wait 12 frames'), { ctrlKey: true });
+    fireEvent.click(screen.getByText('Wait 34 frames'), { ctrlKey: true });
+
+    // Act.
+    fireEvent.keyDown(list, { key: 'd', ctrlKey: true });
+
+    // Assert: the copies follow the inner wait at its indent.
+    expect(commandsOf(hub).slice(0, 7))
+      .toStrictEqual([ cmd(230, 0, [ 12 ]), cmd(111, 0, [ 0, 2, 0 ]), cmd(230, 1, [ 34 ]), cmd(230, 1, [ 12 ]), cmd(230, 1, [ 34 ]), cmd(0, 1), cmd(412, 0) ]);
+  });
+
+  it('cuts a selection Ctrl-clicked across depths and pastes it back, nothing lost and nothing refused', async () =>
+  {
+    // Arrange: both waits selected and cut.
+    const { hub, list } = await renderList();
+    addTwoDepths(hub);
+    fireEvent.click(screen.getByText('Wait 12 frames'), { ctrlKey: true });
+    fireEvent.click(screen.getByText('Wait 34 frames'), { ctrlKey: true });
+    const written: string[] = [];
+    fireEvent.cut(list, { clipboardData: { setData: (_type: string, text: string) => written.push(text) } });
+
+    // Act.
+    fireEvent.paste(list, { clipboardData: { getData: () => written[0] } });
+
+    // Assert: both back above the branch, where the focus went after the cut, as siblings, with no notice.
+    expect([ commandsOf(hub).slice(0, 5), screen.queryByRole('alert') ])
+      .toStrictEqual([ [ cmd(230, 0, [ 12 ]), cmd(230, 0, [ 34 ]), cmd(111, 0, [ 0, 2, 0 ]), cmd(0, 1), cmd(412, 0) ], null ]);
+  });
+
   it('plays a command\'s sound through the window\'s player', async () =>
   {
     // Arrange.

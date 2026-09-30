@@ -16,7 +16,7 @@ import {
   locateCommands,
   readCommandTree,
 } from '../../../../src/mapEditor/core/commandList/commandTree.ts';
-import { commandsOfNodes, insertAt, moveNodes } from '../../../../src/mapEditor/core/commandList/listEdits.ts';
+import { insertAt, moveNodes, unitsAtIndent } from '../../../../src/mapEditor/core/commandList/listEdits.ts';
 import { buildListRows } from '../../../../src/mapEditor/core/commandList/listRows.ts';
 import { chooseRowEditor, rawCommandText, readRawCommandText, type RowEditorKind } from '../../../../src/mapEditor/core/commandList/rowEditors.ts';
 import { jsonEquals, type JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
@@ -345,7 +345,7 @@ describe.skipIf(project === null)('every shipped command, round trip', () =>
         return;
       }
 
-      const read = readClipboard(writeClipboard(commandsOfNodes(list, tree.root.nodes)), structure);
+      const read = readClipboard(writeClipboard(unitsAtIndent(list, tree.root.nodes, 0)), structure);
       const empty = [ { code: 0, indent: 0, parameters: [] } ];
       const pasted = read.ok
         ? insertAt(empty, { body: readCommandTree(empty, structure).root, position: 0 }, read.commands)

@@ -265,6 +265,22 @@ describe('CommandListEditor', () =>
         .toStrictEqual([ 'Paste command', 4, 1, [ '111@0', '101@1', '401@1', '401@1', '250@1' ], [ 'Paste command' ] ]);
     });
 
+    it('cuts units chosen at different depths and pastes them back as siblings, nothing lost', () =>
+    {
+      // Arrange: Show Text at the top and the sound deep in the branch, cut.
+      const { editor } = build();
+      const chosen = [ editor.nodeAt(0)!, editor.nodeAt(4)! ];
+      const text = editor.copy(chosen);
+      editor.remove(chosen);
+
+      // Act.
+      const pasted = editor.paste({ body: editor.tree().root, position: editor.tree().root.nodes.length }, text);
+
+      // Assert: both come back at the list's end, at its indent, and the list reads with no strays.
+      expect([ pasted.ok && pasted.count, describeList(editor.commands().slice(-5)), editor.tree().irregular ])
+        .toStrictEqual([ 2, [ '101@0', '401@0', '401@0', '250@0', '0@0' ], 0 ]);
+    });
+
     it('names a paste by the units it holds, not its lines', () =>
     {
       // Arrange: two units, one of them a block of three commands.

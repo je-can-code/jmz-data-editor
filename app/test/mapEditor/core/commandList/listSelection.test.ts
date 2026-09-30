@@ -128,6 +128,21 @@ describe('listSelection', () =>
         .toStrictEqual([ { selected: [ 0, 13 ], anchor: 0 }, { selected: [ 0, 3, 13 ], anchor: 3 }, { selected: [ 3, 13 ], anchor: 0 } ]);
     });
 
+    it('adds a unit from another body with the toggle key, whatever its depth', () =>
+    {
+      // Arrange: Show Text at the top selected; the sound inside the branch and the loop inside its else.
+      const { nodeAt } = build();
+      const [ sound, loop ] = [ nodeAt(4) as CommandNode, nodeAt(7) as CommandNode ];
+
+      // Act.
+      const withSound = clickSelection({ selected: [ 0 ], anchor: 0 }, sound, { shift: false, toggle: true }, nodeAt);
+      const withLoop = clickSelection(withSound, loop, { shift: false, toggle: true }, nodeAt);
+
+      // Assert: three units from three bodies.
+      expect([ withLoop, selectedNodes(withLoop, nodeAt).map(node => node.parent.indent) ])
+        .toStrictEqual([ { selected: [ 0, 4, 7 ], anchor: 7 }, [ 0, 1, 1 ] ]);
+    });
+
     it('takes a range from the anchor with Shift, keeping the anchor', () =>
     {
       // Arrange.
