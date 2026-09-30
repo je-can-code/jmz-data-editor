@@ -329,6 +329,23 @@ describe('roofs', () =>
       .toBe(WallEdge.top | WallEdge.bottom);
   });
 
+  it('join the same roof beside them only when both columns span the same rows', () =>
+  {
+    // Arrange: a 3x4 map; roof columns 0 and 1 span rows 1 to 2, column 2 spans rows 1 to 1; building wall below.
+    const grid = blankGrid(3, 4);
+    fill(grid, 0, 1, 1, 2, 0, kindTile(ROOF));
+    put(grid, 2, 1, 0, kindTile(ROOF));
+    fill(grid, 0, 3, 1, 3, 0, kindTile(BUILDING_WALL));
+    put(grid, 2, 2, 0, kindTile(BUILDING_WALL));
+
+    // Act.
+    const middle = shapeOf(grid, 1, 1, ROOF);
+
+    // Assert: joined to the matching column on the left, a seam toward the shallower one on the right.
+    expect([ middle & WallEdge.left, middle & WallEdge.right ])
+      .toEqual([ 0, WallEdge.right ]);
+  });
+
   it('show their edge at the top and sides of the map, but join past the bottom', () =>
   {
     // Arrange: a single roof tile filling a 1x1 map.
@@ -378,6 +395,23 @@ describe('wall faces', () =>
     // right edge counts as a wall starting at row 0, which is taller still.
     expect(shorter)
       .toBe(WallEdge.left | WallEdge.top | WallEdge.right | WallEdge.bottom);
+  });
+
+  it('draw an edge beside a wall that ends higher, but join one that ends lower', () =>
+  {
+    // Arrange: a 3x5 map with walls starting on row 1 in all three columns; the left one ends on row 2, the middle on
+    // row 3 and the right one on row 4.
+    const grid = blankGrid(3, 5);
+    fill(grid, 0, 1, 0, 2, 0, kindTile(WALL));
+    fill(grid, 1, 1, 1, 3, 0, kindTile(WALL));
+    fill(grid, 2, 1, 2, 4, 0, kindTile(WALL));
+
+    // Act.
+    const middle = shapeOf(grid, 1, 2, WALL);
+
+    // Assert.
+    expect([ middle & WallEdge.left, middle & WallEdge.right ])
+      .toEqual([ WallEdge.left, 0 ]);
   });
 
   it('apply the same rule to a wall face of another kind', () =>

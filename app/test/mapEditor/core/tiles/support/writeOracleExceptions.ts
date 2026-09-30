@@ -37,10 +37,11 @@ maps.forEach((map) =>
   // file every mismatch on the map under its reason.
   const audit = auditShapes(map, tileset.mode);
   checked += audit.checked;
+  const byIndex = new Map(audit.mismatches.map(cell => [ cell.index, cell ]));
   const byReason = new Map<ExceptionReason, number[]>();
   audit.mismatches.forEach((cell) =>
   {
-    const reason = classifyMismatch(map, cell);
+    const reason = classifyMismatch(map, cell, byIndex);
     const cells = byReason.get(reason) ?? [];
     cells.push(cell.index);
     byReason.set(reason, cells);

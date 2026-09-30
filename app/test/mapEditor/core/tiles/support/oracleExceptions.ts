@@ -12,10 +12,12 @@ import {
 import type { ShippedMap } from './shippedGame.ts';
 
 /**
- * Why a stored autotile shape may differ from what its neighbours call for. Each reason carries a test the oracle
- * applies to every cell filed under it, so a cell can never be excused by a reason its data does not support.
+ * Why a stored autotile shape may differ from what its neighbours call for. Every reason but the last carries a test
+ * that can refuse a cell, applied to every cell filed under it, so a cell is never excused by a reason its data does
+ * not support. The last, {@code unverified}, is no explanation at all: it lists what nothing here accounts for, so a
+ * new mismatch still fails and the size of the gap stays in plain view.
  */
-type ExceptionReason = 'mapgen' | 'map-edge' | 'suspended-autotiling' | 'stale-open' | 'stamped';
+type ExceptionReason = 'mapgen' | 'map-edge' | 'shift-drawn' | 'disturbed-edge' | 'unverified';
 
 /**
  * The reasons, in the order a mismatch is tried against them, each with the explanation the exceptions file carries.
@@ -34,22 +36,25 @@ const EXCEPTION_REASONS: readonly { readonly reason: ExceptionReason; readonly e
       + 'bottom-right corner, and its Shift command moves tiles, and neither reshapes the tiles left at the new edge.',
   },
   {
-    reason: 'suspended-autotiling',
-    explanation: 'The stored shape joins toward neighbours that no longer match. MZ suspends autotiling while Shift is '
-      + 'held ("you can temporarily disable the autotile function by holding [Shift] and drawing tiles or using the '
-      + 'eyedropper", from its help), so a tile drawn that way keeps shape 0, and a neighbour replaced that way leaves '
-      + 'this tile joined toward it.',
+    reason: 'shift-drawn',
+    explanation: 'Stored in shape 0, joined on every side, where its neighbours call for another shape. Shape 0 is what '
+      + 'MZ stores for a tile drawn while autotiling is suspended ("you can temporarily disable the autotile function '
+      + 'by holding [Shift] and drawing tiles or using the eyedropper", from its help), and what a tile keeps when '
+      + 'every neighbour once matched it and was later replaced that way. Checked: the stored shape is exactly 0.',
   },
   {
-    reason: 'stale-open',
-    explanation: 'The stored shape shows an edge toward a neighbour that now matches: the neighbour became this kind '
-      + 'while autotiling was suspended, so this tile was never reshaped.',
+    reason: 'disturbed-edge',
+    explanation: 'Every edge that differs is out of step from both sides: the tile across it also holds a shape that '
+      + 'disagrees with the rules about that same edge. One of the two was changed without autotiling (Shift held, or '
+      + 'the eyedropper) and neither was reshaped. Checked: the neighbour across every differing edge is itself a '
+      + 'mismatch whose join toward this tile differs too.',
   },
   {
-    reason: 'stamped',
-    explanation: 'The stored shape joins toward a neighbour that does not match and shows an edge toward one that does, '
-      + 'so it was shaped for another neighbourhood entirely: a tile stamped with the eyedropper keeps the shape it '
-      + 'was copied with.',
+    reason: 'unverified',
+    explanation: 'Not explained. The stored shape disagrees with the rules and no check above accounts for it. Most look '
+      + 'like eyedropper stamps (a run of identical shapes copied from somewhere else) or tiles beside a plain tile '
+      + 'drawn with autotiling suspended, neither of which leaves anything to check against. Listed so a new mismatch '
+      + 'still fails, and counted so the gap stays visible.',
   },
 ];
 
@@ -163,32 +168,18 @@ const mapgenWallShape = (map: ShippedMap, cell: ShapeMismatch): number =>
 };
 
 /**
- * Compares which neighbours the stored and the expected shape join.
+ * Reports whether a mismatch holds a shape a neighbourhood could produce at all; the floor palette picture and
+ * anything past a table's end cannot be, and no reason excuses them.
  * @param {ShapeMismatch} cell The mismatch.
- * @returns {'superset' | 'subset' | 'mixed' | 'unreadable'} Whether the stored shape joins everything the expected
- * one does and more, a part of it, some of each, or is no shape a map placement holds (such as the palette picture).
+ * @returns {boolean} True when the stored shape is one a map placement holds.
  */
-const compareJoins = (cell: ShapeMismatch): 'superset' | 'subset' | 'mixed' | 'unreadable' =>
+const isReadable = (cell: ShapeMismatch): boolean =>
 {
-  const stored = shapeJoins(cell.kind, cell.stored);
-  const expected = shapeJoins(cell.kind, cell.expected);
-  if (stored < 0)
-  {
-    return 'unreadable';
-  }
-
-  if ((stored & expected) === expected)
-  {
-    return 'superset';
-  }
-
-  return (stored & expected) === stored
-    ? 'subset'
-    : 'mixed';
+  return shapeJoins(cell.kind, cell.stored) >= 0;
 };
 
 /**
- * Lists the offsets of the neighbours whose join differs between the stored and the expected shape.
+ * Lists the neighbours whose join differs between the stored and the expected shape.
  * @param {ShapeMismatch} cell The mismatch.
  * @returns {(readonly [ number, number ])[]} The differing neighbours' dx and dy.
  */
@@ -201,9 +192,43 @@ const differingNeighbours = (cell: ShapeMismatch): (readonly [ number, number ])
 };
 
 /**
+ * Every mismatch on one map, by flat index, for reasons that look at a cell's neighbours.
+ */
+type MapMismatches = ReadonlyMap<number, ShapeMismatch>;
+
+/**
+ * Reports whether the tile across one edge of a mismatch is itself a mismatch that disagrees about that same edge.
+ * @param {ShippedMap} map The map.
+ * @param {ShapeMismatch} cell The mismatch.
+ * @param {number} dx The edge's direction across, -1 to 1.
+ * @param {number} dy The edge's direction down, -1 to 1.
+ * @param {MapMismatches} mismatches Every mismatch on the map.
+ * @returns {boolean} True when some layer across the edge holds such a mismatch.
+ */
+const isDisturbedAcross = (map: ShippedMap, cell: ShapeMismatch, dx: number, dy: number, mismatches: MapMismatches): boolean =>
+{
+  const x = cell.x + dx;
+  const y = cell.y + dy;
+  for (let z = 0; z < 4; z++)
+  {
+    const other = mismatches.get((z * map.height + y) * map.width + x);
+    const back = other === undefined
+      ? undefined
+      : neighboursRead(other.kind).find(([ , bx, by ]) => bx === -dx && by === -dy);
+    if (other !== undefined && back !== undefined
+      && ((shapeJoins(other.kind, other.stored) ^ shapeJoins(other.kind, other.expected)) & back[0]) !== 0)
+    {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+/**
  * The test each reason applies to a cell filed under it.
  */
-const REASON_TESTS: Readonly<Record<ExceptionReason, (map: ShippedMap, cell: ShapeMismatch) => boolean>> = {
+const REASON_TESTS: Readonly<Record<ExceptionReason, (map: ShippedMap, cell: ShapeMismatch, mismatches: MapMismatches) => boolean>> = {
   'mapgen': (map, cell) =>
   {
     return map.id >= MAPGEN_MAPS.first && map.id <= MAPGEN_MAPS.last && cell.z === 0 && isA4Kind(cell.kind)
@@ -212,24 +237,29 @@ const REASON_TESTS: Readonly<Record<ExceptionReason, (map: ShippedMap, cell: Sha
   'map-edge': (map, cell) =>
   {
     const neighbours = differingNeighbours(cell);
-    return compareJoins(cell) !== 'unreadable' && neighbours.length > 0 && neighbours.every(([ dx, dy ]) =>
+    return isReadable(cell) && neighbours.length > 0 && neighbours.every(([ dx, dy ]) =>
     {
       const x = cell.x + dx;
       const y = cell.y + dy;
       return x < 0 || y < 0 || x >= map.width || y >= map.height;
     });
   },
-  'suspended-autotiling': (_map, cell) =>
+  'shift-drawn': (_map, cell) =>
   {
-    return compareJoins(cell) === 'superset';
+    return isReadable(cell) && cell.stored === 0;
   },
-  'stale-open': (_map, cell) =>
+  'disturbed-edge': (map, cell, mismatches) =>
   {
-    return compareJoins(cell) === 'subset';
+    // every differing edge inside the map must be out of step from the other side too.
+    const inside = differingNeighbours(cell).filter(([ dx, dy ]) =>
+    {
+      return cell.x + dx >= 0 && cell.y + dy >= 0 && cell.x + dx < map.width && cell.y + dy < map.height;
+    });
+    return isReadable(cell) && inside.length > 0 && inside.every(([ dx, dy ]) => isDisturbedAcross(map, cell, dx, dy, mismatches));
   },
-  'stamped': (_map, cell) =>
+  'unverified': (_map, cell) =>
   {
-    return compareJoins(cell) === 'mixed';
+    return isReadable(cell);
   },
 };
 
@@ -237,14 +267,15 @@ const REASON_TESTS: Readonly<Record<ExceptionReason, (map: ShippedMap, cell: Sha
  * Files a mismatch under the first reason whose test it passes.
  * @param {ShippedMap} map The map.
  * @param {ShapeMismatch} cell The mismatch.
+ * @param {MapMismatches} mismatches Every mismatch on the map.
  * @returns {ExceptionReason} The reason.
  */
-const classifyMismatch = (map: ShippedMap, cell: ShapeMismatch): ExceptionReason =>
+const classifyMismatch = (map: ShippedMap, cell: ShapeMismatch, mismatches: MapMismatches): ExceptionReason =>
 {
-  const match = EXCEPTION_REASONS.find(({ reason }) => REASON_TESTS[reason](map, cell));
+  const match = EXCEPTION_REASONS.find(({ reason }) => REASON_TESTS[reason](map, cell, mismatches));
   if (match === undefined)
   {
-    throw new Error(`Map${map.id} cell ${cell.index} differs but fits no reason`);
+    throw new Error(`Map${map.id} cell ${cell.index} holds shape ${cell.stored}, which no neighbourhood produces`);
   }
 
   return match.reason;
@@ -302,17 +333,18 @@ const judgeMap = (map: ShippedMap, mode: number, listed: Readonly<Partial<Record
   });
 
   const { mismatches } = auditShapes(map, mode);
+  const byIndex: MapMismatches = new Map(mismatches.map(cell => [ cell.index, cell ]));
   const describe = (cell: ShapeMismatch): string => `(${cell.x},${cell.y}) layer ${cell.z + 1}: kind ${cell.kind} stored ${cell.stored}, expected ${cell.expected}`;
-  const differing = new Set(mismatches.map(cell => cell.index));
+  const fits = (cell: ShapeMismatch): boolean => REASON_TESTS[reasonOf.get(cell.index) as ExceptionReason](map, cell, byIndex);
   return {
     pastTable: mismatches.filter(cell => cell.stored >= autotileTableSize(cell.kind)).map(describe),
     unexplained: mismatches.filter(cell => reasonOf.has(cell.index) === false).map(describe),
     misfiled: mismatches
-      .filter(cell => reasonOf.has(cell.index) && REASON_TESTS[reasonOf.get(cell.index) as ExceptionReason](map, cell) === false)
+      .filter(cell => reasonOf.has(cell.index) && fits(cell) === false)
       .map(cell => `${describe(cell)} does not fit ${reasonOf.get(cell.index)}`),
-    settled: [ ...reasonOf.keys() ].filter(index => differing.has(index) === false),
+    settled: [ ...reasonOf.keys() ].filter(index => byIndex.has(index) === false),
   };
 };
 
 export { classifyMismatch, EXCEPTION_REASONS, EXCEPTIONS_FILE, judgeMap, readExceptionList, REASON_TESTS };
-export type { ExceptionList, ExceptionReason, OracleVerdict };
+export type { ExceptionList, ExceptionReason, MapMismatches, OracleVerdict };

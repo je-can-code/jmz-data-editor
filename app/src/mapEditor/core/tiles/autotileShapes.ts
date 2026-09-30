@@ -335,12 +335,12 @@ const roofNeighbourJoins = (reader: TileReader, x: number, y: number, kind: numb
 };
 
 /**
- * Finds the row where a wall face's run starts: walking up from a cell while the cell above holds the same kind.
- * The walk stops at the top of the map.
+ * Finds the row where a column's run of one kind starts: walking up from a cell while the cell above holds the same
+ * kind. The walk stops at the top of the map.
  * @param {TileReader} reader The map.
  * @param {number} x The column.
  * @param {number} y The row to start from.
- * @param {number} kind The wall face's kind.
+ * @param {number} kind The kind.
  * @returns {number} The top row of the run.
  */
 const wallRunTop = (reader: TileReader, x: number, y: number, kind: number): number =>
@@ -352,6 +352,26 @@ const wallRunTop = (reader: TileReader, x: number, y: number, kind: number): num
   }
 
   return top;
+};
+
+/**
+ * Finds the row where a column's run of one kind ends: walking down from a cell while the cell below holds the same
+ * kind. The walk stops at the bottom of the map.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row to start from.
+ * @param {number} kind The kind.
+ * @returns {number} The bottom row of the run.
+ */
+const wallRunBottom = (reader: TileReader, x: number, y: number, kind: number): number =>
+{
+  let bottom = y;
+  while (bottom + 1 < reader.height && holdsKind(reader, x, bottom + 1, kind))
+  {
+    bottom += 1;
+  }
+
+  return bottom;
 };
 
 /**
@@ -396,8 +416,9 @@ const isTopKind = (kind: number): boolean =>
  * column that hangs down from its top edge, and its sides follow that (counts are side edges MZ stored joined and
  * open, leaving out the maps mapgen drafted):
  *
- * - a wall face beside it, of this kind or any other, joins unless that column's wall starts higher up (43,546 to
- *   231), in which case every row of the shorter wall draws its edge against the taller one (1,219 open to 62);
+ * - a wall face beside it, of this kind or any other, joins unless that column's wall starts higher up or ends
+ *   higher up, in which case every row of this wall draws its edge against that one (between walls of one kind not
+ *   stored in shape 0: 34,732 joined to 178 open where neither happens, 1,104 open to 45 joined where either does);
  * - a wall top (ceiling) or a roof beside it always joins, so a wall face runs cleanly into the ceiling that turns
  *   the corner beside it (3,010 to 155);
  * - beyond the edge of the map counts as the same wall, starting at the map's top row: it joins a wall that starts
@@ -419,11 +440,12 @@ const wallSideNeighbourJoins = (reader: TileReader, x: number, y: number, dx: nu
     return wallRunTop(reader, x, y, kind) === 0;
   }
 
-  // a neighbouring wall face joins unless its own wall starts higher than this one.
+  // a neighbouring wall face joins unless its own wall starts higher, or ends higher, than this one.
   const neighbourKind = wallSideKindAt(reader, nx, y, kind);
   if (neighbourKind >= 0)
   {
-    return wallRunTop(reader, nx, y, neighbourKind) >= wallRunTop(reader, x, y, kind);
+    return wallRunTop(reader, nx, y, neighbourKind) >= wallRunTop(reader, x, y, kind)
+      && wallRunBottom(reader, nx, y, neighbourKind) >= wallRunBottom(reader, x, y, kind);
   }
 
   return holdsKindWhere(reader, nx, y, isTopKind);
@@ -487,10 +509,30 @@ const roofShape = (reader: TileReader, x: number, y: number, kind: number): numb
 
   return sides.reduce((shape, [ dx, dy, edge, beyondEdge ]) =>
   {
-    return roofNeighbourJoins(reader, x + dx, y + dy, kind, beyondEdge)
+    const joins = roofNeighbourJoins(reader, x + dx, y + dy, kind, beyondEdge)
+      && (dx === 0 || roofRunsMatch(reader, x, y, dx, kind));
+    return joins
       ? shape
       : shape | edge;
   }, 0);
+};
+
+/**
+ * Reports whether a roof and the same roof beside it span the same rows. Two columns of one roof kind join sideways
+ * only when their runs of it start and end on the same rows, so roofs of different depths, side by side, keep a seam
+ * between them (1,439 joined to 78 open where the runs match; 270 open to 89 joined where either end differs, counting
+ * only roofs not stored in shape 0).
+ * @param {TileReader} reader The map.
+ * @param {number} x The roof's column.
+ * @param {number} y The roof's row.
+ * @param {number} dx -1 for the left neighbour, 1 for the right.
+ * @param {number} kind The roof's kind.
+ * @returns {boolean} True when both columns' runs span the same rows.
+ */
+const roofRunsMatch = (reader: TileReader, x: number, y: number, dx: number, kind: number): boolean =>
+{
+  return wallRunTop(reader, x, y, kind) === wallRunTop(reader, x + dx, y, kind)
+    && wallRunBottom(reader, x, y, kind) === wallRunBottom(reader, x + dx, y, kind);
 };
 
 /**

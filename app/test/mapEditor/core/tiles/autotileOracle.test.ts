@@ -15,10 +15,12 @@ import { locateShippedGame, readShippedMaps, readShippedTilesets, type ShippedMa
  *
  * The shipped maps are not a clean record: MZ suspends autotiling while Shift is held, the eyedropper stamps copied
  * shapes, resizing leaves old edges at the new border, and mapgen drafted the Nimbus maps with its own wall table.
- * Those cells are listed in autotileOracleExceptions.json, each under a reason, and each reason has a test the cell
- * must pass, so a cell cannot be excused by a reason its data contradicts. Any mismatch missing from the list fails,
- * and so does a listed cell that no longer differs, which keeps the list honest as the maps change; rewrite it with
- * support/writeOracleExceptions.ts and read the diff.
+ * Those cells are listed in autotileOracleExceptions.json by reason. Each reason but one has a test that can refuse a
+ * cell (mapgen's own table, only off-map edges differing, a stored shape of exactly 0, an edge out of step from both
+ * sides), so a cell cannot be excused by a reason its data contradicts; the last, "unverified", explains nothing and
+ * is listed and counted so the gap stays visible. A shape past the end of its table fails outright, as does any
+ * mismatch missing from the list and any listed cell that no longer differs, which keeps the list honest as the maps
+ * change; rewrite it with support/writeOracleExceptions.ts and read the diff.
  *
  * The game is not part of this repository: set JMZ_PROJECT_ROOT to it. When that is unset and the game does not sit
  * beside the repository, the oracle skips; when it is set and wrong, it fails.
@@ -121,25 +123,56 @@ describe('judgeMap', () =>
     map.cells[0] = makeAutotileId(16, 0);
 
     // Act.
-    const verdict = judgeMap(map, TilesetMode.area, { 'stale-open': [ 1 ] });
+    const verdict = judgeMap(map, TilesetMode.area, { 'unverified': [ 1 ] });
 
     // Assert.
     expect([ verdict.unexplained, verdict.settled ])
       .toEqual([ [ '(0,0) layer 1: kind 16 stored 0, expected 24' ], [ 1 ] ]);
   });
 
-  it('fails a cell filed under a reason its shapes contradict', () =>
+  it('accepts a shape-0 cell as shift-drawn, but not a cell in any other shape', () =>
   {
-    // Arrange: grass joined all round (shape 0) where it should be open to the east: it joins more, not less.
-    const map = testMap(2);
-    map.cells[0] = makeAutotileId(16, 0);
+    // Arrange: grass stored in shape 0 in one map, and in shape 5 in another, where both should be shape 24.
+    const zero = testMap(2);
+    zero.cells[0] = makeAutotileId(16, 0);
+    const five = testMap(2);
+    five.cells[0] = makeAutotileId(16, 5);
 
     // Act.
-    const verdict = judgeMap(map, TilesetMode.area, { 'stale-open': [ 0 ] });
+    const verdicts = [ judgeMap(zero, TilesetMode.area, { 'shift-drawn': [ 0 ] }), judgeMap(five, TilesetMode.area, { 'shift-drawn': [ 0 ] }) ];
 
     // Assert.
-    expect(verdict.misfiled)
-      .toEqual([ '(0,0) layer 1: kind 16 stored 0, expected 24 does not fit stale-open' ]);
+    expect(verdicts.map(verdict => verdict.misfiled))
+      .toEqual([ [], [ '(0,0) layer 1: kind 16 stored 5, expected 24 does not fit shift-drawn' ] ]);
+  });
+
+  it('accepts a disturbed edge only when the tile across it disagrees about that edge too', () =>
+  {
+    /**
+     * Builds a 3x2 map: grass, grass, dirt over a row of dirt, with the middle grass stored joined toward the dirt
+     * (shape 28, where its neighbours call for 38) and the dirt beside it stored in the given shape.
+     * @param {number} dirtShape The shape the dirt at (2,0) is stored in.
+     * @returns {ShippedMap} The map.
+     */
+    const build = (dirtShape: number): ShippedMap =>
+    {
+      const map = { id: 1, width: 3, height: 2, tilesetId: 1, cells: new Uint16Array(3 * 2 * 6) };
+      map.cells.set([ makeAutotileId(16, 0), makeAutotileId(16, 28), makeAutotileId(17, dirtShape) ], 0);
+      map.cells.set([ makeAutotileId(17, 0), makeAutotileId(17, 0), makeAutotileId(17, 0) ], 3);
+      return map;
+    };
+
+    // Arrange: the dirt stored in shape 0, joined toward the grass as the grass is toward it; and the dirt stored in
+    // shape 16, the shape its neighbours call for, which leaves the grass's edge unaccounted for.
+    const disturbed = build(0);
+    const settled = build(16);
+
+    // Act.
+    const verdicts = [ judgeMap(disturbed, TilesetMode.area, { 'disturbed-edge': [ 1 ] }), judgeMap(settled, TilesetMode.area, { 'disturbed-edge': [ 1 ] }) ];
+
+    // Assert.
+    expect(verdicts.map(verdict => verdict.misfiled))
+      .toEqual([ [], [ '(1,0) layer 1: kind 16 stored 28, expected 38 does not fit disturbed-edge' ] ]);
   });
 
   it('fails a shape past the end of its table outright, whatever reason it is filed under', () =>
