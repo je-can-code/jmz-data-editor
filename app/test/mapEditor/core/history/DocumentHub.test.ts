@@ -587,6 +587,31 @@ describe('DocumentHub', () =>
         .toStrictEqual([ false, null ]);
     });
 
+    it('puts back the patches that already moved when a later one finds its target changed behind the hub\'s back', () =>
+    {
+      // Arrange: map 1's half of the pair is changed without any step, and undo reverses map 2's half first.
+      const hub = buildHub();
+      hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.set(MAP_A, [ 'note' ], 'paired');
+        tx.set(MAP_B, [ 'note' ], 'paired');
+      });
+      hub.document(MAP_A).apply({ kind: 'set', path: [ 'note' ], before: 'paired', after: 'elsewhere' });
+      const files = [ fileOf(hub, MAP_A), fileOf(hub, MAP_B) ];
+
+      // Act.
+      const result = hub.undo(mapHistoryKey(2));
+
+      // Assert: refused with no recorded edit to blame, both maps as they were, and the pair still done.
+      expect([
+        result.ok === false && result.reason,
+        result.ok === false && 'blockedBy' in result && result.blockedBy,
+        [ fileOf(hub, MAP_A), fileOf(hub, MAP_B) ],
+        hub.history(mapHistoryKey(2)).position,
+      ])
+        .toStrictEqual([ 'conflict', null, files, 1 ]);
+    });
+
     it('names the later edit that blocks a redo', () =>
     {
       // Arrange: after the rename is undone, another history renames the same event.
@@ -804,6 +829,214 @@ describe('DocumentHub', () =>
       // Assert.
       expect([ result.ok, triggersOf(hub), fileOf(hub, MAP_B).note ])
         .toStrictEqual([ true, [ 0, 0 ], '' ]);
+    });
+
+    it('refuses to undo a placement out of order when taking it out would slide a later event into its slot', () =>
+    {
+      // Arrange: the pair adds event 5 to the end of map 2's list, and map 2 then adds event 6 behind it, so taking
+      // event 5 out would leave event 6 in slot 5 while it still says it is event 6.
+      const hub = buildHub();
+      hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.set(MAP_A, [ 'events', 1, 'name' ], 'Door to cave');
+        tx.apply(MAP_B, hub.map('map:2').placeEventPatch(createMapEvent(5, 0, 1)));
+      });
+      hub.edit('Place event', [ mapHistoryKey(2) ], tx => tx.apply(MAP_B, hub.map('map:2').placeEventPatch(createMapEvent(6, 1, 1))));
+      const histories = [ mapHistoryKey(1), mapHistoryKey(2) ];
+      const before = stateOf(hub, histories);
+
+      // Act.
+      const result = hub.undo(mapHistoryKey(1));
+
+      // Assert.
+      expect([
+        result.ok === false && result.reason,
+        result.ok === false && 'blockedBy' in result && result.blockedBy?.label,
+        result.ok === false && 'message' in result && result.message,
+        stateOf(hub, histories),
+      ])
+        .toStrictEqual([ 'moved', 'Place event', 'undoing "Place door pair" would move what "Place event" changed', before ]);
+    });
+
+    it('undoes a placement out of order after another event fills a free slot in front of it', () =>
+    {
+      // Arrange: the same pair, but map 2's next event goes into its empty slot 2, which moves nothing.
+      const hub = buildHub();
+      hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.set(MAP_A, [ 'events', 1, 'name' ], 'Door to cave');
+        tx.apply(MAP_B, hub.map('map:2').placeEventPatch(createMapEvent(5, 0, 1)));
+      });
+      hub.edit('Place event', [ mapHistoryKey(2) ], tx => tx.apply(MAP_B, hub.map('map:2').placeEventPatch(createMapEvent(2, 1, 1))));
+
+      // Act.
+      const result = hub.undo(mapHistoryKey(1));
+
+      // Assert: event 5 is gone, event 2 stays in its slot, and the door on map 1 has its old name.
+      expect([ result.ok, fileOf(hub, MAP_B).events.map(event => event?.id ?? null), fileOf(hub, MAP_A).events[1]?.name ])
+        .toStrictEqual([ true, [ null, 1, 2, 3, null ], 'Door' ]);
+    });
+
+    it('refuses to undo out of order after a later edit changed the same data, even once another put the value back', () =>
+    {
+      // Arrange: after the change, map 1 renames the guard and then renames it back, so its name matches again and
+      // only the record of those edits shows it was changed in between.
+      const hub = buildHub();
+      propagateBlueprint(hub);
+      hub.edit('Rename guard', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'events', 1, 'name' ], 'Captain'));
+      hub.edit('Rename guard back', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'events', 1, 'name' ], 'Guard (sight 5)'));
+      const histories = [ blueprintHistoryKey('guard'), mapHistoryKey(1), mapHistoryKey(2) ];
+      const before = stateOf(hub, histories);
+
+      // Act.
+      const result = hub.undo(blueprintHistoryKey('guard'));
+
+      // Assert: the newer of the two renames is named.
+      expect([
+        result.ok === false && result.reason,
+        result.ok === false && 'blockedBy' in result && result.blockedBy?.label,
+        result.ok === false && 'message' in result && result.message,
+        stateOf(hub, histories),
+      ])
+        .toStrictEqual([ 'conflict', 'Rename guard back', '"Rename guard back" later changed what "Raise guard sight" changed', before ]);
+    });
+
+    it('rolls a blueprint change back on every map after other events on those maps change, pages and all', () =>
+    {
+      // Arrange: after the change, map 1 renames its chest and paints a cell, and map 2 gives its door a second page
+      // and gains an event at the end of its list; none of it touches the guards the change renamed.
+      const hub = buildHub();
+      propagateBlueprint(hub);
+      hub.edit('Rename chest', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'events', 3, 'name' ], 'Crate'));
+      hub.edit('Paint town', [ mapHistoryKey(1) ], tx => tx.tiles(MAP_A, [ [ 5, 600 ] ]));
+      hub.edit('Add page', [ eventHistoryKey(2, 1) ], tx => tx.splice(MAP_B, [ 'events', 1, 'pages' ], 1, 0, [ createEventPage() as unknown as JsonValue ]));
+      hub.edit('Place event', [ mapHistoryKey(2) ], tx => tx.apply(MAP_B, hub.map('map:2').placeEventPatch(createMapEvent(5, 1, 1))));
+
+      // Act.
+      const result = hub.undo(blueprintHistoryKey('guard'));
+
+      // Assert: the change is gone from all three documents, and every later edit stays.
+      expect([
+        result.ok,
+        hub.document(BLUEPRINTS).valueAt([ 'data', 'blueprints', 0, 'sight' ]),
+        fileOf(hub, MAP_A).events[1]?.name,
+        fileOf(hub, MAP_B).events[3]?.name,
+        fileOf(hub, MAP_A).events[3]?.name,
+        fileOf(hub, MAP_A).data[5],
+        fileOf(hub, MAP_B).events[1]?.pages.length,
+        fileOf(hub, MAP_B).events[5]?.id,
+      ])
+        .toStrictEqual([ true, 4, 'Door', 'Chest', 'Crate', 600, 2, 5 ]);
+    });
+
+    it('refuses to undo a pair out of order under a later stroke over a cell it painted, but not under one beside it', () =>
+    {
+      // Arrange: the same pair in two hubs; afterwards map 1 paints the pair's own cell in one, the next cell in the other.
+      const hubs = [ buildHub(), buildHub() ];
+      hubs.forEach(hub => hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.tiles(MAP_A, [ [ 0, 900 ] ]);
+        tx.set(MAP_B, [ 'note' ], 'door');
+      }));
+      hubs[0].edit('Paint', [ mapHistoryKey(1) ], tx => tx.tiles(MAP_A, [ [ 0, 901 ] ]));
+      hubs[1].edit('Paint', [ mapHistoryKey(1) ], tx => tx.tiles(MAP_A, [ [ 1, 901 ] ]));
+
+      // Act.
+      const results = hubs.map(hub => hub.undo(mapHistoryKey(2)));
+
+      // Assert.
+      expect([
+        results.map(result => (result.ok === false && 'blockedBy' in result ? [ result.reason, result.blockedBy?.label ] : result.ok)),
+        hubs.map(hub => fileOf(hub, MAP_A).data.slice(0, 2)),
+        hubs.map(hub => fileOf(hub, MAP_B).note),
+      ])
+        .toStrictEqual([ [ [ 'conflict', 'Paint' ], true ], [ [ 901, 2 ], [ 1, 901 ] ], [ 'door', '' ] ]);
+    });
+
+    it('still refuses once the edit in the way is forgotten, since its patches stay where they are', () =>
+    {
+      // Arrange: the resize leaves every history, but the map keeps its new size and the tiles stay moved.
+      const hub = buildSparseHub();
+      eraseTilePair(hub);
+      const resize = hub.edit('Resize', [ mapHistoryKey(1) ], tx => tx.resize(MAP_A, growOneRow(hub.map('map:1')))) as HistoryStep;
+      hub.forgetStep(resize.id);
+      const histories = [ mapHistoryKey(1), mapHistoryKey(2) ];
+      const before = stateOf(hub, histories);
+
+      // Act.
+      const result = hub.undo(mapHistoryKey(2));
+
+      // Assert.
+      expect([
+        result.ok === false && result.reason,
+        result.ok === false && 'blockedBy' in result && result.blockedBy?.label,
+        hub.history(mapHistoryKey(1)).rows.map(row => row.label),
+        stateOf(hub, histories),
+      ])
+        .toStrictEqual([ 'moved', 'Resize', [ 'Place door pair' ], before ]);
+    });
+
+    it('hands another window the steps in place that no history lists, so the same undo is refused there', () =>
+    {
+      // Arrange: the resize is forgotten in the first window, then both maps are handed to a second window.
+      const source = buildSparseHub();
+      eraseTilePair(source);
+      const resize = source.edit('Resize', [ mapHistoryKey(1) ], tx => tx.resize(MAP_A, growOneRow(source.map('map:1')))) as HistoryStep;
+      source.forgetStep(resize.id);
+      const snapshots = [ MAP_A, MAP_B ].map(key => structuredClone(source.snapshot(key)));
+      const target = new DocumentHub({ clientId: 'window-b' });
+      snapshots.forEach(snapshot => target.adoptSnapshot(snapshot));
+
+      // Act.
+      const result = target.undo(mapHistoryKey(2));
+
+      // Assert: only map 1's copy carries a step beside its histories, the resize; the pair travels in the
+      // histories alone; and the second window refuses the undo just as the first would.
+      expect([
+        snapshots.map(snapshot => snapshot.unlisted.map(step => step.label)),
+        result.ok === false && result.reason,
+        result.ok === false && 'blockedBy' in result && result.blockedBy?.label,
+        target.map('map:1').cellAt(1, 1, 2),
+      ])
+        .toStrictEqual([ [ [ 'Resize' ], [] ], 'moved', 'Resize', 0 ]);
+    });
+
+    it('refuses a copy that names a step as applied without carrying it, changing nothing, and takes the whole copy', () =>
+    {
+      // Arrange: a copy of map 1 whose forgotten resize has been left out, beside the whole copy.
+      const source = buildSparseHub();
+      eraseTilePair(source);
+      const resize = source.edit('Resize', [ mapHistoryKey(1) ], tx => tx.resize(MAP_A, growOneRow(source.map('map:1')))) as HistoryStep;
+      source.forgetStep(resize.id);
+      const whole = structuredClone(source.snapshot(MAP_A));
+      const target = buildHub(undefined, 'window-b');
+      const before = stateOf(target, [ mapHistoryKey(1) ]);
+
+      // Act: the partial copy first, then the whole one.
+      const takePartial = () => target.adoptSnapshot({ ...whole, unlisted: [] });
+      const refusal = (() =>
+      {
+        try
+        {
+          takePartial();
+          return null;
+        }
+        catch (error)
+        {
+          return (error as Error).message;
+        }
+      })();
+      const afterRefusal = stateOf(target, [ mapHistoryKey(1) ]);
+      target.adoptSnapshot(whole);
+
+      // Assert.
+      expect([ refusal, afterRefusal, fileOf(target, MAP_A), [ ...target.lineage(MAP_A) ] ])
+        .toStrictEqual([
+          `the copy of map:1 names ${resize.id} as applied but does not carry it`,
+          before,
+          fileOf(source, MAP_A),
+          [ ...source.lineage(MAP_A) ],
+        ]);
     });
   });
 
