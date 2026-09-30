@@ -236,6 +236,12 @@ const groundClearsDecoration = (decoration: number, mode: number): boolean =>
 /**
  * Plans the ground: layer 1, leaving layers 3 and 4 as they are, unlike MZ, which wipes every layer above. Layer 2
  * keeps its decoration or loses it by {@link groundClearsDecoration}; a tile laid over the ground there always stays.
+ *
+ * A marked tile on layer 1, which is where one lands on a cell with no ground (D5), is lifted rather than replaced: it
+ * moves to the lowest free layer above, layer 2 and then layer 3, as it would have landed with the ground already
+ * there, and the ground goes in beneath it. A decoration this stroke clears leaves layer 2 free for it. When layers 2
+ * and 3 are both taken the ground finds no room and the cell is left as it is, rather than delete a tile nobody
+ * pointed at; that is a default until the owner decides it.
  * @param {TileReader} reader The map.
  * @param {number} x The column.
  * @param {number} y The row.
@@ -245,11 +251,30 @@ const groundClearsDecoration = (decoration: number, mode: number): boolean =>
  */
 const planGround = (reader: TileReader, x: number, y: number, tileId: number, layering: TilesetLayering): PlacementPlan =>
 {
+  const writes: LayerWrite[] = [ [ 0, unshapedTile(tileId) ] ];
   const decoration = reader.tileAt(x, y, 1);
   const clears = decoration !== 0 && isLaidOver(decoration, 1, layering) === false && groundClearsDecoration(decoration, layering.mode);
-  return clears
-    ? { landing: 0, writes: [ [ 0, unshapedTile(tileId) ], [ 1, 0 ] ] }
-    : { landing: 0, writes: [ [ 0, unshapedTile(tileId) ] ] };
+  if (clears)
+  {
+    writes.push([ 1, 0 ]);
+  }
+
+  // anything but a marked tile on the ground layer is simply replaced.
+  const onGround = reader.tileAt(x, y, 0);
+  if (isMarkedTile(layering.marks, onGround) === false)
+  {
+    return { landing: 0, writes };
+  }
+
+  // lift the marked tile to the lowest free layer above, counting a decoration cleared just now as free.
+  const free = ([ 1, 2 ] as const).find(z => (z === 1 && clears) || reader.tileAt(x, y, z) === 0);
+  if (free === undefined)
+  {
+    return NO_ROOM;
+  }
+
+  writes.push([ free, onGround ]);
+  return { landing: 0, writes };
 };
 
 /**
@@ -258,7 +283,7 @@ const planGround = (reader: TileReader, x: number, y: number, tileId: number, la
  * Manual layering writes the chosen layer and nothing else. Automatic layering follows MZ's rules, with D5's
  * changes: B to E tiles stack on layers 3 and 4; B's empty tile clears them; a tile marked to go on top lays over
  * whatever is there instead of replacing it; everything else goes where MZ puts it, except that painting the
- * ground no longer wipes what is above it.
+ * ground no longer wipes what is above it, and lifts a marked tile off the ground layer instead of replacing it.
  * @param {TileReader} reader The map as it stands, earlier tiles of the same stroke included.
  * @param {number} x The column.
  * @param {number} y The row.

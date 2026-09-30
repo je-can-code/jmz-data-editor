@@ -12,11 +12,11 @@ import { blankGrid, cellOf, fill, kindTile, put, type TestGrid } from './support
  * Painting decides which of a cell's four layers a tile lands on, and that decides whether it covers the ground or
  * replaces it. The engine owes the painter MZ's automatic rules as S5 confirmed them (ground on layer 1, the A2
  * decorations and ocean overlays on layer 2, B to E tiles stacked two deep on layers 3 and 4, newest on top) with
- * D5's changes on top: a tile marked "goes on top" lays over the ground instead of replacing it, repainting the
- * ground keeps what is above it (all but the decorations that belong to the ground: deep sea and the ocean
- * decorations, and on a Field tileset every decoration), manual mode and the one-stroke override paint exactly one
- * layer, and the swap tool replaces a tile everywhere at once. It answers with the cells to change and never writes
- * the map itself.
+ * D5's changes on top: a tile marked "goes on top" lays over the ground instead of replacing it, and is lifted over
+ * ground painted in beneath it later; repainting the ground keeps what is above it (all but the decorations that
+ * belong to the ground: deep sea and the ocean decorations, and on a Field tileset every decoration); manual mode and
+ * the one-stroke override paint exactly one layer; and the swap tool replaces a tile everywhere at once. It answers
+ * with the cells to change and never writes the map itself.
  *
  * Every rule is pinned with a near miss beside it: a cell that must stay untouched, a kind that must not count as
  * ground, a marked tile next to an unmarked one.
@@ -510,6 +510,50 @@ describe('tiles laid over the ground survive later strokes', () =>
     // Assert.
     expect(stackOf(after, 0, 0))
       .toEqual([ 0, 'k20', CLIFF_CORNER, 0 ]);
+  });
+
+  it('lift a marked tile off a cell with no ground when the ground is painted, while an unmarked one is replaced', () =>
+  {
+    // Arrange: the marked cliff corner on the ground layer of an otherwise empty cell, and unmarked rock beside it.
+    const grid = put(put(blankGrid(2, 1), 0, 0, 0, CLIFF_CORNER), 1, 0, 0, SOLID_ROCK);
+    const layering = layeringWith([ CLIFF_CORNER ]);
+
+    // Act: grass painted across both.
+    const after = applied(grid, paintTiles(grid, [ { x: 0, y: 0, tileId: kindTile(GRASS) }, { x: 1, y: 0, tileId: kindTile(GRASS) } ], layering, 'auto'));
+
+    // Assert: the cliff corner moves up to layer 2 with the grass beneath it; the rock gives way to the grass.
+    expect([ stackOf(after, 0, 0), stackOf(after, 1, 0) ])
+      .toEqual([ [ 'k16', CLIFF_CORNER, 0, 0 ], [ 'k16', 0, 0, 0 ] ]);
+  });
+
+  it('lift a marked tile to layer 3 over a decoration, and into layer 2 when the ground clears what was there', () =>
+  {
+    // Arrange: on an Area tileset, the marked cliff corner on the ground layer under tall grass, and under deep sea.
+    const decorated = put(put(blankGrid(1, 1), 0, 0, 0, CLIFF_CORNER), 0, 0, 1, kindTile(TALL_GRASS));
+    const overSea = put(put(blankGrid(1, 1), 0, 0, 0, CLIFF_CORNER), 0, 0, 1, kindTile(DEEP_SEA));
+    const layering = layeringWith([ CLIFF_CORNER ]);
+
+    // Act: grass painted over each.
+    const afters = [ decorated, overSea ].map(grid => paintOne(grid, 0, 0, kindTile(GRASS), layering));
+
+    // Assert: above the tall grass, which stays; into the layer the deep sea left.
+    expect(afters.map(after => stackOf(after, 0, 0)))
+      .toEqual([ [ 'k16', 'k20', CLIFF_CORNER, 0 ], [ 'k16', CLIFF_CORNER, 0, 0 ] ]);
+  });
+
+  it('leave a marked tile on the ground layer where it is when layers 2 and 3 are both taken', () =>
+  {
+    // Arrange: the marked cliff corner on the ground layer, tall grass on layer 2 and a tree on layer 3.
+    const grid = put(put(put(blankGrid(1, 1), 0, 0, 0, CLIFF_CORNER), 0, 0, 1, kindTile(TALL_GRASS)), 0, 0, 2, TREE);
+    const layering = layeringWith([ CLIFF_CORNER ]);
+
+    // Act.
+    const changes = paintTiles(grid, [ { x: 0, y: 0, tileId: kindTile(GRASS) } ], layering, 'auto');
+    const { landing } = planPlacement(gridReader(grid), 0, 0, kindTile(GRASS), layering, 'auto');
+
+    // Assert: nothing written, and the ghost preview shows the grass landing nowhere.
+    expect([ changes, landing ])
+      .toEqual([ [], -1 ]);
   });
 });
 
