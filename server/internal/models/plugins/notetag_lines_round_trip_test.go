@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"jmz-data-editor/server/internal/gametest"
 )
 
 // TestNotetagLinesConfigurationRoundTripPreservesEveryLine guards what a save does to this file: it decodes the
@@ -56,12 +58,12 @@ func TestNotetagLinesConfigurationRoundTripPreservesEveryLine(t *testing.T) {
 // TestNotetagLinesConfigurationRoundTripsChefAdventure runs the same guard over the real file, and checks the save
 // writes it back byte for byte, so the first save from the board is never a spurious diff.
 func TestNotetagLinesConfigurationRoundTripsChefAdventure(t *testing.T) {
-	// Arrange- optional, like the other round-trip tests: worth having when the sibling repo is present and worth
-	// skipping when it is not.
-	path := filepath.Join("..", "..", "..", "..", "..", "ca", "chef-adventure", "data", "config.notetag-lines.json")
+	// Arrange- optional, like the other round-trip tests: gametest decides whether the game's absence skips or
+	// fails.
+	path := filepath.Join(gametest.DataDir(t), "config.notetag-lines.json")
 	original, err := os.ReadFile(path)
 	if err != nil {
-		t.Skip("ca/chef-adventure/data not present beside jmz-data-editor (optional)")
+		t.Fatal(err)
 	}
 
 	// Act- decode, then encode exactly as the store saves.

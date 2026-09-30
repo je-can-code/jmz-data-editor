@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"jmz-data-editor/server/internal/gametest"
 )
 
 // TestWeatherConfigurationRoundTripPreservesEveryBlock is the guard for the failure mode
@@ -66,12 +68,12 @@ func TestWeatherConfigurationRoundTripPreservesEveryBlock(t *testing.T) {
 // TestWeatherConfigurationRoundTripsChefAdventure runs the same guard over the real file, which is
 // the only copy carrying every authoring note in the position an author actually put it.
 func TestWeatherConfigurationRoundTripsChefAdventure(t *testing.T) {
-	// Arrange- optional, like the unmarshal test beside it: worth having when the sibling repo is
-	// present and worth skipping when it is not.
-	path := filepath.Join("..", "..", "..", "..", "..", "ca", "chef-adventure", "data", "config.weather.json")
+	// Arrange- optional, like the unmarshal test beside it: gametest decides whether the game's
+	// absence skips or fails.
+	path := filepath.Join(gametest.DataDir(t), "config.weather.json")
 	original, err := os.ReadFile(path)
 	if err != nil {
-		t.Skip("ca/chef-adventure/data not present beside jmz-data-editor (optional)")
+		t.Fatal(err)
 	}
 
 	// Act.

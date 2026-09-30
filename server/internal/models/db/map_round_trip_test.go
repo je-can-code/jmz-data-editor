@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"jmz-data-editor/server/internal/gametest"
 )
 
 // TestMapInfosRoundTripKeepsEveryField holds the map tree to the same standard as the database
@@ -47,9 +49,9 @@ func TestTilesetsRoundTripKeepsEveryField(t *testing.T) {
 // and move route commands come in three shapes. One sample file would miss most of that.
 func TestEveryMapRoundTripKeepsEveryField(t *testing.T) {
 	// Arrange- every map file the folder holds.
-	entries, err := os.ReadDir(gameDataDir())
+	entries, err := os.ReadDir(gametest.DataDir(t))
 	if err != nil {
-		t.Skip("ca/chef-adventure/data not present beside jmz-data-editor (optional)")
+		t.Fatal(err)
 	}
 
 	// Act and Assert, once per map.

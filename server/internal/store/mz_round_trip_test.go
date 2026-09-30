@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"jmz-data-editor/server/internal/gametest"
 	"jmz-data-editor/server/internal/models/db"
 	"jmz-data-editor/server/internal/mzjson"
 )
@@ -27,10 +28,7 @@ import (
 // logged rather than failed, but only once the test has shown that the save changed nothing except
 // the layout: the file's own content, laid out MZ's way, must equal what the save wrote.
 func TestSaveInMzLayoutReproducesEveryFile(t *testing.T) {
-	folder := gameDataDir()
-	if _, err := os.Stat(folder); err != nil {
-		t.Skip("ca/chef-adventure/data not present beside jmz-data-editor (optional)")
-	}
+	folder := gametest.DataDir(t)
 
 	t.Run("MapInfos.json", func(t *testing.T) {
 		// Arrange, Act and Assert all live in the helper; this names the file and its model.

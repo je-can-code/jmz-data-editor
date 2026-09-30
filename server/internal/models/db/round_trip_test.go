@@ -5,10 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-)
 
-// chefAdventureData is the sibling game project; skipped when it is not checked out.
-const chefAdventureData = "../../../../../ca/chef-adventure/data"
+	"jmz-data-editor/server/internal/gametest"
+)
 
 // TestStateRoundTripKeepsEveryField guards a field that was being erased for real.
 //
@@ -115,11 +114,12 @@ func countCollapsed(t *testing.T, payload []byte) int {
 	return total
 }
 
-// readGameFile returns one file from the sibling game project, skipping when it is absent.
+// readGameFile returns one file from the game project, skipping when the file is absent. Where the
+// project is, and when its absence is a failure rather than a skip, is gametest.DataDir's to decide.
 func readGameFile(t *testing.T, name string) []byte {
 	t.Helper()
 
-	path := filepath.Join(gameDataDir(), name)
+	path := filepath.Join(gametest.DataDir(t), name)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Skipf("%s not present beside jmz-data-editor (optional)", name)
