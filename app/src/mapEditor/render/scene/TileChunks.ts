@@ -89,6 +89,8 @@ class TileChunks
 
   #highlight: number | null = null;
 
+  #layerShown = [ true, true, true, true ];
+
   #options: TileOptions = {
     u: 0,
     v: 0,
@@ -180,6 +182,20 @@ class TileChunks
     if (this.#shadows !== on)
     {
       this.#shadows = on;
+      this.markAllDirty();
+    }
+  }
+
+  /**
+   * Shows or hides the four tile layers; a table's edge goes with layer 2, where the table is.
+   * @param {readonly boolean[]} shown Whether each of the four layers draws.
+   */
+  setLayersShown(shown: readonly boolean[]): void
+  {
+    const changed = shown.some((value, index) => this.#layerShown[index] !== value);
+    if (changed)
+    {
+      this.#layerShown = [ ...shown ];
       this.markAllDirty();
     }
   }
@@ -337,13 +353,14 @@ class TileChunks
     const size = this.#tileSize;
     const options = this.#options;
     const highlight = this.#highlight;
+    const shown = this.#layerShown;
     return (upper, layer, sheet, sx, sy, dx, dy, width, height, animation) =>
     {
       // a shadow is texture -1, which the tilemap shader fills with its half-transparent black.
       const slot = sheet < 0
         ? -1
         : this.#sheetSlot[sheet];
-      if (sheet >= 0 && slot < 0)
+      if ((sheet >= 0 && slot < 0) || shown[layer] === false)
       {
         return;
       }

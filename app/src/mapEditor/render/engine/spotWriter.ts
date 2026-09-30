@@ -397,5 +397,22 @@ const writeSpot = (
   addSpotTile(source, sink, 3, readMapData(source, mx, my, 3), dx, dy, options);
 };
 
-export { readMapData, SHADOW_LAYER, SHADOW_SHEET, writeSpot };
+/**
+ * Emits one tile on its own, as the engine would draw it on a layer: what a ghost preview shows before a click places
+ * it. Only the tile itself draws; no neighbour or table edge is consulted.
+ * @param {TileSource} source The map, for the tileset's flags.
+ * @param {number} layer The layer the tile would sit on.
+ * @param {number} tileId The tile id.
+ * @param {number} dx The destination's left edge.
+ * @param {number} dy The destination's top edge.
+ * @param {RectSink} sink Where the rects go.
+ * @param {SpotOptions} options How to draw.
+ */
+const writeTile = (
+  source: TileSource, layer: number, tileId: number, dx: number, dy: number, sink: RectSink, options: SpotOptions): void =>
+{
+  addSpotTile(source, sink, layer, tileId, dx, dy, options);
+};
+
+export { readMapData, SHADOW_LAYER, SHADOW_SHEET, writeSpot, writeTile };
 export type { RectSink, SpotOptions, TileSource };

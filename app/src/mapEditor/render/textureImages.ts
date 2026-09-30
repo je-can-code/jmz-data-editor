@@ -13,18 +13,20 @@ const decodeTextureImage = (blob: Blob): Promise<ImageBitmap> =>
 };
 
 /**
- * Wraps an image as a texture source, sampled nearest so tiles stay crisp at every zoom. An ImageBitmap is taken as
- * already premultiplied ({@link decodeTextureImage} makes them so, since WebGL cannot premultiply an ImageBitmap on
- * upload); any other image is premultiplied as it uploads.
+ * Wraps an image as a texture source, sampled nearest by default so tiles stay crisp at every zoom. An ImageBitmap is
+ * taken as already premultiplied ({@link decodeTextureImage} makes them so, since WebGL cannot premultiply an
+ * ImageBitmap on upload); any other image is premultiplied as it uploads.
  * @param {TextureImage} image The image.
+ * @param {'nearest' | 'linear'} scaleMode How it samples between pixels: nearest for tiles and characters, linear for
+ * a painted parallax.
  * @returns {TextureSource} The source.
  */
-const textureSourceFor = (image: TextureImage): TextureSource =>
+const textureSourceFor = (image: TextureImage, scaleMode: 'nearest' | 'linear' = 'nearest'): TextureSource =>
 {
   const premultiplied = typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap;
   return new ImageSource({
     resource: image,
-    scaleMode: 'nearest',
+    scaleMode,
     alphaMode: premultiplied ? 'premultiplied-alpha' : 'premultiply-alpha-on-upload',
   });
 };

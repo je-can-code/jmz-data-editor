@@ -1,13 +1,20 @@
-import { Container, Graphics, WebGLRenderer, type TextureSource } from 'pixi.js';
+import { Container, Graphics, Rectangle, WebGLRenderer, type TextureSource } from 'pixi.js';
 import type { DocumentChange } from '../core/model/EditorDocument.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
-import { cellAtPoint, panBy, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../core/renderer/camera.ts';
+import type { Patch } from '../core/model/patches.ts';
+import type { PassabilityRule } from '../core/modules/PluginModule.ts';
+import { cellAtPoint, panBy, screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../core/renderer/camera.ts';
 import { FrameTimeRecorder, type FrameTimings } from '../core/renderer/FrameTimeRecorder.ts';
 import {
   GAME_LOOK,
+  NO_OVERLAY_STATE,
   type LayerVisibility,
+  type MapContextMenu,
   type MapRenderer,
+  type OverlayId,
   type OverlaySet,
+  type OverlayState,
+  type RendererInfo,
   type TextureSource as ImageTextureSource,
   type TilesetTextures,
 } from '../core/renderer/MapRenderer.ts';
@@ -21,20 +28,20 @@ import {
   zoomLimits,
   type ViewSize,
 } from './cameraControls.ts';
-import { chunkGrid, chunkRangeFor, dirtyChunksForCells, type ChunkGrid } from './chunkMath.ts';
-import { animationFrameAt, animationVector } from './engine/animation.ts';
+import { chunkGrid, chunkRangeFor, dirtyChunksForCells, type ChunkGrid, type ChunkRange } from './chunkMath.ts';
+import { animationFrameAt, animationVector, engineFramesAt } from './engine/animation.ts';
+import { cellPassage, passabilityQuery, tileEventsByCell } from './engine/passability.ts';
 import type { TileSource } from './engine/spotWriter.ts';
 import { FrameLoop, type FrameWindow } from './FrameLoop.ts';
+import { AtlasChunks } from './scene/AtlasChunks.ts';
+import { EventLayer } from './scene/EventLayer.ts';
+import { GhostTiles } from './scene/GhostTiles.ts';
+import { ModuleOverlays } from './scene/ModuleOverlays.ts';
+import { drawPassageAtlas, drawRegionAtlas, passageMarkIndex } from './scene/overlayAtlases.ts';
+import { ParallaxLayer } from './scene/ParallaxLayer.ts';
+import { drawGrid, drawPointerOverlays } from './scene/pointerOverlays.ts';
 import { TileChunks } from './scene/TileChunks.ts';
 import { textureSourceFor } from './textureImages.ts';
-
-/**
- * What the WebGL context reports about the GPU drawing the map.
- */
-type RendererInfo = {
-  readonly vendor: string;
-  readonly renderer: string;
-};
 
 /**
  * What a frame did, for anything timing the renderer.
@@ -57,6 +64,59 @@ type FrameReport = {
 };
 
 /**
+ * What the renderer holds, for the speed script's report.
+ */
+type RendererStats = {
+  readonly quads: number;
+  readonly chunks: number;
+  readonly eventSprites: number;
+  readonly loadingSheets: number;
+  readonly moduleOverlays: number;
+};
+
+/**
+ * The world's layers, bottom to top: the engine's black behind the map, the parallax, the tiles below characters,
+ * the events in their three priorities around the tiles above characters, the lighting P9 draws, then the editor's
+ * own: the dimming and highlighted layer, and the overlays.
+ */
+type Slots = {
+  readonly backdrop: Graphics;
+  readonly parallax: Container;
+  readonly lowerTiles: Container;
+  readonly upperTiles: Container;
+  readonly lighting: Container;
+  readonly dim: Graphics;
+  readonly highlightTiles: Container;
+  readonly regions: Container;
+  readonly passability: Container;
+  readonly grid: Graphics;
+  readonly modules: Container;
+  readonly ghosts: Container;
+  readonly pointer: Graphics;
+};
+
+/**
+ * What changes with the map: its chunks, its size-bound drawings and its ghosts.
+ */
+type MapScene = {
+  readonly grid: ChunkGrid;
+  readonly source: TileSource;
+  readonly document: MapDocument;
+  readonly tiles: TileChunks;
+  readonly ghosts: GhostTiles;
+
+  /**
+   * The region overlay's chunks, built the first time the overlay shows, since its atlas takes a moment to draw.
+   */
+  regions: AtlasChunks | null;
+
+  /**
+   * The passability overlay's chunks, likewise built on first show.
+   */
+  passability: AtlasChunks | null;
+};
+
+/**
  * The colour behind the map where nothing is drawn, as the engine's black screen shows behind its tilemap.
  */
 const MAP_BACKDROP = 0x000000;
@@ -65,6 +125,16 @@ const MAP_BACKDROP = 0x000000;
  * The editor's own background, around the map.
  */
 const VIEW_BACKGROUND = 0x121212;
+
+/**
+ * How dark the layer highlight makes everything but the highlighted layer.
+ */
+const DIM_ALPHA = 0.6;
+
+/**
+ * The map properties the parallax reads.
+ */
+const PARALLAX_FIELDS: ReadonlySet<string> = new Set([ 'parallaxName', 'parallaxLoopX', 'parallaxLoopY', 'parallaxSx', 'parallaxSy' ]);
 
 /**
  * Reads a map's loop settings, as Game_Map#isLoopHorizontal and #isLoopVertical.
@@ -77,12 +147,32 @@ const loopsOf = (scrollType: number): { horizontal: boolean; vertical: boolean }
 };
 
 /**
- * Draws a map with pixi and the vendored tilemap, exactly as the engine does, on its own frame loop: nothing here goes
- * through React. It listens to its document and redraws only the chunks an edit touched, inside the frame that shows
- * the edit. Frames are scheduled on whichever window hosts it, so a torn-out map keeps drawing.
+ * Reads which event a patch changed, when it changed exactly one.
+ * @param {Patch} patch The patch.
+ * @returns {number | null} The event id, or null when the patch reaches the event list as a whole.
+ */
+const patchedEventId = (patch: Patch): number | null =>
+{
+  if (patch.kind !== 'set' && patch.kind !== 'splice')
+  {
+    return null;
+  }
+
+  const [ , id ] = patch.path;
+  return patch.path.length >= 2 && typeof id === 'number'
+    ? id
+    : null;
+};
+
+/**
+ * Draws a map with pixi and the vendored tilemap exactly as the engine does, on its own frame loop: nothing here goes
+ * through React. It listens to its document and redraws only what an edit touched, inside the frame that shows the
+ * edit, and draws a frame only when something changed. Frames are scheduled on whichever window hosts it, so a
+ * torn-out map keeps drawing.
  *
- * The camera is its own: the wheel zooms about the pointer, the right button held pans, and a right click that does
- * not move raises a context-menu event.
+ * The game look is the default: water animates, the parallax scrolls, events stand where the engine stands them and
+ * auto-shadows stay off, since the game never draws them. The camera is its own: the wheel zooms about the pointer,
+ * the right button held pans, and a right click that does not move raises a context-menu event.
  */
 class PixiMapRenderer implements MapRenderer
 {
@@ -100,13 +190,17 @@ class PixiMapRenderer implements MapRenderer
 
   #world = new Container({ isRenderGroup: true });
 
-  #backdrop = new Graphics();
+  #slots: Slots;
 
-  #tiles: TileChunks | null = null;
+  #scene: MapScene | null = null;
 
-  #grid: ChunkGrid | null = null;
+  #events: EventLayer;
 
-  #lighting = new Container();
+  #parallax: ParallaxLayer;
+
+  #modules = new ModuleOverlays();
+
+  #atlases: { regions: TextureSource; passability: TextureSource } | null = null;
 
   #document: MapDocument | null = null;
 
@@ -120,7 +214,7 @@ class PixiMapRenderer implements MapRenderer
 
   #mapDirty = false;
 
-  #textureSource: ImageTextureSource | null = null;
+  #images: ImageTextureSource | null = null;
 
   #camera: Camera = { x: 0, y: 0, zoom: 1 };
 
@@ -134,6 +228,18 @@ class PixiMapRenderer implements MapRenderer
 
   #overlays: OverlaySet = { enabled: new Set(), definitions: [] };
 
+  #overlayState: OverlayState = NO_OVERLAY_STATE;
+
+  #rules: readonly PassabilityRule[] = [];
+
+  #tileEvents = new Map<number, number[]>();
+
+  #modulesDirty = true;
+
+  #pointerDirty = true;
+
+  #ghostsDirty = true;
+
   #frames = new FrameTimeRecorder();
 
   #loop: FrameLoop;
@@ -144,6 +250,8 @@ class PixiMapRenderer implements MapRenderer
 
   #animationStep = -1;
 
+  #fixedAnimation: { step: number; frames: number } | null = null;
+
   #gesture = new RightButtonGesture();
 
   #resizeObserver: ResizeObserver | null = null;
@@ -152,7 +260,7 @@ class PixiMapRenderer implements MapRenderer
 
   #cameraListeners = new Set<(camera: Camera) => void>();
 
-  #contextMenuListeners = new Set<(point: ScreenPoint) => void>();
+  #contextMenuListeners = new Set<(menu: MapContextMenu) => void>();
 
   #frameListeners = new Set<(report: FrameReport) => void>();
 
@@ -161,8 +269,60 @@ class PixiMapRenderer implements MapRenderer
   constructor()
   {
     this.#loop = new FrameLoop(() => this.#hostWindow(), time => this.#frame(time));
-    this.#world.addChild(this.#backdrop);
+    const invalidate = () =>
+    {
+      this.#needsRender = true;
+    };
+    this.#events = new EventLayer(invalidate);
+    this.#parallax = new ParallaxLayer(invalidate);
+    this.#slots = {
+      backdrop: new Graphics(),
+      parallax: this.#parallax.layer,
+      lowerTiles: new Container(),
+      upperTiles: new Container(),
+      lighting: new Container(),
+      dim: new Graphics(),
+      highlightTiles: new Container(),
+      regions: new Container(),
+      passability: new Container(),
+      grid: new Graphics(),
+      modules: this.#modules.layer,
+      ghosts: new Container(),
+      pointer: new Graphics(),
+    };
+
+    // the engine's order: lower tiles, events below and with characters, upper tiles, events above characters.
+    const { slots } = this;
+    this.#world.addChild(
+      slots.backdrop,
+      slots.parallax,
+      slots.lowerTiles,
+      this.#events.below,
+      this.#events.same,
+      slots.upperTiles,
+      this.#events.above,
+      slots.lighting,
+      slots.dim,
+      slots.highlightTiles,
+      slots.regions,
+      slots.passability,
+      slots.grid,
+      slots.modules,
+      slots.ghosts,
+      slots.pointer,
+    );
+    slots.ghosts.addChild(this.#events.ghosts);
     this.#stage.addChild(this.#world);
+    this.#applyVisibility();
+  }
+
+  /**
+   * The world's layers.
+   * @returns {Slots} The slots.
+   */
+  get slots(): Slots
+  {
+    return this.#slots;
   }
 
   /**
@@ -171,7 +331,7 @@ class PixiMapRenderer implements MapRenderer
    */
   get lightingLayer(): Container
   {
-    return this.#lighting;
+    return this.#slots.lighting;
   }
 
   /**
@@ -203,12 +363,18 @@ class PixiMapRenderer implements MapRenderer
 
   /**
    * Counts what the renderer holds, for the speed script's report.
-   * @returns {{ quads: number, chunks: number }} The tile rects and the chunks.
+   * @returns {RendererStats} The counts.
    */
-  stats(): { quads: number; chunks: number }
+  stats(): RendererStats
   {
-    const grid = this.#grid;
-    return { quads: this.#tiles?.quadCount ?? 0, chunks: grid === null ? 0 : grid.columns * grid.rows };
+    const scene = this.#scene;
+    return {
+      quads: scene?.tiles.quadCount ?? 0,
+      chunks: scene === null ? 0 : scene.grid.columns * scene.grid.rows,
+      eventSprites: this.#events.spriteCount,
+      loadingSheets: this.#events.pendingLoads,
+      moduleOverlays: this.#modules.count,
+    };
   }
 
   mount(host: HTMLElement): void
@@ -261,13 +427,14 @@ class PixiMapRenderer implements MapRenderer
 
   setTextureSource(source: ImageTextureSource): void
   {
-    this.#textureSource = source;
+    this.#images = source;
+    this.#mapDirty = true;
   }
 
   setCamera(camera: Camera): void
   {
     this.#cameraPlaced = true;
-    this.#moveCamera(camera, false);
+    this.#moveCamera(camera);
   }
 
   setLayerVisibility(visibility: LayerVisibility): void
@@ -279,7 +446,41 @@ class PixiMapRenderer implements MapRenderer
   setOverlays(overlays: OverlaySet): void
   {
     this.#overlays = overlays;
+    this.#modules.setDefinitions(overlays.definitions, overlays.enabled);
+    this.#modulesDirty = true;
+    this.#pointerDirty = true;
+    this.#ghostsDirty = true;
     this.#applyVisibility();
+  }
+
+  setOverlayState(state: OverlayState): void
+  {
+    if (state.selectedEvents !== this.#overlayState.selectedEvents)
+    {
+      this.#modulesDirty = true;
+    }
+
+    if (state.ghostTiles !== this.#overlayState.ghostTiles || state.ghostEvents !== this.#overlayState.ghostEvents)
+    {
+      this.#ghostsDirty = true;
+    }
+
+    this.#overlayState = state;
+    this.#pointerDirty = true;
+    this.#needsRender = true;
+  }
+
+  setPassabilityRules(rules: readonly PassabilityRule[]): void
+  {
+    this.#rules = rules;
+    this.#scene?.passability?.markAllDirty();
+    this.#needsRender = true;
+  }
+
+  refreshOverlays(): void
+  {
+    this.#modulesDirty = true;
+    this.#needsRender = true;
   }
 
   frameTimings(): FrameTimings
@@ -301,14 +502,26 @@ class PixiMapRenderer implements MapRenderer
 
   eventAt(point: ScreenPoint): number | null
   {
-    const cell = this.cellAt(point);
     const document = this.#document;
-    if (cell === null || document === null)
+    if (document === null)
     {
       return null;
     }
 
-    // the newest event on the cell is the one on top.
+    // the sprite drawn on top under the point, or failing that the newest event standing on the cell.
+    const world = screenToWorld(this.#camera, point);
+    const drawn = this.#events.eventAt(world.x, world.y);
+    if (drawn !== null)
+    {
+      return drawn;
+    }
+
+    const cell = this.cellAt(point);
+    if (cell === null)
+    {
+      return null;
+    }
+
     const ids = document.eventIds().filter(id =>
     {
       const event = document.event(id);
@@ -319,10 +532,6 @@ class PixiMapRenderer implements MapRenderer
       : null;
   }
 
-  /**
-   * Reads the GPU the map is drawn on, from the WebGL context.
-   * @returns {RendererInfo | null} The vendor and renderer strings, or null before the context is up.
-   */
   rendererInfo(): RendererInfo | null
   {
     const pixi = this.#pixi;
@@ -338,6 +547,18 @@ class PixiMapRenderer implements MapRenderer
       : { vendor: String(gl.getParameter(debug.UNMASKED_VENDOR_WEBGL)), renderer: String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL)) };
   }
 
+  onContextMenu(listener: (menu: MapContextMenu) => void): () => void
+  {
+    this.#contextMenuListeners.add(listener);
+    return () => this.#contextMenuListeners.delete(listener);
+  }
+
+  onCameraChange(listener: (camera: Camera) => void): () => void
+  {
+    this.#cameraListeners.add(listener);
+    return () => this.#cameraListeners.delete(listener);
+  }
+
   /**
    * Shows the whole map, centred.
    */
@@ -347,7 +568,7 @@ class PixiMapRenderer implements MapRenderer
     if (document !== null)
     {
       this.#cameraPlaced = true;
-      this.#moveCamera(fitCamera(this.#view, document, TILE_SIZE), false);
+      this.#moveCamera(fitCamera(this.#view, document, TILE_SIZE));
     }
   }
 
@@ -361,29 +582,19 @@ class PixiMapRenderer implements MapRenderer
     this.#cameraPlaced = true;
     const centre = cell.x * TILE_SIZE + TILE_SIZE / 2;
     const middle = cell.y * TILE_SIZE + TILE_SIZE / 2;
-    this.#moveCamera(centerCamera(centre, middle, zoom, this.#view), false);
+    this.#moveCamera(centerCamera(centre, middle, zoom, this.#view));
   }
 
   /**
-   * Listens for camera moves, whether from the pointer or from {@link setCamera}.
-   * @param {(camera: Camera) => void} listener Called with the new camera.
-   * @returns {() => void} Stops listening.
+   * Holds the game look's animation still at one moment, or lets it run again: water at an animation step, and a
+   * scrolling parallax a number of engine frames in. The parity check uses it to match a frame of the game.
+   * @param {{ step: number, frames: number } | null} moment The moment, or null to follow the clock.
    */
-  onCameraChange(listener: (camera: Camera) => void): () => void
+  holdAnimation(moment: { step: number; frames: number } | null): void
   {
-    this.#cameraListeners.add(listener);
-    return () => this.#cameraListeners.delete(listener);
-  }
-
-  /**
-   * Listens for right clicks that did not move.
-   * @param {(point: ScreenPoint) => void} listener Called with the view point that was clicked.
-   * @returns {() => void} Stops listening.
-   */
-  onContextMenu(listener: (point: ScreenPoint) => void): () => void
-  {
-    this.#contextMenuListeners.add(listener);
-    return () => this.#contextMenuListeners.delete(listener);
+    this.#fixedAnimation = moment;
+    this.#animationStep = -1;
+    this.#needsRender = true;
   }
 
   /**
@@ -417,6 +628,44 @@ class PixiMapRenderer implements MapRenderer
     this.#needsRender = true;
   }
 
+  /**
+   * Draws a stretch of the world at one to one, as it would show through a view at zoom 1, and hands it back as a
+   * PNG: what the parity check compares with the game's own drawing of the same stretch.
+   * @param {{ x: number, y: number, width: number, height: number }} rect The stretch, in world pixels.
+   * @returns {Promise<string>} A data URL of the PNG.
+   */
+  async extract(rect: { x: number; y: number; width: number; height: number }): Promise<string>
+  {
+    const pixi = this.#pixi;
+    if (pixi === null)
+    {
+      throw new Error('the renderer is not drawing yet');
+    }
+
+    // draw every chunk the stretch covers, whatever the camera and the view show now.
+    const saved = { camera: this.#camera, view: this.#view };
+    this.#camera = { x: rect.x, y: rect.y, zoom: 1 };
+    this.#view = { width: rect.width, height: rect.height };
+    this.#prepareFrame(performance.now());
+    this.#world.scale.set(1);
+    this.#world.position.set(-rect.x, -rect.y);
+    try
+    {
+      return await pixi.extract.base64({
+        target: this.#stage,
+        frame: new Rectangle(0, 0, rect.width, rect.height),
+        resolution: 1,
+        antialias: false,
+      });
+    }
+    finally
+    {
+      this.#camera = saved.camera;
+      this.#view = saved.view;
+      this.#needsRender = true;
+    }
+  }
+
   destroy(): void
   {
     this.#destroyed = true;
@@ -426,11 +675,16 @@ class PixiMapRenderer implements MapRenderer
     this.#listeners.splice(0).forEach(stop => stop());
     this.#resizeObserver?.disconnect();
     this.#resizeObserver = null;
-    this.#tiles?.destroy();
-    this.#tiles = null;
+    this.#destroyScene();
+    this.#events.destroy();
+    this.#parallax.destroy();
+    this.#modules.destroy();
     [ ...this.#sheetSources, ...this.#retiredSources ].forEach(source => source?.destroy());
     this.#sheetSources = [];
     this.#retiredSources = [];
+    this.#atlases?.regions.destroy();
+    this.#atlases?.passability.destroy();
+    this.#atlases = null;
     this.#stage.destroy({ children: true });
     this.#pixi?.destroy();
     this.#pixi = null;
@@ -545,26 +799,35 @@ class PixiMapRenderer implements MapRenderer
       if (step.kind === 'pan')
       {
         this.#cameraPlaced = true;
-        this.#moveCamera(panBy(this.#camera, step.dx, step.dy), true);
+        this.#moveCamera(panBy(this.#camera, step.dx, step.dy));
       }
     });
     listen('pointerup', event =>
     {
-      if (event.button !== 2)
+      if (event.button === 2)
       {
-        return;
-      }
-
-      const step = this.#gesture.release({ x: event.offsetX, y: event.offsetY });
-      if (step.kind === 'context-menu')
-      {
-        this.#contextMenuListeners.forEach(listener => listener(step.point));
+        this.#finishRightClick(this.#gesture.release({ x: event.offsetX, y: event.offsetY }));
       }
     });
     listen('pointercancel', () => this.#gesture.cancel());
 
     // the browser's own menu never opens over the map; a right click that did not move raises the editor's.
     listen('contextmenu', event => event.preventDefault(), false);
+  }
+
+  /**
+   * Raises the context menu for a right click that did not move.
+   * @param {ReturnType<RightButtonGesture['release']>} step What the release came to.
+   */
+  #finishRightClick(step: ReturnType<RightButtonGesture['release']>): void
+  {
+    if (step.kind !== 'context-menu')
+    {
+      return;
+    }
+
+    const menu: MapContextMenu = { point: step.point, cell: this.cellAt(step.point), eventId: this.eventAt(step.point) };
+    this.#contextMenuListeners.forEach(listener => listener(menu));
   }
 
   /**
@@ -581,15 +844,14 @@ class PixiMapRenderer implements MapRenderer
     }
 
     this.#cameraPlaced = true;
-    this.#moveCamera(zoomAt(this.#camera, anchor, factor, zoomLimits(this.#view, document, TILE_SIZE)), true);
+    this.#moveCamera(zoomAt(this.#camera, anchor, factor, zoomLimits(this.#view, document, TILE_SIZE)));
   }
 
   /**
    * Moves the camera and tells whoever listens.
    * @param {Camera} camera The camera.
-   * @param {boolean} _fromPointer Whether the pointer moved it.
    */
-  #moveCamera(camera: Camera, _fromPointer: boolean): void
+  #moveCamera(camera: Camera): void
   {
     this.#camera = camera;
     this.#needsRender = true;
@@ -632,16 +894,34 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Rebuilds everything that depends on the map's size and tileset: the chunk grid, the chunks and the backdrop.
+   * Makes the region and passability atlases, once, in the host's document.
+   * @returns {{ regions: TextureSource, passability: TextureSource }} The atlases.
+   */
+  #atlasSources(): { regions: TextureSource; passability: TextureSource }
+  {
+    if (this.#atlases === null)
+    {
+      const document = this.#host?.ownerDocument ?? globalThis.document;
+      this.#atlases = {
+        regions: textureSourceFor(drawRegionAtlas(document, TILE_SIZE)),
+        passability: textureSourceFor(drawPassageAtlas(document, TILE_SIZE)),
+      };
+    }
+
+    return this.#atlases;
+  }
+
+  /**
+   * Rebuilds everything that depends on the map's size and tileset: the chunks, the per-cell overlays, the grid, the
+   * backdrop, the parallax and the events.
    */
   #rebuildMap(): void
   {
-    const source = this.#tileSource();
-    this.#tiles?.destroy();
-    this.#tiles = null;
-    this.#grid = null;
+    this.#destroyScene();
     this.#needsRender = true;
-    if (source === null)
+    const source = this.#tileSource();
+    const document = this.#document;
+    if (source === null || document === null)
     {
       return;
     }
@@ -649,15 +929,32 @@ class PixiMapRenderer implements MapRenderer
     const grid = chunkGrid(source.width, source.height);
     const tiles = new TileChunks(grid, TILE_SIZE);
     tiles.setMap(source, this.#sheetSources);
-    this.#grid = grid;
-    this.#tiles = tiles;
-    this.#world.addChildAt(tiles.lowerLayer, 1);
-    this.#world.addChildAt(tiles.upperLayer, 2);
-    this.#world.addChild(this.#lighting);
-    this.#world.addChild(tiles.highlightLayer);
-    this.#backdrop.clear().rect(0, 0, source.width * TILE_SIZE, source.height * TILE_SIZE).fill(MAP_BACKDROP);
+    const scene: MapScene = {
+      grid,
+      source,
+      document,
+      tiles,
+      regions: null,
+      passability: null,
+      ghosts: new GhostTiles(this.#sheetSources, TILE_SIZE),
+    };
+    this.#scene = scene;
+    this.#mountScene(scene);
+    this.#drawMapBound(source.width, source.height);
+    this.#tileEvents = tileEventsByCell(document);
+    this.#events.setContext({ document, flags: source.flags, sheets: this.#sheetSources, images: this.#images, tileSize: TILE_SIZE });
+    this.#parallax.setMap({
+      name: document.property('parallaxName'),
+      loopX: document.property('parallaxLoopX'),
+      loopY: document.property('parallaxLoopY'),
+      sx: document.property('parallaxSx'),
+      sy: document.property('parallaxSy'),
+    }, source.width * TILE_SIZE, source.height * TILE_SIZE, this.#images);
     this.#animationStart = performance.now();
     this.#animationStep = -1;
+    this.#modulesDirty = true;
+    this.#pointerDirty = true;
+    this.#ghostsDirty = true;
     this.#applyVisibility();
 
     // the chunks that drew with the old sheets are gone, so the sheets can go too.
@@ -665,22 +962,152 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Applies the layer visibility and highlight to the scene.
+   * Builds the region overlay's chunks.
+   * @param {ChunkGrid} grid The grid.
+   * @param {MapDocument} document The map.
+   * @returns {AtlasChunks} The chunks.
+   */
+  #regionChunks(grid: ChunkGrid, document: MapDocument): AtlasChunks
+  {
+    return new AtlasChunks(grid, TILE_SIZE, this.#atlasSources().regions, (x, y) =>
+    {
+      const region = document.cellAt(x, y, 5);
+      return region > 0 ? region : -1;
+    });
+  }
+
+  /**
+   * Builds the passability overlay's chunks.
+   * @param {ChunkGrid} grid The grid.
+   * @param {TileSource} source The tile source.
+   * @param {MapDocument} document The map.
+   * @returns {AtlasChunks} The chunks.
+   */
+  #passageChunks(grid: ChunkGrid, source: TileSource, document: MapDocument): AtlasChunks
+  {
+    const tileset = this.#tileset as TilesetTextures;
+    const query = passabilityQuery(document, tileset.tileset);
+    return new AtlasChunks(grid, TILE_SIZE, this.#atlasSources().passability, (x, y) =>
+    {
+      const tileEvents = this.#tileEvents.get(y * source.width + x) ?? [];
+      const { blocked, denied } = cellPassage(source, x, y, tileEvents, this.#rules, query);
+      return passageMarkIndex(blocked, denied);
+    });
+  }
+
+  /**
+   * Puts a map's chunk layers into their slots.
+   * @param {MapScene} scene The map's scene.
+   */
+  #mountScene(scene: MapScene): void
+  {
+    const { slots } = this;
+    slots.lowerTiles.addChild(scene.tiles.lowerLayer);
+    slots.upperTiles.addChild(scene.tiles.upperLayer);
+    slots.highlightTiles.addChild(scene.tiles.highlightLayer);
+    slots.ghosts.addChildAt(scene.ghosts.view, 0);
+  }
+
+  /**
+   * Builds the per-cell overlays' chunks the first time each shows.
+   * @param {MapScene} scene The map's scene.
+   */
+  #ensureOverlayChunks(scene: MapScene): void
+  {
+    if (scene.regions === null && this.#isOn('regions'))
+    {
+      scene.regions = this.#regionChunks(scene.grid, scene.document);
+      this.#slots.regions.addChild(scene.regions.layer);
+    }
+
+    if (scene.passability === null && this.#isOn('passability'))
+    {
+      scene.passability = this.#passageChunks(scene.grid, scene.source, scene.document);
+      this.#slots.passability.addChild(scene.passability.layer);
+    }
+  }
+
+  /**
+   * Draws what is sized to the map: the black behind it, the dimming, and the grid.
+   * @param {number} width The map's width in tiles.
+   * @param {number} height The map's height in tiles.
+   */
+  #drawMapBound(width: number, height: number): void
+  {
+    const { slots } = this;
+    slots.backdrop.clear().rect(0, 0, width * TILE_SIZE, height * TILE_SIZE).fill(MAP_BACKDROP);
+    slots.dim.clear().rect(0, 0, width * TILE_SIZE, height * TILE_SIZE).fill({ color: 0x000000, alpha: DIM_ALPHA });
+    drawGrid(slots.grid, width, height, TILE_SIZE);
+  }
+
+  /**
+   * Lets go of the current map's scene.
+   */
+  #destroyScene(): void
+  {
+    const scene = this.#scene;
+    if (scene === null)
+    {
+      return;
+    }
+
+    scene.tiles.destroy();
+    scene.regions?.destroy();
+    scene.passability?.destroy();
+    scene.ghosts.destroy();
+    this.#scene = null;
+  }
+
+  /**
+   * Reports whether an overlay is switched on.
+   * @param {OverlayId} id The overlay.
+   * @returns {boolean} True when on.
+   */
+  #isOn(id: OverlayId): boolean
+  {
+    return this.#overlays.enabled.has(id);
+  }
+
+  /**
+   * Applies the layer visibility, the highlight and the overlay switches to the scene.
    */
   #applyVisibility(): void
   {
     const { layers, highlighted } = this.#visibility;
-    const tiles = this.#tiles;
-    this.#lighting.visible = layers.lighting;
-    if (tiles !== null)
+    const { slots } = this;
+    const highlight = highlighted !== null && this.#isOn('layer-highlight')
+      ? Number(highlighted.slice('tiles'.length)) - 1
+      : null;
+    slots.lighting.visible = layers.lighting;
+    slots.parallax.visible = layers.parallax;
+    slots.dim.visible = highlight !== null;
+    slots.grid.visible = this.#isOn('grid');
+    slots.regions.visible = this.#isOn('regions');
+    slots.passability.visible = this.#isOn('passability');
+    slots.ghosts.visible = this.#isOn('ghost');
+    [ this.#events.below, this.#events.same, this.#events.above ].forEach(group =>
     {
-      tiles.setShadows(layers.shadows);
-      const highlight = highlighted !== null && this.#overlays.enabled.has('layer-highlight')
-        ? Number(highlighted.slice('tiles'.length)) - 1
-        : null;
-      tiles.setHighlight(highlight);
+      group.visible = layers.events;
+    });
+    const scene = this.#scene;
+    if (scene !== null)
+    {
+      scene.tiles.setShadows(layers.shadows);
+      scene.tiles.setLayersShown([ layers.tiles1, layers.tiles2, layers.tiles3, layers.tiles4 ]);
+      scene.tiles.setHighlight(highlight);
+      this.#ensureOverlayChunks(scene);
+      if (scene.regions !== null)
+      {
+        scene.regions.layer.visible = slots.regions.visible;
+      }
+
+      if (scene.passability !== null)
+      {
+        scene.passability.layer.visible = slots.passability.visible;
+      }
     }
 
+    this.#pointerDirty = true;
     this.#needsRender = true;
   }
 
@@ -690,62 +1117,187 @@ class PixiMapRenderer implements MapRenderer
    */
   #onDocumentChange(change: DocumentChange): void
   {
+    this.#needsRender = true;
+    this.#modulesDirty = true;
+
     // a swapped file or a new size rebuilds everything, once, in the next frame.
-    if (change.kind === 'replaced')
+    if (change.kind === 'replaced' || change.patch.kind === 'resize')
     {
       this.#mapDirty = true;
       return;
     }
 
     const { patch } = change;
-    if (patch.kind === 'resize')
-    {
-      this.#mapDirty = true;
-      return;
-    }
-
     if (patch.kind === 'tiles')
     {
-      const grid = this.#grid;
-      if (grid !== null && this.#tiles !== null && this.#document !== null)
-      {
-        const loops = loopsOf(this.#document.property('scrollType'));
-        const dirty = dirtyChunksForCells(grid, patch.indices, loops.vertical);
-        this.#tiles.markDirty(dirty.tiles);
-      }
-
-      this.#needsRender = true;
+      this.#markTiles(patch.indices);
       return;
     }
 
-    // a change of loop settings changes how the edges read.
-    if (patch.path[0] === 'scrollType')
+    const [ field ] = patch.path;
+    if (field === 'events')
+    {
+      this.#eventsChanged(patch);
+      return;
+    }
+
+    // the loop settings change how the edges read; the parallax fields change the parallax.
+    if (field === 'scrollType' || PARALLAX_FIELDS.has(String(field)))
     {
       this.#mapDirty = true;
-      return;
     }
-
-    this.#needsRender = true;
   }
 
   /**
-   * Moves the A1 animation to where the clock says, when the game look animates water.
+   * Marks the chunks some changed cells dirty, in every layer that reads them.
+   * @param {readonly number[]} indices The changed cells, as flat indexes.
+   */
+  #markTiles(indices: readonly number[]): void
+  {
+    const scene = this.#scene;
+    if (scene === null)
+    {
+      return;
+    }
+
+    const dirty = dirtyChunksForCells(scene.grid, indices, scene.source.verticalWrap);
+    scene.tiles.markDirty(dirty.tiles);
+    scene.passability?.markDirty(dirty.passage);
+    scene.regions?.markDirty(dirty.regions);
+  }
+
+  /**
+   * Redraws the events a patch touched, and the passability their tile images feed.
+   * @param {Patch} patch The patch.
+   */
+  #eventsChanged(patch: Patch): void
+  {
+    const id = patchedEventId(patch);
+    if (id === null)
+    {
+      this.#events.rebuild();
+    }
+    else
+    {
+      this.#events.refreshEvent(id);
+    }
+
+    const document = this.#document;
+    if (document !== null)
+    {
+      this.#tileEvents = tileEventsByCell(document);
+    }
+
+    this.#scene?.passability?.markAllDirty();
+    this.#pointerDirty = true;
+  }
+
+  /**
+   * Moves the A1 animation and the parallax drift to where the clock says, when the game look animates.
    * @param {number} now The frame's time.
-   * @returns {boolean} True when the animation step changed.
+   * @returns {boolean} True when either moved.
    */
   #tickAnimation(now: number): boolean
   {
-    const step = this.#visibility.animateWater
-      ? animationFrameAt(Math.max(0, now - this.#animationStart))
-      : 0;
-    if (step === this.#animationStep || this.#tiles === null)
+    const scene = this.#scene;
+    if (scene === null)
     {
       return false;
     }
 
-    this.#animationStep = step;
-    this.#tiles.setAnimation(animationVector(step));
-    return true;
+    const elapsed = Math.max(0, now - this.#animationStart);
+    const animate = this.#visibility.animateWater;
+    const fixed = this.#fixedAnimation;
+    const step = fixed?.step ?? (animate ? animationFrameAt(elapsed) : 0);
+    const frames = fixed?.frames ?? (animate ? engineFramesAt(elapsed) : 0);
+    let moved = this.#parallax.update(this.#camera, frames, TILE_SIZE);
+    if (step !== this.#animationStep)
+    {
+      this.#animationStep = step;
+      scene.tiles.setAnimation(animationVector(step));
+      moved = true;
+    }
+
+    return moved;
+  }
+
+  /**
+   * Redraws whatever overlays went stale since the last frame.
+   * @returns {boolean} True when any redrew.
+   */
+  #refreshOverlays(): boolean
+  {
+    const document = this.#document;
+    let redrew = false;
+    if (this.#modulesDirty && document !== null)
+    {
+      this.#modulesDirty = false;
+      this.#modules.redraw({ document, tileSize: TILE_SIZE, selection: this.#overlayState.selectedEvents });
+      redrew = true;
+    }
+
+    if (this.#pointerDirty)
+    {
+      this.#pointerDirty = false;
+      const eventCell = (id: number) =>
+      {
+        const event = document?.event(id) ?? null;
+        return event === null ? null : { x: event.x, y: event.y };
+      };
+      drawPointerOverlays(this.#slots.pointer, this.#overlayState, { hover: this.#isOn('hover'), selection: this.#isOn('selection') }, eventCell, TILE_SIZE);
+      redrew = true;
+    }
+
+    const scene = this.#scene;
+    if (this.#ghostsDirty && scene !== null)
+    {
+      this.#ghostsDirty = false;
+      scene.ghosts.setGhosts(this.#overlayState.ghostTiles, scene.source);
+      this.#events.setGhosts(this.#overlayState.ghostEvents);
+      redrew = true;
+    }
+
+    return redrew;
+  }
+
+  /**
+   * Brings the scene up to date for a frame: rebuilds the map when it went stale, places a new map whole on screen,
+   * moves the animation, culls to the camera and rebuilds dirty chunks and overlays.
+   * @param {number} now The frame's time.
+   * @returns {{ changed: boolean, rebuiltChunks: number }} Whether anything changed, and how many tile chunks rebuilt.
+   */
+  #prepareFrame(now: number): { changed: boolean; rebuiltChunks: number }
+  {
+    if (this.#mapDirty)
+    {
+      this.#mapDirty = false;
+      this.#rebuildMap();
+    }
+
+    const document = this.#document;
+    if (document !== null && this.#cameraPlaced === false && this.#scene !== null)
+    {
+      // a map shown for the first time starts whole on screen.
+      this.#cameraPlaced = true;
+      this.#moveCamera(fitCamera(this.#view, document, TILE_SIZE));
+    }
+
+    let changed = this.#tickAnimation(now);
+    let rebuiltChunks = 0;
+    const scene = this.#scene;
+    if (scene !== null)
+    {
+      const range: ChunkRange = chunkRangeFor(scene.grid, visibleWorld(this.#camera, this.#view), TILE_SIZE);
+      scene.tiles.cull(range);
+      scene.regions?.cull(range);
+      scene.passability?.cull(range);
+      rebuiltChunks = scene.tiles.flush();
+      const overlayChunks = (scene.regions?.flush() ?? 0) + (scene.passability?.flush() ?? 0);
+      changed = changed || rebuiltChunks > 0 || overlayChunks > 0;
+    }
+
+    changed = this.#refreshOverlays() || changed;
+    return { changed, rebuiltChunks };
   }
 
   /**
@@ -762,32 +1314,8 @@ class PixiMapRenderer implements MapRenderer
 
     const started = performance.now();
     this.#beforeFrameListeners.forEach(listener => listener(time));
-    if (this.#mapDirty)
-    {
-      this.#mapDirty = false;
-      this.#rebuildMap();
-    }
-
-    const document = this.#document;
-    if (document !== null && this.#cameraPlaced === false && this.#tiles !== null)
-    {
-      // a map shown for the first time starts whole on screen.
-      this.#cameraPlaced = true;
-      this.#moveCamera(fitCamera(this.#view, document, TILE_SIZE), false);
-    }
-
-    let changed = this.#tickAnimation(performance.now());
-    let rebuiltChunks = 0;
-    const tiles = this.#tiles;
-    const grid = this.#grid;
-    if (tiles !== null && grid !== null)
-    {
-      tiles.cull(chunkRangeFor(grid, visibleWorld(this.#camera, this.#view), TILE_SIZE));
-      rebuiltChunks = tiles.flush();
-    }
-
-    changed = changed || rebuiltChunks > 0 || this.#needsRender;
-    if (changed === false)
+    const { changed, rebuiltChunks } = this.#prepareFrame(started);
+    if (changed === false && this.#needsRender === false)
     {
       return;
     }
@@ -802,4 +1330,4 @@ class PixiMapRenderer implements MapRenderer
 }
 
 export { PixiMapRenderer };
-export type { FrameReport, RendererInfo };
+export type { FrameReport, RendererStats, Slots };

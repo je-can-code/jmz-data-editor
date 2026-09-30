@@ -4,7 +4,13 @@ import type { Transaction } from '../core/history/Transaction.ts';
 import { mapDocumentKey } from '../core/model/documentKeys.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import { TILE_SIZE, type Camera } from '../core/renderer/camera.ts';
-import { GAME_LOOK, type CoreOverlayId } from '../core/renderer/MapRenderer.ts';
+import {
+  GAME_LOOK,
+  NO_OVERLAY_STATE,
+  type CoreOverlayId,
+  type GhostTile,
+  type OverlayState,
+} from '../core/renderer/MapRenderer.ts';
 import { centerCamera, fitZoom } from './cameraControls.ts';
 import type { PixiMapRenderer } from './PixiMapRenderer.ts';
 
@@ -52,6 +58,37 @@ const HOOKS_GLOBAL = '__jmzMapView';
 const EVERY_CORE_OVERLAY: readonly CoreOverlayId[] = [ 'grid', 'regions', 'passability', 'layer-highlight', 'selection', 'hover', 'ghost' ];
 
 /**
+ * Builds a representative state for every pointer overlay at once: a brush footprint under the pointer, fifty events
+ * selected, a tile area and a box selected, and a 3x3 ghost of tiles and an event about to be placed.
+ * @param {MapDocument} map The map.
+ * @returns {OverlayState} The state.
+ */
+const everyOverlayState = (map: MapDocument): OverlayState =>
+{
+  const cx = Math.floor(map.width / 2);
+  const cy = Math.floor(map.height / 2);
+  const ghostTiles: GhostTile[] = [];
+  for (let dy = 0; dy < 3; dy++)
+  {
+    for (let dx = 0; dx < 3; dx++)
+    {
+      ghostTiles.push({ x: Math.min(map.width - 1, cx + 2 + dx), y: Math.min(map.height - 1, cy + dy), layer: 0, tileId: 2816 + 47 });
+    }
+  }
+
+  const ids = map.eventIds();
+  const firstImage = ids.length === 0 ? null : map.event(ids[0])?.pages[0]?.image ?? null;
+  return {
+    hover: { x: cx - 1, y: cy - 1, width: 3, height: 3 },
+    selectedEvents: ids.slice(0, 50),
+    selectedCells: { x: 1, y: 1, width: Math.min(6, map.width - 1), height: Math.min(4, map.height - 1) },
+    selectionBox: { x: TILE_SIZE * 2, y: TILE_SIZE * 2, width: TILE_SIZE * 8, height: TILE_SIZE * 5 },
+    ghostTiles,
+    ghostEvents: firstImage === null ? [] : [ { x: cx, y: Math.min(map.height - 1, cy + 4), image: firstImage, priorityType: 1 } ],
+  };
+};
+
+/**
  * Picks where a camera path looks at a moment.
  * @param {CameraPath} path The path.
  * @param {number} seconds Seconds since the path started.
@@ -96,8 +133,11 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
   const stops: (() => void)[] = [];
   let path: CameraPath | null = null;
   let pathStart = 0;
+  let overlayState: OverlayState = NO_OVERLAY_STATE;
+  let hoverFollows = false;
 
-  // camera paths move the camera at the start of each frame, so the frame that draws the move is the one timed.
+  // camera paths move the camera at the start of each frame, so the frame that draws the move is the one timed; with
+  // every overlay on, the hover follows the view's centre, as it follows a pointer held still while the map moves.
   stops.push(renderer.onBeforeFrame(time =>
   {
     const map = context.map();
@@ -106,7 +146,16 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       return;
     }
 
-    renderer.setCamera(cameraOnPath(path, (time - pathStart) / 1000, map, renderer.viewSize));
+    const camera = cameraOnPath(path, (time - pathStart) / 1000, map, renderer.viewSize);
+    renderer.setCamera(camera);
+    if (hoverFollows)
+    {
+      const { width, height } = renderer.viewSize;
+      const x = Math.floor((camera.x + width / camera.zoom / 2) / TILE_SIZE);
+      const y = Math.floor((camera.y + height / camera.zoom / 2) / TILE_SIZE);
+      overlayState = { ...overlayState, hover: { x: x - 1, y: y - 1, width: 3, height: 3 } };
+      renderer.setOverlayState(overlayState);
+    }
   }));
 
   // the paint stand-in: a pen that paints on pointer moves with the left button held, the way P3's will.
@@ -214,9 +263,29 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     },
     enableEveryOverlay: () =>
     {
+      const map = context.map();
+      if (map === null)
+      {
+        return;
+      }
+
       renderer.setOverlays({ enabled: new Set(EVERY_CORE_OVERLAY), definitions: [] });
       renderer.setLayerVisibility({ ...GAME_LOOK, highlighted: 'tiles3' });
+      overlayState = everyOverlayState(map);
+      renderer.setOverlayState(overlayState);
+      hoverFollows = true;
     },
+    // the parity check draws the map as the game would, still, with nothing of the editor's on top.
+    prepareParity: (options: { events: boolean; step: number; frames: number }) =>
+    {
+      hoverFollows = false;
+      overlayState = NO_OVERLAY_STATE;
+      renderer.setOverlayState(overlayState);
+      renderer.setOverlays({ enabled: new Set(), definitions: [] });
+      renderer.setLayerVisibility({ ...GAME_LOOK, layers: { ...GAME_LOOK.layers, events: options.events, shadows: false } });
+      renderer.holdAnimation({ step: options.step, frames: options.frames });
+    },
+    extract: (rect: { x: number; y: number; width: number; height: number }) => renderer.extract(rect),
     paintState: () => ({ steps, painting: painting !== null }),
     undoPaint: () => hub.undo(mapHistoryKey(context.map()?.mapId ?? 0)),
     openMap: async (mapId: number) =>
