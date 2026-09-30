@@ -340,13 +340,16 @@ async function main()
       projectRoot,
     });
 
+    // the dev stack starts the API on the configured address, allowing exactly the configured UI's page,
+    // and the UI on the configured port.
     child = spawn(
       'bun',
-      [ 'run', 'dev', '--project-root', projectRoot, '--api-base', apiBase ],
+      rules.devStackArgs(projectRoot, apiBase, uiUrl),
       {
         cwd: repoRoot(),
         env: {
           ...process.env,
+          ...rules.serverEnvironment(apiBase, uiUrl),
           JMZ_PROJECT_ROOT: projectRoot,
           VITE_JMZ_API_BASE: apiBase,
         },

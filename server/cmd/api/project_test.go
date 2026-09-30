@@ -59,14 +59,38 @@ type project struct {
 	root    string
 	hub     *watch.Hub
 	handler http.Handler
+
+	// host is the name requests are addressed to by default: the API's own address.
+	host string
 }
 
 // newProject writes the fixtures into a temporary folder, points the server at it, and builds the
-// route table exactly as main does.
+// route table exactly as main does when nothing configures it.
 //
 // Pointing JMZ_PROJECT_ROOT here is not optional: the variable is often already set in a developer's
 // shell to the real game, and these tests write.
 func newProject(t *testing.T) *project {
+	t.Helper()
+
+	current := writeProject(t)
+	current.handler = routes(current.hub, accessPolicy())
+	current.host = listenAddress
+	return current
+}
+
+// newConfiguredProject is newProject for a server started with a configuration, such as a UI moved to
+// another port.
+func newConfiguredProject(t *testing.T, config serverConfig) *project {
+	t.Helper()
+
+	current := writeProject(t)
+	current.handler = routes(current.hub, config.policy())
+	current.host = config.address
+	return current
+}
+
+// writeProject writes the fixtures into a temporary folder and points the server at it.
+func writeProject(t *testing.T) *project {
 	t.Helper()
 
 	root := t.TempDir()
@@ -96,7 +120,7 @@ func newProject(t *testing.T) *project {
 	t.Setenv("JMZ_PROJECT_ROOT", root)
 	hub := watch.NewHub("data", store.EditorDataFolder)
 
-	return &project{root: root, hub: hub, handler: routes(hub, accessPolicy())}
+	return &project{root: root, hub: hub}
 }
 
 // call sends one request through the route table, addressed to the API's own name the way curl or
@@ -107,7 +131,7 @@ func (current *project) call(t *testing.T, method string, target string, body st
 	t.Helper()
 
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
-	request.Host = listenAddress
+	request.Host = current.host
 	for index := 0; index+1 < len(headers); index += 2 {
 		if headers[index] == "Host" {
 			request.Host = headers[index+1]

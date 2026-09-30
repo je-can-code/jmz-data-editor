@@ -129,4 +129,69 @@ function windowSize(requested, fallback)
   return Math.round(Math.min(7680, Math.max(320, requested)));
 }
 
-module.exports = { bootPath, hasFlag, readFlag, resolveWindowUrl, trimOrigin, windowKey, windowSize };
+/**
+ * Builds the environment the Go API reads its configuration from, out of the same origins that tell the UI
+ * where everything is: the address to listen on, from the API base, and the one page origin allowed to call it,
+ * from the UI's URL. A UI moved off port 3000 is then allowed, and the default origins are not.
+ * @param {string} apiBase The API's origin, such as http://127.0.0.1:8080.
+ * @param {string} uiUrl The UI's origin, such as http://127.0.0.1:3000.
+ * @returns {{ JMZ_API_ADDRESS: string, JMZ_UI_ORIGINS: string }} The variables.
+ */
+function serverEnvironment(apiBase, uiUrl)
+{
+  const api = new URL(trimOrigin(apiBase));
+  return {
+    JMZ_API_ADDRESS: `${api.hostname}:${portOf(api)}`,
+    JMZ_UI_ORIGINS: new URL(trimOrigin(uiUrl)).origin,
+  };
+}
+
+/**
+ * Reads a URL's port, filling in the scheme's default when the URL leaves it out.
+ * @param {URL} url The parsed URL.
+ * @returns {number} The port.
+ */
+function portOf(url)
+{
+  if (url.port !== '')
+  {
+    return Number(url.port);
+  }
+
+  return url.protocol === 'https:' ? 443 : 80;
+}
+
+/**
+ * Reads the port the UI's dev server must listen on from its URL.
+ * @param {string} uiUrl The UI's origin.
+ * @returns {number} The port.
+ */
+function uiPort(uiUrl)
+{
+  return portOf(new URL(trimOrigin(uiUrl)));
+}
+
+/**
+ * Builds the arguments that start the dev stack (the Go API and the UI) for a project.
+ * @param {string} projectRoot The RMMZ project.
+ * @param {string} apiBase The API's origin.
+ * @param {string} uiUrl The UI's origin.
+ * @returns {string[]} The arguments for bun.
+ */
+function devStackArgs(projectRoot, apiBase, uiUrl)
+{
+  return [ 'run', 'dev', '--project-root', projectRoot, '--api-base', apiBase, '--ui-url', uiUrl ];
+}
+
+module.exports = {
+  bootPath,
+  devStackArgs,
+  hasFlag,
+  readFlag,
+  resolveWindowUrl,
+  serverEnvironment,
+  trimOrigin,
+  uiPort,
+  windowKey,
+  windowSize,
+};

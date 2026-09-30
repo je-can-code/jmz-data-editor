@@ -18,6 +18,9 @@ const rules = load('../../../nw-app/shellRules.js') as {
   resolveWindowUrl(requested: unknown, uiUrl: string): string | null;
   windowKey(url: string): string;
   windowSize(requested: unknown, fallback: number): number;
+  serverEnvironment(apiBase: string, uiUrl: string): { JMZ_API_ADDRESS: string; JMZ_UI_ORIGINS: string };
+  uiPort(uiUrl: string): number;
+  devStackArgs(projectRoot: string, apiBase: string, uiUrl: string): string[];
 };
 
 describe('shellRules', () =>
@@ -158,6 +161,48 @@ describe('shellRules', () =>
       // Assert.
       expect(keys[0])
         .not.toBe(keys[1]);
+    });
+  });
+
+  describe('serverEnvironment', () =>
+  {
+    it('tells the API to listen at the API base and allow exactly the UI\'s page', () =>
+    {
+      // Arrange: a UI and API moved off their default ports, beside the defaults.
+
+      // Act.
+      const environments = [
+        rules.serverEnvironment('http://127.0.0.1:18151/', 'http://127.0.0.1:18150/'),
+        rules.serverEnvironment('http://127.0.0.1:8080', 'http://127.0.0.1:3000'),
+        rules.serverEnvironment('http://localhost', 'https://localhost'),
+      ];
+
+      // Assert.
+      expect(environments)
+        .toStrictEqual([
+          { JMZ_API_ADDRESS: '127.0.0.1:18151', JMZ_UI_ORIGINS: 'http://127.0.0.1:18150' },
+          { JMZ_API_ADDRESS: '127.0.0.1:8080', JMZ_UI_ORIGINS: 'http://127.0.0.1:3000' },
+          { JMZ_API_ADDRESS: 'localhost:80', JMZ_UI_ORIGINS: 'https://localhost' },
+        ]);
+    });
+  });
+
+  describe('dev stack', () =>
+  {
+    it('starts the UI on its URL\'s port and hands the runner every origin', () =>
+    {
+      // Arrange: explicit ports, and the schemes' defaults.
+
+      // Act.
+      const ports = [ rules.uiPort('http://127.0.0.1:18150'), rules.uiPort('http://127.0.0.1'), rules.uiPort('https://127.0.0.1') ];
+      const args = rules.devStackArgs('/games/chef', 'http://127.0.0.1:18151', 'http://127.0.0.1:18150');
+
+      // Assert.
+      expect([ ports, args ])
+        .toStrictEqual([
+          [ 18150, 80, 443 ],
+          [ 'run', 'dev', '--project-root', '/games/chef', '--api-base', 'http://127.0.0.1:18151', '--ui-url', 'http://127.0.0.1:18150' ],
+        ]);
     });
   });
 
