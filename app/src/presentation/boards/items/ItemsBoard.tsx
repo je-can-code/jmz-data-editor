@@ -185,7 +185,7 @@ function ItemsBoard()
 
   const canSave = !loading && !isSaving && !!rmmzDataPath;
 
-  // whole items copy and paste like any other edit, and save the normal way.
+  // copy and paste whole items like any other edit, saved the normal way.
   const rowClipboard = useRowClipboard({
     table: DatabaseFilenames.Items,
     selectedIndex,

@@ -262,6 +262,24 @@ describe('RowClipboard', () =>
         });
     });
 
+    it('lands the copied rows on the very first row of the table', () =>
+    {
+      // Arrange- the first row is the edge the table starts on, and it is still a row to paste onto.
+      const text = RowClipboard.copy(DatabaseFilenames.Items, [ { id: 7, name: 'Potion' } ]);
+
+      // Act
+      const plan = RowClipboard.plan(text, DatabaseFilenames.Items, 4, 0);
+
+      // Assert
+      expect(plan)
+        .toEqual({
+          outcome: 'paste',
+          startIndex: 0,
+          rows: [ { id: 7, name: 'Potion' } ],
+          droppedCount: 0,
+        });
+    });
+
     it('lands a single row on the very last row of the table', () =>
     {
       // Arrange- the last row is the edge the table ends on, and it is still a row to paste onto.
@@ -346,6 +364,41 @@ describe('RowClipboard', () =>
       // Assert
       expect(plan)
         .toEqual({ outcome: 'no-target' });
+    });
+  });
+
+  describe('writesOver', () =>
+  {
+    it('counts both ends of the pasted run as written over', () =>
+    {
+      // Arrange- two rows landing on rows 1 and 2.
+      const plan = planOf(1, [ { id: 7, name: 'Potion' }, { id: 8, name: 'Ether' } ]);
+
+      // Act
+      const firstWrittenOver = RowClipboard.writesOver(plan, 1);
+      const lastWrittenOver = RowClipboard.writesOver(plan, 2);
+
+      // Assert
+      expect(firstWrittenOver)
+        .toBe(true);
+      expect(lastWrittenOver)
+        .toBe(true);
+    });
+
+    it('counts the rows just outside either end of the pasted run as left alone', () =>
+    {
+      // Arrange- the same two rows landing on rows 1 and 2, with rows 0 and 3 on either side.
+      const plan = planOf(1, [ { id: 7, name: 'Potion' }, { id: 8, name: 'Ether' } ]);
+
+      // Act
+      const beforeWrittenOver = RowClipboard.writesOver(plan, 0);
+      const afterWrittenOver = RowClipboard.writesOver(plan, 3);
+
+      // Assert
+      expect(beforeWrittenOver)
+        .toBe(false);
+      expect(afterWrittenOver)
+        .toBe(false);
     });
   });
 

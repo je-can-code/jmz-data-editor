@@ -138,7 +138,7 @@ function ClassesBoard()
     localStorage.setItem(LS_KEY_TRAITS_EXPANDED, String(expanded));
   }, []);
 
-  // whole classes copy and paste like any other edit, and save the normal way.
+  // copy and paste whole classes like any other edit, saved the normal way.
   const rowClipboard = useRowClipboard({
     table: DatabaseFilenames.Classes,
     selectedIndex,
@@ -271,6 +271,7 @@ function ClassesBoard()
 
             <ClassParamsGrowthEditor
               classId={selectedClass.id}
+              revision={rowClipboard.pasteRevision}
               growth={selectedClass}
               cloneSources={classes}
               onGrowthChange={(growth) => patch(growth)}

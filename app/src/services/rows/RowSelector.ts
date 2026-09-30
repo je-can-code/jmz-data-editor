@@ -46,13 +46,26 @@ class RowSelector
    */
   static resolve(selection: RowSelection | null, selectedIndex: number): RowSelection
   {
-    // a run that no longer ends where the board is has been left behind.
-    if (selection === null || selection.head !== selectedIndex)
+    // fall back to the board's row alone when there is no run, or the board has left the run behind.
+    if (selection === null || RowSelector.isLeftBehind(selection, selectedIndex))
     {
       return RowSelector.single(selectedIndex);
     }
 
     return selection;
+  }
+
+  /**
+   * Determines whether the board has moved off the row a run ended on. A run left behind is gone for good: a
+   * list forgets it rather than keeping it around, so the board coming back to that row later, say by the
+   * arrow keys, finds that row alone selected rather than the whole run come back.
+   * @param {RowSelection} selection The run last made in the list.
+   * @param {number} selectedIndex The row the board is showing.
+   * @returns {boolean} True when the board is showing any row other than the one the run ended on.
+   */
+  static isLeftBehind(selection: RowSelection, selectedIndex: number): boolean
+  {
+    return selection.head !== selectedIndex;
   }
 
   /**
@@ -85,14 +98,14 @@ class RowSelector
    */
   static forContextMenu(selection: RowSelection | null, selectedIndex: number, index: number): RowSelection
   {
-    // a right click inside the run leaves the run as it is.
+    // leave the run as it is when the right click lands inside it.
     const current = RowSelector.resolve(selection, selectedIndex);
     if (RowSelector.contains(current, index))
     {
       return current;
     }
 
-    // anywhere else, the row under the cursor is the one the menu is for.
+    // select the row under the cursor anywhere else, since that is the row the menu is for.
     return RowSelector.single(index);
   }
 

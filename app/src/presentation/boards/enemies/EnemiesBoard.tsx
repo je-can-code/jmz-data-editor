@@ -483,7 +483,7 @@ const EnemiesBoard = () =>
   };
   //endregion update parameters
 
-  // whole enemies copy and paste like any other edit: the row changes, and Save lights up.
+  // copy and paste whole enemies like any other edit, lighting up Save.
   const rowClipboard = useRowClipboard({
     table: DatabaseFilenames.Enemies,
     selectedIndex: selectedEnemyIndex,
@@ -511,13 +511,13 @@ const EnemiesBoard = () =>
    */
   const renderEnemyListIcon = (index: number) =>
   {
-    // the row the editor is showing.
+    // mark the row the editor is showing.
     if (selectedEnemyIndex === index)
     {
       return <DoubleArrow color={'success'} fontSize={'small'}/>;
     }
 
-    // the other rows of a run, which a copy takes along with it.
+    // mark the other rows of a run, which a copy takes along with it.
     if (rowClipboard.isSelected(index))
     {
       return <DoubleArrow fontSize={'small'}/>;
@@ -967,6 +967,7 @@ const EnemiesBoard = () =>
                       />
                       <EnemiesExtraDrops
                         selectedEnemy={selectedEnemy}
+                        revision={rowClipboard.pasteRevision}
                         updateEnemy={updateEnemy}
                         handleSnack={handleSnack}
                       />

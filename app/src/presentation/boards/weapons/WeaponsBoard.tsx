@@ -174,7 +174,7 @@ function WeaponsBoard()
 
   const canSave = !loading && !isSaving && !!rmmzDataPath;
 
-  // whole weapons copy and paste like any other edit, and save the normal way.
+  // copy and paste whole weapons like any other edit, saved the normal way.
   const rowClipboard = useRowClipboard({
     table: DatabaseFilenames.Weapons,
     selectedIndex,

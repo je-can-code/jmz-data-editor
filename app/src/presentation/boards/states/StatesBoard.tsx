@@ -2966,7 +2966,7 @@ const StatesBoard = () =>
     };
   }, [ states ]);
 
-  // whole states copy and paste like any other edit: the row changes, and Save lights up.
+  // copy and paste whole states like any other edit, lighting up Save.
   const rowClipboard = useRowClipboard({
     table: DatabaseFilenames.States,
     selectedIndex: selectedStateIndex,

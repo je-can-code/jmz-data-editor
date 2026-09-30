@@ -126,9 +126,9 @@ const TraitEditor = ({
     loading: skillsLoading
   } = useSkills();
 
-  // the trait names also come out of System.json- elements, skill types, weapon and armor types, equipment
-  // slots- which loads on its own and can land after the board's rows do. its generation stays at zero until
-  // it has loaded, and bumps when it does, which draws the list again.
+  // wait on System.json too, since the trait names also come out of it- elements, skill types, weapon and
+  // armor types, equipment slots- and it loads on its own, so it can land after the board's rows do. its
+  // generation stays at zero until it has loaded, and bumps when it does, which draws the list again.
   const { systemDataGeneration } = useProjectPath();
   const systemDataLoading = systemDataGeneration === 0;
 

@@ -1894,14 +1894,14 @@ const SkillsBoard = () =>
     };
   }, [ skills ]);
 
-  // whole skills copy and paste like any other edit: the row changes, and Save lights up.
+  // copy and paste whole skills like any other edit, lighting up Save.
   const rowClipboard = useRowClipboard({
     table: DatabaseFilenames.Skills,
     selectedIndex: selectedSkillIndex,
     onSelectIndex: (index) => handleSkillListItemOnClickEvent(index),
     listWrapperRef,
-    // reading through the pending edit also settles it, so a copy takes what the fields show, and the
-    // debounce can never fire after a paste and put the row back the way it was before.
+    // read through the pending edit, which also settles it, so a copy takes what the fields show and the
+    // debounce can never fire after a paste to put the row back the way it was.
     getRows: skillsWithPendingEditApplied,
     toRow: (skill) => skill.toRmmz(),
     fromRow: (row) => new RPG_SkillDomainModel(row),

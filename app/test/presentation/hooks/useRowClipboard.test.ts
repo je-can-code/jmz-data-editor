@@ -309,18 +309,39 @@ describe('useRowClipboard', () =>
     });
   });
 
+  /**
+   * Shift-clicks a run the way an author does: a plain click on its first row, then a Shift click on its last,
+   * with the board moving to each row as it is clicked.
+   * @param {ReturnType<typeof renderOver>} rendered The rendered hook.
+   * @param {number} first The row the run starts on.
+   * @param {number} last The row the run ends on, which the board then shows.
+   */
+  const shiftClickRun = (rendered: ReturnType<typeof renderOver>, first: number, last: number) =>
+  {
+    act(() =>
+    {
+      rendered.result.current.onRowClick(first, clickWith(false));
+    });
+    rendered.rerender({ selectedIndex: first });
+    act(() =>
+    {
+      rendered.result.current.onRowClick(last, clickWith(true));
+    });
+    rendered.rerender({ selectedIndex: last });
+  };
+
   describe('clicking rows', () =>
   {
-    it('widens the selection into a run on a Shift click, and a copy takes the whole run', () =>
+    it('widens the selection into a run on a Shift click', () =>
     {
-      // Arrange- the board shows the first row, then the author Shift-clicks the third.
+      // Arrange- the board shows the first row, which the author clicked.
       const { result, rerender, onSelectIndex } = renderOver(tableOf([ 'Herb', 'Tonic', 'Salve', 'Balm' ]), 0);
       act(() =>
       {
         result.current.onRowClick(0, clickWith(false));
       });
 
-      // Act
+      // Act- a Shift click on the third row.
       act(() =>
       {
         result.current.onRowClick(2, clickWith(true));
@@ -332,10 +353,69 @@ describe('useRowClipboard', () =>
         .toHaveBeenLastCalledWith(2);
       expect([ 0, 1, 2, 3 ].map((index) => result.current.isSelected(index)))
         .toEqual([ true, true, true, false ]);
+    });
+
+    it('copies every row of a run, and counts them', () =>
+    {
+      // Arrange- a run over the first three rows of four.
+      const rendered = renderOver(tableOf([ 'Herb', 'Tonic', 'Salve', 'Balm' ]), 0);
+      shiftClickRun(rendered, 0, 2);
       list.focus();
+
+      // Act
       const { written } = raise(list, 'copy');
+
+      // Assert- the three rows of the run and not the fourth, and a count that says so.
       expect(RowClipboard.read(written[ 0 ])?.rows.map((row) => row.id))
         .toEqual([ 1, 2, 3 ]);
+      expect(rendered.notify)
+        .toHaveBeenCalledWith('Copied 3 rows.', MuiSnackbarSeverity.Success);
+    });
+
+    it('pastes onto the topmost row of a run, not the row the board shows', () =>
+    {
+      // Arrange- a run from the first row down to the third, which the board shows, and one copied row.
+      const rows = tableOf([ 'Herb', 'Tonic', 'Salve', 'Balm' ]);
+      const rendered = renderOver(rows, 0);
+      shiftClickRun(rendered, 0, 2);
+      const text = RowClipboard.copy(DatabaseFilenames.Items, [ { id: 9, name: 'Potion' } ]);
+      list.focus();
+
+      // Act
+      raise(list, 'paste', text);
+
+      // Assert- the copy lands on the first row under its id, and the third row is left as it was.
+      const [ [ update ] ] = rendered.applyPaste.mock.calls;
+      const pasted = update(rows);
+      expect(pasted[ 0 ])
+        .toEqual({ id: 1, name: 'Potion' });
+      expect(pasted[ 2 ])
+        .toBe(rows[ 2 ]);
+    });
+
+    it('forgets a run once the board moves off it, so coming back to its last row finds that row alone', () =>
+    {
+      // Arrange- a run from row 3 down to row 7; the arrow keys then move the board to row 8, and back to 7.
+      const rows = tableOf([ 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J' ]);
+      const rendered = renderOver(rows, 3);
+      shiftClickRun(rendered, 3, 7);
+      rendered.rerender({ selectedIndex: 8 });
+      rendered.rerender({ selectedIndex: 7 });
+      const text = RowClipboard.copy(DatabaseFilenames.Items, [ { id: 99, name: 'Potion' } ]);
+      list.focus();
+
+      // Act- a one-row paste.
+      raise(list, 'paste', text);
+
+      // Assert- only row 7 is selected, and the copy lands on row 7 rather than back on row 3.
+      expect([ 3, 4, 5, 6, 7, 8 ].map((index) => rendered.result.current.isSelected(index)))
+        .toEqual([ false, false, false, false, true, false ]);
+      const [ [ update ] ] = rendered.applyPaste.mock.calls;
+      const pasted = update(rows);
+      expect(pasted[ 7 ])
+        .toEqual({ id: 8, name: 'Potion' });
+      expect(pasted[ 3 ])
+        .toBe(rows[ 3 ]);
     });
 
     it('starts over on the row clicked when Shift is not held', () =>
@@ -543,6 +623,63 @@ describe('useRowClipboard', () =>
           'Pasting from the menu needs clipboard access. Ctrl+V works without it.',
           MuiSnackbarSeverity.Warning,
         );
+    });
+  });
+
+  describe('the paste revision', () =>
+  {
+    it('changes when a paste writes over the row the board shows, so that row\'s editors start over', () =>
+    {
+      // Arrange- the board shows the second row, which a copied row is about to land on.
+      const rendered = renderOver(tableOf([ 'Herb', 'Tonic', 'Salve' ]), 1);
+      const revisionBefore = rendered.result.current.pasteRevision;
+      const text = RowClipboard.copy(DatabaseFilenames.Items, [ { id: 9, name: 'Potion' } ]);
+      list.focus();
+
+      // Act
+      raise(list, 'paste', text);
+
+      // Assert
+      expect(revisionBefore)
+        .toBe(0);
+      expect(rendered.result.current.pasteRevision)
+        .toBe(1);
+    });
+
+    it('stays put when a paste lands elsewhere in the run, leaving the shown row\'s editors alone', () =>
+    {
+      // Arrange- a run from the first row down to the third, which the board shows; the one copied row will
+      // land on the first row only.
+      const rendered = renderOver(tableOf([ 'Herb', 'Tonic', 'Salve' ]), 0);
+      shiftClickRun(rendered, 0, 2);
+      const text = RowClipboard.copy(DatabaseFilenames.Items, [ { id: 9, name: 'Potion' } ]);
+      list.focus();
+
+      // Act
+      raise(list, 'paste', text);
+
+      // Assert- the paste went ahead, but the row the board shows was not written over.
+      expect(rendered.applyPaste)
+        .toHaveBeenCalledTimes(1);
+      expect(rendered.result.current.pasteRevision)
+        .toBe(0);
+    });
+
+    it('stays put when a paste is refused', () =>
+    {
+      // Arrange- a skill, pasted onto the item the board shows.
+      const rendered = renderOver(tableOf([ 'Herb', 'Tonic' ]), 0);
+      const text = RowClipboard.copy(DatabaseFilenames.Skills, [ { id: 3, name: 'Fire' } ]);
+      list.focus();
+
+      // Act
+      raise(list, 'paste', text);
+
+      // Assert- refused, and nothing on the row to start over.
+      expect(rendered.notify)
+        .toHaveBeenCalledWith('Skills rows cannot be pasted into Items.', MuiSnackbarSeverity.Warning);
+      expect(rendered.result.current.pasteRevision)
+        .toBe(0);
     });
   });
 });

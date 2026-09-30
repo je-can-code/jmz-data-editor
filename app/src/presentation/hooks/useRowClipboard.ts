@@ -86,6 +86,13 @@ type RowClipboardHandle = {
    * Everything the list's {@link RowClipboardMenu} needs.
    */
   menu: RowClipboardMenuProps;
+
+  /**
+   * Changes every time a paste writes over the row the board is showing. A pasted row keeps its id, so a
+   * board keys the row's editors on this alongside the id: anything they hold for the row, like formulas
+   * typed but not yet applied, then starts over rather than outliving the content it was typed against.
+   */
+  pasteRevision: number;
 };
 
 /**
@@ -123,13 +130,13 @@ const rowCountLabel = (count: number): string =>
  */
 const describePaste = (plan: RowPasteWrite): string =>
 {
-  // every copied row found a row to land on.
+  // report a plain count when every copied row found a row to land on.
   if (plan.droppedCount === 0)
   {
     return `Pasted ${rowCountLabel(plan.rows.length)}.`;
   }
 
-  // some ran off the end of the list, which a paste never grows.
+  // otherwise say how many ran off the end of the list, which a paste never grows.
   const copiedCount = plan.rows.length + plan.droppedCount;
   return `Pasted ${plan.rows.length} of ${copiedCount} rows; the list ends there.`;
 };
@@ -187,8 +194,25 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
 
   const [ selection, setSelection ] = useState<RowSelection | null>(null);
   const [ menuPosition, setMenuPosition ] = useState<RowClipboardMenuPosition | null>(null);
+  const [ pasteRevision, setPasteRevision ] = useState(0);
 
-  // the run as it stands, given the row the board is showing right now.
+  // the row the board showed when this last drew, so a move can be told apart from a board still catching up
+  // to the row just clicked.
+  const [ trackedIndex, setTrackedIndex ] = useState(selectedIndex);
+
+  // forget a run once the board moves off the row it ended on, so coming back to that row later finds it alone
+  // selected rather than the whole run back again. adjust it while drawing, which is safe because the tracked
+  // row matches on the very next pass and the check cannot fire twice.
+  if (selectedIndex !== trackedIndex)
+  {
+    setTrackedIndex(selectedIndex);
+    if (selection !== null && RowSelector.isLeftBehind(selection, selectedIndex))
+    {
+      setSelection(null);
+    }
+  }
+
+  // resolve the run against the row the board is showing right now.
   const activeSelection = RowSelector.resolve(selection, selectedIndex);
 
   /**
@@ -226,6 +250,12 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
     // write it the way the board writes any other edit.
     applyPaste((current) => RowClipboard.apply(current, plan, fromRow));
     notify(describePaste(plan), MuiSnackbarSeverity.Success);
+
+    // start the shown row's editors over when the paste lands on it, since the row keeps its id through it.
+    if (RowClipboard.writesOver(plan, selectedIndex))
+    {
+      setPasteRevision((revision) => revision + 1);
+    }
   };
 
   /**
@@ -244,13 +274,13 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
    */
   const handleCopyEvent = (event: ClipboardEvent): void =>
   {
-    // a copy made anywhere else on the page belongs to whatever has focus there.
+    // leave a copy made anywhere else on the page to whatever has focus there.
     if (isListFocused() === false || event.clipboardData === null)
     {
       return;
     }
 
-    // an empty list has no rows to copy.
+    // copy nothing from an empty list.
     const copy = buildCopy();
     if (copy.count === 0)
     {
@@ -269,13 +299,13 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
    */
   const handlePasteEvent = (event: ClipboardEvent): void =>
   {
-    // a paste made anywhere else on the page belongs to whatever has focus there.
+    // leave a paste made anywhere else on the page to whatever has focus there.
     if (isListFocused() === false || event.clipboardData === null)
     {
       return;
     }
 
-    // the list is not a text box, so the browser has nothing of its own to do with the paste.
+    // keep the browser from handling the paste itself, since the list is not a text box.
     event.preventDefault();
     paste(event.clipboardData.getData('text/plain'));
   };
@@ -287,8 +317,8 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
 
   useEffect(() =>
   {
-    // the events land on the page rather than on the list whenever a text box elsewhere still holds a
-    // caret, so listen page-wide and let the handlers check where focus is.
+    // listen page-wide and let the handlers check where focus is, because the events land on the page rather
+    // than on the list whenever a text box elsewhere still holds a caret.
     const onCopy = (event: ClipboardEvent) => latestRef.current.handleCopyEvent(event);
     const onPaste = (event: ClipboardEvent) => latestRef.current.handlePasteEvent(event);
     document.addEventListener('copy', onCopy);
@@ -308,7 +338,7 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
   {
     setMenuPosition(null);
 
-    // an empty list has no rows to copy.
+    // copy nothing from an empty list.
     const copy = buildCopy();
     if (copy.count === 0)
     {
@@ -333,7 +363,7 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
   {
     setMenuPosition(null);
 
-    // reading the clipboard asks the author's permission the first time, and can be refused.
+    // read the clipboard, which asks the author's permission the first time and can be refused.
     let text: string;
     try
     {
@@ -356,7 +386,7 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
    */
   const handleRowClick = (index: number, event: React.MouseEvent): void =>
   {
-    // a Shift click widens the run; any other click starts over on the row clicked.
+    // widen the run on a Shift click, and start over on the row clicked otherwise.
     const next = event.shiftKey
       ? RowSelector.extend(selection, selectedIndex, index)
       : RowSelector.single(index);
@@ -374,10 +404,10 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
    */
   const handleRowContextMenu = (index: number, event: React.MouseEvent): void =>
   {
-    // this menu replaces the browser's own.
+    // replace the browser's own menu with this one.
     event.preventDefault();
 
-    // a right click outside the selection moves it to the row under the cursor.
+    // move the selection to the row under the cursor when the right click lands outside it.
     const next = RowSelector.forContextMenu(selection, selectedIndex, index);
     setSelection(next);
     if (next.head !== selectedIndex)
@@ -403,6 +433,7 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
       onPaste: handleMenuPaste,
       onClose: () => setMenuPosition(null),
     },
+    pasteRevision,
   };
 };
 

@@ -54,6 +54,11 @@ import { BoardSectionCard } from '@presentation/components/board/BoardSectionCar
 
 type EnemiesExtraDropProps = {
   selectedEnemy: RPG_EnemyDomainModel;
+  /**
+   * Changes whenever the whole enemy is replaced under the drops, as a paste does. A pasted enemy keeps its id,
+   * so without this a drop picked from the old enemy's list would survive, and Clone would copy it in.
+   */
+  revision: number;
   updateEnemy: (enemy: RPG_EnemyDomainModel) => void;
   handleSnack: (
     message: string,
@@ -64,6 +69,7 @@ type EnemiesExtraDropProps = {
 
 const EnemiesExtraDrops = ({
   selectedEnemy,
+  revision,
   updateEnemy,
   handleSnack,
 }: EnemiesExtraDropProps) =>
@@ -96,14 +102,15 @@ const EnemiesExtraDrops = ({
 
   //region setup
   /**
-   * When an enemy changes, reset the selected drop item and pending drop item.
+   * When an enemy changes, or is replaced under the same id by a paste, reset the selected drop item and
+   * pending drop item.
    */
   useEffect(() =>
   {
     setSelectedDropItemType(null);
     setSelectedDropItem(null);
     setPendingDropItem(null);
-  }, [ selectedEnemy.id ]);
+  }, [ selectedEnemy.id, revision ]);
   //endregion setup
 
   //region actions

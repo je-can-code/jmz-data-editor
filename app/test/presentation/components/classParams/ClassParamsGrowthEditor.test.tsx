@@ -62,11 +62,13 @@ describe('ClassParamsGrowthEditor', () =>
    * baked values yet, so every row draws its "nothing saved" line rather than a chart.
    * @param {number} classId The id of the class.
    * @param {string} attackFormula The attack formula saved on the class's note.
+   * @param {number} revision How many times the class has been pasted over; none, unless a test says so.
    * @returns The editor's props.
    */
-  const propsFor = (classId: number, attackFormula: string) => (
+  const propsFor = (classId: number, attackFormula: string, revision: number = 0) => (
     {
       classId,
+      revision,
       growth: {
         note: `<atkGrowthCurve:[${attackFormula}]>`,
         params: [],
@@ -182,6 +184,43 @@ describe('ClassParamsGrowthEditor', () =>
       // Assert
       expect(screen.getByRole('button', { name: /clone/i }))
         .toBeDisabled();
+    });
+  });
+
+  describe('pasting over the class', () =>
+  {
+    it('starts every row over from the pasted class\'s formulas, dropping what was typed', () =>
+    {
+      // Arrange- a new attack formula typed for Fucking Oni and not applied.
+      const { rerender } = render(<ClassParamsGrowthEditor {...propsFor(2, '(12+3*(a.level-1))*1.15')}/>);
+      openCard();
+      fireEvent.change(screen.getByLabelText('Power'), { target: { value: '(99+9*(a.level-1))*9' } });
+
+      // Act- another class is pasted over Oni, which keeps id 2.
+      rerender(<ClassParamsGrowthEditor {...propsFor(2, '(8+2.5*(a.level-1))*0.90', 1)}/>);
+
+      // Assert- the row reads the pasted formula, and nothing typed is left for Apply all to write.
+      expect(screen.getByLabelText('Power'))
+        .toHaveValue('(8+2.5*(a.level-1))*0.90');
+      expect(screen.getByRole('button', { name: /apply all/i }))
+        .toBeDisabled();
+    });
+
+    it('keeps what was typed while the class is only edited, not pasted over', () =>
+    {
+      // Arrange- the same typed formula, on the same class.
+      const { rerender } = render(<ClassParamsGrowthEditor {...propsFor(2, '(12+3*(a.level-1))*1.15')}/>);
+      openCard();
+      fireEvent.change(screen.getByLabelText('Power'), { target: { value: '(99+9*(a.level-1))*9' } });
+
+      // Act- the board draws the class again after an edit elsewhere on it, with no paste in between.
+      rerender(<ClassParamsGrowthEditor {...propsFor(2, '(12+3*(a.level-1))*1.15')}/>);
+
+      // Assert
+      expect(screen.getByLabelText('Power'))
+        .toHaveValue('(99+9*(a.level-1))*9');
+      expect(screen.getByRole('button', { name: 'Apply all (1)' }))
+        .toBeEnabled();
     });
   });
 

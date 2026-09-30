@@ -68,6 +68,48 @@ describe('RowSelector', () =>
     });
   });
 
+  describe('isLeftBehind', () =>
+  {
+    it('leaves a run behind once the board shows any other row', () =>
+    {
+      // Arrange- a run from 2 down to 5, with the arrow keys having moved the board on to row 6.
+      const selection = { anchor: 2, head: 5 };
+
+      // Act
+      const leftBehind = RowSelector.isLeftBehind(selection, 6);
+
+      // Assert
+      expect(leftBehind)
+        .toBe(true);
+    });
+
+    it('keeps a run while the board shows the row it ended on', () =>
+    {
+      // Arrange- the same run, with the board still on row 5.
+      const selection = { anchor: 2, head: 5 };
+
+      // Act
+      const leftBehind = RowSelector.isLeftBehind(selection, 5);
+
+      // Assert
+      expect(leftBehind)
+        .toBe(false);
+    });
+
+    it('leaves a run behind when the board moves to the row it started on', () =>
+    {
+      // Arrange- the same run, with the board moved to row 2, which is inside the run but not where it ended.
+      const selection = { anchor: 2, head: 5 };
+
+      // Act
+      const leftBehind = RowSelector.isLeftBehind(selection, 2);
+
+      // Assert
+      expect(leftBehind)
+        .toBe(true);
+    });
+  });
+
   describe('extend', () =>
   {
     it('widens a run from the row it started on to the row Shift-clicked', () =>

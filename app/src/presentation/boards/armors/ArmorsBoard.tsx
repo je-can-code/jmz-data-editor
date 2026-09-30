@@ -176,7 +176,7 @@ function ArmorsBoard()
 
   const canSave = !loading && !isSaving && !!rmmzDataPath;
 
-  // whole armors copy and paste like any other edit, and save the normal way.
+  // copy and paste whole armors like any other edit, saved the normal way.
   const rowClipboard = useRowClipboard({
     table: DatabaseFilenames.Armors,
     selectedIndex,

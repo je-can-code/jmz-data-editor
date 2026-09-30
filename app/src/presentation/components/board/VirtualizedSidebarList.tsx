@@ -275,7 +275,7 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
         ? row.title
         : row.label;
 
-      // every row of a copy and paste run highlights, not only the row the board shows.
+      // highlight every row of a copy and paste run, not only the row the board shows.
       const isRowSelected = rowClipboard === undefined
         ? selectedIndex === index
         : rowClipboard.isSelected(index);
@@ -326,7 +326,7 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
             tabIndex={-1}
             onClick={(event) =>
             {
-              // with copy and paste on, the click also decides the run of selected rows.
+              // let copy and paste decide the run of selected rows too, when it is on.
               if (rowClipboard === undefined)
               {
                 onSelectIndex(index);

@@ -98,7 +98,7 @@ class RowClipboard
    */
   static read(text: string): CopiedRows | null
   {
-    // text that is not JSON at all is certainly not copied rows.
+    // turn away text that is not JSON at all, which cannot be copied rows.
     let parsed: unknown;
     try
     {
@@ -109,7 +109,7 @@ class RowClipboard
       return null;
     }
 
-    // JSON without the marker and the shape of copied rows is somebody else's.
+    // turn away JSON without the marker and the shape of copied rows, which is somebody else's.
     if (RowClipboard.#isCopiedRows(parsed) === false)
     {
       return null;
@@ -130,14 +130,14 @@ class RowClipboard
    */
   static plan(text: string, table: DatabaseFilenames, rowCount: number, startIndex: number): RowPastePlan
   {
-    // anything that is not copied rows has nothing to paste.
+    // refuse anything that is not copied rows, since there is nothing in it to paste.
     const copied = RowClipboard.read(text);
     if (copied === null)
     {
       return { outcome: 'not-rows' };
     }
 
-    // rows from another table would be rows this one cannot read.
+    // refuse rows from another table, which this one cannot read.
     if (copied.table !== table)
     {
       return {
@@ -146,7 +146,7 @@ class RowClipboard
       };
     }
 
-    // a paste needs a row of this table to start on.
+    // refuse a start that is not a row of this table.
     if (startIndex < 0 || startIndex >= rowCount)
     {
       return { outcome: 'no-target' };
@@ -191,8 +191,8 @@ class RowClipboard
         return entry;
       }
 
-      // take the copied row's content, but keep this row's own id. the rows carry the marker of this very
-      // table, which only this table's own rows are written under, so they are this table's shape.
+      // take the copied row's content, but keep this row's own id. treat it as this table's shape, since only
+      // this table's own rows are ever written under this table's marker.
       const pasted = {
         ...plan.rows[ offset ],
         id: entry.id,
@@ -203,6 +203,20 @@ class RowClipboard
   }
 
   /**
+   * Determines whether a paste writes over a given row. A row written over keeps its id, so anything a board
+   * resets only when the id changes- formulas typed but not yet applied, a drop picked out of a list- would
+   * outlive the paste and could later be written over the pasted content; a board asks this to know when to
+   * start that state over.
+   * @param {RowPasteWrite} plan The paste, from {@link plan}.
+   * @param {number} index The index of the row in question.
+   * @returns {boolean} True when the paste lands a copied row on that row.
+   */
+  static writesOver(plan: RowPasteWrite, index: number): boolean
+  {
+    return index >= plan.startIndex && index < plan.startIndex + plan.rows.length;
+  }
+
+  /**
    * Determines whether parsed clipboard JSON is rows copied out of a board: the marker, a table, and at least
    * one row, every one of them an object.
    * @param {unknown} value The parsed clipboard JSON.
@@ -210,13 +224,13 @@ class RowClipboard
    */
   static #isCopiedRows(value: unknown): boolean
   {
-    // copied rows are always an object.
+    // turn away anything but an object, which copied rows always are.
     if (RowClipboard.#isObject(value) === false)
     {
       return false;
     }
 
-    // they carry the marker, the table they came from, and at least one row.
+    // require the marker, the table the rows came from, and at least one row.
     const { format, table, rows } = value as Record<string, unknown>;
     if (format !== ROW_CLIPBOARD_FORMAT || typeof table !== 'string')
     {
@@ -228,7 +242,7 @@ class RowClipboard
       return false;
     }
 
-    // every row is an object, so it can take on the id of the row it lands on.
+    // require every row to be an object, so it can take on the id of the row it lands on.
     return rows.every((row) => RowClipboard.#isObject(row));
   }
 
