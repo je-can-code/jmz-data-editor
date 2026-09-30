@@ -29,6 +29,8 @@ import { IconIndexField } from '@presentation/components/icons/IconIndexField.ts
 import { patchAt } from '@services/utils/patchAt.ts';
 import { NaturalGrowthQuadrantsEditor } from '@presentation/components/naturalGrowth/NaturalGrowthQuadrantsEditor.tsx';
 import { ClassParamsGrowthEditor } from '@presentation/components/classParams/ClassParamsGrowthEditor.tsx';
+import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 import RPG_ClassLearning = Rmmz.Data.RPG_ClassLearning;
 
@@ -136,6 +138,19 @@ function ClassesBoard()
     localStorage.setItem(LS_KEY_TRAITS_EXPANDED, String(expanded));
   }, []);
 
+  // copy and paste whole classes like any other edit, saved the normal way.
+  const rowClipboard = useRowClipboard({
+    table: DatabaseFilenames.Classes,
+    selectedIndex,
+    onSelectIndex: setSelectedIndex,
+    listWrapperRef,
+    getRows: () => classes,
+    toRow: (rpgClass) => rpgClass.toRmmz(),
+    fromRow: (row) => new RPG_ClassDomainModel(row),
+    applyPaste: setData,
+    notify: (message, severity) => setSnackbar({ open: true, message, severity, variant: MuiSnackbarVariant.Filled }),
+  });
+
   const sidebar = (
     <VirtualizedSidebarList
       ref={listRef}
@@ -150,6 +165,7 @@ function ClassesBoard()
       fillContainer
       searchable
       searchLabel={'Search classes'}
+      rowClipboard={rowClipboard}
     />
   );
 
@@ -255,6 +271,7 @@ function ClassesBoard()
 
             <ClassParamsGrowthEditor
               classId={selectedClass.id}
+              revision={rowClipboard.pasteRevision}
               growth={selectedClass}
               cloneSources={classes}
               onGrowthChange={(growth) => patch(growth)}

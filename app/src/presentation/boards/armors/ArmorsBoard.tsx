@@ -37,6 +37,8 @@ import { StealRatesFields } from '@presentation/components/resources/StealRatesF
 import { IngredientTypeChips } from '@presentation/components/crafting/IngredientTypeChips.tsx';
 import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 import { SystemService } from '@services/SystemService.ts';
+import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 const noteFieldSx = { '& .MuiInputBase-input': { fontFamily: 'monospace' } };
@@ -174,6 +176,19 @@ function ArmorsBoard()
 
   const canSave = !loading && !isSaving && !!rmmzDataPath;
 
+  // copy and paste whole armors like any other edit, saved the normal way.
+  const rowClipboard = useRowClipboard({
+    table: DatabaseFilenames.Armors,
+    selectedIndex,
+    onSelectIndex: setSelectedIndex,
+    listWrapperRef,
+    getRows: () => armors,
+    toRow: (armor) => armor.toRmmz(),
+    fromRow: (row) => new RPG_ArmorDomainModel(row),
+    applyPaste: setData,
+    notify: (message, severity) => setSnackbar({ open: true, message, severity, variant: MuiSnackbarVariant.Filled }),
+  });
+
   const sidebar = (
     <VirtualizedSidebarList
       ref={listRef}
@@ -188,6 +203,7 @@ function ArmorsBoard()
       fillContainer
       searchable
       searchLabel={'Search armors'}
+      rowClipboard={rowClipboard}
     />
   );
 
