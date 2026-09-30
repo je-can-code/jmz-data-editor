@@ -14,6 +14,14 @@ type DifferingCell = {
 };
 
 /**
+ * One compared view, as far as the verdict reads it: which pass it belongs to, and the differing cells nothing explains.
+ */
+type JudgedView = {
+  readonly pass: 'events' | 'tiles';
+  readonly unexplained: readonly DifferingCell[];
+};
+
+/**
  * The parts of a map file the check reads.
  */
 type MapFile = {
@@ -140,6 +148,18 @@ const explainCell = (cell: DifferingCell, events: readonly ProbeEvent[]): string
 };
 
 /**
+ * Decides whether the editor matched the game: no view of either pass may keep a differing cell nothing explains. The
+ * tiles pass explains nothing, so any difference there fails it; the events pass fails on a difference that no event
+ * the game draws its own way accounts for, since that difference would be the editor's own.
+ * @param {readonly JudgedView[]} views Every compared view.
+ * @returns {boolean} True when nothing is left unexplained.
+ */
+const gameParityHolds = (views: readonly JudgedView[]): boolean =>
+{
+  return views.every(view => view.unexplained.length === 0);
+};
+
+/**
  * Lists the cells where the engine predicts snapshot.js to draw differently: a star tile under a later non-star tile,
  * which the engine draws last, and a table or the cell under one, whose legs and edge snapshot.js leaves out.
  * @param {MapFile} map The map.
@@ -173,5 +193,5 @@ const snapshotPredictions = (map: MapFile, flags: readonly number[]): Map<string
   return predicted;
 };
 
-export { animates, coverAxis, explainCell, probeMapFor, snapshotPredictions, spriteCovers, TILE };
-export type { MapFile };
+export { animates, coverAxis, explainCell, gameParityHolds, probeMapFor, snapshotPredictions, spriteCovers, TILE };
+export type { JudgedView, MapFile };

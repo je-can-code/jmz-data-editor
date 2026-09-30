@@ -4,6 +4,7 @@ import {
   animates,
   coverAxis,
   explainCell,
+  gameParityHolds,
   probeMapFor,
   snapshotPredictions,
   spriteCovers,
@@ -14,8 +15,8 @@ import {
  * The parity check's verdict rests on these rules. The views must cover every cell of a map as the engine would
  * allow the display to sit; maps with moving water must be compared at every animation step; a difference in the
  * events pass counts as explained only by an event the game draws differently from its first page, and never under
- * a plainly drawn event, however much its neighbours move; and snapshot.js differences count as predicted only on
- * star-order and table cells.
+ * a plainly drawn event, however much its neighbours move; snapshot.js differences count as predicted only on
+ * star-order and table cells; and any cell left unexplained, in either pass, fails the check.
  */
 
 /**
@@ -186,6 +187,24 @@ describe('parityRules', () =>
           [ '1,0', 'table legs or edge' ],
           [ '1,1', 'table legs or edge' ],
         ]);
+    });
+  });
+
+  describe('gameParityHolds', () =>
+  {
+    it('holds only when no view of either pass leaves a differing cell unexplained', () =>
+    {
+      // Arrange: every view clean; one unexplained cell in an events pass; one in a tiles pass.
+      const clean = [ { pass: 'tiles', unexplained: [] }, { pass: 'events', unexplained: [] } ] as const;
+      const eventsDiffer = [ { pass: 'tiles', unexplained: [] }, { pass: 'events', unexplained: [ { x: 4, y: 2 } ] } ] as const;
+      const tilesDiffer = [ { pass: 'tiles', unexplained: [ { x: 0, y: 0 } ] }, { pass: 'events', unexplained: [] } ] as const;
+
+      // Act.
+      const verdicts = [ clean, eventsDiffer, tilesDiffer ].map(views => gameParityHolds(views));
+
+      // Assert.
+      expect(verdicts)
+        .toStrictEqual([ true, false, false ]);
     });
   });
 });

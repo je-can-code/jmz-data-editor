@@ -11,10 +11,10 @@
  * names another), builds the editor afresh there, and leaves its pictures and report there; it prints where.
  *
  * Two passes per view. The tiles pass hides every character on both sides, so what remains is the parallax and the
- * tiles: it must match, within 2 per channel for compositing rounding, and it decides the exit code. The events pass
- * draws events as each side draws them; the editor shows every event's first page, as MZ's own editor does, while the
- * game shows whichever page's conditions hold, so every differing cell there is either explained by an event the game
- * shows differently (another page, or hidden) or listed as unexplained.
+ * tiles: it must match, within 2 per channel for compositing rounding. The events pass draws events as each side draws
+ * them; the editor shows every event's first page, as MZ's own editor does, while the game shows whichever page's
+ * conditions hold, so every differing cell there is either explained by an event the game shows differently (another
+ * page, or hidden) or listed as unexplained. Any cell left unexplained, in either pass, fails the check.
  *
  * Maps with water or waterfalls are compared at all four animation steps. The game draws on SwiftShader, which is
  * fine for pictures and meaningless for timing. The game runs from a copy in the run's folder, muted, on a virtual
@@ -33,7 +33,7 @@ import { createRunFolder } from '../speed/runFolder.ts';
 import { comparePictures, decodePng, differencePicture, writePng, type CellDifference, type Comparison } from './compareImages.ts';
 import type { ProbeCapture, ProbeReport } from './probeTypes.ts';
 import { runHeadlessGame } from './headlessGame.ts';
-import { explainCell, probeMapFor, snapshotPredictions, TILE, type MapFile } from './parityRules.ts';
+import { explainCell, gameParityHolds, probeMapFor, snapshotPredictions, TILE, type MapFile } from './parityRules.ts';
 
 /**
  * The script's settings.
@@ -269,11 +269,10 @@ const runGameParity = async (options: Options): Promise<boolean> =>
  * Prints the game comparison, per map and pass.
  * @param {number[]} maps The maps.
  * @param {ViewResult[]} results Every view.
- * @returns {boolean} True when every tiles pass matched.
+ * @returns {boolean} True when no view of either pass left a difference unexplained.
  */
 const printGameParity = (maps: number[], results: ViewResult[]): boolean =>
 {
-  let tilesMatch = true;
   maps.forEach(mapId =>
   {
     console.log(`Map${String(mapId).padStart(3, '0')}: ${FIXTURES[mapId] ?? 'fixture'}`);
@@ -296,15 +295,10 @@ const printGameParity = (maps: number[], results: ViewResult[]): boolean =>
       {
         console.log(`           and ${reasons.length - 8} more events shown differently`);
       }
-
-      if (pass === 'tiles' && unexplained.length > 0)
-      {
-        tilesMatch = false;
-      }
     });
   });
 
-  return tilesMatch;
+  return gameParityHolds(results.map(result => ({ pass: result.capture.pass, unexplained: result.unexplained })));
 };
 
 /**
@@ -403,7 +397,7 @@ const main = async (): Promise<void> =>
     pass = await runSnapshotParity(options) && pass;
   }
 
-  console.log(pass ? 'PARITY: every tiles pass matched the game, and every snapshot.js difference was predicted' : 'PARITY: differences need a look');
+  console.log(pass ? 'PARITY: every difference from the game was explained, and every snapshot.js difference was predicted' : 'PARITY: differences need a look');
   process.exit(pass ? 0 : 1);
 };
 
