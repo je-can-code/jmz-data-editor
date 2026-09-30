@@ -1,6 +1,6 @@
 import type { RmmzMapInfo } from '../model/rmmzTypes.ts';
 import { MapTreeModel, TREE_ROOT, type MapInfoRows } from './MapTreeModel.ts';
-import type { TreePlace } from './treePlans.ts';
+import { planDelete, TreePlanError, type TreePlace } from './treePlans.ts';
 
 /**
  * One line of the tree panel: a map, how deep it sits, and whether it has a branch to open.
@@ -18,6 +18,14 @@ type TreeLine = {
  * child, or after it.
  */
 type DropZone = 'before' | 'inside' | 'after';
+
+/**
+ * What the tree asks before deleting maps: how many go, branches included, and the question in the author's words.
+ */
+type DeleteQuestion = {
+  readonly count: number;
+  readonly text: string;
+};
 
 /**
  * Lists the tree panel's lines: every map, top to bottom, skipping whatever sits inside a closed branch.
@@ -189,5 +197,42 @@ const draggedMaps = (selection: readonly number[], draggedId: number): number[] 
     : [ draggedId ];
 };
 
-export { draggedMaps, dropPlace, dropZoneAt, initiallyExpanded, revealMaps, selectRange, toggleSelection, visibleTreeLines };
-export type { DropZone, TreeLine };
+/**
+ * Words the question the tree asks before deleting maps: what goes, by the name the delete's step will carry, and
+ * how many maps that is once every branch is counted. The tree's history lives only as long as the window, so the
+ * author sees the whole count before anything goes.
+ * @param {MapInfoRows} rows The tree's rows.
+ * @param {readonly number[]} mapIds The maps picked to delete.
+ * @returns {DeleteQuestion | null} The question, or null when there is nothing to delete.
+ */
+const deleteQuestion = (rows: MapInfoRows, mapIds: readonly number[]): DeleteQuestion | null =>
+{
+  try
+  {
+    const plan = planDelete(rows, mapIds);
+    const count = plan.removed.length;
+    return { count, text: `${plan.label}? This removes ${count === 1 ? '1 map' : `${count} maps`}.` };
+  }
+  catch (error)
+  {
+    if (error instanceof TreePlanError)
+    {
+      return null;
+    }
+
+    throw error;
+  }
+};
+
+export {
+  deleteQuestion,
+  draggedMaps,
+  dropPlace,
+  dropZoneAt,
+  initiallyExpanded,
+  revealMaps,
+  selectRange,
+  toggleSelection,
+  visibleTreeLines,
+};
+export type { DeleteQuestion, DropZone, TreeLine };

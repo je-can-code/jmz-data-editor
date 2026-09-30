@@ -1,9 +1,10 @@
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Divider, IconButton, InputBase, ListItemText, Menu, MenuItem, Stack, Tooltip, Typography } from '@mui/material';
+import { Alert, Box, Button, Divider, IconButton, InputBase, ListItemText, Menu, MenuItem, Stack, Tooltip, Typography } from '@mui/material';
 import { ChevronRight, CreateNewFolderOutlined, ExpandMore } from '@mui/icons-material';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { TREE_ROOT, type MapInfoRows } from '../../core/tree/MapTreeModel.ts';
 import {
+  deleteQuestion,
   draggedMaps,
   dropPlace,
   dropZoneAt,
@@ -201,7 +202,8 @@ TreeRow.displayName = 'TreeRow';
 
 /**
  * The tree's right-click menu: everything the keyboard does, and the rest, on the map clicked or on the tree itself.
- * @param {object} props Where it is open, the selection, whether anything can be pasted, and the workspace.
+ * Deleting asks first, as the Delete key does.
+ * @param {object} props Where it is open, the selection, whether anything can be pasted, the workspace, and how to ask about a delete.
  * @returns {React.JSX.Element} The menu.
  */
 const TreeMenu = (props: {
@@ -209,10 +211,11 @@ const TreeMenu = (props: {
   selection: readonly number[];
   canPaste: boolean;
   controller: WorkspaceController;
+  onDelete: (mapIds: readonly number[]) => void;
   onClose: () => void;
 }) =>
 {
-  const { menu, selection, canPaste, controller, onClose } = props;
+  const { menu, selection, canPaste, controller, onDelete, onClose } = props;
   const mapId = menu?.mapId ?? null;
 
   /**
@@ -261,7 +264,7 @@ const TreeMenu = (props: {
       item('Copy', () => run(controller.copyMaps(selection)), 'Ctrl+C'),
       item('Cut', () => controller.cutMaps(selection), 'Ctrl+X'),
       item('Paste inside', () => run(controller.paste(mapId)), 'Ctrl+V', canPaste === false),
-      item('Delete', () => run(controller.deleteMaps(selection)), 'Del'),
+      item('Delete', () => onDelete(selection), 'Del'),
       <Divider key={'edit-divider'}/>,
       item('Properties', () =>
       {
@@ -283,10 +286,50 @@ const TreeMenu = (props: {
 };
 
 /**
+ * The question the tree asks, in place above its rows, before deleting maps: what goes and how many maps that is,
+ * with a button to go ahead and one to keep them. Nothing else waits on it; Enter on the focused button deletes, and
+ * Escape keeps the maps.
+ * @param {{ text: string, onDelete: () => void, onKeep: () => void }} props The question and its two answers.
+ * @returns {React.JSX.Element} The question.
+ */
+const DeleteConfirm = (props: { text: string; onDelete: () => void; onKeep: () => void }) =>
+{
+  const { text, onDelete, onKeep } = props;
+  return (
+    <Alert
+      severity={'warning'}
+      data-testid={'delete-confirm'}
+      onKeyDown={event =>
+      {
+        if (event.key === 'Escape')
+        {
+          event.stopPropagation();
+          onKeep();
+        }
+      }}
+      action={(
+        <Stack direction={'row'} spacing={0.5}>
+          <Button color={'inherit'} size={'small'} autoFocus onClick={onDelete}>
+            Delete
+          </Button>
+          <Button color={'inherit'} size={'small'} onClick={onKeep}>
+            Keep
+          </Button>
+        </Stack>
+      )}
+      sx={{ borderRadius: 0, py: 0, alignItems: 'center' }}
+    >
+      {text}
+    </Alert>
+  );
+};
+
+/**
  * The map tree: every map in the project, nested and ordered as MapInfos.json keeps them. Click to pick, Shift and
  * Ctrl to pick several, double-click or Enter to open, F2 to rename, drag to nest and reorder (or into any pane to
- * open it there), and Ctrl+C, X, V, D and Delete to copy, cut, paste, duplicate and delete, all undoable. The right
- * click offers the same. Open branches are kept with the layout.
+ * open it there), and Ctrl+C, X, V, D and Delete to copy, cut, paste, duplicate and delete, all undoable. Deleting
+ * asks first, in place, saying how many maps go: the tree's history lasts only as long as the window, so a delete
+ * cannot be undone once it closes. The right click offers the same. Open branches are kept with the layout.
  * @param {IDockviewPanelProps<MapTreeParams>} props The dock's panel props.
  * @returns {React.JSX.Element} The panel.
  */
@@ -303,6 +346,7 @@ const MapTreePanel = (props: IDockviewPanelProps<MapTreeParams>) =>
   const [ anchor, setAnchor ] = useState<number | null>(null);
   const [ drop, setDrop ] = useState<{ id: number; zone: DropZone } | null>(null);
   const [ menu, setMenu ] = useState<MenuState>(null);
+  const [ confirming, setConfirming ] = useState<readonly number[] | null>(null);
   const seeded = useRef(params.expanded !== undefined);
   const list = useRef<HTMLDivElement | null>(null);
 
@@ -314,6 +358,13 @@ const MapTreePanel = (props: IDockviewPanelProps<MapTreeParams>) =>
   );
   const lines = useMemo(() => visibleTreeLines(rows, expanded), [ rows, expanded ]);
   const cutIds = useMemo(() => new Set(clipboard?.kind === 'cut' ? clipboard.mapIds : []), [ clipboard ]);
+  const question = useMemo(() => (confirming === null ? null : deleteQuestion(rows, confirming)), [ rows, confirming ]);
+
+  // a question about a delete stands for the maps picked when it was asked; picking others withdraws it.
+  useEffect(() =>
+  {
+    setConfirming(null);
+  }, [ selection ]);
 
   // the first time the tree loads without saved branches, open the ones MZ left open.
   useEffect(() =>
@@ -497,17 +548,51 @@ const MapTreePanel = (props: IDockviewPanelProps<MapTreeParams>) =>
     return false;
   };
 
+  /**
+   * Asks, in place, before deleting maps, when there is anything to delete.
+   * @param {readonly number[]} mapIds The maps picked.
+   */
+  const askDelete = (mapIds: readonly number[]) =>
+  {
+    if (deleteQuestion(rows, mapIds) !== null)
+    {
+      setConfirming([ ...mapIds ]);
+    }
+  };
+
+  /**
+   * Answers the question about a delete, deleting the maps it named or keeping them, and hands the keys back to the
+   * tree.
+   * @param {boolean} go True to delete.
+   */
+  const answerDelete = (go: boolean) =>
+  {
+    const mapIds = confirming;
+    setConfirming(null);
+    list.current?.focus({ preventScroll: true });
+    if (go && mapIds !== null)
+    {
+      controller.deleteMaps(mapIds).catch(() => undefined);
+    }
+  };
+
   const target = anchor !== null && selection.includes(anchor) ? anchor : selection[0] ?? TREE_ROOT;
   const shortcutActions: Partial<Record<ShortcutCommand, () => void>> = {
     copy: () => controller.copyMaps(selection).catch(() => undefined),
     cut: () => controller.cutMaps(selection),
     paste: () => controller.paste(target).catch(() => undefined),
     duplicate: () => controller.duplicateMaps(selection).catch(() => undefined),
-    delete: () => controller.deleteMaps(selection).catch(() => undefined),
+    delete: () => askDelete(selection),
     rename: () => controller.setRenaming(selection[0] ?? null),
     open: () => selection.forEach(mapId => controller.openMap(mapId)),
     escape: () =>
     {
+      if (confirming !== null)
+      {
+        setConfirming(null);
+        return;
+      }
+
       if (clipboard?.kind === 'cut')
       {
         controller.clearClipboard();
@@ -537,6 +622,7 @@ const MapTreePanel = (props: IDockviewPanelProps<MapTreeParams>) =>
           </span>
         </Tooltip>
       </Stack>
+      {question !== null && <DeleteConfirm text={question.text} onDelete={() => answerDelete(true)} onKeep={() => answerDelete(false)}/>}
       <Box
         ref={list}
         role={'tree'}
@@ -582,7 +668,14 @@ const MapTreePanel = (props: IDockviewPanelProps<MapTreeParams>) =>
           />
         ))}
       </Box>
-      <TreeMenu menu={menu} selection={selection} canPaste={clipboard !== null} controller={controller} onClose={() => setMenu(null)}/>
+      <TreeMenu
+        menu={menu}
+        selection={selection}
+        canPaste={clipboard !== null}
+        controller={controller}
+        onDelete={askDelete}
+        onClose={() => setMenu(null)}
+      />
     </Box>
   );
 };

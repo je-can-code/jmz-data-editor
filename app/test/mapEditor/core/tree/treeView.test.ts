@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TREE_ROOT } from '../../../../src/mapEditor/core/tree/MapTreeModel.ts';
 import {
+  deleteQuestion,
   draggedMaps,
   dropPlace,
   dropZoneAt,
@@ -17,7 +18,8 @@ import { buildTreeRows } from '../../support/treeFixtures.ts';
  * with closed branches folded away; Shift clicks select a run in the order shown and Ctrl clicks add or take out one;
  * a drag carries the whole selection when the dragged row is in it; and a drop lands in front of a row from its top
  * quarter, after it from its bottom quarter, and inside it from the middle. The drop's place is what the tree
- * service moves maps to, so it decides what gets written to MapInfos.json.
+ * service moves maps to, so it decides what gets written to MapInfos.json. Before a delete, the tree asks in place,
+ * counting every map the delete takes, branches included, since the tree's history ends with the window.
  *
  * The fixture tree: 1 World (2 Town (3 Inn), 5 Cave), 6 Test; only World is open in the file.
  */
@@ -176,6 +178,61 @@ describe('treeView', () =>
           { parentId: 1, beforeId: null },
           { parentId: TREE_ROOT, beforeId: null },
         ]);
+    });
+  });
+
+  describe('deleteQuestion', () =>
+  {
+    it('counts every map a branch takes with it', () =>
+    {
+      // Arrange: the town holds the inn.
+      const rows = buildTreeRows();
+
+      // Act.
+      const question = deleteQuestion(rows, [ 2 ]);
+
+      // Assert.
+      expect(question)
+        .toStrictEqual({ count: 2, text: 'Delete "Town" and 1 map inside? This removes 2 maps.' });
+    });
+
+    it('counts a map picked inside another picked map once', () =>
+    {
+      // Arrange: the inn is picked along with the town that holds it, and the cave beside them.
+      const rows = buildTreeRows();
+
+      // Act.
+      const question = deleteQuestion(rows, [ 3, 2, 5 ]);
+
+      // Assert.
+      expect(question)
+        .toStrictEqual({ count: 3, text: 'Delete 2 maps and 1 map inside? This removes 3 maps.' });
+    });
+
+    it('says one map for a map with nothing inside', () =>
+    {
+      // Arrange.
+      const rows = buildTreeRows();
+
+      // Act.
+      const question = deleteQuestion(rows, [ 6 ]);
+
+      // Assert.
+      expect(question)
+        .toStrictEqual({ count: 1, text: 'Delete "Test"? This removes 1 map.' });
+    });
+
+    it('asks nothing when nothing in the tree is picked', () =>
+    {
+      // Arrange: slot 4 is free.
+      const rows = buildTreeRows();
+
+      // Act.
+      const questions = [ deleteQuestion(rows, []), deleteQuestion(rows, [ 4 ]) ];
+
+      // Assert.
+      expect(questions)
+        .toStrictEqual([ null, null ]);
     });
   });
 });
