@@ -144,14 +144,11 @@ type MarksOpener = {
 };
 
 /**
- * Holds the marks document. A project that has never saved one is seeded from its maps first and the seed saved, so
- * the tiles its maps already layer by hand start out marked; after that the saved document is the only source, and a
- * tile unmarked by hand stays unmarked. A window already holding the document, or another window's copy, is used as
- * it is.
+ * Opens the marks document, seeding it first when the project has never saved one.
  * @param {MarksOpener} opener The window's server and documents.
  * @returns {Promise<EditorDocument>} The marks document.
  */
-const openTilesetMarks = async (opener: MarksOpener): Promise<EditorDocument> =>
+const seedAndOpen = async (opener: MarksOpener): Promise<EditorDocument> =>
 {
   const { api, hub } = opener;
   if (hub.has(TILESET_MARKS_DOCUMENT) || api === null)
@@ -167,6 +164,35 @@ const openTilesetMarks = async (opener: MarksOpener): Promise<EditorDocument> =>
   }
 
   return opener.openDocument(TILESET_MARKS_DOCUMENT);
+};
+
+/**
+ * The open under way in each window, by its hub, so the palette and the stack view opening the marks together read
+ * the project's maps once between them.
+ */
+const opening = new WeakMap<DocumentHub, Promise<EditorDocument>>();
+
+/**
+ * Holds the marks document. A project that has never saved one is seeded from its maps first and the seed saved, so
+ * the tiles its maps already layer by hand start out marked; after that the saved document is the only source, and a
+ * tile unmarked by hand stays unmarked. A window already holding the document, or another window's copy, is used as
+ * it is, and asking again while an open is under way waits for that one. Once an open settles it is forgotten, so an
+ * open that failed is tried afresh on the next ask, and one that worked answers at once from the document now held.
+ * @param {MarksOpener} opener The window's server and documents.
+ * @returns {Promise<EditorDocument>} The marks document.
+ */
+const openTilesetMarks = (opener: MarksOpener): Promise<EditorDocument> =>
+{
+  const { hub } = opener;
+  const underWay = opening.get(hub);
+  if (underWay !== undefined)
+  {
+    return underWay;
+  }
+
+  const open = seedAndOpen(opener).finally(() => opening.delete(hub));
+  opening.set(hub, open);
+  return open;
 };
 
 export { isMarkableTile, marksOf, openTilesetMarks, seedTilesetMarks, TILESET_MARKS_DOCUMENT, toggleTileMark };

@@ -287,6 +287,47 @@ describe('openTilesetMarks', () =>
       .toStrictEqual([ [], [], { tilesets: {} } ]);
   });
 
+  it('seeds once for two panels opening the marks together', async () =>
+  {
+    // Arrange.
+    const { api, calls } = standInServer(SEEDING_MAPS, null);
+    const { opener } = windowOn(api);
+
+    // Act.
+    const [ first, second ] = await Promise.all([ openTilesetMarks(opener), openTilesetMarks(opener) ]);
+
+    // Assert: every map read once, one save, one document.
+    expect([ calls.mapsRead.length, calls.saves.length, first === second ])
+      .toStrictEqual([ 3, 1, true ]);
+  });
+
+  it('tries afresh after an open that failed', async () =>
+  {
+    // Arrange: a server that fails the first read of the marks.
+    const { api, calls } = standInServer(SEEDING_MAPS, { schemaVersion: 1, data: { tilesets: {} } });
+    const { opener } = windowOn(api);
+    const read = api.loadEditorData.bind(api);
+    let failures = 1;
+    api.loadEditorData = async (key: string) =>
+    {
+      if (failures > 0)
+      {
+        failures -= 1;
+        throw new Error('the server is starting');
+      }
+
+      return read(key);
+    };
+
+    // Act.
+    const failed = await openTilesetMarks(opener).then(() => 'opened', (error: Error) => error.message);
+    const document = await openTilesetMarks(opener);
+
+    // Assert.
+    expect([ failed, marksOf(document), calls.marksRead ])
+      .toStrictEqual([ 'the server is starting', { tilesets: {} }, 2 ]);
+  });
+
   it('asks the server nothing when the window already holds the marks', async () =>
   {
     // Arrange.
