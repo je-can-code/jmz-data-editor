@@ -10,7 +10,8 @@ import { drawPalette, drawPaletteBase } from './paletteDrawing.ts';
 import { CHECKERBOARD } from './TileThumb.tsx';
 
 /**
- * The cell under the pointer, and where it sits on screen, for the painted patch shown beside it.
+ * The cell under the pointer, and where on screen a painted patch of it shows: beside the palette's right edge, level
+ * with the cell.
  */
 type PaletteHover = {
   readonly column: number;
@@ -162,10 +163,12 @@ const PaletteCanvas = (props: PaletteCanvasProps) =>
       return;
     }
 
+    // the patch shows past the palette's own right edge, however much wider than its cells the panel is.
+    const right = boxRef.current?.getBoundingClientRect().right ?? left + PALETTE_COLUMNS * size;
     setHover(cell === null ? null : { ...cell, onBadge });
     onHover(cell === null
       ? null
-      : { ...cell, id, onBadge, screen: { left: left + cell.column * size, top: top + cell.row * size, width: size, height: size } });
+      : { ...cell, id, onBadge, screen: { left: right, top: top + cell.row * size, width: 0, height: size } });
   };
 
   /**

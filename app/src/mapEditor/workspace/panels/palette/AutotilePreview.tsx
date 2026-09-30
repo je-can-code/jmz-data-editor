@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Paper, Popper, Typography } from '@mui/material';
 import { autotilePatch } from '../../../core/palette/autotilePatch.ts';
 import { describeTile } from '../../../core/palette/paletteLayout.ts';
@@ -32,10 +32,14 @@ const patchCaption = (tileId: number): string =>
 };
 
 /**
- * What the painted patch needs: which kind, where the hovered cell is on screen, and the pictures.
+ * What the painted patch needs: which kind, where on screen to show it beside, and the pictures.
  */
 type AutotilePreviewProps = {
   readonly tileId: number;
+
+  /**
+   * The screen rectangle the patch shows beside, to its right: the palette's right edge, level with the hovered cell.
+   */
   readonly anchor: { readonly left: number; readonly top: number; readonly width: number; readonly height: number };
   readonly sheets: readonly (TextureImage | null)[];
   readonly mode: number;
@@ -52,17 +56,16 @@ type AutotilePreviewProps = {
 const AutotilePreview = (props: AutotilePreviewProps) =>
 {
   const { tileId, anchor, sheets, mode } = props;
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const patch = useMemo(() => autotilePatch(tileId, mode), [ tileId, mode ]);
 
-  // an element Popper can place itself against: the hovered cell's place on screen.
+  // an element Popper can place itself against: beside the palette, level with the hovered cell.
   const anchorElement = useMemo(() => ({
     getBoundingClientRect: () => new DOMRect(anchor.left, anchor.top, anchor.width, anchor.height),
   }), [ anchor.left, anchor.top, anchor.width, anchor.height ]);
 
-  useEffect(() =>
+  // Popper mounts its content a moment after it opens, so the patch is drawn as the canvas arrives, not on mount.
+  const drawInto = useCallback((canvas: HTMLCanvasElement | null) =>
   {
-    const canvas = canvasRef.current;
     const context = canvas?.getContext('2d') ?? null;
     if (canvas === null || context === null)
     {
@@ -82,7 +85,7 @@ const AutotilePreview = (props: AutotilePreviewProps) =>
     <Popper open anchorEl={anchorElement} placement={'right-start'} sx={{ pointerEvents: 'none', zIndex: 1300 }} data-testid={'autotile-preview'}>
       <Paper elevation={8} sx={{ p: 1, ml: 1 }}>
         <canvas
-          ref={canvasRef}
+          ref={drawInto}
           style={{ display: 'block', width: patch.width * PATCH_CELL_SIZE, height: patch.height * PATCH_CELL_SIZE, background: CHECKERBOARD }}
         />
         <Typography variant={'caption'} color={'text.secondary'} sx={{ display: 'block', mt: 0.5 }}>

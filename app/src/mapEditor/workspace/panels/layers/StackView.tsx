@@ -78,15 +78,29 @@ const LayerRow = (props: {
 {
   const { layer, sheets, marks, pickedTile, onMove, onPut, onClear } = props;
   const faded = layer.passage === 'unread' && layer.tileId !== 0;
+  const name = describeTile(layer.tileId);
+  const fixes = [
+    { tip: 'Move up a layer', label: `Move layer ${layer.z + 1} up`, icon: ArrowUpward, disabled: layer.z === 3, act: () => onMove('up') },
+    { tip: 'Move down a layer', label: `Move layer ${layer.z + 1} down`, icon: ArrowDownward, disabled: layer.z === 0, act: () => onMove('down') },
+    {
+      tip: pickedTile === null ? 'Pick one tile on the palette to put it here' : `Put ${describeTile(pickedTile)} on this layer`,
+      label: `Put the picked tile on layer ${layer.z + 1}`,
+      icon: Brush,
+      disabled: pickedTile === null,
+      act: onPut,
+    },
+    { tip: 'Clear this layer', label: `Clear layer ${layer.z + 1}`, icon: Close, disabled: layer.tileId === 0, act: onClear },
+  ];
+
   return (
-    <Stack direction={'row'} spacing={1} alignItems={'center'} sx={{ px: 1, py: 0.5 }} data-testid={`stack-layer-${layer.z + 1}`}>
-      <Typography variant={'caption'} color={'text.secondary'} sx={{ width: 12, textAlign: 'right' }}>
+    <Stack direction={'row'} spacing={0.75} alignItems={'center'} sx={{ px: 1, py: 0.5 }} data-testid={`stack-layer-${layer.z + 1}`}>
+      <Typography variant={'caption'} color={'text.secondary'} sx={{ width: 10, textAlign: 'right', flex: 'none' }}>
         {layer.z + 1}
       </Typography>
       <TileThumb sheets={sheets} tileId={layer.tileId} size={THUMB_SIZE}/>
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Typography variant={'body2'} noWrap color={layer.tileId === 0 || faded ? 'text.secondary' : 'text.primary'}>
-          {describeTile(layer.tileId)}
+        <Typography variant={'body2'} noWrap title={name} color={layer.tileId === 0 || faded ? 'text.secondary' : 'text.primary'}>
+          {name}
         </Typography>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.25 }}>
           {layerChips(layer, marks).map(chip => (
@@ -101,34 +115,17 @@ const LayerRow = (props: {
           ))}
         </Box>
       </Box>
-      <Tooltip title={'Move up a layer'}>
-        <span>
-          <IconButton size={'small'} aria-label={`Move layer ${layer.z + 1} up`} disabled={layer.z === 3} onClick={() => onMove('up')}>
-            <ArrowUpward sx={{ fontSize: 16 }}/>
-          </IconButton>
-        </span>
-      </Tooltip>
-      <Tooltip title={'Move down a layer'}>
-        <span>
-          <IconButton size={'small'} aria-label={`Move layer ${layer.z + 1} down`} disabled={layer.z === 0} onClick={() => onMove('down')}>
-            <ArrowDownward sx={{ fontSize: 16 }}/>
-          </IconButton>
-        </span>
-      </Tooltip>
-      <Tooltip title={pickedTile === null ? 'Pick one tile on the palette to put it here' : `Put ${describeTile(pickedTile)} on this layer`}>
-        <span>
-          <IconButton size={'small'} aria-label={`Put the picked tile on layer ${layer.z + 1}`} disabled={pickedTile === null} onClick={onPut}>
-            <Brush sx={{ fontSize: 16 }}/>
-          </IconButton>
-        </span>
-      </Tooltip>
-      <Tooltip title={'Clear this layer'}>
-        <span>
-          <IconButton size={'small'} aria-label={`Clear layer ${layer.z + 1}`} disabled={layer.tileId === 0} onClick={onClear}>
-            <Close sx={{ fontSize: 16 }}/>
-          </IconButton>
-        </span>
-      </Tooltip>
+      <Box sx={{ display: 'flex', flex: 'none' }}>
+        {fixes.map(({ tip, label, icon: Icon, disabled, act }) => (
+          <Tooltip key={label} title={tip}>
+            <span>
+              <IconButton size={'small'} aria-label={label} disabled={disabled} onClick={act} sx={{ p: 0.25 }}>
+                <Icon sx={{ fontSize: 15 }}/>
+              </IconButton>
+            </span>
+          </Tooltip>
+        ))}
+      </Box>
     </Stack>
   );
 };
