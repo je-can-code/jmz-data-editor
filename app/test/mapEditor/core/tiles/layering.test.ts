@@ -130,6 +130,23 @@ describe('automatic layering: the ground', () =>
       .toEqual([ [ 'k18', 'k20', TREE, SIGN ], [ SOLID_ROCK, 'k20', TREE, SIGN ] ]);
   });
 
+  it('clears the ground\'s companion on layer 2 on a Field tileset, but keeps a marked tile there', () =>
+  {
+    // Arrange: on a Field tileset, the first base column under its paired second column, ocean under deep sea, and
+    // grass under the marked cliff corner.
+    const paired = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, kindTile(GRASS_PAIRED));
+    const deep = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(OCEAN)), 0, 0, 1, kindTile(DEEP_SEA));
+    const marked = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, CLIFF_CORNER);
+    const field = layeringWith([ CLIFF_CORNER ], [], TilesetMode.field);
+
+    // Act: dirt painted over each.
+    const afters = [ paired, deep, marked ].map(grid => paintOne(grid, 0, 0, kindTile(DIRT), field));
+
+    // Assert: MZ's Field behaviour for the companions; the marked tile stays.
+    expect(afters.map(after => stackOf(after, 0, 0)))
+      .toEqual([ [ 'k18', 0, 0, 0 ], [ 'k18', 0, 0, 0 ], [ 'k18', CLIFF_CORNER, 0, 0 ] ]);
+  });
+
   it('lays a wall top on layer 1 too, replacing the ground', () =>
   {
     // Arrange: grass.

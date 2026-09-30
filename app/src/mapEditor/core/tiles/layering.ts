@@ -1,4 +1,5 @@
 import { reshapeAround, type CellPosition } from './autotileRefresh.ts';
+import { TilesetMode } from './autotileShapes.ts';
 import { isInside, TILE_LAYERS, TileDraft, type CellChange, type TileGrid, type TileLayerIndex, type TileReader } from './tileGrid.ts';
 import { autotileKind, makeAutotileId } from './tileIds.ts';
 import { isMarkedTile, type TilesetMarks } from './tilesetMarks.ts';
@@ -217,14 +218,35 @@ const planClearUpper = (reader: TileReader, x: number, y: number, layering: Tile
 };
 
 /**
- * Plans the ground: layer 1, leaving what is above it as it is, so repainting the ground under an overlay or a tree
- * keeps them, unlike MZ, which wipes every layer above.
+ * Whether painting the ground also clears the decoration on layer 2 above it, by tileset mode. This is the one place
+ * that choice lives, until the owner decides it: an Area tileset keeps the decoration, as D5 says, so repainting the
+ * ground under tall grass keeps the grass; a Field (world-map) tileset clears it, as MZ does, because there layer 2
+ * holds the ground's own companions, a paired base column or deep sea, which belong to the ground being replaced.
+ * @param {number} mode The tileset's mode.
+ * @returns {boolean} True when painting the ground clears the decoration on layer 2.
+ */
+const groundClearsDecoration = (mode: number): boolean =>
+{
+  return mode === TilesetMode.field;
+};
+
+/**
+ * Plans the ground: layer 1, leaving layers 3 and 4 as they are, unlike MZ, which wipes every layer above. Layer 2
+ * keeps its decoration or loses it by {@link groundClearsDecoration}; a tile laid over the ground there always stays.
+ * @param {TileReader} reader The map.
+ * @param {number} x The column.
+ * @param {number} y The row.
  * @param {number} tileId The ground tile.
+ * @param {TilesetLayering} layering The tileset's mode and marks.
  * @returns {PlacementPlan} The plan.
  */
-const planGround = (tileId: number): PlacementPlan =>
+const planGround = (reader: TileReader, x: number, y: number, tileId: number, layering: TilesetLayering): PlacementPlan =>
 {
-  return { landing: 0, writes: [ [ 0, unshapedTile(tileId) ] ] };
+  const decoration = reader.tileAt(x, y, 1);
+  const clears = decoration !== 0 && groundClearsDecoration(layering.mode) && isLaidOver(decoration, 1, layering) === false;
+  return clears
+    ? { landing: 0, writes: [ [ 0, unshapedTile(tileId) ], [ 1, 0 ] ] }
+    : { landing: 0, writes: [ [ 0, unshapedTile(tileId) ] ] };
 };
 
 /**
@@ -266,7 +288,7 @@ const planPlacement = (reader: TileReader, x: number, y: number, tileId: number,
   }
 
   return role === 'ground'
-    ? planGround(tileId)
+    ? planGround(reader, x, y, tileId, layering)
     : planDecoration(reader, x, y, tileId, layering);
 };
 
