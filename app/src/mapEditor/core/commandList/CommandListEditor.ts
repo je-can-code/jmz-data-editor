@@ -26,6 +26,7 @@ import {
   commandsOfNodes,
   duplicateNodes,
   insertAt,
+  landingIndex,
   moveNodes,
   outermostNodes,
   removeNodes,
@@ -45,9 +46,19 @@ type CommandListTarget = {
 };
 
 /**
- * What a paste did: the step it recorded, or why nothing was pasted.
+ * What an operation did: the step it recorded (null when it changed nothing), and the index its commands now start
+ * at, so the list can select and focus what the operation put there.
  */
-type PasteResult = { readonly ok: true; readonly step: HistoryStep | null; readonly index: number } | Extract<ClipboardRead, { ok: false }>;
+type ListOutcome = {
+  readonly step: HistoryStep | null;
+  readonly index: number;
+};
+
+/**
+ * What a paste did: the step it recorded and where the pasted units start, how many there are, or why nothing
+ * was pasted.
+ */
+type PasteResult = (ListOutcome & { readonly ok: true; readonly count: number }) | Extract<ClipboardRead, { ok: false }>;
 
 /**
  * Says how many commands something covers.
@@ -170,9 +181,9 @@ class CommandListEditor
    * Adds a fresh command where a place is, as the search inserts one.
    * @param {CommandCatalogEntry} entry The command's entry.
    * @param {InsertionPoint} point The place, in the current tree.
-   * @returns {{ step: HistoryStep | null, index: number }} The step, and where the new command now sits.
+   * @returns {ListOutcome} The step, and where the new command now sits.
    */
-  insertNew(entry: CommandCatalogEntry, point: InsertionPoint): { step: HistoryStep | null; index: number }
+  insertNew(entry: CommandCatalogEntry, point: InsertionPoint): ListOutcome
   {
     const index = insertionIndex(point);
     const step = this.#commit(`Add ${entry.name}`, insertAt(this.commands(), point, createCommandUnit(entry, this.structure)));
@@ -182,35 +193,58 @@ class CommandListEditor
   /**
    * Deletes some units.
    * @param {readonly CommandNode[]} nodes The units.
-   * @returns {HistoryStep | null} The step, or null when there was nothing to delete.
+   * @returns {ListOutcome} The step, or null when there was nothing to delete, and where the first unit was.
    */
-  remove(nodes: readonly CommandNode[]): HistoryStep | null
+  remove(nodes: readonly CommandNode[]): ListOutcome
   {
     const outer = outermostNodes(nodes);
-    return this.#commit(`Delete ${countPhrase(outer.length)}`, removeNodes(this.commands(), outer));
+    const index = outer[0]?.start ?? 0;
+    return { step: this.#commit(`Delete ${countPhrase(outer.length)}`, removeNodes(this.commands(), outer)), index };
   }
 
   /**
    * Moves some units to a place, as a drop does.
    * @param {readonly CommandNode[]} nodes The units.
    * @param {InsertionPoint} point The place, in the current tree; never inside one of the units.
-   * @returns {HistoryStep | null} The step, or null when the units were already there.
+   * @returns {ListOutcome} The step, or null when the units were already there, and where they landed.
    */
-  move(nodes: readonly CommandNode[], point: InsertionPoint): HistoryStep | null
+  move(nodes: readonly CommandNode[], point: InsertionPoint): ListOutcome
   {
     const outer = outermostNodes(nodes);
-    return this.#commit(`Move ${countPhrase(outer.length)}`, moveNodes(this.commands(), outer, point));
+    const index = landingIndex(outer, point);
+    return { step: this.#commit(`Move ${countPhrase(outer.length)}`, moveNodes(this.commands(), outer, point)), index };
   }
 
   /**
    * Copies some units right after the last of them.
    * @param {readonly CommandNode[]} nodes The units.
-   * @returns {HistoryStep | null} The step, or null when there was nothing to copy.
+   * @returns {ListOutcome} The step, or null when there was nothing to copy, and where the copies start.
    */
-  duplicate(nodes: readonly CommandNode[]): HistoryStep | null
+  duplicate(nodes: readonly CommandNode[]): ListOutcome
   {
     const outer = outermostNodes(nodes);
-    return this.#commit(`Duplicate ${countPhrase(outer.length)}`, duplicateNodes(this.commands(), outer));
+    const index = outer[outer.length - 1]?.end ?? 0;
+    return { step: this.#commit(`Duplicate ${countPhrase(outer.length)}`, duplicateNodes(this.commands(), outer)), index };
+  }
+
+  /**
+   * Finds units that follow one another in one body, from the one starting at an index: where a paste, a move or
+   * a duplicate put its units, so the selection can follow them.
+   * @param {number} start The first unit's first command.
+   * @param {number} count How many units.
+   * @returns {CommandNode[]} The units found, fewer when the body ends first; none when no unit starts there.
+   */
+  unitsFrom(start: number, count: number): CommandNode[]
+  {
+    const first = this.nodeAt(start);
+    if (first === null)
+    {
+      return [];
+    }
+
+    const siblings = first.parent.nodes;
+    const position = siblings.indexOf(first);
+    return siblings.slice(position, position + count);
   }
 
   /**
@@ -240,7 +274,7 @@ class CommandListEditor
     const count = readCommandTree([ ...read.commands, { code: 0, indent: 0, parameters: [] } ], this.structure).root.nodes.length;
     const index = insertionIndex(point);
     const step = this.#commit(`Paste ${countPhrase(count)}`, insertAt(this.commands(), point, read.commands));
-    return { ok: true, step, index };
+    return { ok: true, step, index, count };
   }
 
   /**
@@ -312,4 +346,4 @@ class CommandListEditor
 }
 
 export { CommandListEditor };
-export type { CommandListTarget, PasteResult };
+export type { CommandListTarget, ListOutcome, PasteResult };

@@ -101,6 +101,21 @@ const removeNodes = (list: readonly RmmzEventCommand[], nodes: readonly CommandN
 };
 
 /**
+ * Finds where moved units land: the place's index, pulled up by every moved command that sat above it.
+ * @param {readonly CommandNode[]} nodes The units moved.
+ * @param {InsertionPoint} point The place, as the list stands before the move.
+ * @returns {number} The index the first moved command lands at.
+ */
+const landingIndex = (nodes: readonly CommandNode[], point: InsertionPoint): number =>
+{
+  const index = insertionIndex(point);
+  const removedAbove = outermostNodes(nodes)
+    .filter(node => node.end <= index)
+    .reduce((sum, node) => sum + node.end - node.start, 0);
+  return index - removedAbove;
+};
+
+/**
  * Moves some units to a place, as a drag drops them, re-indented to fit it. The place must not lie inside any of
  * the units moved.
  * @param {readonly RmmzEventCommand[]} list The list.
@@ -117,13 +132,9 @@ const moveNodes = (list: readonly RmmzEventCommand[], nodes: readonly CommandNod
     throw new Error('cannot move commands into themselves');
   }
 
-  // everything removed above the place pulls it up by as many commands.
-  const removedAbove = outer
-    .filter(node => node.end <= index)
-    .reduce((sum, node) => sum + node.end - node.start, 0);
   const moving = reindent(toRelativeIndent(commandsOfNodes(list, outer)), point.body.indent);
   const remaining = removeNodes(list, outer);
-  const at = index - removedAbove;
+  const at = landingIndex(outer, point);
   return [ ...remaining.slice(0, at), ...moving, ...remaining.slice(at) ];
 };
 
@@ -205,6 +216,7 @@ export {
   commandsOfNodes,
   duplicateNodes,
   insertAt,
+  landingIndex,
   moveNodes,
   outermostNodes,
   reindent,

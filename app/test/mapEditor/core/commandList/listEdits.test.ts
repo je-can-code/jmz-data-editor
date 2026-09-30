@@ -5,6 +5,7 @@ import {
   commandsOfNodes,
   duplicateNodes,
   insertAt,
+  landingIndex,
   moveNodes,
   outermostNodes,
   reindent,
@@ -194,6 +195,25 @@ describe('listEdits', () =>
       // Assert.
       expect(move)
         .toThrow('cannot move commands into themselves');
+    });
+  });
+
+  describe('landingIndex', () =>
+  {
+    it('pulls the place up by the moved commands above it, and not by those below', () =>
+    {
+      // Arrange: Show Text (three commands, above) and the choices (below) both moved into the branch's body.
+      const list = buildMixedList();
+      const tree = readCommandTree(list, MZ_STRUCTURE);
+      const [ text, branch, choices ] = tree.root.nodes;
+      const point = { body: (branch as CommandBlockNode).segments[0].body!, position: 1 };
+
+      // Act.
+      const landings = [ landingIndex([ text ], point), landingIndex([ choices ], point), landingIndex([ choices, text ], point) ];
+
+      // Assert: the place is index 5, the branch body's end.
+      expect(landings)
+        .toStrictEqual([ 2, 5, 2 ]);
     });
   });
 

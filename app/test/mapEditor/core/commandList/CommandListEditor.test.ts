@@ -173,23 +173,23 @@ describe('CommandListEditor', () =>
 
   describe('remove, move and duplicate', () =>
   {
-    it('deletes units as one step that undo takes back exactly', () =>
+    it('deletes units as one step that undo takes back exactly, saying where the first one was', () =>
     {
       // Arrange.
       const { hub, editor } = build();
-      const nodes = [ editor.nodeAt(0)!, editor.nodeAt(13)! ];
+      const nodes = [ editor.nodeAt(13)!, editor.nodeAt(3)! ];
 
       // Act.
-      const step = editor.remove(nodes);
+      const { step, index } = editor.remove(nodes);
       const afterDelete = describeList(editor.commands());
       hub.undo(eventHistoryKey(1, 1));
 
       // Assert.
-      expect([ step?.label, afterDelete.length, editor.commands() ])
-        .toStrictEqual([ 'Delete 2 commands', 23 - 3 - 9, buildMixedList() ]);
+      expect([ step?.label, index, afterDelete, editor.commands() ])
+        .toStrictEqual([ 'Delete 2 commands', 3, [ '101@0', '401@0', '401@0', '0@0' ], buildMixedList() ]);
     });
 
-    it('moves a unit as one step, and records nothing when it lands where it was', () =>
+    it('moves a unit as one step, says where it landed, and records nothing when it lands where it was', () =>
     {
       // Arrange.
       const { hub, editor } = build();
@@ -199,22 +199,51 @@ describe('CommandListEditor', () =>
       const nowhere = editor.move([ text ], { body: editor.tree().root, position: 1 });
       const moved = editor.move([ text ], { body: editor.tree().root, position: 3 });
 
-      // Assert.
-      expect([ nowhere, moved?.label, describeList(editor.commands()).slice(-4), historyLabels(hub) ])
-        .toStrictEqual([ null, 'Move command', [ '101@0', '401@0', '401@0', '0@0' ], [ 'Move command' ] ]);
+      // Assert: Show Text's three commands now sit just before the list's end.
+      expect([ nowhere.step, moved.step?.label, moved.index, describeList(editor.commands()).slice(-4), historyLabels(hub) ])
+        .toStrictEqual([ null, 'Move command', 19, [ '101@0', '401@0', '401@0', '0@0' ], [ 'Move command' ] ]);
     });
 
-    it('duplicates units right after the last of them', () =>
+    it('duplicates units right after the last of them, saying where the copies start', () =>
     {
       // Arrange.
       const { editor } = build();
 
       // Act.
-      const step = editor.duplicate([ editor.nodeAt(0)! ]);
+      const { step, index } = editor.duplicate([ editor.nodeAt(0)! ]);
 
       // Assert.
-      expect([ step?.label, describeList(editor.commands().slice(0, 7)) ])
-        .toStrictEqual([ 'Duplicate command', [ '101@0', '401@0', '401@0', '101@0', '401@0', '401@0', '111@0' ] ]);
+      expect([ step?.label, index, describeList(editor.commands().slice(0, 7)) ])
+        .toStrictEqual([ 'Duplicate command', 3, [ '101@0', '401@0', '401@0', '101@0', '401@0', '401@0', '111@0' ] ]);
+    });
+
+    it('reports nothing done when there is nothing to delete or duplicate', () =>
+    {
+      // Arrange.
+      const { hub, editor } = build();
+
+      // Act.
+      const outcomes = [ editor.remove([]), editor.duplicate([]) ];
+
+      // Assert.
+      expect([ outcomes, historyLabels(hub) ])
+        .toStrictEqual([ [ { step: null, index: 0 }, { step: null, index: 0 } ], [] ]);
+    });
+  });
+
+  describe('unitsFrom', () =>
+  {
+    it('finds units following one another in a body, fewer when the body ends, none off a unit\'s start', () =>
+    {
+      // Arrange.
+      const { editor } = build();
+
+      // Act.
+      const found = [ editor.unitsFrom(0, 2), editor.unitsFrom(13, 5), editor.unitsFrom(1, 1) ].map(nodes => nodes.map(node => node.start));
+
+      // Assert.
+      expect(found)
+        .toStrictEqual([ [ 0, 3 ], [ 13 ], [] ]);
     });
   });
 
@@ -231,8 +260,8 @@ describe('CommandListEditor', () =>
       const pasted = editor.paste({ body: branch.segments[0].body!, position: 0 }, text);
 
       // Assert.
-      expect([ pasted.ok && pasted.step?.label, pasted.ok && pasted.index, describeList(editor.commands().slice(3, 8)), historyLabels(hub) ])
-        .toStrictEqual([ 'Paste command', 4, [ '111@0', '101@1', '401@1', '401@1', '250@1' ], [ 'Paste command' ] ]);
+      expect([ pasted.ok && pasted.step?.label, pasted.ok && pasted.index, pasted.ok && pasted.count, describeList(editor.commands().slice(3, 8)), historyLabels(hub) ])
+        .toStrictEqual([ 'Paste command', 4, 1, [ '111@0', '101@1', '401@1', '401@1', '250@1' ], [ 'Paste command' ] ]);
     });
 
     it('names a paste by the units it holds, not its lines', () =>
