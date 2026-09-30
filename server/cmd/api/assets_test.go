@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 )
@@ -175,9 +177,76 @@ func TestAssetRoutesRefuseALinkOutOfTheirFolder(t *testing.T) {
 	assertRefused(t, response, http.StatusInternalServerError)
 }
 
+// TestListImagesListsWhatTheImageRouteServes covers the face picker's list: every plain .png in the
+// folder, by the name the image route takes, sorted; never a file of another kind, a folder, or a
+// link, since the image route would refuse to serve any of them.
+func TestListImagesListsWhatTheImageRouteServes(t *testing.T) {
+	// Arrange- beside the fixture's face, another face, a note, a folder and a link.
+	current := newProject(t)
+	faces := filepath.Join(current.root, "img", "faces")
+	for _, name := range []string{"Actor2.png", "notes.txt"} {
+		if err := os.WriteFile(filepath.Join(faces, name), []byte("\x89PNG"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(faces, "folder.png"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Symlink(filepath.Join(current.root, "secret.txt"), filepath.Join(faces, "Escape.png")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Act.
+	response := current.call(t, http.MethodGet, "/api/img/faces", "")
+
+	// Assert.
+	assertStatus(t, response, http.StatusOK)
+	var names []string
+	if err := json.Unmarshal(readEnvelope(t, response).Data, &names); err != nil {
+		t.Fatal(err)
+	}
+	if expected := []string{"!$Door (open)", "Actor2"}; reflect.DeepEqual(names, expected) == false {
+		t.Errorf("listed %q, expected %q", names, expected)
+	}
+}
+
+// TestListImagesListsNothingForAMissingFolder covers an image folder the project has not made yet.
+func TestListImagesListsNothingForAMissingFolder(t *testing.T) {
+	// Arrange.
+	current := newProject(t)
+
+	// Act.
+	response := current.call(t, http.MethodGet, "/api/img/pictures", "")
+
+	// Assert: an empty list, which the envelope leaves out.
+	assertStatus(t, response, http.StatusOK)
+	if listed := readEnvelope(t, response); listed.Error != "" || len(listed.Data) != 0 {
+		t.Errorf("listed %s with error %q", listed.Data, listed.Error)
+	}
+}
+
+// TestListImagesRefusesAFolderOffTheList covers a folder MZ never loads images from, and one that
+// tries to climb out.
+func TestListImagesRefusesAFolderOffTheList(t *testing.T) {
+	for _, target := range []string{"/api/img/hud", "/api/img/%2E%2E"} {
+		t.Run(target, func(t *testing.T) {
+			// Arrange.
+			current := newProject(t)
+
+			// Act.
+			response := current.call(t, http.MethodGet, target, "")
+
+			// Assert.
+			assertRefused(t, response, http.StatusBadRequest)
+		})
+	}
+}
+
 // TestAssetRoutesNeedAProjectRoot covers a server started without one.
 func TestAssetRoutesNeedAProjectRoot(t *testing.T) {
-	targets := []string{"/api/img/characters/Actor1", "/api/audio/se/Cursor", "/api/plugin-source/Hello"}
+	targets := []string{"/api/img/characters/Actor1", "/api/img/faces", "/api/audio/se/Cursor", "/api/plugin-source/Hello"}
 
 	for _, target := range targets {
 		t.Run(target, func(t *testing.T) {

@@ -42,6 +42,58 @@ func LoadImage(responseWriter http.ResponseWriter, httpRequest *http.Request) {
 	serveAsset(responseWriter, httpRequest, "img", imageFolders, ".png", "image/png")
 }
 
+// ListImages serves GET /api/img/{folder}: the names of the images in img/{folder}, without .png and
+// sorted, for pickers such as the face picker. It lists only what LoadImage would serve: plain .png
+// files whose names are safe, never a folder or a link. A folder the project does not have lists
+// nothing, since a young project may not have made it yet. An empty list leaves "data" out of the
+// envelope, as every empty answer does.
+func ListImages(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+	var req RestRequest
+	if req.ToRestRequest(responseWriter, httpRequest) != nil {
+		return
+	}
+
+	folder := httpRequest.PathValue("folder")
+	if imageFolders[folder] == false {
+		http.Error(responseWriter, "folder must be one of: "+strings.Join(sortedKeys(imageFolders), ", "), http.StatusBadRequest)
+		return
+	}
+
+	names, err := listAssetNames(filepath.Join(req.ProjectPath, "img", folder), ".png")
+	statusCode := http.StatusOK
+	errMsg := ""
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		errMsg = err.Error()
+	}
+
+	var res RestResponse[[]string]
+	res.ToRestResponse(responseWriter, req.ProjectPath, errMsg, names, statusCode)
+}
+
+// listAssetNames lists the plain files in a folder with an extension, by name without it, sorted. A
+// missing folder lists nothing.
+func listAssetNames(folder string, extension string) ([]string, error) {
+	entries, err := os.ReadDir(folder)
+	if errors.Is(err, fs.ErrNotExist) {
+		return []string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	names := []string{}
+	for _, entry := range entries {
+		name, isAsset := strings.CutSuffix(entry.Name(), extension)
+		if isAsset && entry.Type().IsRegular() && IsSafeName(name) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+
+	return names, nil
+}
+
 // LoadAudio serves GET /api/audio/{folder}/{name}: audio/{folder}/{name}.ogg, where the folder is one
 // of bgm, bgs, me and se.
 func LoadAudio(responseWriter http.ResponseWriter, httpRequest *http.Request) {

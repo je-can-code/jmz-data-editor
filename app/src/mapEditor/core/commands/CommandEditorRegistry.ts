@@ -3,6 +3,24 @@ import type { RmmzEventCommand } from '../model/rmmzTypes.ts';
 import type { CommandCatalogEntry } from './catalogTypes.ts';
 
 /**
+ * A whole block, handed to an editor that changes the block's structure rather than one command: Show Choices
+ * adds, removes and renames branches, and Conditional Branch adds or removes its Else. {@code blockSpanAt}
+ * finds the span: a conditional branch through its end, and a Show Choices list from the first of the
+ * consecutive commands HIME_LargeChoices merges through the last one's end, wherever in it the row sits.
+ */
+type CommandBlockEdit = {
+  /**
+   * Every command of the block, from its first line through its end line.
+   */
+  readonly commands: readonly RmmzEventCommand[];
+
+  /**
+   * Replaces the whole block, as one change.
+   */
+  readonly onChange: (commands: readonly RmmzEventCommand[]) => void;
+};
+
+/**
  * What a command editor is handed: the command (with the lines continuing it), its entry, and a way to replace
  * them. It changes nothing itself; the list turns a change into a patch, so every edit lands in history.
  */
@@ -11,6 +29,11 @@ type CommandEditorProps = {
   readonly command: RmmzEventCommand;
   readonly continuation: readonly RmmzEventCommand[];
   readonly onChange: (command: RmmzEventCommand, continuation: readonly RmmzEventCommand[]) => void;
+
+  /**
+   * The whole block, for the editors that change a block's structure; absent for every other command.
+   */
+  readonly block?: CommandBlockEdit;
 };
 
 /**
@@ -74,4 +97,4 @@ class CommandEditorRegistry<TEditor = CommandEditor>
 }
 
 export { CommandEditorRegistry };
-export type { CommandEditor, CommandEditorProps };
+export type { CommandBlockEdit, CommandEditor, CommandEditorProps };
