@@ -29,9 +29,12 @@ import { MemoryChannelNetwork } from '../../support/standIns.ts';
  *
  * The file-change stream echoes every save; a save by any session window is ignored everywhere, and records nothing,
  * while a change from outside the session becomes one "Externally modified" step. The ids differ by one character in
- * the near miss. Every window hears an outside change for itself, in whatever order, and they must still end on the
- * one same step with the same lineage, never flagging each other over it; undo and redo of it travel like any step's.
- * A window holding unsaved edits is flagged instead, in every window, with nothing recorded.
+ * the near miss. Only the window reading the stream reads a changed file, once, and hands that version to the others,
+ * so every window ends on the one same step with the same lineage, even when a second write lands before another
+ * window could have read the first, which then becomes a later step everywhere; nobody is flagged over it, and undo
+ * and redo of it travel like any step's. Windows holding unsaved edits are flagged instead, with nothing recorded. A
+ * save naming a step this window has never seen is not taken, since it would mark the copy saved against a file that
+ * holds something else.
  */
 describe('SyncPeer', () =>
 {
