@@ -36,11 +36,11 @@ const fromHubFailure = (failure: HistoryFailure, direction: Direction): HistoryO
       return { ok: false, nothing: false, message: `"${failure.step.label}" also changed ${names}; open it to have it ${verb}.`, stuckStepId: null };
     }
     case 'conflict':
+    case 'moved':
+    case 'untracked':
     {
-      const why = failure.blockedBy === null
-        ? failure.message
-        : `"${failure.blockedBy.label}" changed the same things since`;
-      return { ok: false, nothing: false, message: `"${failure.step.label}" cannot be ${verb}: ${why}.`, stuckStepId: failure.step.id };
+      // the hub words each kind of blocked move itself, naming the edit in the way when it knows it.
+      return { ok: false, nothing: false, message: `"${failure.step.label}" cannot be ${verb}: ${failure.message}.`, stuckStepId: failure.step.id };
     }
   }
 };

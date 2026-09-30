@@ -129,7 +129,7 @@ describe('HistoryRouter', () =>
       .toStrictEqual({
         ok: false,
         nothing: false,
-        message: '"Rename map" cannot be undone: "Rename from the event" changed the same things since.',
+        message: '"Rename map" cannot be undone: "Rename from the event" later changed what "Rename map" changed.',
         stuckStepId: stuck?.id,
       });
   });
@@ -167,7 +167,7 @@ describe('HistoryRouter', () =>
 
     // Assert: the first step redid; the second could not.
     expect([ outcome.ok === false && outcome.message, hub.map('map:1').property('note') ])
-      .toStrictEqual([ '"Second" cannot be redone: "Elsewhere" changed the same things since.', 'one' ]);
+      .toStrictEqual([ '"Second" cannot be redone: "Elsewhere" changed what "Second" changes.', 'one' ]);
   });
 
   it('forgets a stuck step on request', async () =>

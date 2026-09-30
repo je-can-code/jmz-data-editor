@@ -121,6 +121,8 @@ const describeFailure = (failure: HistoryFailure, direction: 'backward' | 'forwa
     case 'missing-documents':
       return `"${failure.step.label}" needs ${failure.documents.join(', ')} open to ${verb}.`;
     case 'conflict':
+    case 'moved':
+    case 'untracked':
       return failure.blockedBy === null
         ? `"${failure.step.label}" cannot ${verb}: ${failure.message}.`
         : `"${failure.step.label}" cannot ${verb}: "${failure.blockedBy.label}" changed the same maps since.`;
