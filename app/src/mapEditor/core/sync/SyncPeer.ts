@@ -62,12 +62,13 @@ type SyncPeerOptions = {
  * such operation posted by another window is repeated here through {@link DocumentHub.applyRemote}. Operations
  * carry the versions they were made against, so a window can tell when its copy has drifted.
  *
- * Drift resolves to one copy, deterministically: the live window with the lowest client id holding the document
- * is its authority. A drifted window that is not the authority fetches the authority's copy, histories
- * included; a drifted authority pushes its copy to the window it drifted from. Two windows that edit in the same
- * instant each see the other's operation as stale, and both end on the authority's copy rather than swapping
- * states and staying apart. One of those two edits is lost, which a single author working one window at a time
- * never meets in practice.
+ * Drift resolves to one copy, deterministically, between the window that noticed it and the window whose
+ * operation exposed it: the copy that has seen more operations wins, and on a tie the lower client id does. The
+ * winner's copy moves to the other window with its histories, pushed or fetched. So a window that loaded a stale
+ * file while another held unsaved edits takes the edits rather than overwriting them, and two windows that edit in
+ * the same instant (each seeing the other's operation as stale) both end on one copy rather than swapping states
+ * and staying apart. One of those two edits is lost, which a single author working one window at a time never
+ * meets in practice.
  *
  * It also answers the two questions the rest of the editor asks of other windows: whether a client id belongs
  * to the session (so the echo of its saves on the file-change stream can be ignored), and whether a document is
@@ -250,7 +251,7 @@ class SyncPeer
         break;
       case 'out-of-sync':
         // the refetch settles on its own; nothing here waits for it.
-        event.documents.forEach(key => this.#resync(key, event.origin));
+        event.documents.forEach(key => this.#resync(key, event.origin, event.originVersions[key] ?? 0));
         break;
       default:
         break;
@@ -271,36 +272,39 @@ class SyncPeer
   }
 
   /**
-   * Names the authority for a document: the lowest client id among this window and the live windows holding it.
-   * @param {DocumentKey} key The document.
-   * @returns {string} The authority's client id.
+   * Decides which of two copies of a document wins: the one that has seen more operations, and on a tie the one
+   * held by the lower client id.
+   * @param {number} ownVersion This window's version of the document.
+   * @param {string} otherClient The other window.
+   * @param {number} otherVersion The other window's version of the document.
+   * @returns {boolean} True when this window's copy wins.
    */
-  authorityFor(key: DocumentKey): string
+  #outranks(ownVersion: number, otherClient: string, otherVersion: number): boolean
   {
-    const cutoff = this.#now() - this.#livenessMs;
-    const holders = [ ...this.#peers.entries() ]
-      .filter(([ , peer ]) => peer.lastSeen >= cutoff && peer.holding.has(key))
-      .map(([ clientId ]) => clientId);
+    if (ownVersion !== otherVersion)
+    {
+      return ownVersion > otherVersion;
+    }
 
-    return [ this.clientId, ...holders ].sort()[0];
+    return this.clientId < otherClient;
   }
 
   /**
-   * Brings a drifted document back to the authority's copy: pushed to the window it drifted from when this
-   * window is the authority, fetched from the authority otherwise.
+   * Brings a drifted document back to one copy: this window's, pushed to the window whose operation exposed the
+   * drift, when this copy wins; that window's, fetched, when it does.
    * @param {DocumentKey} key The document.
    * @param {string} origin The window whose operation exposed the drift.
+   * @param {number} originVersion The version of that window's copy.
    */
-  async #resync(key: DocumentKey, origin: string): Promise<void>
+  async #resync(key: DocumentKey, origin: string, originVersion: number): Promise<void>
   {
-    const authority = this.authorityFor(key);
-    if (authority === this.clientId)
+    if (this.#outranks(this.#hub.version(key), origin, originVersion))
     {
       this.#post({ type: 'snapshot', from: this.clientId, to: origin, requestId: null, snapshot: this.#hub.snapshot(key) });
       return;
     }
 
-    const snapshot = await this.requestSnapshot(key, authority);
+    const snapshot = await this.requestSnapshot(key, origin);
     if (snapshot !== null && this.#running)
     {
       this.#adopt(snapshot);
@@ -392,7 +396,8 @@ class SyncPeer
 
   /**
    * Settles the request a snapshot answers, ignoring later answers to the same request. A pushed snapshot is
-   * adopted only from a window that outranks this one as authority, for a document this window holds.
+   * adopted only for a document this window holds, and only when its copy wins by the same rule that made the
+   * other window push it, so a stale or stray push never overwrites a fresher copy.
    * @param {Extract<SyncMessage, { type: 'snapshot' }>} message The answer.
    */
   #receiveSnapshot(message: Extract<SyncMessage, { type: 'snapshot' }>): void
@@ -404,7 +409,8 @@ class SyncPeer
 
     if (message.requestId === null)
     {
-      if (message.from < this.clientId && this.#hub.has(message.snapshot.document))
+      const key = message.snapshot.document;
+      if (this.#hub.has(key) && this.#outranks(this.#hub.version(key), message.from, message.snapshot.version) === false)
       {
         this.#adopt(message.snapshot);
       }

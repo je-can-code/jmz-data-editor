@@ -853,9 +853,9 @@ describe('DocumentHub', () =>
       // Act.
       target.applyRemote({ type: 'commit', origin: 'window-a', step: structuredClone(step)!, bases: { [MAP_A]: 5 } });
 
-      // Assert.
+      // Assert: the other window's copy now stands one past the version its step was made against.
       expect([ fileOf(target, MAP_A).displayName, events ])
-        .toStrictEqual([ 'Test Town', [ { type: 'out-of-sync', documents: [ MAP_A ], origin: 'window-a' } ] ]);
+        .toStrictEqual([ 'Test Town', [ { type: 'out-of-sync', documents: [ MAP_A ], origin: 'window-a', originVersions: { [MAP_A]: 6 } } ] ]);
     });
 
     it('holds another window\'s step until the local edit finishes', () =>

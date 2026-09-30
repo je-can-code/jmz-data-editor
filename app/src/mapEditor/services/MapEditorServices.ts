@@ -66,7 +66,8 @@ type MapEditorServices = {
   readonly modules: PluginModuleRegistry;
 
   /**
-   * Holds a document: the live copy from another window when one has it, the file otherwise.
+   * Holds a document: the live copy from another window when one holds it, the file otherwise. Only a window
+   * known to hold it is asked, so opening a map nobody else has open never waits on an answer that cannot come.
    * @param {DocumentKey} key The document.
    * @returns {Promise<EditorDocument>} The document.
    */
@@ -206,7 +207,10 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
         return hub.document(key);
       }
 
-      const snapshot = await sync.requestSnapshot(key);
+      // another window's copy may hold unsaved edits the file lacks, so it comes first when there is one.
+      const snapshot = sync.isHeldElsewhere(key)
+        ? await sync.requestSnapshot(key)
+        : null;
       return snapshot === null
         ? hub.load(key)
         : hub.adoptSnapshot(snapshot);

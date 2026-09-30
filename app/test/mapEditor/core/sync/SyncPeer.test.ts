@@ -227,25 +227,25 @@ describe('SyncPeer', () =>
     }
   };
 
-  it('ends two windows that edited in the same instant on the authority\'s copy, not swapped', async () =>
+  it('ends two windows that edited in the same instant on one copy, the lower id\'s on a tie, not swapped', async () =>
   {
-    // Arrange: both edit before either hears the other, so each finds the other's step stale.
+    // Arrange: both edit before either hears the other, so each finds the other's step stale at the same version.
     const { network, first, second } = await buildPair();
     first.hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP, [ 'displayName' ], 'From A'));
     second.hub.edit('Retag', [ mapHistoryKey(1) ], tx => tx.set(MAP, [ 'note' ], 'From B'));
-    const authorityCopy = first.hub.document(MAP).toJson();
+    const lowerIdsCopy = first.hub.document(MAP).toJson();
 
     // Act.
     await settle(network);
 
     // Assert.
-    expect([ first.peer.authorityFor(MAP), first.hub.document(MAP).toJson(), second.hub.document(MAP).toJson() ])
-      .toStrictEqual([ 'window-A', authorityCopy, authorityCopy ]);
+    expect([ first.hub.document(MAP).toJson(), second.hub.document(MAP).toJson() ])
+      .toStrictEqual([ lowerIdsCopy, lowerIdsCopy ]);
   });
 
-  it('has a drifted authority push its copy to the window it drifted from', async () =>
+  it('has a window that fell behind take the fresher copy, even when its own id is lower', async () =>
   {
-    // Arrange: the authority falls back to an older copy of itself.
+    // Arrange: the lower-id window falls back to an older copy, as a window that loaded a stale file would.
     const { network, first, second } = await buildPair();
     const older = first.hub.snapshot(MAP);
     second.hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP, [ 'displayName' ], 'Harbor'));
@@ -256,28 +256,35 @@ describe('SyncPeer', () =>
     second.hub.edit('Retag', [ mapHistoryKey(1) ], tx => tx.set(MAP, [ 'note' ], 'again'));
     await settle(network);
 
-    // Assert.
-    expect([ second.hub.document(MAP).toJson(), second.hub.history(mapHistoryKey(1)) ])
-      .toStrictEqual([ first.hub.document(MAP).toJson(), first.hub.history(mapHistoryKey(1)) ]);
+    // Assert: the fresher window's edits survive in both.
+    const firstCopy = first.hub.document(MAP).toJson() as { displayName: string; note: string };
+    expect([ firstCopy.displayName, firstCopy.note, second.hub.document(MAP).toJson(), second.hub.history(mapHistoryKey(1)) ])
+      .toStrictEqual([ 'Harbor', 'again', firstCopy, first.hub.history(mapHistoryKey(1)) ]);
   });
 
-  it('adopts a pushed copy only from a window that outranks it', async () =>
+  it('adopts a pushed copy only when it wins: fresher, or as fresh from a lower id', async () =>
   {
-    // Arrange: a lower-ranked window pushes a copy it has no standing to push.
+    // Arrange: pushes that must not land (a tie from a higher id, a stale copy from a lower id, a document it
+    // does not hold), and one that must (fresher, from a higher id).
     const { network, first, second } = await buildPair();
     const pushed = second.hub.snapshot(MAP);
-    const forged = { ...pushed, content: { ...(pushed.content as object), displayName: 'Forged' } };
+    const forge = (displayName: string, version: number, document = MAP) =>
+      ({ ...pushed, document, version, content: { ...(pushed.content as object), displayName } });
     const channel = network.open('jmz-sync');
-    const before = first.hub.document(MAP).toJson();
+    const version = first.hub.version(MAP);
 
     // Act.
-    channel.postMessage({ type: 'snapshot', from: 'window-Z', to: 'window-A', requestId: null, snapshot: forged });
-    channel.postMessage({ type: 'snapshot', from: 'window-0', to: 'window-A', requestId: null, snapshot: { ...forged, document: 'map:4' } });
+    channel.postMessage({ type: 'snapshot', from: 'window-Z', to: 'window-A', requestId: null, snapshot: forge('Tie', version) });
+    channel.postMessage({ type: 'snapshot', from: 'window-0', to: 'window-A', requestId: null, snapshot: forge('Stale', version - 1) });
+    channel.postMessage({ type: 'snapshot', from: 'window-0', to: 'window-A', requestId: null, snapshot: forge('Elsewhere', version + 5, 'map:4') });
+    network.flush();
+    const afterRefusals = (first.hub.document(MAP).toJson() as { displayName: string }).displayName;
+    channel.postMessage({ type: 'snapshot', from: 'window-Z', to: 'window-A', requestId: null, snapshot: forge('Fresher', version + 1) });
     network.flush();
 
     // Assert.
-    expect(first.hub.document(MAP).toJson())
-      .toStrictEqual(before);
+    expect([ afterRefusals, (first.hub.document(MAP).toJson() as { displayName: string }).displayName ])
+      .toStrictEqual([ 'Test Town', 'Fresher' ]);
   });
 
   it('knows which windows hold what, and forgets a window that said goodbye', async () =>

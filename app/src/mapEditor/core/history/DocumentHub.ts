@@ -71,7 +71,7 @@ type HubEvent =
   | { readonly type: 'released'; readonly document: DocumentKey }
   | { readonly type: 'reloaded'; readonly document: DocumentKey }
   | { readonly type: 'conflicted'; readonly document: DocumentKey }
-  | { readonly type: 'out-of-sync'; readonly documents: readonly DocumentKey[]; readonly origin: string };
+  | { readonly type: 'out-of-sync'; readonly documents: readonly DocumentKey[]; readonly origin: string; readonly originVersions: DocumentVersions };
 
 /**
  * Hears every hub event.
@@ -900,7 +900,7 @@ class DocumentHub
 
     if (this.#isStale(held, bases, origin) || this.#applyEntries(step, 'forward') !== null)
     {
-      this.#reportOutOfSync(held, origin);
+      this.#reportOutOfSync(held, origin, bases);
       return;
     }
 
@@ -931,7 +931,7 @@ class DocumentHub
       : history.nextRedo()) === step);
     if (inPlace === false || this.#isStale(held, bases, origin) || this.#applyEntries(step, direction) !== null)
     {
-      this.#reportOutOfSync(held, origin);
+      this.#reportOutOfSync(held, origin, bases);
       return;
     }
 
@@ -961,16 +961,21 @@ class DocumentHub
   }
 
   /**
-   * Announces documents that have drifted from another window's copy.
+   * Announces documents that have drifted from another window's copy, with the versions that window's copies
+   * stand at now, so the sync peer can tell which copy has seen more.
    * @param {readonly DocumentKey[]} documents The documents.
    * @param {string} origin The window whose operation exposed it.
+   * @param {DocumentVersions} bases The versions its operation was made against; each operation moves them on by one.
    */
-  #reportOutOfSync(documents: readonly DocumentKey[], origin: string): void
+  #reportOutOfSync(documents: readonly DocumentKey[], origin: string, bases: DocumentVersions): void
   {
-    if (documents.length > 0)
+    if (documents.length === 0)
     {
-      this.#emit({ type: 'out-of-sync', documents: [ ...documents ], origin });
+      return;
     }
+
+    const originVersions = Object.fromEntries(documents.map(key => [ key, (bases[key] ?? -1) + 1 ]));
+    this.#emit({ type: 'out-of-sync', documents: [ ...documents ], origin, originVersions });
   }
 
   /**

@@ -128,6 +128,7 @@ describe('MapEditorServices', () =>
     network.flush();
     await first.openDocument('map:1');
     first.hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+    network.flush();
 
     // Act.
     const opening = second.openDocument('map:1');
@@ -137,6 +138,28 @@ describe('MapEditorServices', () =>
     // Assert.
     expect((document.toJson() as { displayName: string }).displayName)
       .toBe('Harbor');
+    first.stop();
+    second.stop();
+  });
+
+  it('opens a document from the file at once when the window holding it has not been heard from', async () =>
+  {
+    // Arrange: the other window holds the map, but its presence has not been delivered.
+    const network = new MemoryChannelNetwork();
+    const first = createMapEditorServices(buildEnvironment(network, 'window-a').environment);
+    const secondWindow = buildEnvironment(network, 'window-b');
+    const second = createMapEditorServices(secondWindow.environment);
+    first.start();
+    second.start();
+    await first.openDocument('map:1');
+
+    // Act.
+    const started = Date.now();
+    await second.openDocument('map:1');
+
+    // Assert: no wait on an answer, and the file came from the server.
+    expect([ Date.now() - started < 200, secondWindow.requests.map(request => request.url) ])
+      .toStrictEqual([ true, [ 'http://api/api/maps/1' ] ]);
     first.stop();
     second.stop();
   });
