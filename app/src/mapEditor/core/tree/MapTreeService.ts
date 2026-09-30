@@ -252,12 +252,11 @@ const failedWrite = (label: string, error: unknown, problems: readonly string[],
  * a step brings are written first, then its rows move in the tree every panel reads, then MapInfos.json is saved,
  * then the files it takes away are deleted, which the server allows only once the tree no longer lists them. A
  * panel waiting on a map that comes back therefore always finds its file. Before undoing or redoing a step that
- * creates or removes files, each file is checked to still
- * hold what the step left there, so a map edited since is never silently deleted or written over. A write that
- * fails partway puts back exactly what it had changed, removed files first, so the tree never lists a map whose
- * file is missing. When even that cannot finish, the step stays in the history holding every file, the tree stays
- * where it agrees with the disk, and the outcome is an alarm; moving the step again once the disk recovers finishes
- * the job, keeping any file that already holds what the step brings.
+ * creates or removes files, each file is checked to still hold what the step left there, so a map edited since is
+ * never silently deleted or written over. A write that fails partway puts back exactly what it had changed, removed
+ * files first, so the tree never lists a map whose file is missing. When even that cannot finish, the step stays in
+ * the history holding every file, the tree stays where it agrees with the disk, and the outcome is an alarm; moving
+ * the step again once the disk recovers finishes the job, keeping any file that already holds what the step brings.
  *
  * Operations queue one behind another, since each one reads the tree, waits on the server, then records its step.
  */
