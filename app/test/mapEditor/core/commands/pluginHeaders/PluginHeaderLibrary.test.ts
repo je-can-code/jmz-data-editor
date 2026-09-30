@@ -6,7 +6,9 @@ import { PluginHeaderLibrary, PluginHeaderStore } from '../../../../../src/mapEd
  * The plugin command editor looks headers up three ways: the plugins it can offer (those with commands), a
  * command by plugin and name, and a struct by the plugin declaring it, since two plugins may declare structs of
  * the same name. Headers load after the editor may already be open, so the store tells its listeners whenever
- * they arrive and hands out a fresh library each time.
+ * they arrive and hands out a fresh library each time. The library also keeps the full js/plugins.js entry
+ * list alongside the enabled headers, so it alone can tell a disabled or unknown plugin's command apart from
+ * one an enabled plugin simply never declared.
  */
 describe('plugin header library', () =>
 {
@@ -74,6 +76,29 @@ describe('plugin header library', () =>
       // Assert.
       expect(results)
         .toStrictEqual([ [], 'J-OMNI-Quests', 'Solo' ]);
+    });
+
+    it('checks a plugin command\'s registration against the full plugin list and its own headers together', () =>
+    {
+      // Arrange: J-TIME is enabled and its header declares jumpToTimeOfDay; J-Log is listed but switched off,
+      // and has no header at all since a disabled plugin's source is never fetched.
+      const library = new PluginHeaderLibrary(headers(), [
+        { name: 'j/time/J-TIME', status: true, description: '', parameters: {} },
+        { name: 'j/log/J-Log', status: false, description: '', parameters: {} },
+      ]);
+
+      // Act.
+      const results = [
+        library.registrationOf('j/time/J-TIME', 'jumpToTimeOfDay'),
+        library.registrationOf('j/log/J-Log', 'hideLog'),
+      ];
+
+      // Assert.
+      expect(results)
+        .toStrictEqual([
+          { registered: true },
+          { registered: false, reason: 'plugin-disabled', message: 'J-Log is listed in js/plugins.js, but is not enabled.' },
+        ]);
     });
   });
 
