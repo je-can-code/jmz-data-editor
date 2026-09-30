@@ -507,7 +507,9 @@ const floorShapeAt = (reader: TileReader, x: number, y: number, kind: number, mo
 
 /**
  * Works out the shape MZ's editor would store for an autotile of a given kind at a position, from what surrounds
- * it. The tile's own layer does not matter, because every rule reads its neighbours on all four layers.
+ * it. The tile's own layer does not matter, because every rule reads its neighbours on all four layers. A2 table
+ * tiles (ground with the counter flag) shape exactly like other ground, as all 202 in the shipped maps do; only the
+ * engine's drawing of them differs.
  * @param {TileReader} reader The map, holding the neighbours as they should be judged.
  * @param {number} x The column.
  * @param {number} y The row.

@@ -48,6 +48,19 @@ describe('the marks document', () =>
 
 describe('readTilesetMarks', () =>
 {
+  it('reads back exactly what was saved, through JSON as the editor-data routes carry it', () =>
+  {
+    // Arrange: two tilesets' marks, built the way the palette would build them.
+    const saved = setTileMarked(setTileMarked(emptyTilesetMarks(), 12, CLIFF_CORNER, true), 19, makeAutotileId(88, 3), true);
+
+    // Act.
+    const loaded = readTilesetMarks(JSON.parse(JSON.stringify(saved)));
+
+    // Assert.
+    expect(loaded)
+      .toEqual({ tilesets: { '12': { tiles: [ CLIFF_CORNER ], kinds: [] }, '19': { tiles: [], kinds: [ 88 ] } } });
+  });
+
   it('sorts each list, drops repeats, and leaves out tilesets with nothing marked', () =>
   {
     // Arrange.
