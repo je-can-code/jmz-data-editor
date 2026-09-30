@@ -210,6 +210,27 @@ describe('WorkspaceController', () =>
       expect([ controller.getState().treeSelection, controller.getState().currentMapId ])
         .toStrictEqual([ [ 1, 6 ], 3 ]);
     });
+
+    it('hands undo to a history an edit from a panel without one was recorded in, telling listeners once', () =>
+    {
+      // Arrange: a map focused, and a listener counting updates.
+      const { controller } = buildController();
+      const { api } = buildDock([ { id: 'map-12', component: 'map', params: { mapId: 12 }, group: MAIN } ]);
+      controller.panelActivated(api.getPanel('map-12'));
+      let updates = 0;
+      controller.subscribe(() =>
+      {
+        updates += 1;
+      });
+
+      // Act: the passability editor's edit goes to the tilesets, twice over.
+      controller.focusHistory('tilesets');
+      controller.focusHistory('tilesets');
+
+      // Assert: and the map the properties show stays.
+      expect([ controller.getState().activeHistory, controller.getState().currentMapId, updates ])
+        .toStrictEqual([ 'tilesets', 12, 1 ]);
+    });
   });
 
   describe('opening maps', () =>

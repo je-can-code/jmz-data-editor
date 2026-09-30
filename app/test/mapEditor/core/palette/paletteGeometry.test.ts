@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EMPTY_BRUSH } from '../../../../src/mapEditor/core/palette/paintSelection.ts';
 import {
   badgeSize,
+  brushForPick,
   brushFromRect,
   cellAtPoint,
   edgeAtPoint,
@@ -154,5 +155,32 @@ describe('brushFromRect', () =>
     // Assert.
     expect(brush)
       .toBe(EMPTY_BRUSH);
+  });
+});
+
+describe('brushForPick', () =>
+{
+  it('reads a pick from the tab it was made on, whatever tab shows now', () =>
+  {
+    // Arrange: B's first row, second and third cells.
+
+    // Act.
+    const brush = brushForPick(ALL_SHEETS, { kind: 'cells', tab: 'B', rect: { column: 1, row: 0, columns: 2, rows: 1 } }, 4);
+
+    // Assert.
+    expect(brush)
+      .toStrictEqual({ kind: 'tiles', tilesetId: 4, width: 2, height: 1, cells: [ 1, 2 ] });
+  });
+
+  it('hands out the shadow pen, and nothing when nothing is picked', () =>
+  {
+    // Arrange.
+
+    // Act.
+    const brushes = [ brushForPick(ALL_SHEETS, { kind: 'shadow' }, 4), brushForPick(ALL_SHEETS, null, 4) ];
+
+    // Assert.
+    expect(brushes)
+      .toStrictEqual([ { kind: 'shadows', tilesetId: 4, width: 1, height: 1, cells: [] }, EMPTY_BRUSH ]);
   });
 });

@@ -380,6 +380,19 @@ class WorkspaceController
   }
 
   /**
+   * Hands undo to a history, as an edit made from a panel that owns none must: the stack view's fixes go to their map's
+   * history, and the passability editor's edits to the tilesets', so the next undo takes back what was just done.
+   * @param {HistoryKey} key The history.
+   */
+  focusHistory(key: HistoryKey): void
+  {
+    if (this.#state.activeHistory !== key)
+    {
+      this.#update({ activeHistory: key });
+    }
+  }
+
+  /**
    * Moves a history to just after one of its steps: a click on a history panel row.
    * @param {HistoryKey} key The history.
    * @param {string | null} stepId The step, or null for before the first.

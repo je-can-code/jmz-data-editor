@@ -1,6 +1,13 @@
-import { EMPTY_BRUSH, type PaletteBrush } from './paintSelection.ts';
-import { PALETTE_COLUMNS, rectCells, type PaletteLayout, type PaletteRect } from './paletteLayout.ts';
+import { EMPTY_BRUSH, shadowBrush, type PaletteBrush } from './paintSelection.ts';
+import { layoutPaletteTab, PALETTE_COLUMNS, rectCells, type PaletteLayout, type PaletteRect, type PaletteTab } from './paletteLayout.ts';
 import type { PassageDirection } from './tileFlags.ts';
+
+/**
+ * What has been picked on a tileset's palette: a rectangle of cells on one of its tabs, or the shadow pen.
+ */
+type PalettePick =
+  | { readonly kind: 'cells'; readonly tab: PaletteTab; readonly rect: PaletteRect }
+  | { readonly kind: 'shadow' };
 
 /**
  * The smallest and largest a palette cell is drawn, in CSS pixels: never so small a tile cannot be made out, and never
@@ -123,5 +130,25 @@ const brushFromRect = (layout: PaletteLayout, rect: PaletteRect | null, tilesetI
   return { kind, tilesetId, ...rectCells(layout, rect) };
 };
 
-export { badgeSize, brushFromRect, cellAtPoint, edgeAtPoint, isOnBadge, MAX_CELL_SIZE, MIN_CELL_SIZE, paletteCellSize };
-export type { PaletteCellPosition };
+/**
+ * Builds the brush what was picked on a tileset's palette makes, whichever tab is on show: the rectangle is read from
+ * the tab it was picked on.
+ * @param {readonly string[]} sheetNames The tileset's nine sheet names.
+ * @param {PalettePick | null} pick What was picked, or null for nothing.
+ * @param {number} tilesetId The tileset.
+ * @returns {PaletteBrush} The brush; {@link EMPTY_BRUSH} when nothing is picked.
+ */
+const brushForPick = (sheetNames: readonly string[], pick: PalettePick | null, tilesetId: number): PaletteBrush =>
+{
+  if (pick === null)
+  {
+    return EMPTY_BRUSH;
+  }
+
+  return pick.kind === 'shadow'
+    ? shadowBrush(tilesetId)
+    : brushFromRect(layoutPaletteTab(pick.tab, sheetNames), pick.rect, tilesetId);
+};
+
+export { badgeSize, brushForPick, brushFromRect, cellAtPoint, edgeAtPoint, isOnBadge, MAX_CELL_SIZE, MIN_CELL_SIZE, paletteCellSize };
+export type { PaletteCellPosition, PalettePick };
