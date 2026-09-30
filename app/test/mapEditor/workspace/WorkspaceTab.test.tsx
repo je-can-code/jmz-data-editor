@@ -17,8 +17,9 @@ import { describeGroups, installDockPage, settle, type FakePopout } from '../sup
 /*
  * Every tab carries its own way into a window of its own, so tearing out one map never takes the maps stacked with it:
  * a button on the tab, beside its close button, and the same choice on the tab's right-click menu, each opening just
- * that panel a little off where it sat. A panel that already has a window to itself has nothing left to tear out of:
- * its tab drops the button and its menu greys the choice out. The close button and a middle click close the tab.
+ * that panel a little off where it sat. Once torn out, the tab's button puts it back where it came from instead, and
+ * its menu offers both; a panel that already has a window to itself has nothing left to tear out of, so the menu greys
+ * that choice out. The close button and a middle click close the tab.
  *
  * The dock here is the real one, rendering the real tabs; only the windows it opens are faked.
  */
@@ -104,7 +105,18 @@ describe('WorkspaceTab', () =>
       .toStrictEqual([ [ 'grid:a+c', 'popout:b' ], [ { left: 32, top: 32, width: 1600, height: 900 } ] ]);
   });
 
-  it('drops the button once its panel has a window to itself, keeping the close button', async () =>
+  /**
+   * Finds the buttons on the tab in a torn-out window. That window's page has no window of its own to ask roles of,
+   * so the buttons are read directly.
+   * @param {FakePopout} popout The window.
+   * @returns {HTMLButtonElement[]} The tab's buttons.
+   */
+  const buttonsIn = (popout: FakePopout): HTMLButtonElement[] =>
+  {
+    return Array.from(within(popout.window.document.body).getByTestId('workspace-tab').querySelectorAll('button'));
+  };
+
+  it('turns its window button into one putting it back, once torn out', async () =>
   {
     // Arrange.
     const { api, controller } = await renderDock();
@@ -116,11 +128,31 @@ describe('WorkspaceTab', () =>
       await settle();
     });
 
-    // Assert: the torn-out window's page has no window of its own to ask roles of, so its buttons are read directly.
-    const tornOut = within(page.popouts[0].window.document.body).getByTestId('workspace-tab');
-    const labels = Array.from(tornOut.querySelectorAll('button')).map(button => button.getAttribute('aria-label'));
-    expect([ labels, within(tabShowing('Alpha')).getAllByRole('button').length ])
-      .toStrictEqual([ [ 'Close tab' ], 2 ]);
+    // Assert.
+    expect([ buttonsIn(page.popouts[0]).map(button => button.getAttribute('aria-label')), within(tabShowing('Alpha')).getAllByRole('button').length ])
+      .toStrictEqual([ [ 'Put back in the main window', 'Close tab' ], 2 ]);
+  });
+
+  it('puts its panel back where it came from from that button, closing the window it had to itself', async () =>
+  {
+    // Arrange.
+    const { api, controller } = await renderDock();
+    await act(async () =>
+    {
+      await controller.popouts.tearOutBeside(api.getPanel('b') as IDockviewPanel);
+      await settle();
+    });
+
+    // Act: clicked with the main page's own event, since the torn-out window's page has no window to make one.
+    await act(async () =>
+    {
+      buttonsIn(page.popouts[0])[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await settle();
+    });
+
+    // Assert.
+    expect([ describeGroups(api), page.popouts[0].window.closed ])
+      .toStrictEqual([ [ 'grid:a+b+c' ], true ]);
   });
 
   it('opens just its own panel in a window of its own from its right-click menu', async () =>
@@ -165,41 +197,61 @@ describe('WorkspaceTab', () =>
   describe('tabMenuItems', () =>
   {
     /**
-     * A stand-in keeper that says whether a panel has a window to itself and records tear-outs.
+     * A stand-in keeper that says whether a panel has a window to itself and records what it is asked to do.
      * @param {boolean} alone What it says.
      * @returns {PopoutKeeper} The keeper.
      */
     const keeperSaying = (alone: boolean) =>
     {
-      return { isAloneInWindow: () => alone, tearOutBeside: vi.fn(async () => true) } as unknown as PopoutKeeper & { tearOutBeside: ReturnType<typeof vi.fn> };
+      return {
+        isAloneInWindow: () => alone,
+        tearOutBeside: vi.fn(async () => true),
+        putBack: vi.fn(),
+      } as unknown as PopoutKeeper & { tearOutBeside: ReturnType<typeof vi.fn>; putBack: ReturnType<typeof vi.fn> };
     };
 
-    it('offers the panel a window of its own, then closing it', () =>
+    /**
+     * A stand-in panel, docked or torn out.
+     * @param {string} where Its window: 'grid' for the main window, 'popout' for a torn-out one.
+     * @returns {IDockviewPanel} The panel.
+     */
+    const panelIn = (where: 'grid' | 'popout') => ({ id: 'b', api: { location: { type: where } } }) as unknown as IDockviewPanel;
+
+    /**
+     * Writes a menu out as text: each choice with whether it is greyed out, and the dock's own items by name.
+     * @param {ReturnType<typeof tabMenuItems>} items The menu.
+     * @returns {string[]} The menu as text.
+     */
+    const asText = (items: ReturnType<typeof tabMenuItems>) => items.map(item => (typeof item === 'string' ? item : `${item.label}:${String(item.disabled === true)}`));
+
+    it('offers a docked panel a window of its own, then closing it', () =>
     {
       // Arrange.
       const keeper = keeperSaying(false);
-      const panel = { id: 'b' } as unknown as IDockviewPanel;
+      const panel = panelIn('grid');
 
       // Act.
       const items = tabMenuItems(keeper, panel);
       (items[0] as { action: () => void }).action();
 
       // Assert.
-      expect([ items.map(item => (typeof item === 'string' ? item : `${item.label}:${String(item.disabled)}`)), keeper.tearOutBeside.mock.calls ])
+      expect([ asText(items), keeper.tearOutBeside.mock.calls ])
         .toStrictEqual([ [ 'Open in its own window:false', 'separator', 'close' ], [ [ panel ] ] ]);
     });
 
-    it('greys the choice out for a panel that already has a window to itself', () =>
+    it('offers a torn-out panel a way back, greying out a window of its own once it has one', () =>
     {
       // Arrange.
       const keeper = keeperSaying(true);
+      const panel = panelIn('popout');
 
       // Act.
-      const [ first ] = tabMenuItems(keeper, { id: 'b' } as unknown as IDockviewPanel);
+      const items = tabMenuItems(keeper, panel);
+      (items[1] as { action: () => void }).action();
 
       // Assert.
-      expect(first)
-        .toMatchObject({ label: 'Open in its own window', disabled: true });
+      expect([ asText(items), keeper.putBack.mock.calls ])
+        .toStrictEqual([ [ 'Open in its own window:true', 'Put back in the main window:false', 'separator', 'close' ], [ [ panel ] ] ]);
     });
   });
 });

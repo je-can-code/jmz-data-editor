@@ -208,6 +208,33 @@ const describeGroups = (api: DockviewApi): string[] =>
 };
 
 /**
+ * One node of the main window's grid as the dock serializes it: a group, or a row or column of them.
+ */
+type GridNode = { type: 'leaf'; data: { views: string[] }; visible?: boolean } | { type: 'branch'; data: GridNode[] };
+
+/**
+ * Lists the main window's groups in the order they sit on screen, left to right and top to bottom, skipping any the
+ * dock keeps hidden: where things are, which is what a person looking at the window sees.
+ * @param {DockviewApi} api The dock.
+ * @returns {string[]} One entry per group, its panels joined, such as "tree" then "a+b".
+ */
+const describeGrid = (api: DockviewApi): string[] =>
+{
+  const walk = (node: GridNode): string[] =>
+  {
+    if (node.type === 'branch')
+    {
+      return node.data.flatMap(walk);
+    }
+
+    return node.visible === false || node.data.views.length === 0 ? [] : [ node.data.views.join('+') ];
+  };
+
+  const { grid } = api.toJSON() as unknown as { grid: { root: GridNode } };
+  return walk(grid.root);
+};
+
+/**
  * Drags a panel's tab with the pointer, the way the dock hears a mouse: pressed on the tab, moved past the dock's
  * threshold, then carried to where it is let go.
  * @param {IDockviewPanel} panel The panel whose tab is dragged.
@@ -223,5 +250,5 @@ const dragTab = (panel: IDockviewPanel, to: { x: number; y: number }): void =>
   window.dispatchEvent(new PointerEvent('pointerup', { ...pointer, clientX: to.x, clientY: to.y, screenX: to.x, screenY: to.y }));
 };
 
-export { createRealDock, describeGroups, dragTab, installDockPage, SCREEN, settle };
+export { createRealDock, describeGrid, describeGroups, dragTab, installDockPage, SCREEN, settle };
 export type { FakePopout, RealDock };

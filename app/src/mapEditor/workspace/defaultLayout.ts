@@ -1,5 +1,5 @@
 import type { DockviewApi, SerializedDockview } from 'dockview-react';
-import type { LayoutStore } from '../core/workspace/LayoutStore.ts';
+import type { LayoutStore, SavedLayout } from '../core/workspace/LayoutStore.ts';
 import { PANEL_COMPONENTS, SINGLE_PANEL_IDS } from '../core/workspace/panels.ts';
 
 /**
@@ -38,13 +38,20 @@ const addDefaultPanels = (api: DockviewApi): void =>
 /**
  * Brings back the workspace as it was left, torn-out windows included, or lays it out afresh when there is no saved
  * layout or it no longer fits (a panel kind renamed since, say). A dock replaced while the saved layout was being
- * read (the page's first render builds one, then another) is left alone.
+ * read (the page's first render builds one, then another) is left alone. The dock reads only its own keys from the
+ * saved layout; whatever else the workspace keeps there is handed on once the layout is rebuilt.
  * @param {DockviewApi} api The dock.
  * @param {LayoutStore} layouts Where the layout is kept.
  * @param {() => boolean} isCurrent Whether the dock is still the one on the page.
+ * @param {(saved: SavedLayout) => void} onRestored Takes the saved layout once the dock has rebuilt it.
  * @returns {Promise<'restored' | 'default' | 'stale'>} Which it did.
  */
-const restoreLayout = async (api: DockviewApi, layouts: LayoutStore, isCurrent: () => boolean): Promise<'restored' | 'default' | 'stale'> =>
+const restoreLayout = async (
+  api: DockviewApi,
+  layouts: LayoutStore,
+  isCurrent: () => boolean,
+  onRestored: (saved: SavedLayout) => void = () => undefined,
+): Promise<'restored' | 'default' | 'stale'> =>
 {
   const saved = await layouts.load();
   if (isCurrent() === false)
@@ -57,6 +64,7 @@ const restoreLayout = async (api: DockviewApi, layouts: LayoutStore, isCurrent: 
     try
     {
       api.fromJSON(saved as unknown as SerializedDockview);
+      onRestored(saved);
       return 'restored';
     }
     catch

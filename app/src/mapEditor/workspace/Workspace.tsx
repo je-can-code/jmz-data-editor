@@ -15,6 +15,7 @@ import { MapLinkHost } from '../../core/infrastructure/shell/MapLink.ts';
 import type { SavedLayout } from '../core/workspace/LayoutStore.ts';
 import { decodeDraggedMaps, directionForDrop, MAP_DRAG_TYPE, PANEL_COMPONENTS, SINGLE_PANEL_IDS } from '../core/workspace/panels.ts';
 import { APP_WIDE_COMMANDS, appShortcutFor, type KeyTarget, type ShortcutCommand } from '../core/workspace/shortcuts.ts';
+import { readOrigins, withOrigins } from '../core/workspace/tearOut.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import { addDefaultPanels, POPOUT_URL, restoreLayout } from './defaultLayout.ts';
 import { HistoryPanel } from './panels/HistoryPanel.tsx';
@@ -83,7 +84,9 @@ const holdsTheTree = (group: DockviewDndOverlayEvent['group']): boolean =>
  *
  * Any tab opens alone in a window of its own: from its button or its right-click menu, a little off where it sat, or
  * dragged beyond the window's edge and let go, where it lands. Tabs drag with pointer events, never the browser's drag
- * and drop, so a dragged tab never leaves the app for the desktop to take.
+ * and drop, so a dragged tab never leaves the app for the desktop to take. Closing a torn-out window puts every panel
+ * in it back where it came from, as a tab in the group it left, however it was laid out inside the window; a torn-out
+ * tab's button, or its menu, puts back just that one.
  *
  * Undo, redo and save listen on every window, torn-out ones included, and act on whatever has focus. A map dragged
  * from the tree into any pane opens there, and a map the data editor asks for opens with its event picked out.
@@ -167,9 +170,10 @@ const Workspace = () =>
     let restoring = true;
     const keepLayout = () =>
     {
+      // torn-out panels' origins ride along, so their windows still bring them home after a restart.
       if (restoring === false && isCurrent())
       {
-        controller.layouts.save(api.toJSON() as unknown as SavedLayout);
+        controller.layouts.save(withOrigins(api.toJSON() as unknown as SavedLayout, controller.popouts.origins));
       }
     };
 
@@ -190,7 +194,7 @@ const Workspace = () =>
       controller.popouts.attach(api),
     );
 
-    restoreLayout(api, controller.layouts, isCurrent)
+    restoreLayout(api, controller.layouts, isCurrent, saved => controller.popouts.adopt(readOrigins(saved)))
       .catch(() =>
       {
         if (isCurrent())

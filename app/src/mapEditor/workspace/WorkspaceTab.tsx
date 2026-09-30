@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type {
   BuiltInContextMenuItem,
-  DockviewApi,
   DockviewPanelApi,
   IDockviewPanel,
   IDockviewPanelHeaderProps,
@@ -11,9 +10,11 @@ import type { PopoutKeeper } from './PopoutKeeper.ts';
 import { useWorkspace } from './workspaceHooks.tsx';
 
 /**
- * What a tab's window button and its menu item say.
+ * What a tab's window button and its menu items say: opening a panel in a window of its own, and putting a torn-out
+ * one back.
  */
 const TEAR_OUT_LABEL = 'Open in its own window';
+const PUT_BACK_LABEL = 'Put back in the main window';
 
 /**
  * The glyphs a tab draws, inline, in the dock's own style: a torn-out window copies the page's styles once, when it
@@ -21,6 +22,7 @@ const TEAR_OUT_LABEL = 'Open in its own window';
  */
 const GLYPHS = {
   openInWindow: { viewBox: '0 0 24 24', path: 'M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3z' },
+  putBack: { viewBox: '0 0 24 24', path: 'M20 5.41 18.59 4 7 15.59V9H5v10h10v-2H8.41z' },
   close: { viewBox: '0 0 28 28', path: 'M2.1 27.3L0 25.2L11.55 13.65L0 2.1L2.1 0L13.65 11.55L25.2 0L27.3 2.1L15.75 13.65L27.3 25.2L25.2 27.3L13.65 15.75L2.1 27.3Z' },
 } as const;
 
@@ -70,45 +72,30 @@ const usePanelTitle = (api: DockviewPanelApi): string =>
 };
 
 /**
- * Reports whether a tab's panel can be torn out: anywhere but a window it already has to itself.
- * @param {PopoutKeeper} keeper The keeper.
- * @param {DockviewApi} dock The dock.
- * @param {string} panelId The panel.
- * @returns {boolean} True when tearing it out would give it a window of its own.
+ * Follows whether a tab's panel is torn out, which decides what its window button does.
+ * @param {DockviewPanelApi} api The panel's api.
+ * @returns {boolean} True while the panel is in a torn-out window.
  */
-const canTearOut = (keeper: PopoutKeeper, dock: DockviewApi, panelId: string): boolean =>
+const useTornOut = (api: DockviewPanelApi): boolean =>
 {
-  const panel = dock.getPanel(panelId);
-  return panel !== undefined && keeper.isAloneInWindow(panel) === false;
-};
-
-/**
- * Follows whether a tab's panel can be torn out. Any layout change can decide it, since a window gaining or losing a
- * panel changes the answer for every tab in it.
- * @param {PopoutKeeper} keeper The keeper.
- * @param {IDockviewPanelHeaderProps} props The tab's props.
- * @returns {boolean} True while it can be torn out.
- */
-const useCanTearOut = (keeper: PopoutKeeper, props: IDockviewPanelHeaderProps): boolean =>
-{
-  const { api, containerApi } = props;
-  const [ can, setCan ] = useState(() => canTearOut(keeper, containerApi, api.id));
+  const [ tornOut, setTornOut ] = useState(() => api.location.type === 'popout');
 
   useEffect(() =>
   {
-    const update = () => setCan(canTearOut(keeper, containerApi, api.id));
+    const update = () => setTornOut(api.location.type === 'popout');
     update();
-    const subscriptions = [ containerApi.onDidLayoutChange(update), api.onDidLocationChange(update) ];
-    return () => subscriptions.forEach(subscription => subscription.dispose());
-  }, [ keeper, api, containerApi ]);
+    const subscription = api.onDidLocationChange(update);
+    return () => subscription.dispose();
+  }, [ api ]);
 
-  return can;
+  return tornOut;
 };
 
 /**
- * A panel's tab: its title, a button opening that one panel in a window of its own, and one closing it. Both buttons
- * show on the tab in front and on any tab under the pointer, as the dock's close buttons do, and a middle click closes
- * the tab too. A panel that already has a window to itself has no window button.
+ * A panel's tab: its title, a window button, and a close button. In the main window the window button opens that one
+ * panel in a window of its own; in a torn-out window it puts the panel back where it came from in the main window.
+ * Both buttons show on the tab in front and on any tab under the pointer, as the dock's close buttons do, and a middle
+ * click closes the tab too.
  * @param {IDockviewPanelHeaderProps} props The dock's tab props.
  * @returns {React.JSX.Element} The tab.
  */
@@ -117,19 +104,28 @@ const WorkspaceTab = (props: IDockviewPanelHeaderProps) =>
   const { api, containerApi } = props;
   const controller = useWorkspace();
   const title = usePanelTitle(api);
-  const tearable = useCanTearOut(controller.popouts, props);
+  const tornOut = useTornOut(api);
   const middlePressed = useRef(false);
+  const windowLabel = tornOut ? PUT_BACK_LABEL : TEAR_OUT_LABEL;
 
   /**
-   * Opens this tab's panel in a window of its own.
+   * Opens this tab's panel in a window of its own, or puts it back from one.
    */
-  const tearOut = () =>
+  const moveWindow = () =>
   {
     const panel = containerApi.getPanel(api.id);
-    if (panel !== undefined)
+    if (panel === undefined)
     {
-      controller.popouts.tearOutBeside(panel).catch(() => undefined);
+      return;
     }
+
+    if (tornOut)
+    {
+      controller.popouts.putBack(panel);
+      return;
+    }
+
+    controller.popouts.tearOutBeside(panel).catch(() => undefined);
   };
 
   return (
@@ -154,11 +150,9 @@ const WorkspaceTab = (props: IDockviewPanelHeaderProps) =>
       }}
     >
       <span className={'dv-default-tab-content'}>{title}</span>
-      {tearable && (
-        <button type={'button'} className={'dv-default-tab-action'} aria-label={TEAR_OUT_LABEL} title={TEAR_OUT_LABEL} onPointerDown={keepTabStill} onClick={tearOut}>
-          <Glyph glyph={'openInWindow'}/>
-        </button>
-      )}
+      <button type={'button'} className={'dv-default-tab-action'} aria-label={windowLabel} title={windowLabel} onPointerDown={keepTabStill} onClick={moveWindow}>
+        <Glyph glyph={tornOut ? 'putBack' : 'openInWindow'}/>
+      </button>
       <button type={'button'} className={'dv-default-tab-action'} aria-label={'Close tab'} title={'Close'} onPointerDown={keepTabStill} onClick={() => api.close()}>
         <Glyph glyph={'close'}/>
       </button>
@@ -168,25 +162,25 @@ const WorkspaceTab = (props: IDockviewPanelHeaderProps) =>
 
 /**
  * The menu a tab's right click opens: opening its panel in a window of its own (greyed out once it has one to
- * itself), then closing it.
+ * itself), putting a torn-out panel back in the main window, then closing it.
  * @param {PopoutKeeper} keeper The keeper.
  * @param {IDockviewPanel} panel The panel whose tab was clicked.
  * @returns {(BuiltInContextMenuItem | ReactContextMenuItemConfig)[]} The menu's items.
  */
 const tabMenuItems = (keeper: PopoutKeeper, panel: IDockviewPanel): (BuiltInContextMenuItem | ReactContextMenuItemConfig)[] =>
 {
-  return [
+  const tearOut: ReactContextMenuItemConfig = {
+    label: TEAR_OUT_LABEL,
+    disabled: keeper.isAloneInWindow(panel),
+    action: () =>
     {
-      label: TEAR_OUT_LABEL,
-      disabled: keeper.isAloneInWindow(panel),
-      action: () =>
-      {
-        keeper.tearOutBeside(panel).catch(() => undefined);
-      },
+      keeper.tearOutBeside(panel).catch(() => undefined);
     },
-    'separator',
-    'close',
-  ];
+  };
+  const putBack: ReactContextMenuItemConfig = { label: PUT_BACK_LABEL, action: () => keeper.putBack(panel) };
+  return panel.api.location.type === 'popout'
+    ? [ tearOut, putBack, 'separator', 'close' ]
+    : [ tearOut, 'separator', 'close' ];
 };
 
-export { tabMenuItems, TEAR_OUT_LABEL, WorkspaceTab };
+export { PUT_BACK_LABEL, tabMenuItems, TEAR_OUT_LABEL, WorkspaceTab };
