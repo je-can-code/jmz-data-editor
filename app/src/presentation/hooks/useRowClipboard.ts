@@ -7,6 +7,7 @@ import {
   type RowPasteWrite,
   RowClipboard,
 } from '@services/rows/RowClipboard.ts';
+import { RowClear } from '@services/rows/RowClear.ts';
 import { type RowSelection, RowSelector } from '@services/rows/RowSelector.ts';
 import type {
   RowClipboardMenuPosition,
@@ -53,7 +54,14 @@ type RowClipboardOptions<TModel extends DatabaseRow, TRow extends DatabaseRow> =
   fromRow: (row: TRow) => TModel;
 
   /**
-   * Hands a paste to the board as an edit like any other, as an updater run against its rows.
+   * The table's blank row, exactly as RPG Maker MZ's own database writes a brand-new row of it. A Clear
+   * resets the selected rows to this, apart from the id each one keeps.
+   */
+  blankRow: TRow;
+
+  /**
+   * Hands a paste- or a clear, which writes the same way- to the board as an edit like any other, as an
+   * updater run against its rows.
    */
   applyPaste: (update: (rows: TModel[]) => TModel[]) => void;
 
@@ -81,6 +89,12 @@ type RowClipboardHandle = {
    * Opens the copy and paste menu on a right-clicked row.
    */
   onRowContextMenu: (index: number, event: React.MouseEvent) => void;
+
+  /**
+   * Clears the selection when the list sees the Del key, the way {@link menu}'s Clear item does from the
+   * mouse. Every other key is left alone, for the board's own key handling to see.
+   */
+  onListKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void;
 
   /**
    * Everything the list's {@link RowClipboardMenu} needs.
@@ -161,20 +175,23 @@ const describeRefusal = (plan: Exclude<RowPastePlan, RowPasteWrite>, table: Data
 };
 
 /**
- * Whole-row copy and paste for a database board's list, the way RPG Maker MZ's database does it: Shift-click
- * a run of rows, copy them with Ctrl+C or the right-click menu, select where they should go, and paste them
- * with Ctrl+V or the menu. The rows travel on the system clipboard, so a paste works between two editor
- * windows as well as inside one.
+ * Whole-row copy, paste and clear for a database board's list, the way RPG Maker MZ's database does it:
+ * Shift-click a run of rows, copy them with Ctrl+C or the right-click menu, select where they should go,
+ * and paste them with Ctrl+V or the menu- or reset them to the table's blank row with the Del key or the
+ * menu's Clear item. The rows travel on the system clipboard, so a paste works between two editor windows
+ * as well as inside one.
  *
  * The shortcuts ride the browser's own copy and paste events, which reach a focused list without any
  * permission prompt. The menu items have no such event to ride, so they use the async clipboard; reading it
  * asks the author for permission the first time, and when that is refused the menu says so and the paste is
- * dropped rather than falling back to anything remembered here, which could be stale.
+ * dropped rather than falling back to anything remembered here, which could be stale. The Del key rides no
+ * such browser event- it is ordinary key handling on the list itself, so it needs no such permission.
  *
- * What a paste writes is decided by {@link RowClipboard} and which rows are selected by {@link RowSelector};
- * this hook only routes the list's clicks, keys and menu to them, and hands the result to the board.
+ * What a paste writes is decided by {@link RowClipboard}, what a clear writes by {@link RowClear}, and
+ * which rows are selected by {@link RowSelector}; this hook only routes the list's clicks, keys and menu to
+ * them, and hands the result to the board.
  * @param {RowClipboardOptions<TModel, TRow>} options The board's table, selection, rows and edit path.
- * @returns {RowClipboardHandle} What the board's list needs to offer copy and paste.
+ * @returns {RowClipboardHandle} What the board's list needs to offer copy, paste and clear.
  */
 const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
   options: RowClipboardOptions<TModel, TRow>,
@@ -188,6 +205,7 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
     getRows,
     toRow,
     fromRow,
+    blankRow,
     applyPaste,
     notify,
   } = options;
@@ -256,6 +274,29 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
     {
       setPasteRevision((revision) => revision + 1);
     }
+  };
+
+  /**
+   * Resets the selection to the table's blank row, keeping each row's own id, and reports how many rows
+   * were reset.
+   */
+  const handleClear = (): void =>
+  {
+    // there is nothing to clear when the run has no row left in it, such as an empty list.
+    const rows = getRows();
+    const indices = RowSelector.indices(activeSelection, rows.length);
+    if (indices.length === 0)
+    {
+      notify('Select a row to clear.', MuiSnackbarSeverity.Warning);
+      return;
+    }
+
+    // write it the way the board writes any other edit.
+    applyPaste((current) => RowClear.apply(current, indices, blankRow, fromRow));
+    notify(`Cleared ${rowCountLabel(indices.length)}.`, MuiSnackbarSeverity.Success);
+
+    // the shown row always lies inside its own run, so its editors start over the same way a paste does.
+    setPasteRevision((revision) => revision + 1);
   };
 
   /**
@@ -380,6 +421,31 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
   };
 
   /**
+   * Clears the selected rows from the menu.
+   */
+  const handleMenuClear = (): void =>
+  {
+    setMenuPosition(null);
+    handleClear();
+  };
+
+  /**
+   * Clears the selection when the Del key reaches the list. Every other key is left alone, so the board's
+   * own key handling- arrow-key navigation, say- still sees it.
+   * @param {React.KeyboardEvent<HTMLDivElement>} event The key event from the list.
+   */
+  const handleListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void =>
+  {
+    if (event.key !== 'Delete')
+    {
+      return;
+    }
+
+    event.preventDefault();
+    handleClear();
+  };
+
+  /**
    * Selects a clicked row, widening the selection into a run when Shift is held.
    * @param {number} index The row clicked.
    * @param {React.MouseEvent} event The click, carrying which modifier keys were held.
@@ -427,10 +493,12 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
     isSelected: (index: number) => RowSelector.contains(activeSelection, index),
     onRowClick: handleRowClick,
     onRowContextMenu: handleRowContextMenu,
+    onListKeyDown: handleListKeyDown,
     menu: {
       position: menuPosition,
       onCopy: handleMenuCopy,
       onPaste: handleMenuPaste,
+      onClear: handleMenuClear,
       onClose: () => setMenuPosition(null),
     },
     pasteRevision,

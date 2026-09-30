@@ -77,6 +77,7 @@ import {
 } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
 import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { BLANK_SKILL_ROW } from '@services/rows/RowClear.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import {
   type UsableItemDamageEditorValue,
@@ -1870,7 +1871,7 @@ const SkillsBoard = () =>
   );
 
   /**
-   * Maps a skill array index to a virtualized sidebar row (spacer for gaps/headers).
+   * Maps a skill array index to a virtualized sidebar row (spacer for a gap past the end of the list).
    *
    * @param index Row index in {@link skills}.
    * @returns Spacer or item descriptor for {@link VirtualizedSidebarList}.
@@ -1879,7 +1880,7 @@ const SkillsBoard = () =>
   {
     const skill = skills[index];
 
-    if (skill === undefined || skill.name.startsWith('==='))
+    if (skill === undefined)
     {
       return {
         type: 'spacer',
@@ -1905,6 +1906,7 @@ const SkillsBoard = () =>
     getRows: skillsWithPendingEditApplied,
     toRow: (skill) => skill.toRmmz(),
     fromRow: (row) => new RPG_SkillDomainModel(row),
+    blankRow: BLANK_SKILL_ROW,
     applyPaste: (update) =>
     {
       setSkills(update);

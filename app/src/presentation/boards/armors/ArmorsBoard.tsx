@@ -38,6 +38,7 @@ import { IngredientTypeChips } from '@presentation/components/crafting/Ingredien
 import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 import { SystemService } from '@services/SystemService.ts';
 import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { BLANK_ARMOR_ROW } from '@services/rows/RowClear.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
@@ -185,6 +186,7 @@ function ArmorsBoard()
     getRows: () => armors,
     toRow: (armor) => armor.toRmmz(),
     fromRow: (row) => new RPG_ArmorDomainModel(row),
+    blankRow: BLANK_ARMOR_ROW,
     applyPaste: setData,
     notify: (message, severity) => setSnackbar({ open: true, message, severity, variant: MuiSnackbarVariant.Filled }),
   });

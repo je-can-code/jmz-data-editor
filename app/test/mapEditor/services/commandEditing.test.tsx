@@ -355,4 +355,59 @@ describe('wireCommandEditing', () =>
         .toBe('a();\nb();');
     });
   });
+
+  describe('flagging an unregistered plugin command', () =>
+  {
+    /**
+     * js/plugins.js listing J-Log, switched off.
+     */
+    const DISABLED_LOG_LIST = 'var $plugins = [\n{"name":"j/log/J-Log","status":false,"description":"","parameters":{}}\n];';
+
+    it('shows the row\'s red chip and the editor\'s error banner for a command whose plugin is disabled', async () =>
+    {
+      // Arrange: J-Log is listed but switched off, and an event still calls its hideLog command.
+      const map: RmmzMap = buildMapJson();
+      (map.events[1] as NonNullable<RmmzMap['events'][number]>).pages[0].list = [
+        cmd(357, 0, [ 'j/log/J-Log', 'hideLog', 'Hide Log', {} ]),
+        cmd(0, 0),
+      ];
+      const hub = new DocumentHub({ clientId: 'window-a' });
+      hub.adopt('map:1', map as never);
+      const api = {
+        loadPluginList: async () => DISABLED_LOG_LIST,
+        loadPluginSource: async () => null,
+        loadDatabaseNames: async () => buildNames(),
+        loadCommandUsage: async () => ({ events: 0, codes: {}, pluginCommands: [] }),
+      } as unknown as MapEditorApi;
+      const { catalog, registry } = buildParts();
+      const editing = wireCommandEditing(api, catalog, registry);
+      const services = {
+        hub,
+        catalog,
+        commandEditors: registry,
+        api,
+        pluginHeaders: editing.headers,
+        loadCommandResources: editing.load,
+      } as unknown as MapEditorServices;
+      render(
+        <MapEditorServicesProvider services={services}>
+          <SoundPlayerContext.Provider value={vi.fn()}>
+            <CommandList documentKey={'map:1'} path={[ 'events', 1, 'pages', 0, 'list' ]} histories={[ eventHistoryKey(1, 1) ]} label={'Page 1'}/>
+          </SoundPlayerContext.Provider>
+        </MapEditorServicesProvider>
+      );
+      await act(async () =>
+      {
+        await editing.load();
+      });
+
+      // Act.
+      const chip = screen.queryByText('Unregistered plugin command');
+      fireEvent.click(document.querySelector('[data-command-index="0"]') as HTMLElement);
+
+      // Assert.
+      expect([ chip !== null, screen.queryByText('J-Log is listed in js/plugins.js, but is not enabled.') !== null ])
+        .toStrictEqual([ true, true ]);
+    });
+  });
 });

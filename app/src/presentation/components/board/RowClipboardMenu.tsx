@@ -1,5 +1,5 @@
 import { ListItemIcon, ListItemText, Menu, MenuItem, Typography } from '@mui/material';
-import { ContentCopy, ContentPaste } from '@mui/icons-material';
+import { Backspace, ContentCopy, ContentPaste } from '@mui/icons-material';
 
 /**
  * Where a right click opened the menu, in viewport pixels.
@@ -26,14 +26,19 @@ type RowClipboardMenuProps = {
   onPaste: () => void;
 
   /**
+   * Resets the selected rows to the table's blank row, keeping each row's own id.
+   */
+  onClear: () => void;
+
+  /**
    * Closes the menu without doing anything.
    */
   onClose: () => void;
 };
 
 /**
- * The right-click menu on a database board's list: copy the selected rows, or paste copied rows over them,
- * each showing the shortcut that does the same thing from the keyboard.
+ * The right-click menu on a database board's list: copy the selected rows, paste copied rows over them, or
+ * clear them to the table's blank row, each showing the shortcut that does the same thing from the keyboard.
  * @param {RowClipboardMenuProps} props Where the menu is open, and what each item does.
  * @returns {JSX.Element} The menu, rendered closed while it has no position.
  */
@@ -43,6 +48,7 @@ const RowClipboardMenu = (props: RowClipboardMenuProps) =>
     position,
     onCopy,
     onPaste,
+    onClear,
     onClose,
   } = props;
 
@@ -69,6 +75,15 @@ const RowClipboardMenu = (props: RowClipboardMenuProps) =>
         <ListItemText>Paste</ListItemText>
         <Typography variant={'body2'} color={'text.secondary'} sx={{ ml: 3 }}>
           Ctrl+V
+        </Typography>
+      </MenuItem>
+      <MenuItem dense onClick={onClear}>
+        <ListItemIcon>
+          <Backspace fontSize={'small'}/>
+        </ListItemIcon>
+        <ListItemText>Clear</ListItemText>
+        <Typography variant={'body2'} color={'text.secondary'} sx={{ ml: 3 }}>
+          Del
         </Typography>
       </MenuItem>
     </Menu>
