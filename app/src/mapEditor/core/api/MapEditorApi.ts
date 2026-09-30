@@ -45,6 +45,13 @@ interface MapEditorApi
   saveMap(mapId: number, map: RmmzMap): Promise<void>;
 
   /**
+   * Removes a map file. The server refuses while the map tree still lists the map, so the tree's row goes first.
+   * @param {number} mapId The map id.
+   * @returns {Promise<void>} Settles once the file is gone.
+   */
+  deleteMap(mapId: number): Promise<void>;
+
+  /**
    * Reads the map tree.
    * @returns {Promise<(RmmzMapInfo | null)[]>} The rows, index 0 null.
    */
@@ -243,6 +250,16 @@ class HttpMapEditorApi implements MapEditorApi
   async saveMap(mapId: number, map: RmmzMap): Promise<void>
   {
     return this.#put(`/api/maps/${requireMapId(mapId)}`, map);
+  }
+
+  async deleteMap(mapId: number): Promise<void>
+  {
+    const route = `/api/maps/${requireMapId(mapId)}`;
+    const response = await this.#fetch(`${this.#base}${route}`, {
+      method: 'DELETE',
+      headers: { [CLIENT_HEADER]: this.clientId },
+    });
+    await this.#requireOk(response, `DELETE ${route}`);
   }
 
   async loadMapInfos(): Promise<(RmmzMapInfo | null)[]>

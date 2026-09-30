@@ -194,6 +194,7 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 
 	//region map editor endpoints
 	mux.HandleFunc("PUT /api/maps/{mapId}", api.SaveMap(changes))
+	mux.HandleFunc("DELETE /api/maps/{mapId}", api.DeleteMap)
 
 	mux.HandleFunc("GET /api/mapinfos", api.LoadMapInfos)
 	mux.HandleFunc("PUT /api/mapinfos", api.SaveMapInfos(changes))

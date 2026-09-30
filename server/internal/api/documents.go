@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -69,6 +70,59 @@ func SaveMap(announcer WriteAnnouncer) http.HandlerFunc {
 
 		saveDocument[*db.RpgMap](responseWriter, httpRequest, announcer, mapFileName(id), mzjson.MapLayout, wholeObject[*db.RpgMap])
 	}
+}
+
+// DeleteMap serves DELETE /api/maps/{mapId}: removes data/Map###.json, answering 204 with no body.
+//
+// A map leaves the project in two writes, its row in MapInfos.json and its file, and the tree must
+// never name a map that has no file, since MZ and the game both trust the tree. So a map the tree
+// still lists is refused with a 409 and nothing is removed: the editor takes the row out first, then
+// the file. A map with no file is a 404, the same answer GET gives it, and a tree that cannot be read
+// is a 500, because without it nothing can say the map is safe to remove.
+//
+// The removal is a single unlink, which no reader can ever see half done. It reaches the change
+// stream with no client, even when the request names one: the stream credits a change to a save only
+// when the file settles holding the bytes that save announced, and a removed file holds nothing. That
+// is the answer every window needs anyway, since any window still holding the map must learn its file
+// is gone, and the window that removed it has already let it go.
+func DeleteMap(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+	// map ids start at 1, and being digits only, a valid id can never name a file outside data/.
+	id, ok := mapIdFromPath(responseWriter, httpRequest, 1)
+	if ok == false {
+		return
+	}
+
+	projectPath, pathErr := GetProjectPath()
+	if pathErr != nil {
+		http.Error(responseWriter, pathErr.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// the tree is the authority on which maps exist, so it is read before anything is removed.
+	infos, readErr := store.Load[[]*db.RpgMapInfo](filepath.Join(projectPath, "data", "MapInfos.json"))
+	if readErr != nil {
+		var res RestResponse[*db.RpgMapInfo]
+		res.ToRestResponse(responseWriter, projectPath, "the map tree cannot be read: "+readErr.Error(), nil, http.StatusInternalServerError)
+		return
+	}
+	if id < len(infos) && infos[id] != nil {
+		http.Error(responseWriter, fmt.Sprintf("map %d is still in the map tree; remove its row from MapInfos.json first", id), http.StatusConflict)
+		return
+	}
+
+	relativePath := mapFileName(id)
+	removeErr := os.Remove(filepath.Join(projectPath, filepath.FromSlash(relativePath)))
+	if errors.Is(removeErr, fs.ErrNotExist) {
+		http.Error(responseWriter, relativePath+" does not exist", http.StatusNotFound)
+		return
+	}
+	if removeErr != nil {
+		var res RestResponse[*db.RpgMapInfo]
+		res.ToRestResponse(responseWriter, projectPath, removeErr.Error(), nil, http.StatusInternalServerError)
+		return
+	}
+
+	responseWriter.WriteHeader(http.StatusNoContent)
 }
 
 // wholeObject checks that a body spells out every key of its model, T.

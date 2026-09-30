@@ -179,6 +179,49 @@ describe('HttpMapEditorApi', () =>
     });
   });
 
+  describe('deleting', () =>
+  {
+    it('deletes a map file with this window\'s id and no body', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+
+      // Act.
+      await api.deleteMap(12);
+
+      // Assert.
+      const [ request ] = requests;
+      expect([ requests.length, request.method, request.url, request.headers['x-jmz-client'], request.body ])
+        .toStrictEqual([ 1, 'DELETE', `${BASE}/api/maps/12`, 'window-7', null ]);
+    });
+
+    it('raises the server\'s refusal of a map the tree still lists, with its status', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response('map 12 is still in the map tree', { status: 409 }));
+
+      // Act.
+      const failure = await api.deleteMap(12).catch((error: unknown) => error);
+
+      // Assert.
+      expect([ (failure as MapEditorApiError).status, (failure as Error).message ])
+        .toStrictEqual([ 409, 'DELETE /api/maps/12 answered 409: map 12 is still in the map tree' ]);
+    });
+
+    it('refuses a map id no map can have, before asking the server', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+
+      // Act.
+      const failure = await api.deleteMap(0).catch((error: unknown) => error);
+
+      // Assert.
+      expect([ failure instanceof MapEditorApiError, requests.length ])
+        .toStrictEqual([ true, 0 ]);
+    });
+  });
+
   describe('assets', () =>
   {
     it('builds image and sound addresses with names encoded', () =>
