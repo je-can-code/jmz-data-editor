@@ -32,6 +32,7 @@ import { fromBParamIdToName, fromSParamIdToName, fromXParamIdToName } from '../.
 import { CollapseEffect, PartyAbility, SpecialFlag } from '@core/enums/TraitValues.ts';
 import { useStates } from '@presentation/context/resources/states.context.tsx';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
+import { useProjectPath } from '@presentation/context/project-path.context.tsx';
 import { useTraitMapping } from '@presentation/hooks/useTraitMapping.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
@@ -124,6 +125,13 @@ const TraitEditor = ({
     skills,
     loading: skillsLoading
   } = useSkills();
+
+  // the trait names also come out of System.json- elements, skill types, weapon and armor types, equipment
+  // slots- which loads on its own and can land after the board's rows do. its generation stays at zero until
+  // it has loaded, and bumps when it does, which draws the list again.
+  const { systemDataGeneration } = useProjectPath();
+  const systemDataLoading = systemDataGeneration === 0;
+
   const {
     toGameTrait,
     toCodeIcon,
@@ -718,7 +726,8 @@ const TraitEditor = ({
   };
   //endregion render
 
-  if (statesLoading || skillsLoading)
+  // wait for everything the trait names are read from.
+  if (statesLoading || skillsLoading || systemDataLoading)
   {
     return <Typography>Loading mapping data...</Typography>;
   }
