@@ -393,6 +393,70 @@ describe('CommandList', () =>
       .toStrictEqual([ [ cmd(230, 0, [ 12 ]), cmd(230, 0, [ 34 ]), cmd(111, 0, [ 0, 2, 0 ]), cmd(0, 1), cmd(412, 0) ], null ]);
   });
 
+  /**
+   * Puts two Show Choices back to back at the top of the list, one choice window to HIME_LargeChoices.
+   * @param {DocumentHub} hub The hub.
+   */
+  const addMergedRun = (hub: DocumentHub) => act(() =>
+  {
+    hub.edit('Merged run', [ eventHistoryKey(1, 1) ], tx => tx.splice('map:1', PATH, 0, 0, [
+      cmd(102, 0, [ [ 'C' ], -1, 0, 2, 0 ]), cmd(402, 0, [ 0, 'C' ]), cmd(0, 1), cmd(404, 0),
+      cmd(102, 0, [ [ 'D' ], -1, -1, 2, 0 ]), cmd(402, 0, [ 0, 'D' ]), cmd(0, 1), cmd(404, 0),
+    ] as never));
+  });
+
+  it('pastes at a merged Show Choices run\'s second command before the whole run, keeping it one window', async () =>
+  {
+    // Arrange: the focus on the run's second Show Choices.
+    const { hub, list } = await renderList();
+    addMergedRun(hub);
+    fireEvent.click(screen.getByText('Choices: D (cannot cancel)'));
+
+    // Act.
+    fireEvent.paste(list, { clipboardData: { getData: () => writeClipboard([ cmd(230, 0, [ 77 ]) ]) } });
+
+    // Assert.
+    expect(commandsOf(hub).slice(0, 6).map(command => command.code))
+      .toStrictEqual([ 230, 102, 402, 0, 404, 102 ]);
+  });
+
+  it('adds from a search opened on a merged run\'s second command before the whole run, showing the search there', async () =>
+  {
+    // Arrange: the focus on the run's second Show Choices.
+    const { hub, list } = await renderList();
+    addMergedRun(hub);
+    fireEvent.click(screen.getByText('Choices: D (cannot cancel)'), { ctrlKey: true });
+
+    // Act.
+    fireEvent.keyDown(list, { key: 'w' });
+    const search = screen.getByRole('textbox', { name: 'Find a command' });
+    const shownAboveFirst = search.compareDocumentPosition(screen.getByText('Choices: C (cannot cancel)')) === Node.DOCUMENT_POSITION_FOLLOWING;
+    fireEvent.change(search, { target: { value: 'wait' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+
+    // Assert.
+    expect([ shownAboveFirst, commandsOf(hub).slice(0, 6).map(command => command.code) ])
+      .toStrictEqual([ true, [ 230, 102, 402, 0, 404, 102 ] ]);
+  });
+
+  it('pastes a command aimed above the comment setting the event\'s area just below it, and says so', async () =>
+  {
+    // Arrange: a page opening with its area comment, the focus on it.
+    const { hub, list } = await renderList();
+    act(() =>
+    {
+      hub.edit('Area', [ eventHistoryKey(1, 1) ], tx => tx.splice('map:1', PATH, 0, 0, [ cmd(108, 0, [ '<areaEvent:3x1>' ]) ] as never));
+    });
+    fireEvent.click(document.querySelector('[data-command-index="0"]') as HTMLElement, { ctrlKey: true });
+
+    // Act.
+    fireEvent.paste(list, { clipboardData: { getData: () => writeClipboard([ cmd(230, 0, [ 77 ]) ]) } });
+
+    // Assert.
+    expect([ commandsOf(hub).slice(0, 2), screen.queryByText(/below the comment that sets this event's area/u) !== null ])
+      .toStrictEqual([ [ cmd(108, 0, [ '<areaEvent:3x1>' ]), cmd(230, 0, [ 77 ]) ], true ]);
+  });
+
   it('plays a command\'s sound through the window\'s player', async () =>
   {
     // Arrange.

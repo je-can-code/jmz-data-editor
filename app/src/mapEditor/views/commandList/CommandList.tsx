@@ -9,6 +9,7 @@ import { isBodyInside, type CommandBlockNode, type CommandNode } from '../../cor
 import { nameLookup } from '../../core/commandList/databaseNames.ts';
 import {
   dropTargetAt,
+  insertionIndex,
   pointAtRow,
   pointBelowRow,
   type DropTarget,
@@ -165,7 +166,9 @@ const rowPositionOf = (rows: readonly ListRow[], list: readonly RmmzEventCommand
 };
 
 /**
- * Finds where the open search adds: its row, and the place that row stands for.
+ * Finds where the open search adds: the place its row stands for, and the row to show the search above, which is
+ * the row of whatever the new command will land before (a merged Show Choices run's first block rather than the
+ * block the search was opened on), or the search's own row when that one is hidden in a fold.
  * @param {readonly ListRow[]} rows The rows.
  * @param {readonly RmmzEventCommand[]} list The list.
  * @param {SearchState | null} search The search.
@@ -178,10 +181,15 @@ const searchPlaceOf = (rows: readonly ListRow[], list: readonly RmmzEventCommand
     : rows.find(each => list[each.index] === search.at);
   const point = row === undefined
     ? null
-    : pointAtRow(row) ?? pointBelowRow(row);
-  return row === undefined || point === null
-    ? null
-    : { row, point };
+    : pointAtRow(row, list) ?? pointBelowRow(row, list);
+  if (row === undefined || point === null)
+  {
+    return null;
+  }
+
+  const landing = insertionIndex(point);
+  const shown = rows.find(each => each.index === landing && each.kind !== 'branch' && each.kind !== 'closer') ?? row;
+  return { row: shown, point };
 };
 
 /**
@@ -444,7 +452,22 @@ const CommandList = (props: CommandListProps) =>
       return endOfList;
     }
 
-    return pointAtRow(focusedRow) ?? pointBelowRow(focusedRow) ?? endOfList;
+    return pointAtRow(focusedRow, list) ?? pointBelowRow(focusedRow, list) ?? endOfList;
+  };
+
+  /**
+   * Says so when commands went in somewhere other than where they were aimed, which only happens to keep them from
+   * landing above the comment that sets the event's area.
+   * @param {string} verb What happened to them, such as "Added".
+   * @param {InsertionPoint} aimed Where they were aimed.
+   * @param {number} landed The index they landed at.
+   */
+  const sayIfBelowAreaComment = (verb: string, aimed: InsertionPoint, landed: number) =>
+  {
+    if (landed !== insertionIndex(aimed))
+    {
+      setNotice(`${verb} below the comment that sets this event's area, which only works while nothing but comments comes before it.`);
+    }
   };
 
   /**
@@ -477,6 +500,7 @@ const CommandList = (props: CommandListProps) =>
     setSearch(null);
     const { index } = editor.insertNew(entry, point);
     keepOpenAt(index);
+    sayIfBelowAreaComment('Added', point, index);
     containerRef.current?.focus();
   });
 
@@ -516,10 +540,12 @@ const CommandList = (props: CommandListProps) =>
    */
   const pasteText = (text: string) => run(() =>
   {
-    const result = editor.paste(insertionAtFocus(), text);
+    const point = insertionAtFocus();
+    const result = editor.paste(point, text);
     if (result.ok)
     {
       selectUnitsAt(result.index, result.count);
+      sayIfBelowAreaComment('Pasted', point, result.index);
       return;
     }
 

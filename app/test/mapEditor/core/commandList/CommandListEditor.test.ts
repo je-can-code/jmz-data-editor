@@ -50,6 +50,12 @@ describe('CommandListEditor', () =>
   const describeList = (commands: readonly RmmzEventCommand[]): string[] => commands.map(command => `${command.code}@${command.indent}`);
 
   /**
+   * A page opening with the comment that sets its area, then a wait.
+   * @returns {RmmzEventCommand[]} The list.
+   */
+  const buildAreaPage = (): RmmzEventCommand[] => [ cmd(108, 0, [ '<areaEvent:3x1>' ]), cmd(230, 0, [ 5 ]), cmd(0, 0) ];
+
+  /**
    * Lists the step names of the event's history.
    * @param {DocumentHub} hub The hub.
    * @returns {string[]} The names, oldest first.
@@ -170,6 +176,21 @@ describe('CommandListEditor', () =>
       expect(describeList(editor.commands().slice(0, 4)))
         .toStrictEqual([ '112@0', '0@1', '413@0', '101@0' ]);
     });
+
+    it('adds a command aimed above the area comment just below it, and a comment where it was aimed', () =>
+    {
+      // Arrange: a page opening with its area comment.
+      const { editor, catalog } = build(buildAreaPage());
+      const top = { body: editor.tree().root, position: 0 };
+
+      // Act.
+      const wait = editor.insertNew(catalog.entry('core:230') as CommandCatalogEntry, top);
+      const comment = editor.insertNew(catalog.entry('core:108') as CommandCatalogEntry, { body: editor.tree().root, position: 0 });
+
+      // Assert: the wait after the area comment, the new comment above everything.
+      expect([ wait.index, comment.index, describeList(editor.commands()) ])
+        .toStrictEqual([ 1, 0, [ '108@0', '108@0', '230@0', '230@0', '0@0' ] ]);
+    });
   });
 
   describe('remove, move and duplicate', () =>
@@ -203,6 +224,19 @@ describe('CommandListEditor', () =>
       // Assert: Show Text's three commands now sit just before the list's end.
       expect([ nowhere.step, moved.step?.label, moved.index, describeList(editor.commands()).slice(-4), historyLabels(hub) ])
         .toStrictEqual([ null, 'Move command', 19, [ '101@0', '401@0', '401@0', '0@0' ], [ 'Move command' ] ]);
+    });
+
+    it('keeps a command dropped above the area comment just below it, where it already was', () =>
+    {
+      // Arrange: a page opening with its area comment, its wait dropped at the very top.
+      const { hub, editor } = build(buildAreaPage());
+
+      // Act.
+      const moved = editor.move([ editor.nodeAt(1)! ], { body: editor.tree().root, position: 0 });
+
+      // Assert: nothing moved, so nothing was recorded.
+      expect([ moved.step, moved.index, editor.commands(), historyLabels(hub) ])
+        .toStrictEqual([ null, 1, buildAreaPage(), [] ]);
     });
 
     it('duplicates units right after the last of them, saying where the copies start', () =>
@@ -263,6 +297,20 @@ describe('CommandListEditor', () =>
       // Assert.
       expect([ pasted.ok && pasted.step?.label, pasted.ok && pasted.index, pasted.ok && pasted.count, describeList(editor.commands().slice(3, 8)), historyLabels(hub) ])
         .toStrictEqual([ 'Paste command', 4, 1, [ '111@0', '101@1', '401@1', '401@1', '250@1' ], [ 'Paste command' ] ]);
+    });
+
+    it('pastes commands aimed above the area comment just below it', () =>
+    {
+      // Arrange: a page opening with its area comment, and a copied wait.
+      const { editor } = build(buildAreaPage());
+      const text = writeClipboard([ cmd(230, 0, [ 9 ]) ]);
+
+      // Act.
+      const pasted = editor.paste({ body: editor.tree().root, position: 0 }, text);
+
+      // Assert.
+      expect([ pasted.ok && pasted.index, editor.commands() ])
+        .toStrictEqual([ 1, [ cmd(108, 0, [ '<areaEvent:3x1>' ]), cmd(230, 0, [ 9 ]), cmd(230, 0, [ 5 ]), cmd(0, 0) ] ]);
     });
 
     it('cuts units chosen at different depths and pastes them back as siblings, nothing lost', () =>
