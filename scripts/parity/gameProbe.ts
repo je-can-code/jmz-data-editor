@@ -194,7 +194,7 @@ const parityProbe = (config: ProbeConfig): void =>
     // draw the base layer alone: without the screen tone its colour filter carries, and without anything a plugin put
     // beside the map there (J-Weather's particles live in it, so the lighting darkens them).
     const base = spriteset._baseSprite;
-    const filters = base.filters;
+    const { filters } = base;
     base.filters = null;
     const kept = new Set([ spriteset._blackScreen, spriteset._parallax, tilemap ]);
     const setAside = base.children.filter((child: any) => kept.has(child) === false && child.visible);
@@ -202,7 +202,7 @@ const parityProbe = (config: ProbeConfig): void =>
     {
       child.visible = false;
     });
-    const renderer = engine.Graphics.app.renderer;
+    const { renderer } = engine.Graphics.app;
     const texture = engine.PIXI.RenderTexture.create({ width: engine.Graphics.width, height: engine.Graphics.height });
     renderer.render(base, texture);
     const url: string = renderer.extract.base64(texture);
@@ -299,6 +299,81 @@ const parityProbe = (config: ProbeConfig): void =>
     settle = 0;
   };
 
+  // a progress note every two seconds, so a run that stalls says where.
+  const noteProgress = (scene: any, sceneName: string): void =>
+  {
+    if (ticks % 20 === 0)
+    {
+      const where = { phase, sceneName, active: scene?.isActive?.() ?? false, mapId: engine.$gameMap?.mapId?.() ?? 0, ticks, errors: report.errors };
+      fs.writeFileSync(`${config.outDir}/PROBE_PROGRESS.json`, JSON.stringify(where));
+    }
+  };
+
+  // the new game starts straight on the first fixture map, so the opening map's autorun story never runs.
+  const startGame = (scene: any): void =>
+  {
+    installFreeze();
+    report.screen = { width: engine.Graphics.width, height: engine.Graphics.height };
+    engine.$dataSystem.startMapId = config.maps[0].mapId;
+    engine.$dataSystem.startX = 0;
+    engine.$dataSystem.startY = 0;
+    scene.commandNewGame();
+    phase = 'transferring';
+  };
+
+  // the map the probe is waiting for is up, still, and done arriving.
+  const hasArrived = (scene: any, sceneName: string, map: ProbeMap): boolean =>
+  {
+    return phase === 'transferring' && sceneName === 'Scene_Map' && scene.isActive()
+      && engine.$gameMap.mapId() === map.mapId && engine.$gamePlayer.isTransferring() === false;
+  };
+
+  // one step of the walk: start the game, wait for each map, draw it, move on.
+  const advance = (stop: () => void): void =>
+  {
+    const scene = engine.SceneManager?._scene;
+    const sceneName = scene === undefined || scene === null ? 'none' : scene.constructor.name;
+    noteProgress(scene, sceneName);
+    if (scene === undefined || scene === null)
+    {
+      return;
+    }
+
+    if (phase === 'boot')
+    {
+      if (sceneName === 'Scene_Title' && scene.isActive())
+      {
+        startGame(scene);
+      }
+
+      return;
+    }
+
+    const map = config.maps[mapIndex];
+    if (hasArrived(scene, sceneName, map) === false)
+    {
+      return;
+    }
+
+    // give the sprites a few frames to settle on the arrived map before drawing it.
+    settle += 1;
+    if (settle < 5 || hooksInstalled === false)
+    {
+      return;
+    }
+
+    captureMap(map);
+    mapIndex += 1;
+    if (mapIndex >= config.maps.length)
+    {
+      stop();
+      finish('done');
+      return;
+    }
+
+    transferNext();
+  };
+
   const tick = setInterval(() =>
   {
     try
@@ -311,57 +386,7 @@ const parityProbe = (config: ProbeConfig): void =>
         return;
       }
 
-      const scene = engine.SceneManager?._scene;
-      const sceneName = scene === undefined || scene === null ? 'none' : scene.constructor.name;
-
-      // a progress note every two seconds, so a run that stalls says where.
-      if (ticks % 20 === 0)
-      {
-        const where = { phase, sceneName, active: scene?.isActive?.() ?? false, mapId: engine.$gameMap?.mapId?.() ?? 0, ticks, errors: report.errors };
-        fs.writeFileSync(`${config.outDir}/PROBE_PROGRESS.json`, JSON.stringify(where));
-      }
-
-      if (scene === undefined || scene === null)
-      {
-        return;
-      }
-      if (phase === 'boot' && sceneName === 'Scene_Title' && scene.isActive())
-      {
-        // the new game starts straight on the first fixture map, so the opening map's autorun story never runs.
-        installFreeze();
-        report.screen = { width: engine.Graphics.width, height: engine.Graphics.height };
-        engine.$dataSystem.startMapId = config.maps[0].mapId;
-        engine.$dataSystem.startX = 0;
-        engine.$dataSystem.startY = 0;
-        scene.commandNewGame();
-        phase = 'transferring';
-        return;
-      }
-
-      const map = config.maps[mapIndex];
-      if (phase !== 'transferring' || sceneName !== 'Scene_Map' || scene.isActive() === false
-        || engine.$gameMap.mapId() !== map.mapId || engine.$gamePlayer.isTransferring())
-      {
-        return;
-      }
-
-      // give the sprites a few frames to settle on the arrived map before drawing it.
-      settle += 1;
-      if (settle < 5 || hooksInstalled === false)
-      {
-        return;
-      }
-
-      captureMap(map);
-      mapIndex += 1;
-      if (mapIndex >= config.maps.length)
-      {
-        clearInterval(tick);
-        finish('done');
-        return;
-      }
-
-      transferNext();
+      advance(() => clearInterval(tick));
     }
     catch (error)
     {
