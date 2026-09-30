@@ -212,6 +212,30 @@ describe('MapTreeService', () =>
         .toStrictEqual([ [ 4 ], created, 'MAP004', 1 ]);
     });
 
+    it('has the new map\'s file on disk before its row appears in the tree, and again when a redo brings it back', async () =>
+    {
+      // Arrange: note whether the file is there each time the row appears.
+      const { service, hub, maps } = buildService();
+      await service.tree();
+      const seen: [ string, boolean ][] = [];
+      hub.subscribe(event =>
+      {
+        if (event.type === 'committed' || event.type === 'redone')
+        {
+          seen.push([ event.type, maps.has(4) ]);
+        }
+      });
+
+      // Act.
+      succeeded(await service.create(TREE_ROOT));
+      succeeded(await service.undo());
+      succeeded(await service.redo());
+
+      // Assert.
+      expect(seen)
+        .toStrictEqual([ [ 'committed', true ], [ 'redone', true ] ]);
+    });
+
     it('passes over a free id whose file already exists, leaving that stray file alone', async () =>
     {
       // Arrange: a map file the tree does not list sits in slot 4.
@@ -337,6 +361,29 @@ describe('MapTreeService', () =>
         .toStrictEqual([ [ 2, 3 ], [ oddText(fileFor(2)), oddText(fileFor(3)), buildTreeRows(), [ 'restore 2', 'restore 3', 'write tree' ] ] ]);
       expect([ maps.has(2), maps.has(3), historyOf(hub) ])
         .toStrictEqual([ false, false, [ 'Delete "Town" and 1 map inside' ] ]);
+    });
+
+    it('has every file of a branch back on disk before its rows reappear on undo, and takes the rows out first on redo', async () =>
+    {
+      // Arrange: note which files are there each time the rows move.
+      const { service, hub, maps } = buildService();
+      await service.remove([ 2 ]);
+      const seen: [ string, boolean, boolean ][] = [];
+      hub.subscribe(event =>
+      {
+        if (event.type === 'undone' || event.type === 'redone')
+        {
+          seen.push([ event.type, maps.has(2), maps.has(3) ]);
+        }
+      });
+
+      // Act.
+      succeeded(await service.undo());
+      succeeded(await service.redo());
+
+      // Assert.
+      expect(seen)
+        .toStrictEqual([ [ 'undone', true, true ], [ 'redone', true, true ] ]);
     });
 
     it('writes a file back from its content when the text read was not that same file', async () =>
@@ -597,6 +644,51 @@ describe('MapTreeService', () =>
       // Assert.
       expect([ outcome, state.infos[5]?.name, historyOf(hub) ])
         .toStrictEqual([ { ok: false, message: 'The map tree changed while "Delete "Cave"" was being worked out; try it again.' }, 'Cave', [ 'Rename elsewhere' ] ]);
+    });
+
+    it('refuses a new map when the tree moves on while its file is written, and takes the file away again', async () =>
+    {
+      // Arrange: writing the new file gives another change time to land on the tree.
+      const { service, hub, api, maps } = buildService();
+      await service.tree();
+      const saveMap = api.saveMap.bind(api);
+      api.saveMap = async (mapId: number, map: RmmzMap) =>
+      {
+        hub.edit('Rename elsewhere', [ TREE_HISTORY_KEY ], tx => tx.set('mapinfos', [ 6, 'name' ], 'Elsewhere'));
+        return saveMap(mapId, map);
+      };
+
+      // Act.
+      const outcome = await service.create(TREE_ROOT);
+
+      // Assert.
+      expect([ outcome, maps.has(4), historyOf(hub) ])
+        .toStrictEqual([ { ok: false, message: 'The map tree changed while "Create "MAP004"" was being worked out; try it again.' }, false, [ 'Rename elsewhere' ] ]);
+    });
+
+    it('refuses an undo when the tree moves on while its files are written, and takes the files away again', async () =>
+    {
+      // Arrange: writing the town back gives another change time to land on the tree.
+      const { service, hub, api, maps, state } = buildService();
+      await service.remove([ 5 ]);
+      const restoreMapFile = api.restoreMapFile.bind(api);
+      api.restoreMapFile = async (mapId: number, text: string) =>
+      {
+        hub.edit('Rename elsewhere', [ TREE_HISTORY_KEY ], tx => tx.set('mapinfos', [ 6, 'name' ], 'Elsewhere'));
+        return restoreMapFile(mapId, text);
+      };
+
+      // Act.
+      const outcome = await service.undo();
+
+      // Assert: the rename is now the newest step, so the delete is not the one to undo.
+      expect([ outcome, maps.has(5), state.infos[5], historyOf(hub) ])
+        .toStrictEqual([
+          { ok: false, message: 'The map tree changed while "Delete "Cave"" was being written; try it again.' },
+          false,
+          null,
+          [ 'Delete "Cave"', 'Rename elsewhere' ],
+        ]);
     });
 
     it('names the later edit that blocks an undo, and changes nothing', async () =>

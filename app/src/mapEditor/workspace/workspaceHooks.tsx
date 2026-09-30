@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
-import { mapDocumentKey, TILESETS_KEY } from '../core/model/documentKeys.ts';
+import { MAP_INFOS_KEY, mapDocumentKey, TILESETS_KEY } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { RmmzMapInfo, RmmzTileset } from '../core/model/rmmzTypes.ts';
@@ -62,6 +62,27 @@ const useHubVersion = (hub: DocumentHub): number =>
   const [ version, setVersion ] = useState(0);
   useEffect(() => hub.subscribe(() => setVersion(current => current + 1)), [ hub ]);
   return version;
+};
+
+/**
+ * Counts the times the map tree's file settles: saved here or in another window, or reloaded from disk. The tree
+ * lists a map only once the map's file is written, so each settle is a fresh chance for a map that could not be
+ * opened.
+ * @param {DocumentHub} hub The hub.
+ * @returns {number} A number that changes whenever the tree's file settles.
+ */
+const useTreeSettles = (hub: DocumentHub): number =>
+{
+  const [ settles, setSettles ] = useState(0);
+  useEffect(() => hub.subscribe(event =>
+  {
+    if ((event.type === 'saved' || event.type === 'reloaded') && event.document === MAP_INFOS_KEY)
+    {
+      setSettles(current => current + 1);
+    }
+  }), [ hub ]);
+
+  return settles;
 };
 
 /**
@@ -145,7 +166,9 @@ type HeldMap = {
 
 /**
  * Holds a map for as long as the tree lists it. A delete lets the document go (the tree service releases it), and
- * an undo lists the map again, which holds it afresh from its restored file.
+ * an undo lists the map again, which holds it afresh from its restored file. A map that could not be opened is not
+ * given up on: it is tried again whenever its row comes back or the tree's file settles, so a panel recovers the
+ * moment its map appears.
  * @param {number | null} mapId The map, or null for none.
  * @returns {HeldMap} What the panel knows.
  */
@@ -155,6 +178,7 @@ const useHeldMap = (mapId: number | null): HeldMap =>
   const { hub } = controller.services;
   const { tree } = useMapTreeDocument();
   const [ failure, setFailure ] = useState<string | null>(null);
+  const treeSettles = useTreeSettles(hub);
   useHubVersion(hub);
 
   const key = mapId === null ? null : mapDocumentKey(mapId);
@@ -162,6 +186,7 @@ const useHeldMap = (mapId: number | null): HeldMap =>
   const row = found ?? null;
   const map = key !== null && row !== null && hub.has(key) ? hub.map(key) : null;
 
+  // a settle of the tree's file only matters here while the map is listed but not held, which is when it retries.
   useEffect(() =>
   {
     setFailure(null);
@@ -183,7 +208,7 @@ const useHeldMap = (mapId: number | null): HeldMap =>
     {
       live = false;
     };
-  }, [ controller, key, row, map ]);
+  }, [ controller, key, row, map, treeSettles ]);
 
   return { row, map, dirty: key !== null && map !== null && hub.isDirty(key), failure };
 };
