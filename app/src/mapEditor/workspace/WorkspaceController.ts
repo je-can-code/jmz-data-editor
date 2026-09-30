@@ -14,7 +14,7 @@ import {
   SINGLE_PANEL_IDS,
   type PanelDirection,
 } from '../core/workspace/panels.ts';
-import { MAP_INFOS_KEY } from '../core/model/documentKeys.ts';
+import { MAP_INFOS_KEY, mapDocumentKey } from '../core/model/documentKeys.ts';
 import type { RmmzMapInfo } from '../core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../services/MapEditorServices.ts';
 import { documentLabel } from '../views/documentLabels.ts';
@@ -125,7 +125,8 @@ class WorkspaceController
 
   /**
    * The events selected in this window, on one map at a time: every map panel draws and changes it, torn-out ones
-   * included, and the quick panel reads it (see {@link EventSelection} for how to read and follow it).
+   * included, and the quick panel reads it (see {@link EventSelection} for how to read and follow it). It only ever
+   * names a map this window holds: letting go of that map clears it.
    */
   readonly selection = new EventSelection();
 
@@ -158,6 +159,17 @@ class WorkspaceController
       : new MapTreeService({ hub: services.hub, api: services.api, openDocument: key => services.openDocument(key) });
     this.router = new HistoryRouter(services.hub, this.tree);
     this.layouts = new LayoutStore({ api: services.api });
+
+    // a map the window lets go of, such as one deleted from the tree, takes its selected events with it, so the
+    // selection only ever names a map this window holds.
+    services.hub.subscribe(event =>
+    {
+      const { mapId } = this.selection.get();
+      if (event.type === 'released' && mapId !== null && event.document === mapDocumentKey(mapId))
+      {
+        this.selection.clear();
+      }
+    });
   }
 
   //region state

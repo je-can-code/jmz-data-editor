@@ -532,4 +532,23 @@ describe('WorkspaceController', () =>
     expect([ afterStale, controller.getState().notice ])
       .toStrictEqual([ 'second', null ]);
   });
+
+  describe('the event selection', () =>
+  {
+    it('clears the selection when the window lets go of its map, and keeps it when another map goes', () =>
+    {
+      // Arrange: events selected on map 1; the window holds maps 1 and 2.
+      const { controller, hub } = buildController();
+      controller.selection.select(1, [ 3 ]);
+
+      // Act: map 2 goes first, then map 1.
+      hub.release('map:2');
+      const afterOther = controller.selection.get();
+      hub.release('map:1');
+
+      // Assert.
+      expect([ afterOther, controller.selection.get() ])
+        .toStrictEqual([ { mapId: 1, eventIds: [ 3 ] }, { mapId: null, eventIds: [] } ]);
+    });
+  });
 });
