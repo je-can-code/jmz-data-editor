@@ -18,10 +18,11 @@ import { MemoryChannelNetwork } from '../../support/standIns.ts';
  * histories stay equal, and a window opening a document takes the live copy from whoever holds it.
  *
  * When two copies are found to differ, their lineages decide. A copy that is only behind takes the other, which
- * holds everything it did. Two copies that went different ways (a window that loaded a stale file and edited it,
- * while another held unsaved work) are both kept, both windows are flagged with the other's copy, and nothing
- * changes until the author chooses; then both windows end on the chosen copy. The two windows never trade offers
- * forever over it.
+ * holds everything it did, and a window offered a copy older than its own hands its own back, since that may be
+ * the only way the other window ever catches up. Two copies that went different ways (a window that loaded a
+ * stale file and edited it, while another held unsaved work) are both kept, both windows are flagged with the
+ * other's copy, and nothing changes until the author chooses; then both windows end on the chosen copy. The two
+ * windows never trade offers forever over it.
  *
  * The close guard's question is answered here too: does another live window hold exactly this window's latest
  * state of a document? A window holding an older copy, or one that said goodbye, does not.
@@ -225,6 +226,69 @@ describe('SyncPeer', () =>
       const firstCopy = first.hub.document(MAP).toJson() as { displayName: string; note: string };
       expect([ firstCopy.displayName, firstCopy.note, first.hub.lineage(MAP), first.hub.isConflicted(MAP) ])
         .toStrictEqual([ 'Harbor', 'again', second.hub.lineage(MAP), false ]);
+    });
+
+    it('hands its newer copy back to a window that offered an older one, which takes it', async () =>
+    {
+      // Arrange: the second window falls back to an older copy of its own, and an offer of that copy reaches the first
+      // window as if the second had sent it. No operation is on its way, so only the first window can catch it up.
+      const { network, first, second } = await buildPair();
+      const older = second.hub.snapshot(MAP);
+      first.hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP, [ 'displayName' ], 'Harbor'));
+      network.flush();
+      second.hub.adoptSnapshot(older);
+      const stranger = network.open('jmz-sync');
+      const offers: unknown[] = [];
+      stranger.addEventListener('message', event =>
+      {
+        const message = event.data as { type: string; from: string; to: string; snapshot: { lineage: string[] } };
+        if (message.type === 'offer')
+        {
+          offers.push([ message.from, message.to, message.snapshot.lineage ]);
+        }
+      });
+
+      // Act.
+      stranger.postMessage({ type: 'offer', from: 'window-B', to: 'window-A', snapshot: older, resolution: false });
+      await settle(network);
+
+      // Assert: one copy went back, the first window's own, and the second window now holds it, with nobody flagged.
+      expect([
+        offers,
+        second.hub.document(MAP).toJson(),
+        second.hub.lineage(MAP),
+        first.hub.isConflicted(MAP) || second.hub.isConflicted(MAP),
+      ])
+        .toStrictEqual([
+          [ [ 'window-A', 'window-B', first.hub.lineage(MAP) ] ],
+          first.hub.document(MAP).toJson(),
+          first.hub.lineage(MAP),
+          false,
+        ]);
+    });
+
+    it('hands nothing back for a copy offered at its own state, so two windows never trade the same copy', async () =>
+    {
+      // Arrange: an offer of exactly the copy the first window holds.
+      const { network, first } = await buildPair();
+      const same = first.hub.snapshot(MAP);
+      const stranger = network.open('jmz-sync');
+      const offers: unknown[] = [];
+      stranger.addEventListener('message', event =>
+      {
+        if ((event.data as { type: string }).type === 'offer')
+        {
+          offers.push(event.data);
+        }
+      });
+
+      // Act.
+      stranger.postMessage({ type: 'offer', from: 'window-B', to: 'window-A', snapshot: same, resolution: false });
+      await settle(network);
+
+      // Assert.
+      expect([ offers, first.hub.lineage(MAP), first.hub.isConflicted(MAP) ])
+        .toStrictEqual([ [], same.lineage, false ]);
     });
 
     it('keeps both copies and flags both windows when a stale window\'s edit meets unsaved work', async () =>
