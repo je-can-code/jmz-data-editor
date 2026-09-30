@@ -402,21 +402,96 @@ describe('MapTreeService', () =>
         .toStrictEqual([ 'write 6', fileFor(6) ]);
     });
 
-    it('keeps a held map\'s unsaved edits in what the undo writes back, from its content since its file is older', async () =>
+    /**
+     * Opens the cave here and gives it an edit that is never saved, as a map being worked on when it is deleted.
+     * @param {DocumentHub} hub The hub.
+     */
+    const editCaveUnsaved = async (hub: DocumentHub) =>
     {
-      // Arrange.
-      const { service, hub, maps, writes } = buildService();
       await hub.load('map:5');
       hub.edit('Rename map', [ mapHistoryKey(5) ], tx => tx.set('map:5', [ 'displayName' ], 'Edited, never saved'));
+    };
+
+    it('brings a map deleted with unsaved edits back on undo with its history, the edits still unsaved and its file as it was', async () =>
+    {
+      // Arrange.
+      const { service, hub, texts, writes } = buildService();
+      await editCaveUnsaved(hub);
       await service.remove([ 5 ]);
       writes.length = 0;
 
       // Act.
       succeeded(await service.undo());
 
+      // Assert: the disk gets back exactly what it had, and the edit comes back as an edit, not as a save.
+      expect([ writes, texts.get(5), hub.map('map:5').property('displayName'), hub.isDirty('map:5'), hub.history(mapHistoryKey(5)).rows.map(row => row.label) ])
+        .toStrictEqual([ [ 'restore 5', 'write tree' ], oddText(fileFor(5)), 'Edited, never saved', true, [ 'Rename map' ] ]);
+    });
+
+    it('lets the map\'s own history undo its edit once the delete is undone, leaving it clean', async () =>
+    {
+      // Arrange.
+      const { service, hub } = buildService();
+      await editCaveUnsaved(hub);
+      await service.remove([ 5 ]);
+      succeeded(await service.undo());
+
+      // Act.
+      const undone = hub.undo(mapHistoryKey(5));
+
       // Assert.
-      expect([ maps.get(5)?.displayName, writes[0] ])
-        .toStrictEqual([ 'Edited, never saved', 'write 5' ]);
+      expect([ undone.ok, hub.map('map:5').property('displayName'), hub.isDirty('map:5') ])
+        .toStrictEqual([ true, 'file 5', false ]);
+    });
+
+    it('takes a map with unsaved edits away again on redo, and brings it back on undo still unsaved', async () =>
+    {
+      // Arrange.
+      const { service, hub, maps, texts } = buildService();
+      await editCaveUnsaved(hub);
+      await service.remove([ 5 ]);
+      succeeded(await service.undo());
+
+      // Act.
+      succeeded(await service.redo());
+      const afterRedo = [ hub.has('map:5'), maps.has(5) ];
+      succeeded(await service.undo());
+
+      // Assert.
+      expect([ afterRedo, hub.map('map:5').property('displayName'), hub.isDirty('map:5'), texts.get(5) ])
+        .toStrictEqual([ [ false, false ], 'Edited, never saved', true, oddText(fileFor(5)) ]);
+    });
+
+    it('refuses to redo a delete once the map it brought back has been edited again, and changes nothing', async () =>
+    {
+      // Arrange.
+      const { service, hub, maps } = buildService();
+      await editCaveUnsaved(hub);
+      await service.remove([ 5 ]);
+      succeeded(await service.undo());
+      hub.edit('Rename map', [ mapHistoryKey(5) ], tx => tx.set('map:5', [ 'displayName' ], 'Edited again'));
+
+      // Act.
+      const outcome = await service.redo();
+
+      // Assert.
+      expect([ outcome, hub.map('map:5').property('displayName'), maps.has(5) ])
+        .toStrictEqual([ { ok: false, message: '"Delete "Cave"" cannot redo: map 5 has changed since, and those changes would be lost.' }, 'Edited again', true ]);
+    });
+
+    it('holds a map it let go of again, edits and history and all, when its delete cannot be written through', async () =>
+    {
+      // Arrange.
+      const { service, hub, maps, failing } = buildService();
+      await editCaveUnsaved(hub);
+      failing.add('delete 5');
+
+      // Act.
+      const outcome = await service.remove([ 5 ]);
+
+      // Assert.
+      expect([ outcome.ok, maps.has(5), hub.map('map:5').property('displayName'), hub.isDirty('map:5'), hub.history(mapHistoryKey(5)).rows.map(row => row.label) ])
+        .toStrictEqual([ false, true, 'Edited, never saved', true, [ 'Rename map' ] ]);
     });
 
     it('writes a held map back byte for byte when it had no unsaved edits', async () =>

@@ -1,6 +1,7 @@
 import type { DocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { Patch } from '../model/patches.ts';
+import type { DocumentSnapshot } from './DocumentHub.ts';
 import { homeDocumentOf, type HistoryKey } from './historyKeys.ts';
 
 /**
@@ -23,6 +24,11 @@ type StepEntry = {
  * A side may also carry the file's exact text, when the step read it: putting the file back then writes those very
  * bytes, so a delete that is undone leaves the file exactly as it was, key order and spelling included, where its
  * content alone would come back in the server's layout.
+ *
+ * The before side may also carry the copy of the document the window held when the step was made, histories and
+ * unsaved edits included ({@code beforeHeld}). The file is what the disk had; the held copy is what the author was
+ * working on. Putting the file back then brings that copy back too, so undoing the delete of a map being edited
+ * returns it with its own undo history, and with its unsaved edits still unsaved rather than written to disk.
  */
 type FileEffect = {
   readonly document: DocumentKey;
@@ -30,6 +36,7 @@ type FileEffect = {
   readonly after: JsonValue | null;
   readonly beforeText?: string;
   readonly afterText?: string;
+  readonly beforeHeld?: DocumentSnapshot;
 };
 
 /**

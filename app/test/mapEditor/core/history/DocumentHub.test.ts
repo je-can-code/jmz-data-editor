@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   diskOperationId,
   DocumentHub,
+  type DocumentSnapshot,
   type DocumentStore,
   type HubEvent,
   type RemoteOperation,
@@ -472,6 +473,30 @@ describe('DocumentHub', () =>
       const [ removed, created ] = step.files ?? [];
       expect([ removed.beforeText, Object.keys(removed), Object.keys(created) ])
         .toStrictEqual([ '{"exact":"bytes"}', [ 'document', 'before', 'after', 'beforeText' ], [ 'document', 'before', 'after' ] ]);
+    });
+
+    it('carries the copy the window held beside a removed file, copied, and only where there was one', () =>
+    {
+      // Arrange: map 1 is held here with an edit never saved.
+      const hub = buildTreeHub();
+      hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
+      hub.edit('Rename map', [ 'map:1' ], tx => tx.set('map:1', [ 'displayName' ], 'Unsaved'));
+      const held = hub.snapshot('map:1');
+
+      // Act.
+      const step = hub.edit('Delete map', [ 'tree' ], tx =>
+      {
+        tx.set('mapinfos', [ 1 ], null);
+        tx.file('map:1', buildMapJson() as unknown as JsonValue, null, { beforeHeld: held });
+        tx.file('map:2', null, buildMapJson() as unknown as JsonValue);
+      }) as HistoryStep;
+      (held.content as { displayName: string }).displayName = 'changed after the step';
+
+      // Assert.
+      const [ removed, created ] = step.files ?? [];
+      const carried = removed.beforeHeld as DocumentSnapshot;
+      expect([ (carried.content as { displayName: string }).displayName, carried.histories.map(({ key }) => key), Object.keys(created) ])
+        .toStrictEqual([ 'Unsaved', [ 'map:1' ], [ 'document', 'before', 'after' ] ]);
     });
 
     it('leaves a step without files exactly its old shape', () =>
