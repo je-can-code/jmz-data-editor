@@ -357,9 +357,88 @@ const exactWrites = (plan: PlacementPlan, tileId: number): readonly LayerWrite[]
 };
 
 /**
+ * Where one painted tile ended up: its cell, the layer it landed on, and the tile there once shaped. The ghost preview
+ * draws these before a click, so it shows the layer each tile will land on and the shape it will take.
+ */
+type TileLanding = {
+  readonly x: number;
+  readonly y: number;
+  readonly layer: TileLayerIndex;
+  readonly tileId: number;
+};
+
+/**
+ * What painting a stroke comes to: the cells to change, and where each painted tile landed.
+ */
+type PaintedStroke = {
+  /**
+   * The cells to change, in index order, ready for the map document's tiles patch.
+   */
+  readonly changes: CellChange[];
+
+  /**
+   * Where each tile landed, in stroke order; B's empty tile, which only clears, lands nowhere and is left out.
+   */
+  readonly landings: TileLanding[];
+};
+
+/**
  * Paints tiles as one stroke: places each in turn by {@link planPlacement}, then shapes every autotile the stroke
- * reached against the finished result. Placements beyond the map are skipped. With exact shaping (Shift held) each
- * tile is written exactly as given and nothing is reshaped, neither the tiles painted nor their neighbours.
+ * reached against the finished result, and reports where each tile landed. Placements beyond the map are skipped.
+ * With exact shaping (Shift held) each tile is written exactly as given and nothing is reshaped, neither the tiles
+ * painted nor their neighbours.
+ * @param {TileGrid} grid The map's tile data as it stands.
+ * @param {readonly TilePlacement[]} placements The tiles to paint, in stroke order.
+ * @param {TilesetLayering} layering The tileset's mode and marks.
+ * @param {LayerChoice} choice The layer choice the stroke paints with.
+ * @param {Shaping} shaping Whether autotiles are shaped as they are painted; they are unless told otherwise.
+ * @returns {PaintedStroke} The cells to change and where each tile landed.
+ */
+const paintStroke = (
+  grid: TileGrid,
+  placements: readonly TilePlacement[],
+  layering: TilesetLayering,
+  choice: LayerChoice,
+  shaping: Shaping = 'auto',
+): PaintedStroke =>
+{
+  const draft = new TileDraft(grid);
+  const touched: CellPosition[] = [];
+  const landed: (readonly [ number, number, TileLayerIndex ])[] = [];
+  placements.forEach(({ x, y, tileId }) =>
+  {
+    if (isInside(draft, x, y) === false)
+    {
+      return;
+    }
+
+    // each placement reads the draft, so a stroke that crosses a cell twice builds on its own first pass.
+    const plan = planPlacement(draft, x, y, tileId, layering, choice);
+    const writes = shaping === 'exact'
+      ? exactWrites(plan, tileId)
+      : plan.writes;
+    writes.forEach(([ z, value ]) => draft.setTile(x, y, z, value));
+    touched.push([ x, y ]);
+    if (plan.landing !== -1)
+    {
+      landed.push([ x, y, plan.landing ]);
+    }
+  });
+
+  if (shaping === 'auto')
+  {
+    reshapeAround(draft, touched, layering.mode);
+  }
+
+  // read each landing back once every shape is settled, so it shows the shape the tile will really take.
+  return {
+    changes: draft.changes(),
+    landings: landed.map(([ x, y, layer ]) => ({ x, y, layer, tileId: draft.tileAt(x, y, layer) })),
+  };
+};
+
+/**
+ * Paints tiles as one stroke, as {@link paintStroke} does, answering only with the cells to change.
  * @param {TileGrid} grid The map's tile data as it stands.
  * @param {readonly TilePlacement[]} placements The tiles to paint, in stroke order.
  * @param {TilesetLayering} layering The tileset's mode and marks.
@@ -375,30 +454,7 @@ const paintTiles = (
   shaping: Shaping = 'auto',
 ): CellChange[] =>
 {
-  const draft = new TileDraft(grid);
-  const touched: CellPosition[] = [];
-  placements.forEach(({ x, y, tileId }) =>
-  {
-    if (isInside(draft, x, y) === false)
-    {
-      return;
-    }
-
-    // each placement reads the draft, so a stroke that crosses a cell twice builds on its own first pass.
-    const plan = planPlacement(draft, x, y, tileId, layering, choice);
-    const writes = shaping === 'exact'
-      ? exactWrites(plan, tileId)
-      : plan.writes;
-    writes.forEach(([ z, value ]) => draft.setTile(x, y, z, value));
-    touched.push([ x, y ]);
-  });
-
-  if (shaping === 'auto')
-  {
-    reshapeAround(draft, touched, layering.mode);
-  }
-
-  return draft.changes();
+  return paintStroke(grid, placements, layering, choice, shaping).changes;
 };
 
 /**
@@ -489,5 +545,5 @@ const swapTiles = (
   return draft.changes();
 };
 
-export { paintTiles, planPlacement, strokeLayerChoice, swapTiles };
-export type { LayerChoice, LayerWrite, PlacementPlan, Shaping, TilePlacement, TilesetLayering };
+export { paintStroke, paintTiles, planPlacement, strokeLayerChoice, swapTiles };
+export type { LayerChoice, LayerWrite, PaintedStroke, PlacementPlan, Shaping, TileLanding, TilePlacement, TilesetLayering };
