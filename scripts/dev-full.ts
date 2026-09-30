@@ -1,5 +1,8 @@
 /// <reference types="bun-types" />
 
+// the NW.js shell's rules for turning the API base and UI URL into the server's configuration and the UI's port.
+import shellRules from "../nw-app/shellRules.js";
+
 type HealthEnvelope = {
   path: string;
   error?: string;
@@ -13,6 +16,7 @@ type HealthEnvelope = {
 type RunnerOptions = {
   apiBase: string;
   projectRoot: string;
+  uiUrl: string;
 };
 
 function parseArgs(argv: string[]): Partial<RunnerOptions>
@@ -34,6 +38,12 @@ function parseArgs(argv: string[]): Partial<RunnerOptions>
       i++;
       continue;
     }
+    if (a === "--ui-url")
+    {
+      out.uiUrl = String(argv[i + 1] ?? "");
+      i++;
+      continue;
+    }
     if (a === "--help" || a === "-h")
     {
       // eslint-disable-next-line no-console
@@ -44,6 +54,7 @@ function parseArgs(argv: string[]): Partial<RunnerOptions>
           "Options:",
           "  --project-root <path>   (defaults to JMZ_PROJECT_ROOT)",
           "  --api-base <origin>     (defaults to VITE_JMZ_API_BASE or http://127.0.0.1:8080)",
+          "  --ui-url <origin>       (defaults to http://127.0.0.1:3000; the API allows only this page)",
           "",
           "Examples:",
           "  JMZ_PROJECT_ROOT=/games/chef-adventure bun run dev",
@@ -225,8 +236,15 @@ async function main(): Promise<void>
     ?? "http://127.0.0.1:8080",
   );
 
+  const uiUrl = normalizeApiBase(overrides.uiUrl ?? "http://127.0.0.1:3000");
+
+  // the server listens where the UI will look for it, and allows the UI's page and nothing else.
+  const serverEnvironment = shellRules.serverEnvironment(apiBase, uiUrl);
+
   // eslint-disable-next-line no-console
   console.log(`[dev-full] apiBase=${apiBase}`);
+  // eslint-disable-next-line no-console
+  console.log(`[dev-full] uiUrl=${uiUrl}`);
   // eslint-disable-next-line no-console
   console.log(`[dev-full] JMZ_PROJECT_ROOT=${projectRoot}`);
 
@@ -288,6 +306,7 @@ async function main(): Promise<void>
         cwd: "server",
         env: {
           ...process.env,
+          ...serverEnvironment,
           JMZ_PROJECT_ROOT: projectRoot,
         },
         stdout: "inherit",
@@ -313,8 +332,9 @@ async function main(): Promise<void>
       return;
     }
 
+    // the UI's dev server runs on the port its URL names, so the page lands on the origin the API allows.
     ui = Bun.spawn(
-      [ "bun", "run", "start" ],
+      [ "bun", "run", "start", "--port", String(shellRules.uiPort(uiUrl)), "--strictPort" ],
       {
         cwd: "app",
         env: {

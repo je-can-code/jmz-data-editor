@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"jmz-data-editor/server/internal/api"
 	"jmz-data-editor/server/internal/middleware"
@@ -9,32 +10,105 @@ import (
 	"jmz-data-editor/server/internal/placements"
 	"jmz-data-editor/server/internal/store"
 	"jmz-data-editor/server/internal/watch"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
+	"strings"
 )
 
-// listenAddress is where the API listens: the loopback address only, on the port the UI expects
-// (nw-app/main.js and the dev scripts both default to http://127.0.0.1:8080).
+// listenAddress is where the API listens unless told otherwise: the loopback address only, on the port
+// the UI expects (nw-app/main.js and the dev scripts both default to http://127.0.0.1:8080).
 const listenAddress = "127.0.0.1:8080"
 
+// defaultOrigins are the pages allowed to call the API unless told otherwise: the UI's Vite server on
+// its default port, under either name for the loopback address.
+var defaultOrigins = []string{"http://127.0.0.1:3000", "http://localhost:3000"}
+
+// serverConfig is where the API listens and which pages may call it. The NW.js shell and the dev runner
+// pass both in, from the same --api-base and --ui-url that tell the UI where everything is, so a UI
+// moved to another port is allowed and nothing else is.
+type serverConfig struct {
+	// address is the host and port to listen on, always a loopback name.
+	address string
+
+	// origins are the page origins allowed to call the API from a browser, compared exactly.
+	origins []string
+}
+
+// configFrom reads the server's configuration: JMZ_API_ADDRESS, the host and port to listen on, and
+// JMZ_UI_ORIGINS, the comma-separated page origins allowed to call it. Either one unset keeps today's
+// default. The address must be a loopback name, because the API reads and writes the game's files and
+// must never be reachable from another machine.
+func configFrom(getenv func(string) string) (serverConfig, error) {
+	address := strings.TrimSpace(getenv("JMZ_API_ADDRESS"))
+	if address == "" {
+		address = listenAddress
+	}
+
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || port == "" {
+		return serverConfig{}, fmt.Errorf("JMZ_API_ADDRESS must be host:port, not %q", address)
+	}
+	if host != "127.0.0.1" && strings.EqualFold(host, "localhost") == false {
+		return serverConfig{}, fmt.Errorf("JMZ_API_ADDRESS must use 127.0.0.1 or localhost, not %q", host)
+	}
+
+	origins := []string{}
+	for _, origin := range strings.Split(getenv("JMZ_UI_ORIGINS"), ",") {
+		origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+		if origin == "" {
+			continue
+		}
+		parsed, parseErr := url.Parse(origin)
+		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Path != "" {
+			return serverConfig{}, errors.New("JMZ_UI_ORIGINS must list origins such as http://127.0.0.1:3000, not " + origin)
+		}
+		origins = append(origins, origin)
+	}
+	if len(origins) == 0 {
+		origins = defaultOrigins
+	}
+
+	return serverConfig{address: address, origins: origins}, nil
+}
+
+// policy is who may talk to the API: pages from the configured origins, and requests addressed to the
+// API's own address, under either loopback name for its port.
+func (config serverConfig) policy() middleware.Policy {
+	_, port, _ := net.SplitHostPort(config.address)
+	hosts := []string{config.address}
+	for _, name := range []string{"127.0.0.1", "localhost"} {
+		alias := net.JoinHostPort(name, port)
+		if strings.EqualFold(alias, config.address) == false {
+			hosts = append(hosts, alias)
+		}
+	}
+
+	return middleware.Policy{AllowedOrigins: config.origins, AllowedHosts: hosts}
+}
+
 func main() {
+	config, err := configFrom(os.Getenv)
+	if err != nil {
+		panic(err)
+	}
+
 	// one change stream for the whole server: every window's saves pass through it.
 	changes := watch.NewHub("data", store.EditorDataFolder)
 
-	fmt.Println("Server running on http://localhost:8080")
-	err := http.ListenAndServe(listenAddress, routes(changes, accessPolicy()))
+	fmt.Printf("Server running on http://%s\n", config.address)
+	err = http.ListenAndServe(config.address, routes(changes, config.policy()))
 	if err != nil {
 		panic(err)
 	}
 }
 
-// accessPolicy is who may talk to the API: pages from the UI's Vite server, which app/vite.config.ts
-// pins to port 3000 and nw-app/main.js opens as http://127.0.0.1:3000, under either name for the
-// loopback address; and requests addressed to the API by either of those names on its own port.
+// accessPolicy is the policy the server keeps when nothing configures it: pages from the UI's Vite
+// server on port 3000 under either loopback name, and requests addressed to the API by either of those
+// names on port 8080.
 func accessPolicy() middleware.Policy {
-	return middleware.Policy{
-		AllowedOrigins: []string{"http://127.0.0.1:3000", "http://localhost:3000"},
-		AllowedHosts:   []string{listenAddress, "localhost:8080"},
-	}
+	return serverConfig{address: listenAddress, origins: defaultOrigins}.policy()
 }
 
 // routes registers every endpoint the API serves, behind the access policy.

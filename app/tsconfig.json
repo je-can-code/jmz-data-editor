@@ -37,6 +37,9 @@
       ],
       "@types/*": [
         "types/*"
+      ],
+      "@mapEditor/*": [
+        "mapEditor/*"
       ]
     },
     "target": "ESNext",
