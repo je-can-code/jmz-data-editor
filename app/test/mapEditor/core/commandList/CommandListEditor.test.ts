@@ -26,13 +26,14 @@ describe('CommandListEditor', () =>
   const PATH = [ 'events', 1, 'pages', 0, 'list' ] as const;
 
   /**
-   * A hub holding a map whose event 1 runs the mixed list, and an editor on that list.
+   * A hub holding a map whose event 1 runs a list (the mixed list unless another is given), and an editor on it.
+   * @param {RmmzEventCommand[]} list The list event 1 runs.
    * @returns {{ hub: DocumentHub, editor: CommandListEditor, catalog: CommandCatalog }} The pieces.
    */
-  const build = () =>
+  const build = (list: RmmzEventCommand[] = buildMixedList()) =>
   {
     const map: RmmzMap = buildMapJson();
-    (map.events[1] as NonNullable<RmmzMap['events'][number]>).pages[0].list = buildMixedList();
+    (map.events[1] as NonNullable<RmmzMap['events'][number]>).pages[0].list = list;
     const hub = new DocumentHub({ clientId: 'window-a' });
     hub.adopt('map:1', map as never);
     const catalog = new CommandCatalog();
@@ -347,6 +348,38 @@ describe('CommandListEditor', () =>
 
   describe('blockSpanAt and editBlock', () =>
   {
+    it('spans a merged run of Show Choices from either of its openers, and stops at anything between', () =>
+    {
+      // Arrange: two Show Choices back to back, a wait, then a third on its own.
+      const { editor } = build([
+        cmd(102, 0, [ [ 'A' ], -1, 0, 2, 0 ]), cmd(402, 0, [ 0, 'A' ]), cmd(0, 1), cmd(404, 0),
+        cmd(102, 0, [ [ 'B' ], -1, -1, 2, 0 ]), cmd(402, 0, [ 0, 'B' ]), cmd(0, 1), cmd(404, 0),
+        cmd(230, 0, [ 5 ]),
+        cmd(102, 0, [ [ 'C' ], -1, 0, 2, 0 ]), cmd(402, 0, [ 0, 'C' ]), cmd(0, 1), cmd(404, 0),
+        cmd(0, 0),
+      ]);
+
+      // Act.
+      const spans = [ editor.blockSpanAt(0), editor.blockSpanAt(4), editor.blockSpanAt(9) ];
+
+      // Assert.
+      expect(spans)
+        .toStrictEqual([ { start: 0, end: 8 }, { start: 0, end: 8 }, { start: 9, end: 13 } ]);
+    });
+
+    it('gives no span to a branch row, a line, a block no editor reshapes, or past the end', () =>
+    {
+      // Arrange: the mixed list's else (6), a choice (14), its show text (0) and the loop in the else (7).
+      const { editor } = build();
+
+      // Act.
+      const spans = [ 6, 14, 0, 7, 99 ].map(index => editor.blockSpanAt(index));
+
+      // Assert.
+      expect(spans)
+        .toStrictEqual([ null, null, null, null, null ]);
+    });
+
     it('hands out a block\'s span and replaces the block with an edited one as one step, at its own indent', () =>
     {
       // Arrange: a block editor hands back the branch without its else, at the wrong indent.

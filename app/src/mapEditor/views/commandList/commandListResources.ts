@@ -29,13 +29,13 @@ const held = new WeakMap<MapEditorApi, { names: Promise<DatabaseNamesJson | null
 const NO_USAGE: ReadonlyMap<string, number> = new Map();
 
 /**
- * Asks the server for the names and counts once, keeping the answers for every list after. Neither is needed for a
- * list to work, only to read better and rank better, so a failure leaves ids as numbers and the search in name
- * order rather than stopping anything.
+ * Asks the server for the names and counts once, keeping the answers for every list after, and for the command
+ * editors' pickers, which read the same names. Neither is needed for a list to work, only to read better and rank
+ * better, so a failure leaves ids as numbers and the search in name order rather than stopping anything.
  * @param {MapEditorApi} api The server.
  * @returns {{ names: Promise<DatabaseNamesJson | null>, usage: Promise<Map<string, number>> }} The answers.
  */
-const resourcesOf = (api: MapEditorApi) =>
+const commandListResourcesOf = (api: MapEditorApi) =>
 {
   const known = held.get(api);
   if (known !== undefined)
@@ -70,7 +70,7 @@ const useCommandListResources = (api: MapEditorApi | null): CommandListResources
 
     // answers arriving after the list has gone are dropped.
     let live = true;
-    const asked = resourcesOf(api);
+    const asked = commandListResourcesOf(api);
     asked.names.then(value =>
     {
       if (live)
@@ -145,5 +145,5 @@ const createSoundPlayer = (createAudio: (url: string) => HTMLAudioElement): Soun
  */
 const SoundPlayerContext = createContext<SoundPlayer>(createSoundPlayer(url => new Audio(url)));
 
-export { createSoundPlayer, SoundPlayerContext, useCommandListResources };
+export { commandListResourcesOf, createSoundPlayer, SoundPlayerContext, useCommandListResources };
 export type { CommandListResources, SoundPlayer, SoundSettings };

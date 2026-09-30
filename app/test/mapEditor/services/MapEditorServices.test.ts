@@ -164,6 +164,39 @@ describe('MapEditorServices', () =>
       .toStrictEqual([ 'window-a', { kind: 'event', mapId: 1, eventId: 3 }, 'window-a', 'window-a', BUILT_IN_ENTRIES.map(entry => entry.id), [] ]);
   });
 
+  it('wires command editing: every hand-built editor registered, and the plugin headers read into the catalog once a list asks', async () =>
+  {
+    // Arrange: a server answering the plugin list, one plugin's source, and everything else in the envelope.
+    const { fetch, requests } = stubFetch(request =>
+    {
+      if (request.url.endsWith('/api/plugin-metadata'))
+      {
+        return new Response('var $plugins = [\n{"name":"j/time/J-TIME","status":true,"description":"","parameters":{}}\n];');
+      }
+
+      return request.url.endsWith('/api/plugin-source/j/time/J-TIME')
+        ? new Response('/*:\n * @command stopTime\n * @text Stop TIME\n */')
+        : envelope({});
+    });
+    const { environment } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    const askedBefore = requests.length;
+    const handBuilt = [ 101, 102, 111, 122, 201, 205, 355, 357 ]
+      .every(code => services.commandEditors.editorFor(services.catalog.resolve({ code, indent: 0, parameters: [] })) !== null);
+
+    // Act.
+    await services.loadCommandResources();
+
+    // Assert.
+    expect([
+      askedBefore,
+      handBuilt,
+      services.catalog.entry('plugin:j/time/J-TIME:stopTime')?.name,
+      services.pluginHeaders.library().headers().map(header => header.plugin),
+    ])
+      .toStrictEqual([ 0, true, 'Plugin: J-TIME Stop TIME', [ 'j/time/J-TIME' ] ]);
+  });
+
   it('opens a document from the file when no other window holds it, and hands back the same one after', async () =>
   {
     // Arrange.

@@ -8,6 +8,7 @@ import '@testing-library/jest-dom/vitest';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { CommandEditorRegistry } from '../../../../src/mapEditor/core/commands/CommandEditorRegistry.ts';
 import { registerBuiltInCommands } from '../../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
+import { PluginHeaderStore } from '../../../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { DocumentHub, type DocumentStore } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { commonEventHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
@@ -54,7 +55,15 @@ describe('CommonEventsView', () =>
     const catalog = new CommandCatalog();
     registerBuiltInCommands(catalog);
     const openDocument = vi.fn(options.open ?? (async () => hub.load('common-events')));
-    const services = { hub, catalog, commandEditors: new CommandEditorRegistry(), api: null, openDocument } as unknown as MapEditorServices;
+    const services = {
+      hub,
+      catalog,
+      commandEditors: new CommandEditorRegistry(),
+      api: null,
+      pluginHeaders: new PluginHeaderStore(),
+      loadCommandResources: async () => undefined,
+      openDocument,
+    } as unknown as MapEditorServices;
     render(
       <MapEditorServicesProvider services={services}>
         <SoundPlayerContext.Provider value={vi.fn()}>

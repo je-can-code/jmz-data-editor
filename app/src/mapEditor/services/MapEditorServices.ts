@@ -6,6 +6,7 @@ import { installCloseGuard, unsavedOnlyHere, type CloseTarget } from '../core/cl
 import { registerBuiltInCommands } from '../core/commands/builtin/builtInCommands.ts';
 import { CommandCatalog } from '../core/commands/CommandCatalog.ts';
 import { CommandEditorRegistry } from '../core/commands/CommandEditorRegistry.ts';
+import type { PluginHeaderStore } from '../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { DocumentHub } from '../core/history/DocumentHub.ts';
 import type { DocumentKey } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
@@ -15,6 +16,7 @@ import { recheckCleanDocuments, routeFileChange } from '../core/sync/fileChangeR
 import { SharedFileChangeFeed, type LockManagerLike } from '../core/sync/SharedFileChangeFeed.ts';
 import { SyncPeer } from '../core/sync/SyncPeer.ts';
 import { parseMapEditorView, type MapEditorView } from '../views/mapEditorViews.ts';
+import { wireCommandEditing } from './commandEditing.ts';
 
 /**
  * Everything one map editor window runs on. Later packages reach these through the services context rather than
@@ -57,14 +59,28 @@ type MapEditorServices = {
   readonly catalog: CommandCatalog;
 
   /**
-   * The hand-built command editors.
+   * The hand-built command editors, all eight registered.
    */
   readonly commandEditors: CommandEditorRegistry;
+
+  /**
+   * The plugin headers read so far. The plugin command editor reads them, and the catalog gains an entry for every
+   * command they declare, so a list redraws when they change.
+   */
+  readonly pluginHeaders: PluginHeaderStore;
 
   /**
    * The event kinds and plugin modules.
    */
   readonly modules: PluginModuleRegistry;
+
+  /**
+   * Reads what command editing needs from the server, once per window however often it is asked: the plugin
+   * headers, whose commands join the catalog, and the database names the editors' pickers offer. A window that
+   * never shows a command list never asks. Never rejects.
+   * @returns {Promise<void>} Settles once both have been read.
+   */
+  loadCommandResources(): Promise<void>;
 
   /**
    * Holds a document: the live copy from another window when one holds it, the file otherwise. It first gives
@@ -191,6 +207,8 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   const sync = new SyncPeer({ hub, channel: environment.openChannel(CHANNEL_NAMES.sync) });
   const catalog = new CommandCatalog();
   registerBuiltInCommands(catalog);
+  const commandEditors = new CommandEditorRegistry();
+  const commandEditing = wireCommandEditing(api, catalog, commandEditors);
 
   // the change stream is shared by every window, and only exists with a server to stream from.
   const feed = api === null
@@ -219,8 +237,10 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     sync,
     shell: environment.shell,
     catalog,
-    commandEditors: new CommandEditorRegistry(),
+    commandEditors,
+    pluginHeaders: commandEditing.headers,
     modules: new PluginModuleRegistry(catalog),
+    loadCommandResources: commandEditing.load,
     openDocument: async (key: DocumentKey) =>
     {
       if (hub.has(key) === false)

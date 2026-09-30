@@ -1,4 +1,4 @@
-import React, { useContext, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, Box, Divider, Menu, MenuItem } from '@mui/material';
 import type { CommandEditorRegistry } from '../../core/commands/CommandEditorRegistry.ts';
 import type { CommandCatalogEntry } from '../../core/commands/catalogTypes.ts';
@@ -288,8 +288,17 @@ const DropMarker = (props: { readonly indent: number }) =>
 const CommandList = (props: CommandListProps) =>
 {
   const { documentKey, path, histories, label } = props;
-  const { hub, catalog, commandEditors, api } = useMapEditorServices();
+  const { hub, catalog, commandEditors, api, pluginHeaders, loadCommandResources } = useMapEditorServices();
   const playSound = useContext(SoundPlayerContext);
+
+  // the plugin headers and the names the editors pick from are read once a list shows; the list redraws when the
+  // headers land, by which time the catalog holds their commands and the names are in place.
+  useEffect(() =>
+  {
+    loadCommandResources();
+  }, [ loadCommandResources ]);
+  const subscribeToHeaders = useCallback((listener: () => void) => pluginHeaders.subscribe(listener), [ pluginHeaders ]);
+  useSyncExternalStore(subscribeToHeaders, () => pluginHeaders.library());
   const { names, usage } = useCommandListResources(api);
   const lookup = useMemo(() => nameLookup(names), [ names ]);
   const pathKey = path.join('/');

@@ -1,5 +1,6 @@
 import type { CommandCatalogEntry } from '../commands/catalogTypes.ts';
 import type { CommandCatalog } from '../commands/CommandCatalog.ts';
+import { blockSpanAt, type CommandSpan } from '../commands/editors/blockSpan.ts';
 import type { CommandDraft } from '../commands/fieldValues.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import type { HistoryKey } from '../history/historyKeys.ts';
@@ -8,7 +9,6 @@ import type { DocumentKey } from '../model/documentKeys.ts';
 import type { PatchPath } from '../model/patches.ts';
 import type { RmmzEventCommand } from '../model/rmmzTypes.ts';
 import { reconcileBlock, setElseBranch } from './blockReconcile.ts';
-import { blockSpanOf, type BlockSpan } from './blockSpans.ts';
 import { readClipboard, writeClipboard, type ClipboardRead } from './commandClipboard.ts';
 import {
   catalogStructure,
@@ -298,24 +298,27 @@ class CommandListEditor
   }
 
   /**
-   * Finds the whole block the editor of a block's opener works on: a conditional branch through its end, or a
-   * Show Choices list across the blocks HIME_LargeChoices merges.
+   * Finds the whole block the editor of a block's opener works on, exactly as the hand-built editors find it
+   * ({@code blockSpanAt}): a conditional branch through its end, or a Show Choices list across every block
+   * HIME_LargeChoices merges with it, from whichever of them the row opens.
    * @param {number} index The opener's index.
-   * @returns {BlockSpan | null} The span, or null when the command opens no such block.
+   * @returns {CommandSpan | null} The span, or null when the row opens no such block.
    */
-  blockSpanAt(index: number): BlockSpan | null
+  blockSpanAt(index: number): CommandSpan | null
   {
-    return blockSpanOf(this.commands(), this.locate(index));
+    return this.locate(index)?.role === 'opener'
+      ? blockSpanAt(this.commands(), index)
+      : null;
   }
 
   /**
    * Replaces a whole block with an edited version, as the editors that change a block's shape hand it back (Show
    * Choices adding a choice, Conditional Branch taking its else away). The block keeps its indent.
-   * @param {BlockSpan} span Where the block is.
+   * @param {CommandSpan} span Where the block is.
    * @param {readonly RmmzEventCommand[]} commands The edited block, its first command its opener.
    * @returns {HistoryStep | null} The step, or null when nothing changed.
    */
-  editBlock(span: BlockSpan, commands: readonly RmmzEventCommand[]): HistoryStep | null
+  editBlock(span: CommandSpan, commands: readonly RmmzEventCommand[]): HistoryStep | null
   {
     const list = this.commands();
     const [ first ] = commands;

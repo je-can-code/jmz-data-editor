@@ -9,6 +9,7 @@ import { WindowShell, type OpenBrowserWindow } from '../../src/core/infrastructu
 import { CommandCatalog } from '../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { CommandEditorRegistry } from '../../src/mapEditor/core/commands/CommandEditorRegistry.ts';
 import { registerBuiltInCommands } from '../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
+import { PluginHeaderStore } from '../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { DocumentHub } from '../../src/mapEditor/core/history/DocumentHub.ts';
 import { MapEditorApp } from '../../src/mapEditor/MapEditorApp.tsx';
 import type { MapEditorServices } from '../../src/mapEditor/services/MapEditorServices.ts';
@@ -112,7 +113,16 @@ describe('MapEditorApp', () =>
     registerBuiltInCommands(catalog);
     const hub = new DocumentHub({ clientId: 'window-a' });
     hub.adopt('common-events', [ null, { id: 1, list: [ { code: 230, indent: 0, parameters: [ 30 ] }, { code: 0, indent: 0, parameters: [] } ], name: 'Heal Party', switchId: 1, trigger: 0 } ]);
-    const services = { view: { kind: 'common-events' }, hub, catalog, commandEditors: new CommandEditorRegistry(), api: null, resolveConflict: vi.fn() } as unknown as MapEditorServices;
+    const services = {
+      view: { kind: 'common-events' },
+      hub,
+      catalog,
+      commandEditors: new CommandEditorRegistry(),
+      api: null,
+      pluginHeaders: new PluginHeaderStore(),
+      loadCommandResources: async () => undefined,
+      resolveConflict: vi.fn(),
+    } as unknown as MapEditorServices;
 
     // Act.
     render(

@@ -9,6 +9,7 @@ import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorA
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { CommandEditorRegistry, type CommandEditorProps } from '../../../../src/mapEditor/core/commands/CommandEditorRegistry.ts';
 import { registerBuiltInCommands } from '../../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
+import { PluginHeaderStore } from '../../../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { writeClipboard } from '../../../../src/mapEditor/core/commandList/commandClipboard.ts';
 import type { DatabaseNamesJson } from '../../../../src/mapEditor/core/commandList/databaseNames.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
@@ -95,7 +96,14 @@ describe('CommandList', () =>
     hub.adopt('map:1', map as never);
     const catalog = new CommandCatalog();
     registerBuiltInCommands(catalog);
-    const services = { hub, catalog, commandEditors: options.registry ?? new CommandEditorRegistry(), api: buildApi() } as unknown as MapEditorServices;
+    const services = {
+      hub,
+      catalog,
+      commandEditors: options.registry ?? new CommandEditorRegistry(),
+      api: buildApi(),
+      pluginHeaders: new PluginHeaderStore(),
+      loadCommandResources: async () => undefined,
+    } as unknown as MapEditorServices;
     const playSound = options.playSound ?? vi.fn<SoundPlayer>();
     render(
       <MapEditorServicesProvider services={services}>
