@@ -35,10 +35,6 @@ const MapStatus = (props: { mapId: number; held: HeldMap; focusEventId: number |
       </Typography>
       {dirty && <Chip size={'small'} label={'Unsaved'} color={'warning'} variant={'outlined'}/>}
       {focusEventId !== null && <Chip size={'small'} label={`Event ${focusEventId} picked`} color={'secondary'} variant={'outlined'}/>}
-      <Box sx={{ flex: 1 }}/>
-      <Typography variant={'caption'} color={'text.disabled'} noWrap>
-        Simplified preview
-      </Typography>
     </Stack>
   );
 };

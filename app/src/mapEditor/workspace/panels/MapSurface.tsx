@@ -1,7 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { Box } from '@mui/material';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
-import { PreviewMapRenderer } from '../renderer/PreviewMapRenderer.ts';
+import { MapView } from '../../render/MapView.tsx';
 import { usePanelWindow } from '../windowScope.tsx';
 
 /**
@@ -20,48 +20,59 @@ type MapSurfaceProps = {
 };
 
 /**
- * Draws one map inside a map panel. This is the single place the map renderer plugs into the workspace: the panel
- * gives it a host element, the document and the event to pick out, and the renderer draws on its own loop, never
- * through React. The real renderer (the renderer package's MapView) replaces the body of this component; until it
- * lands, a simplified preview built on the same renderer contract stands in.
+ * Counts the windows and documents given keys so far.
+ */
+let keyCount = 0;
+
+/**
+ * The key of every window and map document a surface has shown, by identity, forgotten with the object.
+ */
+const identityKeys = new WeakMap<object, number>();
+
+/**
+ * Finds the key standing for one object: the same for as long as the object lives, and never another object's.
+ * @param {object} value The window or the document.
+ * @returns {number} Its key.
+ */
+const identityKey = (value: object): number =>
+{
+  const known = identityKeys.get(value);
+  if (known !== undefined)
+  {
+    return known;
+  }
+
+  keyCount += 1;
+  identityKeys.set(value, keyCount);
+  return keyCount;
+};
+
+/**
+ * Draws one map inside a map panel with the real renderer, the map view: tiles, events and overlays as the game draws
+ * them, its switches and status line, panning while the right mouse button is held and zooming on the wheel. This is
+ * the single place the renderer plugs into the workspace, and it draws on its own loop, never through React. The event
+ * the panel picks out, such as the battler the data editor asked to see, shows selected with the view centred on it.
  *
- * Tearing the panel out or putting it back moves it to another window, whose frames and size the renderer must
- * follow, so the renderer starts afresh in the new window.
+ * A map view belongs to one window: its canvas, its GPU context, the size it follows and the frames it draws on all
+ * come from the document it was mounted in. Tearing the panel out or putting it back moves it to another window, so
+ * the view starts afresh there instead of drawing on for a window it has left. It starts afresh too when the panel's
+ * map comes back as a new document, so it never draws a copy the window has let go of.
  * @param {MapSurfaceProps} props The map and the event to pick out.
  * @returns {React.JSX.Element} The surface.
  */
 const MapSurface = (props: MapSurfaceProps) =>
 {
   const { document, focusEventId } = props;
-  const host = useRef<HTMLDivElement | null>(null);
-  const renderer = useRef<PreviewMapRenderer | null>(null);
   const panelWindow = usePanelWindow();
 
-  useEffect(() =>
-  {
-    const element = host.current;
-    if (element === null)
-    {
-      return undefined;
-    }
+  // a new window or a new document is a new key, which mounts a new view in place of the old one.
+  const viewKey = `${identityKey(panelWindow)}:${identityKey(document)}`;
 
-    const created = new PreviewMapRenderer();
-    created.mount(element);
-    created.setDocument(document);
-    renderer.current = created;
-    return () =>
-    {
-      created.destroy();
-      renderer.current = null;
-    };
-  }, [ document, panelWindow ]);
-
-  useEffect(() =>
-  {
-    renderer.current?.highlightEvent(focusEventId);
-  }, [ focusEventId, document, panelWindow ]);
-
-  return <Box ref={host} data-testid={'map-surface'} sx={{ position: 'absolute', inset: 0, overflow: 'hidden' }}/>;
+  return (
+    <Box data-testid={'map-surface'} sx={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+      <MapView key={viewKey} mapId={document.mapId} pickedEventId={focusEventId}/>
+    </Box>
+  );
 };
 
 export { MapSurface };
