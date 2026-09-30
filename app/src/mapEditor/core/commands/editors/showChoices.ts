@@ -1,5 +1,5 @@
 import type { RmmzEventCommand } from '../../model/rmmzTypes.ts';
-import { bodyEnd, createCommand, isWholeNumber, withIndentAndParameters } from './commandShape.ts';
+import { BODY_END_CODE, bodyEnd, createCommand, isWholeNumber, withIndentAndParameters } from './commandShape.ts';
 
 /**
  * The code of Show Choices.
@@ -279,7 +279,8 @@ const readBlock = (commands: readonly RmmzEventCommand[], start: number) =>
     return null;
   }
 
-  // a cancel branch follows the choices exactly when cancel is set to run one.
+  // a cancel branch follows the choices. MZ writes one exactly when cancel runs it; the editor also keeps one
+  // whose commands would otherwise be lost after cancel stops running it, which the engine simply never enters.
   let index = branches.next;
   let cancelBranch: CancelBranch | null = null;
   if (isAt(commands[index], CHOICE_CANCEL_CODE, opener.indent))
@@ -290,7 +291,7 @@ const readBlock = (commands: readonly RmmzEventCommand[], start: number) =>
   }
 
   const end = commands[index];
-  if (isAt(end, CHOICES_END_CODE, opener.indent) === false || (cancelBranch !== null) !== (settings.cancel === CANCEL_BRANCH))
+  if (isAt(end, CHOICES_END_CODE, opener.indent) === false || (settings.cancel === CANCEL_BRANCH && cancelBranch === null))
   {
     return null;
   }
@@ -398,14 +399,17 @@ const pointAtChoice = (choice: number, sizes: readonly number[], neutral: number
 
 /**
  * Stores the list's cancel setting across its commands. The commands keep their own stored values whenever those
- * still mean exactly what the list asks for, which is what keeps an untouched list exactly as it arrived;
- * otherwise the setting is stored canonically, with the cancel branch on the last command.
+ * still mean exactly what the list asks for, which is what keeps an untouched list exactly as it arrived.
+ * Otherwise the setting is stored canonically: running the cancel branch is stored on every command that holds
+ * one, so each of them still runs (and on the last command when none does); anything else is stored with the
+ * other commands passing.
  * @param {readonly number[]} raws Each command's stored cancel setting.
  * @param {readonly number[]} sizes Each command's number of choices.
  * @param {number} desired The list's cancel setting.
+ * @param {readonly boolean[]} holders Whether each command holds a cancel branch.
  * @returns {number[]} Each command's cancel setting.
  */
-const storeCancel = (raws: readonly number[], sizes: readonly number[], desired: number): number[] =>
+const storeCancel = (raws: readonly number[], sizes: readonly number[], desired: number, holders: readonly boolean[]): number[] =>
 {
   const fits = raws.every(raw => fitsSlots(raw, CANCEL_BRANCH));
   if (fits && mergedCancel(raws, sizes) === desired)
@@ -415,7 +419,12 @@ const storeCancel = (raws: readonly number[], sizes: readonly number[], desired:
 
   if (desired === CANCEL_BRANCH)
   {
-    return sizes.map((_size, index) => (index === sizes.length - 1 ? CANCEL_BRANCH : CANCEL_DISALLOWED));
+    const anyHolder = holders.some(holds => holds);
+    return sizes.map((_size, index) =>
+    {
+      const runs = anyHolder ? holders[index] : index === sizes.length - 1;
+      return runs ? CANCEL_BRANCH : CANCEL_DISALLOWED;
+    });
   }
 
   return desired === CANCEL_DISALLOWED
@@ -506,9 +515,41 @@ const writeBranch = (choice: ChoiceEntry, local: number, indent: number): RmmzEv
 };
 
 /**
+ * Reports whether a cancel branch holds any command besides the empty line closing it.
+ * @param {CancelBranch} branch The branch.
+ * @returns {boolean} True when it holds commands.
+ */
+const holdsCommands = (branch: CancelBranch): boolean =>
+{
+  return branch.body.some(command => command.code !== BODY_END_CODE);
+};
+
+/**
+ * Writes one command's cancel branch. A command whose stored cancel runs the branch gets its own, or a new empty
+ * one as MZ writes it. A branch whose command no longer runs it is still written while it holds commands, so an
+ * edit never loses them (the engine only enters a cancel branch when cancel runs one); an empty one is left out.
+ * @param {ChoiceBlock} block The command.
+ * @param {number} cancel Its stored cancel setting.
+ * @param {number} indent The list's indent.
+ * @returns {RmmzEventCommand[]} The branch, or nothing.
+ */
+const writeCancelBranch = (block: ChoiceBlock, cancel: number, indent: number): RmmzEventCommand[] =>
+{
+  const branch = block.cancelBranch;
+  if (branch !== null && (cancel === CANCEL_BRANCH || holdsCommands(branch)))
+  {
+    return [ branch.line, ...branch.body ];
+  }
+
+  return cancel === CANCEL_BRANCH
+    ? [ createCommand(CHOICE_CANCEL_CODE, indent, [ CHOICES_PER_COMMAND, null ]), bodyEnd(indent) ]
+    : [];
+};
+
+/**
  * Writes a Show Choices list back as the commands it is spread over: each command with its own choices and its
- * stored settings, each choice with its branch, and a cancel branch on each command whose cancel runs one. An
- * untouched list comes back exactly as it arrived.
+ * stored settings, each choice with its branch, and each command's cancel branch. An untouched list comes back
+ * exactly as it arrived.
  * @param {ChoiceListModel} model The list.
  * @returns {RmmzEventCommand[]} The commands, from the first Show Choices through the last end line.
  */
@@ -521,7 +562,8 @@ const writeChoiceList = (model: ChoiceListModel): RmmzEventCommand[] =>
     throw new Error(`the commands hold ${sizes.join('+')} choices, but the list has ${choices.length}`);
   }
 
-  const cancels = storeCancel(blocks.map(block => block.cancel), sizes, model.cancelType);
+  const holders = blocks.map(block => block.cancelBranch !== null);
+  const cancels = storeCancel(blocks.map(block => block.cancel), sizes, model.cancelType, holders);
   const defaults = storeDefault(blocks.map(block => block.defaultChoice), sizes, model.defaultType);
   const offsets = blockOffsets(sizes);
 
@@ -536,15 +578,8 @@ const writeChoiceList = (model: ChoiceListModel): RmmzEventCommand[] =>
       own.map(choice => choice.text), cancels[index], defaults[index], position, background,
     ]);
 
-    let cancel: RmmzEventCommand[] = [];
-    if (cancels[index] === CANCEL_BRANCH)
-    {
-      cancel = block.cancelBranch === null
-        ? [ createCommand(CHOICE_CANCEL_CODE, indent, [ CHOICES_PER_COMMAND, null ]), bodyEnd(indent) ]
-        : [ block.cancelBranch.line, ...block.cancelBranch.body ];
-    }
-
-    return [ opener, ...own.flatMap((choice, local) => writeBranch(choice, local, indent)), ...cancel, block.end ];
+    const branches = own.flatMap((choice, local) => writeBranch(choice, local, indent));
+    return [ opener, ...branches, ...writeCancelBranch(block, cancels[index], indent), block.end ];
   });
 };
 
@@ -630,6 +665,42 @@ const followChoice = (value: number, move: (place: number) => number | null, fal
 };
 
 /**
+ * Reads the list's cancel setting as the game runs it. A cancel pointing at an empty slot past the last choice
+ * is one the engine runs as the cancel branch (it closes the list, running whatever cancel branch there is), so
+ * an edit that reshapes the list keeps it doing exactly that rather than letting it land on a real choice or
+ * fall off into "does nothing".
+ * @param {ChoiceListModel} model The list.
+ * @returns {number} The cancel setting, with an empty slot read as the cancel branch.
+ */
+const runningCancel = (model: ChoiceListModel): number =>
+{
+  return model.cancelType >= model.choices.length
+    ? CANCEL_BRANCH
+    : model.cancelType;
+};
+
+/**
+ * Joins two cancel branches into one, the earlier's commands first, as the engine would have run them one after
+ * the other. The earlier body's closing line goes, so the joined branch closes once.
+ * @param {CancelBranch | null} earlier The branch that came first in the list.
+ * @param {CancelBranch | null} later The branch that came after it.
+ * @returns {CancelBranch | null} The joined branch, or null when neither exists.
+ */
+const joinCancelBranches = (earlier: CancelBranch | null, later: CancelBranch | null): CancelBranch | null =>
+{
+  if (earlier === null || later === null)
+  {
+    return earlier ?? later;
+  }
+
+  const last = earlier.body.at(-1);
+  const opening = last !== undefined && last.code === BODY_END_CODE
+    ? earlier.body.slice(0, -1)
+    : earlier.body;
+  return { line: earlier.line, body: [ ...opening, ...later.body ] };
+};
+
+/**
  * Changes a choice's text, and the "When" line that repeats it.
  * @param {ChoiceListModel} model The list.
  * @param {number} index The choice.
@@ -665,15 +736,16 @@ const insertChoice = (model: ChoiceListModel, index: number, text: string): Choi
     ...model,
     choices: [ ...choices.slice(0, place), added, ...choices.slice(place) ],
     blocks: spreadBlocks(model, grown),
-    cancelType: followChoice(model.cancelType, move, CANCEL_DISALLOWED),
+    cancelType: followChoice(runningCancel(model), move, CANCEL_DISALLOWED),
     defaultType: followChoice(model.defaultType, move, NO_DEFAULT),
   };
 };
 
 /**
- * Removes a choice and its branch. A command left with no choices goes, handing its cancel branch to a
- * neighbour that has none, so the branch is never lost by removing a choice. A cancel or default pointing at the
- * removed choice falls back to disallowed or none.
+ * Removes a choice and its branch. A command left with no choices goes, and its cancel branch joins its
+ * neighbour's (the command before it, or after it when it was first), in the order the engine ran them, so no
+ * command in a cancel branch is ever lost by removing a choice. A cancel or default pointing at the removed
+ * choice falls back to disallowed or none.
  * @param {ChoiceListModel} model The list.
  * @param {number} index The choice.
  * @returns {ChoiceListModel} The list without it.
@@ -691,11 +763,22 @@ const removeChoice = (model: ChoiceListModel, index: number): ChoiceListModel =>
   let kept = shrunk;
   if (shrunk[holder].size === 0 && shrunk.length > 1)
   {
-    // the neighbour before it, or after it when it was first, inherits its cancel branch if it has none.
     const heir = holder === 0 ? 1 : holder - 1;
     const orphan = shrunk[holder].cancelBranch;
     kept = shrunk
-      .map((block, at) => (at === heir && block.cancelBranch === null ? { ...block, cancelBranch: orphan } : block))
+      .map((block, at) =>
+      {
+        if (at !== heir)
+        {
+          return block;
+        }
+
+        // the heir comes after the emptied command only when that command was the first.
+        const cancelBranch = heir > holder
+          ? joinCancelBranches(orphan, block.cancelBranch)
+          : joinCancelBranches(block.cancelBranch, orphan);
+        return { ...block, cancelBranch };
+      })
       .filter((_block, at) => at !== holder);
   }
 
@@ -713,7 +796,7 @@ const removeChoice = (model: ChoiceListModel, index: number): ChoiceListModel =>
     ...model,
     choices: choices.filter((_choice, place) => place !== index),
     blocks: kept,
-    cancelType: followChoice(model.cancelType, move, CANCEL_DISALLOWED),
+    cancelType: followChoice(runningCancel(model), move, CANCEL_DISALLOWED),
     defaultType: followChoice(model.defaultType, move, NO_DEFAULT),
   };
 };
@@ -737,19 +820,21 @@ const moveChoice = (model: ChoiceListModel, from: number, to: number): ChoiceLis
   const order = choices.map((_choice, place) => place);
   const [ moved ] = order.splice(from, 1);
   order.splice(to, 0, moved);
-  const move = (old: number) => order.indexOf(old);
+
+  // an empty slot past the last choice is no choice that moves, so a setting pointing at one stays put.
+  const move = (old: number) => (old < choices.length ? order.indexOf(old) : old);
 
   return {
     ...model,
     choices: order.map(place => choices[place]),
-    cancelType: followChoice(model.cancelType, move, CANCEL_DISALLOWED),
+    cancelType: followChoice(runningCancel(model), move, CANCEL_DISALLOWED),
     defaultType: followChoice(model.defaultType, move, NO_DEFAULT),
   };
 };
 
 /**
- * Counts the commands the cancel branches hold besides the empty lines closing them, so switching the cancel
- * branch off can say what goes with it.
+ * Counts the commands the cancel branches hold besides the empty lines closing them, so the editor can say what
+ * stays behind when cancel stops running them.
  * @param {ChoiceListModel} model The list.
  * @returns {number} How many commands the cancel branches hold.
  */

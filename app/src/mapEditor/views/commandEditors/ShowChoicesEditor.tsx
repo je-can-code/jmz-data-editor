@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Alert, Box, Button, IconButton, TextField, Tooltip, Typography } from '@mui/material';
+import React, { useMemo } from 'react';
+import { Box, Button, IconButton, TextField, Tooltip, Typography } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
@@ -51,7 +51,9 @@ const choiceLabel = (index: number, text: string): string =>
 const cancelOptions = (model: ChoiceListModel) =>
 {
   const choices = model.choices.map((choice, index) => ({ value: index, label: choiceLabel(index, choice.text) }));
-  const stray = model.cancelType >= model.choices.length ? [ { value: model.cancelType, label: `Choice ${model.cancelType + 1} (empty)` } ] : [];
+  const stray = model.cancelType >= model.choices.length
+    ? [ { value: model.cancelType, label: `Choice ${model.cancelType + 1}, which is empty, so it closes the list` } ]
+    : [];
   return [ { value: CANCEL_DISALLOWED, label: 'Does nothing' }, { value: CANCEL_BRANCH, label: 'Runs the cancel branch' }, ...choices, ...stray ];
 };
 
@@ -118,43 +120,28 @@ const ChoiceRow = (props: ChoiceRowProps) =>
 };
 
 /**
- * The cancel dropdown, which asks once more before switching the cancel branch off while it holds commands.
+ * The cancel dropdown. A cancel branch keeps its commands whatever cancel is set to, so while cancel does not run
+ * it, a note says they are there and wait for it.
  * @param {{ model: ChoiceListModel, onChange: (cancelType: number) => void }} props The list and what to do with a new setting.
  * @returns {React.JSX.Element} The dropdown.
  */
 const CancelField = (props: { model: ChoiceListModel; onChange: (cancelType: number) => void }) =>
 {
   const { model, onChange } = props;
-  const [ pending, setPending ] = useState<number | null>(null);
   const held = cancelBranchCommandCount(model);
+  const runsBranch = model.cancelType === CANCEL_BRANCH || model.cancelType >= model.choices.length;
 
   return (
     <>
-      <SelectField label={'Cancel'} value={model.cancelType} options={cancelOptions(model)} width={260} onChange={cancelType =>
-      {
-        if (model.cancelType === CANCEL_BRANCH && cancelType !== CANCEL_BRANCH && held > 0)
-        {
-          setPending(cancelType);
-          return;
-        }
-
-        onChange(cancelType);
-      }}/>
-      {pending === null
+      <SelectField label={'Cancel'} value={model.cancelType} options={cancelOptions(model)} width={260} onChange={onChange}/>
+      {runsBranch || held === 0
         ? null
         : (
-          <Alert severity={'warning'} variant={'outlined'} sx={{ flexBasis: '100%' }} action={(
-            <>
-              <Button size={'small'} color={'inherit'} onClick={() => setPending(null)}>Keep</Button>
-              <Button size={'small'} color={'inherit'} onClick={() =>
-              {
-                onChange(pending);
-                setPending(null);
-              }}>Remove</Button>
-            </>
-          )}>
-            {held === 1 ? 'The cancel branch holds a command, which goes with it.' : `The cancel branch holds ${held} commands, which go with it.`}
-          </Alert>
+          <Typography variant={'caption'} color={'text.secondary'} sx={{ flexBasis: '100%' }}>
+            {held === 1
+              ? 'The cancel branch keeps its command, which runs again once cancel runs the cancel branch.'
+              : `The cancel branch keeps its ${held} commands, which run again once cancel runs the cancel branch.`}
+          </Typography>
         )}
     </>
   );

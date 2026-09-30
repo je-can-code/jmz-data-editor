@@ -167,7 +167,6 @@ describe('show choices', () =>
       const valid = block([ 'Yes', 'No' ], [ 1, 0, 2, 0 ]);
       const missingBranch = [ ...valid.slice(0, 4), valid[7] ];
       const renumbered = valid.map((each, index) => (index === 4 ? command(402, 0, [ 5, 'No' ]) : each));
-      const strayBranch = [ ...valid.slice(0, 7), command(403, 0, [ 6, null ]), command(0, 1), valid[7] ];
       const missingCancel = block([ 'Yes', 'No' ], [ -2, 0, 2, 0 ]).filter(each => each.code !== 403);
       const strayLine = [ ...valid.slice(0, 7), command(250, 0, [ {} ]), valid[7] ];
       const unended = valid.slice(0, 7);
@@ -177,12 +176,26 @@ describe('show choices', () =>
       const shortSettings = valid.map((each, index) => (index === 0 ? command(102, 0, [ [ 'Yes', 'No' ], 1 ]) : each));
 
       // Act.
-      const models = [ missingBranch, renumbered, strayBranch, missingCancel, strayLine, unended, trailing, outOfSlots, numberChoice, shortSettings, [] ]
+      const models = [ missingBranch, renumbered, missingCancel, strayLine, unended, trailing, outOfSlots, numberChoice, shortSettings, [] ]
         .map(parseChoiceList);
 
       // Assert.
       expect(models)
         .toStrictEqual(models.map(() => null));
+    });
+
+    it('reads a cancel branch kept on a command whose cancel no longer runs it, and writes it back as it was', () =>
+    {
+      // Arrange: cancel picks "No", and a branch the editor kept after cancel stopped running it follows.
+      const valid = block([ 'Yes', 'No' ], [ 1, 0, 2, 0 ]);
+      const kept = [ ...valid.slice(0, 7), command(403, 0, [ 6, null ]), command(355, 1, [ 'kept();' ]), command(0, 1), valid[7] ];
+
+      // Act.
+      const model = parseChoiceList(kept);
+
+      // Assert.
+      expect([ model?.cancelType, model?.blocks[0].cancelBranch?.body, JSON.stringify(writeChoiceList(model as ChoiceListModel)) ])
+        .toStrictEqual([ 1, kept.slice(8, 10), JSON.stringify(kept) ]);
     });
   });
 
@@ -242,17 +255,52 @@ describe('show choices', () =>
         .toStrictEqual([ [ -1, -2 ], [ command(403, 0, [ 6, null ]), command(0, 1), command(404, 0) ] ]);
     });
 
-    it('drops every cancel branch once cancel is disallowed', () =>
+    it('keeps the cancel branches\' commands once cancel is disallowed, and runs them again once it runs the branch', () =>
     {
-      // Arrange.
-      const model = { ...read(bothCancelling()), cancelType: -1 };
+      // Arrange: both commands' cancel branches hold a script.
+      const commands = bothCancelling();
 
       // Act.
-      const written = writeChoiceList(model);
+      const disallowed = writeChoiceList({ ...read(commands), cancelType: -1 });
+      const runningAgain = writeChoiceList({ ...read(disallowed), cancelType: -2 });
+
+      // Assert: nothing runs the branches while disallowed, yet nothing is lost, and both run again afterwards.
+      expect([
+        openers(disallowed).map(each => (each as unknown[])[1]),
+        read(disallowed).cancelType,
+        disallowed.filter(each => each.code === 355 && each.parameters[0] === 'cancelled();').length,
+        openers(runningAgain).map(each => (each as unknown[])[1]),
+        JSON.stringify(runningAgain) === JSON.stringify(commands),
+      ])
+        .toStrictEqual([ [ -1, -1 ], -1, 2, [ -2, -2 ], true ]);
+    });
+
+    it('leaves out an empty cancel branch once cancel stops running it', () =>
+    {
+      // Arrange: a cancel branch holding nothing but its closing line.
+      const commands = block([ 'Yes', 'No' ], [ -2, 0, 2, 0 ]).filter(each => each.code !== 355 || each.parameters[0] !== 'cancelled();');
+
+      // Act.
+      const written = writeChoiceList({ ...read(commands), cancelType: 1 });
 
       // Assert.
-      expect([ openers(written).map(each => (each as unknown[])[1]), written.some(each => each.code === 403) ])
-        .toStrictEqual([ [ -1, -1 ], false ]);
+      expect([ openers(written), written.some(each => each.code === 403) ])
+        .toStrictEqual([ [ [ [ 'Yes', 'No' ], 1, 0, 2, 0 ] ], false ]);
+    });
+
+    it('keeps a cancel branch\'s commands when a reshaped list stores its cancel choice afresh', () =>
+    {
+      // Arrange: the first command keeps a branch the second command's cancel choice overrides, which a new
+      // first choice pushes on into the second command.
+      const commands = [ ...block([ 'a', 'b', 'c', 'd', 'e', 'f' ], [ -2, 0, 2, 0 ]), ...block([ 'g', 'h' ], [ 1, -1, 2, 0 ]) ];
+
+      // Act.
+      const written = writeChoiceList(insertChoice(read(commands), 0, 'new'));
+
+      // Assert: cancel still picks "h", and the branch's script is still there.
+      const reread = read(written);
+      expect([ reread.choices[reread.cancelType].text, written.filter(each => each.code === 355 && each.parameters[0] === 'cancelled();').length ])
+        .toStrictEqual([ 'h', 1 ]);
     });
 
     it('stores a default on the command holding it, or nowhere for none', () =>
@@ -384,6 +432,57 @@ describe('show choices', () =>
         ]);
     });
 
+    it('keeps a cancel branch running with its commands when its command empties in the middle of the list', () =>
+    {
+      // Arrange: Map305's level-up menu (six choices, a cancel branch that says something), grown by nine choices
+      // into three commands, then cut back by its first six.
+      const menu = [
+        command(102, 0, [ [ 'a', 'b', 'c', 'd', 'e', 'f' ], -2, -1, 0, 0 ]),
+        ...[ 'a', 'b', 'c', 'd', 'e', 'f' ].flatMap((text, index) => [ command(402, 0, [ index, text ]), command(0, 1) ]),
+        command(403, 0, [ 6, null ]),
+        command(101, 1, [ 'Monster', 6, 0, 0, '' ]),
+        command(401, 1, [ '\\pop[self]Fine.' ]),
+        command(0, 1),
+        command(404, 0),
+      ];
+      let model = read(menu);
+      for (let added = 0; added < 9; added++)
+      {
+        model = insertChoice(model, model.choices.length, `new ${added}`);
+      }
+      for (let removed = 0; removed < 6; removed++)
+      {
+        model = removeChoice(model, 0);
+      }
+
+      // Act.
+      const written = writeChoiceList(model);
+
+      // Assert: one cancel branch, still saying its line, and still run by cancel.
+      const cancelAt = written.findIndex(each => each.code === 403);
+      expect([ written.filter(each => each.code === 403).length, written.slice(cancelAt + 1, cancelAt + 4), read(written).cancelType ])
+        .toStrictEqual([ 1, [ menu[14], menu[15], menu[16] ], -2 ]);
+    });
+
+    it('joins an emptied command\'s cancel branch into its neighbour\'s, in the order they ran', () =>
+    {
+      // Arrange: both commands have cancel branches with a command each, as the shop in Map221 can.
+      const commands = [
+        ...block([ 'a', 'b' ], [ -2, 0, 2, 0 ]).map(each => (each.code === 355 && each.parameters[0] === 'cancelled();' ? command(355, 1, [ 'first();' ]) : each)),
+        ...block([ 'c', 'd' ], [ -2, 0, 2, 0 ]).map(each => (each.code === 355 && each.parameters[0] === 'cancelled();' ? command(355, 1, [ 'second();' ]) : each)),
+      ];
+
+      // Act: the first command's two choices go.
+      const written = writeChoiceList(removeChoice(removeChoice(read(commands), 0), 0));
+
+      // Assert: one command, whose one cancel branch runs both commands in order, closed once.
+      expect([ openers(written).length, written.slice(-5) ])
+        .toStrictEqual([
+          1,
+          [ command(403, 0, [ 6, null ]), command(355, 1, [ 'first();' ]), command(355, 1, [ 'second();' ]), command(0, 1), command(404, 0) ],
+        ]);
+    });
+
     it('keeps the only command even when its last choice goes, and ignores a place with no choice', () =>
     {
       // Arrange.
@@ -431,6 +530,86 @@ describe('show choices', () =>
       // Assert.
       expect(results)
         .toStrictEqual([ model, model, model ]);
+    });
+  });
+
+  describe('a cancel pointing at an empty slot', () =>
+  {
+    /**
+     * Works out what cancel does in the game for written commands: HIME's merged setting, which the engine runs as
+     * the cancel branch whenever it points past the last choice.
+     * @param {RmmzEventCommand[]} commands The written list.
+     * @returns {number} The cancel setting the game runs.
+     */
+    const runtimeCancel = (commands: RmmzEventCommand[]): number =>
+    {
+      const model = read(commands);
+      return model.cancelType < model.choices.length ? model.cancelType : -2;
+    };
+
+    /**
+     * Map032's smith menu: three choices, with cancel stored on the fourth, empty slot.
+     * @returns {RmmzEventCommand[]} The commands.
+     */
+    const smith = (): RmmzEventCommand[] => block([ 'latest', 'named', 'jk' ], [ 3, 0, 2, 0 ]);
+
+    it('keeps closing the list however many choices are added', () =>
+    {
+      // Arrange.
+      let model = read(smith());
+      const cancels: number[] = [];
+
+      // Act: add three choices, one at a time, reading back what the game would run after each.
+      for (let added = 0; added < 3; added++)
+      {
+        const written = writeChoiceList(insertChoice(model, model.choices.length, `extra ${added}`));
+        cancels.push(runtimeCancel(written));
+        model = read(written);
+      }
+
+      // Assert: the game runs it as the cancel branch every time, now written as one with an empty branch.
+      expect([ cancels, model.cancelType, model.blocks[0].cancelBranch?.body ])
+        .toStrictEqual([ [ -2, -2, -2 ], -2, [ command(0, 1) ] ]);
+    });
+
+    it('keeps closing the list when a choice moves or goes', () =>
+    {
+      // Arrange.
+      const model = read(smith());
+
+      // Act.
+      const moved = runtimeCancel(writeChoiceList(moveChoice(model, 0, 2)));
+      const removed = runtimeCancel(writeChoiceList(removeChoice(model, 1)));
+
+      // Assert.
+      expect([ moved, removed ])
+        .toStrictEqual([ -2, -2 ]);
+    });
+
+    it('stays exactly as stored while nothing reshapes the list', () =>
+    {
+      // Arrange: only a choice's text changes.
+      const commands = smith();
+
+      // Act.
+      const written = writeChoiceList(setChoiceText(read(commands), 0, 'the latest'));
+
+      // Assert.
+      expect(openers(written))
+        .toStrictEqual([ [ [ 'the latest', 'named', 'jk' ], 3, 0, 2, 0 ] ]);
+    });
+
+    it('leaves a default pointing at an empty slot where it points when a choice moves', () =>
+    {
+      // Arrange: the default on the fourth, empty slot.
+      const model = read(block([ 'a', 'b', 'c' ], [ -1, 3, 2, 0 ]));
+
+      // Act.
+      const moved = moveChoice(model, 0, 2);
+
+      // Assert.
+      expect(moved.defaultType)
+        .toBe(3);
     });
   });
 
