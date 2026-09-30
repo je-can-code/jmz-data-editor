@@ -329,6 +329,10 @@ const PalettePanel = () =>
   const held = useHeldMap(mapId);
   const tilesets = useTilesets();
   const { map } = held;
+
+  // closing the palette closes its passability editor, so no map goes on showing passability for an editor nobody sees.
+  useEffect(() => () => paletteMode.setEditing('tiles'), []);
+
   if (mapId === null || map === null)
   {
     return <PaletteMessage line={'Open a map to see its tiles here.'}/>;
