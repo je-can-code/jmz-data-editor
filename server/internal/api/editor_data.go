@@ -90,7 +90,7 @@ func SaveEditorData(announcer WriteAnnouncer) http.HandlerFunc {
 		// the folder appears with the first document saved into it.
 		relativePath := editorDataFile(key)
 		fullPath := filepath.Join(projectPath, filepath.FromSlash(relativePath))
-		withdraw := announcer.Expect(relativePath, httpRequest.Header.Get(ClientHeader))
+		withdraw := announcer.Expect(relativePath, httpRequest.Header.Get(ClientHeader), content)
 		writeErr := os.MkdirAll(filepath.Dir(fullPath), 0755)
 		if writeErr == nil {
 			writeErr = store.WriteFileAtomic(fullPath, content)

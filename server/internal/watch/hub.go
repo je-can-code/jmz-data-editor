@@ -3,6 +3,7 @@
 package watch
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -85,7 +86,12 @@ type session struct {
 
 // expectation is a write the server announced before making it.
 type expectation struct {
-	client     string
+	client string
+
+	// digest is the SHA-256 of the exact bytes the write puts in the file. A change is only credited
+	// to the write when the file still holds those bytes once it settles.
+	digest [sha256.Size]byte
+
 	registered time.Time
 	deadline   time.Time
 }
@@ -159,6 +165,14 @@ func (hub *Hub) Subscribe(root string) (*Subscription, error) {
 	return subscription, nil
 }
 
+// Subscribers reports how many listeners the hub is feeding, and so whether it is watching at all.
+func (hub *Hub) Subscribers() int {
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+
+	return len(hub.subscribers)
+}
+
 // unsubscribe removes a subscription and stops the watcher once nobody is left.
 func (hub *Hub) unsubscribe(subscription *Subscription) {
 	hub.mu.Lock()
@@ -179,18 +193,20 @@ func (hub *Hub) unsubscribe(subscription *Subscription) {
 	}
 }
 
-// Expect records that the server is about to write the file at path (project-relative, forward
-// slashes) on behalf of client, so the change it causes can say who asked for it. Call it before the
-// write starts, and call the returned function if the write fails, so the expectation cannot be
-// pinned on somebody else's change.
-func (hub *Hub) Expect(path string, client string) func() {
+// Expect records that the server is about to write content to the file at path (project-relative,
+// forward slashes) on behalf of client, so the change it causes can say who asked for it. Call it
+// just before the write, with the exact bytes being written, and call the returned function if the
+// write fails, so the expectation cannot be pinned on somebody else's change.
+func (hub *Hub) Expect(path string, client string, content []byte) func() {
+	digest := sha256.Sum256(content)
+
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
 
 	now := time.Now()
 	hub.forgetExpired(now)
 
-	expected := &expectation{client: client, registered: now, deadline: now.Add(hub.expectFor)}
+	expected := &expectation{client: client, digest: digest, registered: now, deadline: now.Add(hub.expectFor)}
 	hub.expected[path] = append(hub.expected[path], expected)
 
 	return func() {
@@ -447,7 +463,8 @@ func (hub *Hub) announceSettled(running *session, bursts map[string]*burst, know
 
 		// the kind comes from what existed before and what exists now, not from the raw events: an
 		// atomic save arrives as a create even though the file was there all along.
-		info, err := os.Stat(filepath.Join(running.root, filepath.FromSlash(path)))
+		full := filepath.Join(running.root, filepath.FromSlash(path))
+		info, err := os.Stat(full)
 		exists := err == nil && info.Mode().IsRegular()
 		kind := changeKind(known[path], exists)
 		if exists {
@@ -456,11 +473,31 @@ func (hub *Hub) announceSettled(running *session, bursts map[string]*burst, know
 			delete(known, path)
 		}
 
-		client := hub.claim(path, settled.last, now)
+		client := hub.claim(path, settled.last, now, hub.digestIfExpected(path, full, exists))
 		if kind != "" {
 			hub.broadcast(Change{Path: path, Kind: kind, Client: client})
 		}
 	}
+}
+
+// digestIfExpected hashes the file as it now stands, but only when a save is waiting to be credited
+// with the change, since most changes have no save to compare against. It returns nil when there is
+// nothing to hash.
+func (hub *Hub) digestIfExpected(path string, full string, exists bool) *[sha256.Size]byte {
+	hub.mu.Lock()
+	expecting := len(hub.expected[path]) > 0
+	hub.mu.Unlock()
+	if expecting == false || exists == false {
+		return nil
+	}
+
+	content, err := os.ReadFile(full)
+	if err != nil {
+		return nil
+	}
+	digest := sha256.Sum256(content)
+
+	return &digest
 }
 
 // changeKind names what happened to a file from whether it existed before and whether it does now,
@@ -478,17 +515,21 @@ func changeKind(existedBefore bool, existsNow bool) string {
 	return ""
 }
 
-// claim takes the expectations a burst accounts for and says whose write it was: the client every
-// one of them names, or nobody when there were none or they disagree, so that a window never skips
-// a change somebody else also made. Only expectations registered before the burst's last event count;
-// a later one belongs to a write that has not landed yet.
-func (hub *Hub) claim(path string, lastEvent time.Time, now time.Time) string {
+// claim takes the expectations a burst accounts for and says whose write it was, so a window can skip
+// its own save and nothing else. It names a client only when every expectation names that same client
+// and the file, as it settled (current), holds exactly the bytes one of those writes put there. Any
+// doubt names nobody: expectations that disagree, or content no save of ours wrote, which means
+// something else wrote the file after the save and the saving window must see it too. Only
+// expectations registered before the burst's last event count; a later one belongs to a write that
+// has not landed yet.
+func (hub *Hub) claim(path string, lastEvent time.Time, now time.Time, current *[sha256.Size]byte) string {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
 
 	client := ""
 	claimed := 0
 	agreed := true
+	matched := false
 	remaining := []*expectation{}
 	for _, expected := range hub.expected[path] {
 		if now.After(expected.deadline) {
@@ -501,6 +542,9 @@ func (hub *Hub) claim(path string, lastEvent time.Time, now time.Time) string {
 		if claimed > 0 && expected.client != client {
 			agreed = false
 		}
+		if current != nil && expected.digest == *current {
+			matched = true
+		}
 		client = expected.client
 		claimed++
 	}
@@ -511,7 +555,7 @@ func (hub *Hub) claim(path string, lastEvent time.Time, now time.Time) string {
 		hub.expected[path] = remaining
 	}
 
-	if agreed == false {
+	if agreed == false || matched == false {
 		return ""
 	}
 

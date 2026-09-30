@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"crypto/sha256"
 	"os"
 	"path/filepath"
 	"testing"
@@ -115,8 +116,53 @@ func TestHubNamesTheClientWhoseSaveItWas(t *testing.T) {
 	hub := NewHub("data", store.EditorDataFolder)
 	subscription := subscribe(t, hub, root)
 
-	// Act- announce the save, then make it, as the server's PUT does.
-	hub.Expect("data/Map001.json", "window-a")
+	// Act- announce the save with its bytes, then make it, as the server's PUT does.
+	hub.Expect("data/Map001.json", "window-a", []byte(`{"a":1}`))
+	if err := store.WriteFileAtomic(filepath.Join(root, "data", "Map001.json"), []byte(`{"a":1}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert.
+	assertChange(t, receive(t, subscription), Change{Path: "data/Map001.json", Kind: KindWrite, Client: "window-a"})
+}
+
+// TestHubNamesNobodyWhenSomethingElseWritesRightAfterTheSave is the race the content check exists
+// for: a window saves, and MZ or a script writes the same file a moment later, inside one settle
+// window. The saving window must not skip that change as its own, or it keeps showing a file that is
+// no longer on disk.
+func TestHubNamesNobodyWhenSomethingElseWritesRightAfterTheSave(t *testing.T) {
+	// Arrange.
+	root := newProject(t)
+	writeFile(t, root, "data/Map001.json", "{}")
+	hub := NewHub("data", store.EditorDataFolder)
+	subscription := subscribe(t, hub, root)
+
+	// Act- the save, then an outside write well inside the settle window.
+	hub.Expect("data/Map001.json", "window-a", []byte(`{"a":1}`))
+	if err := store.WriteFileAtomic(filepath.Join(root, "data", "Map001.json"), []byte(`{"a":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	writeFile(t, root, "data/Map001.json", `{"outside":1}`)
+
+	// Assert- one change, credited to nobody, so every window reloads.
+	assertChange(t, receive(t, subscription), Change{Path: "data/Map001.json", Kind: KindWrite, Client: ""})
+	assertNothingMore(t, subscription)
+}
+
+// TestHubNamesTheSaverWhenTheirSaveLandsLast is the near miss: an outside write lands first and the
+// save lands after it, inside one settle window. The file holds the save's bytes, which the saving
+// window already shows, so it may skip the change; every other window still hears it.
+func TestHubNamesTheSaverWhenTheirSaveLandsLast(t *testing.T) {
+	// Arrange.
+	root := newProject(t)
+	writeFile(t, root, "data/Map001.json", "{}")
+	hub := NewHub("data", store.EditorDataFolder)
+	subscription := subscribe(t, hub, root)
+
+	// Act- announced, overtaken by an outside write, then saved.
+	hub.Expect("data/Map001.json", "window-a", []byte(`{"a":1}`))
+	writeFile(t, root, "data/Map001.json", `{"outside":1}`)
 	if err := store.WriteFileAtomic(filepath.Join(root, "data", "Map001.json"), []byte(`{"a":1}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -135,9 +181,9 @@ func TestHubNamesNobodyWhenTwoClientsSaveInOneBurst(t *testing.T) {
 	subscription := subscribe(t, hub, root)
 
 	// Act- two saves of one file from two windows, inside one settle window.
-	hub.Expect("data/Map001.json", "window-a")
+	hub.Expect("data/Map001.json", "window-a", []byte(`{"a":1}`))
 	writeFile(t, root, "data/Map001.json", `{"a":1}`)
-	hub.Expect("data/Map001.json", "window-b")
+	hub.Expect("data/Map001.json", "window-b", []byte(`{"b":1}`))
 	writeFile(t, root, "data/Map001.json", `{"b":1}`)
 
 	// Assert.
@@ -145,14 +191,14 @@ func TestHubNamesNobodyWhenTwoClientsSaveInOneBurst(t *testing.T) {
 }
 
 // TestHubForgetsAWithdrawnExpectation covers a save that failed: its client must not be pinned on the
-// next change somebody else makes.
+// next change somebody else makes, even one that happens to write the same bytes.
 func TestHubForgetsAWithdrawnExpectation(t *testing.T) {
 	// Arrange.
 	root := newProject(t)
 	writeFile(t, root, "data/Map001.json", "{}")
 	hub := NewHub("data", store.EditorDataFolder)
 	subscription := subscribe(t, hub, root)
-	withdraw := hub.Expect("data/Map001.json", "window-a")
+	withdraw := hub.Expect("data/Map001.json", "window-a", []byte(`{"a":1}`))
 
 	// Act- the save fails and is withdrawn; then something else writes the file.
 	withdraw()
@@ -163,16 +209,17 @@ func TestHubForgetsAWithdrawnExpectation(t *testing.T) {
 }
 
 // TestHubClaimsOnlyExpectationsOlderThanTheChange covers the race the registration time exists for:
-// a change that happened before a save was announced is not that save.
+// a change that happened before a save was announced is not that save, even with matching bytes.
 func TestHubClaimsOnlyExpectationsOlderThanTheChange(t *testing.T) {
 	// Arrange- an expectation registered after the burst's last event.
 	hub := NewHub("data")
 	lastEvent := time.Now()
 	time.Sleep(2 * time.Millisecond)
-	hub.Expect("data/Map001.json", "window-a")
+	hub.Expect("data/Map001.json", "window-a", []byte(`{"a":1}`))
+	current := sha256.Sum256([]byte(`{"a":1}`))
 
 	// Act.
-	client := hub.claim("data/Map001.json", lastEvent, time.Now())
+	client := hub.claim("data/Map001.json", lastEvent, time.Now(), &current)
 
 	// Assert- not claimed, and still waiting for the save it belongs to.
 	if client != "" {
@@ -180,6 +227,39 @@ func TestHubClaimsOnlyExpectationsOlderThanTheChange(t *testing.T) {
 	}
 	if len(hub.expected["data/Map001.json"]) != 1 {
 		t.Errorf("expected the expectation to wait for its own change, have %d", len(hub.expected["data/Map001.json"]))
+	}
+}
+
+// TestHubClaimNeedsTheFileToHoldTheSavedBytes covers the content check on its own: the saver is named
+// only when the settled file is exactly what the save wrote.
+func TestHubClaimNeedsTheFileToHoldTheSavedBytes(t *testing.T) {
+	saved := sha256.Sum256([]byte(`{"a":1}`))
+	other := sha256.Sum256([]byte(`{"outside":1}`))
+	cases := []struct {
+		name     string
+		current  *[sha256.Size]byte
+		expected string
+	}{
+		{name: "the saved bytes", current: &saved, expected: "window-a"},
+		{name: "other bytes", current: &other, expected: ""},
+		{name: "no file to read", current: nil, expected: ""},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange- a save announced before the change it caused.
+			hub := NewHub("data")
+			hub.Expect("data/Map001.json", "window-a", []byte(`{"a":1}`))
+			lastEvent := time.Now().Add(time.Millisecond)
+
+			// Act.
+			client := hub.claim("data/Map001.json", lastEvent, lastEvent, testCase.current)
+
+			// Assert.
+			if client != testCase.expected {
+				t.Errorf("claimed %q, expected %q", client, testCase.expected)
+			}
+		})
 	}
 }
 

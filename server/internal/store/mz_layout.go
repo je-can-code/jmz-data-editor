@@ -23,7 +23,11 @@ var mzWriteLock sync.Mutex
 // with strings and numbers written as JavaScript writes them, and with the key order of the file it
 // replaces (see mzjson.Render). Saving a document that has not changed reproduces the file byte for
 // byte. The write is atomic.
-func SaveInMzLayout[T any](data T, path string, layout mzjson.Layout) error {
+//
+// beforeWrite, when given, is handed the exact bytes about to be written, just before the write, so a
+// caller can announce them (the change stream credits a change to a save only when the file holds
+// what the save wrote). It runs only when the document rendered, and the write can still fail after.
+func SaveInMzLayout[T any](data T, path string, layout mzjson.Layout, beforeWrite func(content []byte)) error {
 	mzWriteLock.Lock()
 	defer mzWriteLock.Unlock()
 
@@ -36,6 +40,10 @@ func SaveInMzLayout[T any](data T, path string, layout mzjson.Layout) error {
 	rendered, err := mzjson.Render(data, template, layout)
 	if err != nil {
 		return err
+	}
+
+	if beforeWrite != nil {
+		beforeWrite(rendered)
 	}
 
 	return WriteFileAtomic(path, rendered)

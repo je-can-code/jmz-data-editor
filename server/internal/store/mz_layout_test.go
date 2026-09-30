@@ -51,13 +51,17 @@ func TestSaveInMzLayoutReproducesTheFileItReplaces(t *testing.T) {
 	}
 
 	// Act.
-	err = SaveInMzLayout(loaded, path, mzjson.MapLayout)
+	announced := []byte{}
+	err = SaveInMzLayout(loaded, path, mzjson.MapLayout, func(content []byte) { announced = content })
 
-	// Assert.
+	// Assert- the same bytes back, and the announcement carried exactly those bytes.
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertFileHolds(t, path, replacedMap)
+	if string(announced) != replacedMap {
+		t.Errorf("announced %q before writing", announced)
+	}
 }
 
 // TestSaveInMzLayoutWritesANewMapInMzsOrder saves the same map to a path with no file yet, so there
@@ -71,7 +75,7 @@ func TestSaveInMzLayoutWritesANewMapInMzsOrder(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Map002.json")
 
 	// Act.
-	err := SaveInMzLayout(&gameMap, path, mzjson.MapLayout)
+	err := SaveInMzLayout(&gameMap, path, mzjson.MapLayout, nil)
 
 	// Assert- identical but for the image, which a new file writes in the model's order.
 	if err != nil {
@@ -97,11 +101,15 @@ func TestSaveInMzLayoutRefusesADocumentItCannotLayOut(t *testing.T) {
 	rows := []*db.RpgMapInfo{nil}
 
 	// Act.
-	err := SaveInMzLayout(rows, path, mzjson.MapLayout)
+	announced := false
+	err := SaveInMzLayout(rows, path, mzjson.MapLayout, func([]byte) { announced = true })
 
-	// Assert- refused, and nothing written.
+	// Assert- refused, nothing announced, and nothing written.
 	if err == nil {
 		t.Fatal("expected a table to be refused by the map layout")
+	}
+	if announced {
+		t.Error("a document that never rendered was still announced")
 	}
 	if _, statErr := os.Stat(path); os.IsNotExist(statErr) == false {
 		t.Errorf("expected no file to be written, stat said %v", statErr)

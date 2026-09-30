@@ -25,11 +25,12 @@ const ClientHeader = "X-Jmz-Client"
 // tilesets under one; this leaves room for maps far bigger than any the game has.
 const maxBodyBytes = 64 << 20
 
-// WriteAnnouncer is told about each write the server is about to make, so that the change the write
-// causes can say which client asked for it. The server's change stream (a *watch.Hub) is the one in
-// use; the returned function withdraws the announcement when the write fails.
+// WriteAnnouncer is told about each write the server is about to make, with the exact bytes it will
+// write, so that the change the write causes can say which client asked for it. The server's change
+// stream (a *watch.Hub) is the one in use; the returned function withdraws the announcement when the
+// write fails.
 type WriteAnnouncer interface {
-	Expect(path string, client string) func()
+	Expect(path string, client string, content []byte) func()
 }
 
 // LoadMapInfos serves GET /api/mapinfos: the map tree, as MapInfos.json stores it (index 0 is null).
@@ -167,11 +168,14 @@ func saveDocument[T any](responseWriter http.ResponseWriter, httpRequest *http.R
 		return
 	}
 
-	// announce the write before making it, so the change it causes can carry the client's name.
-	withdraw := announcer.Expect(relativePath, httpRequest.Header.Get(ClientHeader))
-
-	// write it where MZ keeps it, in MZ's layout.
-	writeErr := store.SaveInMzLayout(data, filepath.Join(projectPath, filepath.FromSlash(relativePath)), layout)
+	// write it where MZ keeps it, in MZ's layout, announcing the exact bytes just before they land so
+	// the change they cause can carry the client's name.
+	client := httpRequest.Header.Get(ClientHeader)
+	withdraw := func() {}
+	announce := func(content []byte) {
+		withdraw = announcer.Expect(relativePath, client, content)
+	}
+	writeErr := store.SaveInMzLayout(data, filepath.Join(projectPath, filepath.FromSlash(relativePath)), layout, announce)
 	if writeErr != nil {
 		withdraw()
 		var res RestResponse[*T]

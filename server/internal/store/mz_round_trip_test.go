@@ -114,7 +114,7 @@ func assertSaveReproduces[T any](t *testing.T, path string, layout mzjson.Layout
 	}
 
 	// Act.
-	if err := SaveInMzLayout(decoded, target, layout); err != nil {
+	if err := SaveInMzLayout(decoded, target, layout, nil); err != nil {
 		t.Fatalf("%s did not save: %v", filepath.Base(path), err)
 	}
 	written, err := os.ReadFile(target)
