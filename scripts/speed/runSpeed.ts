@@ -319,7 +319,9 @@ const measureStroke = async (page: Page, size: number[]): Promise<StrokeResult> 
     hooks.disablePaint();
     return state;
   });
-  const moves = recording.inputs.filter(input => input.type === 'pointermove' || input.type === 'pointerdown');
+  // the stroke runs from the press on; the move that put the pointer in place before it painted nothing.
+  const pressed = recording.inputs.findIndex(input => input.type === 'pointerdown');
+  const moves = recording.inputs.slice(Math.max(0, pressed)).filter(input => input.type === 'pointermove' || input.type === 'pointerdown');
   return judgeStrokeFrames(moves, recording.frames, proof);
 };
 
