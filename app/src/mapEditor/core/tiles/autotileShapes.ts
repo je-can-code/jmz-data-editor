@@ -230,16 +230,20 @@ const holdsKindWhere = (reader: TileReader, x: number, y: number, test: (kind: n
 
 /**
  * Reports whether a neighbouring cell joins a floor tile (A1 water, A2 ground, or an A4 wall top). These are MZ's
- * rules as the shipped maps show them:
+ * rules as the shipped maps show them; the counts are the edges between a floor tile and a neighbour, across every
+ * shipped map, that MZ stored joined and open:
  *
- * - beyond the edge of the map counts as joined, so a map's border never draws a coastline;
+ * - beyond the edge of the map counts as joined, so a map's border never draws a coastline (38,974 to 121);
  * - a neighbour holding the same kind on any of its four layers joins, not only one on the tile's own layer, so a
- *   wall top laid on layer 2 joins the same wall top on layer 1 beside it;
- * - open water (the ocean, and the plain water kinds) joins every waterfall, since a waterfall pours into it;
- * - open water joins other open water kinds too, as MZ's help says A1 tiles do not draw a boundary where they touch,
- *   except on a Field-mode tileset, where every A1 kind keeps its own shore.
+ *   wall top laid on layer 2 joins the same wall top on layer 1 beside it (1,449 to 7 where the kind sits only on
+ *   another layer);
+ * - open water (the ocean, and the plain water kinds) joins every waterfall, since a waterfall pours into it (304 to
+ *   3);
+ * - open water joins other open water kinds too, as MZ's help says A1 tiles do not draw a boundary where they touch
+ *   (365 to 57), except on a Field-mode tileset, where every A1 kind keeps its own shore (0 to 84).
  *
- * Nothing else joins: a different ground kind, a wall, an A5 tile or an empty cell all draw an edge.
+ * Nothing else joins: a different ground kind, a wall, an A5 tile or an empty cell all draw an edge (162,774 open;
+ * the 6,772 stored joined are tiles drawn or neighbours changed while MZ's autotiling was suspended).
  * @param {TileReader} reader The map.
  * @param {number} x The neighbour's column.
  * @param {number} y The neighbour's row.
@@ -270,8 +274,8 @@ const floorNeighbourJoins = (reader: TileReader, x: number, y: number, kind: num
 
 /**
  * Reports whether the cell beside a waterfall joins it. A waterfall only looks sideways: beyond the edge of the
- * map, the same waterfall on any layer, or any other A1 tile (water, ocean or another waterfall) joins; anything
- * else draws the waterfall's edge.
+ * map (22 to 0), the same waterfall on any layer, or any other A1 tile, water, ocean or another waterfall (1,216 to
+ * 2), joins; anything else draws the waterfall's edge (404 open to 86 joined).
  * @param {TileReader} reader The map.
  * @param {number} x The neighbour's column.
  * @param {number} y The neighbour's row.
@@ -283,9 +287,9 @@ const waterfallNeighbourJoins = (reader: TileReader, x: number, y: number): bool
 };
 
 /**
- * Reports whether a neighbouring cell joins a roof. Roofs join only their own kind, on any layer; a building wall
- * beside or below a roof draws the roof's edge. Beyond the edge of the map, a roof joins downwards but shows its
- * edge at the top and the sides.
+ * Reports whether a neighbouring cell joins a roof. Roofs join only their own kind, on any layer (8,663 joined to
+ * 349); a building wall beside or below a roof draws the roof's edge (1,022 open to 64). Beyond the edge of the map,
+ * a roof joins downwards (43 to 6) but shows its edge at the top (45 to 15) and the sides (75 to 6).
  * @param {TileReader} reader The map.
  * @param {number} x The neighbour's column.
  * @param {number} y The neighbour's row.
@@ -359,13 +363,17 @@ const isTopKind = (kind: number): boolean =>
 
 /**
  * Reports whether the cell beside a wall face (an A3 building wall or A4 wall side) joins it. A wall face is a
- * column that hangs down from its top edge, and its sides follow that:
+ * column that hangs down from its top edge, and its sides follow that (counts are side edges MZ stored joined and
+ * open, leaving out the maps mapgen drafted):
  *
- * - a wall face beside it, of this kind or any other, joins unless that column's wall starts higher up, in which
- *   case every row of the shorter wall draws its edge against the taller one;
+ * - a wall face beside it, of this kind or any other, joins unless that column's wall starts higher up (43,546 to
+ *   231), in which case every row of the shorter wall draws its edge against the taller one (1,219 open to 62);
  * - a wall top (ceiling) or a roof beside it always joins, so a wall face runs cleanly into the ceiling that turns
- *   the corner beside it;
- * - beyond the edge of the map counts as the same wall, starting at the map's top row.
+ *   the corner beside it (3,010 to 155);
+ * - beyond the edge of the map counts as the same wall, starting at the map's top row: it joins a wall that starts
+ *   there too (37 to 14), and not one that starts lower (298 open to 73).
+ *
+ * Anything else beside it draws the edge (4,092 open to 63).
  * @param {TileReader} reader The map.
  * @param {number} x The wall face's column.
  * @param {number} y The wall face's row.
@@ -393,8 +401,10 @@ const wallSideNeighbourJoins = (reader: TileReader, x: number, y: number, dx: nu
 
 /**
  * Works out a wall face's shape. Its sides follow {@link wallSideNeighbourJoins}. Its top edge shows unless the cell
- * above holds the same kind, the map's top row included; its bottom edge shows unless the cell below holds the same
- * kind or lies beyond the map's bottom row.
+ * above holds the same kind (15,447 joined to 100 under its own kind; 10,493 open to 39 under anything else); on the
+ * map's top row it shows too, which is what 18 shipped maps store (184 cells) against 8 maps that store it joined
+ * (137). Its bottom edge shows unless the cell below holds the same kind (15,547 to 0) or lies beyond the map's bottom
+ * row (58 to 4).
  * @param {TileReader} reader The map.
  * @param {number} x The column.
  * @param {number} y The row.
