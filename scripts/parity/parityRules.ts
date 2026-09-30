@@ -3,8 +3,15 @@
  * which maps are worth comparing at every animation step, what explains a difference in the events pass, and which
  * differences the engine predicts against snapshot.js.
  */
-import type { CellDifference } from './compareImages.ts';
-import type { ProbeEvent, ProbeMap } from './gameProbe.ts';
+import type { ProbeEvent, ProbeMap } from './probeTypes.ts';
+
+/**
+ * A map cell that differs, as far as the rules read it.
+ */
+type DifferingCell = {
+  readonly x: number;
+  readonly y: number;
+};
 
 /**
  * The parts of a map file the check reads.
@@ -108,11 +115,11 @@ const spriteCovers = (event: ProbeEvent, cell: { x: number; y: number }, margin:
  * Explains a differing cell of the events pass by an event around it that the game draws differently from a plain
  * drawing of its first page, which is what the editor draws. A cell under a plainly drawn event stays unexplained
  * however much its neighbours move: a difference there would be the editor's own.
- * @param {CellDifference} cell The cell.
+ * @param {DifferingCell} cell The cell.
  * @param {readonly ProbeEvent[]} events The game's events on the map.
  * @returns {string | null} Why it differs, or null when nothing explains it.
  */
-const explainCell = (cell: CellDifference, events: readonly ProbeEvent[]): string | null =>
+const explainCell = (cell: DifferingCell, events: readonly ProbeEvent[]): string | null =>
 {
   const departs = (event: ProbeEvent): boolean => event.visible === false || event.departures.length > 0;
   if (events.some(event => departs(event) === false && spriteCovers(event, cell, 0)))

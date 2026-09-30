@@ -159,13 +159,13 @@ describe('pixi-tilemap fixes', () =>
       const tilemap = new Tilemap([ new TextureSource({ width: 96, height: 96 }) ]);
       tilemap.tile(0, 0, 0, TILE);
       tilemap.updateBuffer(pipe);
-      const firstX = (tilemap.vb.getBuffer('aVertexPosition').data as Float32Array)[0];
+      const [ firstX ] = tilemap.vb.getBuffer('aVertexPosition').data as Float32Array;
 
       // Act: cleared and refilled with one tile at x 96.
       tilemap.clear();
       tilemap.tile(0, 96, 0, TILE);
       tilemap.updateBuffer(pipe);
-      const refilledX = (tilemap.vb.getBuffer('aVertexPosition').data as Float32Array)[0];
+      const [ refilledX ] = tilemap.vb.getBuffer('aVertexPosition').data as Float32Array;
 
       // Assert.
       expect([ firstX, refilledX ])

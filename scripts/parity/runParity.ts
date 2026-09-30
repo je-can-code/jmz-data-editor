@@ -27,7 +27,7 @@ import type { Page } from 'playwright-core';
 import { startEditorStack } from '../speed/editorStack.ts';
 import { openSpeedBrowser } from '../speed/gpuChromium.ts';
 import { comparePictures, decodePng, differencePicture, writePng, type CellDifference, type Comparison } from './compareImages.ts';
-import type { ProbeCapture, ProbeReport } from './gameProbe.ts';
+import type { ProbeCapture, ProbeReport } from './probeTypes.ts';
 import { runHeadlessGame } from './headlessGame.ts';
 import { explainCell, probeMapFor, snapshotPredictions, TILE, type MapFile } from './parityRules.ts';
 

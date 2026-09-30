@@ -10,7 +10,8 @@
  * A virtual display hides the window but not the sound, so the game is muted at every level (see MUTE_AUDIO).
  */
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { parityProbe, type ProbeConfig, type ProbeReport } from './gameProbe.ts';
+import { parityProbe } from './gameProbe.ts';
+import type { ProbeConfig, ProbeReport } from './probeTypes.ts';
 
 /**
  * How to run the game.
