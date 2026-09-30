@@ -15,6 +15,11 @@ type ClassParamsGrowthEditorProps = {
    * from that class's own saved formulas.
    */
   classId: number;
+  /**
+   * Changes whenever the whole class is replaced under the card, as a paste does. A pasted class keeps its id,
+   * so without this the card could not tell that the formulas typed into its rows no longer belong to it.
+   */
+  revision: number;
   /** The class's growth as it stands: its growth-curve formulas, and the levels baked from them. */
   growth: ClassGrowth;
   /** Every class in the database, any of which the class being edited can clone its growth from. */
@@ -34,12 +39,21 @@ type ClassParamsGrowthEditorProps = {
  * edited row at once. Pulls `trueMaxLevel` from {@link useLevelConfig} so each row's graph can preview
  * J-LevelMaster's actual beyond-99 runtime extrapolation before anything gets applied.
  */
-function ClassParamsGrowthEditor({ classId, growth, cloneSources, onGrowthChange }: ClassParamsGrowthEditorProps)
+function ClassParamsGrowthEditor(props: ClassParamsGrowthEditorProps)
 {
+  const {
+    classId,
+    revision,
+    growth,
+    cloneSources,
+    onGrowthChange,
+  } = props;
+
   const { levelConfig } = useLevelConfig();
 
-  // how many clones have landed, which is part of the rows' key alongside the class: a clone replaces every
-  // formula under the rows at once, and the rows only start from the saved formulas when they mount.
+  // how many clones have landed, which is part of the rows' key alongside the class and its revision: a clone
+  // replaces every formula under the rows at once, and the rows only start from the saved formulas when they
+  // mount.
   const [ cloneCount, setCloneCount ] = useState(0);
 
   /**
@@ -67,7 +81,7 @@ function ClassParamsGrowthEditor({ classId, growth, cloneSources, onGrowthChange
         />
 
         <ClassParamRows
-          key={`${classId}:${cloneCount}`}
+          key={`${classId}:${revision}:${cloneCount}`}
           growth={growth}
           trueMaxLevel={levelConfig?.trueMaxLevel}
           onGrowthChange={onGrowthChange}

@@ -55,6 +55,9 @@ import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel
 import { EnemyJabsConfigs } from '@boards/enemies/EnemyJabsConfigs.tsx';
 import { EnemyPassiveAbs } from '@boards/enemies/EnemyPassiveAbs.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
+import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { RowClipboardMenu } from '@presentation/components/board/RowClipboardMenu.tsx';
+import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 const EnemiesBoard = () =>
@@ -479,9 +482,50 @@ const EnemiesBoard = () =>
     updateEnemy(selectedEnemy!);
   };
   //endregion update parameters
+
+  // copy and paste whole enemies like any other edit, lighting up Save.
+  const rowClipboard = useRowClipboard({
+    table: DatabaseFilenames.Enemies,
+    selectedIndex: selectedEnemyIndex,
+    onSelectIndex: (index) => handleEnemyListItemOnClickEvent(index),
+    listWrapperRef,
+    getRows: () => enemies,
+    toRow: (enemy) => enemy.toRmmz(),
+    fromRow: (row) => new RPG_EnemyDomainModel(row),
+    applyPaste: (update) =>
+    {
+      setEnemies(update);
+      setCanSave(true);
+    },
+    notify: (message, severity) => handleSnack(message, severity),
+  });
   //endregion updates
 
   //region render
+  /**
+   * Picks the marker at the start of an enemy's row. The family colors cover the list's selected background,
+   * so the marker is what shows which rows are selected: the row the editor shows, and the rest of a
+   * Shift-click run.
+   * @param {number} index The row's index in the list.
+   * @returns {JSX.Element} The row's marker icon.
+   */
+  const renderEnemyListIcon = (index: number) =>
+  {
+    // mark the row the editor is showing.
+    if (selectedEnemyIndex === index)
+    {
+      return <DoubleArrow color={'success'} fontSize={'small'}/>;
+    }
+
+    // mark the other rows of a run, which a copy takes along with it.
+    if (rowClipboard.isSelected(index))
+    {
+      return <DoubleArrow fontSize={'small'}/>;
+    }
+
+    return <KeyboardArrowRight color={'warning'} fontSize={'small'}/>;
+  };
+
   const renderEnemyListItem = (props: ListChildComponentProps) =>
   {
     const {
@@ -552,23 +596,20 @@ const EnemiesBoard = () =>
               }
             }
           }}
-          selected={selectedEnemyIndex === index}
+          selected={rowClipboard.isSelected(index)}
           onMouseDown={(e) =>
           {
             // keep keyboard focus on the wrapper
             e.preventDefault();
           }}
           tabIndex={-1}
-          onClick={() => handleEnemyListItemOnClickEvent(index)}
+          onClick={(event) => rowClipboard.onRowClick(index, event)}
+          onContextMenu={(event) => rowClipboard.onRowContextMenu(index, event)}
         >
           <ListItemIcon
             sx={{ minWidth: '24px' }}
           >
-            {(
-              selectedEnemyIndex === index
-            )
-              ? <DoubleArrow color={'success'} fontSize={'small'}/>
-              : <KeyboardArrowRight color={'warning'} fontSize={'small'}/>}
+            {renderEnemyListIcon(index)}
           </ListItemIcon>
           <ListItemText
             disableTypography
@@ -732,10 +773,6 @@ const EnemiesBoard = () =>
           tabIndex={0}
           role={'listbox'}
           onKeyDown={handleListKeyDown}
-          onContextMenu={() =>
-          {
-            // TODO: implement context menu.
-          }}
           style={{
             cursor: 'context-menu',
             outline: 'none',
@@ -754,6 +791,7 @@ const EnemiesBoard = () =>
             {renderEnemyListItem}
           </FixedSizeList>
         </div>
+        <RowClipboardMenu {...rowClipboard.menu}/>
         </Box>
           </>
         }
@@ -929,6 +967,7 @@ const EnemiesBoard = () =>
                       />
                       <EnemiesExtraDrops
                         selectedEnemy={selectedEnemy}
+                        revision={rowClipboard.pasteRevision}
                         updateEnemy={updateEnemy}
                         handleSnack={handleSnack}
                       />
