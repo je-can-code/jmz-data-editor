@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import {
   Autocomplete,
   Box,
@@ -167,13 +167,15 @@ const BooleanControl = (props: FieldControlProps) =>
 const SelectControl = (props: FieldControlProps) =>
 {
   const { field, value, onChange } = props;
+  const labelId = useId();
   const options = field.options ?? [];
   const current = String(value ?? '');
   const known = options.some(option => String(option.value) === current);
   return (
     <FormControl size={'small'} fullWidth>
-      <InputLabel>{field.label}</InputLabel>
+      <InputLabel id={labelId}>{field.label}</InputLabel>
       <Select
+        labelId={labelId}
         label={field.label}
         value={current}
         onChange={event =>
@@ -262,6 +264,7 @@ const IdControl = (props: FieldControlProps) =>
 const CharacterControl = (props: FieldControlProps) =>
 {
   const { field, value, onChange } = props;
+  const labelId = useId();
   const id = numberOf(value) ?? 0;
   let choice = 'event';
   if (id < 0)
@@ -276,8 +279,9 @@ const CharacterControl = (props: FieldControlProps) =>
   return (
     <Stack direction={'row'} spacing={1}>
       <FormControl size={'small'} fullWidth>
-        <InputLabel>{field.label}</InputLabel>
+        <InputLabel id={labelId}>{field.label}</InputLabel>
         <Select
+          labelId={labelId}
           label={field.label}
           value={choice}
           onChange={event =>
