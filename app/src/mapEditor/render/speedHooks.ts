@@ -9,6 +9,7 @@ import {
   NO_OVERLAY_STATE,
   type CoreOverlayId,
   type GhostTile,
+  type MapContextMenu,
   type OverlayState,
 } from '../core/renderer/MapRenderer.ts';
 import { centerCamera, fitZoom } from './cameraControls.ts';
@@ -158,6 +159,10 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     }
   }));
 
+  // every context menu the renderer raises, so a check can see a still right click land.
+  const contextMenus: MapContextMenu[] = [];
+  stops.push(renderer.onContextMenu(menu => contextMenus.push(menu)));
+
   // the paint stand-in: a pen that paints on pointer moves with the left button held, the way P3's will.
   let painting: { transaction: Transaction; map: MapDocument } | null = null;
   let settings: PaintSettings = { tileIds: [ 2048 + 47, 2816 + 47 ], layer: 0, footprint: 3 };
@@ -230,6 +235,7 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       };
     },
     camera: () => renderer.camera,
+    contextMenus: () => [ ...contextMenus ],
     lookAt: (x: number, y: number, zoom: number) => renderer.lookAt({ x, y }, zoom),
     zoomToFit: () => renderer.zoomToFit(),
     screenOfCell: (x: number, y: number) =>
