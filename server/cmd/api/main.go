@@ -133,7 +133,7 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	mux.HandleFunc("GET /api/editor-data/{key}", api.LoadEditorData)
 	mux.HandleFunc("PUT /api/editor-data/{key}", api.SaveEditorData(changes))
 
-	mux.HandleFunc("GET /api/file-changes", api.StreamFileChanges(changes, api.KeepAliveInterval))
+	mux.HandleFunc("GET /api/file-changes", api.StreamFileChanges(changes, api.DefaultStreamTiming))
 	//endregion map editor endpoints
 
 	return middleware.CORS(mux, policy)
