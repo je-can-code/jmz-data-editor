@@ -24,7 +24,7 @@ const chefAdventureData = "../../../../ca/chef-adventure/data"
 // A failure is not a bug in this test. It is the name of a field that needs declaring on the model
 // the message points at.
 func TestLoadRefusesUnknownFields(t *testing.T) {
-	if _, err := os.Stat(chefAdventureData); err != nil {
+	if _, err := os.Stat(gameDataDir()); err != nil {
 		t.Skip("ca/chef-adventure/data not present beside jmz-data-editor (optional)")
 	}
 
@@ -52,14 +52,16 @@ func TestLoadRefusesUnknownFields(t *testing.T) {
 		loadOne(t, "States.json", func(p string) error { _, e := LoadSlice[*db.RpgState](p); return e })
 		loadOne(t, "Weapons.json", func(p string) error { _, e := LoadSlice[*db.RpgWeapon](p); return e })
 		loadOne(t, "System.json", func(p string) error { _, e := Load[*db.RpgSystem](p); return e })
+		loadOne(t, "MapInfos.json", func(p string) error { _, e := LoadSlice[*db.RpgMapInfo](p); return e })
+		loadOne(t, "Tilesets.json", func(p string) error { _, e := LoadSlice[*db.RpgTileset](p); return e })
 	})
 
 	// every map, because there are 383 of them and they differ: `meta` appears on thirty and on
 	// none of the rest, which is exactly the kind of thing one sample file would miss.
 	t.Run("every map", func(t *testing.T) {
-		entries, err := os.ReadDir(chefAdventureData)
+		entries, err := os.ReadDir(gameDataDir())
 		if err != nil {
-			t.Fatalf("reading %s: %v", chefAdventureData, err)
+			t.Fatalf("reading %s: %v", gameDataDir(), err)
 		}
 
 		checked := 0
@@ -86,7 +88,7 @@ func TestLoadRefusesUnknownFields(t *testing.T) {
 func loadOne(t *testing.T, name string, load func(path string) error) {
 	t.Helper()
 
-	path := filepath.Join(chefAdventureData, name)
+	path := filepath.Join(gameDataDir(), name)
 	if _, err := os.Stat(path); err != nil {
 		return
 	}

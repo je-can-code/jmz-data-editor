@@ -119,7 +119,7 @@ func countCollapsed(t *testing.T, payload []byte) int {
 func readGameFile(t *testing.T, name string) []byte {
 	t.Helper()
 
-	path := filepath.Join(chefAdventureData, name)
+	path := filepath.Join(gameDataDir(), name)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Skipf("%s not present beside jmz-data-editor (optional)", name)

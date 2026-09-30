@@ -3,6 +3,10 @@ package db
 import "encoding/json"
 
 // RpgMap is the root object in data/Map###.json (MZ map editor export).
+//
+// The fields are declared in the order MZ writes them, with the tiles and the events last, because
+// that is the order a brand-new map is written in. A map that already exists keeps the key order of
+// its file instead (see mzjson.Render); decoding matches by name, so the order changes nothing else.
 type RpgMap struct {
 	AutoplayBgm       bool              `json:"autoplayBgm"`
 	AutoplayBgs       bool              `json:"autoplayBgs"`
@@ -10,12 +14,10 @@ type RpgMap struct {
 	Battleback2Name   string            `json:"battleback2Name"`
 	Bgm               RpgSoundEffect    `json:"bgm"`
 	Bgs               RpgSoundEffect    `json:"bgs"`
-	Data              []int             `json:"data"`
 	DisableDashing    bool              `json:"disableDashing"`
 	DisplayName       string            `json:"displayName"`
 	EncounterList     []RpgMapEncounter `json:"encounterList"`
 	EncounterStep     int               `json:"encounterStep"`
-	Events            []*RpgMapEvent    `json:"events"`
 	Height            int               `json:"height"`
 	Note              string            `json:"note"`
 	ParallaxLoopX     bool              `json:"parallaxLoopX"`
@@ -34,6 +36,13 @@ type RpgMap struct {
 	// to disk as well. Carried verbatim and never interpreted: `note` is the authority, and a
 	// derived copy that disagreed with it would be worse than not having one.
 	Meta json.RawMessage `json:"meta,omitempty"`
+
+	// Data is the six tile layers, width times height cells each: four tile layers, then shadows,
+	// then regions.
+	Data []int `json:"data"`
+
+	// Events is sparse and indexed by event id, so index 0 and every deleted event are null.
+	Events []*RpgMapEvent `json:"events"`
 }
 
 // RpgMapEncounter is one random encounter row on the map properties.
