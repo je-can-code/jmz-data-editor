@@ -53,6 +53,19 @@ const whichEvents = (document: MapDocument, eventIds: readonly number[]): string
 };
 
 /**
+ * Names a kind's section after the map and the events it stands for. Picking other events, or moving to another map,
+ * gives the section a new name, so it is built afresh: a box still holding half-typed text goes with the old section,
+ * and that text can never be written to events it was not typed for.
+ * @param {MapDocument} document The map.
+ * @param {KindGroup<EventKindDefinition>} group The kind and its events.
+ * @returns {string} Such as "map:3 core.chest 4,9".
+ */
+const sectionKey = (document: MapDocument, group: KindGroup<EventKindDefinition>): string =>
+{
+  return `${document.key} ${group.kind.id} ${group.eventIds.join(',')}`;
+};
+
+/**
  * One kind's part of the panel: its name, which events it stands for, and its own quick panel.
  * @param {{ document: MapDocument, group: KindGroup<EventKindDefinition> }} props The map and the kind's events.
  * @returns {React.JSX.Element} The section.
@@ -112,7 +125,7 @@ const QuickPanelHost = (props: QuickPanelHostProps) =>
   return (
     <Box sx={{ height: '100%', overflowY: 'auto', px: 1.5, py: 1, bgcolor: 'background.default' }} data-testid={'quick-panel'}>
       <Stack spacing={1.5} divider={<Divider flexItem/>}>
-        {groups.map(group => <KindSection key={group.kind.id} document={document} group={group}/>)}
+        {groups.map(group => <KindSection key={sectionKey(document, group)} document={document} group={group}/>)}
         {unclaimed.length > 0 && (
           <Typography variant={'body2'} color={'text.secondary'}>
             {others}
