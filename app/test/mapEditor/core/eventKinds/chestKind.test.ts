@@ -147,13 +147,16 @@ describe('chestKind', () =>
 
     it('wants exactly one sound, one route turning the chest itself and one switch turned on', () =>
     {
-      // Arrange: two sounds; no route; a route moving the player; a switch turned off; an unknown switch letter.
+      // Arrange: two sounds; no route; two routes; a route moving the player; a switch turned off; an unknown switch
+      // letter; a second switch turned on beside the one the opened page waits for.
       const openings = [
         [ sound(), sound(), ...chestRoute(), command(123, [ 'A', 0 ]), command(126, [ 1, 0, 0, 1 ]) ],
         [ sound(), command(123, [ 'A', 0 ]), command(126, [ 1, 0, 0, 1 ]) ],
+        [ sound(), ...chestRoute(), ...chestRoute(), command(123, [ 'A', 0 ]), command(126, [ 1, 0, 0, 1 ]) ],
         [ sound(), command(205, [ -1, { repeat: false, skippable: false, wait: true, list: [ { code: 0 } ] } ]), command(123, [ 'A', 0 ]), command(126, [ 1, 0, 0, 1 ]) ],
         [ sound(), ...chestRoute(), command(123, [ 'A', 1 ]), command(126, [ 1, 0, 0, 1 ]) ],
         [ sound(), ...chestRoute(), command(123, [ 'E', 0 ]), command(126, [ 1, 0, 0, 1 ]) ],
+        [ sound(), ...chestRoute(), command(123, [ 'A', 0 ]), command(123, [ 'B', 0 ]), command(126, [ 1, 0, 0, 1 ]) ],
       ];
 
       // Act.
@@ -161,7 +164,7 @@ describe('chestKind', () =>
 
       // Assert.
       expect(answers)
-        .toStrictEqual([ false, false, false, false, false ]);
+        .toStrictEqual([ false, false, false, false, false, false, false ]);
     });
 
     it('refuses a reward that takes away, or reads its amount from a variable', () =>
