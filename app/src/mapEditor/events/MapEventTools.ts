@@ -20,11 +20,11 @@ import type { DocumentChange } from '../core/model/EditorDocument.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import { screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../core/renderer/camera.ts';
 import type { CellRect, GhostEvent, GhostTile, MapContextMenu, OverlayState, WorldRect } from '../core/renderer/MapRenderer.ts';
-import { isTextEntry, type KeyTarget } from '../core/workspace/shortcuts.ts';
+import { isTextEntry, shortcutFor, type KeyTarget } from '../core/workspace/shortcuts.ts';
 
 /**
  * What the event tools need from the renderer: its canvas and camera, the event under a point, the overlay state it
- * draws, and its still right clicks.
+ * draws, its still right clicks, and every move of its camera.
  */
 type EventToolsRenderer = {
   readonly canvas: HTMLCanvasElement | null;
@@ -32,6 +32,7 @@ type EventToolsRenderer = {
   eventAt(point: ScreenPoint): number | null;
   setOverlayState(state: OverlayState): void;
   onContextMenu(listener: (menu: MapContextMenu) => void): () => void;
+  onCameraChange(listener: (camera: Camera) => void): () => void;
 };
 
 /**
@@ -108,7 +109,10 @@ const NO_CELLS: readonly MapCell[] = Object.freeze([]);
  * - Double-click an event to open its window; double-click the ground to place a new event there and open it.
  * - Delete, Ctrl+D, Ctrl+A, Enter and Esc delete, duplicate, select all, open and deselect. Ctrl+C, X and V copy, cut and
  *   paste through the system clipboard, across maps and windows; a paste lands with its top-left corner on the tile
- *   under the pointer, or where the events were copied from when the pointer is off the map.
+ *   under the pointer, or where the events were copied from when the pointer is off the map. The tile under the
+ *   pointer follows the camera too, so a zoom under a still pointer moves the paste with it.
+ * - While the left button is down, only Esc acts: the arrows, Delete, Ctrl+D, Ctrl+X, Ctrl+V, Ctrl+Z and the rest wait
+ *   until it comes up, since each would change the map under a drag or a box still in hand.
  *
  * Nothing here goes through React: the tools listen on the canvas and the view themselves, which also keeps them
  * working in a torn-out window, and hand the renderer its overlay state directly. While another tool owns the left
@@ -129,6 +133,11 @@ class MapEventTools
   #dragFrame: DragFrame | null = null;
 
   #hover: CellRect | null = null;
+
+  /**
+   * Where the pointer last was over the canvas, or null once it left: what the hover follows when the camera moves.
+   */
+  #pointer: ScreenPoint | null = null;
 
   #box: WorldRect | null = null;
 
@@ -157,6 +166,7 @@ class MapEventTools
     this.#stops.push(
       selection.subscribe(() => this.#selectionChanged()),
       renderer.onContextMenu(menu => this.#contextMenu(menu)),
+      renderer.onCameraChange(() => this.#cameraMoved()),
     );
 
     const { canvas } = renderer;
@@ -406,34 +416,15 @@ class MapEventTools
 
     const point = { x: event.offsetX, y: event.offsetY };
     const press = { point, cell: this.#cellAt(point), eventId: this.#options.renderer.eventAt(point), modifiers: modifiersOf(event) };
+    this.#pointer = point;
     this.#options.renderer.canvas?.setPointerCapture(event.pointerId);
     this.#apply(this.#gesture.press(press, this.#selected));
   };
 
   #onPointerMove = (event: PointerEvent): void =>
   {
-    const map = this.#map;
-    if (this.#enabled === false || map === null)
-    {
-      return;
-    }
-
-    const point = { x: event.offsetX, y: event.offsetY };
-    const cell = this.#cellAt(point);
-    const hoverMoved = this.#hoverOver(isOnMap(cell, map) ? cell : null);
-    const step = this.#gesture.isActive
-      ? this.#gesture.move(point, cell)
-      : { kind: 'none' as const };
-    if (step.kind !== 'none')
-    {
-      this.#apply(step);
-      return;
-    }
-
-    if (hoverMoved)
-    {
-      this.#push();
-    }
+    this.#pointer = { x: event.offsetX, y: event.offsetY };
+    this.#pointAt(this.#pointer);
   };
 
   #onPointerUp = (event: PointerEvent): void =>
@@ -457,7 +448,13 @@ class MapEventTools
   #onPointerLeave = (): void =>
   {
     // a drag or a box keeps the pointer captured, and keeps its hover, until the button comes up.
-    if (this.#gesture.isActive === false && this.#hoverOver(null))
+    if (this.#gesture.isActive)
+    {
+      return;
+    }
+
+    this.#pointer = null;
+    if (this.#hoverOver(null))
     {
       this.#push();
     }
@@ -491,10 +488,20 @@ class MapEventTools
   #onKeyDown = (event: KeyboardEvent): void =>
   {
     const map = this.#map;
-    const action = this.#enabled && map !== null
-      ? eventKeyFor(event, event.target as unknown as KeyTarget)
-      : null;
-    if (map === null || action === null)
+    if (this.#enabled === false || map === null)
+    {
+      return;
+    }
+
+    // a drag or a box still in hand would have the map changed under it, so every key but Esc waits for the button.
+    if (this.#gesture.isActive)
+    {
+      this.#holdDuringGesture(event);
+      return;
+    }
+
+    const action = eventKeyFor(event, event.target as unknown as KeyTarget);
+    if (action === null)
     {
       return;
     }
@@ -544,8 +551,9 @@ class MapEventTools
 
   #onCut = (event: ClipboardEvent): void =>
   {
+    // a cut removes events, which waits, like every edit, until no drag or box is in hand.
     const map = this.#map;
-    if (this.#ownsClipboard() === false || map === null || event.clipboardData === null || this.#selected.length === 0)
+    if (this.#ownsClipboard() === false || this.#gesture.isActive || map === null || event.clipboardData === null || this.#selected.length === 0)
     {
       return;
     }
@@ -562,7 +570,8 @@ class MapEventTools
 
   #onPaste = (event: ClipboardEvent): void =>
   {
-    const events = this.#ownsClipboard() && event.clipboardData !== null
+    // a paste places events, which waits, like every edit, until no drag or box is in hand.
+    const events = this.#ownsClipboard() && this.#gesture.isActive === false && event.clipboardData !== null
       ? decodeEventClipboard(event.clipboardData.getData('text/plain'))
       : null;
     if (events === null)
@@ -600,6 +609,72 @@ class MapEventTools
   {
     const world = screenToWorld(this.#options.renderer.camera, point);
     return { x: Math.floor(world.x / TILE_SIZE), y: Math.floor(world.y / TILE_SIZE) };
+  }
+
+  /**
+   * Follows the pointer to a point in the view: the tile under it becomes the hover (where a paste lands), and a drag
+   * or a box in hand moves with it.
+   * @param {ScreenPoint} point The point.
+   */
+  #pointAt(point: ScreenPoint): void
+  {
+    const map = this.#map;
+    if (this.#enabled === false || map === null)
+    {
+      return;
+    }
+
+    const cell = this.#cellAt(point);
+    const hoverMoved = this.#hoverOver(isOnMap(cell, map) ? cell : null);
+    const step = this.#gesture.isActive
+      ? this.#gesture.move(point, cell)
+      : { kind: 'none' as const };
+    if (step.kind !== 'none')
+    {
+      this.#apply(step);
+      return;
+    }
+
+    if (hoverMoved)
+    {
+      this.#push();
+    }
+  }
+
+  /**
+   * Follows the camera: a zoom or a pan under a pointer that stays still puts another tile under it, so the hover, and
+   * any drag or box in hand, follow as if the pointer had moved there.
+   */
+  #cameraMoved(): void
+  {
+    const point = this.#pointer;
+    if (point !== null)
+    {
+      this.#pointAt(point);
+    }
+  }
+
+  /**
+   * Answers a key pressed while the left button is down: Esc drops the drag or box in hand, and every other key the
+   * map or the workspace would act on is held back, the workspace's undo and redo included, since they would change
+   * the map under the drag. Saving still goes through, since it changes nothing.
+   * @param {KeyboardEvent} event The key press.
+   */
+  #holdDuringGesture(event: KeyboardEvent): void
+  {
+    const action = eventKeyFor(event, event.target as unknown as KeyTarget);
+    if (action !== null && action.kind === 'escape')
+    {
+      event.preventDefault();
+      this.#escape();
+      return;
+    }
+
+    const command = shortcutFor(event);
+    if (action !== null || (command !== null && command !== 'save'))
+    {
+      event.preventDefault();
+    }
   }
 
   /**

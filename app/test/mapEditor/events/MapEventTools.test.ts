@@ -6,6 +6,7 @@ import { decodeEventClipboard, encodeEventClipboard, copyEvents } from '../../..
 import { EventSelection } from '../../../src/mapEditor/core/events/EventSelection.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import type { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
+import type { Camera } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { MapContextMenu, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { MapEventTools, type EventMenuRequest } from '../../../src/mapEditor/events/MapEventTools.ts';
 import { hubWithMaps, mapFileOf, mapWithEvents, spotsOf } from '../support/eventFixtures.ts';
@@ -15,10 +16,11 @@ import { hubWithMaps, mapFileOf, mapWithEvents, spotsOf } from '../support/event
  * steps and the window's selection, and hand the renderer what to show. What they owe, beyond the services' own
  * promises: a click, a box and a drag each do what the gesture says (a drag shows ghosts and its drop is one undoable
  * step, or a refusal said aloud); a double-click opens an event, or places one on the ground and opens it; the keys act
- * only while the view has focus and nudge only when something is selected; copy and paste go through the browser's
+ * only while the view has focus and nudge only when something is selected, and while the left button is down only Esc
+ * acts, every other key (an undo included) waiting until it comes up; copy and paste go through the browser's
  * clipboard events with the map editor's marker, pasting under the pointer with fresh ids and leaving plain text
- * alone; a right click picks the event it lands on before the menu opens; standing down ignores all of it; and an
- * event removed by an undo leaves the selection.
+ * alone, the tile under the pointer following the camera as it zooms; a right click picks the event it lands on
+ * before the menu opens; standing down ignores all of it; and an event removed by an undo leaves the selection.
  *
  * The view is at zoom 1 with the map's corner at the view's, so a tile is 48 pixels. The 6x4 map holds event 1 at
  * 0, 0, event 2 at 1, 0, and event 3 at 4, 2.
@@ -50,6 +52,7 @@ describe('MapEventTools', () =>
 
     const overlays: OverlayState[] = [];
     const menus: ((menu: MapContextMenu) => void)[] = [];
+    const cameraListeners: ((camera: Camera) => void)[] = [];
     const renderer = {
       canvas,
       camera: { x: 0, y: 0, zoom: 1 },
@@ -60,6 +63,21 @@ describe('MapEventTools', () =>
         menus.push(listener);
         return () => undefined;
       },
+      onCameraChange: (listener: (camera: Camera) => void) =>
+      {
+        cameraListeners.push(listener);
+        return () => undefined;
+      },
+    };
+
+    /**
+     * Moves the camera, as a wheel zoom or a pan does, and tells whoever listens.
+     * @param {Camera} camera The new camera.
+     */
+    const moveCamera = (camera: Camera) =>
+    {
+      renderer.camera = camera;
+      cameraListeners.forEach(listener => listener(camera));
     };
 
     const selection = new EventSelection();
@@ -79,7 +97,7 @@ describe('MapEventTools', () =>
     });
     tools.setMap(map);
     built.push(tools);
-    return { hub, map, host, canvas, overlays, menus, selection, opened, notices, menuRequests, tools, clipboard };
+    return { hub, map, host, canvas, overlays, menus, selection, opened, notices, menuRequests, tools, clipboard, moveCamera };
   };
 
   /**
@@ -255,6 +273,44 @@ describe('MapEventTools', () =>
         .toStrictEqual([ [ { x: 1, y: 0 } ], [ 'Another event is in the way.' ], [ null, [ 0, 0 ], [ 1, 0 ], [ 4, 2 ] ], 1 ]);
     });
 
+    it('holds nudges, deletes and undo while the left button is down, and takes keys again once it comes up', () =>
+    {
+      // Arrange: event 3 is selected, and an undo pressed before any drag is the workspace's to take.
+      const { hub, canvas, host, selection } = setUp();
+      selection.select(1, [ 3 ]);
+      const undoBefore = key(host, 'z', { ctrlKey: true }).defaultPrevented;
+      point(canvas, 'pointerdown', { x: 4, y: 2 });
+      point(canvas, 'pointermove', { x: 4, y: 3 });
+
+      // Act: an arrow, Delete and Ctrl+Z mid-drag; then the drop, and an arrow once the button is up.
+      const held = [ key(host, 'ArrowUp'), key(host, 'Delete'), key(host, 'z', { ctrlKey: true }) ].map(event => event.defaultPrevented);
+      const midDrag = spotsOf(mapFileOf(hub, 1));
+      point(canvas, 'pointerup', { x: 4, y: 3 });
+      const [ , , , dropped ] = spotsOf(mapFileOf(hub, 1));
+      key(host, 'ArrowUp');
+
+      // Assert: nothing changed mid-drag, the drop landed whole, and the arrow nudged afterwards.
+      expect([ undoBefore, held, midDrag, dropped, spotsOf(mapFileOf(hub, 1))[3] ])
+        .toStrictEqual([ false, [ true, true, true ], [ null, [ 0, 0 ], [ 1, 0 ], [ 4, 2 ] ], [ 4, 3 ], [ 4, 2 ] ]);
+    });
+
+    it('moves the ghosts of a drag in hand with the camera when a zoom puts another tile under the still pointer', () =>
+    {
+      // Arrange: event 3 dragged one tile down; at zoom 2 the pointer's spot lies over tile 2, 1.
+      const { canvas, selection, overlays, moveCamera } = setUp();
+      selection.select(1, [ 3 ]);
+      point(canvas, 'pointerdown', { x: 4, y: 2 });
+      point(canvas, 'pointermove', { x: 4, y: 3 });
+      const beforeTheZoom = overlays[overlays.length - 1].ghostEvents.map(ghost => [ ghost.x, ghost.y ]);
+
+      // Act.
+      moveCamera({ x: 0, y: 0, zoom: 2 });
+
+      // Assert.
+      expect([ beforeTheZoom, overlays[overlays.length - 1].ghostEvents.map(ghost => [ ghost.x, ghost.y ]) ])
+        .toStrictEqual([ [ [ 4, 3 ] ], [ [ 2, 1 ] ] ]);
+    });
+
     it('drops a drag without moving anything on Esc', () =>
     {
       // Arrange.
@@ -383,6 +439,23 @@ describe('MapEventTools', () =>
       // Assert.
       expect([ paste.event.defaultPrevented, spotsOf(mapFileOf(hub, 1)), selection.eventsOn(1) ])
         .toStrictEqual([ true, [ null, [ 0, 0 ], [ 1, 0 ], [ 4, 2 ], [ 2, 2 ], [ 3, 2 ] ], [ 4, 5 ] ]);
+    });
+
+    it('lands a paste on the tile a zoom puts under the still pointer, not the one it rested on before', () =>
+    {
+      // Arrange: event 3 copied, the pointer resting over 2, 2; at zoom 2 that spot lies over tile 1, 1.
+      const { hub, host, map, canvas, moveCamera } = setUp();
+      const text = encodeEventClipboard(copyEvents(map, 1, [ 3 ]) as NonNullable<ReturnType<typeof copyEvents>>);
+      point(canvas, 'pointermove', { x: 2, y: 2 });
+      host.focus();
+      moveCamera({ x: 0, y: 0, zoom: 2 });
+
+      // Act.
+      clipboardEvent('paste', text);
+
+      // Assert.
+      expect(spotsOf(mapFileOf(hub, 1))[4])
+        .toStrictEqual([ 1, 1 ]);
     });
 
     it('pastes from the menu what the clipboard read hands over, with the corner on the right-clicked tile', async () =>
