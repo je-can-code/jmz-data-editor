@@ -85,10 +85,10 @@ describe('CommandList', () =>
 
   /**
    * Renders a list over a real hub and the built-in catalog, and lets the names arrive.
-   * @param {object} options The editors registered, and the sound player.
+   * @param {object} options The editors registered, the sound player, and the window shell's clipboard read.
    * @returns {Promise<object>} The hub, the list element and the player.
    */
-  const renderList = async (options: { registry?: CommandEditorRegistry; playSound?: SoundPlayer } = {}) =>
+  const renderList = async (options: { registry?: CommandEditorRegistry; playSound?: SoundPlayer; readClipboard?: (marker: string) => Promise<string | null> } = {}) =>
   {
     const map: RmmzMap = buildMapJson();
     (map.events[1] as NonNullable<RmmzMap['events'][number]>).pages[0].list = buildList();
@@ -103,6 +103,7 @@ describe('CommandList', () =>
       api: buildApi(),
       pluginHeaders: new PluginHeaderStore(),
       loadCommandResources: async () => undefined,
+      shell: { readClipboard: options.readClipboard ?? (async () => null) },
     } as unknown as MapEditorServices;
     const playSound = options.playSound ?? vi.fn<SoundPlayer>();
     render(
@@ -245,6 +246,44 @@ describe('CommandList', () =>
     // Assert.
     expect([ JSON.parse(written[0]).format, commandsOf(hub).map(command => command.code).slice(0, 3), historyOf(hub) ])
       .toStrictEqual([ 'jmz-map-editor/commands', [ 250, 230, 230 ], [ 'Paste command' ] ]);
+  });
+
+  it('pastes from the menu what the window shell reads, asking for copied commands alone', async () =>
+  {
+    // Arrange: a wait copied, which the window shell's read hands over.
+    const copied = JSON.stringify({ format: 'jmz-map-editor/commands', version: 1, commands: [ cmd(230, 0, [ 30 ]) ] });
+    const readClipboard = vi.fn(async (_marker: string) => copied);
+    const { hub } = await renderList({ readClipboard });
+    fireEvent.contextMenu(screen.getByText('Wait 30 frames'), { clientX: 5, clientY: 5 });
+
+    // Act.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Paste' }));
+    await act(async () =>
+    {
+      await Promise.resolve();
+    });
+
+    // Assert: the copy lands above the wait, as a paste does at the focus.
+    expect([ readClipboard.mock.calls, commandsOf(hub).map(command => command.code).slice(0, 3), historyOf(hub) ])
+      .toStrictEqual([ [ [ 'jmz-map-editor/commands' ] ], [ 250, 230, 230 ], [ 'Paste command' ] ]);
+  });
+
+  it('says so when the menu\'s paste cannot read the clipboard, and pastes nothing', async () =>
+  {
+    // Arrange: a read that comes back with nothing, as one the shell never answered does.
+    const { hub } = await renderList({ readClipboard: async () => null });
+    fireEvent.contextMenu(screen.getByText('Wait 30 frames'), { clientX: 5, clientY: 5 });
+
+    // Act.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Paste' }));
+    await act(async () =>
+    {
+      await Promise.resolve();
+    });
+
+    // Assert.
+    expect([ screen.queryByText('The clipboard could not be read here; press Ctrl+V to paste instead.') !== null, historyOf(hub) ])
+      .toStrictEqual([ true, [] ]);
   });
 
   it('pastes nothing from text that is not commands, and says so', async () =>

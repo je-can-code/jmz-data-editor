@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import { MuiSnackbarSeverity } from '@core/enums/MuiSnackbar.ts';
-import { RowClipboard } from '@services/rows/RowClipboard.ts';
+import { ROW_CLIPBOARD_FORMAT, RowClipboard } from '@services/rows/RowClipboard.ts';
 import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
 
 /**
@@ -15,8 +15,9 @@ import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
  * ends up written over rows on disk. It owes the boards five things. Ctrl+C and Ctrl+V act on the rows only
  * while the list has focus, so copying a formula out of a field, or pasting one into a field, never touches a
  * row. A paste reaches the board through the board's own edit path, so it saves like any other change. A
- * Shift click widens the selection, so several rows copy at once. The menu's paste reports a refused
- * clipboard rather than pasting anything remembered from before, which could be stale. And the Del key, or
+ * Shift click widens the selection, so several rows copy at once. The menu's paste reads through the window
+ * shell, asking for copied rows alone, and reports a clipboard it could not read rather than pasting anything
+ * remembered from before, which could be stale. And the Del key, or
  * the menu's Clear item, resets the selection to the table's blank row through that same edit path.
  */
 describe('useRowClipboard', () =>
@@ -54,9 +55,10 @@ describe('useRowClipboard', () =>
    * Renders the hook over a table, with every callback a spy.
    * @param {Row[]} rows The board's rows.
    * @param {number} selectedIndex The row the board shows at first.
+   * @param {(marker: string) => Promise<string | null>} readClipboard What the menu's paste reads the clipboard with.
    * @returns The rendered hook, and the spies standing in for the board.
    */
-  const renderOver = (rows: Row[], selectedIndex: number) =>
+  const renderOver = (rows: Row[], selectedIndex: number, readClipboard: (marker: string) => Promise<string | null> = async () => null) =>
   {
     const onSelectIndex = vi.fn();
     const applyPaste = vi.fn();
@@ -73,6 +75,7 @@ describe('useRowClipboard', () =>
         blankRow: { id: 0, name: '' },
         applyPaste,
         notify,
+        readClipboard,
       }),
       { initialProps: { selectedIndex } },
     );
@@ -597,13 +600,13 @@ describe('useRowClipboard', () =>
         .not.toHaveBeenCalled();
     });
 
-    it('pastes what the clipboard holds from the menu', async () =>
+    it('pastes what the clipboard holds from the menu, asking the window shell for copied rows alone', async () =>
     {
-      // Arrange
+      // Arrange: the window shell's read, which under NW.js hands over only the clipboard the marker names.
       const text = RowClipboard.copy(DatabaseFilenames.Items, [ { id: 9, name: 'Potion' } ]);
-      stubClipboard({ readText: () => Promise.resolve(text) });
+      const readClipboard = vi.fn(async (_marker: string) => text);
       const rows = tableOf([ 'Herb', 'Tonic' ]);
-      const { result, applyPaste } = renderOver(rows, 0);
+      const { result, applyPaste } = renderOver(rows, 0, readClipboard);
 
       // Act
       await act(async () =>
@@ -613,15 +616,14 @@ describe('useRowClipboard', () =>
 
       // Assert
       const [ [ update ] ] = applyPaste.mock.calls;
-      expect(update(rows))
-        .toEqual([ { id: 1, name: 'Potion' }, { id: 2, name: 'Tonic' } ]);
+      expect([ update(rows), readClipboard.mock.calls ])
+        .toEqual([ [ { id: 1, name: 'Potion' }, { id: 2, name: 'Tonic' } ], [ [ ROW_CLIPBOARD_FORMAT ] ] ]);
     });
 
-    it('pastes nothing and says why when the author has not allowed clipboard access', async () =>
+    it('pastes nothing and says why when the clipboard cannot be read', async () =>
     {
-      // Arrange
-      stubClipboard({ readText: () => Promise.reject(new Error('denied')) });
-      const { result, applyPaste, notify } = renderOver(tableOf([ 'Herb', 'Tonic' ]), 0);
+      // Arrange: a read that comes back with nothing, as a refused or unanswered one does.
+      const { result, applyPaste, notify } = renderOver(tableOf([ 'Herb', 'Tonic' ]), 0, async () => null);
 
       // Act
       await act(async () =>

@@ -8,9 +8,9 @@
 //
 // Pages ask the same channel for the clipboard's text, which a page under NW.js cannot read itself: Chromium asks the
 // person before a page reads the clipboard, and NW.js has nowhere to ask, so the read would wait forever. The shell
-// reads it with nw.Clipboard, but hands it over only when it is the kind of clipboard the page asked for (events the
-// editor copied, say), and only on a reply channel the asking page opened under a random name, since every window
-// hears the shell channel. Anything else on the clipboard never reaches a page.
+// reads it with nw.Clipboard, but hands it over only when it is the kind of clipboard the page asked for (events,
+// commands or rows the editors copied), and only on a reply channel the asking page opened under a random name, since
+// every window hears the shell channel. Anything else on the clipboard never reaches a page.
 //
 // The app stays open while any window is. Visible windows are never given a 'close' listener: that would take
 // their closing away from the page, and a page holding unsaved edits asks before it closes through its own

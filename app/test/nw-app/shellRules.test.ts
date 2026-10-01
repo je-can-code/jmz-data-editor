@@ -1,6 +1,9 @@
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
+import DatabaseFilenames from '../../src/core/enums/DatabaseFilenames.ts';
+import { CLIPBOARD_FORMAT as COMMAND_CLIPBOARD_FORMAT } from '../../src/mapEditor/core/commandList/commandClipboard.ts';
 import { EVENT_CLIPBOARD_MARKER } from '../../src/mapEditor/core/events/eventClipboard.ts';
+import { ROW_CLIPBOARD_FORMAT, RowClipboard } from '../../src/services/rows/RowClipboard.ts';
 
 /*
  * The NW.js shell's decisions, tested without NW.js. It reads its flags from nw.App.argv, which also carries some
@@ -290,7 +293,28 @@ describe('shellRules', () =>
         .toStrictEqual([ [ null, null, null, null, null ], 0 ]);
     });
 
-    it('reads only the event clipboard the map editor writes', () =>
+    it('reads each of the editors\' own clipboards only for a page asking for that one', () =>
+    {
+      // Arrange: commands and rows as the editors write them.
+      const commands = JSON.stringify({ format: COMMAND_CLIPBOARD_FORMAT, version: 1, commands: [] });
+      const rows = RowClipboard.copy(DatabaseFilenames.Items, [ { id: 9, name: 'Potion' } ]);
+      const ask = (marker: string, text: string) => rules.clipboardAnswer({ marker, replyTo: REPLY }, () => text)?.message.text;
+
+      // Act.
+      const answers = [
+        ask(COMMAND_CLIPBOARD_FORMAT, commands),
+        ask(ROW_CLIPBOARD_FORMAT, rows),
+        ask(EVENT_CLIPBOARD_MARKER, commands),
+        ask(COMMAND_CLIPBOARD_FORMAT, rows),
+        ask(ROW_CLIPBOARD_FORMAT, EVENTS),
+      ];
+
+      // Assert.
+      expect(answers)
+        .toStrictEqual([ commands, rows, '', '', '' ]);
+    });
+
+    it('reads exactly the clipboards the editors write, each by the field its marker sits in', () =>
     {
       // Arrange: nothing to set up; the kinds are the shell's own.
 
@@ -299,7 +323,7 @@ describe('shellRules', () =>
 
       // Assert.
       expect(kinds)
-        .toStrictEqual({ [EVENT_CLIPBOARD_MARKER]: 'marker' });
+        .toStrictEqual({ [EVENT_CLIPBOARD_MARKER]: 'marker', [COMMAND_CLIPBOARD_FORMAT]: 'format', [ROW_CLIPBOARD_FORMAT]: 'format' });
     });
   });
 });

@@ -131,12 +131,15 @@ function windowSize(requested, fallback)
 }
 
 /**
- * The clipboards the shell reads for a page, by the marker each carries and the field it carries it in. A page asks
- * for one of these, and gets the system clipboard's text only when it is that clipboard: anything else on it (a
- * password, a message, another program's data) never reaches a page through the shell.
+ * The clipboards the shell reads for a page, by the marker each carries and the field it carries it in: events copied
+ * off a map, commands copied out of a command list, and rows copied out of a data editor board. A page asks for one of
+ * these, and gets the system clipboard's text only when it is that clipboard: anything else on it (a password, a
+ * message, another program's data) never reaches a page through the shell.
  */
 const CLIPBOARD_KINDS = {
   'jmz-map-editor/events': 'marker',
+  'jmz-map-editor/commands': 'format',
+  'jmz-data-editor/rows': 'format',
 };
 
 /**
