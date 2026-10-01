@@ -15,6 +15,7 @@ import {
   shiftWithinMap,
   type EventMap,
 } from './eventPlacement.ts';
+import { rewireGroupReferences } from './eventReferences.ts';
 
 /**
  * The mark every event clipboard carries, so a paste knows the text on the system clipboard is events copied from the
@@ -145,8 +146,9 @@ const decodeEventClipboard = (text: string): EventClipboard | null =>
  * Works out a paste of copied events onto a map. The group keeps its layout: its top-left corner lands on the target
  * tile, or, with no target, every event lands on the tile it was copied from. A group reaching past the map's edge is
  * slid back onto it. The events take new ids past the end of this map's list, in the order they were copied: never an
- * id the map uses, and never an empty slot a delete left, which something may still name. A group larger than the
- * map, or one that would land an event on a tile another event holds, is refused whole.
+ * id the map uses, and never an empty slot a delete left, which something may still name. Their commands naming each
+ * other (a move route, a balloon, an exchange of places) name the copies; those naming anything else stay as they
+ * are. A group larger than the map, or one that would land an event on a tile another event holds, is refused whole.
  * @param {EventMap} map The map to paste onto.
  * @param {EventClipboard} clipboard The copied events.
  * @param {MapCell | null} target The tile the group's top-left corner goes to, or null to paste where they were copied.
@@ -179,8 +181,15 @@ const planPaste = (map: EventMap, clipboard: EventClipboard, target: MapCell | n
     };
   }
 
+  // the copies' references to each other follow them to their new ids.
   const ids = newEventIds(map, events.length);
-  const placed = events.map((event, index) => ({ ...cloneJson(event), id: ids[index], x: cells[index].x, y: cells[index].y }));
+  const newIds = new Map(events.map((event, index) => [ event.id, ids[index] ]));
+  const placed = events.map((event, index) => ({
+    ...rewireGroupReferences(cloneJson(event), newIds),
+    id: ids[index],
+    x: cells[index].x,
+    y: cells[index].y,
+  }));
 
   return { ok: true, events: placed };
 };
@@ -225,7 +234,8 @@ const pasteEvents = (hub: DocumentHub, mapId: number, clipboard: EventClipboard,
 
 /**
  * Duplicates events beside themselves as one step in the map's history: the copies keep the group's layout one tile
- * right of the originals, or below, left or above when the group does not fit there, and take fresh ids.
+ * right of the originals, or below, left or above when the group does not fit there, and take fresh ids; the copies'
+ * commands naming each other name the copies, while the originals keep theirs.
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map.
  * @param {readonly number[]} eventIds The events.

@@ -14,6 +14,7 @@ import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKey
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { hubWithMaps, mapFileOf, mapWithEvents, spotsOf } from '../../support/eventFixtures.ts';
+import { command } from '../../support/eventKindFixtures.ts';
 
 /*
  * Events copy through the system clipboard as JSON carrying a marker, so they paste across maps and across windows,
@@ -23,8 +24,9 @@ import { hubWithMaps, mapFileOf, mapWithEvents, spotsOf } from '../../support/ev
  * map at an edge, and gives every pasted event a fresh id on the map it lands on: ids past the end of its list, never
  * an id in use, since a collision would silently replace an event, and never a hole a delete left, since a self switch
  * in a save or a command in another event may still name it. A paste that would land an event on another is refused
- * whole. Duplicate pastes copies beside the originals; cut copies and then deletes. Each is one step in the map's
- * history.
+ * whole. A pasted group's commands naming each other follow the copies to their new ids, while those naming anything
+ * else stay as they are. Duplicate pastes copies beside the originals, whose own commands never change; cut copies
+ * and then deletes. Each is one step in the map's history.
  *
  * The source fixture is a 6x4 map (map 1): event 1 at 1, 1 and event 2 at 2, 1, slot 3 empty, and event 4 at 5, 3.
  */
@@ -54,6 +56,31 @@ describe('eventClipboard', () =>
   const described = (events: readonly (RmmzMapEvent | null)[]): (string | null)[] =>
   {
     return events.map(event => (event === null ? null : `${event.id} ${event.name} (${event.note}) at ${event.x},${event.y}`));
+  };
+
+  /**
+   * Builds the source map with events that name each other: event 1 moves event 2 and balloons over event 4, and
+   * event 2 exchanges places with event 1.
+   * @returns {ReturnType<typeof mapWithEvents>} The file.
+   */
+  const linkedSource = () =>
+  {
+    const file = source();
+    const [ , first, second ] = file.events as RmmzMapEvent[];
+    first.pages[0].list.unshift(command(205, [ 2, { list: [ { code: 0, parameters: [] } ], repeat: false, skippable: false, wait: true } ]), command(213, [ 4, 1, false ]));
+    second.pages[0].list.unshift(command(203, [ 0, 2, 1, 0, 0 ]));
+    return file;
+  };
+
+  /**
+   * Reads the character each of an event's commands names, leaving out the closing command.
+   * @param {RmmzMapEvent | null} event The event.
+   * @returns {string[]} One line per command, such as "205 -> 2".
+   */
+  const namedBy = (event: RmmzMapEvent | null): string[] =>
+  {
+    const list = event === null ? [] : event.pages[0].list.slice(0, -1);
+    return list.map(each => `${each.code} -> ${each.code === 203 ? `${String(each.parameters[0])} and ${String(each.parameters[2])}` : String(each.parameters[0])}`);
   };
 
   describe('copyEvents', () =>
@@ -206,6 +233,20 @@ describe('eventClipboard', () =>
         .toStrictEqual({ ok: false, message: 'The pasted event would land on another event.' });
     });
 
+    it('points the pasted group\'s commands naming each other at the copies, and leaves the rest as they were', () =>
+    {
+      // Arrange: map 2's list ends after slot 4, so events 1 and 2 land as 5 and 6.
+      const clipboard = copyEvents(MapDocument.fromJson('map:1', linkedSource()), 1, [ 1, 2 ]) as EventClipboard;
+      const target = MapDocument.fromJson('map:2', mapWithEvents(6, 4, [ null, [ 0, 0 ], [ 1, 0 ], [ 2, 0 ], [ 3, 0 ] ]));
+
+      // Act.
+      const plan = planPaste(target, clipboard, { x: 1, y: 2 });
+
+      // Assert: 5 moves 6 and still balloons over 4, which was never copied; 6 exchanges places with 5.
+      expect(plan.ok && plan.events.map(event => [ event.id, namedBy(event) ]))
+        .toStrictEqual([ [ 5, [ '205 -> 6', '213 -> 4' ] ], [ 6, [ '203 -> 0 and 5' ] ] ]);
+    });
+
     it('refuses a group wider or taller than the map', () =>
     {
       // Arrange: events 1 and 4 span five tiles across; the map is four wide.
@@ -295,6 +336,20 @@ describe('eventClipboard', () =>
           [ 5, 6 ],
           [ null, '1 EV001 (event 1) at 1,1', '2 EV002 (event 2) at 2,1', null, '4 EV004 (event 4) at 5,3', '5 EV001 (event 1) at 1,2', '6 EV002 (event 2) at 2,2' ],
         ]);
+    });
+
+    it('points the copies\' commands naming each other at the copies, leaving the originals\' commands as they were', () =>
+    {
+      // Arrange: events 1 and 2 name each other; their copies go below them, as 5 and 6.
+      const hub = hubWithMaps({ 1: linkedSource() });
+
+      // Act.
+      duplicateEvents(hub, 1, [ 1, 2 ]);
+
+      // Assert.
+      const { events } = mapFileOf(hub, 1);
+      expect([ 1, 2, 5, 6 ].map(id => namedBy(events[id])))
+        .toStrictEqual([ [ '205 -> 2', '213 -> 4' ], [ '203 -> 0 and 1' ], [ '205 -> 6', '213 -> 4' ], [ '203 -> 0 and 5' ] ]);
     });
 
     it('tries below, then left, then above when the group has no room to its right', () =>
