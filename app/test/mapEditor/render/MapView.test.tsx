@@ -6,10 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { WindowShell, type OpenBrowserWindow } from '../../../src/core/infrastructure/shell/WindowShell.ts';
+import { apiDocumentStore } from '../../../src/mapEditor/core/api/apiDocumentStore.ts';
 import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { EventSelection } from '../../../src/mapEditor/core/events/EventSelection.ts';
 import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
+import type { DocumentKey } from '../../../src/mapEditor/core/model/documentKeys.ts';
+import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
+import { marksOf, TILESET_MARKS_DOCUMENT } from '../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { PaintState } from '../../../src/mapEditor/core/tools/PaintState.ts';
@@ -191,6 +195,11 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * mounted (a view mounted behind a tab must make no context at all) and each time that changes. And a map that cannot
  * draw says why over the canvas, in plain words, rather than leaving it blank: every context the window may keep is
  * taken by maps on screen, the graphics card let go of it for a moment, or the window cannot draw at all.
+ *
+ * The tiles marked to go on top decide where the painting tools lay tiles, so a view holds the marks from the start,
+ * through the same open as the palette: a project that never saved marks is seeded from its own maps first. Holding an
+ * empty set in the seed's place would paint every marked tile as ground, and the first mark toggled would save over
+ * the seed for good.
  */
 describe('MapView', () =>
 {
@@ -440,5 +449,44 @@ describe('MapView', () =>
       .toBe(1));
     expect([ stand.renderers[0].overlays.map(state => state.selectedEvents), stand.renderers[0].looks ])
       .toStrictEqual([ [ [] ], [] ]);
+  });
+
+  it('holds the tiles that go on top from the start, seeded from the maps when the project never saved any', async () =>
+  {
+    // Arrange: a project that never saved its marks, whose one map lays the cliff corner on layer 2 by hand.
+    const cliffCorner = 1536 + 122;
+    const data = new Array<number>(2 * 6).fill(0);
+    data[2] = cliffCorner;
+    const saves: JsonValue[] = [];
+    let stored: JsonValue | null = null;
+    const api = {
+      clientId: 'window-a',
+      loadMapInfos: async () => [ null, { id: 1, expanded: false, name: 'Map 1', order: 1, parentId: 0, scrollX: 0, scrollY: 0 } ],
+      loadTilesets: async () => [ null, { id: 1, mode: 1 } ],
+      loadMap: async () => ({ width: 2, height: 1, tilesetId: 1, data }),
+      loadEditorData: async () => stored,
+      saveEditorData: async (_key: string, document: JsonValue) =>
+      {
+        stored = document;
+        saves.push(document);
+      },
+    } as unknown as MapEditorApi;
+    const hub = new DocumentHub({ clientId: 'window-a', store: apiDocumentStore(api) });
+    const openDocument = (key: DocumentKey) => (hub.has(key) ? Promise.resolve(hub.document(key)) : hub.load(key));
+    const services = { ...served(), api, hub, openDocument } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    await waitFor(() => expect(hub.has(TILESET_MARKS_DOCUMENT))
+      .toBe(true));
+
+    // Assert: the seed saved, and held as the very marks the painting tools read, never an empty set in its place.
+    const seed = { tilesets: { '1': { tiles: [ cliffCorner ], kinds: [] } } };
+    expect([ saves, marksOf(hub.document(TILESET_MARKS_DOCUMENT)) ])
+      .toStrictEqual([ [ { schemaVersion: 1, data: seed } ], seed ]);
   });
 });

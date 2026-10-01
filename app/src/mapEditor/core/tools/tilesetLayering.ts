@@ -1,17 +1,12 @@
-import { TILESET_MARKS } from '../editorData/editorData.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
-import { editorDataDocumentKey, TILESETS_KEY } from '../model/documentKeys.ts';
+import { TILESETS_KEY } from '../model/documentKeys.ts';
 import type { TilesetsDocument } from '../model/JsonDocument.ts';
 import { isJsonObject } from '../model/json.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
+import { TILESET_MARKS_DOCUMENT } from '../palette/tilesetMarkEdits.ts';
 import { TilesetMode } from '../tiles/autotileShapes.ts';
 import type { TilesetLayering } from '../tiles/layering.ts';
 import { marksForTileset, readTilesetMarks, type TilesetMarks } from '../tiles/tilesetMarks.ts';
-
-/**
- * The document the "goes on top" marks live in.
- */
-const TILESET_MARKS_DOCUMENT = editorDataDocumentKey(TILESET_MARKS.name);
 
 /**
  * No tile marked, for a window that does not hold the marks.
@@ -108,4 +103,4 @@ class TilesetLayeringSource
   }
 }
 
-export { TILESET_MARKS_DOCUMENT, TilesetLayeringSource };
+export { TilesetLayeringSource };

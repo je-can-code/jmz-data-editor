@@ -3,7 +3,8 @@ import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.
 import { mapDocumentKey, TILESETS_KEY } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
-import { TILESET_MARKS_DOCUMENT, TilesetLayeringSource } from '../../../../src/mapEditor/core/tools/tilesetLayering.ts';
+import { TILESET_MARKS_DOCUMENT } from '../../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
+import { TilesetLayeringSource } from '../../../../src/mapEditor/core/tools/tilesetLayering.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
 /*

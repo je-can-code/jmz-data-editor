@@ -5,7 +5,8 @@ import { EventSelection } from '../core/events/EventSelection.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { Camera, MapCell } from '../core/renderer/camera.ts';
 import { GAME_LOOK, type OverlayId } from '../core/renderer/MapRenderer.ts';
-import { TILESET_MARKS_DOCUMENT, TilesetLayeringSource } from '../core/tools/tilesetLayering.ts';
+import { openTilesetMarks } from '../core/palette/tilesetMarkEdits.ts';
+import { TilesetLayeringSource } from '../core/tools/tilesetLayering.ts';
 import { EventMenu } from '../events/EventMenu.tsx';
 import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity, type EventToolsRenderer } from '../events/MapEventTools.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
@@ -255,8 +256,10 @@ const MapView = (props: MapViewProps) =>
     });
     stops.push(painter.attach());
 
-    // the "goes on top" marks decide where painted tiles land, so they are held from the start.
-    services.openDocument(TILESET_MARKS_DOCUMENT).catch(() => undefined);
+    // the "goes on top" marks decide where painted tiles land, so they are held from the start, through the same open
+    // the palette uses: a project that never saved marks is seeded from its maps first, where opening the document
+    // straight away would hold an empty set in the seed's place, and the first mark toggled would save over the seed.
+    openTilesetMarks(services).catch(() => undefined);
 
     // the first frame that shows the map complete, sprites and parallax included, ends the page's first open: the cold
     // open the speed script times.
