@@ -3,14 +3,18 @@ import { describe, expect, it } from 'vitest';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
-import { EventLayer } from '../../../../src/mapEditor/render/scene/EventLayer.ts';
+import type { TextureImage } from '../../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import { EventLayer, type AlphaReader } from '../../../../src/mapEditor/render/scene/EventLayer.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
 /*
  * Events draw in the engine's order: split by priority into the group below characters, the group with them (under
  * the star tiles) and the group above them, and inside each group lower on screen over higher, then later id over
  * earlier, as the engine's tilemap sorts its sprites. The pointer finds events by that same order, so a click lands on
- * the sprite drawn on top. Tile-image events build without loading anything, so none of this needs a GPU.
+ * the sprite drawn on top, and only on a pixel that sprite draws: a frame is mostly clear around its figure (a tree on
+ * a big sheet is nearly two tiles by four), and a click on the clear part belongs to whatever shows through it. A sheet
+ * whose pixels cannot be read counts as solid. Tile-image events build without loading anything, and character sheets
+ * load from stand-ins, so none of this needs a GPU.
  */
 
 /**
@@ -90,6 +94,116 @@ describe('EventLayer', () =>
     // Assert.
     expect(found)
       .toStrictEqual([ 2, 4, 5, null ]);
+  });
+
+  describe('eventAt over character sheets', () =>
+  {
+    /*
+     * As on Map301: a tree from a big sheet, 282 by 760 so its frame is 94 by 190, stands on 2, 4, and its frame reaches
+     * up and right over an orc on 3, 3, whose 72 by 72 frame it draws over, standing lower on screen. The tree's frame
+     * spans 73 to 167 across and 44 to 234 down; the orc's, 132 to 204 and 114 to 186. The tree draws only a column 24
+     * pixels wide down the middle of its frame, 108 to 132 across; the orc draws every pixel of its frame.
+     */
+    const TREE = { width: 282, height: 760 };
+    const ORC = { width: 864, height: 576 };
+
+    /**
+     * Builds an event with a character image, priority with characters.
+     * @param {number} id The event id.
+     * @param {number} x The column.
+     * @param {number} y The row.
+     * @param {string} characterName The sheet.
+     * @returns {RmmzMapEvent} The event.
+     */
+    const characterEvent = (id: number, x: number, y: number, characterName: string): RmmzMapEvent =>
+    {
+      const event = createMapEvent(id, x, y);
+      event.pages[0].image = { ...event.pages[0].image, characterName, characterIndex: 0, tileId: 0 };
+      event.pages[0].priorityType = 1;
+      return event;
+    };
+
+    /**
+     * Draws the tree and the orc on an empty 6x6 map, their sheets loaded from stand-ins, their pixels read through a
+     * reader.
+     * @param {AlphaReader} readAlpha How a sheet's pixels read.
+     * @returns {Promise<EventLayer>} The layer, once the sheets have loaded.
+     */
+    const drawTreeAndOrc = async (readAlpha: AlphaReader): Promise<EventLayer> =>
+    {
+      const json = buildMapJson();
+      json.width = 6;
+      json.height = 6;
+      json.data = new Array<number>(6 * 6 * 6).fill(0);
+      json.events = [ null, characterEvent(1, 2, 4, '$tree'), characterEvent(2, 3, 3, 'orc') ];
+      const sheets: Record<string, object> = { $tree: TREE, orc: ORC };
+      const images = { image: async (_folder: string, name: string) => sheets[name] as TextureImage };
+      const layer = new EventLayer(() => undefined, readAlpha);
+      layer.setContext({ document: MapDocument.fromJson('map:1', json), flags: [], sheets: [], images, tileSize: 48 });
+
+      // the sheets load on a later turn, and the sprites are rebuilt with them.
+      await new Promise(resolve =>
+      {
+        setTimeout(resolve, 0);
+      });
+      return layer;
+    };
+
+    /**
+     * Reads the tree's sheet as clear but for the column it draws, and the orc's as solid.
+     * @param {TextureSource} source The sheet.
+     * @param {number} x The pixel's column in the sheet.
+     * @returns {number} The pixel's alpha.
+     */
+    const treeColumn = (source: TextureSource, x: number): number =>
+    {
+      if (source.resource !== TREE)
+      {
+        return 255;
+      }
+
+      return x >= 35 && x < 59 ? 255 : 0;
+    };
+
+    it('passes a point on the clear part of a frame drawn on top to the sprite showing through it', async () =>
+    {
+      // Arrange: 150, 160 lies in both frames, on the tree's clear part and on the orc.
+      const layer = await drawTreeAndOrc(treeColumn);
+
+      // Act.
+      const found = layer.eventAt(150, 160);
+
+      // Assert.
+      expect(found)
+        .toBe(2);
+    });
+
+    it('finds the sprite drawn on top on a pixel it draws, and nothing on a clear part with nothing showing through', async () =>
+    {
+      // Arrange: 120, 180 lies on the tree's column, over the orc's frame; 80, 60 on the tree's clear part, over
+      // nothing.
+      const layer = await drawTreeAndOrc(treeColumn);
+
+      // Act.
+      const found = [ layer.eventAt(120, 180), layer.eventAt(80, 60) ];
+
+      // Assert.
+      expect(found)
+        .toStrictEqual([ 1, null ]);
+    });
+
+    it('counts a whole frame as solid where its sheet\'s pixels cannot be read', async () =>
+    {
+      // Arrange: a reader that can read nothing.
+      const layer = await drawTreeAndOrc(() => null);
+
+      // Act: the same point on the tree's clear part, over the orc.
+      const found = layer.eventAt(150, 160);
+
+      // Assert.
+      expect(found)
+        .toBe(1);
+    });
   });
 
   describe('markChanged and flushChanges', () =>

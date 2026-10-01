@@ -11,17 +11,25 @@ import {
   type SpriteFrame,
   type SpritePlacement,
 } from '../engine/characterFrames.ts';
-import { textureSourceFor } from '../textureImages.ts';
+import { readSourceAlpha, textureSourceFor } from '../textureImages.ts';
 
 /**
- * One event's sprite: the container placed at its feet, and what it draws with.
+ * One event's sprite: the container placed at its feet, and what it draws with: the frame cut from the sheet, or null
+ * while there is nothing to draw, and the sheet itself.
  */
 type EventSprite = {
   readonly id: number;
   readonly root: Container;
   readonly placement: SpritePlacement;
   readonly frame: SpriteFrame | null;
+  readonly source: TextureSource | null;
 };
+
+/**
+ * Reads how opaque one pixel of a sheet is: its alpha from 0 for clear to 255 for solid, or null when the pixels cannot
+ * be read, which counts the whole frame as solid.
+ */
+type AlphaReader = (source: TextureSource, x: number, y: number) => number | null;
 
 /**
  * What the layer draws from.
@@ -102,14 +110,19 @@ class EventLayer
 
   #onChange: () => void;
 
+  #readAlpha: AlphaReader;
+
   #destroyed = false;
 
   /**
    * @param {() => void} onChange Called whenever what the layer draws changed, so the renderer draws a frame.
+   * @param {AlphaReader} readAlpha Reads one pixel's opacity from a sheet, for finding the sprite a point is really
+   * over; the page's own canvas reads them unless told otherwise.
    */
-  constructor(onChange: () => void)
+  constructor(onChange: () => void, readAlpha: AlphaReader = readSourceAlpha)
   {
     this.#onChange = onChange;
+    this.#readAlpha = readAlpha;
   }
 
   /**
@@ -238,10 +251,12 @@ class EventLayer
   }
 
   /**
-   * Finds the event whose sprite covers a world point, the one drawn on top winning.
+   * Finds the event whose sprite shows at a world point: of the sprites drawing a pixel there, the one drawn on top.
+   * A frame is mostly clear around its figure (a tree on a big sheet is 94 pixels by 190, nearly two tiles by four),
+   * so a point on the clear part belongs to whatever shows through it, never to the frame around it.
    * @param {number} x The point, across.
    * @param {number} y The point, down.
-   * @returns {number | null} The event id, or null when no sprite covers it.
+   * @returns {number | null} The event id, or null when no sprite draws there.
    */
   eventAt(x: number, y: number): number | null
   {
@@ -253,7 +268,7 @@ class EventLayer
       {
         const id = (group.children[index] as Container & { eventId?: number }).eventId ?? -1;
         const sprite = this.#sprites.get(id);
-        if (sprite !== undefined && sprite.frame !== null && this.#covers(sprite, x, y))
+        if (sprite !== undefined && sprite.frame !== null && this.#covers(sprite, x, y) && this.#drawsAt(sprite, x, y))
         {
           return id;
         }
@@ -360,6 +375,23 @@ class EventLayer
   }
 
   /**
+   * Reports whether a sprite draws a pixel at a point inside its rectangle: the frame's pixel there is not clear. A
+   * character sunk in a bush draws its two halves over the same rectangle, so the same pixel answers for it.
+   * @param {EventSprite} sprite The sprite, with a frame covering the point.
+   * @param {number} x The point, across.
+   * @param {number} y The point, down.
+   * @returns {boolean} True on a pixel it draws, or wherever its sheet's pixels cannot be read.
+   */
+  #drawsAt(sprite: EventSprite, x: number, y: number): boolean
+  {
+    const frame = sprite.frame as SpriteFrame;
+    const left = sprite.placement.x - frame.width / 2;
+    const top = sprite.placement.y - frame.height;
+    const alpha = this.#readAlpha(sprite.source as TextureSource, frame.sx + Math.floor(x - left), frame.sy + Math.floor(y - top));
+    return alpha === null || alpha > 0;
+  }
+
+  /**
    * Builds one event's sprite, loading its sheet first when it is a character not seen yet.
    * @param {number} id The event id.
    */
@@ -389,7 +421,7 @@ class EventLayer
     }
 
     this.#groupFor(placement.z).addChild(root);
-    this.#sprites.set(id, { id, root, placement, frame: texture === null ? null : frame });
+    this.#sprites.set(id, { id, root, placement, frame: texture === null ? null : frame, source: texture });
   }
 
   /**
@@ -580,4 +612,4 @@ class EventLayer
 }
 
 export { EventLayer, shownPage };
-export type { EventLayerContext };
+export type { AlphaReader, EventLayerContext };
