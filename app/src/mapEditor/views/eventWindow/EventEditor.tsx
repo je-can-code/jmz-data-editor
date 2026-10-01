@@ -11,21 +11,27 @@ import {
   type EventWindowTarget,
   type PageOutcome,
 } from '../../core/eventWindow/eventWindowTarget.ts';
+import { namedRows } from '../../core/commandList/databaseNames.ts';
+import { parseEventMovement, type EventMovementFields } from '../../core/eventPage/eventMovement.ts';
 import { setPageCondition, type ConditionChange } from '../../core/eventWindow/pageConditions.ts';
-import { setPageImage, setPageMovement, setPageOption, setPagePriority, setPageTrigger, type PageMovement } from '../../core/eventWindow/pageSettings.ts';
-import { describeEventPage } from '../../core/model/eventModel.ts';
-import type { RmmzEventImage } from '../../core/model/rmmzTypes.ts';
+import { setPageImage, setPageMovement, setPageOption, setPagePriority, setPageTrigger } from '../../core/eventWindow/pageSettings.ts';
+import type { DocumentHub } from '../../core/history/DocumentHub.ts';
+import { TILESETS_KEY } from '../../core/model/documentKeys.ts';
+import type { TilesetsDocument } from '../../core/model/JsonDocument.ts';
+import type { RmmzEventImage, RmmzTileset } from '../../core/model/rmmzTypes.ts';
 import { HistoryRouter, type HistoryOutcome } from '../../core/workspace/HistoryRouter.ts';
 import { isTextEntry } from '../../core/workspace/shortcuts.ts';
 import { useMapEditorServices } from '../../services/MapEditorServicesContext.tsx';
+import { EditorEnvironmentProvider, type HandBuiltEditorEnvironment } from '../commandEditors/editorEnvironment.tsx';
 import { CommandList } from '../commandList/CommandList.tsx';
 import { useCommandListResources } from '../commandList/commandListResources.ts';
 import { useDocumentRevision, useHubChanges } from '../commandList/useCommandListState.ts';
+import { GraphicPicker } from '../eventPage/GraphicPicker.tsx';
+import { MovementSettings } from '../eventPage/MovementSettings.tsx';
 import { eventWindowTitle } from '../mapEditorViews.ts';
 import { EventHeader } from './EventHeader.tsx';
 import { useReadyMark } from './eventWindowMarks.ts';
 import { PageConditions } from './PageConditions.tsx';
-import { GraphicSlot, MovementSlot } from './PageSlots.tsx';
 import { PageOptions, PagePriorityTrigger } from './PageSettings.tsx';
 import { PageTabs } from './PageTabs.tsx';
 import { useEventWindowKeys } from './useEventWindowKeys.ts';
@@ -58,6 +64,19 @@ const Section = (props: { readonly title: string; readonly children: React.React
 };
 
 /**
+ * Reads the tileset a map draws with, once the window holds the tilesets: the graphic picker cuts tile pictures from it.
+ * @param {DocumentHub} hub The window's documents.
+ * @param {number} tilesetId The map's tileset.
+ * @returns {RmmzTileset | null} The tileset, or null while the tilesets are still on their way.
+ */
+const heldTileset = (hub: DocumentHub, tilesetId: number): RmmzTileset | null =>
+{
+  return hub.has(TILESETS_KEY)
+    ? (hub.document(TILESETS_KEY) as TilesetsDocument).tileset(tilesetId)
+    : null;
+};
+
+/**
  * Commits whatever the author is typing before a save, so Ctrl+S in the middle of a name or a line of dialogue saves
  * what they typed: the field hands its value over as it loses focus, and gets focus straight back.
  */
@@ -83,13 +102,16 @@ const commitTyping = (): void =>
 const EventEditor = (props: { readonly target: EventWindowTarget }) =>
 {
   const { target } = props;
-  const { hub, api } = useMapEditorServices();
+  const { hub, api, pluginHeaders } = useMapEditorServices();
   const key = targetDocument(target);
   const history = targetHistory(target);
   useDocumentRevision(hub, key);
   useHubChanges(hub);
   const { names } = useCommandListResources(api);
   const router = useMemo(() => new HistoryRouter(hub, null), [ hub ]);
+
+  // the graphic picker reads the server and the names the way the hand-built command editors do.
+  const environment = useMemo<HandBuiltEditorEnvironment>(() => ({ api, headers: pluginHeaders, names: kind => namedRows(names, kind) }), [ api, pluginHeaders, names ]);
   const [ selected, setSelected ] = useState(0);
   const [ notice, setNotice ] = useState<Notice | null>(null);
   const [ saving, setSaving ] = useState(false);
@@ -188,7 +210,7 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
   // the page shown follows the pages there are, which an undo or another window may have changed.
   const pageIndex = Math.min(selected, event.pages.length - 1);
   const page = event.pages[pageIndex];
-  const view = describeEventPage(page);
+  const tileset = heldTileset(hub, hub.map(key).tilesetId);
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }} data-testid={'event-editor'}>
@@ -224,10 +246,21 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
           </Section>
           <Divider/>
           <Section title={'Graphic'}>
-            <GraphicSlot value={view.image} onChange={(image: RmmzEventImage) => run(() => setPageImage(hub, target, pageIndex, image))}/>
+            <EditorEnvironmentProvider environment={environment}>
+              <GraphicPicker
+                key={pageIndex}
+                value={page.image}
+                tileset={tileset}
+                onChange={(image: RmmzEventImage) => run(() => setPageImage(hub, target, pageIndex, image))}
+              />
+            </EditorEnvironmentProvider>
           </Section>
           <Section title={'Movement'}>
-            <MovementSlot value={view.movement} onChange={(movement: PageMovement) => run(() => setPageMovement(hub, target, pageIndex, movement))}/>
+            <MovementSettings
+              key={pageIndex}
+              value={parseEventMovement(page)}
+              onChange={(movement: EventMovementFields) => run(() => setPageMovement(hub, target, pageIndex, movement))}
+            />
           </Section>
           <Divider/>
           <Section title={'Options'}>

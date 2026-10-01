@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { EventMovementFields } from '../../../../src/mapEditor/core/eventPage/eventMovement.ts';
 import { PAGE_GONE_MESSAGE, targetHistory } from '../../../../src/mapEditor/core/eventWindow/eventWindowTarget.ts';
 import {
   PAGE_OPTIONS,
@@ -8,7 +9,6 @@ import {
   setPageOption,
   setPagePriority,
   setPageTrigger,
-  type PageMovement,
 } from '../../../../src/mapEditor/core/eventWindow/pageSettings.ts';
 import type { RmmzEventImage } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { eventWindowHub, eventWindowMap, expectedMap, heldMap, markedPage, TARGET } from '../../support/eventWindowFixtures.ts';
@@ -260,21 +260,21 @@ describe('pageSettings', () =>
   describe('setPageMovement', () =>
   {
     /**
-     * Reads a fixture page's movement in the grouping the movement settings edit.
+     * Reads a fixture page's movement in the page's own fields, as the movement settings hand it over.
      * @param {number} mark The page's mark.
-     * @returns {PageMovement} The movement.
+     * @returns {EventMovementFields} The movement.
      */
-    const movementOf = (mark: number): PageMovement =>
+    const movementOf = (mark: number): EventMovementFields =>
     {
-      const page = markedPage(mark);
-      return { type: page.moveType, speed: page.moveSpeed, frequency: page.moveFrequency, route: page.moveRoute };
+      const { moveType, moveSpeed, moveFrequency, moveRoute } = markedPage(mark);
+      return { moveType, moveSpeed, moveFrequency, moveRoute };
     };
 
     it('writes only the parts of the movement that changed, as one step that one undo takes back', () =>
     {
       // Arrange.
       const hub = eventWindowHub();
-      const movement: PageMovement = { ...movementOf(1), speed: 5 };
+      const movement: EventMovementFields = { ...movementOf(1), moveSpeed: 5 };
 
       // Act.
       const outcome = setPageMovement(hub, TARGET, 0, movement);
@@ -299,7 +299,7 @@ describe('pageSettings', () =>
       // Arrange: a route turning the event left, then right, repeating.
       const hub = eventWindowHub();
       const route = { list: [ { code: 16 }, { code: 17 }, { code: 0 } ], repeat: true, skippable: true, wait: false };
-      const movement: PageMovement = { ...movementOf(3), type: 3, route };
+      const movement: EventMovementFields = { ...movementOf(3), moveType: 3, moveRoute: route };
 
       // Act.
       const outcome = setPageMovement(hub, TARGET, 2, movement);
@@ -314,13 +314,13 @@ describe('pageSettings', () =>
       // Arrange: each one part past what the game runs.
       const hub = eventWindowHub();
       const base = movementOf(1);
-      const movements: PageMovement[] = [
-        { ...base, type: 4 },
-        { ...base, speed: 0 },
-        { ...base, speed: 7 },
-        { ...base, frequency: 0 },
-        { ...base, frequency: 6 },
-        { ...base, route: { ...base.route, list: [ { code: 16 } ] } },
+      const movements: EventMovementFields[] = [
+        { ...base, moveType: 4 },
+        { ...base, moveSpeed: 0 },
+        { ...base, moveSpeed: 7 },
+        { ...base, moveFrequency: 0 },
+        { ...base, moveFrequency: 6 },
+        { ...base, moveRoute: { ...base.moveRoute, list: [ { code: 16 } ] } },
       ];
 
       // Act.

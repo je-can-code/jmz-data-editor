@@ -1,7 +1,8 @@
+import type { EventMovementFields } from '../eventPage/eventMovement.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import type { Transaction } from '../history/Transaction.ts';
 import { cloneJson, type JsonValue } from '../model/json.ts';
-import { Direction, EventMoveType, EventPriority, EventTrigger, type EventPageView } from '../model/eventModel.ts';
+import { Direction, EventMoveType, EventPriority, EventTrigger } from '../model/eventModel.ts';
 import type { RmmzEventImage, RmmzEventPage } from '../model/rmmzTypes.ts';
 import {
   locatePage,
@@ -19,11 +20,6 @@ import { isEventImage, isMoveRoute } from './pageShapes.ts';
  * stepping animation while it stands, a facing that never turns, and passing through anything.
  */
 type PageOption = 'walking' | 'stepping' | 'directionFix' | 'through';
-
-/**
- * A page's movement, grouped the way the event window shows it, which is what the movement settings edit.
- */
-type PageMovement = EventPageView['movement'];
 
 /**
  * Every option, in the order MZ lists them.
@@ -244,15 +240,15 @@ const setPageImage = (hub: DocumentHub, target: EventWindowTarget, pageIndex: nu
 /**
  * Reports whether a movement is one the game can run: a type from fixed to custom, a speed from 1 to 6, a frequency
  * from 1 to 5, and a whole route.
- * @param {PageMovement} movement The movement.
+ * @param {EventMovementFields} movement The movement.
  * @returns {boolean} True when it is.
  */
-const isRunnableMovement = (movement: PageMovement): boolean =>
+const isRunnableMovement = (movement: EventMovementFields): boolean =>
 {
-  return MOVE_TYPES.has(movement.type)
-    && isWholeWithin(movement.speed, 1, 6)
-    && isWholeWithin(movement.frequency, 1, 5)
-    && isMoveRoute(movement.route as unknown as JsonValue);
+  return MOVE_TYPES.has(movement.moveType)
+    && isWholeWithin(movement.moveSpeed, 1, 6)
+    && isWholeWithin(movement.moveFrequency, 1, 5)
+    && isMoveRoute(movement.moveRoute as unknown as JsonValue);
 };
 
 /**
@@ -261,21 +257,21 @@ const isRunnableMovement = (movement: PageMovement): boolean =>
  * @param {DocumentHub} hub The window's documents; the event's map must be held.
  * @param {EventWindowTarget} target The event.
  * @param {number} pageIndex The page.
- * @param {PageMovement} movement The new movement.
+ * @param {EventMovementFields} movement The new movement, in the page's own fields.
  * @returns {PageOutcome} The step (null when nothing differs), with the same page to show, or why nothing changed.
  */
-const setPageMovement = (hub: DocumentHub, target: EventWindowTarget, pageIndex: number, movement: PageMovement): PageOutcome =>
+const setPageMovement = (hub: DocumentHub, target: EventWindowTarget, pageIndex: number, movement: EventMovementFields): PageOutcome =>
 {
   if (isRunnableMovement(movement) === false)
   {
     return { ok: false, message: REFUSALS.movement };
   }
 
-  const fields: Readonly<Record<string, JsonValue>> = {
-    moveType: movement.type,
-    moveSpeed: movement.speed,
-    moveFrequency: movement.frequency,
-    moveRoute: cloneJson(movement.route) as unknown as JsonValue,
+  const fields: Readonly<Record<keyof EventMovementFields, JsonValue>> = {
+    moveType: movement.moveType,
+    moveSpeed: movement.moveSpeed,
+    moveFrequency: movement.moveFrequency,
+    moveRoute: cloneJson(movement.moveRoute) as unknown as JsonValue,
   };
   return editPage(hub, target, pageIndex, 'Change movement', (transaction, path) =>
   {
@@ -298,4 +294,4 @@ export {
   setPagePriority,
   setPageTrigger,
 };
-export type { PageMovement, PageOption };
+export type { PageOption };
