@@ -205,11 +205,12 @@ const decodeDraggedMaps = (data: string): number[] =>
 
 /**
  * Works out which history a panel owns, which is what undo acts on while it has focus: a map panel its map's, the
- * tree the tree's, and the properties panel the history of the map it shows. The history panel and the
- * placeholders own none, so focusing them leaves undo where it was.
+ * tree the tree's, and the properties panel and the quick settings the history of the map they show, since what
+ * they change lives in that map. The history panel and the placeholders own none, so focusing them leaves undo
+ * where it was.
  * @param {string} component The panel's kind.
  * @param {unknown} params The panel's parameters.
- * @param {number | null} currentMapId The map the properties panel shows, or null.
+ * @param {number | null} currentMapId The map the properties panel and the quick settings show, or null.
  * @returns {HistoryKey | null | undefined} The history, null for "none at all", or undefined to keep the last one.
  */
 const historyOwnedBy = (component: string, params: unknown, currentMapId: number | null): HistoryKey | null | undefined =>
@@ -223,6 +224,7 @@ const historyOwnedBy = (component: string, params: unknown, currentMapId: number
     case PANEL_COMPONENTS.mapTree:
       return TREE_HISTORY_KEY;
     case PANEL_COMPONENTS.properties:
+    case PANEL_COMPONENTS.quick:
       return currentMapId === null
         ? null
         : mapHistoryKey(currentMapId);

@@ -13,7 +13,9 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * missing, or only a near namesake like J-ABS-Metrics) contributes nothing, a module that is on contributes its
  * kinds, palette entries, passability rules, overlays and command entries, a module can never claim a core kind,
  * and the core's own kinds are on in every project. When several kinds recognise one event, the higher priority
- * wins, since a battler is also a comment-only event.
+ * wins, since a battler is also a comment-only event. A map an active module copies its events from, such as J-ABS's
+ * action map, holds the plugin's patterns, so no kind claims an event there. Every activation is announced, since
+ * modules switch on after the views that show kinds have drawn.
  */
 describe('PluginModuleRegistry', () =>
 {
@@ -149,7 +151,7 @@ describe('PluginModuleRegistry', () =>
     registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', true) ]);
 
     // Act.
-    const kinds = [ registry.kindOf(commentedEvent('<enemyId:12>'))?.id, registry.kindOf(commentedEvent('<light:3>'))?.id ];
+    const kinds = [ registry.kindOf(commentedEvent('<enemyId:12>'), 1)?.id, registry.kindOf(commentedEvent('<light:3>'), 1)?.id ];
 
     // Assert.
     expect(kinds)
@@ -162,11 +164,49 @@ describe('PluginModuleRegistry', () =>
     const registry = new PluginModuleRegistry(new CommandCatalog());
 
     // Act.
-    const kind = registry.kindOf(createMapEvent(1, 0, 0));
+    const kind = registry.kindOf(createMapEvent(1, 0, 0), 1);
 
     // Assert.
     expect(kind)
       .toBeNull();
+  });
+
+  it('claims nothing on a map an active module copies its events from, every other map as before, until it switches off', () =>
+  {
+    // Arrange: a module naming map 2 as its patterns, over the core's catch-all decor.
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+    registry.registerCoreKind(decor());
+    const patterns: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register: add => add.templateMap(2) };
+    const lamp = createMapEvent(4, 1, 1);
+
+    // Act.
+    registry.activate([ patterns ], [ plugin('j/abs/J-ABS', true) ]);
+    const whileOn = [ registry.kindOf(lamp, 2), registry.kindOf(lamp, 3)?.id ];
+    registry.activate([ patterns ], [ plugin('j/abs/J-ABS', false) ]);
+    const onceOff = registry.kindOf(lamp, 2)?.id;
+
+    // Assert.
+    expect([ whileOn, onceOff ])
+      .toStrictEqual([ [ null, 'core.decor' ], 'core.decor' ]);
+  });
+
+  it('tells whoever listens after each activation, and stops once they stop listening', () =>
+  {
+    // Arrange.
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+    const listener = vi.fn();
+    const stop = registry.subscribe(listener);
+
+    // Act.
+    registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', true) ]);
+    registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', false) ]);
+    const heard = listener.mock.calls.length;
+    stop();
+    registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', true) ]);
+
+    // Assert.
+    expect([ heard, listener.mock.calls.length, registry.revision ])
+      .toStrictEqual([ 2, 2, 3 ]);
   });
 
   it('refuses a module adding anything outside its own name', () =>

@@ -16,9 +16,10 @@ import {
  * the shell a few exact answers: a map panel's saved parameters name a real map or are refused; every further view
  * of one map gets its own id; a map dropped on a group's middle stacks as a tab while an edge splits the group;
  * only a list of map ids comes off a drag; and undo follows the panel with focus, the tree to the tree's history,
- * a map (or the properties of one) to that map's, while the history panel and the placeholders leave it alone.
- * Side panels are never squeezed below a readable width, while maps keep only the dock's small minimum so any number
- * can sit side by side; a saved layout comes back with the minimums panels have now, whatever it was saved with.
+ * a map (or the properties or quick settings of one) to that map's, while the history panel and the placeholders
+ * leave it alone. Side panels are never squeezed below a readable width, while maps keep only the dock's small
+ * minimum so any number can sit side by side; a saved layout comes back with the minimums panels have now, whatever
+ * it was saved with.
  */
 describe('panels', () =>
 {
@@ -75,29 +76,31 @@ describe('panels', () =>
 
   describe('historyOwnedBy', () =>
   {
-    it('hands undo to the map, the tree, or the map the properties show', () =>
+    it('hands undo to the map, the tree, or the map the properties and quick settings show', () =>
     {
-      // Arrange: the properties panel shows map 7.
+      // Arrange: the properties panel and the quick settings show map 7.
 
       // Act.
       const owners = [
         historyOwnedBy(PANEL_COMPONENTS.map, { mapId: 12 }, 7),
         historyOwnedBy(PANEL_COMPONENTS.mapTree, {}, 7),
         historyOwnedBy(PANEL_COMPONENTS.properties, {}, 7),
+        historyOwnedBy(PANEL_COMPONENTS.quick, {}, 7),
       ];
 
       // Assert.
       expect(owners)
-        .toStrictEqual([ 'map:12', 'tree', 'map:7' ]);
+        .toStrictEqual([ 'map:12', 'tree', 'map:7', 'map:7' ]);
     });
 
-    it('owns no history for properties showing no map, and keeps the last one for panels that own none', () =>
+    it('owns no history for properties or quick settings showing no map, and keeps the last one for panels that own none', () =>
     {
       // Arrange: nothing beyond the panels below.
 
       // Act.
       const owners = [
         historyOwnedBy(PANEL_COMPONENTS.properties, {}, null),
+        historyOwnedBy(PANEL_COMPONENTS.quick, {}, null),
         historyOwnedBy(PANEL_COMPONENTS.history, {}, 7),
         historyOwnedBy(PANEL_COMPONENTS.palette, {}, 7),
         historyOwnedBy(PANEL_COMPONENTS.map, { mapId: 'broken' }, 7),
@@ -105,7 +108,7 @@ describe('panels', () =>
 
       // Assert.
       expect(owners)
-        .toStrictEqual([ null, undefined, undefined, undefined ]);
+        .toStrictEqual([ null, null, undefined, undefined, undefined ]);
     });
   });
 

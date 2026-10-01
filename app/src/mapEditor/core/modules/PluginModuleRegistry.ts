@@ -32,17 +32,19 @@ type Contributions = {
   rules: PassabilityRule[];
   overlays: OverlayDefinition[];
   catalogIds: string[];
+  templateMaps: number[];
 };
 
 /**
  * Starts an empty set of contributions.
  * @returns {Contributions} The empty set.
  */
-const noContributions = (): Contributions => ({ kinds: [], palette: [], rules: [], overlays: [], catalogIds: [] });
+const noContributions = (): Contributions => ({ kinds: [], palette: [], rules: [], overlays: [], catalogIds: [], templateMaps: [] });
 
 /**
- * Holds the event kinds, palette entries, passability rules, overlays and command entries the editor knows: the
- * core's kinds, always, and each plugin module's contributions while its plugins are enabled.
+ * Holds the event kinds, palette entries, passability rules, overlays and command entries the editor knows, and the
+ * maps whose events are a plugin's patterns: the core's kinds, always, and each plugin module's contributions while
+ * its plugins are enabled.
  */
 class PluginModuleRegistry
 {
@@ -53,6 +55,10 @@ class PluginModuleRegistry
   #contributions: Contributions = noContributions();
 
   #active: string[] = [];
+
+  #revision = 0;
+
+  #listeners = new Set<() => void>();
 
   /**
    * @param {CommandCatalog} catalog The catalog module command entries join.
@@ -109,8 +115,35 @@ class PluginModuleRegistry
       this.#active.push(pluginModule.id);
     });
 
+    // whatever shows kinds read before this activation may read differently now.
+    this.#revision += 1;
+    this.#listeners.forEach(listener => listener());
     return { active: [ ...this.#active ], inactive };
   }
+
+  /**
+   * Counts the activations so far, so a view can tell that what the modules contribute may have changed.
+   * @returns {number} The count.
+   */
+  get revision(): number
+  {
+    return this.#revision;
+  }
+
+  /**
+   * Listens for activations, as a view showing event kinds does: modules switch on once js/plugins.js has been
+   * read, which can be after the view first drew.
+   * @param {() => void} listener Called after each activation.
+   * @returns {() => void} Stops listening.
+   */
+  subscribe = (listener: () => void): (() => void) =>
+  {
+    this.#listeners.add(listener);
+    return () =>
+    {
+      this.#listeners.delete(listener);
+    };
+  };
 
   /**
    * Reports whether a module is on.
@@ -132,12 +165,19 @@ class PluginModuleRegistry
   }
 
   /**
-   * Finds the kind an event is: the highest-priority kind that recognises it.
+   * Finds the kind an event is: the highest-priority kind that recognises it, and none at all on a map an active
+   * module copies its events from, since those events are the plugin's patterns rather than things on a map.
    * @param {RmmzMapEvent} event The event.
-   * @returns {EventKindDefinition | null} The kind, or null when none recognises it.
+   * @param {number} mapId The map it is on.
+   * @returns {EventKindDefinition | null} The kind, or null when none recognises it or its map holds patterns.
    */
-  kindOf(event: RmmzMapEvent): EventKindDefinition | null
+  kindOf(event: RmmzMapEvent, mapId: number): EventKindDefinition | null
   {
+    if (this.#contributions.templateMaps.includes(mapId))
+    {
+      return null;
+    }
+
     return this.eventKinds().find(kind => kind.detect(event)) ?? null;
   }
 
@@ -210,6 +250,10 @@ class PluginModuleRegistry
       {
         this.#catalog.register(entry);
         this.#contributions.catalogIds.push(entry.id);
+      },
+      templateMap: mapId =>
+      {
+        this.#contributions.templateMaps.push(mapId);
       },
     };
   }
