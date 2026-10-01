@@ -19,21 +19,9 @@ const Placeholder = (props: { line: string }) =>
 };
 
 /**
- * Where the tileset palette goes: the tiles to paint with, sheet by sheet.
- * @returns {React.JSX.Element} The panel.
- */
-const PalettePanel = () => <Placeholder line={'The tiles to paint with will appear here.'}/>;
-
-/**
- * Where the layer strip goes: automatic layering, or one layer at a time.
- * @returns {React.JSX.Element} The panel.
- */
-const LayersPanel = () => <Placeholder line={'The layers to paint on will appear here.'}/>;
-
-/**
  * Holds the middle of the workspace until the first map opens there, when it closes itself.
  * @returns {React.JSX.Element} The panel.
  */
 const StartPanel = () => <Placeholder line={'Double-click a map in the tree, or drag it here, to open it.'}/>;
 
-export { LayersPanel, PalettePanel, StartPanel };
+export { StartPanel };

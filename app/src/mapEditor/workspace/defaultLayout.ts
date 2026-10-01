@@ -15,6 +15,13 @@ const SIDE_WIDTH = 300;
 const INSPECTOR_WIDTH = 360;
 
 /**
+ * How much of the left column's height the map tree and the layers panel start with; the palette takes the rest,
+ * since painting reaches for it most.
+ */
+const TREE_SHARE = 0.25;
+const LAYERS_SHARE = 0.3;
+
+/**
  * Adds one of the workspace's own panels, with the minimum width its kind keeps.
  * @param {DockviewApi} api The dock.
  * @param {Parameters<DockviewApi['addPanel']>[0]} options The panel.
@@ -25,23 +32,24 @@ const addPanel = (api: DockviewApi, options: Parameters<DockviewApi['addPanel']>
 };
 
 /**
- * Lays out the workspace the first time, or after a reset: the map tree on the left (with the palette and the layer
- * strip stacked beside it until they arrive), the start panel in the middle where maps open, and the map properties
- * and quick settings on the right above the history. The side panels keep their minimum widths, so however the maps
- * crowd in, the tree and the properties stay readable.
+ * Lays out the workspace the first time, or after a reset: down the left, the map tree, the palette and the layers
+ * panel, each in its own group so all three show at once; the start panel in the middle where maps open; and the map
+ * properties and quick settings on the right above the history. The side panels keep their minimum widths, so however
+ * the maps crowd in, the tree, the palette and the properties stay readable.
  * @param {DockviewApi} api The dock.
  */
 const addDefaultPanels = (api: DockviewApi): void =>
 {
   addPanel(api, { id: SINGLE_PANEL_IDS.mapTree, component: PANEL_COMPONENTS.mapTree, title: 'Maps' });
-  addPanel(api, { id: SINGLE_PANEL_IDS.palette, component: PANEL_COMPONENTS.palette, title: 'Tiles', position: { referencePanel: SINGLE_PANEL_IDS.mapTree, direction: 'within' }, inactive: true });
-  addPanel(api, { id: SINGLE_PANEL_IDS.layers, component: PANEL_COMPONENTS.layers, title: 'Layers', position: { referencePanel: SINGLE_PANEL_IDS.mapTree, direction: 'within' }, inactive: true });
+  addPanel(api, { id: SINGLE_PANEL_IDS.palette, component: PANEL_COMPONENTS.palette, title: 'Tiles', position: { referencePanel: SINGLE_PANEL_IDS.mapTree, direction: 'below' } });
+  addPanel(api, { id: SINGLE_PANEL_IDS.layers, component: PANEL_COMPONENTS.layers, title: 'Layers', position: { referencePanel: SINGLE_PANEL_IDS.palette, direction: 'below' } });
   addPanel(api, { id: SINGLE_PANEL_IDS.start, component: PANEL_COMPONENTS.start, title: 'Start', position: { direction: 'right' } });
   addPanel(api, { id: SINGLE_PANEL_IDS.properties, component: PANEL_COMPONENTS.properties, title: 'Map properties', position: { direction: 'right' } });
   addPanel(api, { id: SINGLE_PANEL_IDS.quick, component: PANEL_COMPONENTS.quick, title: 'Quick settings', position: { referencePanel: SINGLE_PANEL_IDS.properties, direction: 'within' }, inactive: true });
   addPanel(api, { id: SINGLE_PANEL_IDS.history, component: PANEL_COMPONENTS.history, title: 'History', position: { referencePanel: SINGLE_PANEL_IDS.properties, direction: 'below' } });
 
-  api.getPanel(SINGLE_PANEL_IDS.mapTree)?.group.api.setSize({ width: SIDE_WIDTH });
+  api.getPanel(SINGLE_PANEL_IDS.mapTree)?.group.api.setSize({ width: SIDE_WIDTH, height: Math.round(api.height * TREE_SHARE) });
+  api.getPanel(SINGLE_PANEL_IDS.layers)?.group.api.setSize({ height: Math.round(api.height * LAYERS_SHARE) });
   api.getPanel(SINGLE_PANEL_IDS.properties)?.group.api.setSize({ width: INSPECTOR_WIDTH });
   api.getPanel(SINGLE_PANEL_IDS.mapTree)?.api.setActive();
 };

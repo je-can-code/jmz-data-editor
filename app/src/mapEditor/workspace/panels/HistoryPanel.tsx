@@ -27,6 +27,8 @@ const historyTitle = (controller: WorkspaceController, key: HistoryKey): string 
       return `Event ${second} on ${controller.mapName(Number.parseInt(first, 10))}`;
     case 'blueprint':
       return `Blueprint ${first}`;
+    case 'tilesets':
+      return 'Tilesets';
     default:
       return key;
   }
