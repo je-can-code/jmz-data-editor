@@ -260,6 +260,7 @@ const MapView = (props: MapViewProps) =>
           notifyRef.current('The event\'s window was blocked; allow pop-ups for the editor to open it.', 'error');
         }
       },
+      readClipboard: () => services.shell.readClipboard(),
       notify: (text: string, severity: EventNoticeSeverity) => notifyRef.current(text, severity),
       openMenu: setMenu,
     });

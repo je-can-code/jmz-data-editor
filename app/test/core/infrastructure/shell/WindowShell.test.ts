@@ -174,4 +174,83 @@ describe('WindowShell', () =>
     expect(shell.isRelayed)
       .toBe(false);
   });
+
+  /*
+   * A paste chosen from a menu has no clipboard event to carry the clipboard's text, so the page reads it. Under the
+   * NW.js shell the page asks the shell, since NW.js leaves a page's own read waiting forever on a question it has
+   * nowhere to ask; every window hears every answer, so a read takes only the answer to its own request. A shell that
+   * never answers costs a moment, never a hang. Without the shell, the page reads through the browser, and a refusal
+   * reads as nothing.
+   */
+  describe('readClipboard', () =>
+  {
+    it('asks the NW.js shell once it answers, taking only the answer to its own request', async () =>
+    {
+      // Arrange.
+      const { network, relay, heard, shell } = buildShell();
+      network.flush();
+      relay.postMessage({ type: 'shell-ready' });
+      network.flush();
+      heard.length = 0;
+
+      // Act: another window's answer arrives first, then this one's.
+      const reading = shell.readClipboard();
+      network.flush();
+      const [ request ] = heard as { type: string; requestId: string }[];
+      relay.postMessage({ type: 'clipboard-text', requestId: 'another-window-1', text: 'not ours' });
+      relay.postMessage({ type: 'clipboard-text', requestId: request.requestId, text: 'ours' });
+      network.flush();
+
+      // Assert.
+      expect([ request.type, typeof request.requestId, await reading ])
+        .toStrictEqual([ 'clipboard-read', 'string', 'ours' ]);
+    });
+
+    it('reads nothing when the NW.js shell does not answer in time', async () =>
+    {
+      // Arrange.
+      vi.useFakeTimers();
+      const { network, relay, shell } = buildShell();
+      network.flush();
+      relay.postMessage({ type: 'shell-ready' });
+      network.flush();
+
+      // Act.
+      const reading = shell.readClipboard();
+      await vi.advanceTimersByTimeAsync(2_000);
+      const text = await reading;
+      vi.useRealTimers();
+
+      // Assert.
+      expect(text)
+        .toBeNull();
+    });
+
+    it('reads through the browser without the shell, and nothing when the browser refuses', async () =>
+    {
+      // Arrange.
+      const reads = [ async () => 'from the browser', async () => Promise.reject(new Error('not allowed')) ];
+      const shells = reads.map(readClipboardText => new WindowShell({ channel: null, origin: ORIGIN, openWindow: () => null, readClipboardText }));
+
+      // Act.
+      const texts = await Promise.all(shells.map(each => each.readClipboard()));
+
+      // Assert.
+      expect(texts)
+        .toStrictEqual([ 'from the browser', null ]);
+    });
+
+    it('reads nothing where the page has no way to read', async () =>
+    {
+      // Arrange: no shell, and no browser read.
+      const shell = new WindowShell({ channel: null, origin: ORIGIN, openWindow: () => null });
+
+      // Act.
+      const text = await shell.readClipboard();
+
+      // Assert.
+      expect(text)
+        .toBeNull();
+    });
+  });
 });

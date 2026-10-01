@@ -6,6 +6,10 @@
 // page with new_instance, so every window runs in its own renderer process and a busy one never stalls another.
 // A second request for a page already open focuses its window instead.
 //
+// Pages ask the same channel for the clipboard's text, which a page under NW.js cannot read itself: Chromium asks the
+// person before a page reads the clipboard, and NW.js has nowhere to ask, so the read would wait forever. The shell
+// reads it with nw.Clipboard and answers with the request's id, since every window hears every answer.
+//
 // The app stays open while any window is. Visible windows are never given a 'close' listener: that would take
 // their closing away from the page, and a page holding unsaved edits asks before it closes through its own
 // beforeunload.
@@ -252,6 +256,18 @@ function startRelay(uiUrl, fallbackSize, ready)
         if (request.type === 'hello')
         {
           shellChannel.postMessage({ type: 'shell-ready' });
+          return;
+        }
+
+        // the clipboard's text, for a page's paste that has no clipboard event to carry it.
+        if (request.type === 'clipboard-read')
+        {
+          if (typeof request.requestId === 'string')
+          {
+            const text = nw.Clipboard.get().get('text');
+            shellChannel.postMessage({ type: 'clipboard-text', requestId: request.requestId, text: typeof text === 'string' ? text : '' });
+          }
+
           return;
         }
 

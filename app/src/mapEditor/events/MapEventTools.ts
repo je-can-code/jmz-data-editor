@@ -67,6 +67,12 @@ type MapEventToolsOptions = {
    * Opens an event's full editor in its own window, or brings forward the one editing it.
    */
   readonly openEvent: (mapId: number, eventId: number) => void;
+
+  /**
+   * Reads the system clipboard's text for the menu's Paste, which has no clipboard event to carry it: the window
+   * shell's read, which asks the NW.js shell where the page itself may not read. Null when it could not be read.
+   */
+  readonly readClipboard: () => Promise<string | null>;
   readonly notify: (text: string, severity: EventNoticeSeverity) => void;
   readonly openMenu: (request: EventMenuRequest) => void;
 };
@@ -355,10 +361,7 @@ class MapEventTools
    */
   async pasteFromClipboard(target: MapCell | null): Promise<void>
   {
-    const clipboard = navigatorOf(this.#options.host)?.clipboard;
-    const text = clipboard === undefined
-      ? null
-      : await clipboard.readText().catch(() => null);
+    const text = await this.#options.readClipboard();
     if (text === null)
     {
       this.#options.notify('The clipboard could not be read here; press Ctrl+V to paste instead.', 'error');

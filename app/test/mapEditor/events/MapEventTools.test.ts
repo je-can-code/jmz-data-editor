@@ -66,18 +66,20 @@ describe('MapEventTools', () =>
     const opened: string[] = [];
     const notices: string[] = [];
     const menuRequests: EventMenuRequest[] = [];
+    const clipboard: { text: string | null } = { text: null };
     const tools = new MapEventTools({
       renderer,
       host,
       hub,
       selection,
       openEvent: (mapId, eventId) => opened.push(`${mapId}:${eventId}`),
+      readClipboard: async () => clipboard.text,
       notify: text => notices.push(text),
       openMenu: request => menuRequests.push(request),
     });
     tools.setMap(map);
     built.push(tools);
-    return { hub, map, host, canvas, overlays, menus, selection, opened, notices, menuRequests, tools };
+    return { hub, map, host, canvas, overlays, menus, selection, opened, notices, menuRequests, tools, clipboard };
   };
 
   /**
@@ -381,6 +383,35 @@ describe('MapEventTools', () =>
       // Assert.
       expect([ paste.event.defaultPrevented, spotsOf(mapFileOf(hub, 1)), selection.eventsOn(1) ])
         .toStrictEqual([ true, [ null, [ 0, 0 ], [ 1, 0 ], [ 4, 2 ], [ 2, 2 ], [ 3, 2 ] ], [ 4, 5 ] ]);
+    });
+
+    it('pastes from the menu what the clipboard read hands over, with the corner on the right-clicked tile', async () =>
+    {
+      // Arrange: event 3 copied; the read answers with it.
+      const { hub, map, tools, clipboard, selection } = setUp();
+      clipboard.text = encodeEventClipboard(copyEvents(map, 1, [ 3 ]) as NonNullable<ReturnType<typeof copyEvents>>);
+
+      // Act.
+      await tools.pasteFromClipboard({ x: 2, y: 3 });
+
+      // Assert.
+      expect([ spotsOf(mapFileOf(hub, 1))[4], selection.eventsOn(1) ])
+        .toStrictEqual([ [ 2, 3 ], [ 4 ] ]);
+    });
+
+    it('says why the menu pasted nothing: a clipboard it could not read, or one holding no events', async () =>
+    {
+      // Arrange.
+      const { hub, tools, clipboard, notices } = setUp();
+
+      // Act.
+      await tools.pasteFromClipboard({ x: 2, y: 3 });
+      clipboard.text = 'Welcome to Nimbus!';
+      await tools.pasteFromClipboard({ x: 2, y: 3 });
+
+      // Assert.
+      expect([ notices, hub.history(mapHistoryKey(1)).rows.length ])
+        .toStrictEqual([ [ 'The clipboard could not be read here; press Ctrl+V to paste instead.', 'The clipboard holds no events to paste.' ], 0 ]);
     });
 
     it('leaves a paste of anything but copied events to the page, changing nothing', () =>
