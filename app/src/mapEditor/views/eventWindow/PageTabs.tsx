@@ -15,8 +15,9 @@ import {
   PAGE_CLIPBOARD_MARKER,
   pastePages,
 } from '../../core/eventWindow/pageOperations.ts';
+import { editPageItself } from '../../core/eventWindow/pageIdentity.ts';
 import { describePageTab } from '../../core/eventWindow/pageSummaries.ts';
-import type { RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
+import type { RmmzEventPage, RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
 import { useMapEditorServices } from '../../services/MapEditorServicesContext.tsx';
 
 /**
@@ -34,12 +35,13 @@ type PageTabsProps = {
 };
 
 /**
- * The open right-click menu: where, and for which page.
+ * The open right-click menu: where, and for which page, held by the page itself so pages added or taken away in front
+ * of it while the menu is open never turn its choice onto another page.
  */
 type TabMenu = {
   readonly x: number;
   readonly y: number;
-  readonly page: number;
+  readonly page: RmmzEventPage;
 };
 
 /**
@@ -51,7 +53,9 @@ const NO_COPIED_PAGE = 'The clipboard holds no copied page.';
  * The tabs of an event's pages, with what can be done to them: a new page, copy, cut, paste, duplicate, delete, clear
  * and a move left or right, from the buttons, a tab's right-click menu, or the keys while the tabs have focus (Ctrl+C,
  * X, V and D, and Delete). A tab dragged onto another moves its page there. New and pasted pages land after the page
- * shown. Copied pages go on the system clipboard, so they paste into any event, in any window.
+ * shown. Copied pages go on the system clipboard, so they paste into any event, in any window. Every change finds its
+ * page by the page itself at the moment it runs, so pages another window adds or takes away in front of it never turn
+ * the change onto a neighbour.
  * @param {PageTabsProps} props The event, the page shown, and where changes go.
  * @returns {React.JSX.Element} The tabs.
  */
@@ -61,9 +65,10 @@ const PageTabs = (props: PageTabsProps) =>
   const { hub, shell } = useMapEditorServices();
   const [ menu, setMenu ] = useState<TabMenu | null>(null);
   const [ dropAt, setDropAt ] = useState<number | null>(null);
-  const dragFrom = useRef<number | null>(null);
+  const dragFrom = useRef<RmmzEventPage | null>(null);
   const lookup = nameLookup(names);
   const last = event.pages.length - 1;
+  const shownPage = event.pages[page];
 
   /**
    * Runs a page change, telling an unexpected failure rather than losing it.
@@ -83,13 +88,23 @@ const PageTabs = (props: PageTabsProps) =>
   };
 
   /**
+   * Runs a change on one page, wherever that page stands by the time it runs.
+   * @param {RmmzEventPage} which The page.
+   * @param {(at: number) => PageOutcome} change The change, given the page's place.
+   */
+  const runOn = (which: RmmzEventPage, change: (at: number) => PageOutcome) =>
+  {
+    run(() => editPageItself(hub, target, which, change));
+  };
+
+  /**
    * Writes one page as clipboard text.
-   * @param {number} index The page.
+   * @param {RmmzEventPage} which The page.
    * @returns {string | null} The text, or null when the page has gone.
    */
-  const clipboardText = (index: number): string | null =>
+  const clipboardText = (which: RmmzEventPage): string | null =>
   {
-    const clipboard = copyPages(event, [ index ]);
+    const clipboard = copyPages(event, [ event.pages.indexOf(which) ]);
     return clipboard === null
       ? null
       : encodePageClipboard(clipboard);
@@ -108,18 +123,18 @@ const PageTabs = (props: PageTabsProps) =>
       return;
     }
 
-    run(() => pastePages(hub, target, page, clipboard));
+    runOn(shownPage, at => pastePages(hub, target, at, clipboard));
   };
 
   /**
    * Copies a page from a button or the menu, which have no clipboard event to write through.
-   * @param {number} index The page.
+   * @param {RmmzEventPage} which The page.
    * @param {boolean} cut True to take the page off once it is on the clipboard.
    */
-  const copyFromMenu = (index: number, cut: boolean) =>
+  const copyFromMenu = (which: RmmzEventPage, cut: boolean) =>
   {
     setMenu(null);
-    const text = clipboardText(index);
+    const text = clipboardText(which);
     if (text === null)
     {
       return;
@@ -130,7 +145,7 @@ const PageTabs = (props: PageTabsProps) =>
       {
         if (cut)
         {
-          run(() => deletePage(hub, target, index, 'Cut'));
+          runOn(which, at => deletePage(hub, target, at, 'Cut'));
         }
       })
       .catch((error: unknown) => onNotice(`The clipboard refused: ${(error as Error).message}`));
@@ -164,7 +179,7 @@ const PageTabs = (props: PageTabsProps) =>
    */
   const onCopy = (clipboardEvent: React.ClipboardEvent, cut: boolean) =>
   {
-    const text = clipboardText(page);
+    const text = clipboardText(shownPage);
     if (text === null)
     {
       return;
@@ -174,7 +189,7 @@ const PageTabs = (props: PageTabsProps) =>
     clipboardEvent.preventDefault();
     if (cut)
     {
-      run(() => deletePage(hub, target, page, 'Cut'));
+      runOn(shownPage, at => deletePage(hub, target, at, 'Cut'));
     }
   };
 
@@ -188,14 +203,14 @@ const PageTabs = (props: PageTabsProps) =>
     if (keyEvent.key === 'Delete' && command === false)
     {
       keyEvent.preventDefault();
-      run(() => deletePage(hub, target, page));
+      runOn(shownPage, at => deletePage(hub, target, at));
       return;
     }
 
     if (command && keyEvent.key.toLowerCase() === 'd')
     {
       keyEvent.preventDefault();
-      run(() => duplicatePage(hub, target, page));
+      runOn(shownPage, at => duplicatePage(hub, target, at));
     }
   };
 
@@ -209,20 +224,24 @@ const PageTabs = (props: PageTabsProps) =>
   };
 
   /**
-   * Moves the dragged page onto the tab it was dropped on.
-   * @param {number} index The tab dropped on.
+   * Moves the dragged page onto the tab it was dropped on, both found by the pages themselves as the drop lands.
+   * @param {RmmzEventPage} onto The page whose tab it was dropped on.
    */
-  const dropOn = (index: number) =>
+  const dropOn = (onto: RmmzEventPage) =>
   {
     const from = dragFrom.current;
     endDrag();
-    if (from !== null && from !== index)
+    if (from !== null && from !== onto)
     {
-      run(() => movePage(hub, target, from, index));
+      runOn(from, at => editPageItself(hub, target, onto, to => movePage(hub, target, at, to)));
     }
   };
 
-  const menuPage = menu?.page ?? page;
+  // the menu's page as it stands now; a page gone while its menu was open stands nowhere, and its moves are off.
+  const menuPage = menu === null
+    ? shownPage
+    : menu.page;
+  const menuPlace = event.pages.indexOf(menuPage);
   return (
     <Stack
       direction={'row'}
@@ -259,7 +278,7 @@ const PageTabs = (props: PageTabsProps) =>
             draggable
             onDragStart={dragEvent =>
             {
-              dragFrom.current = index;
+              dragFrom.current = each;
               dragEvent.dataTransfer.effectAllowed = 'move';
               dragEvent.dataTransfer.setData('text/plain', `Page ${index + 1}`);
             }}
@@ -275,40 +294,40 @@ const PageTabs = (props: PageTabsProps) =>
             onDrop={dragEvent =>
             {
               dragEvent.preventDefault();
-              dropOn(index);
+              dropOn(each);
             }}
             onDragEnd={endDrag}
             onContextMenu={menuEvent =>
             {
               menuEvent.preventDefault();
               onSelect(index);
-              setMenu({ x: menuEvent.clientX, y: menuEvent.clientY, page: index });
+              setMenu({ x: menuEvent.clientX, y: menuEvent.clientY, page: each });
             }}
-            sx={{ minWidth: 48, outline: dropAt === index && dragFrom.current !== index ? '2px dashed' : 'none', outlineOffset: -4 }}
+            sx={{ minWidth: 48, outline: dropAt === index && dragFrom.current !== each ? '2px dashed' : 'none', outlineOffset: -4 }}
           />
         ))}
       </Tabs>
-      <Button size={'small'} startIcon={<Add/>} onClick={() => run(() => addPage(hub, target, page))}>New</Button>
-      <Button size={'small'} startIcon={<ContentCopy/>} onClick={() => copyFromMenu(page, false)}>Copy</Button>
+      <Button size={'small'} startIcon={<Add/>} onClick={() => runOn(shownPage, at => addPage(hub, target, at))}>New</Button>
+      <Button size={'small'} startIcon={<ContentCopy/>} onClick={() => copyFromMenu(shownPage, false)}>Copy</Button>
       <Button size={'small'} startIcon={<ContentPaste/>} onClick={pasteFromMenu}>Paste</Button>
       <Tooltip title={event.pages.length === 1 ? 'An event keeps at least one page' : 'Delete this page (Delete)'}>
         <span>
-          <Button size={'small'} startIcon={<DeleteOutline/>} disabled={event.pages.length === 1} onClick={() => run(() => deletePage(hub, target, page))}>
+          <Button size={'small'} startIcon={<DeleteOutline/>} disabled={event.pages.length === 1} onClick={() => runOn(shownPage, at => deletePage(hub, target, at))}>
             Delete
           </Button>
         </span>
       </Tooltip>
-      <Button size={'small'} startIcon={<LayersClear/>} onClick={() => run(() => clearPage(hub, target, page))}>Clear</Button>
+      <Button size={'small'} startIcon={<LayersClear/>} onClick={() => runOn(shownPage, at => clearPage(hub, target, at))}>Clear</Button>
       <Tooltip title={'Move this page left'}>
         <span>
-          <IconButton size={'small'} aria-label={'Move this page left'} disabled={page === 0} onClick={() => run(() => movePage(hub, target, page, page - 1))}>
+          <IconButton size={'small'} aria-label={'Move this page left'} disabled={page === 0} onClick={() => runOn(shownPage, at => movePage(hub, target, at, at - 1))}>
             <ChevronLeft/>
           </IconButton>
         </span>
       </Tooltip>
       <Tooltip title={'Move this page right'}>
         <span>
-          <IconButton size={'small'} aria-label={'Move this page right'} disabled={page === last} onClick={() => run(() => movePage(hub, target, page, page + 1))}>
+          <IconButton size={'small'} aria-label={'Move this page right'} disabled={page === last} onClick={() => runOn(shownPage, at => movePage(hub, target, at, at + 1))}>
             <ChevronRight/>
           </IconButton>
         </span>
@@ -319,18 +338,18 @@ const PageTabs = (props: PageTabsProps) =>
         anchorReference={'anchorPosition'}
         anchorPosition={menu === null ? undefined : { top: menu.y, left: menu.x }}
       >
-        <MenuItem onClick={() => run(() => addPage(hub, target, menuPage))}>New page after</MenuItem>
+        <MenuItem onClick={() => runOn(menuPage, at => addPage(hub, target, at))}>New page after</MenuItem>
         <Divider/>
         <MenuItem onClick={() => copyFromMenu(menuPage, false)}>Copy</MenuItem>
         <MenuItem disabled={event.pages.length === 1} onClick={() => copyFromMenu(menuPage, true)}>Cut</MenuItem>
         <MenuItem onClick={pasteFromMenu}>Paste after</MenuItem>
-        <MenuItem onClick={() => run(() => duplicatePage(hub, target, menuPage))}>Duplicate</MenuItem>
+        <MenuItem onClick={() => runOn(menuPage, at => duplicatePage(hub, target, at))}>Duplicate</MenuItem>
         <Divider/>
-        <MenuItem disabled={event.pages.length === 1} onClick={() => run(() => deletePage(hub, target, menuPage))}>Delete</MenuItem>
-        <MenuItem onClick={() => run(() => clearPage(hub, target, menuPage))}>Clear</MenuItem>
+        <MenuItem disabled={event.pages.length === 1} onClick={() => runOn(menuPage, at => deletePage(hub, target, at))}>Delete</MenuItem>
+        <MenuItem onClick={() => runOn(menuPage, at => clearPage(hub, target, at))}>Clear</MenuItem>
         <Divider/>
-        <MenuItem disabled={menuPage === 0} onClick={() => run(() => movePage(hub, target, menuPage, menuPage - 1))}>Move left</MenuItem>
-        <MenuItem disabled={menuPage === last} onClick={() => run(() => movePage(hub, target, menuPage, menuPage + 1))}>Move right</MenuItem>
+        <MenuItem disabled={menuPlace <= 0} onClick={() => runOn(menuPage, at => movePage(hub, target, at, at - 1))}>Move left</MenuItem>
+        <MenuItem disabled={menuPlace < 0 || menuPlace === last} onClick={() => runOn(menuPage, at => movePage(hub, target, at, at + 1))}>Move right</MenuItem>
       </Menu>
     </Stack>
   );

@@ -16,6 +16,7 @@ import { namedRows } from '../../core/commandList/databaseNames.ts';
 import { parseEventMovement, type EventMovementFields } from '../../core/eventPage/eventMovement.ts';
 import { saveTargetMap } from '../../core/eventWindow/eventWindowSave.ts';
 import { setPageCondition, type ConditionChange } from '../../core/eventWindow/pageConditions.ts';
+import { editPageItself, pageKey, placeOfShownPage, shownPageAt, type ShownPage } from '../../core/eventWindow/pageIdentity.ts';
 import { setPageImage, setPageMovement, setPageOption, setPagePriority, setPageTrigger } from '../../core/eventWindow/pageSettings.ts';
 import { loadTilesetRow } from '../../core/eventWindow/tilesetRow.ts';
 import type { RmmzEventImage, RmmzTileset } from '../../core/model/rmmzTypes.ts';
@@ -121,8 +122,10 @@ const commitTyping = (): void =>
  * The full editor of one event, in its own window: its name and note, its pages as tabs, and on the page shown its
  * conditions, graphic, movement, options, priority, trigger and commands. Every change is one step in the event's own
  * history (Ctrl+Z and Ctrl+Y move it, and the header lists it), lands at once in every other window holding the map,
- * and Ctrl+S saves the map. The map must be held by the window's hub; an event that goes from the map while its window
- * is open says so, and comes back if an undo elsewhere brings it back.
+ * and Ctrl+S saves the map. The page shown is followed by the page itself rather than its place, so pages added or
+ * taken away in front of it, in any window, never put another page in its stead. The map must be held by the window's
+ * hub; an event that goes from the map while its window is open says so, and comes back if an undo elsewhere brings it
+ * back.
  * @param {{ target: EventWindowTarget }} props The event.
  * @returns {React.JSX.Element} The editor.
  */
@@ -139,7 +142,7 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
 
   // the graphic picker reads the server and the names the way the hand-built command editors do.
   const environment = useMemo<HandBuiltEditorEnvironment>(() => ({ api, headers: pluginHeaders, names: kind => namedRows(names, kind) }), [ api, pluginHeaders, names ]);
-  const [ selected, setSelected ] = useState(0);
+  const [ shown, setShown ] = useState<ShownPage>({ page: null, place: 0 });
   const [ notice, setNotice ] = useState<Notice | null>(null);
   const [ saving, setSaving ] = useState(false);
 
@@ -174,7 +177,7 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
 
     if ('page' in outcome)
     {
-      setSelected(outcome.page);
+      setShown(shownPageAt(hub, target, outcome.page));
     }
   };
 
@@ -250,9 +253,26 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
     );
   }
 
-  // the page shown follows the pages there are, which an undo or another window may have changed.
-  const pageIndex = Math.min(selected, event.pages.length - 1);
+  // the page shown is followed by the page itself, wherever pages added or taken away in front of it have moved it.
+  const pageIndex = placeOfShownPage(event.pages, shown);
   const page = event.pages[pageIndex];
+  if (shown.page !== page || shown.place !== pageIndex)
+  {
+    // remember it as it stands now, so the next change to the pages finds it from here.
+    setShown({ page, place: pageIndex });
+  }
+
+  // what is drawn for the page is keyed by the page, so a half-typed value never passes to another page.
+  const shownKey = pageKey(page);
+
+  /**
+   * Runs an edit on the page shown, wherever that page stands by the time the edit lands.
+   * @param {(at: number) => PageOutcome} edit The edit, given the page's place.
+   */
+  const runOnPage = (edit: (at: number) => PageOutcome) =>
+  {
+    run(() => editPageItself(hub, target, page, edit));
+  };
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }} data-testid={'event-editor'}>
@@ -273,52 +293,50 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
         event={event}
         page={pageIndex}
         names={names}
-        onSelect={setSelected}
+        onSelect={place => setShown(shownPageAt(hub, target, place))}
         onOutcome={take}
         onNotice={message => setNotice({ message, severity: 'warning' })}
       />
       <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <Box sx={{ width: 420, flex: 'none', overflowY: 'auto', borderRight: 1, borderColor: 'divider' }} data-testid={'page-settings'}>
+        <Box key={shownKey} sx={{ width: 420, flex: 'none', overflowY: 'auto', borderRight: 1, borderColor: 'divider' }} data-testid={'page-settings'}>
           <Section title={'Conditions'}>
             <PageConditions
               conditions={page.conditions}
               names={names}
-              onChange={(change: ConditionChange) => run(() => setPageCondition(hub, target, pageIndex, change))}
+              onChange={(change: ConditionChange) => runOnPage(at => setPageCondition(hub, target, at, change))}
             />
           </Section>
           <Divider/>
           <Section title={'Graphic'}>
             <EditorEnvironmentProvider environment={environment}>
               <GraphicPicker
-                key={pageIndex}
                 value={page.image}
                 tileset={tileset}
-                onChange={(image: RmmzEventImage) => run(() => setPageImage(hub, target, pageIndex, image))}
+                onChange={(image: RmmzEventImage) => runOnPage(at => setPageImage(hub, target, at, image))}
               />
             </EditorEnvironmentProvider>
           </Section>
           <Section title={'Movement'}>
             <MovementSettings
-              key={pageIndex}
               value={parseEventMovement(page)}
-              onChange={(movement: EventMovementFields) => run(() => setPageMovement(hub, target, pageIndex, movement))}
+              onChange={(movement: EventMovementFields) => runOnPage(at => setPageMovement(hub, target, at, movement))}
             />
           </Section>
           <Divider/>
           <Section title={'Options'}>
-            <PageOptions page={page} onChange={(option, on) => run(() => setPageOption(hub, target, pageIndex, option, on))}/>
+            <PageOptions page={page} onChange={(option, on) => runOnPage(at => setPageOption(hub, target, at, option, on))}/>
           </Section>
           <Section title={'Priority and trigger'}>
             <PagePriorityTrigger
               page={page}
-              onPriority={priority => run(() => setPagePriority(hub, target, pageIndex, priority))}
-              onTrigger={trigger => run(() => setPageTrigger(hub, target, pageIndex, trigger))}
+              onPriority={priority => runOnPage(at => setPagePriority(hub, target, at, priority))}
+              onTrigger={trigger => runOnPage(at => setPageTrigger(hub, target, at, trigger))}
             />
           </Section>
         </Box>
         <Box sx={{ flex: 1, minWidth: 0, overflowY: 'auto', p: 1 }}>
           <CommandList
-            key={pageIndex}
+            key={shownKey}
             documentKey={key}
             path={pageListPath(target, pageIndex)}
             histories={[ history ]}

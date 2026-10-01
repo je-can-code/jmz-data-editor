@@ -16,6 +16,7 @@ import { copyPages, decodePageClipboard, encodePageClipboard } from '../../../..
 import { DocumentHub, type DocumentStore } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
+import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzTileset } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
@@ -532,6 +533,50 @@ describe('EventWindowView', () =>
     // Assert.
     expect([ heldEvent(hub).pages, shownTab(), stepsOf(hub) ])
       .toStrictEqual([ [ markedPage(2), markedPage(3), markedPage(1) ], 'Page 3', [ 'Move page 1' ] ]);
+  });
+
+  it('hands a half-typed value to the page it was typed on, still shown, when another window adds a page in front of it', () =>
+  {
+    // Arrange: page 2 shown with its variable condition on, and a value half typed into it.
+    const { hub } = renderWindow();
+    fireEvent.click(screen.getByRole('tab', { name: 'Page 2' }));
+    fireEvent.click(screen.getByLabelText('Use the variable condition'));
+    const value = screen.getByLabelText('At least');
+    fireEvent.change(value, { target: { value: '120' } });
+
+    // Act: the map's window adds a page in front of it, then the field is left.
+    act(() =>
+    {
+      hub.edit('Add page', [ mapHistoryKey(1) ], transaction => transaction.splice('map:1', [ 'events', 2, 'pages' ], 1, 0, [ createEventPage() as unknown as JsonValue ]));
+    });
+    fireEvent.blur(value);
+
+    // Assert: page 2, third by then, took the value and is still the page shown; the new page is untouched.
+    const turnedOn = { ...markedPage(2), conditions: { ...markedPage(2).conditions, variableValid: true, variableValue: 120 } };
+    expect([ shownTab(), heldEvent(hub).pages, stepsOf(hub) ])
+      .toStrictEqual([
+        'Page 3',
+        [ markedPage(1), createEventPage(), turnedOn, markedPage(3) ],
+        [ 'Turn on variable condition (page 2)', 'Change variable condition (page 3)' ],
+      ]);
+  });
+
+  it('deletes the page its menu was opened on, though another window adds a page in front of it while the menu is open', () =>
+  {
+    // Arrange: the menu open on page 2.
+    const { hub } = renderWindow();
+    fireEvent.contextMenu(screen.getByRole('tab', { name: 'Page 2' }));
+
+    // Act: the map's window adds a page first, then Delete is chosen.
+    act(() =>
+    {
+      hub.edit('Add page', [ mapHistoryKey(1) ], transaction => transaction.splice('map:1', [ 'events', 2, 'pages' ], 0, 0, [ createEventPage() as unknown as JsonValue ]));
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+
+    // Assert: page 2 went, third by then; page 1 and the new page stay.
+    expect([ heldEvent(hub).pages, stepsOf(hub) ])
+      .toStrictEqual([ [ createEventPage(), markedPage(1), markedPage(3) ], [ 'Delete page 3' ] ]);
   });
 
   it('pastes a copied page from the Paste button, reading the clipboard through the window shell', async () =>
