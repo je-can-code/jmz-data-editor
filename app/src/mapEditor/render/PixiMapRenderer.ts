@@ -642,9 +642,10 @@ class PixiMapRenderer implements MapRenderer
       this.#flushEvents();
     }
 
-    // the sprite drawn on top under the point, or failing that the newest event standing on the cell.
+    // the event a click there picks, by its tile or by the pixels its sprite draws at this zoom; or failing that, while
+    // the map's sprites are still to be built, the newest event standing on the cell.
     const world = screenToWorld(this.#camera, point);
-    const drawn = this.#events.eventAt(world.x, world.y);
+    const drawn = this.#events.eventAt(world.x, world.y, this.#camera.zoom);
     if (drawn !== null)
     {
       return drawn;
