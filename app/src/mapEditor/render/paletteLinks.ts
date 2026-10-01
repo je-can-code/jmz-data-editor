@@ -1,7 +1,7 @@
 import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { cellInspector } from '../core/palette/cellInspector.ts';
-import { paintSelection, WheelStepper } from '../core/palette/paintSelection.ts';
-import { paletteMode } from '../core/palette/paletteMode.ts';
+import { WheelStepper, type PaintSelection } from '../core/palette/paintSelection.ts';
+import type { PaletteModeStore } from '../core/palette/paletteMode.ts';
 import type { MapCell, ScreenPoint } from '../core/renderer/camera.ts';
 import type { OverlayId } from '../core/renderer/MapRenderer.ts';
 import type { LayerChoice } from '../core/tiles/layering.ts';
@@ -95,10 +95,17 @@ type PaletteLinkOptions = {
    */
   readonly settings: MapViewSettings;
   readonly setSettings: Dispatch<SetStateAction<MapViewSettings>>;
+
+  /**
+   * The view's window's palette and layer strip choices, and its palette's mode.
+   */
+  readonly selection: PaintSelection;
+  readonly mode: PaletteModeStore;
 };
 
 /**
- * Links a map view to the palette and the layers panel, so painting never needs a trip to the strip:
+ * Links a map view to its window's palette and layer strip, and to the stack view, so painting never needs a trip to
+ * the strip:
  *
  * - Shift and the wheel step along the layer strip instead of zooming;
  * - the cell under the pointer feeds the stack view, and a middle click holds a cell there, or lets it go;
@@ -106,11 +113,12 @@ type PaletteLinkOptions = {
  *   highlighting;
  * - while the passability editor is open, the view shows the passability overlay beside it, and takes it away again
  *   afterwards unless it was already showing.
- * @param {PaletteLinkOptions} options The view's element, how it finds cells, its map, and its settings.
+ * @param {PaletteLinkOptions} options The view's element, how it finds cells, its map, its settings, and its window's
+ * choices and palette mode.
  */
 const usePaletteLinks = (options: PaletteLinkOptions): void =>
 {
-  const { host, renderer, mapId, settings, setSettings } = options;
+  const { host, renderer, mapId, settings, setSettings, selection, mode } = options;
 
   // the settings as they stand, for deciding what to change outside a render.
   const settingsRef = useRef(settings);
@@ -149,7 +157,7 @@ const usePaletteLinks = (options: PaletteLinkOptions): void =>
       const step = stepper.step(event.deltaY, event.deltaX, event.deltaMode);
       if (step !== 0)
       {
-        paintSelection.stepLayer(step);
+        selection.stepLayer(step);
       }
     };
 
@@ -197,14 +205,14 @@ const usePaletteLinks = (options: PaletteLinkOptions): void =>
       element.removeEventListener('pointerdown', onPointerDown);
       element.removeEventListener('auxclick', onAuxClick);
     };
-  }, [ host, renderer, mapId ]);
+  }, [ host, renderer, mapId, selection ]);
 
   // the strip's layer, highlighted from the start and on every change of layer; a new brush changes nothing here.
   useEffect(() =>
   {
-    let { layer: shown } = paintSelection.getState();
+    let { layer: shown } = selection.getState();
     setSettings(current => highlightForChoice(current, shown));
-    return paintSelection.subscribe(({ layer }) =>
+    return selection.subscribe(({ layer }) =>
     {
       if (layer !== shown)
       {
@@ -212,7 +220,7 @@ const usePaletteLinks = (options: PaletteLinkOptions): void =>
         setSettings(current => highlightForChoice(current, layer));
       }
     });
-  }, [ setSettings ]);
+  }, [ setSettings, selection ]);
 
   // the passability overlay shows for as long as its editor is open; one shown already stays after it closes.
   useEffect(() =>
@@ -232,9 +240,9 @@ const usePaletteLinks = (options: PaletteLinkOptions): void =>
       }
     };
 
-    let { editing: followed } = paletteMode.getState();
+    let { editing: followed } = mode.getState();
     follow(followed === 'passability');
-    return paletteMode.subscribe(({ editing }) =>
+    return mode.subscribe(({ editing }) =>
     {
       if (editing !== followed)
       {
@@ -242,7 +250,7 @@ const usePaletteLinks = (options: PaletteLinkOptions): void =>
         follow(editing === 'passability');
       }
     });
-  }, [ setSettings ]);
+  }, [ setSettings, mode ]);
 };
 
 export { highlightForChoice, usePaletteLinks, withOverlay };

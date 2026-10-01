@@ -56,6 +56,12 @@ type PopoutKeeperOptions = {
    * group that holds nothing but panels on their way back.
    */
   readonly mapsGroup: (returning: ReadonlySet<string>) => DockviewGroupPanel | null;
+
+  /**
+   * Picks out the panels that never leave the main window, which are never torn out, by drag, button or menu. Left
+   * out, any panel may be.
+   */
+  readonly staysDocked?: (panel: IDockviewPanel) => boolean;
 };
 
 /**
@@ -67,6 +73,7 @@ type PopoutKeeperOptions = {
  * drop, so a drag never leaves the app: nothing is offered to the desktop or to other programs, which would otherwise
  * take a tab let go over them as text (a desktop makes a note of it). The keeper follows each tab drag's pointer to
  * where it is let go, and the dock drops nothing outside its window, so a release out there is the keeper's alone.
+ * A panel the workspace keeps docked (the start panel, which holds the centre) is never torn out.
  *
  * Every panel leaving the main window is remembered with its origin: the group it left, its place among that group's
  * tabs, and the panels beside it. Closing a torn-out window brings all of its panels back that way, whatever layout
@@ -233,7 +240,7 @@ class PopoutKeeper
   async #open(panel: IDockviewPanel, bounds: ScreenRect, origin: PanelOrigin | null): Promise<boolean>
   {
     const api = this.#api;
-    if (api === null || api.getPanel(panel.id) !== panel || this.isAloneInWindow(panel))
+    if (api === null || api.getPanel(panel.id) !== panel || this.isAloneInWindow(panel) || this.#options.staysDocked?.(panel) === true)
     {
       return false;
     }

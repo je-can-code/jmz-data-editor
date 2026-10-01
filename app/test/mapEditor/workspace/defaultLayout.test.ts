@@ -129,6 +129,43 @@ describe('defaultLayout', () =>
       ]);
   });
 
+  it('gives a layout saved before the centre was permanent a centre, the start panel joining its roomiest maps behind them', async () =>
+  {
+    // Arrange.
+    dock.api.layout(1920, 1032);
+
+    // Act.
+    const outcome = await restoreLayout(dock.api, storeHolding(squeezedLayout()), () => true);
+
+    // Assert: map 301 takes the most room, and stays in front of the start panel.
+    const group = dock.api.getPanel('start')?.group;
+    expect([ outcome, describeGrid(dock.api), group?.activePanel?.id ])
+      .toStrictEqual([
+        'restored',
+        [ 'start+map-301', 'map-tree+palette+layers', 'map-324', 'map-properties+quick-settings', 'history' ],
+        'map-301',
+      ]);
+  });
+
+  it('lays out afresh a saved layout with neither the start panel nor a map in the main window, as one closed to its side panels was', async () =>
+  {
+    // Arrange: the squeezed layout with both maps gone, as the dock saved it once the last map closed.
+    const saved = squeezedLayout() as unknown as { grid: { root: { data: unknown[] } }; panels: Record<string, unknown>; activeGroup: string };
+    saved.grid.root.data = saved.grid.root.data.filter((_node, index) => index === 1 || index === 3);
+    delete saved.panels['map-301'];
+    delete saved.panels['map-324'];
+    saved.activeGroup = '1';
+    const onRestored = vi.fn();
+    dock.api.layout(1920, 1032);
+
+    // Act.
+    const outcome = await restoreLayout(dock.api, storeHolding(saved as unknown as SavedLayout), () => true, onRestored);
+
+    // Assert.
+    expect([ outcome, describeGrid(dock.api), onRestored.mock.calls.length ])
+      .toStrictEqual([ 'default', [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ], 0 ]);
+  });
+
   it('hands the saved layout on once rebuilt, and lays out afresh when nothing is saved', async () =>
   {
     // Arrange.

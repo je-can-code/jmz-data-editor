@@ -6,6 +6,7 @@ import type {
   IDockviewPanelHeaderProps,
   ReactContextMenuItemConfig,
 } from 'dockview-react';
+import { isStartPanel, isStartTabHidden } from '../core/workspace/centre.ts';
 import type { PopoutKeeper } from './PopoutKeeper.ts';
 import { useWorkspace } from './workspaceHooks.tsx';
 
@@ -15,6 +16,25 @@ import { useWorkspace } from './workspaceHooks.tsx';
  */
 const TEAR_OUT_LABEL = 'Open in its own window';
 const PUT_BACK_LABEL = 'Put back in the main window';
+
+/**
+ * The classes the start panel's tab carries: always, so it can take the whole of the dock's tab, and while it hides,
+ * so the dock's tab around it takes no room. The workspace's styles act on them (see START_TAB_STYLES).
+ */
+const START_TAB_CLASS = 'jmz-start-tab';
+const HIDDEN_START_TAB_CLASS = 'jmz-start-tab-hidden';
+
+/**
+ * The styles the start panel's tab needs from the dock's tab around it, which only the page's styles can reach: none of
+ * the dock's padding, so every press on the tab lands on the start tab itself and stops there, and no room at all while
+ * it hides, the divider beside it hiding too.
+ */
+const START_TAB_STYLES = {
+  [`.dv-tab:has(.${START_TAB_CLASS})`]: { padding: 0 },
+  [`.${START_TAB_CLASS}`]: { padding: '0.25rem 0.5rem', boxSizing: 'border-box' },
+  [`.dv-tab:has(.${HIDDEN_START_TAB_CLASS})`]: { display: 'none' },
+  [`.dv-tab:has(.${HIDDEN_START_TAB_CLASS}) + .dv-tab::before`]: { display: 'none' },
+} as const;
 
 /**
  * The glyphs a tab draws, inline, in the dock's own style: a torn-out window copies the page's styles once, when it
@@ -92,6 +112,85 @@ const useTornOut = (api: DockviewPanelApi): boolean =>
 };
 
 /**
+ * Follows which panels share a tab's group, by id, in tab order, as panels come and go and should the tab's panel
+ * move to another group.
+ * @param {DockviewPanelApi} api The tab's panel's api.
+ * @returns {readonly string[]} The group's panels.
+ */
+const useGroupPanelIds = (api: DockviewPanelApi): readonly string[] =>
+{
+  const [ panelIds, setPanelIds ] = useState<readonly string[]>(() => api.group.panels.map(panel => panel.id));
+
+  useEffect(() =>
+  {
+    let watching: { dispose: () => void }[] = [];
+
+    // read afresh on every change, keeping the same list while the panels are the same, so nothing renders for nothing.
+    const update = () => setPanelIds(current =>
+    {
+      const next = api.group.panels.map(panel => panel.id);
+      return next.join('\n') === current.join('\n') ? current : next;
+    });
+
+    // the group's own add and remove events, which fire while panels are dragged between groups as well.
+    const watchGroup = () =>
+    {
+      watching.forEach(each => each.dispose());
+      update();
+      watching = [ api.group.model.onDidAddPanel(update), api.group.model.onDidRemovePanel(update) ];
+    };
+
+    watchGroup();
+    const moved = api.onDidGroupChange(watchGroup);
+    return () =>
+    {
+      moved.dispose();
+      watching.forEach(each => each.dispose());
+    };
+  }, [ api ]);
+
+  return panelIds;
+};
+
+/**
+ * Stops a press, a right click or a drag on the start panel's tab right there: the dock never drags it, floats it,
+ * opens a menu for it or picks it, and the page shows no menu of its own.
+ * @param {React.SyntheticEvent} event The press.
+ */
+const stopAtStartTab = (event: React.SyntheticEvent) =>
+{
+  event.preventDefault();
+  event.stopPropagation();
+};
+
+/**
+ * The start panel's tab: its title alone, with no window button, no close button and no menu, since the start panel
+ * holds the centre and never leaves it, and presses on it stop there, so the dock never drags or floats it. It hides
+ * whenever anything else shares the centre, so the strip shows just the maps, and shows again once the last of them is
+ * gone, the start panel with it.
+ * @param {IDockviewPanelHeaderProps} props The dock's tab props.
+ * @returns {React.JSX.Element} The tab.
+ */
+const StartTab = (props: IDockviewPanelHeaderProps) =>
+{
+  const { api } = props;
+  const title = usePanelTitle(api);
+  const hidden = isStartTabHidden(useGroupPanelIds(api));
+
+  return (
+    <div
+      className={hidden ? `dv-default-tab ${START_TAB_CLASS} ${HIDDEN_START_TAB_CLASS}` : `dv-default-tab ${START_TAB_CLASS}`}
+      data-testid={'start-tab'}
+      data-hidden={hidden}
+      onPointerDown={stopAtStartTab}
+      onContextMenu={stopAtStartTab}
+    >
+      <span className={'dv-default-tab-content'}>{title}</span>
+    </div>
+  );
+};
+
+/**
  * A panel's tab: its title, a window button, and a close button. In the main window the window button opens that one
  * panel in a window of its own; in a torn-out window it puts the panel back where it came from in the main window.
  * Both buttons show on the tab in front and on any tab under the pointer, as the dock's close buttons do, and a middle
@@ -99,7 +198,7 @@ const useTornOut = (api: DockviewPanelApi): boolean =>
  * @param {IDockviewPanelHeaderProps} props The dock's tab props.
  * @returns {React.JSX.Element} The tab.
  */
-const WorkspaceTab = (props: IDockviewPanelHeaderProps) =>
+const PanelTab = (props: IDockviewPanelHeaderProps) =>
 {
   const { api, containerApi } = props;
   const controller = useWorkspace();
@@ -161,14 +260,32 @@ const WorkspaceTab = (props: IDockviewPanelHeaderProps) =>
 };
 
 /**
+ * Any panel's tab: the start panel's own, or the tab every other panel has.
+ * @param {IDockviewPanelHeaderProps} props The dock's tab props.
+ * @returns {React.JSX.Element} The tab.
+ */
+const WorkspaceTab = (props: IDockviewPanelHeaderProps) =>
+{
+  return isStartPanel(props.api.id)
+    ? <StartTab {...props}/>
+    : <PanelTab {...props}/>;
+};
+
+/**
  * The menu a tab's right click opens: opening its panel in a window of its own (greyed out once it has one to
- * itself), putting a torn-out panel back in the main window, then closing it.
+ * itself), putting a torn-out panel back in the main window, then closing it. The start panel, which never leaves the
+ * centre, has no menu.
  * @param {PopoutKeeper} keeper The keeper.
  * @param {IDockviewPanel} panel The panel whose tab was clicked.
- * @returns {(BuiltInContextMenuItem | ReactContextMenuItemConfig)[]} The menu's items.
+ * @returns {(BuiltInContextMenuItem | ReactContextMenuItemConfig)[]} The menu's items, none for no menu.
  */
 const tabMenuItems = (keeper: PopoutKeeper, panel: IDockviewPanel): (BuiltInContextMenuItem | ReactContextMenuItemConfig)[] =>
 {
+  if (isStartPanel(panel.id))
+  {
+    return [];
+  }
+
   const tearOut: ReactContextMenuItemConfig = {
     label: TEAR_OUT_LABEL,
     disabled: keeper.isAloneInWindow(panel),
@@ -183,4 +300,4 @@ const tabMenuItems = (keeper: PopoutKeeper, panel: IDockviewPanel): (BuiltInCont
     : [ tearOut, 'separator', 'close' ];
 };
 
-export { PUT_BACK_LABEL, tabMenuItems, TEAR_OUT_LABEL, WorkspaceTab };
+export { PUT_BACK_LABEL, START_TAB_STYLES, tabMenuItems, TEAR_OUT_LABEL, WorkspaceTab };

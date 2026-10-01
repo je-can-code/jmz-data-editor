@@ -4,7 +4,6 @@ import type { CloseTarget } from '../../../src/mapEditor/core/closeGuard.ts';
 import { BUILT_IN_ENTRIES } from '../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
-import { paintSelection } from '../../../src/mapEditor/core/palette/paintSelection.ts';
 import { createMapEditorServices, type MapEditorEnvironment } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../support/standIns.ts';
@@ -21,7 +20,7 @@ import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../s
  * window keeps counting it. Conflicts settle only the way the author chooses. And a stop leaves nothing listening.
  * A started window reads js/plugins.js and switches on the modules whose plugins it enables; one that cannot read it
  * keeps the core's kinds alone. A started window's painting tools paint with what the palette and the layer strip
- * pick.
+ * pick, and any other window the page draws into, a torn-out map's, paints with a paint of its own.
  */
 describe('MapEditorServices', () =>
 {
@@ -492,14 +491,32 @@ describe('MapEditorServices', () =>
     services.start();
 
     // Act: layer 3 picked on the strip, then the window stopped and layer 2 picked.
-    paintSelection.setLayer(2);
-    const whileStarted = services.painting.settings.strip;
+    const { selection, painting } = services.paints.main;
+    selection.setLayer(2);
+    const whileStarted = painting.settings.strip;
     services.stop();
-    paintSelection.setLayer(1);
+    selection.setLayer(1);
 
     // Assert.
-    expect([ whileStarted, services.painting.settings.strip ])
+    expect([ whileStarted, painting.settings.strip ])
       .toStrictEqual([ 2, 2 ]);
-    paintSelection.setLayer('auto');
+  });
+
+  it('paints in the page\'s own window with the paint it started, and in any other window with one of that window\'s own', () =>
+  {
+    // Arrange: a started window, and another window the page draws into, as a torn-out panel's is.
+    const { environment, window } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices(environment);
+    services.start();
+    const tornOut = {};
+
+    // Act.
+    const own = services.paints.forWindow(window.target);
+    const other = services.paints.forWindow(tornOut);
+
+    // Assert.
+    expect([ own === services.paints.main, other === services.paints.main, services.paints.forWindow(tornOut) === other ])
+      .toStrictEqual([ true, false, true ]);
+    services.stop();
   });
 });
