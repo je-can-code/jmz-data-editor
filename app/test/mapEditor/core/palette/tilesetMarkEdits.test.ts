@@ -24,7 +24,8 @@ import { makeAutotileId, TileId } from '../../../../src/mapEditor/core/tiles/til
  *
  * A project that has never saved marks starts from its own maps: every A-sheet tile mostly laid above its auto layer
  * by hand. That seed is worked out once, from every map the tree lists, saved, and from then on the saved document is
- * the only source, so a tile unmarked by hand stays unmarked.
+ * the only source, so a tile unmarked by hand stays unmarked. Marks another window saves while the maps are being read
+ * win over the seed, which is then dropped rather than written over them.
  */
 const CLIFF_CORNER = TileId.A5 + 122;
 const ROCK = TileId.A5 + 123;
@@ -285,6 +286,31 @@ describe('openTilesetMarks', () =>
     // Assert.
     expect([ calls.mapsRead, calls.saves, marksOf(document) ])
       .toStrictEqual([ [], [], { tilesets: {} } ]);
+  });
+
+  it('drops its seed when another window saves marks while the maps are being read', async () =>
+  {
+    // Arrange: a project that never saved marks, where another window saves its own as this one starts reading maps.
+    const { api, calls } = standInServer(SEEDING_MAPS, null);
+    const { opener } = windowOn(api);
+    const theirs = { tilesets: { '12': { tiles: [ ROCK ], kinds: [] } } };
+    const read = api.loadMap.bind(api);
+    api.loadMap = async (mapId: number) =>
+    {
+      if (calls.saves.length === 0)
+      {
+        await api.saveEditorData('tileset-marks', { schemaVersion: 1, data: theirs });
+      }
+
+      return read(mapId);
+    };
+
+    // Act.
+    const document = await openTilesetMarks(opener);
+
+    // Assert: the other window's marks stand, and the seed is never written over them.
+    expect([ calls.saves, marksOf(document) ])
+      .toStrictEqual([ [ { schemaVersion: 1, data: theirs } ], theirs ]);
   });
 
   it('seeds once for two panels opening the marks together', async () =>

@@ -144,7 +144,9 @@ type MarksOpener = {
 };
 
 /**
- * Opens the marks document, seeding it first when the project has never saved one.
+ * Opens the marks document, seeding it first when the project has never saved one. Reading every map takes a while,
+ * so the marks are looked for again before the seed is saved: marks another window saved in the meantime win, and the
+ * seed is dropped rather than written over them.
  * @param {MarksOpener} opener The window's server and documents.
  * @returns {Promise<EditorDocument>} The marks document.
  */
@@ -160,7 +162,13 @@ const seedAndOpen = async (opener: MarksOpener): Promise<EditorDocument> =>
   if (saved === null)
   {
     const seed = await seedTilesetMarks(api);
-    await api.saveEditorData(TILESET_MARKS.name, { schemaVersion: TILESET_MARKS.schemaVersion, data: seed as unknown as JsonValue });
+
+    // only a project still without marks takes the seed.
+    const savedSince = await api.loadEditorData(TILESET_MARKS.name);
+    if (savedSince === null)
+    {
+      await api.saveEditorData(TILESET_MARKS.name, { schemaVersion: TILESET_MARKS.schemaVersion, data: seed as unknown as JsonValue });
+    }
   }
 
   return opener.openDocument(TILESET_MARKS_DOCUMENT);
@@ -174,10 +182,11 @@ const opening = new WeakMap<DocumentHub, Promise<EditorDocument>>();
 
 /**
  * Holds the marks document. A project that has never saved one is seeded from its maps first and the seed saved, so
- * the tiles its maps already layer by hand start out marked; after that the saved document is the only source, and a
- * tile unmarked by hand stays unmarked. A window already holding the document, or another window's copy, is used as
- * it is, and asking again while an open is under way waits for that one. Once an open settles it is forgotten, so an
- * open that failed is tried afresh on the next ask, and one that worked answers at once from the document now held.
+ * the tiles its maps already layer by hand start out marked, unless another window saved marks while the maps were
+ * read; after that the saved document is the only source, and a tile unmarked by hand stays unmarked. A window
+ * already holding the document, or another window's copy, is used as it is, and asking again while an open is under
+ * way waits for that one. Once an open settles it is forgotten, so an open that failed is tried afresh on the next ask,
+ * and one that worked answers at once from the document now held.
  * @param {MarksOpener} opener The window's server and documents.
  * @returns {Promise<EditorDocument>} The marks document.
  */
