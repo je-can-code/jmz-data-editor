@@ -21,6 +21,14 @@ type PendingRequest = {
 };
 
 /**
+ * A wait for some window holding a document to be heard from.
+ */
+type HolderWait = {
+  readonly key: DocumentKey;
+  readonly resolve: () => void;
+};
+
+/**
  * Where a copy being reconciled came from: fetched after this window's copy was found to differ, or offered by
  * the other window.
  */
@@ -142,6 +150,8 @@ class SyncPeer
 
   #pending = new Map<string, PendingRequest>();
 
+  #holderWaits = new Set<HolderWait>();
+
   #requestCounter = 0;
 
   #heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -231,6 +241,9 @@ class SyncPeer
       resolve(null);
     });
     this.#pending.clear();
+
+    // nobody else will be heard from now, so nothing waits on it.
+    [ ...this.#holderWaits ].forEach(wait => this.#settleWait(wait));
     this.#channel.removeEventListener('message', this.#listener);
     this.#channel.close();
   }
@@ -243,6 +256,30 @@ class SyncPeer
   whenDiscovered(): Promise<void>
   {
     return this.#discovered;
+  }
+
+  /**
+   * Settles as soon as some window holding a document has been heard from, or once the discovery window has passed
+   * with none: the moment a window opening the document knows whether to ask another window for its live copy or read
+   * the file. Discovery is waited out only for the answer "nobody holds it", which a window that has just opened cannot
+   * give before the others have had time to speak; a window holding the document that has spoken already settles it,
+   * so an event window asks the map's window for its copy the moment that window answers hello, not a beat later.
+   * @param {DocumentKey} key The document.
+   * @returns {Promise<void>} Settles once a holder is known, or discovery is over.
+   */
+  whenHeldOrDiscovered(key: DocumentKey): Promise<void>
+  {
+    if (this.holders(key).length > 0)
+    {
+      return Promise.resolve();
+    }
+
+    return new Promise(resolve =>
+    {
+      const wait: HolderWait = { key, resolve };
+      this.#holderWaits.add(wait);
+      this.#discovered.then(() => this.#settleWait(wait)).catch(() => undefined);
+    });
   }
 
   /**
@@ -530,6 +567,23 @@ class SyncPeer
   #notePeer(from: string, holding: readonly HeldDocument[]): void
   {
     this.#peers.set(from, { holding: new Map(holding.map(({ document, head }) => [ document, head ])), lastSeen: this.#now() });
+
+    // whoever was waiting to hear from a window holding one of these documents has now.
+    [ ...this.#holderWaits ]
+      .filter(wait => holding.some(({ document }) => document === wait.key))
+      .forEach(wait => this.#settleWait(wait));
+  }
+
+  /**
+   * Ends a wait for a holder, once.
+   * @param {HolderWait} wait The wait.
+   */
+  #settleWait(wait: HolderWait): void
+  {
+    if (this.#holderWaits.delete(wait))
+    {
+      wait.resolve();
+    }
   }
 
   /**

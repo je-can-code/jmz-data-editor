@@ -296,6 +296,30 @@ describe('MapEditorServices', () =>
     second.stop();
   });
 
+  it('takes the live copy the moment the window holding it answers, without waiting out the discovery window', async () =>
+  {
+    // Arrange: the first window holds the map with an unsaved rename; the second notes when its discovery is over.
+    const network = new MemoryChannelNetwork();
+    const first = await buildEditedWindow(network);
+    const secondWindow = buildEnvironment(network, 'window-b');
+    const second = createMapEditorServices(secondWindow.environment);
+    second.start();
+    let discovered = false;
+    second.sync.whenDiscovered().then(() =>
+    {
+      discovered = true;
+    });
+
+    // Act.
+    const document = await pump(network, second.openDocument('map:1'));
+
+    // Assert: the live copy was in hand while discovery still had time to run.
+    expect([ (document.toJson() as { displayName: string }).displayName, discovered ])
+      .toStrictEqual([ 'Harbor', false ]);
+    first.services.stop();
+    second.stop();
+  });
+
   it('asks before closing when the only other window holding the map holds an older copy of it', async () =>
   {
     // Arrange: a second window that loaded the stale file itself holds the map, but not the rename.

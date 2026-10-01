@@ -47,7 +47,21 @@ describe('MapEditorApp', () =>
     hub.adopt('map:1', buildMapJson() as never);
     hub.adopt('map:2', buildMapJson() as never);
     const resolveConflict = vi.fn(() => true);
-    const services = { view, shell, hub, resolveConflict } as unknown as MapEditorServices;
+    const catalog = new CommandCatalog();
+    registerBuiltInCommands(catalog);
+
+    // an event window's command list reads the catalog and editors; the window holds its map already, so it opens nothing.
+    const services = {
+      view,
+      shell,
+      hub,
+      resolveConflict,
+      catalog,
+      commandEditors: new CommandEditorRegistry(),
+      api: null,
+      pluginHeaders: new PluginHeaderStore(),
+      loadCommandResources: async () => undefined,
+    } as unknown as MapEditorServices;
     render(
       <MapEditorServicesProvider services={services}>
         <MapEditorApp/>
@@ -68,16 +82,16 @@ describe('MapEditorApp', () =>
       .toStrictEqual([ 'The workspace', null ]);
   });
 
-  it('shows an event window for an event view', () =>
+  it('shows an event window for an event view, editing that event', () =>
   {
-    // Arrange: nothing beyond the render below.
+    // Arrange: event 3 of map 1 is the fixture's chest.
 
     // Act.
-    renderApp({ kind: 'event', mapId: 12, eventId: 5 });
+    renderApp({ kind: 'event', mapId: 1, eventId: 3 });
 
     // Assert.
-    expect([ screen.getByText('Event 5').textContent, screen.getByText('Map 12').textContent, screen.queryByTestId('map-editor-workspace') ])
-      .toStrictEqual([ 'Event 5', 'Map 12', null ]);
+    expect([ screen.getByLabelText('Name'), screen.getByRole('tab', { name: 'Page 1' }) !== null, screen.queryByTestId('map-editor-workspace') ])
+      .toStrictEqual([ expect.objectContaining({ value: 'Chest' }), true, null ]);
   });
 
   it('shows the common events for a common events view', () =>

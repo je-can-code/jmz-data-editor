@@ -95,8 +95,20 @@ const titleFor = (view: MapEditorView): string =>
 };
 
 /**
+ * Builds an event window's title once its event has arrived: the event's name, then its map's, so a row of event
+ * windows reads as the events they edit.
+ * @param {string} eventName The event's name.
+ * @param {string} mapName The map's name.
+ * @returns {string} The title.
+ */
+const eventWindowTitle = (eventName: string, mapName: string): string =>
+{
+  return `${eventName} - ${mapName} - ${APP_TITLE}`;
+};
+
+/**
  * Opens an event's full editor in its own window, or brings forward the window already editing it: what a
- * double-click on an event does.
+ * double-click on an event does. It opens wide enough for a page's settings beside its commands.
  * @param {WindowShell} shell The page's window shell.
  * @param {number} mapId The map the event is on.
  * @param {number} eventId The event id.
@@ -105,7 +117,7 @@ const titleFor = (view: MapEditorView): string =>
 const openEventWindow = (shell: WindowShell, mapId: number, eventId: number): WindowOpenResult =>
 {
   const view: MapEditorView = { kind: 'event', mapId, eventId };
-  return shell.open({ path: mapEditorPath(view), name: `jmz-event-${mapId}-${eventId}`, width: 960, height: 760 });
+  return shell.open({ path: mapEditorPath(view), name: `jmz-event-${mapId}-${eventId}`, width: 1240, height: 820 });
 };
 
 /**
@@ -118,5 +130,5 @@ const openCommonEventsWindow = (shell: WindowShell): WindowOpenResult =>
   return shell.open({ path: mapEditorPath({ kind: 'common-events' }), name: 'jmz-common-events', width: 1280, height: 860 });
 };
 
-export { APP_TITLE, mapEditorPath, openCommonEventsWindow, openEventWindow, parseMapEditorView, titleFor };
+export { APP_TITLE, eventWindowTitle, mapEditorPath, openCommonEventsWindow, openEventWindow, parseMapEditorView, titleFor };
 export type { MapEditorView };

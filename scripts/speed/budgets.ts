@@ -32,6 +32,12 @@ const BUDGETS = {
    * a warm open: from being shown to its first frame drawn on the context it got back.
    */
   shownAgainMs: 100,
+
+  /**
+   * An event window opens in under half a second: from the double-click on the event to the first frame of the
+   * event's own window showing it, the map's live copy taken from the window holding it.
+   */
+  eventWindowOpenMs: 500,
 } as const;
 
 /**
