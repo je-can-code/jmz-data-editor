@@ -6,11 +6,11 @@ import { hubWithMaps, mapFileOf, mapWithEvents, spotsOf } from '../../support/ev
 
 /*
  * Creating and deleting events are single steps in the map's history, so one undo takes either back exactly. A new
- * event takes the lowest free id, filling a hole a delete left before growing the list, never an id in use, and
- * starts as MZ starts one: named for its id, with one fresh page. It goes only on an empty tile of the map, since MZ
- * never stacks events. A delete empties each event's slot and leaves the list its length, as MZ does, passes over ids
- * the map does not hold, and records nothing when there is nothing to remove. Events not deleted stay exactly as they
- * were.
+ * event takes the id past the end of the list, never an id in use and never the hole a delete left, which a self
+ * switch in a save or a command in another event may still name; it starts as MZ starts one: named for its id, with
+ * one fresh page. It goes only on an empty tile of the map, since MZ never stacks events. A delete empties each
+ * event's slot and leaves the list its length, as MZ does, passes over ids the map does not hold, and records nothing
+ * when there is nothing to remove. Events not deleted stay exactly as they were.
  *
  * The fixture is a 4x3 map: event 1 at 0, 0, slot 2 empty, event 3 at 2, 1.
  */
@@ -24,29 +24,30 @@ describe('eventEdits', () =>
 
   describe('createEvent', () =>
   {
-    it('places a fresh event in the lowest empty slot as one step, which one undo takes back', () =>
+    it('places a fresh event past the end of the list as one step, which one undo takes back', () =>
     {
-      // Arrange.
+      // Arrange: slot 2 is the hole a delete left, which the new event must not take.
       const hub = hubWithMaps({ 1: fixture() });
 
       // Act.
       const outcome = createEvent(hub, 1, { x: 3, y: 2 });
-      const [ , , created ] = mapFileOf(hub, 1).events;
+      const { events } = mapFileOf(hub, 1);
       hub.undo(mapHistoryKey(1));
 
-      // Assert: slot 2 was the hole; 1 and 3 kept their events.
-      expect([ outcome.ok && outcome.step?.label, outcome.ok && outcome.eventIds, created, mapFileOf(hub, 1) ])
+      // Assert: slot 2 stays empty; 1 and 3 kept their events.
+      expect([ outcome.ok && outcome.step?.label, outcome.ok && outcome.eventIds, events[2], events[4], mapFileOf(hub, 1) ])
         .toStrictEqual([
           'New event',
-          [ 2 ],
-          { id: 2, name: 'EV002', note: '', pages: [ createEventPage() ], x: 3, y: 2 },
+          [ 4 ],
+          null,
+          { id: 4, name: 'EV004', note: '', pages: [ createEventPage() ], x: 3, y: 2 },
           fixture(),
         ]);
     });
 
-    it('grows the list for a new event when no slot is empty', () =>
+    it('takes the next id again for each new event, leaving the hole empty', () =>
     {
-      // Arrange: the hole at 2 is filled first.
+      // Arrange: one event placed already, as id 4.
       const hub = hubWithMaps({ 1: fixture() });
       createEvent(hub, 1, { x: 3, y: 2 });
 
@@ -55,7 +56,21 @@ describe('eventEdits', () =>
 
       // Assert.
       expect([ outcome.ok && outcome.eventIds, spotsOf(mapFileOf(hub, 1)) ])
-        .toStrictEqual([ [ 4 ], [ null, [ 0, 0 ], [ 3, 2 ], [ 2, 1 ], [ 1, 2 ] ] ]);
+        .toStrictEqual([ [ 5 ], [ null, [ 0, 0 ], null, [ 2, 1 ], [ 3, 2 ], [ 1, 2 ] ] ]);
+    });
+
+    it('never hands out the id of an event deleted earlier', () =>
+    {
+      // Arrange: event 3, the last in the list, is deleted, leaving its slot empty at the end.
+      const hub = hubWithMaps({ 1: fixture() });
+      deleteEvents(hub, 1, [ 3 ]);
+
+      // Act.
+      const outcome = createEvent(hub, 1, { x: 2, y: 1 });
+
+      // Assert: the new event stands where event 3 stood, yet takes id 4, so nothing naming 3 reaches it.
+      expect([ outcome.ok && outcome.eventIds, spotsOf(mapFileOf(hub, 1)) ])
+        .toStrictEqual([ [ 4 ], [ null, [ 0, 0 ], null, null, [ 2, 1 ] ] ]);
     });
 
     it('refuses a tile another event holds, changing nothing', () =>

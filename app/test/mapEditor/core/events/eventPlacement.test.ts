@@ -4,8 +4,8 @@ import {
   boundsOf,
   eventCellsOf,
   eventsPhrase,
-  freeEventIds,
   isOnMap,
+  newEventIds,
   shiftWithinMap,
 } from '../../../../src/mapEditor/core/events/eventPlacement.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
@@ -15,8 +15,8 @@ import { mapWithEvents } from '../../support/eventFixtures.ts';
  * Every event edit leans on the same few facts about a map, so they are worked out one way. A group of events is
  * shifted as a block, and stops at the map's edge each way on its own rather than going over it. A tile another event
  * holds blocks a landing, but a tile the group itself is leaving never does, or a group could not shift one tile. New
- * events take the lowest free ids, filling the holes a delete left before growing the list, and never an id the map
- * already uses: a collision there would silently replace an event.
+ * events take ids past the end of the list and never an empty slot inside it: an id in use would silently replace an
+ * event, and an id a delete freed may still be named by a self switch in a save or a command in another event.
  *
  * The fixture is a 6x4 map: event 1 at 0, 0, event 2 at 1, 0, slot 3 empty, event 4 at 3, 2, slot 5 empty.
  */
@@ -140,18 +140,18 @@ describe('eventPlacement', () =>
     });
   });
 
-  describe('freeEventIds', () =>
+  describe('newEventIds', () =>
   {
-    it('fills the empty slots first, then grows the list, never taking an id in use', () =>
+    it('hands out ids past the end of the list, one after another, never an empty slot inside it', () =>
     {
       // Arrange: 3 and 5 are empty slots; 1, 2 and 4 are taken, and the list ends after 5.
 
       // Act.
-      const ids = freeEventIds(map, 4);
+      const ids = newEventIds(map, 4);
 
       // Assert.
       expect(ids)
-        .toStrictEqual([ 3, 5, 6, 7 ]);
+        .toStrictEqual([ 6, 7, 8, 9 ]);
     });
 
     it('hands out nothing when nothing is asked for', () =>
@@ -159,7 +159,7 @@ describe('eventPlacement', () =>
       // Arrange: nothing to set up.
 
       // Act.
-      const ids = freeEventIds(map, 0);
+      const ids = newEventIds(map, 0);
 
       // Assert.
       expect(ids)

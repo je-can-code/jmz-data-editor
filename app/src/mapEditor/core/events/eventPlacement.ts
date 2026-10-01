@@ -3,10 +3,10 @@ import type { MapCell, MapSize } from '../renderer/camera.ts';
 import type { CellRect } from '../renderer/MapRenderer.ts';
 
 /**
- * What the event services read from a map: its size and its events. A {@link MapDocument} is one, and so is anything
- * a test builds with the same four members.
+ * What the event services read from a map: its size, its events, and the id a new event takes. A {@link MapDocument}
+ * is one, and so is anything a test builds with the same five members.
  */
-type EventMap = Pick<MapDocument, 'width' | 'height' | 'eventIds' | 'event'>;
+type EventMap = Pick<MapDocument, 'width' | 'height' | 'eventIds' | 'event' | 'nextFreeEventId'>;
 
 /**
  * One event's place on its map.
@@ -126,25 +126,17 @@ const blockedCells = (map: EventMap, targets: readonly MapCell[], moving: Readon
 };
 
 /**
- * Finds ids for new events: the lowest empty slots first, then new slots past the end of the list. Slot 0 is never
- * used, and no id the map already holds is ever handed out.
+ * Finds ids for new events: new slots past the end of the list, one after another, and never an empty slot inside it.
+ * A slot a delete emptied stays unused for good, since a self switch in a save, a command in another event or a
+ * plugin's parameters may still name its id (see {@link MapDocument.nextFreeEventId}).
  * @param {EventMap} map The map.
  * @param {number} count How many ids are needed.
  * @returns {number[]} The ids, lowest first.
  */
-const freeEventIds = (map: EventMap, count: number): number[] =>
+const newEventIds = (map: EventMap, count: number): number[] =>
 {
-  const taken = new Set(map.eventIds());
-  const ids: number[] = [];
-  for (let id = 1; ids.length < count; id++)
-  {
-    if (taken.has(id) === false)
-    {
-      ids.push(id);
-    }
-  }
-
-  return ids;
+  const first = map.nextFreeEventId();
+  return Array.from({ length: count }, (_, index) => first + index);
 };
 
 /**
@@ -160,5 +152,5 @@ const eventsPhrase = (count: number): string =>
     : `${count} events`;
 };
 
-export { blockedCells, boundsOf, eventCellsOf, eventsPhrase, freeEventIds, isOnMap, shiftWithinMap };
+export { blockedCells, boundsOf, eventCellsOf, eventsPhrase, isOnMap, newEventIds, shiftWithinMap };
 export type { EventCell, EventMap };

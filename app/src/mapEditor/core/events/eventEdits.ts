@@ -4,7 +4,7 @@ import type { HistoryStep } from '../history/HistoryStep.ts';
 import { mapDocumentKey } from '../model/documentKeys.ts';
 import { createMapEvent } from '../model/eventModel.ts';
 import type { MapCell } from '../renderer/camera.ts';
-import { blockedCells, eventCellsOf, eventsPhrase, freeEventIds, isOnMap } from './eventPlacement.ts';
+import { blockedCells, eventCellsOf, eventsPhrase, isOnMap, newEventIds } from './eventPlacement.ts';
 
 /**
  * What an edit to a map's events came to: the step it recorded (null when there was nothing to change) and the events
@@ -15,9 +15,10 @@ type EventEditOutcome =
   | { readonly ok: false; readonly message: string };
 
 /**
- * Places a new event on an empty tile, as one step in the map's history. It takes the lowest free id, as MZ does, and
- * starts with one fresh page. A tile holding an event already, or a spot off the map, is refused: MZ never stacks two
- * events on one tile, and none of the shipped maps do.
+ * Places a new event on an empty tile, as one step in the map's history. It takes the id just past the end of the
+ * list, never an empty slot a delete left, since whatever still names that id (a self switch in a save, a command in
+ * another event) would otherwise reach the new event; and it starts with one fresh page. A tile holding an event
+ * already, or a spot off the map, is refused: MZ never stacks two events on one tile, and none of the shipped maps do.
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map.
  * @param {MapCell} cell Where the event goes.
@@ -37,7 +38,7 @@ const createEvent = (hub: DocumentHub, mapId: number, cell: MapCell): EventEditO
     return { ok: false, message: 'Another event already stands there.' };
   }
 
-  const [ id ] = freeEventIds(map, 1);
+  const [ id ] = newEventIds(map, 1);
   const step = hub.edit('New event', [ mapHistoryKey(mapId) ], tx =>
   {
     tx.apply(key, map.placeEventPatch(createMapEvent(id, cell.x, cell.y)));

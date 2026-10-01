@@ -11,7 +11,7 @@ import {
   boundsOf,
   eventCellsOf,
   eventsPhrase,
-  freeEventIds,
+  newEventIds,
   shiftWithinMap,
   type EventMap,
 } from './eventPlacement.ts';
@@ -144,9 +144,9 @@ const decodeEventClipboard = (text: string): EventClipboard | null =>
 /**
  * Works out a paste of copied events onto a map. The group keeps its layout: its top-left corner lands on the target
  * tile, or, with no target, every event lands on the tile it was copied from. A group reaching past the map's edge is
- * slid back onto it. The events take the lowest free ids on this map, in the order they were copied, so none takes an
- * id the map already uses. A group larger than the map, or one that would land an event on a tile another event holds,
- * is refused whole.
+ * slid back onto it. The events take new ids past the end of this map's list, in the order they were copied: never an
+ * id the map uses, and never an empty slot a delete left, which something may still name. A group larger than the
+ * map, or one that would land an event on a tile another event holds, is refused whole.
  * @param {EventMap} map The map to paste onto.
  * @param {EventClipboard} clipboard The copied events.
  * @param {MapCell | null} target The tile the group's top-left corner goes to, or null to paste where they were copied.
@@ -179,7 +179,7 @@ const planPaste = (map: EventMap, clipboard: EventClipboard, target: MapCell | n
     };
   }
 
-  const ids = freeEventIds(map, events.length);
+  const ids = newEventIds(map, events.length);
   const placed = events.map((event, index) => ({ ...cloneJson(event), id: ids[index], x: cells[index].x, y: cells[index].y }));
 
   return { ok: true, events: placed };

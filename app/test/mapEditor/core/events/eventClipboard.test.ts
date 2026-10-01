@@ -20,10 +20,11 @@ import { hubWithMaps, mapFileOf, mapWithEvents, spotsOf } from '../../support/ev
  * and a paste of anything else (a line of dialogue copied from a text box) changes nothing. Copies are whole: every
  * page, command and note, exactly as the map file holds the event. A paste keeps the group's layout, with its
  * top-left corner on the tile asked for (or on the tiles it was copied from, when no tile is), slides back onto the
- * map at an edge, and gives every pasted event a fresh id on the map it lands on: the lowest free ids, holes first,
- * never an id already in use, since a collision would silently replace an event. A paste that would land an event on
- * another is refused whole. Duplicate pastes copies beside the originals; cut copies and then deletes. Each is one
- * step in the map's history.
+ * map at an edge, and gives every pasted event a fresh id on the map it lands on: ids past the end of its list, never
+ * an id in use, since a collision would silently replace an event, and never a hole a delete left, since a self switch
+ * in a save or a command in another event may still name it. A paste that would land an event on another is refused
+ * whole. Duplicate pastes copies beside the originals; cut copies and then deletes. Each is one step in the map's
+ * history.
  *
  * The source fixture is a 6x4 map (map 1): event 1 at 1, 1 and event 2 at 2, 1, slot 3 empty, and event 4 at 5, 3.
  */
@@ -140,7 +141,7 @@ describe('eventClipboard', () =>
 
   describe('planPaste', () =>
   {
-    it('lands the group\'s top-left corner on the target, keeping its layout, with the lowest free ids on the map', () =>
+    it('lands the group\'s top-left corner on the target, keeping its layout, with ids past the end of the map\'s list', () =>
     {
       // Arrange: map 2 holds event 1 at 0, 0, a hole at 2 and event 3 at 5, 0; events 1 and 2 were copied from map 1.
       const target = MapDocument.fromJson('map:2', mapWithEvents(6, 4, [ null, [ 0, 0 ], null, [ 5, 0 ] ]));
@@ -148,9 +149,9 @@ describe('eventClipboard', () =>
       // Act.
       const plan = planPaste(target, copied([ 1, 2 ]), { x: 3, y: 2 });
 
-      // Assert: the hole takes the first, the list grows for the second, and ids 1 and 3 stay with their events.
+      // Assert: the hole at 2 stays empty, and ids 1 and 3 stay with their events.
       expect(plan.ok && described(plan.events))
-        .toStrictEqual([ '2 EV001 (event 1) at 3,2', '4 EV002 (event 2) at 4,2' ]);
+        .toStrictEqual([ '4 EV001 (event 1) at 3,2', '5 EV002 (event 2) at 4,2' ]);
     });
 
     it('lands every event on the tile it was copied from when no target is given', () =>
@@ -268,13 +269,13 @@ describe('eventClipboard', () =>
       // Act.
       const outcome = duplicateEvents(hub, 1, [ 2 ]);
 
-      // Assert: the hole at 3 takes the copy; every original stays where it was.
+      // Assert: the copy takes id 5, past the end, leaving the hole at 3 empty; every original stays where it was.
       const { events } = mapFileOf(hub, 1);
       expect([ outcome.ok && outcome.step?.label, outcome.ok && outcome.eventIds, described(events) ])
         .toStrictEqual([
           'Duplicate event',
-          [ 3 ],
-          [ null, '1 EV001 (event 1) at 1,1', '2 EV002 (event 2) at 2,1', '3 EV002 (event 2) at 3,1', '4 EV004 (event 4) at 5,3' ],
+          [ 5 ],
+          [ null, '1 EV001 (event 1) at 1,1', '2 EV002 (event 2) at 2,1', null, '4 EV004 (event 4) at 5,3', '5 EV002 (event 2) at 3,1' ],
         ]);
     });
 
@@ -291,8 +292,8 @@ describe('eventClipboard', () =>
       expect([ outcome.ok && outcome.step?.label, outcome.ok && outcome.eventIds, described(events) ])
         .toStrictEqual([
           'Duplicate 2 events',
-          [ 3, 5 ],
-          [ null, '1 EV001 (event 1) at 1,1', '2 EV002 (event 2) at 2,1', '3 EV001 (event 1) at 1,2', '4 EV004 (event 4) at 5,3', '5 EV002 (event 2) at 2,2' ],
+          [ 5, 6 ],
+          [ null, '1 EV001 (event 1) at 1,1', '2 EV002 (event 2) at 2,1', null, '4 EV004 (event 4) at 5,3', '5 EV001 (event 1) at 1,2', '6 EV002 (event 2) at 2,2' ],
         ]);
     });
 
@@ -304,9 +305,9 @@ describe('eventClipboard', () =>
       // Act.
       const outcome = duplicateEvents(hub, 1, [ 4 ]);
 
-      // Assert.
-      expect([ outcome.ok && outcome.eventIds, spotsOf(mapFileOf(hub, 1))[3] ])
-        .toStrictEqual([ [ 3 ], [ 4, 3 ] ]);
+      // Assert: the copy stands left of event 4, at 4, 3.
+      expect([ outcome.ok && outcome.eventIds, spotsOf(mapFileOf(hub, 1))[5] ])
+        .toStrictEqual([ [ 5 ], [ 4, 3 ] ]);
     });
 
     it('refuses when there is no room on any side, changing nothing', () =>

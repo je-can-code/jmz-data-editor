@@ -11,8 +11,9 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * and every property. It owes its callers a faithful file (what goes in comes out), cells that can only hold
  * real tile ids (a value the typed array would wrap is refused on the way in rather than saved as something
  * else), and changes that happen only through patches, each checked against what it replaces and each heard
- * by every listener. The round-trip test proves the first promise over every shipped map; these prove the
- * rest on a small map whose cells all differ, so a write to the wrong index shows.
+ * by every listener. A new event's id lies past the end of the list, so an id a delete emptied is never handed
+ * out again to answer for the event that held it. The round-trip test proves the first promise over every
+ * shipped map; these prove the rest on a small map whose cells all differ, so a write to the wrong index shows.
  */
 describe('MapDocument', () =>
 {
@@ -211,9 +212,9 @@ describe('MapDocument', () =>
         .toStrictEqual([ 1, 3 ]);
     });
 
-    it('offers the lowest empty slot for a new event', () =>
+    it('offers the slot past the end of the list for a new event, never an empty slot inside it', () =>
     {
-      // Arrange.
+      // Arrange: slots 2 and 4 are empty, so something may still name either id.
       const document = buildDocument();
 
       // Act.
@@ -221,7 +222,7 @@ describe('MapDocument', () =>
 
       // Assert.
       expect(id)
-        .toBe(2);
+        .toBe(5);
     });
 
     it('offers the end of the list when no slot is empty', () =>
