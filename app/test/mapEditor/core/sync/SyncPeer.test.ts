@@ -751,6 +751,94 @@ describe('SyncPeer', () =>
       expect([ early, discovered ])
         .toStrictEqual([ false, true ]);
     });
+
+    it('ends a wait for a document the moment a window holding it answers, long before discovery is over', async () =>
+    {
+      // Arrange: window A holds the map; window B has just said hello and waits to hear who holds it.
+      const network = new MemoryChannelNetwork();
+      const server = buildServer();
+      const holder = buildWindow(network, 'window-A', server.store);
+      await holder.hub.load(MAP);
+      network.flush();
+      const opener = buildWindow(network, 'window-B', server.store);
+      const heard: string[] = [];
+      opener.peer.whenHeldOrDiscovered(MAP).then(() => heard.push('held'));
+      opener.peer.whenDiscovered().then(() => heard.push('discovered'));
+
+      // Act: the hello and its answer cross, with no time passing at all.
+      await settle(network);
+
+      // Assert.
+      expect([ heard, opener.peer.holders(MAP) ])
+        .toStrictEqual([ [ 'held' ], [ 'window-A' ] ]);
+    });
+
+    it('ends a wait at once for a document a window was already heard holding', async () =>
+    {
+      // Arrange: window B has heard window A answer holding the map.
+      const network = new MemoryChannelNetwork();
+      const server = buildServer();
+      const holder = buildWindow(network, 'window-A', server.store);
+      await holder.hub.load(MAP);
+      const opener = buildWindow(network, 'window-B', server.store);
+      await settle(network);
+      let held = false;
+
+      // Act: nothing is delivered and no time passes.
+      opener.peer.whenHeldOrDiscovered(MAP).then(() =>
+      {
+        held = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Assert.
+      expect(held)
+        .toBe(true);
+    });
+
+    it('waits out discovery when the windows that answer hold other documents', async () =>
+    {
+      // Arrange: window A holds map 1 only; window B waits for map 2.
+      const network = new MemoryChannelNetwork();
+      const server = buildServer();
+      const holder = buildWindow(network, 'window-A', server.store);
+      await holder.hub.load(MAP);
+      const opener = buildWindow(network, 'window-B', server.store);
+      let held = false;
+      opener.peer.whenHeldOrDiscovered('map:2').then(() =>
+      {
+        held = true;
+      });
+
+      // Act: A's answer arrives, then discovery runs out.
+      await settle(network);
+      const afterAnswer = held;
+      await vi.advanceTimersByTimeAsync(25);
+
+      // Assert.
+      expect([ afterAnswer, held ])
+        .toStrictEqual([ false, true ]);
+    });
+
+    it('lets go of every wait when it stops, since nobody will be heard from after', async () =>
+    {
+      // Arrange: a lone window waiting to hear who holds the map.
+      const network = new MemoryChannelNetwork();
+      const lone = buildWindow(network, 'window-A', buildServer().store);
+      let held = false;
+      lone.peer.whenHeldOrDiscovered(MAP).then(() =>
+      {
+        held = true;
+      });
+
+      // Act: no time passes before it stops.
+      lone.peer.stop();
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Assert.
+      expect(held)
+        .toBe(true);
+    });
   });
 
   describe('snapshot requests', () =>

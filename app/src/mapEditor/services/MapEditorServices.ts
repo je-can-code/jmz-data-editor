@@ -97,7 +97,8 @@ type MapEditorServices = {
   /**
    * Holds a document: the live copy from another window when one holds it, the file otherwise. It first gives
    * the other windows time to answer this window's hello, so a window that has just opened never mistakes
-   * "nobody answered yet" for "nobody holds it" and loads a file that is missing another window's edits.
+   * "nobody answered yet" for "nobody holds it" and loads a file that is missing another window's edits; a window
+   * holding the document that answers ends that wait at once, so its copy is asked for straight away.
    * @param {DocumentKey} key The document.
    * @returns {Promise<EditorDocument>} The document.
    */
@@ -262,8 +263,9 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     {
       if (hub.has(key) === false)
       {
-        // another window's copy may hold unsaved edits the file lacks, so its answer is waited for first.
-        await sync.whenDiscovered();
+        // another window's copy may hold unsaved edits the file lacks, so its answer is waited for first; once a window
+        // holding the document has answered, there is nobody else worth waiting for.
+        await sync.whenHeldOrDiscovered(key);
       }
 
       if (hub.has(key))
