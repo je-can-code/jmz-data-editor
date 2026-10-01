@@ -1,6 +1,8 @@
 import type { DockviewApi, SerializedDockview } from 'dockview-react';
+import { hasRoomForCentre } from '../core/workspace/centre.ts';
 import type { LayoutStore, SavedLayout } from '../core/workspace/LayoutStore.ts';
 import { minimumWidthFor, PANEL_COMPONENTS, SINGLE_PANEL_IDS, withPanelMinimums } from '../core/workspace/panels.ts';
+import { settleCentre } from './CentreKeeper.ts';
 
 /**
  * Where a torn-out panel's window loads: a blank page of this app's origin that dockview fills. Without it dockview
@@ -33,9 +35,9 @@ const addPanel = (api: DockviewApi, options: Parameters<DockviewApi['addPanel']>
 
 /**
  * Lays out the workspace the first time, or after a reset: down the left, the map tree, the palette and the layers
- * panel, each in its own group so all three show at once; the start panel in the middle where maps open; and the map
- * properties and quick settings on the right above the history. The side panels keep their minimum widths, so however
- * the maps crowd in, the tree, the palette and the properties stay readable.
+ * panel, each in its own group so all three show at once; the start panel in the middle, holding the centre maps open
+ * into (see CentreKeeper); and the map properties and quick settings on the right above the history. The side panels
+ * keep their minimum widths, so however the maps crowd in, the tree, the palette and the properties stay readable.
  * @param {DockviewApi} api The dock.
  */
 const addDefaultPanels = (api: DockviewApi): void =>
@@ -58,7 +60,9 @@ const addDefaultPanels = (api: DockviewApi): void =>
  * Brings back the workspace as it was left, torn-out windows included, or lays it out afresh when there is no saved
  * layout or it no longer fits (a panel kind renamed since, say). A dock replaced while the saved layout was being
  * read (the page's first render builds one, then another) is left alone. Every panel comes back with the minimum width
- * its kind has now, whatever the layout was saved with. The dock reads only its own keys from the saved layout;
+ * its kind has now, whatever the layout was saved with. A layout saved before the centre was permanent gets one: the
+ * start panel joins its roomiest group of maps, and a layout with neither the start panel nor a map in the main window
+ * is laid out afresh, since it has nowhere for maps to open. The dock reads only its own keys from the saved layout;
  * whatever else the workspace keeps there is handed on once the layout is rebuilt.
  * @param {DockviewApi} api The dock.
  * @param {LayoutStore} layouts Where the layout is kept.
@@ -79,19 +83,24 @@ const restoreLayout = async (
     return 'stale';
   }
 
-  if (saved !== null)
+  // a layout with nowhere for a centre is never rebuilt at all, torn-out windows and all, only to be cleared again.
+  if (saved !== null && hasRoomForCentre(saved))
   {
     try
     {
       api.fromJSON(withPanelMinimums(saved) as unknown as SerializedDockview);
-      onRestored(saved);
-      return 'restored';
+      if (settleCentre(api) !== 'none')
+      {
+        onRestored(saved);
+        return 'restored';
+      }
     }
     catch
     {
-      // a layout the dock cannot rebuild is dropped for the default rather than left half built.
-      api.clear();
+      // a layout the dock cannot rebuild is dropped for the default below, rather than left half built.
     }
+
+    api.clear();
   }
 
   addDefaultPanels(api);

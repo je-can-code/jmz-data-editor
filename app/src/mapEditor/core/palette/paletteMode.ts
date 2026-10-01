@@ -19,8 +19,9 @@ type PaletteModeState = {
 type PaletteModeListener = (state: PaletteModeState) => void;
 
 /**
- * The palette's mode, kept apart from the palette so every map view can follow it: while the passability editor is
- * open, the maps show the passability overlay beside it, so each edit shows on the map at once.
+ * The palette's mode, kept apart from the palette so every map view in its window can follow it: while the
+ * passability editor is open, the window's maps show the passability overlay beside it, so each edit shows on the map
+ * at once. Each window has its own, in its paint (see WindowPaint).
  */
 class PaletteModeStore
 {
@@ -86,10 +87,5 @@ class PaletteModeStore
   }
 }
 
-/**
- * The window's palette mode, shared by the palette and every map view in the window.
- */
-const paletteMode = new PaletteModeStore();
-
-export { paletteMode, PaletteModeStore };
+export { PaletteModeStore };
 export type { PaletteEditing, PaletteModeListener, PaletteModeState };

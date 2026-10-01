@@ -21,6 +21,10 @@ import { describeGroups, installDockPage, settle, type FakePopout } from '../sup
  * its menu offers both; a panel that already has a window to itself has nothing left to tear out of, so the menu greys
  * that choice out. The close button and a middle click close the tab.
  *
+ * The start panel's tab is the exception, since the start panel holds the centre and must never leave it: no buttons,
+ * no menu, and a press on it stops there, so the dock never floats or drags it. It shows only while the start panel is
+ * alone in its group, standing in for the maps that are not there.
+ *
  * The dock here is the real one, rendering the real tabs; only the windows it opens are faked.
  */
 describe('WorkspaceTab', () =>
@@ -194,6 +198,78 @@ describe('WorkspaceTab', () =>
       .toStrictEqual([ 'grid:a' ]);
   });
 
+  describe('the start panel\'s tab', () =>
+  {
+    /**
+     * Renders the dock with the start panel alone in a group of its own, beside the three maps.
+     * @returns {Promise<DockviewApi>} The dock.
+     */
+    const renderWithStart = async (): Promise<DockviewApi> =>
+    {
+      const { api } = await renderDock();
+      await act(async () =>
+      {
+        api.addPanel({ id: 'start', component: 'plain', title: 'Start', position: { direction: 'right' } });
+        await settle();
+      });
+
+      return api;
+    };
+
+    it('shows its title alone, with no window or close button, while the start panel is alone in its group', async () =>
+    {
+      // Arrange.
+      await renderWithStart();
+
+      // Act.
+      const tab = screen.getByTestId('start-tab');
+
+      // Assert: the maps' tabs keep both buttons.
+      expect([ tab.textContent, tab.getAttribute('data-hidden'), tab.querySelectorAll('button').length, within(tabShowing('Alpha')).getAllByRole('button').length ])
+        .toStrictEqual([ 'Start', 'false', 0, 2 ]);
+    });
+
+    it('hides while anything shares its group, and shows again once nothing does', async () =>
+    {
+      // Arrange.
+      const api = await renderWithStart();
+
+      // Act: a map opened into the start panel's group, then closed again.
+      await act(async () =>
+      {
+        api.addPanel({ id: 'd', component: 'plain', title: 'Delta', position: { referencePanel: 'start', direction: 'within' } });
+        await settle();
+      });
+      const whileShared = screen.getByTestId('start-tab').getAttribute('data-hidden');
+      await act(async () =>
+      {
+        api.getPanel('d')?.api.close();
+        await settle();
+      });
+
+      // Assert.
+      expect([ whileShared, screen.getByTestId('start-tab').getAttribute('data-hidden') ])
+        .toStrictEqual([ 'true', 'false' ]);
+    });
+
+    it('keeps a Shift press from floating the start panel, as it floats any other tab', async () =>
+    {
+      // Arrange.
+      const api = await renderWithStart();
+
+      // Act.
+      act(() =>
+      {
+        fireEvent.pointerDown(screen.getByTestId('start-tab'), { button: 0, shiftKey: true, pointerId: 3 });
+        fireEvent.pointerDown(tabShowing('Alpha'), { button: 0, shiftKey: true, pointerId: 4 });
+      });
+
+      // Assert.
+      expect([ api.getPanel('start')?.api.location.type, api.getPanel('a')?.api.location.type ])
+        .toStrictEqual([ 'grid', 'floating' ]);
+    });
+  });
+
   describe('tabMenuItems', () =>
   {
     /**
@@ -237,6 +313,20 @@ describe('WorkspaceTab', () =>
       // Assert.
       expect([ asText(items), keeper.tearOutBeside.mock.calls ])
         .toStrictEqual([ [ 'Open in its own window:false', 'separator', 'close' ], [ [ panel ] ] ]);
+    });
+
+    it('offers the start panel no menu at all, since it never leaves the centre', () =>
+    {
+      // Arrange.
+      const keeper = keeperSaying(false);
+      const start = { id: 'start', api: { location: { type: 'grid' } } } as unknown as IDockviewPanel;
+
+      // Act.
+      const items = tabMenuItems(keeper, start);
+
+      // Assert.
+      expect(items)
+        .toStrictEqual([]);
     });
 
     it('offers a torn-out panel a way back, greying out a window of its own once it has one', () =>

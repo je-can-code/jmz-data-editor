@@ -5,14 +5,15 @@ import React, { useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, render } from '@testing-library/react';
 import { cellInspector } from '../../../src/mapEditor/core/palette/cellInspector.ts';
-import { paintSelection } from '../../../src/mapEditor/core/palette/paintSelection.ts';
-import { paletteMode } from '../../../src/mapEditor/core/palette/paletteMode.ts';
+import { PaintSelection } from '../../../src/mapEditor/core/palette/paintSelection.ts';
+import { PaletteModeStore } from '../../../src/mapEditor/core/palette/paletteMode.ts';
 import { GAME_LOOK } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import type { MapViewSettings } from '../../../src/mapEditor/render/mapViewSettings.ts';
 import { highlightForChoice, usePaletteLinks, withOverlay, type CellFinder } from '../../../src/mapEditor/render/paletteLinks.ts';
 
 /*
- * A map view's links to the palette and the layers panel.
+ * A map view's links to its window's palette and layer strip, and to the stack view. The view is handed its window's
+ * choices and palette mode, so a torn-out map follows its own palette and never the main window's.
  *
  * Painting should never need a trip to the strip, so over a map Shift and the wheel step the layer strip (and must not
  * also zoom), the cell under the pointer feeds the stack view, and a middle click holds a cell there. While the strip
@@ -103,6 +104,12 @@ describe('usePaletteLinks', () =>
   let shown: MapViewSettings = start();
 
   /**
+   * The probe's window's palette and layer strip choices, and its palette's mode, fresh for every test.
+   */
+  let selection = new PaintSelection();
+  let mode = new PaletteModeStore();
+
+  /**
    * A map view standing in: a host element, a renderer finding cell 3, 4 under any point, and the view's settings.
    * @param {{ initial: MapViewSettings }} props The settings it starts with.
    * @returns {React.JSX.Element} The host.
@@ -112,23 +119,22 @@ describe('usePaletteLinks', () =>
     const host = useRef<HTMLDivElement | null>(null);
     const renderer = useRef<CellFinder | null>({ cellAt: () => ({ x: 3, y: 4 }) });
     const [ settings, setSettings ] = useState<MapViewSettings>(props.initial);
-    usePaletteLinks({ host, renderer, mapId: 12, settings, setSettings });
+    usePaletteLinks({ host, renderer, mapId: 12, settings, setSettings, selection, mode });
     shown = settings;
     return <div data-testid={'host'} ref={host}/>;
   };
 
   beforeEach(() =>
   {
-    paintSelection.setLayer('auto');
-    paletteMode.setEditing('tiles');
+    selection = new PaintSelection();
+    mode = new PaletteModeStore();
     cellInspector.forgetMap(12);
     shown = start();
   });
 
   afterEach(() =>
   {
-    paintSelection.setLayer('auto');
-    paletteMode.setEditing('tiles');
+    cellInspector.forgetMap(12);
   });
 
   it('steps the strip on Shift and the wheel, and keeps the wheel from reaching the map beneath', () =>
@@ -146,14 +152,14 @@ describe('usePaletteLinks', () =>
     {
       canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, shiftKey: true, bubbles: true, cancelable: true }));
     });
-    const afterShift = paintSelection.layer;
+    const afterShift = selection.layer;
     act(() =>
     {
       canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }));
     });
 
     // Assert: the Shift notch stepped from automatic to layer 1 and never zoomed; the plain notch zoomed only.
-    expect([ afterShift, paintSelection.layer, zoomed.length ])
+    expect([ afterShift, selection.layer, zoomed.length ])
       .toStrictEqual([ 0, 0, 1 ]);
   });
 
@@ -199,14 +205,14 @@ describe('usePaletteLinks', () =>
   it('highlights the strip\'s layer from the start and follows it, stopping for automatic layering', () =>
   {
     // Arrange: the strip already on layer 2 when the view mounts.
-    paintSelection.setLayer(1);
+    selection.setLayer(1);
     render(<Probe initial={start()}/>);
     const atMount = shown.visibility.highlighted;
 
     // Act.
-    act(() => paintSelection.setLayer(3));
+    act(() => selection.setLayer(3));
     const followed = shown.visibility.highlighted;
-    act(() => paintSelection.setLayer('auto'));
+    act(() => selection.setLayer('auto'));
 
     // Assert.
     expect([ atMount, followed, shown.visibility.highlighted ])
@@ -219,9 +225,9 @@ describe('usePaletteLinks', () =>
     render(<Probe initial={start()}/>);
 
     // Act.
-    act(() => paletteMode.setEditing('passability'));
+    act(() => mode.setEditing('passability'));
     const whileOpen = shown.overlays.has('passability');
-    act(() => paletteMode.setEditing('tiles'));
+    act(() => mode.setEditing('tiles'));
 
     // Assert.
     expect([ whileOpen, shown.overlays.has('passability') ])
@@ -234,8 +240,8 @@ describe('usePaletteLinks', () =>
     render(<Probe initial={withOverlay(start(), 'passability', true)}/>);
 
     // Act.
-    act(() => paletteMode.setEditing('passability'));
-    act(() => paletteMode.setEditing('tiles'));
+    act(() => mode.setEditing('passability'));
+    act(() => mode.setEditing('tiles'));
 
     // Assert.
     expect(shown.overlays.has('passability'))

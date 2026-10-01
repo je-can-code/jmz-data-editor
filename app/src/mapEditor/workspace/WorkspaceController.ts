@@ -11,13 +11,14 @@ import {
   isMapPanelParams,
   mapPanelId,
   PANEL_COMPONENTS,
-  SINGLE_PANEL_IDS,
   type PanelDirection,
 } from '../core/workspace/panels.ts';
 import { MAP_INFOS_KEY, mapDocumentKey } from '../core/model/documentKeys.ts';
 import type { RmmzMapInfo } from '../core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../services/MapEditorServices.ts';
+import { isStartPanel } from '../core/workspace/centre.ts';
 import { documentLabel } from '../views/documentLabels.ts';
+import { CentreKeeper, centreOf } from './CentreKeeper.ts';
 import { POPOUT_URL } from './defaultLayout.ts';
 import { PopoutKeeper } from './PopoutKeeper.ts';
 
@@ -56,6 +57,12 @@ type WorkspaceState = {
    * The map the properties panel shows: the last map focused in a panel or picked alone in the tree.
    */
   readonly currentMapId: number | null;
+
+  /**
+   * The map the workspace's own palette shows: the last map focused in the main window or picked alone in the tree. A
+   * torn-out map has a palette of its own, so focusing one leaves this as it was.
+   */
+  readonly paletteMapId: number | null;
 
   /**
    * The maps selected in the tree, in the order they were picked.
@@ -105,7 +112,7 @@ type OpenMapOptions = {
   readonly newView?: boolean;
 
   /**
-   * Open it beside the maps already open, splitting the workspace, rather than as another tab among them.
+   * Open it beside the centre, splitting the workspace, rather than as another tab there.
    */
   readonly beside?: boolean;
 
@@ -144,12 +151,19 @@ class WorkspaceController
   readonly selection = new EventSelection();
 
   /**
+   * Keeps the centre, the group maps open into, which never closes: the start panel holds it and shows there whenever
+   * no map does.
+   */
+  readonly centre = new CentreKeeper();
+
+  /**
    * Tears panels out into windows of their own, and puts them back where they came from; maps with no place of their
-   * own go back among the maps.
+   * own go back to the centre. The start panel, which holds the centre, is never torn out.
    */
   readonly popouts = new PopoutKeeper({
     popoutUrl: POPOUT_URL,
-    mapsGroup: returning => (this.#dockview === null ? null : this.#mapGroup(this.#dockview, returning)),
+    mapsGroup: () => (this.#dockview === null ? null : centreOf(this.#dockview)),
+    staysDocked: panel => isStartPanel(panel.id),
   });
 
   #dockview: DockviewApi | null = null;
@@ -157,6 +171,7 @@ class WorkspaceController
   #state: WorkspaceState = {
     activeHistory: null,
     currentMapId: null,
+    paletteMapId: null,
     treeSelection: [],
     renaming: null,
     clipboard: null,
@@ -165,8 +180,6 @@ class WorkspaceController
   };
 
   #listeners = new Set<() => void>();
-
-  #lastMapGroup: DockviewGroupPanel | null = null;
 
   #noticeCount = 0;
 
@@ -257,8 +270,9 @@ class WorkspaceController
   }
 
   /**
-   * Follows focus from panel to panel: a map panel makes its map current and its history the one undo acts on;
-   * the tree and the properties panel hand undo their own; the rest leave it where it was.
+   * Follows focus from panel to panel: a map panel makes its map current and its history the one undo acts on, and,
+   * in the main window, the map the workspace's own palette shows; the tree and the properties panel hand undo their
+   * own; the rest leave it where it was.
    * @param {IDockviewPanel | undefined} panel The panel that now has focus.
    */
   panelActivated(panel: IDockviewPanel | undefined): void
@@ -271,8 +285,10 @@ class WorkspaceController
     const { component } = panel.api;
     if (component === PANEL_COMPONENTS.map && isMapPanelParams(panel.params))
     {
-      this.#lastMapGroup = panel.group;
-      this.#update({ currentMapId: panel.params.mapId, activeHistory: mapHistoryKey(panel.params.mapId) });
+      const { mapId } = panel.params;
+      this.#update(panel.api.location.type === 'popout'
+        ? { currentMapId: mapId, activeHistory: mapHistoryKey(mapId) }
+        : { currentMapId: mapId, paletteMapId: mapId, activeHistory: mapHistoryKey(mapId) });
       return;
     }
 
@@ -318,22 +334,19 @@ class WorkspaceController
       return open;
     }
 
-    const panel = api.addPanel({
+    // a new map comes to the front of wherever it opens, and the centre keeps the start panel behind it.
+    return api.addPanel({
       id: mapPanelId(mapId, api.panels.map(each => each.id)),
       component: PANEL_COMPONENTS.map,
       title: this.mapName(mapId),
       params: { mapId },
       position: this.#placeForMap(api, options),
     });
-
-    // the start panel only holds the middle of the workspace until a map is open there.
-    api.getPanel(SINGLE_PANEL_IDS.start)?.api.close();
-    return panel;
   }
 
   /**
-   * Works out where a new map panel goes: where it was dropped, beside the maps, among them, in place of the start
-   * panel, or, with none of those, right of the tree.
+   * Works out where a new map panel goes: where it was dropped, split beside the centre when asked, and otherwise into
+   * the centre, as a tab. A torn-out window was torn out for what it shows, so new maps never open inside one.
    * @param {DockviewApi} api The dock.
    * @param {OpenMapOptions} options Where it was asked for.
    * @returns {Parameters<DockviewApi['addPanel']>[0]['position']} The position.
@@ -347,41 +360,14 @@ class WorkspaceController
         : { referenceGroup: options.at.group, direction: options.at.direction };
     }
 
-    const mapGroup = this.#mapGroup(api);
-    if (mapGroup !== null)
+    // the centre never closes once the dock is laid out; before then there is nowhere better than the dock's edge.
+    const centre = centreOf(api);
+    if (centre === null)
     {
-      return { referenceGroup: mapGroup, direction: options.beside === true ? 'right' : 'within' };
+      return { direction: 'right' };
     }
 
-    if (api.getPanel(SINGLE_PANEL_IDS.start) !== undefined)
-    {
-      return { referencePanel: SINGLE_PANEL_IDS.start, direction: 'within' };
-    }
-
-    return api.getPanel(SINGLE_PANEL_IDS.mapTree) === undefined
-      ? { direction: 'right' }
-      : { referencePanel: SINGLE_PANEL_IDS.mapTree, direction: 'right' };
-  }
-
-  /**
-   * Finds the group maps open into: in the main window, the one that last showed a focused map, or any holding a
-   * map. A torn-out window was torn out for what it shows, so new maps never open inside one. Maps on their way back
-   * from a closed window are passed over, since the dock may have dropped them anywhere.
-   * @param {DockviewApi} api The dock.
-   * @param {ReadonlySet<string>} returning The panels on their way back, by id.
-   * @returns {DockviewGroupPanel | null} The group, or null when no map is open in the main window.
-   */
-  #mapGroup(api: DockviewApi, returning: ReadonlySet<string> = new Set()): DockviewGroupPanel | null
-  {
-    const groups = api.panels
-      .filter(panel => panel.api.component === PANEL_COMPONENTS.map && panel.group.api.location.type === 'grid' && returning.has(panel.id) === false)
-      .map(panel => panel.group);
-    if (this.#lastMapGroup !== null && groups.includes(this.#lastMapGroup))
-    {
-      return this.#lastMapGroup;
-    }
-
-    return groups[0] ?? null;
+    return { referenceGroup: centre, direction: options.beside === true ? 'right' : 'within' };
   }
 
   /**
@@ -511,13 +497,13 @@ class WorkspaceController
   //region tree
 
   /**
-   * Picks maps in the tree. Picking one alone makes it the map the properties panel shows.
+   * Picks maps in the tree. Picking one alone makes it the map the properties panel and the workspace's palette show.
    * @param {readonly number[]} mapIds The maps.
    */
   selectTreeMaps(mapIds: readonly number[]): void
   {
     this.#update(mapIds.length === 1
-      ? { treeSelection: [ ...mapIds ], currentMapId: mapIds[0] }
+      ? { treeSelection: [ ...mapIds ], currentMapId: mapIds[0], paletteMapId: mapIds[0] }
       : { treeSelection: [ ...mapIds ] });
   }
 
