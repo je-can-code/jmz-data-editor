@@ -11,6 +11,7 @@ import { CommandEditorRegistry } from '../../../../src/mapEditor/core/commands/C
 import { registerBuiltInCommands } from '../../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { PluginHeaderStore } from '../../../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { targetHistory } from '../../../../src/mapEditor/core/eventWindow/eventWindowTarget.ts';
+import { copyPages, decodePageClipboard, encodePageClipboard } from '../../../../src/mapEditor/core/eventWindow/pageOperations.ts';
 import { DocumentHub, type DocumentStore } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
@@ -44,10 +45,17 @@ describe('EventWindowView', () =>
 
   /**
    * Renders the event window over a real hub.
-   * @param {object} options Whether the hub holds the map already, the map, what opening a document does, and the store.
+   * @param {object} options Whether the hub holds the map already, the map, what opening a document does, the store,
+   * and what the clipboard holds for a paste from a button.
    * @returns {object} The hub, the store and the opener.
    */
-  const renderWindow = (options: { held?: boolean; map?: RmmzMap; open?: (key: DocumentKey) => Promise<unknown>; store?: DocumentStore } = {}) =>
+  const renderWindow = (options: {
+    held?: boolean;
+    map?: RmmzMap;
+    open?: (key: DocumentKey) => Promise<unknown>;
+    store?: DocumentStore;
+    clipboard?: string;
+  } = {}) =>
   {
     const map = options.map ?? eventWindowMap();
     const store = options.store ?? {
@@ -71,7 +79,7 @@ describe('EventWindowView', () =>
       pluginHeaders: new PluginHeaderStore(),
       loadCommandResources: async () => undefined,
       openDocument,
-      shell: new WindowShell({ channel: null, origin: 'http://ui', openWindow: () => null }),
+      shell: new WindowShell({ channel: null, origin: 'http://ui', openWindow: () => null, readClipboardText: async () => options.clipboard ?? '' }),
     } as unknown as MapEditorServices;
     render(
       <MapEditorServicesProvider services={services}>
@@ -410,6 +418,159 @@ describe('EventWindowView', () =>
     // Assert.
     expect([ gone, (screen.getByLabelText('Name') as HTMLInputElement).value ])
       .toStrictEqual([ true, 'EV002' ]);
+  });
+
+  it('picks a condition\'s switch, a variable\'s value and the self switch through their pickers, each a step', () =>
+  {
+    // Arrange: the first switch and the variable turned on, so their pickers are in reach; without the project's names,
+    // ids are typed as numbers.
+    const { hub } = renderWindow();
+    fireEvent.click(screen.getByLabelText('Use the switch condition'));
+    fireEvent.click(screen.getByLabelText('Use the variable condition'));
+    fireEvent.click(screen.getByLabelText('Use the self switch condition'));
+    const [ switchPicker ] = screen.getAllByLabelText('Switch');
+    const value = screen.getByLabelText('At least');
+
+    // Act.
+    fireEvent.change(switchPicker, { target: { value: '7' } });
+    fireEvent.blur(switchPicker);
+    fireEvent.change(value, { target: { value: '120' } });
+    fireEvent.blur(value);
+    fireEvent.mouseDown(screen.getByLabelText('Self switch'));
+    fireEvent.click(screen.getByRole('option', { name: 'C' }));
+
+    // Assert.
+    const { conditions } = heldEvent(hub).pages[0];
+    expect([ conditions.switch1Id, conditions.variableValue, conditions.selfSwitchCh, stepsOf(hub).slice(3) ])
+      .toStrictEqual([ 7, 120, 'C', [ 'Change switch condition (page 1)', 'Change variable condition (page 1)', 'Change self switch condition (page 1)' ] ]);
+  });
+
+  it('duplicates and moves a page from its tab\'s right-click menu, showing the page each lands on', () =>
+  {
+    // Arrange.
+    const { hub } = renderWindow();
+
+    // Act.
+    fireEvent.contextMenu(screen.getByRole('tab', { name: 'Page 1' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate' }));
+    fireEvent.contextMenu(screen.getByRole('tab', { name: 'Page 2' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move right' }));
+
+    // Assert: the copy, made second, went third.
+    expect([ heldEvent(hub).pages, shownTab(), stepsOf(hub) ])
+      .toStrictEqual([ [ markedPage(1), markedPage(2), markedPage(1), markedPage(3) ], 'Page 3', [ 'Duplicate page 1', 'Move page 2' ] ]);
+  });
+
+  it('moves a page dragged onto another tab there', () =>
+  {
+    // Arrange.
+    const { hub } = renderWindow();
+    const dataTransfer = { setData: vi.fn(), effectAllowed: '' };
+
+    // Act.
+    fireEvent.dragStart(screen.getByRole('tab', { name: 'Page 1' }), { dataTransfer });
+    fireEvent.dragOver(screen.getByRole('tab', { name: 'Page 3' }), { dataTransfer });
+    fireEvent.drop(screen.getByRole('tab', { name: 'Page 3' }), { dataTransfer });
+
+    // Assert.
+    expect([ heldEvent(hub).pages, shownTab(), stepsOf(hub) ])
+      .toStrictEqual([ [ markedPage(2), markedPage(3), markedPage(1) ], 'Page 3', [ 'Move page 1' ] ]);
+  });
+
+  it('pastes a copied page from the Paste button, reading the clipboard through the window shell', async () =>
+  {
+    // Arrange: the clipboard holds page 3 of the neighbouring event, as a copy writes it.
+    const map = eventWindowMap();
+    const clipboard = encodePageClipboard(copyPages(map.events[3]!, [ 2 ])!);
+    const { hub } = renderWindow({ map, clipboard });
+
+    // Act.
+    await act(async () =>
+    {
+      fireEvent.click(screen.getByRole('button', { name: 'Paste' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Assert.
+    expect([ heldEvent(hub).pages, shownTab(), stepsOf(hub) ])
+      .toStrictEqual([ [ markedPage(1), markedPage(3), markedPage(2), markedPage(3) ], 'Page 2', [ 'Paste page' ] ]);
+  });
+
+  it('cuts a page from its tab\'s menu once the clipboard has it', async () =>
+  {
+    // Arrange: a clipboard that keeps what is written to it.
+    const { hub } = renderWindow();
+    let written = '';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: vi.fn(async (text: string) =>
+        {
+          written = text;
+        }),
+      },
+    });
+
+    // Act.
+    fireEvent.contextMenu(screen.getByRole('tab', { name: 'Page 2' }));
+    await act(async () =>
+    {
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Cut' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Assert.
+    expect([ decodePageClipboard(written)?.pages, heldEvent(hub).pages, stepsOf(hub) ])
+      .toStrictEqual([ [ markedPage(2) ], [ markedPage(1), markedPage(3) ], [ 'Cut page 2' ] ]);
+  });
+
+  it('says so when a save fails, leaving the map unsaved', async () =>
+  {
+    // Arrange: a store that cannot write, and one edit to save.
+    const map = eventWindowMap();
+    const store: DocumentStore = { load: vi.fn(async () => map as unknown as JsonValue), save: vi.fn(async () => Promise.reject(new Error('disk full'))) };
+    const { hub } = renderWindow({ map, store });
+    fireEvent.click(screen.getByLabelText('Through'));
+
+    // Act.
+    await act(async () =>
+    {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Assert.
+    expect([ screen.getByText('The map was not saved: disk full') !== null, hub.isDirty('map:1') ])
+      .toStrictEqual([ true, true ]);
+  });
+
+  it('names the edit in the way of an undo, and forgets the step blocked by it when asked', async () =>
+  {
+    // Arrange: a rename here, then the same name changed again in the map's own history.
+    const { hub } = renderWindow();
+    const name = screen.getByLabelText('Name');
+    fireEvent.change(name, { target: { value: 'Gate Guard' } });
+    fireEvent.blur(name);
+    act(() =>
+    {
+      hub.edit('Rename on the map', [ mapHistoryKey(1) ], transaction => transaction.set('map:1', [ 'events', 2, 'name' ], 'Night Guard'));
+    });
+
+    // Act.
+    await act(async () =>
+    {
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      await Promise.resolve();
+    });
+    const told = screen.queryByText('"Rename event" cannot be undone: "Rename on the map" later changed what "Rename event" changed.') !== null;
+    fireEvent.click(screen.getByRole('button', { name: 'Forget it' }));
+
+    // Assert: the name stays as the map left it, and the step is gone from the event's history.
+    expect([ told, heldEvent(hub).name, stepsOf(hub) ])
+      .toStrictEqual([ true, 'Night Guard', [] ]);
   });
 
   it('marks its first frame showing the event on the page\'s timeline, once', async () =>
