@@ -8,10 +8,11 @@ import { createRealDock, describeGrid, type RealDock } from '../support/realDock
 
 /*
  * The side panels hold what the author reads while working (the map tree, the map's properties, the history), so the
- * workspace never lets the maps squeeze them into a sliver: the default layout gives each its minimum width, and a
- * saved layout comes back with the minimums panels have now, so a column saved at a sliver (as one was once a torn-out
- * window's maps came back beside it) opens readable again, the maps giving up the room. Whatever else the workspace
- * keeps in the saved layout is handed on once the dock has rebuilt it; with nothing saved, the default layout is used.
+ * workspace never lets the maps squeeze them into a sliver: the default layout gives each its minimum width, with the
+ * map tree, the palette and the layers stacked down the left so all three show at once, and a saved layout comes back
+ * with the minimums panels have now, so a column saved at a sliver (as one was once a torn-out window's maps came back
+ * beside it) opens readable again, the maps giving up the room. Whatever else the workspace keeps in the saved layout
+ * is handed on once the dock has rebuilt it; with nothing saved, the default layout is used.
  *
  * The dock here is the real one; its windows are faked.
  */
@@ -89,7 +90,7 @@ describe('defaultLayout', () =>
       .map(group => [ group.activePanel?.id, `${Math.round(group.api.width)}/${group.minimumWidth}` ]));
   };
 
-  it('lays out the side panels with their minimum widths, and the start panel with the dock\'s', () =>
+  it('stacks the tree, the palette and the layers down the left, each side panel at its minimum width, and the start panel with the dock\'s', () =>
   {
     // Arrange: an empty dock the width of a desktop window.
     dock.api.layout(1920, 1032);
@@ -100,8 +101,15 @@ describe('defaultLayout', () =>
     // Assert.
     expect([ describeGrid(dock.api), widths() ])
       .toStrictEqual([
-        [ 'map-tree+palette+layers', 'start', 'map-properties+quick-settings', 'history' ],
-        { 'map-tree': '300/240', 'start': '1260/100', 'map-properties': '360/300', 'history': '360/240' },
+        [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ],
+        {
+          'map-tree': '300/240',
+          'palette': '300/240',
+          'layers': '300/240',
+          'start': '1260/100',
+          'map-properties': '360/300',
+          'history': '360/240',
+        },
       ]);
   });
 
@@ -134,7 +142,7 @@ describe('defaultLayout', () =>
     const fresh = await restoreLayout(dock.api, storeHolding(null), () => true, onRestored);
 
     // Assert.
-    expect([ restored, fresh, onRestored.mock.calls, describeGrid(dock.api)[1] ])
-      .toStrictEqual([ 'restored', 'default', [ [ saved ] ], 'start' ]);
+    expect([ restored, fresh, onRestored.mock.calls, describeGrid(dock.api) ])
+      .toStrictEqual([ 'restored', 'default', [ [ saved ] ], [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ] ]);
   });
 });
