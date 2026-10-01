@@ -101,8 +101,9 @@ const withCharacter = (image: RmmzEventImage, characterName: string, cellIndex: 
 };
 
 /**
- * Changes which way the character faces. Meaningless while the page shows a tile or nothing, but harmless to set
- * regardless: RMMZ simply never reads it in those modes.
+ * Changes which way the character faces. Only a character sheet draws differently for it, but the engine turns the
+ * event to face this way whatever the page shows ({@code Game_Event#setupPageSettings}), so on a tile or an empty page
+ * it still decides which way the event faces: where Move Forward and Move Backward take it, for one.
  * @param {RmmzEventImage} image The page's image.
  * @param {number} direction One of {@link DIRECTION_OPTIONS}.
  * @returns {RmmzEventImage} The image facing that way.
@@ -138,8 +139,9 @@ const withTile = (image: RmmzEventImage, tileId: number): RmmzEventImage =>
 };
 
 /**
- * Clears the page's graphic. Direction, pattern and the character index are left exactly where they were, since
- * they stop mattering the moment both {@code tileId} and {@code characterName} are empty.
+ * Clears the page's graphic. Direction, pattern and the character index are left exactly where they were: the
+ * pattern and the index stop mattering the moment both {@code tileId} and {@code characterName} are empty, and the
+ * direction still sets which way the event faces (see {@link withDirection}).
  * @param {RmmzEventImage} image The page's image.
  * @returns {RmmzEventImage} The image showing nothing.
  */
