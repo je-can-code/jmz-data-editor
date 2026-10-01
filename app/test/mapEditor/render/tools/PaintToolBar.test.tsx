@@ -79,8 +79,8 @@ describe('PaintToolBar', () =>
       painting.setStrip(1);
     });
 
-    // Assert.
+    // Assert: the tree named as the palette names it.
     expect([ screen.getByTestId('paint-brush').textContent, screen.queryByText('Shift: exact tiles · Space: paint layer 2') !== null ])
-      .toEqual([ 'Tile 10', true ]);
+      .toEqual([ 'B tile 11', true ]);
   });
 });

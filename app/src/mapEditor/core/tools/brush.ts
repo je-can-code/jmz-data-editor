@@ -1,3 +1,4 @@
+import { describeTile } from '../palette/paletteLayout.ts';
 import type { MapCell } from '../renderer/camera.ts';
 import type { CellRect } from '../renderer/MapRenderer.ts';
 import { TileId } from '../tiles/tileIds.ts';
@@ -162,7 +163,8 @@ const fitsTileset = (brush: Brush, tilesetId: number): boolean =>
 };
 
 /**
- * Says what a brush holds, in a few words, for a readout beside the tools.
+ * Says what a brush holds, in a few words, for a readout beside the tools: one tile named as the palette and the stack
+ * view name it, such as "B tile 11", one region by its number, or the size of a bigger rectangle.
  * @param {Brush | null} brush The brush, or null when nothing is picked.
  * @returns {string} The words.
  */
@@ -178,10 +180,15 @@ const describeBrush = (brush: Brush | null): string =>
     return 'Shadows';
   }
 
-  const noun = brush.kind === 'regions' ? 'Region' : 'Tile';
-  return brush.cells.length === 1
-    ? `${noun} ${brush.cells[0]}`
-    : `${brush.width} by ${brush.height} ${brush.kind === 'regions' ? 'regions' : 'tiles'}`;
+  const regions = brush.kind === 'regions';
+  if (brush.cells.length === 1)
+  {
+    return regions
+      ? `Region ${brush.cells[0]}`
+      : describeTile(brush.cells[0]);
+  }
+
+  return `${brush.width} by ${brush.height} ${regions ? 'regions' : 'tiles'}`;
 };
 
 export { brushFootprint, brushValueAt, describeBrush, fitsTileset, MAX_REGION_ID, regionBrush, SHADOW_BRUSH, singleTileBrush, tileBrush };

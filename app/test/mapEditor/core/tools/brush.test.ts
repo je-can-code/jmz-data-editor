@@ -162,16 +162,16 @@ describe('brushFootprint', () =>
 
 describe('describeBrush', () =>
 {
-  it('says what each kind of brush holds, and when nothing is picked', () =>
+  it('says what each kind of brush holds, one tile named as the palette names it, and when nothing is picked', () =>
   {
-    // Arrange.
-    const brushes = [ null, singleTileBrush(2864), tileBrush([ 1, 2, 3, 4 ], 2, 2), regionBrush(7), SHADOW_BRUSH ];
+    // Arrange: the second A2 ground kind, a B tile, a 2 by 2 of B tiles, a region and the shadow pen.
+    const brushes = [ null, singleTileBrush(2864), singleTileBrush(10), tileBrush([ 1, 2, 3, 4 ], 2, 2), regionBrush(7), SHADOW_BRUSH ];
 
     // Act.
     const words = brushes.map(describeBrush);
 
     // Assert.
     expect(words)
-      .toEqual([ 'Nothing picked', 'Tile 2864', '2 by 2 tiles', 'Region 7', 'Shadows' ]);
+      .toEqual([ 'Nothing picked', 'A2 ground 2', 'B tile 11', '2 by 2 tiles', 'Region 7', 'Shadows' ]);
   });
 });
