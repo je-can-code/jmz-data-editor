@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, IconButton, Tooltip } from '@mui/material';
-import { OpenInNew } from '@mui/icons-material';
+import { Box } from '@mui/material';
 import {
   DockviewReact,
   themeDark,
@@ -8,7 +7,7 @@ import {
   type DockviewDidDropEvent,
   type DockviewDndOverlayEvent,
   type DockviewReadyEvent,
-  type IDockviewHeaderActionsProps,
+  type GetTabContextMenuItemsParams,
   type IDockviewPanelProps,
 } from 'dockview-react';
 import { CHANNEL_NAMES, openBroadcastChannel } from '../../core/infrastructure/messaging/MessageChannelLike.ts';
@@ -16,6 +15,7 @@ import { MapLinkHost } from '../../core/infrastructure/shell/MapLink.ts';
 import type { SavedLayout } from '../core/workspace/LayoutStore.ts';
 import { decodeDraggedMaps, directionForDrop, MAP_DRAG_TYPE, PANEL_COMPONENTS, SINGLE_PANEL_IDS } from '../core/workspace/panels.ts';
 import { APP_WIDE_COMMANDS, appShortcutFor, type KeyTarget, type ShortcutCommand } from '../core/workspace/shortcuts.ts';
+import { readOrigins, withOrigins } from '../core/workspace/tearOut.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import { addDefaultPanels, POPOUT_URL, restoreLayout } from './defaultLayout.ts';
 import { HistoryPanel } from './panels/HistoryPanel.tsx';
@@ -29,6 +29,7 @@ import { attachShortcutsToPopouts, withWindowScope } from './windowScope.tsx';
 import { NoticeBar, WorkspaceBar } from './WorkspaceChrome.tsx';
 import { WorkspaceController } from './WorkspaceController.ts';
 import { WorkspaceProvider } from './workspaceHooks.tsx';
+import { tabMenuItems, WorkspaceTab } from './WorkspaceTab.tsx';
 
 declare global
 {
@@ -78,56 +79,16 @@ const holdsTheTree = (group: DockviewDndOverlayEvent['group']): boolean =>
 };
 
 /**
- * The smallest a torn-out window opens, in pixels, however narrow its group was docked.
- */
-const POPOUT_MIN_WIDTH = 720;
-const POPOUT_MIN_HEIGHT = 540;
-
-/**
- * The button on each docked group's tab strip that tears the group out into a window of its own, opened a little
- * off where the group sat and never smaller than a comfortable size. A torn-out group goes back when its window is
- * closed.
- * @param {IDockviewHeaderActionsProps} props The group's header props.
- * @returns {React.JSX.Element | null} The button, or nothing for a group already torn out.
- */
-const GroupActions = (props: IDockviewHeaderActionsProps) =>
-{
-  const { containerApi, group } = props;
-  if (group.api.location.type === 'popout')
-  {
-    return null;
-  }
-
-  /**
-   * Tears the group out, sized from where it sits.
-   */
-  const tearOut = () =>
-  {
-    const host = group.element.ownerDocument.defaultView ?? window;
-    const bounds = group.element.getBoundingClientRect();
-    const position = {
-      left: Math.round(host.screenX + bounds.left + 32),
-      top: Math.round(host.screenY + bounds.top + 32),
-      width: Math.round(Math.max(bounds.width, POPOUT_MIN_WIDTH)),
-      height: Math.round(Math.max(bounds.height, POPOUT_MIN_HEIGHT)),
-    };
-    containerApi.addPopoutGroup(group, { popoutUrl: POPOUT_URL, position }).catch(() => undefined);
-  };
-
-  return (
-    <Tooltip title={'Open in its own window'}>
-      <IconButton size={'small'} aria-label={'Open in its own window'} onClick={tearOut} sx={{ mx: 0.5, p: 0.25 }}>
-        <OpenInNew sx={{ fontSize: 16 }}/>
-      </IconButton>
-    </Tooltip>
-  );
-};
-
-/**
  * The map editor's workspace: one window split into panels (any number of maps, the map tree, the map properties,
  * the history, and the palette, layer strip and quick settings to come) that can be resized, rearranged, stacked as
  * tabs, closed, or torn out into windows of their own, still live and in sync. The layout is kept with the project
  * and comes back as it was left, torn-out windows included.
+ *
+ * Any tab opens alone in a window of its own: from its button or its right-click menu, a little off where it sat, or
+ * dragged beyond the window's edge and let go, where it lands. Tabs drag with pointer events, never the browser's drag
+ * and drop, so a dragged tab never leaves the app for the desktop to take. Closing a torn-out window puts every panel
+ * in it back where it came from, as a tab in the group it left, however it was laid out inside the window; a torn-out
+ * tab's button, or its menu, puts back just that one.
  *
  * Undo, redo and save listen on every window, torn-out ones included, and act on whatever has focus. A map dragged
  * from the tree into any pane opens there, and a map the data editor asks for opens with its event picked out.
@@ -160,6 +121,9 @@ const Workspace = () =>
     };
     actions[command]?.().catch(() => undefined);
   }, [ controller ]);
+
+  // a tab's right-click menu; held steady, since the dock takes every new menu builder as a change to its options.
+  const tabMenu = useCallback((params: GetTabContextMenuItemsParams) => tabMenuItems(controller.popouts, params.panel), [ controller ]);
 
   // the main window hears its own keys; every torn-out window gets the same listener once the dock is ready.
   useEffect(() =>
@@ -208,9 +172,10 @@ const Workspace = () =>
     let restoring = true;
     const keepLayout = () =>
     {
+      // torn-out panels' origins ride along, so their windows still bring them home after a restart.
       if (restoring === false && isCurrent())
       {
-        controller.layouts.save(api.toJSON() as unknown as SavedLayout);
+        controller.layouts.save(withOrigins(api.toJSON() as unknown as SavedLayout, controller.popouts.origins));
       }
     };
 
@@ -228,9 +193,10 @@ const Workspace = () =>
     teardown.current.push(
       () => subscriptions.forEach(subscription => subscription.dispose()),
       attachShortcutsToPopouts(api, onShortcut),
+      controller.popouts.attach(api),
     );
 
-    restoreLayout(api, controller.layouts, isCurrent)
+    restoreLayout(api, controller.layouts, isCurrent, saved => controller.popouts.adopt(readOrigins(saved)))
       .catch(() =>
       {
         if (isCurrent())
@@ -316,8 +282,10 @@ const Workspace = () =>
           <DockviewReact
             components={PANELS}
             theme={themeDark}
+            dndStrategy={'pointer'}
             popoutUrl={POPOUT_URL}
-            rightHeaderActionsComponent={GroupActions}
+            defaultTabComponent={WorkspaceTab}
+            getTabContextMenuItems={tabMenu}
             onReady={onReady}
             onDidDrop={onDidDrop}
           />

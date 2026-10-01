@@ -3,7 +3,7 @@ import { DocumentHub, type DocumentStore } from '../../../../src/mapEditor/core/
 import { eventHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import { routeFileChange } from '../../../../src/mapEditor/core/sync/fileChangeRouting.ts';
+import { FileChangeRouter } from '../../../../src/mapEditor/core/sync/fileChangeRouting.ts';
 import { compareLineages } from '../../../../src/mapEditor/core/sync/SyncProtocol.ts';
 import { SyncPeer } from '../../../../src/mapEditor/core/sync/SyncPeer.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
@@ -27,12 +27,30 @@ import { MemoryChannelNetwork } from '../../support/standIns.ts';
  * The close guard's question is answered here too: does another live window hold exactly this window's latest
  * state of a document? A window holding an older copy, or one that said goodbye, does not.
  *
- * The file-change stream echoes every save; a save by any session window is ignored everywhere, and only a
- * change from outside the session reloads anything. The ids differ by one character in the near miss.
+ * The file-change stream echoes every save; a save by any session window is ignored everywhere, and records nothing,
+ * while a change from outside the session becomes one "Externally modified" step. The ids differ by one character in
+ * the near miss. Only the window reading the stream reads a changed file, once, and hands that version to the others,
+ * so every window ends on the one same step with the same lineage, even when a second write lands before another
+ * window could have read the first, which then becomes a later step everywhere; nobody is flagged over it, and undo
+ * and redo of it travel like any step's. Windows holding unsaved edits are flagged instead, with nothing recorded. A
+ * save naming a step this window has never seen is not taken, since it would mark the copy saved against a file that
+ * holds something else.
  */
 describe('SyncPeer', () =>
 {
   const MAP: DocumentKey = 'map:1';
+
+  /**
+   * A write to the map's file from outside the editor, as the stream announces it.
+   */
+  const OUTSIDE_WRITE = { path: 'data/Map001.json', kind: 'write', client: '' } as const;
+
+  /**
+   * Reads the names in a window's history of the map, oldest first.
+   * @param {DocumentHub} hub The window's hub.
+   * @returns {string[]} The step names.
+   */
+  const labelsOf = (hub: DocumentHub): string[] => hub.history(mapHistoryKey(1)).rows.map(row => row.label);
 
   /**
    * A store over one shared in-memory file per document, as the server would be.
@@ -439,10 +457,11 @@ describe('SyncPeer', () =>
 
   describe('file changes', () =>
   {
-    it('ignores the echo of a save by this window or another session window, and reloads for a stranger', async () =>
+    it('skips the echo of a save by this window or another session window, and records a stranger\'s change in both', async () =>
     {
-      // Arrange.
+      // Arrange: the file already holds an outside version when the echoes arrive, so an echo let through would show.
       const { network, server, first, second } = await buildPair();
+      const reading = new FileChangeRouter(first.hub, first.peer, () => true);
       first.hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP, [ 'displayName' ], 'Harbor'));
       network.flush();
       await first.hub.save(MAP);
@@ -452,29 +471,174 @@ describe('SyncPeer', () =>
       server.files.set(MAP, outsider as unknown as JsonValue);
 
       // Act.
-      const ownEcho = await routeFileChange({ path: 'data/Map001.json', kind: 'write', client: 'window-A' }, first.hub, first.peer);
-      const peerEcho = await routeFileChange({ path: 'data/Map001.json', kind: 'write', client: 'window-A' }, second.hub, second.peer);
-      const nearMiss = await routeFileChange({ path: 'data/Map001.json', kind: 'write', client: 'window-AB' }, second.hub, second.peer);
+      const ownEcho = await reading.route({ ...OUTSIDE_WRITE, client: 'window-A' });
+      const peerEcho = await reading.route({ ...OUTSIDE_WRITE, client: 'window-B' });
+      await settle(network);
+      const afterEchoes = [ labelsOf(first.hub), labelsOf(second.hub) ];
+      const nearMiss = await reading.route({ ...OUTSIDE_WRITE, client: 'window-AB' });
+      await settle(network);
 
       // Assert.
-      expect([ ownEcho, peerEcho, nearMiss, second.hub.document(MAP).toJson() ])
-        .toStrictEqual([ 'echo', 'echo', 'reloaded', outsider ]);
+      expect([ ownEcho, peerEcho, afterEchoes, nearMiss, labelsOf(second.hub), second.hub.document(MAP).toJson() ])
+        .toStrictEqual([ 'echo', 'echo', [ [ 'Rename' ], [ 'Rename' ] ], 'recorded', [ 'Rename', 'Externally modified' ], outsider ]);
     });
 
     it('treats a change with no client as coming from outside the editor', async () =>
     {
       // Arrange.
       const { server, second } = await buildPair();
+      const reading = new FileChangeRouter(second.hub, second.peer, () => true);
       const outsider = structuredClone(server.files.get(MAP)) as { note: string };
       outsider.note = 'changed by a script';
       server.files.set(MAP, outsider as unknown as JsonValue);
 
       // Act.
-      const outcome = await routeFileChange({ path: 'data/Map001.json', kind: 'write', client: '' }, second.hub, second.peer);
+      const outcome = await reading.route(OUTSIDE_WRITE);
 
       // Assert.
-      expect([ outcome, (second.hub.document(MAP).toJson() as { note: string }).note ])
-        .toStrictEqual([ 'reloaded', 'changed by a script' ]);
+      expect([ outcome, (second.hub.document(MAP).toJson() as { note: string }).note, labelsOf(second.hub) ])
+        .toStrictEqual([ 'recorded', 'changed by a script', [ 'Externally modified' ] ]);
+    });
+  });
+
+  describe('outside changes in several windows', () =>
+  {
+    /**
+     * Renames the map in its file on the server, as MZ or a script would.
+     * @param {{ files: Map<DocumentKey, JsonValue> }} server The server.
+     */
+    const renameOutside = (server: { files: Map<DocumentKey, JsonValue> }) =>
+    {
+      server.files.set(MAP, { ...(server.files.get(MAP) as object), displayName: 'Edited in MZ' } as JsonValue);
+    };
+
+    /**
+     * Reads what a window holds of the map: its title, and whether it is unsaved.
+     * @param {DocumentHub} hub The window's hub.
+     * @returns {[ string, boolean ]} The title and the unsaved state.
+     */
+    const stateOf = (hub: DocumentHub): [ string, boolean ] => [ (hub.document(MAP).toJson() as { displayName: string }).displayName, hub.isDirty(MAP) ];
+
+    /**
+     * Routes one change the way both windows hear it: the first window reads the change stream for everyone, and the
+     * second follows. Messages already posted are delivered before the second window hears it.
+     * @param {object} pair The two windows and their network.
+     * @returns {Promise<string[]>} What each window made of the change.
+     */
+    const hearInBoth = async (pair: Awaited<ReturnType<typeof buildPair>>): Promise<string[]> =>
+    {
+      const { network, first, second } = pair;
+      const outcomes = [
+        await new FileChangeRouter(first.hub, first.peer, () => true).route(OUTSIDE_WRITE),
+        await new FileChangeRouter(second.hub, second.peer, () => false).route(OUTSIDE_WRITE),
+      ];
+      await settle(network);
+      return outcomes;
+    };
+
+    it('ends both windows on the one step the reading window read, saved, with neither flagged', async () =>
+    {
+      // Arrange: a server counting its reads.
+      const pair = await buildPair();
+      const { server, first, second } = pair;
+      renameOutside(server);
+      const load = vi.spyOn(server.store, 'load');
+
+      // Act.
+      const outcomes = await hearInBoth(pair);
+
+      // Assert: the file was read once, for both.
+      expect([ outcomes, load.mock.calls.length, [ ...second.hub.lineage(MAP) ], second.hub.history(mapHistoryKey(1)), [ stateOf(first.hub), stateOf(second.hub) ] ])
+        .toStrictEqual([ [ 'recorded', 'follower' ], 1, [ ...first.hub.lineage(MAP) ], first.hub.history(mapHistoryKey(1)), [ [ 'Edited in MZ', false ], [ 'Edited in MZ', false ] ] ]);
+      expect([ labelsOf(first.hub), first.hub.isConflicted(MAP), second.hub.isConflicted(MAP) ])
+        .toStrictEqual([ [ 'Externally modified' ], false, false ]);
+    });
+
+    it('takes a second write landing between the windows\' reads as a later step in both, never as a different first step', async () =>
+    {
+      // Arrange: the file is written again the moment it has been read once, before any other window could read it.
+      const pair = await buildPair();
+      const { server, first, second } = pair;
+      renameOutside(server);
+      const read = server.store.load;
+      let reads = 0;
+      server.store.load = async key =>
+      {
+        const content = await read(key);
+        reads += 1;
+        server.files.set(MAP, { ...(content as object), displayName: 'Written again' } as JsonValue);
+        return content;
+      };
+
+      // Act: both windows hear the first write, then both hear the second.
+      const outcomes = [ ...await hearInBoth(pair), ...await hearInBoth(pair) ];
+
+      // Assert: one version per write in both, the newer one standing.
+      expect([ outcomes, reads, labelsOf(first.hub), labelsOf(second.hub), [ ...second.hub.lineage(MAP) ], [ stateOf(first.hub), stateOf(second.hub) ] ])
+        .toStrictEqual([
+          [ 'recorded', 'follower', 'recorded', 'follower' ],
+          2,
+          [ 'Externally modified', 'Externally modified' ],
+          [ 'Externally modified', 'Externally modified' ],
+          [ ...first.hub.lineage(MAP) ],
+          [ [ 'Written again', false ], [ 'Written again', false ] ],
+        ]);
+      expect(first.hub.isConflicted(MAP) || second.hub.isConflicted(MAP))
+        .toBe(false);
+    });
+
+    it('undoes the step in both windows from either one, back to the version the editor had, and redoes it in both', async () =>
+    {
+      // Arrange.
+      const pair = await buildPair();
+      const { network, server, first, second } = pair;
+      renameOutside(server);
+      await hearInBoth(pair);
+
+      // Act: undo in the second window, then redo in the first.
+      second.hub.undo(mapHistoryKey(1));
+      await settle(network);
+      const afterUndo = [ stateOf(first.hub), stateOf(second.hub) ];
+      first.hub.redo(mapHistoryKey(1));
+      await settle(network);
+
+      // Assert.
+      expect([ afterUndo, [ stateOf(first.hub), stateOf(second.hub) ], first.hub.isConflicted(MAP) || second.hub.isConflicted(MAP) ])
+        .toStrictEqual([ [ [ 'Test Town', true ], [ 'Test Town', true ] ], [ [ 'Edited in MZ', false ], [ 'Edited in MZ', false ] ], false ]);
+    });
+
+    it('flags both windows holding unsaved edits, and records nothing in either', async () =>
+    {
+      // Arrange: an unsaved rename, shared by both windows, when the file changes.
+      const pair = await buildPair();
+      const { network, server, first, second } = pair;
+      first.hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP, [ 'displayName' ], 'Harbor'));
+      await settle(network);
+      renameOutside(server);
+
+      // Act.
+      const outcomes = await hearInBoth(pair);
+
+      // Assert.
+      expect([ outcomes, [ labelsOf(first.hub), labelsOf(second.hub) ], [ stateOf(first.hub), stateOf(second.hub) ], [ first.hub.conflict(MAP)?.kind, second.hub.conflict(MAP)?.kind ] ])
+        .toStrictEqual([ [ 'conflicted', 'follower' ], [ [ 'Rename' ], [ 'Rename' ] ], [ [ 'Harbor', true ], [ 'Harbor', true ] ], [ 'disk', 'disk' ] ]);
+    });
+
+    it('refuses another window\'s save naming a step this window has never seen, and works out whose copy is ahead', async () =>
+    {
+      // Arrange: a stray save of the map names a step no window here ever made.
+      const { network, first } = await buildPair();
+      const stranger = network.open('jmz-sync');
+      const events: string[] = [];
+      first.hub.subscribe(event => events.push(event.type));
+
+      // Act.
+      stranger.postMessage({ type: 'operation', from: 'window-B', operation: { type: 'saved', origin: 'window-B', document: MAP, marker: [ 'window-B#99' ] } });
+      await settle(network);
+
+      // Assert: the copy stays clean and unflagged; the difference was announced, and the other copy found to be the same.
+      expect([ events, first.hub.isDirty(MAP), first.hub.isConflicted(MAP) ])
+        .toStrictEqual([ [ 'out-of-sync' ], false, false ]);
     });
   });
 
