@@ -6,7 +6,7 @@ import { decodeEventClipboard, encodeEventClipboard, copyEvents } from '../../..
 import { EventSelection } from '../../../src/mapEditor/core/events/EventSelection.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import type { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
-import type { Camera } from '../../../src/mapEditor/core/renderer/camera.ts';
+import { screenToWorld, type Camera } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { MapContextMenu, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { MapEventTools, type EventMenuRequest } from '../../../src/mapEditor/events/MapEventTools.ts';
 import { hubWithMaps, mapFileOf, mapWithEvents, spotsOf } from '../support/eventFixtures.ts';
@@ -15,7 +15,9 @@ import { hubWithMaps, mapFileOf, mapWithEvents, spotsOf } from '../support/event
  * The event tools are the map view's hands: they turn the mouse, the keys and the clipboard into the event services'
  * steps and the window's selection, and hand the renderer what to show. What they owe, beyond the services' own
  * promises: a click, a box and a drag each do what the gesture says (a drag shows ghosts and its drop is one undoable
- * step, or a refusal said aloud); a double-click opens an event, or places one on the ground and opens it; the keys act
+ * step, or a refusal said aloud); a double-click opens an event, or places one on the ground and opens it, acting on
+ * the spot its presses landed on even where the browser reports the double-click itself in whole pixels a tile away,
+ * as it does zoomed out at a device pixel ratio of 1.5; a click on the tile beside an event never picks it; the keys act
  * only while the view has focus and nudge only when something is selected, and while the left button is down only Esc
  * acts, every other key (an undo included) waiting until it comes up; copy and paste go through the browser's
  * clipboard events with the map editor's marker, pasting under the pointer with fresh ids and leaving plain text
@@ -46,10 +48,12 @@ describe('MapEventTools', () =>
   };
 
   /**
-   * Builds the tools over the fixture map, in a view in the page, with a stand-in renderer that finds events by tile.
+   * Builds the tools over the fixture map, in a view in the page, with a stand-in renderer that finds events by the
+   * tile under a point through its camera.
+   * @param {Camera} startCamera Where the view looks; left out, at zoom 1 with the map's corner at the view's.
    * @returns {object} The tools and everything they were handed and said.
    */
-  const setUp = () =>
+  const setUp = (startCamera: Camera = { x: 0, y: 0, zoom: 1 }) =>
   {
     const hub = hubWithMaps({ 1: mapWithEvents(6, 4, [ null, [ 0, 0 ], [ 1, 0 ], [ 4, 2 ] ]) });
     const map = hub.map('map:1');
@@ -65,8 +69,12 @@ describe('MapEventTools', () =>
     const cameraListeners: ((camera: Camera) => void)[] = [];
     const renderer = {
       canvas,
-      camera: { x: 0, y: 0, zoom: 1 },
-      eventAt: (point: { x: number; y: number }) => eventOn(map, Math.floor(point.x / 48), Math.floor(point.y / 48)),
+      camera: startCamera,
+      eventAt: (point: { x: number; y: number }) =>
+      {
+        const world = screenToWorld(renderer.camera, point);
+        return eventOn(map, Math.floor(world.x / 48), Math.floor(world.y / 48));
+      },
       setOverlayState: (state: OverlayState) => overlays.push(state),
       onContextMenu: (listener: (menu: MapContextMenu) => void) =>
       {
@@ -137,6 +145,24 @@ describe('MapEventTools', () =>
     Object.defineProperties(event, {
       offsetX: { value: cell.x * 48 + 24 + (options.dx ?? 0) },
       offsetY: { value: cell.y * 48 + 24 },
+      pointerId: { value: 1 },
+    });
+    target.dispatchEvent(event);
+  };
+
+  /**
+   * Sends a pointer or mouse event with the left button to the canvas at an exact spot in the view, fractions and all,
+   * as Chromium reports one: pointer events at the pointer's spot, mouse events at a whole-pixel spot.
+   * @param {HTMLElement} target The canvas.
+   * @param {string} type The event.
+   * @param {{ x: number, y: number }} spot The spot, in CSS pixels from the canvas's corner.
+   */
+  const pointAt = (target: HTMLElement, type: string, spot: { x: number; y: number }) =>
+  {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0 });
+    Object.defineProperties(event, {
+      offsetX: { value: spot.x },
+      offsetY: { value: spot.y },
       pointerId: { value: 1 },
     });
     target.dispatchEvent(event);
@@ -353,6 +379,85 @@ describe('MapEventTools', () =>
       // Assert: the new event takes id 4, and is selected.
       expect([ opened, spotsOf(mapFileOf(hub, 1))[4], selection.eventsOn(1) ])
         .toStrictEqual([ [ '1:2', '1:4' ], [ 2, 3 ], [ 4 ] ]);
+    });
+  });
+
+  describe('at a device pixel ratio of 1.5, zoomed out and panned', () =>
+  {
+    /*
+     * The view looks from -2, -10 at a quarter of the game's scale, so a tile is 12 CSS pixels and event 3's tile, 4, 2,
+     * spans 48.5 to 60.5 across and 26.5 to 38.5 down. The tiles left of it (3, 2) and above it (4, 1) are empty. At 1.5
+     * a device pixel is two thirds of a CSS pixel, and the canvas sits at 300, 181.67 on the page, as in the workspace:
+     * device pixel 523 across lands at 48.67 in the view, which pointer events report as it is and mouse events as 48
+     * (page 348.67 cut to 348, less the canvas's 300); device pixel 313 down lands at 27, reported to mouse events as 26
+     * (page 208.67 cut to 208, less 181.67, cut again).
+     */
+    const ZOOMED_OUT: Camera = { x: -2, y: -10, zoom: 0.25 };
+
+    it('selects the event pressed just inside its tile\'s edges, and nothing pressed on the empty tile just beside each', () =>
+    {
+      // Arrange: inside the left edge at 48.67, then just left of it at 48 on tile 3, 2; inside the top edge at 27, then
+      // just above it at 26.33 on tile 4, 1.
+      const { canvas, selection } = setUp(ZOOMED_OUT);
+      const seen: (readonly number[])[] = [];
+
+      // Act.
+      [ { x: 48.666666666666686, y: 32.33333333333334 }, { x: 48, y: 32.33333333333334 }, { x: 54.666666666666686, y: 27 }, { x: 54.666666666666686, y: 26.333333333333343 } ]
+        .forEach(spot =>
+        {
+          pointAt(canvas, 'pointerdown', spot);
+          pointAt(canvas, 'pointerup', spot);
+          seen.push(selection.eventsOn(1));
+        });
+
+      // Assert.
+      expect(seen)
+        .toStrictEqual([ [ 3 ], [], [ 3 ], [] ]);
+    });
+
+    it('opens the event double-clicked just inside its tile\'s left edge, though the double-click reports a spot on the tile beside it', () =>
+    {
+      // Arrange: both presses at 48.67, 32.33 on event 3; the double-click they make reports 48, 32, on tile 3, 2.
+      const { hub, canvas, opened } = setUp(ZOOMED_OUT);
+      const press = { x: 48.666666666666686, y: 32.33333333333334 };
+
+      // Act.
+      [ 'pointerdown', 'pointerup', 'pointerdown', 'pointerup' ].forEach(type => pointAt(canvas, type, press));
+      pointAt(canvas, 'dblclick', { x: 48, y: 32 });
+
+      // Assert: event 3 opened, and nothing was placed on tile 3, 2.
+      expect([ opened, spotsOf(mapFileOf(hub, 1)) ])
+        .toStrictEqual([ [ '1:3' ], [ null, [ 0, 0 ], [ 1, 0 ], [ 4, 2 ] ] ]);
+    });
+
+    it('opens the event double-clicked just inside its tile\'s top edge, though the double-click reports a spot on the tile above', () =>
+    {
+      // Arrange: both presses at 54.67, 27 on event 3; the double-click they make reports 54, 26, on tile 4, 1.
+      const { hub, canvas, opened } = setUp(ZOOMED_OUT);
+      const press = { x: 54.666666666666686, y: 27 };
+
+      // Act.
+      [ 'pointerdown', 'pointerup', 'pointerdown', 'pointerup' ].forEach(type => pointAt(canvas, type, press));
+      pointAt(canvas, 'dblclick', { x: 54, y: 26 });
+
+      // Assert: event 3 opened, and nothing was placed on tile 4, 1.
+      expect([ opened, spotsOf(mapFileOf(hub, 1)) ])
+        .toStrictEqual([ [ '1:3' ], [ null, [ 0, 0 ], [ 1, 0 ], [ 4, 2 ] ] ]);
+    });
+
+    it('places an event on the empty tile beside, double-clicked there, and opens it', () =>
+    {
+      // Arrange: both presses at 48, 32.33 on tile 3, 2, just left of event 3; the double-click reports 48, 32.
+      const { hub, canvas, opened, selection } = setUp(ZOOMED_OUT);
+      const press = { x: 48, y: 32.33333333333334 };
+
+      // Act.
+      [ 'pointerdown', 'pointerup', 'pointerdown', 'pointerup' ].forEach(type => pointAt(canvas, type, press));
+      pointAt(canvas, 'dblclick', { x: 48, y: 32 });
+
+      // Assert: the new event takes id 4 on tile 3, 2, is selected and opened, and event 3 is where it was.
+      expect([ opened, spotsOf(mapFileOf(hub, 1)), selection.eventsOn(1) ])
+        .toStrictEqual([ [ '1:4' ], [ null, [ 0, 0 ], [ 1, 0 ], [ 4, 2 ], [ 3, 2 ] ], [ 4 ] ]);
     });
   });
 

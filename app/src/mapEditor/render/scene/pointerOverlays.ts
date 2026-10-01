@@ -103,9 +103,10 @@ const drawSelection = (
 };
 
 /**
- * Draws what the tools point at, over the selection: the box being dragged (selection), the tile every ghost event
- * would land on with the tiles it cannot land on in red (ghost), then the cell or footprint under the pointer (hover)
- * on top. Cheap enough to redraw whenever the state changes.
+ * Draws what the tools point at: the box being dragged (selection), the tile every ghost event would land on with the
+ * tiles it cannot land on in red (ghost), then the cell or footprint under the pointer (hover) on top. The renderer
+ * lays the selection over all of it, so the hover never hides the event a click just picked. Cheap enough to redraw
+ * whenever the state changes.
  * @param {Graphics} graphics Where to draw.
  * @param {OverlayState} state The tools' state.
  * @param {PointerOverlaysShown} shown Which overlays are on.

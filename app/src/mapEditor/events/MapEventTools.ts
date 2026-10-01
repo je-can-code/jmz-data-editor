@@ -20,6 +20,7 @@ import type { DocumentChange } from '../core/model/EditorDocument.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import { screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../core/renderer/camera.ts';
 import type { CellRect, GhostEvent, GhostTile, MapContextMenu, OverlayState, WorldRect } from '../core/renderer/MapRenderer.ts';
+import { precisePoint } from '../core/renderer/precisePoint.ts';
 import { isTextEntry, shortcutFor, type KeyTarget } from '../core/workspace/shortcuts.ts';
 
 /**
@@ -138,6 +139,12 @@ class MapEventTools
    * Where the pointer last was over the canvas, or null once it left: what the hover follows when the camera moves.
    */
   #pointer: ScreenPoint | null = null;
+
+  /**
+   * Where the last press of the left button landed, as precisely as the pointer reported it: where a double-click
+   * really happened, since the double-click itself reports whole pixels.
+   */
+  #press: ScreenPoint | null = null;
 
   #box: WorldRect | null = null;
 
@@ -417,6 +424,7 @@ class MapEventTools
     const point = { x: event.offsetX, y: event.offsetY };
     const press = { point, cell: this.#cellAt(point), eventId: this.#options.renderer.eventAt(point), modifiers: modifiersOf(event) };
     this.#pointer = point;
+    this.#press = point;
     this.#options.renderer.canvas?.setPointerCapture(event.pointerId);
     this.#apply(this.#gesture.press(press, this.#selected));
   };
@@ -468,7 +476,9 @@ class MapEventTools
       return;
     }
 
-    const point = { x: event.offsetX, y: event.offsetY };
+    // a double-click reports whole pixels, which at a device pixel ratio such as 1.5 can lie on the tile beside the one
+    // its presses landed on, so the press says where it happened: the event it selected is the event it opens.
+    const point = precisePoint({ x: event.offsetX, y: event.offsetY }, this.#press);
     const eventId = this.#options.renderer.eventAt(point);
     if (eventId !== null)
     {

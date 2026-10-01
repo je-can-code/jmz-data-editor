@@ -11,17 +11,26 @@ import {
   type SpriteFrame,
   type SpritePlacement,
 } from '../engine/characterFrames.ts';
-import { textureSourceFor } from '../textureImages.ts';
+import { readSourceAlpha, textureSourceFor } from '../textureImages.ts';
 
 /**
- * One event's sprite: the container placed at its feet, and what it draws with.
+ * One event's sprite: the tile the event stands on, the container placed at its feet, and what it draws with: the
+ * frame cut from the sheet, or null while there is nothing to draw, and the sheet itself.
  */
 type EventSprite = {
   readonly id: number;
+  readonly cell: { readonly x: number; readonly y: number };
   readonly root: Container;
   readonly placement: SpritePlacement;
   readonly frame: SpriteFrame | null;
+  readonly source: TextureSource | null;
 };
+
+/**
+ * Reads how opaque one pixel of a sheet is: its alpha from 0 for clear to 255 for solid, or null when the pixels cannot
+ * be read, which counts the whole frame as solid.
+ */
+type AlphaReader = (source: TextureSource, x: number, y: number) => number | null;
 
 /**
  * What the layer draws from.
@@ -38,6 +47,14 @@ type EventLayerContext = {
  * How opaque the part of a character sunk in a bush draws, as Sprite_Character's lower body: 128 of 255.
  */
 const BUSH_ALPHA = 128 / 255;
+
+/**
+ * How big a character must be drawn on screen, on its longer side, in CSS pixels, before a click is aimed at the
+ * pixels it draws rather than at the tile it stands on. Zoomed out, a character is a few screen pixels across and its
+ * tile is all the pointer can aim at; a tree from a big sheet, nearly two tiles by four, stays big down to about a
+ * sixth of the game's scale, and its clear surround keeps passing clicks through to the events beside it.
+ */
+const SMALL_ON_SCREEN = 32;
 
 /**
  * The page an event shows in the editor: its first, as MZ's own editor shows it. The game shows whichever page's
@@ -102,14 +119,19 @@ class EventLayer
 
   #onChange: () => void;
 
+  #readAlpha: AlphaReader;
+
   #destroyed = false;
 
   /**
    * @param {() => void} onChange Called whenever what the layer draws changed, so the renderer draws a frame.
+   * @param {AlphaReader} readAlpha Reads one pixel's opacity from a sheet, for finding the sprite a point is really
+   * over; the page's own canvas reads them unless told otherwise.
    */
-  constructor(onChange: () => void)
+  constructor(onChange: () => void, readAlpha: AlphaReader = readSourceAlpha)
   {
     this.#onChange = onChange;
+    this.#readAlpha = readAlpha;
   }
 
   /**
@@ -238,29 +260,38 @@ class EventLayer
   }
 
   /**
-   * Finds the event whose sprite covers a world point, the one drawn on top winning.
-   * @param {number} x The point, across.
-   * @param {number} y The point, down.
-   * @returns {number | null} The event id, or null when no sprite covers it.
+   * Finds the event a click at a world point picks, as the pointer can aim at the map at the zoom it is drawn at. Each
+   * step takes the event drawn on top:
+   *
+   * - first, an event found by its tile, standing on the tile clicked: a tile image, which is its tile; a character
+   *   drawn small on screen, too few pixels to aim within; or an event drawing nothing at all. Zoomed out, clicking an
+   *   event's tile always picks it, whatever a big sprite draws over it;
+   * - then, the sprite drawing the pixel clicked. A frame is mostly clear around its figure (a tree on a big sheet is
+   *   94 pixels by 190), so a click on the clear part belongs to whatever shows through it, never to the frame;
+   * - then, whatever stands on the tile clicked, such as a big character clicked on a clear pixel of its own tile.
+   * @param {number} x The point, across, in world pixels.
+   * @param {number} y The point, down, in world pixels.
+   * @param {number} zoom The zoom the map is drawn at, which decides what is drawn small on screen.
+   * @returns {number | null} The event id, or null when the click picks none.
    */
-  eventAt(x: number, y: number): number | null
+  eventAt(x: number, y: number, zoom: number): number | null
   {
-    // the top of the draw order first: above, then with characters, then below.
-    const groups = [ this.above, this.same, this.below ];
-    for (const group of groups)
+    const context = this.#context;
+    if (context === null)
     {
-      for (let index = group.children.length - 1; index >= 0; index--)
-      {
-        const id = (group.children[index] as Container & { eventId?: number }).eventId ?? -1;
-        const sprite = this.#sprites.get(id);
-        if (sprite !== undefined && sprite.frame !== null && this.#covers(sprite, x, y))
-        {
-          return id;
-        }
-      }
+      return null;
     }
 
-    return null;
+    const column = Math.floor(x / context.tileSize);
+    const row = Math.floor(y / context.tileSize);
+    const sprites = this.#topFirst();
+    const onTile = (sprite: EventSprite) => sprite.cell.x === column && sprite.cell.y === row;
+    const picked = sprites.find(sprite => onTile(sprite) && this.#foundByTile(sprite, zoom))
+      ?? sprites.find(sprite => sprite.frame !== null && this.#covers(sprite, x, y) && this.#drawsAt(sprite, x, y))
+      ?? sprites.find(onTile);
+    return picked === undefined
+      ? null
+      : picked.id;
   }
 
   /**
@@ -360,6 +391,61 @@ class EventLayer
   }
 
   /**
+   * Lists every event's sprite in the order a click meets them, the top of the draw order first: above characters, then
+   * with them, then below them, and within each group the sprite drawn last first.
+   * @returns {EventSprite[]} The sprites.
+   */
+  #topFirst(): EventSprite[]
+  {
+    const sprites: EventSprite[] = [];
+    [ this.above, this.same, this.below ].forEach(group =>
+    {
+      for (let index = group.children.length - 1; index >= 0; index--)
+      {
+        const sprite = this.#sprites.get((group.children[index] as Container & { eventId?: number }).eventId ?? -1);
+        if (sprite !== undefined)
+        {
+          sprites.push(sprite);
+        }
+      }
+    });
+
+    return sprites;
+  }
+
+  /**
+   * Reports whether a click finds an event by its tile rather than by the pixels it draws: a tile image is its tile, a
+   * character drawn small on screen is too few pixels to aim within, and an event drawing nothing has only its tile.
+   * @param {EventSprite} sprite The event's sprite.
+   * @param {number} zoom The zoom the map is drawn at.
+   * @returns {boolean} True when its tile finds it.
+   */
+  #foundByTile(sprite: EventSprite, zoom: number): boolean
+  {
+    const { frame } = sprite;
+    return frame === null
+      || frame.source === 'tileset'
+      || Math.max(frame.width, frame.height) * zoom < SMALL_ON_SCREEN;
+  }
+
+  /**
+   * Reports whether a sprite draws a pixel at a point inside its rectangle: the frame's pixel there is not clear. A
+   * character sunk in a bush draws its two halves over the same rectangle, so the same pixel answers for it.
+   * @param {EventSprite} sprite The sprite, with a frame covering the point.
+   * @param {number} x The point, across.
+   * @param {number} y The point, down.
+   * @returns {boolean} True on a pixel it draws, or wherever its sheet's pixels cannot be read.
+   */
+  #drawsAt(sprite: EventSprite, x: number, y: number): boolean
+  {
+    const frame = sprite.frame as SpriteFrame;
+    const left = sprite.placement.x - frame.width / 2;
+    const top = sprite.placement.y - frame.height;
+    const alpha = this.#readAlpha(sprite.source as TextureSource, frame.sx + Math.floor(x - left), frame.sy + Math.floor(y - top));
+    return alpha === null || alpha > 0;
+  }
+
+  /**
    * Builds one event's sprite, loading its sheet first when it is a character not seen yet.
    * @param {number} id The event id.
    */
@@ -389,7 +475,7 @@ class EventLayer
     }
 
     this.#groupFor(placement.z).addChild(root);
-    this.#sprites.set(id, { id, root, placement, frame: texture === null ? null : frame });
+    this.#sprites.set(id, { id, cell: { x: event.x, y: event.y }, root, placement, frame: texture === null ? null : frame, source: texture });
   }
 
   /**
@@ -580,4 +666,4 @@ class EventLayer
 }
 
 export { EventLayer, shownPage };
-export type { EventLayerContext };
+export type { AlphaReader, EventLayerContext };
