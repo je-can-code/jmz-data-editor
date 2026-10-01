@@ -2,30 +2,34 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { EditorDocument } from '../../../core/model/EditorDocument.ts';
 import type { RmmzTileset } from '../../../core/model/rmmzTypes.ts';
 import { cellInspector, type InspectorState } from '../../../core/palette/cellInspector.ts';
-import { paintSelection, type PaintSelectionState } from '../../../core/palette/paintSelection.ts';
-import { paletteMode, type PaletteModeState } from '../../../core/palette/paletteMode.ts';
+import type { PaintSelectionState } from '../../../core/palette/paintSelection.ts';
+import type { PaletteModeState } from '../../../core/palette/paletteMode.ts';
 import { marksOf, openTilesetMarks } from '../../../core/palette/tilesetMarkEdits.ts';
 import type { TextureImage } from '../../../core/renderer/MapRenderer.ts';
 import { marksForTileset, type TilesetMarks } from '../../../core/tiles/tilesetMarks.ts';
 import { projectImagesFor } from '../../../render/projectImages.ts';
 import { useDocumentRevision, useWorkspace } from '../../workspaceHooks.tsx';
+import { usePaintScope } from './paintScope.tsx';
 
 /**
- * Reads the window's paint selection, re-rendering when the brush or the layer changes.
+ * Reads the paint selection the surrounding palette picks for (see usePaintScope), re-rendering when the brush or the
+ * layer changes.
  * @returns {PaintSelectionState} The brush and the layer.
  */
 const usePaintSelection = (): PaintSelectionState =>
 {
-  return useSyncExternalStore(paintSelection.subscribe, paintSelection.getState);
+  const { selection } = usePaintScope();
+  return useSyncExternalStore(selection.subscribe, selection.getState);
 };
 
 /**
- * Reads the palette's mode, re-rendering when it changes.
+ * Reads the surrounding palette's mode, re-rendering when it changes.
  * @returns {PaletteModeState} Whether the palette picks tiles or edits passability, and which flags.
  */
 const usePaletteMode = (): PaletteModeState =>
 {
-  return useSyncExternalStore(paletteMode.subscribe, paletteMode.getState);
+  const { mode } = usePaintScope();
+  return useSyncExternalStore(mode.subscribe, mode.getState);
 };
 
 /**

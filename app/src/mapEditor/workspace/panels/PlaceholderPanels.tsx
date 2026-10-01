@@ -19,7 +19,8 @@ const Placeholder = (props: { line: string }) =>
 };
 
 /**
- * Holds the middle of the workspace until the first map opens there, when it closes itself.
+ * Holds the centre of the workspace, where maps open, and never leaves it: it waits behind the maps while any are open
+ * there, and shows, saying how to open one, whenever none is.
  * @returns {React.JSX.Element} The panel.
  */
 const StartPanel = () => <Placeholder line={'Double-click a map in the tree, or drag it here, to open it.'}/>;

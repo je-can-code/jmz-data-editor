@@ -147,15 +147,16 @@ type PaintSelectionListener = (state: PaintSelectionState) => void;
 
 /**
  * The palette's and the layer strip's output, in one place: the brush the palette has chosen, and the layer the strip
- * has chosen. The painting tools read it and subscribe to it; nothing here paints.
+ * has chosen. The painting tools read it and subscribe to it; nothing here paints. Each window has its own, in its
+ * paint (see WindowPaint), so a palette torn out with its map picks for that map's window alone.
  *
  * {@code layer} is exactly what the layering service's {@code paintTiles} takes: {@code 'auto'} for automatic
  * layering, or 0 to 3 for layers 1 to 4. Every change replaces the state object, so a listener or a React hook can
  * tell a change by identity.
  *
  * <pre>
- * const stop = paintSelection.subscribe(({ brush, layer }) => { ... });
- * paintSelection.setLayer(2);
+ * const stop = selection.subscribe(({ brush, layer }) => { ... });
+ * selection.setLayer(2);
  * </pre>
  */
 class PaintSelection
@@ -249,17 +250,10 @@ class PaintSelection
   }
 }
 
-/**
- * The window's selection, which the palette, the layer strip and the painting tools share. A torn-out panel runs in
- * the same page as the main window, so it shares this one too; an event window, a page of its own, paints nothing.
- */
-const paintSelection = new PaintSelection();
-
 export {
   EMPTY_BRUSH,
   LAYER_STRIP,
   PaintSelection,
-  paintSelection,
   sameBrush,
   shadowBrush,
   stepLayerChoice,

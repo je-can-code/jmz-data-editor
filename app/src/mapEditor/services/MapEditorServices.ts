@@ -11,9 +11,7 @@ import { DocumentHub } from '../core/history/DocumentHub.ts';
 import type { DocumentKey } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
-import { paintSelection } from '../core/palette/paintSelection.ts';
-import { linkPaintSelection } from '../core/tools/paintSelectionLink.ts';
-import { PaintState } from '../core/tools/PaintState.ts';
+import { WindowPaints } from '../core/tools/WindowPaint.ts';
 import { FileChangeFeed, openEventSource, type EventSourceFactory } from '../core/sync/FileChangeFeed.ts';
 import { FileChangeRouter } from '../core/sync/fileChangeRouting.ts';
 import { SharedFileChangeFeed, type LockManagerLike } from '../core/sync/SharedFileChangeFeed.ts';
@@ -81,10 +79,12 @@ type MapEditorServices = {
   readonly modules: PluginModuleRegistry;
 
   /**
-   * What the painting tools paint with, shared by every map view in the window: the tool, the brush the palette or
-   * the eyedropper handed over, and the layer strip's choice.
+   * What each window paints with, by window: the tool, the brush the palette or the eyedropper handed over, and the
+   * layer strip's choice. The page's own window has its paint from the start, shared by its palette, its layer strip and
+   * every map docked in it; a map torn out into a window of its own paints with that window's, and its palette there
+   * picks for that window alone.
    */
-  readonly painting: PaintState;
+  readonly paints: WindowPaints;
 
   /**
    * Reads what command editing needs from the server, once per window however often it is asked: the plugin
@@ -225,7 +225,9 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   const commandEditing = wireCommandEditing(api, catalog, commandEditors);
   const modules = new PluginModuleRegistry(catalog);
   registerCoreEventKinds(modules);
-  const painting = new PaintState();
+
+  // the window the close guard listens on is the page's own, the one whose paint the page starts with.
+  const paints = new WindowPaints(environment.closeTarget);
 
   // the change stream is shared by every window, and only exists with a server to stream from.
   const feed = api === null
@@ -257,7 +259,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     commandEditors,
     pluginHeaders: commandEditing.headers,
     modules,
-    painting,
+    paints,
     loadCommandResources: commandEditing.load,
     openDocument: async (key: DocumentKey) =>
     {
@@ -319,8 +321,8 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
       stops.push(() => sync.stop());
 
       // what the palette and the layer strip pick is what the painting tools paint with, and the eyedropper's picks go
-      // back to them; the palette's choices are the page's, shared by every panel torn out of it.
-      stops.push(linkPaintSelection(paintSelection, painting));
+      // back to them; a torn-out map's window links its own paint the first time it is asked for.
+      stops.push(paints.main.link());
 
       if (api !== null)
       {

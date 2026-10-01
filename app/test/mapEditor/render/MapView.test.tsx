@@ -16,7 +16,7 @@ import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import { marksOf, TILESET_MARKS_DOCUMENT } from '../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
-import { PaintState } from '../../../src/mapEditor/core/tools/PaintState.ts';
+import { WindowPaints } from '../../../src/mapEditor/core/tools/WindowPaint.ts';
 import { MapEditorApp } from '../../../src/mapEditor/MapEditorApp.tsx';
 import { MapView, mapIdFromQuery } from '../../../src/mapEditor/render/MapView.tsx';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
@@ -224,8 +224,8 @@ describe('MapView', () =>
     const shell = new WindowShell({ channel: null, origin: 'http://127.0.0.1:3000', openWindow });
     const hub = new DocumentHub({ clientId: 'window-a' });
     const openDocument = vi.fn(() => Promise.reject(new Error('no documents in this test')));
-    const painting = new PaintState();
-    return { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, painting, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
+    const paints = new WindowPaints(window);
+    return { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
   };
 
   /**
