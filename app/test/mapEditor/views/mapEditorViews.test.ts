@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { WindowShell } from '../../../src/core/infrastructure/shell/WindowShell.ts';
 import {
+  eventWindowTitle,
   mapEditorPath,
   openCommonEventsWindow,
   openEventWindow,
@@ -88,6 +89,21 @@ describe('mapEditorViews', () =>
     });
   });
 
+  describe('eventWindowTitle', () =>
+  {
+    it('titles an event window after its event and its map, once they are known', () =>
+    {
+      // Arrange: an event and the map it is on.
+
+      // Act.
+      const title = eventWindowTitle('Gate Guard', 'Nimbus Gate');
+
+      // Assert.
+      expect(title)
+        .toBe('Gate Guard - Nimbus Gate - jmz-map-editor');
+    });
+  });
+
   describe('openCommonEventsWindow', () =>
   {
     it('asks the shell for the common events window by one URL', () =>
@@ -139,6 +155,27 @@ describe('mapEditorViews', () =>
           'http://127.0.0.1:3000/map.html?view=event&map=12&event=5',
           'http://127.0.0.1:3000/map.html?view=event&map=12&event=6',
         ]);
+    });
+
+    it('asks for a window wide enough for a page\'s settings beside its commands', () =>
+    {
+      // Arrange.
+      const network = new MemoryChannelNetwork();
+      const relay = network.open('jmz-shell');
+      const heard: unknown[] = [];
+      relay.addEventListener('message', event => heard.push(event.data));
+      const shell = new WindowShell({ channel: network.open('jmz-shell'), origin: 'http://127.0.0.1:3000', openWindow: () => null });
+      relay.postMessage({ type: 'shell-ready' });
+      network.flush();
+      heard.length = 0;
+
+      // Act.
+      openEventWindow(shell, 12, 5);
+      network.flush();
+
+      // Assert.
+      expect(heard.map(message => [ (message as { width: number }).width, (message as { height: number }).height ]))
+        .toStrictEqual([ [ 1240, 820 ] ]);
     });
   });
 });
