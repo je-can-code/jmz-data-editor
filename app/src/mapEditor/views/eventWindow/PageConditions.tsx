@@ -6,7 +6,6 @@ import {
   CONDITION_NOUNS,
   readPageConditions,
   SELF_SWITCH_LETTERS,
-  VARIABLE_VALUE_LIMIT,
   type ConditionChange,
   type ConditionKind,
   type IdConditionKind,
@@ -30,15 +29,15 @@ const ID_FIELDS: Readonly<Record<IdConditionKind, CommandField>> = {
 };
 
 /**
- * The value a variable condition waits for, as a number field.
+ * The value a variable condition waits for, as a number field. It carries no bounds for the field to clamp to, so
+ * whatever is typed reaches the condition, which takes any whole number the game holds exactly and refuses anything
+ * else out loud rather than quietly writing a different number.
  */
 const VALUE_FIELD: CommandField = {
   key: 'value',
   label: 'At least',
   param: [ 0 ],
   kind: 'number',
-  min: -VARIABLE_VALUE_LIMIT,
-  max: VARIABLE_VALUE_LIMIT,
 };
 
 /**

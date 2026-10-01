@@ -478,6 +478,30 @@ describe('EventWindowView', () =>
       .toStrictEqual([ 7, 120, 'C', [ 'Change switch condition (page 1)', 'Change variable condition (page 1)', 'Change self switch condition (page 1)' ] ]);
   });
 
+  it('writes a typed value exactly however large, and refuses out loud one the game cannot hold, writing nothing for it', () =>
+  {
+    // Arrange: page 1's variable condition turned on, so its value is in reach.
+    const { hub } = renderWindow();
+    fireEvent.click(screen.getByLabelText('Use the variable condition'));
+    const value = screen.getByLabelText('At least');
+
+    // Act: a value well past a hundred million, then one past what the game holds exactly.
+    fireEvent.change(value, { target: { value: '123456789012' } });
+    fireEvent.blur(value);
+    const written = heldEvent(hub).pages[0].conditions.variableValue;
+    fireEvent.change(value, { target: { value: '100000000000000000000' } });
+    fireEvent.blur(value);
+
+    // Assert: the second was refused, saying so, and left the first in place.
+    expect([
+      written,
+      heldEvent(hub).pages[0].conditions.variableValue,
+      screen.queryByText('A variable condition waits for a whole number between -9,007,199,254,740,991 and 9,007,199,254,740,991.') !== null,
+      stepsOf(hub),
+    ])
+      .toStrictEqual([ 123_456_789_012, 123_456_789_012, true, [ 'Turn on variable condition (page 1)', 'Change variable condition (page 1)' ] ]);
+  });
+
   it('duplicates and moves a page from its tab\'s right-click menu, showing the page each lands on', () =>
   {
     // Arrange.

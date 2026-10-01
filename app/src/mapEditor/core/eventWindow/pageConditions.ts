@@ -85,9 +85,10 @@ const CONDITION_KINDS: readonly ConditionKind[] = [ 'switch1', 'switch2', 'varia
 const SELF_SWITCH_LETTERS: readonly SelfSwitchLetter[] = [ 'A', 'B', 'C', 'D' ];
 
 /**
- * The widest value a variable condition can wait for, either way: the same bound MZ puts on a variable's constants.
+ * The widest value a variable condition can wait for, either way: the largest whole number the game holds exactly. The
+ * condition puts no smaller cap of its own on it.
  */
-const VARIABLE_VALUE_LIMIT = 99_999_999;
+const VARIABLE_VALUE_LIMIT = Number.MAX_SAFE_INTEGER;
 
 /**
  * What each condition is called in the history panel and in a page's summary.
@@ -145,8 +146,9 @@ const readPageConditions = (conditions: RmmzEventConditions): PageConditionRow[]
 
 /**
  * Works out the one field of a page's conditions a change writes, and checks the value can stand there: an id is a
- * whole number from 1, a variable's value a whole number within MZ's bounds, and a self switch one of its four letters.
- * Every other field is left exactly as it is, which is what keeps one condition's edit from reaching another's.
+ * whole number from 1, a variable's value any whole number the game holds exactly (a safe integer, either way), and a
+ * self switch one of its four letters. Every other field is left exactly as it is, which is what keeps one condition's
+ * edit from reaching another's.
  * @param {ConditionChange} change The change.
  * @returns {ConditionWrite | EditRefusal} The field and its value, or why the change cannot be made.
  */
@@ -162,7 +164,7 @@ const encodeConditionChange = (change: ConditionChange): ConditionWrite | EditRe
         ? { ok: true, field: fields.id as keyof RmmzEventConditions, value: change.value }
         : { ok: false, message: REFUSALS.id };
     case 'value':
-      return Number.isInteger(change.value) && Math.abs(change.value) <= VARIABLE_VALUE_LIMIT
+      return Number.isSafeInteger(change.value)
         ? { ok: true, field: 'variableValue', value: change.value }
         : { ok: false, message: REFUSALS.value };
     case 'letter':

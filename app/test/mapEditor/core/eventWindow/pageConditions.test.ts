@@ -20,8 +20,9 @@ import { eventWindowHub, eventWindowMap, expectedMap, heldMap, markedPage, TARGE
  * page's conditions: the condition's own on-off flag, its own id, the variable's value, or the self switch's letter.
  * That one-field promise is the whole contract, because the fields sit side by side with near-identical names, so
  * every encoding is checked against its nearest neighbour: the first switch against the second, the variable's id
- * against its value, the item against the actor. A value a condition cannot hold (an id below 1, a value past MZ's
- * bounds, a fifth self switch) is refused, changing nothing. Each change is one step in the event's own history.
+ * against its value, the item against the actor. A value a condition cannot hold (an id below 1, a value that is not a
+ * whole number the game holds exactly, a fifth self switch) is refused, changing nothing; a variable's value has no
+ * smaller cap than that. Each change is one step in the event's own history.
  */
 describe('pageConditions', () =>
 {
@@ -102,33 +103,42 @@ describe('pageConditions', () =>
         .toStrictEqual([ { ok: true, field: 'variableValue', value: -40 }, { ok: true, field: 'selfSwitchCh', value: 'D' } ]);
     });
 
-    it('takes ids from 1, and values out to MZ\'s bounds either way', () =>
+    it('takes ids from 1, and as a value any whole number the game holds exactly, either way, with no smaller cap', () =>
     {
-      // Arrange: each the edge of what a condition can hold.
+      // Arrange: each the edge of what a condition can hold, and a value well past a hundred million.
       const changes: ConditionChange[] = [
         { kind: 'switch1', part: 'id', value: 1 },
-        { kind: 'variable', part: 'value', value: 99_999_999 },
-        { kind: 'variable', part: 'value', value: -99_999_999 },
+        { kind: 'variable', part: 'value', value: Number.MAX_SAFE_INTEGER },
+        { kind: 'variable', part: 'value', value: -Number.MAX_SAFE_INTEGER },
+        { kind: 'variable', part: 'value', value: 123_456_789_012 },
         { kind: 'selfSwitch', part: 'letter', value: 'A' },
       ];
 
       // Act.
-      const accepted = changes.map(change => encodeConditionChange(change).ok);
+      const writes = changes.map(encodeConditionChange);
 
       // Assert.
-      expect(accepted)
-        .toStrictEqual([ true, true, true, true ]);
+      expect(writes)
+        .toStrictEqual([
+          { ok: true, field: 'switch1Id', value: 1 },
+          { ok: true, field: 'variableValue', value: 9_007_199_254_740_991 },
+          { ok: true, field: 'variableValue', value: -9_007_199_254_740_991 },
+          { ok: true, field: 'variableValue', value: 123_456_789_012 },
+          { ok: true, field: 'selfSwitchCh', value: 'A' },
+        ]);
     });
 
-    it('refuses an id below 1 or not whole, a value past the bounds or not whole, and any letter but A to D', () =>
+    it('refuses an id below 1 or not whole, a value the game cannot hold exactly or not whole, and any letter but A to D', () =>
     {
       // Arrange: each just past the edge.
       const changes: ConditionChange[] = [
         { kind: 'switch1', part: 'id', value: 0 },
         { kind: 'actor', part: 'id', value: 2.5 },
-        { kind: 'variable', part: 'value', value: 100_000_000 },
-        { kind: 'variable', part: 'value', value: -100_000_000 },
+        { kind: 'variable', part: 'value', value: 9_007_199_254_740_992 },
+        { kind: 'variable', part: 'value', value: -9_007_199_254_740_992 },
         { kind: 'variable', part: 'value', value: 1.5 },
+        { kind: 'variable', part: 'value', value: Number.POSITIVE_INFINITY },
+        { kind: 'variable', part: 'value', value: Number.NaN },
         { kind: 'selfSwitch', part: 'letter', value: 'E' },
         { kind: 'selfSwitch', part: 'letter', value: 'a' },
       ];
@@ -137,13 +147,16 @@ describe('pageConditions', () =>
       const refused = changes.map(encodeConditionChange);
 
       // Assert.
+      const value = 'A variable condition waits for a whole number between -9,007,199,254,740,991 and 9,007,199,254,740,991.';
       expect(refused.map(each => (each.ok ? 'written' : each.message)))
         .toStrictEqual([
           'Pick one from the list.',
           'Pick one from the list.',
-          'A variable condition waits for a whole number between -99,999,999 and 99,999,999.',
-          'A variable condition waits for a whole number between -99,999,999 and 99,999,999.',
-          'A variable condition waits for a whole number between -99,999,999 and 99,999,999.',
+          value,
+          value,
+          value,
+          value,
+          value,
           'A self switch is A, B, C or D.',
           'A self switch is A, B, C or D.',
         ]);
