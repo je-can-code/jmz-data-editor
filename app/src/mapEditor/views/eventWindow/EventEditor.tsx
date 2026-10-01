@@ -13,6 +13,7 @@ import {
 } from '../../core/eventWindow/eventWindowTarget.ts';
 import { namedRows } from '../../core/commandList/databaseNames.ts';
 import { parseEventMovement, type EventMovementFields } from '../../core/eventPage/eventMovement.ts';
+import { saveTargetMap } from '../../core/eventWindow/eventWindowSave.ts';
 import { setPageCondition, type ConditionChange } from '../../core/eventWindow/pageConditions.ts';
 import { setPageImage, setPageMovement, setPageOption, setPagePriority, setPageTrigger } from '../../core/eventWindow/pageSettings.ts';
 import type { DocumentHub } from '../../core/history/DocumentHub.ts';
@@ -177,19 +178,32 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
   };
 
   /**
-   * Saves the map, with whatever the author is typing.
+   * Saves the map, with whatever the author is typing; a map waiting for a choice about changes made elsewhere is held
+   * back, and says so.
    */
   const save = () =>
   {
     commitTyping();
-    if (hub.isDirty(key) === false || saving)
+    if (saving)
     {
       return;
     }
 
     setSaving(true);
-    hub.save(key)
-      .then(() => setNotice({ message: 'Saved.', severity: 'success' }))
+    saveTargetMap(hub, target)
+      .then(outcome =>
+      {
+        if (outcome.ok === false)
+        {
+          setNotice({ message: outcome.message, severity: 'error' });
+          return;
+        }
+
+        if (outcome.saved)
+        {
+          setNotice({ message: 'Saved.', severity: 'success' });
+        }
+      })
       .catch((error: unknown) => setNotice({ message: `The map was not saved: ${(error as Error).message}`, severity: 'error' }))
       .finally(() => setSaving(false));
   };

@@ -10,6 +10,7 @@ import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandC
 import { CommandEditorRegistry } from '../../../../src/mapEditor/core/commands/CommandEditorRegistry.ts';
 import { registerBuiltInCommands } from '../../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { PluginHeaderStore } from '../../../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
+import { MAP_CONFLICT_MESSAGE } from '../../../../src/mapEditor/core/eventWindow/eventWindowSave.ts';
 import { targetHistory } from '../../../../src/mapEditor/core/eventWindow/eventWindowTarget.ts';
 import { copyPages, decodePageClipboard, encodePageClipboard } from '../../../../src/mapEditor/core/eventWindow/pageOperations.ts';
 import { DocumentHub, type DocumentStore } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
@@ -29,7 +30,7 @@ import { eventWindowMap, heldEvent, markedPage, TARGET } from '../../support/eve
  * picker; then the event's name, note and pages, and on the page shown its conditions, graphic, movement, options,
  * priority, trigger and commands. Every change is one step in the event's own history, never the map's, with undo and
  * redo from the header and from Ctrl+Z and Ctrl+Y anywhere in the window, and Ctrl+S saves the map with whatever is
- * still being typed. The page tabs add, move, copy, paste, duplicate and delete pages from their buttons and keys,
+ * still being typed, unless the map waits for a choice about changes made elsewhere. The page tabs add, move, copy, paste, duplicate and delete pages from their buttons and keys,
  * showing the page each change lands on. The title names the event and its map. When the event goes from the map in
  * another window, a message stands in for the editor until an undo brings the event back.
  *
@@ -545,6 +546,28 @@ describe('EventWindowView', () =>
     // Assert.
     expect([ screen.getByText('The map was not saved: disk full') !== null, hub.isDirty('map:1') ])
       .toStrictEqual([ true, true ]);
+  });
+
+  it('holds back a save while the map waits for a choice about changes made elsewhere, and says so', async () =>
+  {
+    // Arrange: an unsaved edit, then a change on disk flags the map.
+    const { hub, store } = renderWindow();
+    fireEvent.click(screen.getByLabelText('Through'));
+    act(() =>
+    {
+      hub.flagConflict('map:1', { kind: 'disk', content: eventWindowMap() as unknown as JsonValue });
+    });
+
+    // Act.
+    await act(async () =>
+    {
+      fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+      await Promise.resolve();
+    });
+
+    // Assert: nothing was written, and the edit is still unsaved.
+    expect([ screen.queryByText(MAP_CONFLICT_MESSAGE) !== null, vi.mocked(store.save).mock.calls.length, hub.isDirty('map:1') ])
+      .toStrictEqual([ true, 0, true ]);
   });
 
   it('names the edit in the way of an undo, and forgets the step blocked by it when asked', async () =>
