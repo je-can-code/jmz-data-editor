@@ -15,8 +15,10 @@ import { blankGrid, cellOf, fill, kindTile, put, type TestGrid } from './support
  * D5's changes on top: a tile marked "goes on top" lays over the ground instead of replacing it, and is lifted over
  * ground painted in beneath it later; repainting the ground keeps what is above it (all but the decorations that
  * belong to the ground: deep sea and the ocean decorations, and on a Field tileset every decoration); manual mode and
- * the one-stroke override paint exactly one layer; and the swap tool replaces a tile everywhere at once. It answers
- * with the cells to change and never writes the map itself.
+ * the one-stroke override paint exactly one layer; and the swap tool replaces a tile everywhere at once. Where the
+ * layer a tile needs is contested, the owner's rule gives it to what is being painted, so a stroke never skips a
+ * cell. With Shift held (exact shaping) the tile goes down exactly as the brush holds it and nothing is reshaped. It
+ * answers with the cells to change and never writes the map itself.
  *
  * Every rule is pinned with a near miss beside it: a cell that must stay untouched, a kind that must not count as
  * ground, a marked tile next to an unmarked one.
@@ -25,6 +27,7 @@ const OCEAN = 0;
 const DEEP_SEA = 1;
 const OCEAN_DECORATION = 2;
 const LAKE = 4;
+const WATERFALL = 5;
 const GRASS = 16;
 const GRASS_PAIRED = 17;
 const DIRT = 18;
@@ -443,7 +446,7 @@ describe('tiles laid over the ground survive later strokes', () =>
       .toEqual([ [ 'k16', CLIFF_CORNER, 'k21', 0 ], [ 'k16', 'k21', 0, 0 ] ]);
   });
 
-  it('keep an unmarked A tile somebody laid on layer 2 by hand, and give up when layer 3 is taken too', () =>
+  it('keep an unmarked A tile somebody laid on layer 2 by hand, and give layer 3 to the decoration when it is taken', () =>
   {
     // Arrange: rock laid on layer 2 by hand; and the same with the cliff corner on layer 3.
     const byHand = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, SOLID_ROCK);
@@ -451,11 +454,11 @@ describe('tiles laid over the ground survive later strokes', () =>
 
     // Act.
     const over = paintOne(byHand, 0, 0, kindTile(FLOWERS));
-    const noRoom = paintTiles(full, [ { x: 0, y: 0, tileId: kindTile(FLOWERS) } ], layeringWith(), 'auto');
+    const contested = paintOne(full, 0, 0, kindTile(FLOWERS));
 
-    // Assert.
-    expect([ stackOf(over, 0, 0), noRoom, planPlacement(gridReader(full), 0, 0, kindTile(FLOWERS), layeringWith(), 'auto').landing ])
-      .toEqual([ [ 'k16', SOLID_ROCK, 'k21', 0 ], [], -1 ]);
+    // Assert: the rock stays both times; the contested layer 3 goes to the flowers being painted.
+    expect([ stackOf(over, 0, 0), stackOf(contested, 0, 0), planPlacement(gridReader(full), 0, 0, kindTile(FLOWERS), layeringWith(), 'auto').landing ])
+      .toEqual([ [ 'k16', SOLID_ROCK, 'k21', 0 ], [ 'k16', SOLID_ROCK, 'k21', 0 ], 2 ]);
   });
 
   it('keep a marked tile on layer 3 when B\'s empty tile clears the tile above it', () =>
@@ -471,7 +474,7 @@ describe('tiles laid over the ground survive later strokes', () =>
       .toEqual([ 'k16', 0, CLIFF_CORNER, 0 ]);
   });
 
-  it('move an A tile on layer 4 down when a B to E tile pushes, and give up when layer 3 holds one too', () =>
+  it('move an A tile on layer 4 down when a B to E tile pushes, and give layer 4 to the B to E tile when layer 3 holds one too', () =>
   {
     // Arrange: the cliff corner laid on layer 4; and rock on layer 3 below it.
     const top = put(blankGrid(1, 1), 0, 0, 3, CLIFF_CORNER);
@@ -479,24 +482,26 @@ describe('tiles laid over the ground survive later strokes', () =>
 
     // Act.
     const pushed = paintOne(top, 0, 0, TREE);
-    const noRoom = paintTiles(both, [ { x: 0, y: 0, tileId: TREE } ], layeringWith(), 'auto');
+    const contested = paintOne(both, 0, 0, TREE);
 
-    // Assert.
-    expect([ stackOf(pushed, 0, 0), noRoom ])
-      .toEqual([ [ 0, 0, CLIFF_CORNER, TREE ], [] ]);
+    // Assert: the rock on layer 3 is never pushed over, so the tree takes the contested top from the cliff corner.
+    expect([ stackOf(pushed, 0, 0), stackOf(contested, 0, 0) ])
+      .toEqual([ [ 0, 0, CLIFF_CORNER, TREE ], [ 0, 0, SOLID_ROCK, TREE ] ]);
   });
 
-  it('keep a tile laid on layer 3 when a marked tile finds layers 2 and 3 taken', () =>
+  it('give layer 3 to a marked tile that finds layers 2 and 3 taken, even from a tile laid there', () =>
   {
-    // Arrange: grass, tall grass, and rock laid on layer 3.
-    const grid = put(put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, kindTile(TALL_GRASS)), 0, 0, 2, SOLID_ROCK);
+    // Arrange: grass, tall grass, and rock laid on layer 3; and the same with a bush on layer 3 for the near miss.
+    const laid = put(put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, kindTile(TALL_GRASS)), 0, 0, 2, SOLID_ROCK);
+    const bush = put(put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, kindTile(TALL_GRASS)), 0, 0, 2, BUSH);
+    const layering = layeringWith([ CLIFF_CORNER ]);
 
     // Act.
-    const changes = paintTiles(grid, [ { x: 0, y: 0, tileId: CLIFF_CORNER } ], layeringWith([ CLIFF_CORNER ]), 'auto');
+    const afters = [ laid, bush ].map(grid => paintOne(grid, 0, 0, CLIFF_CORNER, layering));
 
-    // Assert.
-    expect(changes)
-      .toEqual([]);
+    // Assert: the ground and the tall grass stay; layer 3 goes to the cliff corner being painted either way.
+    expect(afters.map(after => stackOf(after, 0, 0)))
+      .toEqual([ [ 'k16', 'k20', CLIFF_CORNER, 0 ], [ 'k16', 'k20', CLIFF_CORNER, 0 ] ]);
   });
 
   it('lay a marked tile over a decoration on a cell with no ground, not beneath it', () =>
@@ -541,19 +546,81 @@ describe('tiles laid over the ground survive later strokes', () =>
       .toEqual([ [ 'k16', 'k20', CLIFF_CORNER, 0 ], [ 'k16', CLIFF_CORNER, 0, 0 ] ]);
   });
 
-  it('leave a marked tile on the ground layer where it is when layers 2 and 3 are both taken', () =>
+  it('give the ground layer to the ground being painted when a marked tile there finds layers 2 and 3 taken', () =>
   {
-    // Arrange: the marked cliff corner on the ground layer, tall grass on layer 2 and a tree on layer 3.
-    const grid = put(put(put(blankGrid(1, 1), 0, 0, 0, CLIFF_CORNER), 0, 0, 1, kindTile(TALL_GRASS)), 0, 0, 2, TREE);
+    // Arrange: the marked cliff corner on the ground layer, tall grass on layer 2 and a tree on layer 3; and the same
+    // with layer 3 free, where the cliff corner still has somewhere to go.
+    const full = put(put(put(blankGrid(1, 1), 0, 0, 0, CLIFF_CORNER), 0, 0, 1, kindTile(TALL_GRASS)), 0, 0, 2, TREE);
+    const roomy = put(put(blankGrid(1, 1), 0, 0, 0, CLIFF_CORNER), 0, 0, 1, kindTile(TALL_GRASS));
     const layering = layeringWith([ CLIFF_CORNER ]);
 
     // Act.
-    const changes = paintTiles(grid, [ { x: 0, y: 0, tileId: kindTile(GRASS) } ], layering, 'auto');
-    const { landing } = planPlacement(gridReader(grid), 0, 0, kindTile(GRASS), layering, 'auto');
+    const afters = [ full, roomy ].map(grid => paintOne(grid, 0, 0, kindTile(GRASS), layering));
+    const { landing } = planPlacement(gridReader(full), 0, 0, kindTile(GRASS), layering, 'auto');
 
-    // Assert: nothing written, and the ghost preview shows the grass landing nowhere.
-    expect([ changes, landing ])
-      .toEqual([ [], -1 ]);
+    // Assert: the grass replaces the cliff corner it had no room to lift, and the ghost preview shows it on layer 1.
+    expect([ ...afters.map(after => stackOf(after, 0, 0)), landing ])
+      .toEqual([ [ 'k16', 'k20', TREE, 0 ], [ 'k16', 'k20', CLIFF_CORNER, 0 ], 0 ]);
+  });
+});
+
+describe('filling in the ground beneath a decoration on a cell with no ground', () =>
+{
+  it('lifts a marked tile over deep sea as the ocean goes in beneath, while an unmarked one is replaced', () =>
+  {
+    // Arrange: the marked cliff corner on the ground layer of an otherwise empty cell, and unmarked rock beside it.
+    const grid = put(put(blankGrid(2, 1), 0, 0, 0, CLIFF_CORNER), 1, 0, 0, SOLID_ROCK);
+    const layering = layeringWith([ CLIFF_CORNER ]);
+
+    // Act: deep sea painted across both.
+    const after = applied(grid, paintTiles(grid, [ { x: 0, y: 0, tileId: kindTile(DEEP_SEA) }, { x: 1, y: 0, tileId: kindTile(DEEP_SEA) } ], layering, 'auto'));
+
+    // Assert: the cliff corner rises over the deep sea; the rock gives way to the ocean, as MZ does.
+    expect([ stackOf(after, 0, 0), stackOf(after, 1, 0) ])
+      .toEqual([ [ `k${OCEAN}`, 'k1', CLIFF_CORNER, 0 ], [ `k${OCEAN}`, 'k1', 0, 0 ] ]);
+  });
+
+  it('lifts a marked tile over an ocean decoration, and over a Field tileset\'s paired column', () =>
+  {
+    // Arrange: the marked cliff corner alone on the ground layer, on an Area tileset and on a Field tileset.
+    const grid = put(blankGrid(1, 1), 0, 0, 0, CLIFF_CORNER);
+
+    // Act.
+    const decorated = paintOne(grid, 0, 0, kindTile(OCEAN_DECORATION), layeringWith([ CLIFF_CORNER ]));
+    const paired = paintOne(grid, 0, 0, kindTile(GRASS_PAIRED), layeringWith([ CLIFF_CORNER ], [], TilesetMode.field));
+
+    // Assert.
+    expect([ stackOf(decorated, 0, 0), stackOf(paired, 0, 0) ])
+      .toEqual([ [ `k${OCEAN}`, 'k2', CLIFF_CORNER, 0 ], [ 'k16', 'k17', CLIFF_CORNER, 0 ] ]);
+  });
+
+  it('gives the ground layer to the ocean when the marked tile has nowhere left to rise', () =>
+  {
+    // Arrange: the marked cliff corner on the ground layer, once with a tree on layer 3, once under rock laid on layer 2
+    // (which sends the deep sea itself to layer 3).
+    const treeAbove = put(put(blankGrid(1, 1), 0, 0, 0, CLIFF_CORNER), 0, 0, 2, TREE);
+    const rockAbove = put(put(blankGrid(1, 1), 0, 0, 0, CLIFF_CORNER), 0, 0, 1, SOLID_ROCK);
+    const layering = layeringWith([ CLIFF_CORNER ]);
+
+    // Act.
+    const afters = [ treeAbove, rockAbove ].map(grid => paintOne(grid, 0, 0, kindTile(DEEP_SEA), layering));
+
+    // Assert: what is being painted takes the contested ground layer.
+    expect(afters.map(after => stackOf(after, 0, 0)))
+      .toEqual([ [ `k${OCEAN}`, 'k1', TREE, 0 ], [ `k${OCEAN}`, SOLID_ROCK, 'k1', 0 ] ]);
+  });
+
+  it('leaves a marked tile under a decoration that needs no ground', () =>
+  {
+    // Arrange: the marked cliff corner alone on the ground layer.
+    const grid = put(blankGrid(1, 1), 0, 0, 0, CLIFF_CORNER);
+
+    // Act: tall grass, which fills nothing in beneath it.
+    const after = paintOne(grid, 0, 0, kindTile(TALL_GRASS), layeringWith([ CLIFF_CORNER ]));
+
+    // Assert.
+    expect(stackOf(after, 0, 0))
+      .toEqual([ CLIFF_CORNER, 'k20', 0, 0 ]);
   });
 });
 
@@ -721,6 +788,94 @@ describe('hand-shaped autotiles beside a stroke', () =>
     // Assert: both cells joined all round.
     expect(changes)
       .toEqual([ [ 0, makeAutotileId(GRASS, 0) ], [ 1, makeAutotileId(GRASS, 0) ] ]);
+  });
+});
+
+describe('exact shaping, as MZ does with Shift held', () =>
+{
+  it('writes the tile in the exact shape given and leaves a hand-shaped neighbour alone, where auto reshapes both', () =>
+  {
+    // Arrange: grass drawn by hand in shape 5 in the left cell of a 2x1 map.
+    const grid = put(blankGrid(2, 1), 0, 0, 0, makeAutotileId(GRASS, 5));
+
+    // Act: grass in shape 7 painted beside it, exactly and then automatically.
+    const exact = paintTiles(grid, [ { x: 1, y: 0, tileId: makeAutotileId(GRASS, 7) } ], layeringWith(), 'auto', 'exact');
+    const auto = paintTiles(grid, [ { x: 1, y: 0, tileId: makeAutotileId(GRASS, 7) } ], layeringWith(), 'auto');
+
+    // Assert: only the painted cell changes, in shape 7; automatic shaping joins both into shape 0.
+    expect([ exact, auto ])
+      .toEqual([ [ [ 1, makeAutotileId(GRASS, 7) ] ], [ [ 0, makeAutotileId(GRASS, 0) ], [ 1, makeAutotileId(GRASS, 0) ] ] ]);
+  });
+
+  it('writes the exact shape on the chosen layer in manual layering too', () =>
+  {
+    // Arrange: grass in the left cell of a 2x1 map, joined all round.
+    const grid = put(blankGrid(2, 1), 0, 0, 0, makeAutotileId(GRASS, 0));
+
+    // Act: dirt in shape 12 painted by hand on layer 3 of the right cell.
+    const changes = paintTiles(grid, [ { x: 1, y: 0, tileId: makeAutotileId(DIRT, 12) } ], layeringWith(), 2, 'exact');
+
+    // Assert.
+    expect(changes)
+      .toEqual([ [ cellIndex(2, 1, 1, 0, 2), makeAutotileId(DIRT, 12) ] ]);
+  });
+
+  it('puts a marked kind already in the cell into the exact shape, where auto leaves it be', () =>
+  {
+    // Arrange: grass under tall grass in shape 0; tall grass is marked.
+    const grid = put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 1, makeAutotileId(TALL_GRASS, 0));
+    const layering = layeringWith([], [ TALL_GRASS ]);
+
+    // Act.
+    const exact = paintTiles(grid, [ { x: 0, y: 0, tileId: makeAutotileId(TALL_GRASS, 9) } ], layering, 'auto', 'exact');
+    const auto = paintTiles(grid, [ { x: 0, y: 0, tileId: makeAutotileId(TALL_GRASS, 9) } ], layering, 'auto');
+
+    // Assert: in place on layer 2, never a second copy.
+    expect([ exact, auto ])
+      .toEqual([ [ [ cellIndex(1, 1, 0, 0, 1), makeAutotileId(TALL_GRASS, 9) ] ], [] ]);
+  });
+
+  it('still fills the ocean in beneath deep sea, in shape 0, while the deep sea keeps its exact shape', () =>
+  {
+    // Arrange: an empty cell.
+    const grid = blankGrid(1, 1);
+
+    // Act.
+    const after = applied(grid, paintTiles(grid, [ { x: 0, y: 0, tileId: makeAutotileId(DEEP_SEA, 3) } ], layeringWith(), 'auto', 'exact'));
+
+    // Assert.
+    expect([ cellOf(after, 0, 0, 0), cellOf(after, 0, 0, 1) ])
+      .toEqual([ makeAutotileId(OCEAN, 0), makeAutotileId(DEEP_SEA, 3) ]);
+  });
+
+  it('swaps each copy into the new kind in its own shape and reshapes nothing', () =>
+  {
+    // Arrange: grass in shapes 5 and 9 side by side, and grass in shape 20 alone below them.
+    const grid = blankGrid(2, 2);
+    put(grid, 0, 0, 0, makeAutotileId(GRASS, 5));
+    put(grid, 1, 0, 0, makeAutotileId(GRASS, 9));
+    put(grid, 0, 1, 0, makeAutotileId(GRASS, 20));
+
+    // Act: every grass swapped for dirt exactly, and for dirt automatically.
+    const exact = applied(grid, swapTiles(grid, kindTile(GRASS), kindTile(DIRT), TilesetMode.area, [ 0, 1, 2, 3 ], 'exact'));
+    const auto = applied(grid, swapTiles(grid, kindTile(GRASS), kindTile(DIRT), TilesetMode.area));
+
+    // Assert: the exact swap keeps 5, 9 and 20; the automatic one shapes the three against each other.
+    expect([ [ cellOf(exact, 0, 0, 0), cellOf(exact, 1, 0, 0), cellOf(exact, 0, 1, 0) ], cellOf(auto, 0, 0, 0) === makeAutotileId(DIRT, 5) ])
+      .toEqual([ [ makeAutotileId(DIRT, 5), makeAutotileId(DIRT, 9), makeAutotileId(DIRT, 20) ], false ]);
+  });
+
+  it('swaps a copy exactly into a kind with fewer shapes as the tile given, since its own shape has no match there', () =>
+  {
+    // Arrange: grass in shape 20; waterfalls draw only four shapes.
+    const grid = put(blankGrid(1, 1), 0, 0, 0, makeAutotileId(GRASS, 20));
+
+    // Act.
+    const changes = swapTiles(grid, kindTile(GRASS), makeAutotileId(WATERFALL, 1), TilesetMode.area, [ 0, 1, 2, 3 ], 'exact');
+
+    // Assert.
+    expect(changes)
+      .toEqual([ [ 0, makeAutotileId(WATERFALL, 1) ] ]);
   });
 });
 

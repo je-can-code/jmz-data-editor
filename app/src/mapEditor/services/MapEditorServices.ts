@@ -11,6 +11,9 @@ import { DocumentHub } from '../core/history/DocumentHub.ts';
 import type { DocumentKey } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
+import { paintSelection } from '../core/palette/paintSelection.ts';
+import { linkPaintSelection } from '../core/tools/paintSelectionLink.ts';
+import { PaintState } from '../core/tools/PaintState.ts';
 import { FileChangeFeed, openEventSource, type EventSourceFactory } from '../core/sync/FileChangeFeed.ts';
 import { FileChangeRouter } from '../core/sync/fileChangeRouting.ts';
 import { SharedFileChangeFeed, type LockManagerLike } from '../core/sync/SharedFileChangeFeed.ts';
@@ -76,6 +79,12 @@ type MapEditorServices = {
    * the start, and the shipped modules switch on once a started window has read which plugins are enabled.
    */
   readonly modules: PluginModuleRegistry;
+
+  /**
+   * What the painting tools paint with, shared by every map view in the window: the tool, the brush the palette or
+   * the eyedropper handed over, and the layer strip's choice.
+   */
+  readonly painting: PaintState;
 
   /**
    * Reads what command editing needs from the server, once per window however often it is asked: the plugin
@@ -215,6 +224,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   const commandEditing = wireCommandEditing(api, catalog, commandEditors);
   const modules = new PluginModuleRegistry(catalog);
   registerCoreEventKinds(modules);
+  const painting = new PaintState();
 
   // the change stream is shared by every window, and only exists with a server to stream from.
   const feed = api === null
@@ -246,6 +256,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     commandEditors,
     pluginHeaders: commandEditing.headers,
     modules,
+    painting,
     loadCommandResources: commandEditing.load,
     openDocument: async (key: DocumentKey) =>
     {
@@ -304,6 +315,10 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     {
       sync.start();
       stops.push(() => sync.stop());
+
+      // what the palette and the layer strip pick is what the painting tools paint with, and the eyedropper's picks go
+      // back to them; the palette's choices are the page's, shared by every panel torn out of it.
+      stops.push(linkPaintSelection(paintSelection, painting));
 
       if (api !== null)
       {

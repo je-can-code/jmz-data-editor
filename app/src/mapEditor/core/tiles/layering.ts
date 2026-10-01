@@ -1,7 +1,7 @@
 import { reshapeAround, type CellPosition } from './autotileRefresh.ts';
-import { TilesetMode } from './autotileShapes.ts';
+import { autotileTableSize, TilesetMode } from './autotileShapes.ts';
 import { isInside, TILE_LAYERS, TileDraft, type CellChange, type TileGrid, type TileLayerIndex, type TileReader } from './tileGrid.ts';
-import { autotileKind, makeAutotileId } from './tileIds.ts';
+import { autotileKind, autotileShape, isAutotile, makeAutotileId } from './tileIds.ts';
 import { isMarkedTile, type TilesetMarks } from './tilesetMarks.ts';
 import { fieldBaseTile, isASheetTile, isFieldPairedKind, isSameTile, OCEAN_KIND, tileRole, unshapedTile } from './tileRoles.ts';
 
@@ -56,21 +56,25 @@ type PlacementPlan = {
 };
 
 /**
- * A plan that changes nothing: the tile finds no room in the cell.
+ * How a stroke shapes autotiles. {@code auto} is MZ's autotiling: every autotile the stroke paints takes the shape
+ * its neighbours call for, and the neighbours are reshaped around it. {@code exact} is MZ's Shift held down: the
+ * painted tile is written exactly as the brush holds it, shape and all, and nothing around it is reshaped.
  */
-const NO_ROOM: PlacementPlan = { landing: -1, writes: [] };
+type Shaping = 'auto' | 'exact';
 
 /**
- * Reports whether a tile above the ground layer is one automatic layering never deletes: an A-sheet tile laid over
- * the ground by hand or by a "goes on top" mark. Only a decoration auto mode itself lays on layer 2 (an A2
- * decoration, a Field tileset's paired column, an ocean overlay) may be replaced, and only while it is unmarked, the
- * way MZ replaces one decoration with another. B to E tiles are never laid over; the stack handles them.
+ * Reports whether a tile above the ground layer is one automatic layering keeps out of the way: an A-sheet tile laid
+ * over the ground by hand or by a "goes on top" mark. Only a decoration auto mode itself lays on layer 2 (an A2
+ * decoration, a Field tileset's paired column, an ocean overlay) is replaced by the next decoration, and only while it
+ * is unmarked, the way MZ replaces one decoration with another. B to E tiles are never laid over; the stack handles
+ * them. A tile laid over is still replaced when it sits on the very layer a painted tile needs and nothing else is
+ * free, since the owner's rule for a contested layer is that it goes to what is being painted.
  * @param {number} tileId The tile on the layer.
  * @param {number} z The layer it is on, 1 to 3.
  * @param {TilesetLayering} layering The tileset's mode and marks.
- * @returns {boolean} True when automatic layering must keep the tile.
+ * @returns {boolean} True when automatic layering keeps the tile, short of a contested layer.
  */
-const isLaidOver = (tileId: number, z: number, layering: TilesetLayering): boolean =>
+const isLaidOver =(tileId: number, z: number, layering: TilesetLayering): boolean =>
 {
   if (isASheetTile(tileId) === false)
   {
@@ -89,10 +93,10 @@ const isLaidOver = (tileId: number, z: number, layering: TilesetLayering): boole
 /**
  * Plans a B to E tile: a two-slot stack on layers 3 and 4, newest on top, as MZ does it. Painting the tile already
  * on top changes nothing, and a third tile drops the oldest. Choices this editor makes where MZ says nothing: a free
- * top slot is filled without pushing anything down, and the stack never deletes an A tile laid on layers 3 or 4
- * (see {@link isLaidOver}). It never pushes a tile down over one on layer 3, replacing the top instead, so painting a
- * tree never deletes a cliff corner; one on layer 4 moves down to layer 3 when pushed; and with A tiles on both, the
- * B to E tile finds no room.
+ * top slot is filled without pushing anything down, and the stack never pushes a tile down over an A tile laid on
+ * layer 3 (see {@link isLaidOver}), replacing the top instead, so painting a tree never deletes a cliff corner; an A
+ * tile on layer 4 moves down to layer 3 when pushed. With A tiles laid on both, layer 4 is contested, and it goes to
+ * the B to E tile being painted.
  * @param {TileReader} reader The map.
  * @param {number} x The column.
  * @param {number} y The row.
@@ -109,17 +113,10 @@ const planUpperTile = (reader: TileReader, x: number, y: number, tileId: number,
     return { landing: 3, writes: [] };
   }
 
-  if (top === 0)
+  // an empty top slot is simply filled, and an A tile on layer 3 is never pushed over: the top is replaced.
+  if (top === 0 || isLaidOver(below, 2, layering))
   {
     return { landing: 3, writes: [ [ 3, tileId ] ] };
-  }
-
-  // an A tile on layer 3 is never pushed over: replace the top, unless the top is one too.
-  if (isLaidOver(below, 2, layering))
-  {
-    return isLaidOver(top, 3, layering)
-      ? NO_ROOM
-      : { landing: 3, writes: [ [ 3, tileId ] ] };
   }
 
   return { landing: 3, writes: [ [ 2, top ], [ 3, tileId ] ] };
@@ -128,16 +125,15 @@ const planUpperTile = (reader: TileReader, x: number, y: number, tileId: number,
 /**
  * Plans a tile marked to go on top: on the ground layer when the cell has nothing on layers 1 and 2, otherwise on
  * the lowest free layer above what is there, layer 2 and then layer 3, so it always lies over whatever it is painted
- * on. A cell that already holds the tile keeps it where it is. When nothing above is free the tile replaces a B to
- * E tile on layer 3, the highest a marked tile goes; if layer 3 holds an A tile laid there, it finds no room.
+ * on. A cell that already holds the tile keeps it where it is. When nothing above is free, layer 3, the highest a
+ * marked tile goes, is contested, and the marked tile takes it from whatever is there.
  * @param {TileReader} reader The map.
  * @param {number} x The column.
  * @param {number} y The row.
  * @param {number} tileId The marked tile.
- * @param {TilesetLayering} layering The tileset's mode and marks.
  * @returns {PlacementPlan} The plan.
  */
-const planMarkedTile = (reader: TileReader, x: number, y: number, tileId: number, layering: TilesetLayering): PlacementPlan =>
+const planMarkedTile = (reader: TileReader, x: number, y: number, tileId: number): PlacementPlan =>
 {
   const already = TILE_LAYERS.find(z => isSameTile(reader.tileAt(x, y, z), tileId));
   if (already !== undefined)
@@ -156,22 +152,41 @@ const planMarkedTile = (reader: TileReader, x: number, y: number, tileId: number
     lowest = 1;
   }
 
-  const free = ([ 0, 1, 2 ] as const).find(z => z >= lowest && reader.tileAt(x, y, z) === 0);
-  if (free !== undefined)
+  // the lowest free layer from there, or layer 3 taken over when none is free.
+  const free = ([ 0, 1, 2 ] as const).find(z => z >= lowest && reader.tileAt(x, y, z) === 0) ?? 2;
+  return { landing: free, writes: [ [ free, unshapedTile(tileId) ] ] };
+};
+
+/**
+ * Finds the ground auto mode fills in beneath a decoration: the ocean under deep sea and the ocean decorations, and on
+ * a Field tileset the base column before a paired one.
+ * @param {number} tileId The decoration.
+ * @param {number} mode The tileset's mode.
+ * @returns {number} The ground tile in shape 0, or 0 when the decoration needs none.
+ */
+const decorationCompanion = (tileId: number, mode: number): number =>
+{
+  if (tileRole(tileId, mode) === 'oceanOverlay')
   {
-    return { landing: free, writes: [ [ free, unshapedTile(tileId) ] ] };
+    return makeAutotileId(OCEAN_KIND, 0);
   }
 
-  return isLaidOver(reader.tileAt(x, y, 2), 2, layering)
-    ? NO_ROOM
-    : { landing: 2, writes: [ [ 2, unshapedTile(tileId) ] ] };
+  return isFieldPairedKind(autotileKind(tileId), mode)
+    ? fieldBaseTile(tileId)
+    : 0;
 };
 
 /**
  * Plans a decoration auto mode lays over the ground: an A2 decoration, a Field tileset's paired base column (with
  * the column before it filled in on layer 1), or deep sea and the ocean decorations (with the ocean filled in on
- * layer 1). It takes layer 2, replacing a decoration there as MZ does; a tile laid over the ground there is kept
- * and the decoration lies over it on layer 3 instead, or finds no room when layer 3 is taken too.
+ * layer 1). It takes layer 2, replacing a decoration there as MZ does; over a tile laid over the ground there, it
+ * lies on layer 3 instead, taking that layer from whatever holds it, since a contested layer goes to what is being
+ * painted.
+ *
+ * Filling in the ground beneath treats a tile marked to go on top the way painting the ground does: on a cell with
+ * no ground, where a marked tile sits on the ground layer, the marked tile is lifted over the decoration onto layer 3
+ * rather than written over, and the ground goes in beneath both. With layer 3 taken, or the decoration itself there,
+ * the marked tile has nowhere left to go and the ground being painted replaces it.
  * @param {TileReader} reader The map.
  * @param {number} x The column.
  * @param {number} y The row.
@@ -181,25 +196,25 @@ const planMarkedTile = (reader: TileReader, x: number, y: number, tileId: number
  */
 const planDecoration = (reader: TileReader, x: number, y: number, tileId: number, layering: TilesetLayering): PlacementPlan =>
 {
-  const tile = unshapedTile(tileId);
-  const companions: LayerWrite[] = [];
-  if (tileRole(tileId, layering.mode) === 'oceanOverlay')
+  const landing = isLaidOver(reader.tileAt(x, y, 1), 1, layering)
+    ? 2
+    : 1;
+  const writes: LayerWrite[] = [ [ landing, unshapedTile(tileId) ] ];
+  const companion = decorationCompanion(tileId, layering.mode);
+  if (companion === 0)
   {
-    companions.push([ 0, makeAutotileId(OCEAN_KIND, 0) ]);
-  }
-  else if (isFieldPairedKind(autotileKind(tileId), layering.mode))
-  {
-    companions.push([ 0, fieldBaseTile(tileId) ]);
-  }
-
-  if (isLaidOver(reader.tileAt(x, y, 1), 1, layering) === false)
-  {
-    return { landing: 1, writes: [ ...companions, [ 1, tile ] ] };
+    return { landing, writes };
   }
 
-  return reader.tileAt(x, y, 2) === 0
-    ? { landing: 2, writes: [ ...companions, [ 2, tile ] ] }
-    : NO_ROOM;
+  // the ground goes in first; a marked tile on a cell with no ground rises over the decoration when layer 3 is free.
+  const onGround = reader.tileAt(x, y, 0);
+  const lifts = landing === 1 && isMarkedTile(layering.marks, onGround) && reader.tileAt(x, y, 2) === 0;
+  return {
+    landing,
+    writes: lifts
+      ? [ [ 0, companion ], ...writes, [ 2, onGround ] ]
+      : [ [ 0, companion ], ...writes ],
+  };
 };
 
 /**
@@ -240,8 +255,8 @@ const groundClearsDecoration = (decoration: number, mode: number): boolean =>
  * A marked tile on layer 1, which is where one lands on a cell with no ground (D5), is lifted rather than replaced: it
  * moves to the lowest free layer above, layer 2 and then layer 3, as it would have landed with the ground already
  * there, and the ground goes in beneath it. A decoration this stroke clears leaves layer 2 free for it. When layers 2
- * and 3 are both taken the ground finds no room and the cell is left as it is, rather than delete a tile nobody
- * pointed at; that is a default until the owner decides it.
+ * and 3 are both taken, layer 1 is contested, and by the owner's rule it goes to the ground being painted: the marked
+ * tile is replaced.
  * @param {TileReader} reader The map.
  * @param {number} x The column.
  * @param {number} y The row.
@@ -266,14 +281,14 @@ const planGround = (reader: TileReader, x: number, y: number, tileId: number, la
     return { landing: 0, writes };
   }
 
-  // lift the marked tile to the lowest free layer above, counting a decoration cleared just now as free.
+  // lift the marked tile to the lowest free layer above, counting a decoration cleared just now as free; with none
+  // free, the ground takes its place.
   const free = ([ 1, 2 ] as const).find(z => (z === 1 && clears) || reader.tileAt(x, y, z) === 0);
-  if (free === undefined)
+  if (free !== undefined)
   {
-    return NO_ROOM;
+    writes.push([ free, onGround ]);
   }
 
-  writes.push([ free, onGround ]);
   return { landing: 0, writes };
 };
 
@@ -284,6 +299,7 @@ const planGround = (reader: TileReader, x: number, y: number, tileId: number, la
  * changes: B to E tiles stack on layers 3 and 4; B's empty tile clears them; a tile marked to go on top lays over
  * whatever is there instead of replacing it; everything else goes where MZ puts it, except that painting the
  * ground no longer wipes what is above it, and lifts a marked tile off the ground layer instead of replacing it.
+ * Where the layer a tile needs is contested, the tile being painted always gets it, so every tile lands somewhere.
  * @param {TileReader} reader The map as it stands, earlier tiles of the same stroke included.
  * @param {number} x The column.
  * @param {number} y The row.
@@ -312,7 +328,7 @@ const planPlacement = (reader: TileReader, x: number, y: number, tileId: number,
 
   if (isMarkedTile(layering.marks, tileId))
   {
-    return planMarkedTile(reader, x, y, tileId, layering);
+    return planMarkedTile(reader, x, y, tileId);
   }
 
   return role === 'ground'
@@ -321,18 +337,74 @@ const planPlacement = (reader: TileReader, x: number, y: number, tileId: number,
 };
 
 /**
+ * Turns a plan into the writes that put the tile down exactly as the brush holds it, which is what Shift does in MZ:
+ * the landing layer gets the very tile id, shape included, rather than the shape-0 form every other write starts
+ * from, and a cell already holding the tile's kind there in another shape takes the exact one. Every other write in
+ * the plan (a companion filled in beneath, a marked tile lifted, a decoration cleared) goes ahead as planned.
+ * @param {PlacementPlan} plan The plan.
+ * @param {number} tileId The tile as the brush holds it.
+ * @returns {readonly LayerWrite[]} The writes.
+ */
+const exactWrites = (plan: PlacementPlan, tileId: number): readonly LayerWrite[] =>
+{
+  const { landing } = plan;
+  if (landing === -1)
+  {
+    return plan.writes;
+  }
+
+  return [ ...plan.writes.filter(([ z ]) => z !== landing), [ landing, tileId ] ];
+};
+
+/**
+ * Where one painted tile ended up: its cell, the layer it landed on, and the tile there once shaped. The ghost preview
+ * draws these before a click, so it shows the layer each tile will land on and the shape it will take.
+ */
+type TileLanding = {
+  readonly x: number;
+  readonly y: number;
+  readonly layer: TileLayerIndex;
+  readonly tileId: number;
+};
+
+/**
+ * What painting a stroke comes to: the cells to change, and where each painted tile landed.
+ */
+type PaintedStroke = {
+  /**
+   * The cells to change, in index order, ready for the map document's tiles patch.
+   */
+  readonly changes: CellChange[];
+
+  /**
+   * Where each tile landed, in stroke order; B's empty tile, which only clears, lands nowhere and is left out.
+   */
+  readonly landings: TileLanding[];
+};
+
+/**
  * Paints tiles as one stroke: places each in turn by {@link planPlacement}, then shapes every autotile the stroke
- * reached against the finished result. Placements beyond the map are skipped.
+ * reached against the finished result, and reports where each tile landed. Placements beyond the map are skipped.
+ * With exact shaping (Shift held) each tile is written exactly as given and nothing is reshaped, neither the tiles
+ * painted nor their neighbours.
  * @param {TileGrid} grid The map's tile data as it stands.
  * @param {readonly TilePlacement[]} placements The tiles to paint, in stroke order.
  * @param {TilesetLayering} layering The tileset's mode and marks.
  * @param {LayerChoice} choice The layer choice the stroke paints with.
- * @returns {CellChange[]} The cells to change, in index order, ready for the map document's tiles patch.
+ * @param {Shaping} shaping Whether autotiles are shaped as they are painted; they are unless told otherwise.
+ * @returns {PaintedStroke} The cells to change and where each tile landed.
  */
-const paintTiles = (grid: TileGrid, placements: readonly TilePlacement[], layering: TilesetLayering, choice: LayerChoice): CellChange[] =>
+const paintStroke = (
+  grid: TileGrid,
+  placements: readonly TilePlacement[],
+  layering: TilesetLayering,
+  choice: LayerChoice,
+  shaping: Shaping = 'auto',
+): PaintedStroke =>
 {
   const draft = new TileDraft(grid);
   const touched: CellPosition[] = [];
+  const landed: (readonly [ number, number, TileLayerIndex ])[] = [];
   placements.forEach(({ x, y, tileId }) =>
   {
     if (isInside(draft, x, y) === false)
@@ -341,12 +413,48 @@ const paintTiles = (grid: TileGrid, placements: readonly TilePlacement[], layeri
     }
 
     // each placement reads the draft, so a stroke that crosses a cell twice builds on its own first pass.
-    planPlacement(draft, x, y, tileId, layering, choice).writes.forEach(([ z, value ]) => draft.setTile(x, y, z, value));
+    const plan = planPlacement(draft, x, y, tileId, layering, choice);
+    const writes = shaping === 'exact'
+      ? exactWrites(plan, tileId)
+      : plan.writes;
+    writes.forEach(([ z, value ]) => draft.setTile(x, y, z, value));
     touched.push([ x, y ]);
+    if (plan.landing !== -1)
+    {
+      landed.push([ x, y, plan.landing ]);
+    }
   });
 
-  reshapeAround(draft, touched, layering.mode);
-  return draft.changes();
+  if (shaping === 'auto')
+  {
+    reshapeAround(draft, touched, layering.mode);
+  }
+
+  // read each landing back once every shape is settled, so it shows the shape the tile will really take.
+  return {
+    changes: draft.changes(),
+    landings: landed.map(([ x, y, layer ]) => ({ x, y, layer, tileId: draft.tileAt(x, y, layer) })),
+  };
+};
+
+/**
+ * Paints tiles as one stroke, as {@link paintStroke} does, answering only with the cells to change.
+ * @param {TileGrid} grid The map's tile data as it stands.
+ * @param {readonly TilePlacement[]} placements The tiles to paint, in stroke order.
+ * @param {TilesetLayering} layering The tileset's mode and marks.
+ * @param {LayerChoice} choice The layer choice the stroke paints with.
+ * @param {Shaping} shaping Whether autotiles are shaped as they are painted; they are unless told otherwise.
+ * @returns {CellChange[]} The cells to change, in index order, ready for the map document's tiles patch.
+ */
+const paintTiles = (
+  grid: TileGrid,
+  placements: readonly TilePlacement[],
+  layering: TilesetLayering,
+  choice: LayerChoice,
+  shaping: Shaping = 'auto',
+): CellChange[] =>
+{
+  return paintStroke(grid, placements, layering, choice, shaping).changes;
 };
 
 /**
@@ -365,17 +473,47 @@ const strokeLayerChoice = (strip: LayerChoice, override: TileLayerIndex | 'none'
 };
 
 /**
+ * Finds what an exact swap writes over one copy of the tile it replaces: the new kind in the copy's own shape when both
+ * are autotiles drawn from tables of the same size, so a shape drawn by hand survives the swap, and the new tile as
+ * given otherwise.
+ * @param {number} copy The copy being replaced.
+ * @param {number} toTile The tile replacing it.
+ * @returns {number} The tile to write.
+ */
+const exactReplacement = (copy: number, toTile: number): number =>
+{
+  if (isAutotile(copy) === false || isAutotile(toTile) === false)
+  {
+    return toTile;
+  }
+
+  const shape = autotileShape(copy);
+  return shape < autotileTableSize(autotileKind(toTile))
+    ? makeAutotileId(autotileKind(toTile), shape)
+    : toTile;
+};
+
+/**
  * Replaces one tile with another across the whole map, in place on whichever layer each copy sits, then reshapes
  * every autotile around the cells it changed. An autotile matches by kind, whatever its shape. Swapping a tile for
- * itself, or swapping out the empty tile (which would fill every empty layer of every cell), changes nothing.
+ * itself, or swapping out the empty tile (which would fill every empty layer of every cell), changes nothing. With
+ * exact shaping (Shift held) nothing is reshaped: each copy keeps its own shape where the new kind has one like it.
  * @param {TileGrid} grid The map's tile data as it stands.
  * @param {number} fromTile The tile to replace.
  * @param {number} toTile The tile to put in its place; 0 removes it.
  * @param {number} mode The tileset's mode.
  * @param {readonly TileLayerIndex[]} layers The layers to swap on; every tile layer unless narrowed.
+ * @param {Shaping} shaping Whether autotiles are reshaped around the swap; they are unless told otherwise.
  * @returns {CellChange[]} The cells to change, in index order.
  */
-const swapTiles = (grid: TileGrid, fromTile: number, toTile: number, mode: number, layers: readonly TileLayerIndex[] = TILE_LAYERS): CellChange[] =>
+const swapTiles = (
+  grid: TileGrid,
+  fromTile: number,
+  toTile: number,
+  mode: number,
+  layers: readonly TileLayerIndex[] = TILE_LAYERS,
+  shaping: Shaping = 'auto',
+): CellChange[] =>
 {
   if (fromTile === 0 || isSameTile(fromTile, toTile))
   {
@@ -391,7 +529,7 @@ const swapTiles = (grid: TileGrid, fromTile: number, toTile: number, mode: numbe
     {
       // swap every matching layer of the cell, and remember the cell once if any changed.
       const matching = layers.filter(z => isSameTile(draft.tileAt(x, y, z), fromTile));
-      matching.forEach(z => draft.setTile(x, y, z, replacement));
+      matching.forEach(z => draft.setTile(x, y, z, shaping === 'exact' ? exactReplacement(draft.tileAt(x, y, z), toTile) : replacement));
       if (matching.length > 0)
       {
         touched.push([ x, y ]);
@@ -399,9 +537,13 @@ const swapTiles = (grid: TileGrid, fromTile: number, toTile: number, mode: numbe
     }
   }
 
-  reshapeAround(draft, touched, mode);
+  if (shaping === 'auto')
+  {
+    reshapeAround(draft, touched, mode);
+  }
+
   return draft.changes();
 };
 
-export { paintTiles, planPlacement, strokeLayerChoice, swapTiles };
-export type { LayerChoice, LayerWrite, PlacementPlan, TilePlacement, TilesetLayering };
+export { paintStroke, paintTiles, planPlacement, strokeLayerChoice, swapTiles };
+export type { LayerChoice, LayerWrite, PaintedStroke, PlacementPlan, Shaping, TileLanding, TilePlacement, TilesetLayering };

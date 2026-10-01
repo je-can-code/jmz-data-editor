@@ -1,4 +1,4 @@
-import { Container, Graphics, Rectangle, WebGLRenderer, type TextureSource } from 'pixi.js';
+import { Container, Graphics, Rectangle, Text, WebGLRenderer, type TextureSource } from 'pixi.js';
 import type { DocumentChange } from '../core/model/EditorDocument.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { PassabilityRule } from '../core/modules/PluginModule.ts';
@@ -101,6 +101,7 @@ type Slots = {
   readonly selection: Graphics;
   readonly ghosts: Container;
   readonly pointer: Graphics;
+  readonly pointerLabel: Text;
 };
 
 /**
@@ -138,6 +139,11 @@ const VIEW_BACKGROUND = 0x121212;
  * How dark the layer highlight makes everything but the highlighted layer.
  */
 const DIM_ALPHA = 0.6;
+
+/**
+ * How far above the hover its words sit, in screen pixels.
+ */
+const HOVER_LABEL_GAP = 3;
 
 /**
  * Reports whether two maps of tiles to the tile-image events on them hold the same, so passability is rebuilt only
@@ -334,7 +340,13 @@ class PixiMapRenderer implements MapRenderer
       selection: new Graphics(),
       ghosts: new Container(),
       pointer: new Graphics(),
+      pointerLabel: new Text({
+        text: '',
+        style: { fontFamily: 'sans-serif', fontSize: 13, fontWeight: '600', fill: 0xffffff, stroke: { color: 0x000000, width: 3 } },
+      }),
     };
+    this.#slots.pointerLabel.anchor.set(0, 1);
+    this.#slots.pointerLabel.visible = false;
 
     // the engine's order: lower tiles, events below and with characters, upper tiles, events above characters.
     const { slots } = this;
@@ -356,6 +368,7 @@ class PixiMapRenderer implements MapRenderer
       slots.selection,
       slots.ghosts,
       slots.pointer,
+      slots.pointerLabel,
     );
     slots.ghosts.addChild(this.#events.ghosts);
     this.#stage.addChild(this.#world);
@@ -568,6 +581,7 @@ class PixiMapRenderer implements MapRenderer
     }
 
     const pointerChanged = state.hover !== previous.hover
+      || (state.hoverLabel ?? null) !== (previous.hoverLabel ?? null)
       || state.selectionBox !== previous.selectionBox
       || state.ghostEvents !== previous.ghostEvents
       || state.blockedCells !== previous.blockedCells;
@@ -1063,6 +1077,52 @@ class PixiMapRenderer implements MapRenderer
     const resolution = this.#resolution;
     this.#world.scale.set(zoom);
     this.#world.position.set(Math.round(-x * zoom * resolution) / resolution, Math.round(-y * zoom * resolution) / resolution);
+    this.#placeHoverLabel();
+  }
+
+  /**
+   * Puts the hover's words just above its top-left corner, at the same size on screen whatever the zoom.
+   */
+  #placeHoverLabel(): void
+  {
+    const label = this.#slots.pointerLabel;
+    const { hover } = this.#overlayState;
+    if (label.visible === false || hover === null)
+    {
+      return;
+    }
+
+    const { zoom } = this.#camera;
+    label.scale.set(1 / zoom);
+    label.position.set(hover.x * TILE_SIZE, hover.y * TILE_SIZE - HOVER_LABEL_GAP / zoom);
+  }
+
+  /**
+   * Writes the hover's words, or hides them when there are none or no hover to put them beside.
+   */
+  #writeHoverLabel(): void
+  {
+    const label = this.#slots.pointerLabel;
+    const text = this.#overlayState.hoverLabel ?? null;
+    const shown = text !== null && text !== '' && this.#overlayState.hover !== null && this.#isOn('hover');
+    label.visible = shown;
+    if (shown === false)
+    {
+      return;
+    }
+
+    // each change redraws the words' texture, so only a real change is made.
+    if (label.text !== text)
+    {
+      label.text = text;
+    }
+
+    if (label.resolution !== this.#resolution)
+    {
+      label.resolution = this.#resolution;
+    }
+
+    this.#placeHoverLabel();
   }
 
   /**
@@ -1317,8 +1377,15 @@ class PixiMapRenderer implements MapRenderer
   #onDocumentChange(change: DocumentChange): void
   {
     this.#needsRender = true;
-    this.#modulesDirty = true;
     const effect = changeEffect(change);
+
+    // the modules draw from events and regions, so a tile edit that leaves the regions alone never redraws them: a
+    // brush stroke would otherwise redraw every sight ring and light on the map at every step.
+    if (effect.kind !== 'tiles' || this.#touchesRegions(effect.indices))
+    {
+      this.#modulesDirty = true;
+    }
+
     switch (effect.kind)
     {
       case 'rebuild':
@@ -1337,6 +1404,23 @@ class PixiMapRenderer implements MapRenderer
       case 'overlays':
         break;
     }
+  }
+
+  /**
+   * Reports whether any of some changed cells lies on the region layer, the one tile layer a module may draw from.
+   * @param {readonly number[]} indices The changed cells, as flat indexes.
+   * @returns {boolean} True when a region changed.
+   */
+  #touchesRegions(indices: readonly number[]): boolean
+  {
+    const document = this.#document;
+    if (document === null)
+    {
+      return false;
+    }
+
+    const regionsStart = document.width * document.height * 5;
+    return indices.some(index => index >= regionsStart);
   }
 
   /**
@@ -1453,6 +1537,7 @@ class PixiMapRenderer implements MapRenderer
     {
       this.#pointerDirty = false;
       drawPointerOverlays(this.#slots.pointer, this.#overlayState, shown, TILE_SIZE);
+      this.#writeHoverLabel();
       redrew = true;
     }
 

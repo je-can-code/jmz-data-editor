@@ -15,8 +15,10 @@
  *   - the cold open: navigation start to the first frame that showed the map complete, sprites and parallax loaded;
  *   - three camera paths driven from the page's own frame clock: a pan at zoom 1, a zoom sweep from 2x out to the
  *     whole map and back, and the whole map held on screen and drifting;
- *   - a brush stroke: real pointer moves with the left button held, each painting a 3x3 patch through the paint
- *     stand-in (P3's tools do not exist yet), matched to the frames that drew them;
+ *   - a brush stroke: real pointer moves with the left button held, one cell apart, each painting a fresh 3x3 patch
+ *     of ground with the map view's own pen, through the layering engine and the autotile refresh, matched to the
+ *     frames that drew them; and the same again with a stand-in for a plugin module's overlay (two rings around every
+ *     event, as heavy as sight rings) switched on, since a tile edit must not redraw those;
  *   - the warm open: reopening the map after another, once this window holds both;
  *   - shown again: the view hidden, as a panel behind another tab is, which lets its GPU context go, then shown, timed
  *     to the first frame drawn on the context it got back; measured last, since it restarts the page's GPU context;
@@ -95,6 +97,7 @@ type MapResult = {
   timings: Record<string, number>;
   paths: Record<string, PathResult>;
   stroke: StrokeResult;
+  strokeWithRings: StrokeResult;
   warmOpenMs: number;
   shownAgainMs: number;
   events: EventsResult;
@@ -138,8 +141,9 @@ type PageHooks = {
   screenOfCell: (x: number, y: number) => { x: number; y: number };
   startPath: (kind: string) => void;
   stopPath: () => void;
-  enablePaint: (settings: Record<string, unknown>) => void;
+  enablePaint: (settings: Record<string, unknown>) => number | null;
   disablePaint: () => void;
+  enableModuleRings: () => void;
   paintState: () => { steps: number; redrawnFrames: number };
   enableEveryOverlay: () => void;
   openMap: (mapId: number) => Promise<{ ms: number }>;
@@ -164,6 +168,12 @@ const PATHS = [ 'pan', 'zoom', 'zoomedout' ];
  * How many pointer moves a stroke makes, 4 ms apart, as a hand dragging a pen would.
  */
 const STROKE_MOVES = 150;
+
+/**
+ * The stroke's brush: 3 cells across and down, so every move paints a column of three and reshapes the autotiles
+ * around it.
+ */
+const STROKE_FOOTPRINT = 3;
 
 /**
  * The map's own canvas on the page; the quick panel beside it may draw canvases of its own.
@@ -317,30 +327,46 @@ const measurePath = async (page: Page, kind: string, seconds: number): Promise<P
 };
 
 /**
- * Builds a stroke's path inside the map's part of the view: sweeping across and back, drifting down.
+ * Builds a stroke's path inside the map's part of the view, one cell per move, so every move paints cells the stroke
+ * has not covered yet: across a band of rows, down by the brush's height, back across, and so on, snake-wise. A path
+ * that came back over its own cells would find them painted already and change nothing there.
  * @param {{ x: number, y: number }} topLeft The screen point of the top-left cell's centre.
- * @param {{ x: number, y: number }} bottomRight The screen point of the bottom-right cell's centre.
- * @param {{ width: number, height: number }} viewport The page's viewport.
+ * @param {number} cellPixels How far apart neighbouring cells' centres are on screen.
+ * @param {number[]} size The map's size in cells.
+ * @param {{ width: number, height: number }} viewport The canvas's size.
  * @returns {{ x: number, y: number }[]} The pointer positions.
  */
 const strokePath = (
   topLeft: { x: number; y: number },
-  bottomRight: { x: number; y: number },
+  cellPixels: number,
+  size: number[],
   viewport: { width: number; height: number }): { x: number; y: number }[] =>
 {
-  const left = Math.max(topLeft.x, 24);
-  const top = Math.max(topLeft.y, 24);
-  const right = Math.min(bottomRight.x, viewport.width - 24);
-  const bottom = Math.min(bottomRight.y, viewport.height - 60);
-  const width = Math.max(1, right - left);
-  const height = Math.max(1, bottom - top);
+  // the columns and rows whose centres are on screen, leaving room at the far edges for the brush.
+  const [ width, height ] = size;
+  const firstColumn = Math.max(0, Math.ceil((24 - topLeft.x) / cellPixels));
+  const lastColumn = Math.min(width - STROKE_FOOTPRINT, Math.floor((viewport.width - 24 - topLeft.x) / cellPixels));
+  const firstRow = Math.max(0, Math.ceil((24 - topLeft.y) / cellPixels));
+  const lastRow = Math.min(height - STROKE_FOOTPRINT, Math.floor((viewport.height - 24 - topLeft.y) / cellPixels) - STROKE_FOOTPRINT);
   const points: { x: number; y: number }[] = [];
-  for (let step = 0; step < STROKE_MOVES; step++)
+  let column = firstColumn;
+  let row = firstRow;
+  let direction = 1;
+  while (points.length < STROKE_MOVES && row <= lastRow)
   {
-    // a triangle wave across, so the stroke stays on the map however narrow it is.
-    const travel = (step * 8) % (width * 2);
-    const x = travel <= width ? left + travel : left + width * 2 - travel;
-    points.push({ x, y: top + ((step * 3) % height) });
+    points.push({ x: topLeft.x + column * cellPixels, y: topLeft.y + row * cellPixels });
+
+    // across the band, then down a brush's height and back the other way.
+    const next = column + direction;
+    if (next < firstColumn || next > lastColumn)
+    {
+      row += STROKE_FOOTPRINT;
+      direction = -direction;
+    }
+    else
+    {
+      column = next;
+    }
   }
 
   return points;
@@ -355,18 +381,23 @@ const strokePath = (
 const measureStroke = async (page: Page, size: number[]): Promise<StrokeResult> =>
 {
   const [ width, height ] = size;
-  await page.evaluate(([ x, y ]) =>
+  const tileId = await page.evaluate(([ x, y, footprint ]) =>
   {
     const hooks = (window as unknown as HookWindow).__jmzMapView;
     hooks.lookAt(x, y, 1);
-    hooks.enablePaint({ layer: 0, footprint: 3 });
-  }, [ Math.floor(width / 2), Math.floor(height / 2) ]);
+    return hooks.enablePaint({ footprint });
+  }, [ Math.floor(width / 2), Math.floor(height / 2), STROKE_FOOTPRINT ]);
+  if (tileId === null)
+  {
+    throw new Error('the map view has no map to paint on');
+  }
+
   await page.waitForTimeout(300);
-  const [ topLeft, bottomRight ] = await page.evaluate(([ right, bottom ]) =>
+  const [ topLeft, nextCell ] = await page.evaluate(() =>
   {
     const hooks = (window as unknown as HookWindow).__jmzMapView;
-    return [ hooks.screenOfCell(0, 0), hooks.screenOfCell(right, bottom) ];
-  }, [ width - 1, height - 1 ]);
+    return [ hooks.screenOfCell(0, 0), hooks.screenOfCell(1, 0) ];
+  });
 
   // the hooks answer in the canvas's own pixels; the mouse moves in the page's, around the view's bars.
   const canvas = await page.locator(MAP_CANVAS).boundingBox();
@@ -376,7 +407,7 @@ const measureStroke = async (page: Page, size: number[]): Promise<StrokeResult> 
   }
 
   const onPage = (point: { x: number; y: number }) => ({ x: point.x + canvas.x, y: point.y + canvas.y });
-  const points = strokePath(topLeft, bottomRight, { width: canvas.width, height: canvas.height }).map(onPage);
+  const points = strokePath(topLeft, nextCell.x - topLeft.x, size, { width: canvas.width, height: canvas.height }).map(onPage);
 
   await startRecording(page);
   await page.mouse.move(points[0].x, points[0].y);
@@ -768,6 +799,11 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
     const stroke = await measureStroke(page, info.size ?? [ 1, 1 ]);
     const events = await measureEvents(page, info.size ?? [ 1, 1 ]);
 
+    // again with a module overlay as heavy as sight rings around every event, which painting must not redraw.
+    await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.enableModuleRings());
+    await page.waitForTimeout(300);
+    const strokeWithRings = await measureStroke(page, info.size ?? [ 1, 1 ]);
+
     // warm: another map, then this one again, both now held by the window.
     const other = options.maps.find(candidate => candidate !== mapId) ?? mapId;
     await page.evaluate(id => (window as unknown as HookWindow).__jmzMapView.openMap(id), other);
@@ -787,6 +823,7 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
       warmOpen: judgeOpen(warm.ms, BUDGETS.warmOpenMs, 'warm open'),
       shownAgain: judgeOpen(shown.ms, BUDGETS.shownAgainMs, 'shown again'),
       stroke: stroke.verdict,
+      strokeWithRings: strokeWithRings.verdict,
       eventClick: events.click.verdict,
       eventBox: events.box.verdict,
       eventDrag: events.drag.verdict,
@@ -809,6 +846,7 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
       timings,
       paths,
       stroke,
+      strokeWithRings,
       warmOpenMs: warm.ms,
       shownAgainMs: shown.ms,
       events,
@@ -861,9 +899,12 @@ const printMap = (result: MapResult): void =>
     stalls.forEach(stall => console.log(`            stall ${stall.interval.toFixed(1)} ms: before work ${stall.before.work.toFixed(2)} gpu`
       + ` ${stall.before.gpu.toFixed(2)}, after work ${stall.after.work.toFixed(2)} gpu ${stall.after.gpu.toFixed(2)}`));
   });
-  const { stroke } = result;
-  console.log(`  stroke    inputs ${stroke.inputs} matched ${stroke.matched} frames ${stroke.frames} dropped ${stroke.dropped}`
-    + ` cost p50 ${cell(stroke.cost.p50)} max ${cell(stroke.cost.max)} work max ${cell(stroke.work.max)}  ${verdictText(stroke.verdict)}`);
+  const strokes: [ string, StrokeResult ][] = [ [ 'stroke', result.stroke ], [ '+rings', result.strokeWithRings ] ];
+  strokes.forEach(([ label, stroke ]) =>
+  {
+    console.log(`  ${label.padEnd(9)} inputs ${stroke.inputs} matched ${stroke.matched} frames ${stroke.frames} dropped ${stroke.dropped}`
+      + ` cost p50 ${cell(stroke.cost.p50)} max ${cell(stroke.cost.max)} work max ${cell(stroke.work.max)}  ${verdictText(stroke.verdict)}`);
+  });
   const { events } = result;
   const interaction = (label: string, outcome: InteractionResult) =>
   {
@@ -905,6 +946,8 @@ const printSpread = (results: MapResult[], maps: number[]): void =>
     });
     line('stroke frame cost max (ms)', mine.map(result => result.stroke.cost.max));
     line('stroke dropped mid-stroke', mine.map(result => result.stroke.dropped));
+    line('stroke with rings cost max (ms)', mine.map(result => result.strokeWithRings.cost.max));
+    line('stroke with rings dropped', mine.map(result => result.strokeWithRings.dropped));
     ([ 'click', 'box', 'drag', 'drop' ] as const).forEach(kind =>
     {
       line(`event ${kind} dropped frames`, mine.map(result => result.events[kind].dropped));

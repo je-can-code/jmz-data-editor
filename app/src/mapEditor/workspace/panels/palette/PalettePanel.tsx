@@ -18,6 +18,7 @@ import {
 } from '../../../core/palette/passabilityEdits.ts';
 import { TILESET_MARKS_DOCUMENT, toggleTileMark } from '../../../core/palette/tilesetMarkEdits.ts';
 import { isAutotile } from '../../../core/tiles/tileIds.ts';
+import { takeUpPenForPick } from '../../../core/tools/paintSelectionLink.ts';
 import { useHeldMap, useTilesets, useWorkspace, useWorkspaceState } from '../../workspaceHooks.tsx';
 import { AutotilePreview } from './AutotilePreview.tsx';
 import { PaletteCanvas, type PaletteHover } from './PaletteCanvas.tsx';
@@ -194,12 +195,23 @@ const TilesetPalette = (props: { readonly tileset: RmmzTileset }) =>
   }, [ hover, editing ]);
 
   /**
-   * Picks a rectangle of cells on the tab on show.
+   * Picks a rectangle of cells on the tab on show, and takes up the pen if the events were in hand, since tiles are
+   * picked to be painted.
    * @param {PaletteRect} rect The cells.
    */
   const pickCells = (rect: PaletteRect) =>
   {
     setMemory(current => ({ ...current, pick: { kind: 'cells', tab: current.tab, rect } }));
+    takeUpPenForPick(controller.services.painting);
+  };
+
+  /**
+   * Picks the shadow pen, taking up the pen to draw with it if the events were in hand.
+   */
+  const pickShadow = () =>
+  {
+    setMemory(current => ({ ...current, pick: { kind: 'shadow' } }));
+    takeUpPenForPick(controller.services.painting);
   };
 
   /**
@@ -291,7 +303,7 @@ const TilesetPalette = (props: { readonly tileset: RmmzTileset }) =>
         editing={editing}
         shadowPicked={memory.pick?.kind === 'shadow'}
         unsaved={hub.has(TILESETS_KEY) && hub.isDirty(TILESETS_KEY)}
-        onPickShadow={() => setMemory(current => ({ ...current, pick: { kind: 'shadow' } }))}
+        onPickShadow={pickShadow}
       />
       {marksState.failure !== null && memory.tab === 'A' && (
         <Alert severity={'warning'} sx={{ mx: 1, mb: 0.5, py: 0 }}>

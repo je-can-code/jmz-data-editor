@@ -5,8 +5,10 @@ import { EventSelection } from '../core/events/EventSelection.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { Camera, MapCell } from '../core/renderer/camera.ts';
 import { GAME_LOOK, type OverlayId } from '../core/renderer/MapRenderer.ts';
+import { openTilesetMarks } from '../core/palette/tilesetMarkEdits.ts';
+import { TilesetLayeringSource } from '../core/tools/tilesetLayering.ts';
 import { EventMenu } from '../events/EventMenu.tsx';
-import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity } from '../events/MapEventTools.ts';
+import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity, type EventToolsRenderer } from '../events/MapEventTools.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import { openEventWindow } from '../views/mapEditorViews.ts';
 import type { DrawState } from './ContextKeeper.ts';
@@ -20,10 +22,14 @@ import {
 } from './mapViewSettings.ts';
 import { MapViewController } from './MapViewController.ts';
 import { whenMapDrawn } from './openTiming.ts';
+import { OverlayComposer } from './overlayComposer.ts';
 import { usePaletteLinks } from './paletteLinks.ts';
 import { PixiMapRenderer } from './PixiMapRenderer.ts';
 import { projectImagesFor } from './projectImages.ts';
 import { installSpeedHooks, wantsSpeedHooks } from './speedHooks.ts';
+import { followToolInHand } from './tools/leftButton.ts';
+import { PaintController } from './tools/PaintController.ts';
+import { PaintToolBar } from './tools/PaintToolBar.tsx';
 
 /**
  * What a map view shows.
@@ -170,11 +176,14 @@ const DrawNotice = (props: { state: DrawState }) =>
 /**
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
  * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look,
- * with a status line naming the zoom, the tile under the pointer, how many events are selected and the GPU drawing it.
+ * the painting tools, and a status line naming the zoom, the tile under the pointer, how many events are selected and
+ * the GPU drawing it.
  *
- * Its events are selected, moved, created, deleted, copied and pasted with the mouse, the keys and a right-click menu,
- * through {@link MapEventTools}, into the window's selection. An event picked out, such as the battler the data editor
- * asked to see, becomes the selection, with the view centred on it.
+ * The tool in hand decides what the left button does. With the events in hand, the map's events are selected, moved,
+ * created, deleted, copied and pasted with the mouse, the keys and a right-click menu, through {@link MapEventTools},
+ * into the window's selection; with any painting tool in hand the left button paints, previewed before each click, and
+ * the event tools stand down. An event picked out, such as the battler the data editor asked to see, becomes the
+ * selection, with the view centred on it.
  *
  * A view off screen, behind another tab, lets its GPU context go and draws again, camera and all, when it shows; a map
  * that cannot draw says why over the canvas rather than leaving it blank.
@@ -234,6 +243,24 @@ const MapView = (props: MapViewProps) =>
       setStatus(current => (current.zoom === camera.zoom ? current : { ...current, zoom: camera.zoom }));
     }));
 
+    // the event tools and the painting tools each hand the renderer their part of the overlay.
+    const overlays = new OverlayComposer(renderer);
+    const layering = new TilesetLayeringSource(services.hub);
+    const painter = new PaintController({
+      surface: renderer,
+      hub: services.hub,
+      map: () => controller.map,
+      layering: map => layering.layeringFor(map),
+      painting: services.painting,
+      overlay: part => overlays.update('tools', part),
+    });
+    stops.push(painter.attach());
+
+    // the "goes on top" marks decide where painted tiles land, so they are held from the start, through the same open
+    // the palette uses: a project that never saved marks is seeded from its maps first, where opening the document
+    // straight away would hold an empty set in the seed's place, and the first mark toggled would save over the seed.
+    openTilesetMarks(services).catch(() => undefined);
+
     // the first frame that shows the map complete, sprites and parallax included, ends the page's first open: the cold
     // open the speed script times.
     stops.push(whenMapDrawn(renderer, at =>
@@ -256,9 +283,24 @@ const MapView = (props: MapViewProps) =>
       .then(() => setStatus(current => ({ ...current, gpu: renderer.rendererInfo()?.renderer ?? '' })))
       .catch(() => undefined);
 
-    // the events on the map answer the mouse, the keys and the clipboard through the tools, never through React.
+    // the events on the map answer the mouse, the keys and the clipboard through the tools, never through React; what
+    // they show goes through the composer, beside the painting tools' part.
+    const eventRenderer: EventToolsRenderer = {
+      get canvas()
+      {
+        return renderer.canvas;
+      },
+      get camera()
+      {
+        return renderer.camera;
+      },
+      eventAt: point => renderer.eventAt(point),
+      setOverlayState: state => overlays.update('events', state),
+      onContextMenu: listener => renderer.onContextMenu(listener),
+      onCameraChange: listener => renderer.onCameraChange(listener),
+    };
     const tools = new MapEventTools({
-      renderer,
+      renderer: eventRenderer,
       host,
       hub: services.hub,
       selection,
@@ -275,12 +317,17 @@ const MapView = (props: MapViewProps) =>
     });
     toolsRef.current = tools;
 
+    // the left button is the event tools' only while the events are in hand; a painting tool stands them down.
+    stops.push(followToolInHand(services.painting, tools));
+
     const view = host.ownerDocument.defaultView;
     if (view !== null && wantsSpeedHooks(view.location.search))
     {
       stops.push(installSpeedHooks(view, {
         renderer,
         hub: services.hub,
+        painter,
+        painting: services.painting,
         tools,
         selection,
         map: () => controller.map,
@@ -408,6 +455,7 @@ const MapView = (props: MapViewProps) =>
           />
         ))}
       </Box>
+      <PaintToolBar painting={services.painting}/>
       <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <Box
           data-testid={'map-view'}

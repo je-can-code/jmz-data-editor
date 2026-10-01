@@ -226,6 +226,12 @@ type OverlayState = {
   readonly ghostTiles: readonly GhostTile[];
   readonly ghostEvents: readonly GhostEvent[];
   readonly blockedCells?: readonly MapCell[];
+
+  /**
+   * A few words beside the hover, such as the layer the brush will paint; drawn at the same size at every zoom, and
+   * only while there is a hover to put them beside. Left out, or null, there are none.
+   */
+  readonly hoverLabel?: string | null;
 };
 
 /**
@@ -238,6 +244,8 @@ const NO_OVERLAY_STATE: OverlayState = {
   selectionBox: null,
   ghostTiles: [],
   ghostEvents: [],
+  blockedCells: [],
+  hoverLabel: null,
 };
 
 /**
