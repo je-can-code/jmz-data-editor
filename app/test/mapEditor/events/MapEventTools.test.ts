@@ -33,7 +33,17 @@ describe('MapEventTools', () =>
   {
     built.splice(0).forEach(tools => tools.destroy());
     document.body.innerHTML = '';
+    Reflect.deleteProperty(window.navigator, 'clipboard');
   });
+
+  /**
+   * Gives the page's navigator a clipboard whose writes go where the test says, as the browser's own would.
+   * @param {(text: string) => Promise<void>} writeText What a write does.
+   */
+  const stubClipboard = (writeText: (text: string) => Promise<void>) =>
+  {
+    Object.defineProperty(window.navigator, 'clipboard', { value: { writeText }, configurable: true });
+  };
 
   /**
    * Builds the tools over the fixture map, in a view in the page, with a stand-in renderer that finds events by tile.
@@ -456,6 +466,47 @@ describe('MapEventTools', () =>
       // Assert.
       expect(spotsOf(mapFileOf(hub, 1))[4])
         .toStrictEqual([ 1, 1 ]);
+    });
+
+    it('cuts from the menu once the clipboard holds the events, removing them as one undoable step', async () =>
+    {
+      // Arrange: event 1 selected; the clipboard takes whatever is written to it.
+      const { hub, map, tools, selection } = setUp();
+      selection.select(1, [ 1 ]);
+      const copy = copyEvents(map, 1, [ 1 ]);
+      let written = '';
+      stubClipboard(async text =>
+      {
+        written = text;
+      });
+
+      // Act.
+      await tools.cutToClipboard();
+
+      // Assert.
+      expect([ decodeEventClipboard(written), spotsOf(mapFileOf(hub, 1))[1], hub.history(mapHistoryKey(1)).rows.map(row => row.label) ])
+        .toStrictEqual([ copy, null, [ 'Cut event' ] ]);
+    });
+
+    it('keeps the events when the menu\'s cut cannot write the clipboard, whether it refuses or there is none', async () =>
+    {
+      // Arrange: event 1 selected; first a clipboard that refuses, then none at all.
+      const { hub, tools, selection, notices } = setUp();
+      selection.select(1, [ 1 ]);
+      stubClipboard(async () => Promise.reject(new Error('not allowed')));
+
+      // Act.
+      await tools.cutToClipboard();
+      Reflect.deleteProperty(window.navigator, 'clipboard');
+      await tools.cutToClipboard();
+
+      // Assert: event 1 stays, nothing was recorded, and the author hears why, twice.
+      expect([ spotsOf(mapFileOf(hub, 1))[1], hub.history(mapHistoryKey(1)).rows.length, notices ])
+        .toStrictEqual([
+          [ 0, 0 ],
+          0,
+          [ 'The clipboard could not be written here; press Ctrl+C instead.', 'The clipboard could not be written here; press Ctrl+C instead.' ],
+        ]);
     });
 
     it('pastes from the menu what the clipboard read hands over, with the corner on the right-clicked tile', async () =>
