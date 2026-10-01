@@ -311,6 +311,35 @@ describe('MapView', () =>
       ]);
   });
 
+  it('picks out the same event again when it is asked for again, after other events were picked', async () =>
+  {
+    // Arrange: the chest is asked for, then the person picks the door instead.
+    stand.maps.set(5, MapDocument.fromJson('map:5', buildMapJson()));
+    const services = served();
+    const selection = new EventSelection();
+    const { rerender } = render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} pickedEventId={3} pickRequest={1} selection={selection}/>
+      </MapEditorServicesProvider>
+    );
+    await waitFor(() => expect(stand.renderers[0]?.looks.length)
+      .toBe(1));
+    act(() => selection.select(5, [ 1 ]));
+
+    // Act: the same link clicked again asks for the chest again.
+    rerender(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} pickedEventId={3} pickRequest={2} selection={selection}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert.
+    await waitFor(() => expect(stand.renderers[0]?.looks.length)
+      .toBe(2));
+    expect([ selection.get(), stand.renderers[0].looks ])
+      .toStrictEqual([ { mapId: 5, eventIds: [ 3 ] }, [ { cell: { x: 2, y: 1 }, zoom: 1 }, { cell: { x: 2, y: 1 }, zoom: 1 } ] ]);
+  });
+
   it('counts the events selected on its map in the status line, and none selected on another map', async () =>
   {
     // Arrange: the chest is picked on map 5.

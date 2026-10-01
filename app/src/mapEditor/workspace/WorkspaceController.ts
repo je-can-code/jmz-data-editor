@@ -82,7 +82,17 @@ type WorkspaceState = {
    * The map's view picks it out, which makes it the window's selection; the quick panel follows the selection, never
    * this.
    */
-  readonly eventFocus: Readonly<Record<number, number>>;
+  readonly eventFocus: Readonly<Record<number, EventFocus>>;
+};
+
+/**
+ * One ask to pick out an event: the event, and the ask's own number, which is new every time, so asking for the same
+ * event again (a second click on the same link in the data editor) picks it out again, after the person has picked
+ * other events or panned away.
+ */
+type EventFocus = {
+  readonly eventId: number;
+  readonly request: number;
 };
 
 /**
@@ -159,6 +169,11 @@ class WorkspaceController
   #lastMapGroup: DockviewGroupPanel | null = null;
 
   #noticeCount = 0;
+
+  /**
+   * Counts the asks to pick out an event, for each ask's own number.
+   */
+  #focusRequests = 0;
 
   /**
    * @param {MapEditorServices} services The window's services.
@@ -282,9 +297,12 @@ class WorkspaceController
       return null;
     }
 
+    // every ask is a new one, even for the event asked for last time, so the map picks it out again.
     if (options.focusEventId !== undefined && options.focusEventId !== null)
     {
-      this.#update({ eventFocus: { ...this.#state.eventFocus, [mapId]: options.focusEventId } });
+      this.#focusRequests += 1;
+      const focus: EventFocus = { eventId: options.focusEventId, request: this.#focusRequests };
+      this.#update({ eventFocus: { ...this.#state.eventFocus, [mapId]: focus } });
     }
 
     const open = api.panels.find(panel => panel.api.component === PANEL_COMPONENTS.map && isMapPanelParams(panel.params) && panel.params.mapId === mapId);
@@ -705,4 +723,4 @@ class WorkspaceController
 }
 
 export { TREE_ROOT, WorkspaceController };
-export type { MapClipboard, Notice, NoticeSeverity, OpenMapOptions, WorkspaceState };
+export type { EventFocus, MapClipboard, Notice, NoticeSeverity, OpenMapOptions, WorkspaceState };

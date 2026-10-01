@@ -41,6 +41,13 @@ type MapViewProps = {
   readonly pickedEventId?: number | null;
 
   /**
+   * The number of the ask that named the event to pick out. A new number picks the same event out again, selecting it
+   * and centring on it, as a second click on the same link in the data editor asks. Left out, each event is picked out
+   * once.
+   */
+  readonly pickRequest?: number;
+
+  /**
    * Whether the view is on screen; false while its panel is a tab behind another. A view off screen lets its GPU
    * context go and draws again, as it was, when it shows. Left out, the view is on screen.
    */
@@ -177,7 +184,7 @@ const DrawNotice = (props: { state: DrawState }) =>
  */
 const MapView = (props: MapViewProps) =>
 {
-  const { mapId, pickedEventId = null, visible = true, onNotice } = props;
+  const { mapId, pickedEventId = null, pickRequest = 0, visible = true, onNotice } = props;
   const services = useMapEditorServices();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<PixiMapRenderer | null>(null);
@@ -328,8 +335,9 @@ const MapView = (props: MapViewProps) =>
       });
   }, [ mapId ]);
 
-  // pick out the event asked for once the map is open, and again whenever another is asked for: it becomes the
-  // selection, and the view centres on it. Only a new pick moves the view, so panning away afterwards is never undone.
+  // pick out the event asked for once the map is open, and again whenever another is asked for, or the same one is
+  // asked for again: it becomes the selection, and the view centres on it. Only a new ask moves the view, so panning
+  // away afterwards is never undone.
   useEffect(() =>
   {
     const renderer = rendererRef.current;
@@ -344,7 +352,7 @@ const MapView = (props: MapViewProps) =>
     {
       renderer.lookAt(cell, PICKED_EVENT_ZOOM);
     }
-  }, [ openMap, pickedEventId ]);
+  }, [ openMap, pickedEventId, pickRequest ]);
 
   // hand the renderer the switches, the modules' overlays and their passability rules.
   useEffect(() =>

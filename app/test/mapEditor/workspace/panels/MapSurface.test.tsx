@@ -16,6 +16,7 @@ import { buildMapJson } from '../../support/fixtures.ts';
  */
 const views = vi.hoisted(() => ({
   lives: [] as { mapId: number; picks: (number | null)[]; shown: boolean[]; unmounted: boolean }[],
+  requests: [] as number[],
 }));
 
 // the map view draws on the GPU, which a test page has none of; what the surface owes is which views it mounts, for
@@ -25,14 +26,14 @@ vi.mock('../../../../src/mapEditor/render/MapView.tsx', async () =>
   const { useEffect, useState } = await import('react');
 
   /**
-   * Stands in for the map view, recording its life.
-   * @param {{ mapId: number, pickedEventId?: number | null, visible?: boolean }} props The map, the event to pick out,
-   * and whether the view is on screen.
+   * Stands in for the map view, recording its life, and every ask to pick out an event it is handed.
+   * @param {{ mapId: number, pickedEventId?: number | null, pickRequest?: number, visible?: boolean }} props The map,
+   * the event to pick out and the ask that named it, and whether the view is on screen.
    * @returns {React.JSX.Element} A line naming the map.
    */
-  const MapView = (props: { mapId: number; pickedEventId?: number | null; visible?: boolean }) =>
+  const MapView = (props: { mapId: number; pickedEventId?: number | null; pickRequest?: number; visible?: boolean }) =>
   {
-    const { mapId, pickedEventId = null, visible = true } = props;
+    const { mapId, pickedEventId = null, pickRequest = 0, visible = true } = props;
     const [ life ] = useState(() => ({ mapId, picks: [] as (number | null)[], shown: [] as boolean[], unmounted: false }));
 
     useEffect(() =>
@@ -48,6 +49,11 @@ vi.mock('../../../../src/mapEditor/render/MapView.tsx', async () =>
     {
       life.picks.push(pickedEventId);
     }, [ life, pickedEventId ]);
+
+    useEffect(() =>
+    {
+      views.requests.push(pickRequest);
+    }, [ pickRequest ]);
 
     useEffect(() =>
     {
@@ -75,6 +81,7 @@ describe('MapSurface', () =>
   beforeEach(() =>
   {
     views.lives.splice(0);
+    views.requests.splice(0);
   });
 
   /**
@@ -82,8 +89,13 @@ describe('MapSurface', () =>
    */
   const ScopedSurface = withWindowScope((props: IDockviewPanelProps) =>
   {
-    const { document, focusEventId, visible } = props.params as { document: MapDocument; focusEventId: number | null; visible: boolean };
-    return <MapSurface document={document} focusEventId={focusEventId} visible={visible}/>;
+    const { document, focusEventId, focusRequest, visible } = props.params as {
+      document: MapDocument;
+      focusEventId: number | null;
+      focusRequest?: number;
+      visible: boolean;
+    };
+    return <MapSurface document={document} focusEventId={focusEventId} focusRequest={focusRequest} visible={visible}/>;
   });
 
   /**
@@ -201,6 +213,22 @@ describe('MapSurface', () =>
     // Assert.
     expect(views.lives)
       .toStrictEqual([ { mapId: 5, picks: [ 3, 1 ], shown: [ true ], unmounted: false } ]);
+  });
+
+  it('hands the view it has a second ask for the same event, so the view picks it out again', () =>
+  {
+    // Arrange: event 3 asked for once.
+    const { api } = buildPanel();
+    const map = MapDocument.fromJson('map:5', buildMapJson());
+    const asked = (request: number): IDockviewPanelProps => ({ ...panelProps(api, map, 3), params: { document: map, focusEventId: 3, focusRequest: request, visible: true } });
+    const { rerender } = render(<ScopedSurface {...asked(1)}/>);
+
+    // Act: the same event asked for again.
+    rerender(<ScopedSurface {...asked(2)}/>);
+
+    // Assert: one view, the event unchanged, and both asks heard.
+    expect([ views.lives.length, views.lives[0].picks, views.requests ])
+      .toStrictEqual([ 1, [ 3 ], [ 1, 2 ] ]);
   });
 
   it('mounts a fresh view when the panel\'s map comes back as a new document', () =>

@@ -247,7 +247,31 @@ describe('WorkspaceController', () =>
 
       // Assert.
       expect([ dock.activated, dock.focused, dock.added, controller.getState().eventFocus ])
-        .toStrictEqual([ [ 'map-12' ], [ 'map-12' ], [], { 12: 5 } ]);
+        .toStrictEqual([ [ 'map-12' ], [ 'map-12' ], [], { 12: { eventId: 5, request: 1 } } ]);
+    });
+
+    it('makes every ask for an event a new one, the same event asked for again included, and leaves other maps\' alone', () =>
+    {
+      // Arrange: map 40 was asked for at event 2 first.
+      const { controller } = buildController();
+      const dock = buildDock([ { id: 'map-12', component: 'map', params: { mapId: 12 }, group: MAIN } ]);
+      controller.attach(dock.api);
+      controller.openMap(40, { focusEventId: 2 });
+
+      // Act: the same link in the data editor clicked twice, then a plain open naming no event.
+      controller.openMap(12, { focusEventId: 5 });
+      const { 12: first } = controller.getState().eventFocus;
+      controller.openMap(12, { focusEventId: 5 });
+      const { 12: second } = controller.getState().eventFocus;
+      controller.openMap(12);
+
+      // Assert.
+      expect([ first, second, controller.getState().eventFocus ])
+        .toStrictEqual([
+          { eventId: 5, request: 2 },
+          { eventId: 5, request: 3 },
+          { 40: { eventId: 2, request: 1 }, 12: { eventId: 5, request: 3 } },
+        ]);
     });
 
     it('opens a new map as a tab where the maps are in the main window, never in a torn-out window', () =>

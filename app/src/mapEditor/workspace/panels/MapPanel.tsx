@@ -87,7 +87,8 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
   const { mapId } = params;
   const controller = useWorkspace();
   const held = useHeldMap(mapId);
-  const focusEventId = useWorkspaceState(state => state.eventFocus[mapId] ?? null);
+  const focus = useWorkspaceState(state => state.eventFocus[mapId] ?? null);
+  const focusEventId = focus === null ? null : focus.eventId;
   const visible = usePanelVisible(api);
 
   // the tab reads the map's name, marked while it has unsaved edits.
@@ -112,6 +113,7 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
             <MapSurface
               document={held.map}
               focusEventId={focusEventId}
+              focusRequest={focus === null ? 0 : focus.request}
               visible={visible}
               selection={controller.selection}
               onNotice={(text, severity) => controller.notify(text, severity)}
