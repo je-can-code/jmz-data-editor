@@ -81,6 +81,63 @@ type FlagEdit = {
 const FLAG_COUNT = TileId.MAX;
 
 /**
+ * Which shapes of each autotile kind a ladder, bush, counter or damage floor was on when a click switched it off, for
+ * one tileset, so switching it back on puts it on exactly those shapes again rather than on all 48. MZ ships kinds
+ * whose shapes differ (some grass is a bush everywhere but its bottom corners), and switching such a flag off and on
+ * again must leave the kind as it was. The note lasts as long as the window; once it closes, only the file says where
+ * a flag is, and switching one on puts it on every shape.
+ */
+class SwitchedOffShapes
+{
+  #shapes = new Map<string, readonly number[]>();
+
+  /**
+   * Notes which shapes of a kind a flag is on, as a click switches it off.
+   * @param {number} kind The autotile kind.
+   * @param {number} bit The flag's bit.
+   * @param {readonly number[]} shapes The shapes it is on.
+   */
+  remember(kind: number, bit: number, shapes: readonly number[]): void
+  {
+    this.#shapes.set(`${kind}:${bit}`, [ ...shapes ]);
+  }
+
+  /**
+   * Recalls which shapes of a kind a flag was on when a click here last switched it off.
+   * @param {number} kind The autotile kind.
+   * @param {number} bit The flag's bit.
+   * @returns {readonly number[]} The shapes; none when it was never switched off here.
+   */
+  recall(kind: number, bit: number): readonly number[]
+  {
+    return this.#shapes.get(`${kind}:${bit}`) ?? [];
+  }
+}
+
+/**
+ * The window's notes of switched-off shapes, one per tileset, kept for as long as it is open.
+ */
+const switchedOffByTileset = new Map<number, SwitchedOffShapes>();
+
+/**
+ * Finds the window's note of the shapes flags were switched off on, for one tileset, starting it the first time.
+ * @param {number} tilesetId The tileset.
+ * @returns {SwitchedOffShapes} The note.
+ */
+const switchedOffShapesFor = (tilesetId: number): SwitchedOffShapes =>
+{
+  const existing = switchedOffByTileset.get(tilesetId);
+  if (existing !== undefined)
+  {
+    return existing;
+  }
+
+  const created = new SwitchedOffShapes();
+  switchedOffByTileset.set(tilesetId, created);
+  return created;
+};
+
+/**
  * Reports whether a tile's flags can be edited. B's first tile is the empty tile, which MZ keeps a star so an empty
  * layer never blocks a step, and ids no sheet holds are on no palette.
  * @param {number} tileId The tile id.
@@ -266,20 +323,51 @@ const directionEdit = (flags: ArrayLike<number>, tileId: number, direction: Pass
 };
 
 /**
+ * Lists the tile ids switching a flag on writes: the shapes of an autotile kind it was on when a click here last
+ * switched it off, or every id the tile has when it never was.
+ * @param {number} tileId The tile.
+ * @param {number} bit The flag's bit.
+ * @param {SwitchedOffShapes} switchedOff The tileset's note of the shapes flags were switched off on.
+ * @returns {number[]} The ids.
+ */
+const switchedOnIds = (tileId: number, bit: number, switchedOff: SwitchedOffShapes): number[] =>
+{
+  const kind = autotileKind(tileId);
+  const shapes = isAutotile(tileId)
+    ? switchedOff.recall(kind, bit)
+    : [];
+  return shapes.length > 0
+    ? shapes.map(shape => makeAutotileId(kind, shape))
+    : flagIdsOf(tileId);
+};
+
+/**
  * Plans a click that switches a ladder, bush, counter or damage floor on or off, going by the shown flags, and
- * written to every shape of an autotile kind.
+ * written to every shape of an autotile kind. Switching it off notes which shapes had it, and switching it back on
+ * puts it on just those shapes again (see {@link SwitchedOffShapes}).
  * @param {ArrayLike<number>} flags The tileset's flags.
  * @param {number} tileId The tile.
  * @param {'ladder' | 'bush' | 'counter' | 'damage'} mode Which flag.
+ * @param {SwitchedOffShapes} switchedOff The tileset's note of the shapes flags were switched off on.
  * @returns {FlagEdit} The edit.
  */
-const toggleEdit = (flags: ArrayLike<number>, tileId: number, mode: 'ladder' | 'bush' | 'counter' | 'damage'): FlagEdit =>
+const toggleEdit = (flags: ArrayLike<number>, tileId: number, mode: 'ladder' | 'bush' | 'counter' | 'damage', switchedOff: SwitchedOffShapes): FlagEdit =>
 {
   const { bit, name } = TOGGLED_FLAGS[mode];
   const on = (shownFlags(flags, tileId) & bit) === 0;
+  const ids = flagIdsOf(tileId);
+  if (on === false && isAutotile(tileId))
+  {
+    // note the shapes it is on before it goes, so switching it back on can put it on exactly those again.
+    const shapes = ids.filter(id => (flagsOf(flags, id) & bit) !== 0).map(autotileShape);
+    switchedOff.remember(autotileKind(tileId), bit, shapes);
+  }
+
   return {
     label: `${describeTile(tileId)}: ${name} ${on ? 'on' : 'off'}`,
-    changes: changesFor(flags, flagIdsOf(tileId), flag => (on ? flag | bit : flag & ~bit)),
+    changes: on
+      ? changesFor(flags, switchedOnIds(tileId, bit, switchedOff), flag => flag | bit)
+      : changesFor(flags, ids, flag => flag & ~bit),
   };
 };
 
@@ -304,13 +392,17 @@ const terrainEdit = (flags: ArrayLike<number>, tileId: number, delta: number): F
 
 /**
  * Plans what a click in the passability editor does to a tile's flags. The flags of an autotile kind are shown from
- * its shape 0 and written to all 48 of its shapes; a tile that cannot be edited comes to no changes.
+ * its shape 0 and written to all 48 of its shapes, except that a ladder, bush, counter or damage floor switched back on
+ * goes on just the shapes it was on when switched off, as the tileset's note recalls; a tile that cannot be edited
+ * comes to no changes.
  * @param {ArrayLike<number>} flags The tileset's flags.
  * @param {number} tileId The tile clicked.
  * @param {FlagClick} click The mode, and what else the click says.
+ * @param {SwitchedOffShapes} switchedOff The tileset's note of the shapes flags were switched off on (see
+ * {@link switchedOffShapesFor}); without one, a flag switched on goes on every shape.
  * @returns {FlagEdit} The edit; no changes when nothing would change.
  */
-const planFlagEdit = (flags: ArrayLike<number>, tileId: number, click: FlagClick): FlagEdit =>
+const planFlagEdit = (flags: ArrayLike<number>, tileId: number, click: FlagClick, switchedOff = new SwitchedOffShapes()): FlagEdit =>
 {
   if (isEditableTile(tileId) === false)
   {
@@ -326,7 +418,7 @@ const planFlagEdit = (flags: ArrayLike<number>, tileId: number, click: FlagClick
     case 'terrain':
       return terrainEdit(flags, tileId, click.delta);
     default:
-      return toggleEdit(flags, tileId, click.mode);
+      return toggleEdit(flags, tileId, click.mode, switchedOff);
   }
 };
 
@@ -374,5 +466,7 @@ export {
   nextPassageState,
   passageStateOf,
   planFlagEdit,
+  SwitchedOffShapes,
+  switchedOffShapesFor,
 };
 export type { FlagChange, FlagClick, FlagEdit, FlagMode, PassageState };

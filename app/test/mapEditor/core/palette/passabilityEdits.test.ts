@@ -8,6 +8,8 @@ import {
   nextPassageState,
   passageStateOf,
   planFlagEdit,
+  SwitchedOffShapes,
+  switchedOffShapesFor,
   type FlagChange,
 } from '../../../../src/mapEditor/core/palette/passabilityEdits.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
@@ -22,7 +24,9 @@ import { locateGameProject } from '../../../support/gameProject.ts';
  * A click in the editor changes a tileset's flags, and those flags decide where the player can walk, so every edit
  * must change exactly the bits its mode names and nothing else: MZ's own boat, ship and airship bits and the terrain
  * tag ride along untouched. An autotile kind is shown from its shape 0 and written to all 48 of its shapes, since the
- * engine reads whichever shape a map stores, and never to the kind beside it. Passage cycles open, blocked, star as
+ * engine reads whichever shape a map stores, and never to the kind beside it; a ladder, bush, counter or damage floor
+ * switched back on goes on just the shapes it was on when switched off, since MZ ships grass that is a bush on only
+ * some shapes, and switching it off and on again must leave the kind as it was. Passage cycles open, blocked, star as
  * MZ's does (stars for plain tiles alone), and an open ceiling gets MZ's own edges, which every open ceiling Chef
  * Adventure ships matches; opening one way out of a ceiling keeps the edges facing that way too, so clicking a way out
  * twice changes nothing. Each edit is one undoable step in the tilesets' history, and a flags list written short by
@@ -48,6 +52,21 @@ const fillKind = (flags: number[], kind: number, value: number): number[] =>
   flagIdsOf(makeAutotileId(kind, 0)).forEach(id =>
   {
     flags[id] = value;
+  });
+  return flags;
+};
+
+/**
+ * Builds flags holding grass kind 20 as MZ's world map ships it: a bush on every shape but its bottom corners (shapes
+ * 38 to 41 and 43 to 46), and kind 21 beside it plain.
+ * @returns {number[]} The flags.
+ */
+const partBushGrass = (): number[] =>
+{
+  const flags = fillKind(shippedLikeFlags(), 20, MZ_BITS | 0x40);
+  [ 38, 39, 40, 41, 43, 44, 45, 46 ].forEach((shape) =>
+  {
+    flags[makeAutotileId(20, shape)] = MZ_BITS;
   });
   return flags;
 };
@@ -360,6 +379,43 @@ describe('planFlagEdit', () =>
       ]);
   });
 
+  it('switches a flag back on just where it was when switched off, as MZ ships grass that is a bush on only some shapes', () =>
+  {
+    // Arrange: grass kind 20 a bush on every shape but its bottom corners, as MZ's world map ships it, switched off by a
+    // first click.
+    const flags = partBushGrass();
+    const switchedOff = new SwitchedOffShapes();
+    const grass = makeAutotileId(20, 0);
+    const off = applied(flags, planFlagEdit(flags, grass, { mode: 'bush' }, switchedOff).changes);
+
+    // Act.
+    const on = planFlagEdit(off, grass, { mode: 'bush' }, switchedOff);
+
+    // Assert: a bush again on the 40 shapes it was, and every shape back as MZ shipped it.
+    const after = applied(off, on.changes);
+    expect([ on.label, on.changes.length, after.every((value, id) => value === flags[id]) ])
+      .toStrictEqual([ 'A2 decoration 5: bush on', 40, true ]);
+  });
+
+  it('switches a flag on every shape of a kind it was never switched off on here, and a different flag likewise', () =>
+  {
+    // Arrange: grass kind 20 a bush on all but its bottom corners, switched off; kind 21 beside it, and the ladder on
+    // kind 20 itself, never switched off.
+    const flags = partBushGrass();
+    const switchedOff = new SwitchedOffShapes();
+    const off = applied(flags, planFlagEdit(flags, makeAutotileId(20, 0), { mode: 'bush' }, switchedOff).changes);
+
+    // Act.
+    const edits = [
+      planFlagEdit(off, makeAutotileId(21, 0), { mode: 'bush' }, switchedOff),
+      planFlagEdit(off, makeAutotileId(20, 0), { mode: 'ladder' }, switchedOff),
+    ];
+
+    // Assert.
+    expect(edits.map(edit => [ edit.label, edit.changes.length ]))
+      .toStrictEqual([ [ 'A2 decoration 6: bush on', 48 ], [ 'A2 decoration 5: ladder on', 48 ] ]);
+  });
+
   it('counts a terrain tag up and down, going round between 7 and 0, keeping every other bit', () =>
   {
     // Arrange: B tile 6 has no tag and is blocked; B tile 7 has tag 7.
@@ -394,6 +450,38 @@ describe('planFlagEdit', () =>
     // Assert.
     expect(edit)
       .toStrictEqual({ label: '', changes: [] });
+  });
+});
+
+describe('SwitchedOffShapes', () =>
+{
+  it('recalls the shapes noted for a kind and a flag, and none for a kind or flag never noted', () =>
+  {
+    // Arrange: the bush on kind 20 noted as on shapes 0 and 5.
+    const switchedOff = new SwitchedOffShapes();
+    switchedOff.remember(20, 0x40, [ 0, 5 ]);
+
+    // Act.
+    const recalled = [ switchedOff.recall(20, 0x40), switchedOff.recall(21, 0x40), switchedOff.recall(20, 0x20) ];
+
+    // Assert.
+    expect(recalled)
+      .toStrictEqual([ [ 0, 5 ], [], [] ]);
+  });
+});
+
+describe('switchedOffShapesFor', () =>
+{
+  it('keeps one note per tileset for the window', () =>
+  {
+    // Arrange: nothing; the window starts with no notes.
+
+    // Act.
+    const [ first, again, other ] = [ switchedOffShapesFor(1), switchedOffShapesFor(1), switchedOffShapesFor(2) ];
+
+    // Assert.
+    expect([ first === again, first === other ])
+      .toStrictEqual([ true, false ]);
   });
 });
 

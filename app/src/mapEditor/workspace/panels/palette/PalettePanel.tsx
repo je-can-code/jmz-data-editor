@@ -8,7 +8,14 @@ import { brushForPick, type PalettePick } from '../../../core/palette/paletteGeo
 import { isTabAvailable, layoutPaletteTab, PALETTE_TABS, type PaletteRect, type PaletteTab } from '../../../core/palette/paletteLayout.ts';
 import { paletteMode, type PaletteEditing } from '../../../core/palette/paletteMode.ts';
 import { describeHover, describePick, FLAG_MODE_WORDS, paletteHint } from '../../../core/palette/paletteWords.ts';
-import { editTilesetFlags, FLAG_MODES, planFlagEdit, type FlagClick, type FlagMode } from '../../../core/palette/passabilityEdits.ts';
+import {
+  editTilesetFlags,
+  FLAG_MODES,
+  planFlagEdit,
+  switchedOffShapesFor,
+  type FlagClick,
+  type FlagMode,
+} from '../../../core/palette/passabilityEdits.ts';
 import { TILESET_MARKS_DOCUMENT, toggleTileMark } from '../../../core/palette/tilesetMarkEdits.ts';
 import { isAutotile } from '../../../core/tiles/tileIds.ts';
 import { useHeldMap, useTilesets, useWorkspace, useWorkspaceState } from '../../workspaceHooks.tsx';
@@ -234,7 +241,8 @@ const TilesetPalette = (props: { readonly tileset: RmmzTileset }) =>
   {
     try
     {
-      const step = editTilesetFlags(hub, tileset.id, planFlagEdit(tileset.flags, tileId, click));
+      const edit = planFlagEdit(tileset.flags, tileId, click, switchedOffShapesFor(tileset.id));
+      const step = editTilesetFlags(hub, tileset.id, edit);
       if (step !== null)
       {
         controller.focusHistory(documentHistoryKey(TILESETS_KEY));
