@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import DatabaseFilenames from '../../src/core/enums/DatabaseFilenames.ts';
 import { CLIPBOARD_FORMAT as COMMAND_CLIPBOARD_FORMAT } from '../../src/mapEditor/core/commandList/commandClipboard.ts';
 import { EVENT_CLIPBOARD_MARKER } from '../../src/mapEditor/core/events/eventClipboard.ts';
+import { encodePageClipboard, PAGE_CLIPBOARD_MARKER } from '../../src/mapEditor/core/eventWindow/pageOperations.ts';
+import { createEventPage } from '../../src/mapEditor/core/model/eventModel.ts';
 import { ROW_CLIPBOARD_FORMAT, RowClipboard } from '../../src/services/rows/RowClipboard.ts';
 
 /*
@@ -295,23 +297,27 @@ describe('shellRules', () =>
 
     it('reads each of the editors\' own clipboards only for a page asking for that one', () =>
     {
-      // Arrange: commands and rows as the editors write them.
+      // Arrange: commands, rows and pages as the editors write them.
       const commands = JSON.stringify({ format: COMMAND_CLIPBOARD_FORMAT, version: 1, commands: [] });
       const rows = RowClipboard.copy(DatabaseFilenames.Items, [ { id: 9, name: 'Potion' } ]);
+      const pages = encodePageClipboard({ marker: PAGE_CLIPBOARD_MARKER, version: 1, pages: [ createEventPage() ] });
       const ask = (marker: string, text: string) => rules.clipboardAnswer({ marker, replyTo: REPLY }, () => text)?.message.text;
 
       // Act.
       const answers = [
         ask(COMMAND_CLIPBOARD_FORMAT, commands),
         ask(ROW_CLIPBOARD_FORMAT, rows),
+        ask(PAGE_CLIPBOARD_MARKER, pages),
         ask(EVENT_CLIPBOARD_MARKER, commands),
         ask(COMMAND_CLIPBOARD_FORMAT, rows),
         ask(ROW_CLIPBOARD_FORMAT, EVENTS),
+        ask(PAGE_CLIPBOARD_MARKER, EVENTS),
+        ask(EVENT_CLIPBOARD_MARKER, pages),
       ];
 
       // Assert.
       expect(answers)
-        .toStrictEqual([ commands, rows, '', '', '' ]);
+        .toStrictEqual([ commands, rows, pages, '', '', '', '', '' ]);
     });
 
     it('reads exactly the clipboards the editors write, each by the field its marker sits in', () =>
@@ -323,7 +329,12 @@ describe('shellRules', () =>
 
       // Assert.
       expect(kinds)
-        .toStrictEqual({ [EVENT_CLIPBOARD_MARKER]: 'marker', [COMMAND_CLIPBOARD_FORMAT]: 'format', [ROW_CLIPBOARD_FORMAT]: 'format' });
+        .toStrictEqual({
+          [EVENT_CLIPBOARD_MARKER]: 'marker',
+          [PAGE_CLIPBOARD_MARKER]: 'marker',
+          [COMMAND_CLIPBOARD_FORMAT]: 'format',
+          [ROW_CLIPBOARD_FORMAT]: 'format',
+        });
     });
   });
 });
