@@ -2,7 +2,7 @@ import type { DatabaseNamesJson } from '../commandList/databaseNames.ts';
 import { createCommand, isWholeNumber } from '../commands/editors/commandShape.ts';
 import { SHOW_TEXT_CODE, SHOW_TEXT_LINE_CODE, textToLines } from '../commands/editors/showText.ts';
 import { createEventPage, createMapEvent } from '../model/eventModel.ts';
-import { cloneJson, type JsonObject, type JsonValue } from '../model/json.ts';
+import { cloneJson, jsonEquals, type JsonObject, type JsonValue } from '../model/json.ts';
 import type { RmmzEventCommand, RmmzEventImage, RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
 import { messageField } from './dialogueKind.ts';
 import {
@@ -460,17 +460,22 @@ type NewChest = {
 };
 
 /**
- * Builds a chest's two pages exactly in the treasure pattern. The closed page plays the chest sound, turns the
- * chest through its opening, turns self switch A on, says what was found in a dimmed window in the middle of the
- * screen, then gives it; it starts from the action button, draws with characters, and keeps its facing fixed. The
- * opened page shows the open chest once self switch A is on, and does nothing more.
- * @param {NewChest} chest The look, the reward and the message.
- * @returns {RmmzEventPage[]} The two pages.
+ * What the treasure pattern sets on both of a chest's pages beyond the picture and the commands: the facing fixed, so
+ * talking to the chest never turns it to a half-open frame before it opens; drawn level with characters, so it
+ * blocks the way and opens from the tile in front; and no walking animation.
  */
-const chestPages = (chest: NewChest): RmmzEventPage[] =>
+const CHEST_PAGE_SETTINGS = { directionFix: true, priorityType: 1, walkAnime: false } as const;
+
+/**
+ * Builds the commands a chest's closed page runs: the chest sound, the turn through its opening, self switch A
+ * turned on, what was found said in a dimmed window in the middle of the screen, then the reward itself.
+ * @param {NewChest} chest The reward and the message.
+ * @returns {RmmzEventCommand[]} The commands, closed with the empty command.
+ */
+const openingList = (chest: NewChest): RmmzEventCommand[] =>
 {
   const route = cloneJson(CHEST_OPENING_ROUTE);
-  const list = [
+  return [
     createCommand(PLAY_SE_CODE, 0, [ CHEST_SOUND ]),
     createCommand(SET_MOVEMENT_ROUTE_CODE, 0, [ 0, route ]),
     ...route.list.slice(0, -1).map(step => createCommand(MOVE_ROUTE_LINE_CODE, 0, [ step ])),
@@ -480,18 +485,31 @@ const chestPages = (chest: NewChest): RmmzEventPage[] =>
     rewardCommand(chest.reward, null),
     createCommand(0, 0, []),
   ];
+};
 
-  const closed = createEventPage();
-  const opened = createEventPage();
+/**
+ * Builds a chest's two pages in the treasure pattern, written over a page's own settings. The closed page is that
+ * page with the closed picture, the opening and {@link CHEST_PAGE_SETTINGS}; the opened page is the same page waiting
+ * for self switch A as well, with the open picture and nothing to run. Everything else the page holds, its conditions,
+ * trigger and movement among them, stays on both, so a chest made from a placed event shows when the event did and
+ * moves as it did. Over a fresh page, which is the default, the two pages are exactly MZ's treasure chest.
+ * @param {NewChest} chest The look, the reward and the message.
+ * @param {RmmzEventPage} base The page the pattern is written over.
+ * @returns {RmmzEventPage[]} The two pages.
+ */
+const chestPages = (chest: NewChest, base: RmmzEventPage = createEventPage()): RmmzEventPage[] =>
+{
+  // each page gets its own copy, so the two never share a condition or a route.
+  const closed = cloneJson(base);
+  const opened = cloneJson(base);
   return [
-    { ...closed, directionFix: true, image: pageImage(chest.look.closed), list, priorityType: 1, walkAnime: false },
+    { ...closed, ...CHEST_PAGE_SETTINGS, image: pageImage(chest.look.closed), list: openingList(chest) },
     {
       ...opened,
+      ...CHEST_PAGE_SETTINGS,
       conditions: { ...opened.conditions, selfSwitchCh: 'A', selfSwitchValid: true },
-      directionFix: true,
       image: pageImage(chest.look.opened),
-      priorityType: 1,
-      walkAnime: false,
+      list: [ createCommand(0, 0, []) ],
     },
   ];
 };
@@ -587,20 +605,26 @@ const chestLookFor = (event: RmmzMapEvent, events: readonly (RmmzMapEvent | null
 };
 
 /**
- * Works out the edit that makes an event a chest: its pages replaced by the treasure pattern, giving the default
- * reward with a message naming it, in the look {@link chestLookFor} picks. Its id, name, note and place stay.
- * @param {RmmzMapEvent} event The event.
+ * Works out the edits that make a one-page event a chest: its page written over in the treasure pattern, giving the
+ * default reward with a message naming it, in the look {@link chestLookFor} picks, and the opened page added after it.
+ * Only the settings the pattern changes are written, so the page keeps its conditions, trigger and movement, which the
+ * opened page shares, and the event keeps its id, name, note and place.
+ * @param {RmmzMapEvent} event The event, which has one page.
  * @param {QuickContext} context The map's events and the project's names.
- * @returns {EventEdit[]} The edit.
+ * @returns {EventEdit[]} The edits.
  */
 const makeChestEdits = (event: RmmzMapEvent, context: QuickContext): EventEdit[] =>
 {
-  const pages = chestPages({
-    look: chestLookFor(event, context.events),
-    reward: DEFAULT_REWARD,
-    message: chestMessage(DEFAULT_REWARD, context.names),
-  });
-  return [ { kind: 'set', path: [], value: { ...cloneJson(event), pages } as unknown as JsonValue } ];
+  const [ page ] = event.pages;
+  const chest = { look: chestLookFor(event, context.events), reward: DEFAULT_REWARD, message: chestMessage(DEFAULT_REWARD, context.names) };
+  const [ closed, opened ] = chestPages(chest, page);
+
+  // a setting the pattern leaves as it was is not written at all, so a kept picture keeps its own layout too.
+  const changed = (Object.keys(closed) as (keyof RmmzEventPage)[]).filter(key => jsonEquals(closed[key], page[key]) === false);
+  return [
+    ...changed.map((key): EventEdit => ({ kind: 'set', path: [ 'pages', 0, key ], value: closed[key] as unknown as JsonValue })),
+    { kind: 'splice', path: [ 'pages' ], index: 1, deleteCount: 0, inserted: [ opened as unknown as JsonValue ] },
+  ];
 };
 
 /**

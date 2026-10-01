@@ -39,7 +39,9 @@ import {
  *
  * The panel edits what a chest gives and how much, what it says, and how it looks, and each change rewrites only
  * the command it concerns, keeping its layout, as one step that one undo takes back exactly. A new chest is written
- * exactly in the pattern, key order included, the way the game's own chests hold it.
+ * exactly in the pattern, key order included, the way the game's own chests hold it. An event made a chest has the
+ * pattern written over its page, and only what the pattern changes is written: its conditions, trigger and movement
+ * stay, and the opened page shares them, waiting for its self switch as well.
  */
 describe('chestKind', () =>
 {
@@ -631,6 +633,36 @@ describe('chestKind', () =>
       // Assert.
       expect([ made.id, made.name, made.note, made.x, made.y, read?.rewards[0].reward, read?.messages[0].model.lines, read?.opened ])
         .toStrictEqual([ 9, 'loot', 'kept', 4, 2, { kind: 'item', id: 1, amount: 1 }, [ 'Potion was found!' ], OPEN_GLASS ]);
+    });
+
+    it('keeps the page\'s conditions, trigger and movement on both pages, and writes only what the pattern changes', () =>
+    {
+      // Arrange: a chest graphic shown while switch 12 is on and variable 4 is at least 3, opened by touch, walking a
+      // route of its own, with a self switch letter stored but unused.
+      const conditions = { ...createEventPage().conditions, selfSwitchCh: 'C', switch1Id: 12, switch1Valid: true, variableId: 4, variableValid: true, variableValue: 3 };
+      const moveRoute = { list: [ { code: 19 }, { code: 0 } ], repeat: false, skippable: true, wait: false };
+      const placed = event(9, [ page([], { conditions, image: { ...CLOSED_GLASS }, moveFrequency: 4, moveRoute, moveSpeed: 5, moveType: 3, through: true, trigger: 1 }) ]);
+
+      // Act.
+      const edits = makeChestEdits(placed, { events: [ null ], names: null });
+      const made = applyEdits(placed, edits);
+
+      // Assert: the picture was already a chest's, so it is not written; the opened page waits for self switch A too.
+      const route = { list: [ { code: 19 }, { code: 0 } ], repeat: false, skippable: true, wait: false };
+      const kept = { actorId: 1, actorValid: false, itemId: 1, itemValid: false, switch1Id: 12, switch1Valid: true, switch2Id: 1, switch2Valid: false, variableId: 4, variableValid: true, variableValue: 3 };
+      expect([
+        edits.map(edit => edit.path.join('.')),
+        made.pages.map(each => [ each.conditions, each.trigger, each.moveType, each.moveSpeed, each.moveFrequency, each.moveRoute, each.through, each.directionFix, each.priorityType, each.walkAnime ]),
+        readChest(made)?.letter,
+      ])
+        .toStrictEqual([
+          [ 'pages.0.directionFix', 'pages.0.list', 'pages.0.priorityType', 'pages.0.walkAnime', 'pages' ],
+          [
+            [ { ...kept, selfSwitchCh: 'C', selfSwitchValid: false }, 1, 3, 5, 4, route, true, true, 1, false ],
+            [ { ...kept, selfSwitchCh: 'A', selfSwitchValid: true }, 1, 3, 5, 4, route, true, true, 1, false ],
+          ],
+          'A',
+        ]);
     });
   });
 });

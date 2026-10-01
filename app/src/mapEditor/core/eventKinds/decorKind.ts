@@ -55,9 +55,22 @@ const decorPageFields = (page: RmmzEventPage, pageIndex: number, section: string
 };
 
 /**
+ * Reports whether an event can be made a chest: it has one page, which a chest's two pages are written over, and that
+ * page does not wait for a self switch, since a chest's closed page cannot, and its opened page waits for one of its
+ * own in place of whatever the event waited for.
+ * @param {RmmzMapEvent} event The event, already known to be decor.
+ * @returns {boolean} True when it can become a chest.
+ */
+const canBecomeChest = (event: RmmzMapEvent): boolean =>
+{
+  const [ page ] = event.pages;
+  return event.pages.length === 1 && page.conditions.selfSwitchValid === false;
+};
+
+/**
  * What decor's quick panel offers: each page's picture, facing, frame, priority and trigger, and, for a one-page
- * event, making it a chest. A chest graphic placed first and then made a chest keeps that graphic as its closed
- * look.
+ * event that waits for no self switch, making it a chest. A chest graphic placed first and then made a chest keeps
+ * that graphic as its closed look.
  * @param {RmmzMapEvent} event The event.
  * @param {QuickContext} context The map's events and the project's names.
  * @returns {QuickModel} The settings and actions; none for an event that is not decor.
@@ -71,7 +84,7 @@ const decorQuickModel = (event: RmmzMapEvent, context: QuickContext): QuickModel
 
   const several = event.pages.length > 1;
   const fields = event.pages.flatMap((page, pageIndex) => decorPageFields(page, pageIndex, several ? `Page ${pageIndex + 1}` : ''));
-  const actions: QuickAction[] = several ? [] : [ {
+  const actions: QuickAction[] = canBecomeChest(event) === false ? [] : [ {
     key: 'make-chest',
     label: 'Make it a chest',
     section: '',

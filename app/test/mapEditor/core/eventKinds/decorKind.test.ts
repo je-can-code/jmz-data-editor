@@ -3,6 +3,7 @@ import { isChest, readChest } from '../../../../src/mapEditor/core/eventKinds/ch
 import { decorQuickModel, isDecor } from '../../../../src/mapEditor/core/eventKinds/decorKind.ts';
 import { editQuickField, runQuickAction } from '../../../../src/mapEditor/core/eventKinds/quickFields.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import { applyEdits, CLOSED_GLASS, command, event, eventIn, hubWith, OPEN_GLASS, oreChest, page } from '../../support/eventKindFixtures.ts';
 
 /*
@@ -12,7 +13,8 @@ import { applyEdits, CLOSED_GLASS, command, event, eventIn, hubWith, OPEN_GLASS,
  *
  * The panel edits each page's picture (sheet and character, facing and frame), priority and trigger, each as one
  * step one undo takes back, and offers to make a one-page event a chest: the pattern written in, the event's own
- * picture kept as the closed chest, and its id, name, note and place untouched.
+ * picture kept as the closed chest, and its id, name, note and place untouched. An event whose page waits for a self
+ * switch is not offered it, since a chest's pages wait for a self switch of their own and the event's would be lost.
  */
 describe('decorKind', () =>
 {
@@ -85,6 +87,19 @@ describe('decorKind', () =>
       // Assert.
       expect([ model.fields.map(field => [ field.key, field.section ]).filter(([ key ]) => String(key).endsWith('trigger')), model.actions ])
         .toStrictEqual([ [ [ 'page.0.trigger', 'Page 1' ], [ 'page.1.trigger', 'Page 2' ] ], [] ]);
+    });
+
+    it('offers no chest for an event whose one page waits for a self switch, though it offers the page\'s settings', () =>
+    {
+      // Arrange: a lamp shown only once its self switch B is on.
+      const lamp = event(1, [ page([], { conditions: { ...createEventPage().conditions, selfSwitchCh: 'B', selfSwitchValid: true } }) ]);
+
+      // Act.
+      const model = decorQuickModel(lamp, { events: [], names: null });
+
+      // Assert.
+      expect([ model.fields.map(field => field.key), model.actions ])
+        .toStrictEqual([ [ 'page.0.graphic', 'page.0.direction', 'page.0.pattern', 'page.0.priority', 'page.0.trigger' ], [] ]);
     });
 
     it('offers nothing for an event that is not decor', () =>
