@@ -199,6 +199,37 @@ describe('WorkspaceController', () =>
         .toStrictEqual([ 'tree', 'tree', 'map:5' ]);
     });
 
+    it('keeps the workspace\'s palette on the main window\'s map while a torn-out map has focus, the properties following both', () =>
+    {
+      // Arrange: a map docked in the main window, and one torn out with a palette of its own.
+      const { controller } = buildController();
+      const { api } = buildDock([
+        { id: 'map-12', component: 'map', params: { mapId: 12 }, group: MAIN },
+        { id: 'map-40', component: 'map', params: { mapId: 40 }, group: TORN },
+      ]);
+      controller.panelActivated(api.getPanel('map-12'));
+
+      // Act.
+      controller.panelActivated(api.getPanel('map-40'));
+
+      // Assert.
+      expect([ controller.getState().currentMapId, controller.getState().paletteMapId, controller.getState().activeHistory ])
+        .toStrictEqual([ 40, 12, 'map:40' ]);
+    });
+
+    it('makes a map picked alone in the tree the one the palette shows too', () =>
+    {
+      // Arrange.
+      const { controller } = buildController();
+
+      // Act.
+      controller.selectTreeMaps([ 3 ]);
+
+      // Assert.
+      expect([ controller.getState().currentMapId, controller.getState().paletteMapId ])
+        .toStrictEqual([ 3, 3 ]);
+    });
+
     it('makes a map picked alone in the tree the one the properties show, and not several', () =>
     {
       // Arrange.

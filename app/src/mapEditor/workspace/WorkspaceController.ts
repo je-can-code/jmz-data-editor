@@ -59,6 +59,12 @@ type WorkspaceState = {
   readonly currentMapId: number | null;
 
   /**
+   * The map the workspace's own palette shows: the last map focused in the main window or picked alone in the tree. A
+   * torn-out map has a palette of its own, so focusing one leaves this as it was.
+   */
+  readonly paletteMapId: number | null;
+
+  /**
    * The maps selected in the tree, in the order they were picked.
    */
   readonly treeSelection: readonly number[];
@@ -165,6 +171,7 @@ class WorkspaceController
   #state: WorkspaceState = {
     activeHistory: null,
     currentMapId: null,
+    paletteMapId: null,
     treeSelection: [],
     renaming: null,
     clipboard: null,
@@ -263,8 +270,9 @@ class WorkspaceController
   }
 
   /**
-   * Follows focus from panel to panel: a map panel makes its map current and its history the one undo acts on;
-   * the tree and the properties panel hand undo their own; the rest leave it where it was.
+   * Follows focus from panel to panel: a map panel makes its map current and its history the one undo acts on, and,
+   * in the main window, the map the workspace's own palette shows; the tree and the properties panel hand undo their
+   * own; the rest leave it where it was.
    * @param {IDockviewPanel | undefined} panel The panel that now has focus.
    */
   panelActivated(panel: IDockviewPanel | undefined): void
@@ -277,7 +285,10 @@ class WorkspaceController
     const { component } = panel.api;
     if (component === PANEL_COMPONENTS.map && isMapPanelParams(panel.params))
     {
-      this.#update({ currentMapId: panel.params.mapId, activeHistory: mapHistoryKey(panel.params.mapId) });
+      const { mapId } = panel.params;
+      this.#update(panel.api.location.type === 'popout'
+        ? { currentMapId: mapId, activeHistory: mapHistoryKey(mapId) }
+        : { currentMapId: mapId, paletteMapId: mapId, activeHistory: mapHistoryKey(mapId) });
       return;
     }
 
@@ -486,13 +497,13 @@ class WorkspaceController
   //region tree
 
   /**
-   * Picks maps in the tree. Picking one alone makes it the map the properties panel shows.
+   * Picks maps in the tree. Picking one alone makes it the map the properties panel and the workspace's palette show.
    * @param {readonly number[]} mapIds The maps.
    */
   selectTreeMaps(mapIds: readonly number[]): void
   {
     this.#update(mapIds.length === 1
-      ? { treeSelection: [ ...mapIds ], currentMapId: mapIds[0] }
+      ? { treeSelection: [ ...mapIds ], currentMapId: mapIds[0], paletteMapId: mapIds[0] }
       : { treeSelection: [ ...mapIds ] });
   }
 

@@ -10,10 +10,8 @@ import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.
 import { MAP_INFOS_KEY, TILESETS_KEY, type DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { cellInspector } from '../../../../src/mapEditor/core/palette/cellInspector.ts';
-import { EMPTY_BRUSH, paintSelection } from '../../../../src/mapEditor/core/palette/paintSelection.ts';
-import { paletteMode } from '../../../../src/mapEditor/core/palette/paletteMode.ts';
 import { TILESET_MARKS_DOCUMENT } from '../../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
-import { PaintState } from '../../../../src/mapEditor/core/tools/PaintState.ts';
+import { WindowPaints } from '../../../../src/mapEditor/core/tools/WindowPaint.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { LayersPanel } from '../../../../src/mapEditor/workspace/panels/layers/LayersPanel.tsx';
 import { PalettePanel } from '../../../../src/mapEditor/workspace/panels/palette/PalettePanel.tsx';
@@ -36,8 +34,9 @@ describe('the palette and the layers panel', () =>
 {
   /**
    * A workspace holding the cave (map 5, the 3 by 2 fixture on tileset 4), with tileset 4 naming A1, A2 and B, and
-   * no marks saved.
-   * @returns {{ hub: DocumentHub, controller: WorkspaceController }} The hub and the workspace.
+   * no marks saved, the page's own window painting with a linked paint of its own.
+   * @returns {{ hub: DocumentHub, controller: WorkspaceController, paint: WindowPaint }} The hub, the workspace, and the
+   * page's paint.
    */
   const buildWorkspace = () =>
   {
@@ -57,16 +56,20 @@ describe('the palette and the layers panel', () =>
       loadImage: async () => null,
       loadEditorData: async () => contents[TILESET_MARKS_DOCUMENT],
     } as unknown as MapEditorApi;
-    const painting = new PaintState();
-    const controller = new WorkspaceController({ hub, api, openDocument, painting } as unknown as MapEditorServices);
-    return { hub, controller, painting };
+    const paints = new WindowPaints(window);
+    unlinks.push(paints.main.link());
+    const controller = new WorkspaceController({ hub, api, openDocument, paints } as unknown as MapEditorServices);
+    return { hub, controller, paint: paints.main };
   };
+
+  /**
+   * Unlinks each test's paint once the test is done.
+   */
+  const unlinks: (() => void)[] = [];
 
   afterEach(() =>
   {
-    paletteMode.setEditing('tiles');
-    paintSelection.setLayer('auto');
-    paintSelection.setBrush(EMPTY_BRUSH);
+    unlinks.splice(0).forEach(unlink => unlink());
     cellInspector.forgetMap(5);
   });
 
@@ -94,7 +97,7 @@ describe('the palette and the layers panel', () =>
   it('opens the passability editor for every map to follow, and closes it with the palette', async () =>
   {
     // Arrange.
-    const { controller } = buildWorkspace();
+    const { controller, paint } = buildWorkspace();
     const { unmount } = render(
       <WorkspaceProvider controller={controller}>
         <PalettePanel/>
@@ -105,18 +108,18 @@ describe('the palette and the layers panel', () =>
 
     // Act.
     fireEvent.click(screen.getByRole('button', { name: 'Passability' }));
-    const whileOpen = [ paletteMode.getState().editing, screen.queryByText('Terrain tag') !== null ];
+    const whileOpen = [ paint.mode.getState().editing, screen.queryByText('Terrain tag') !== null ];
     unmount();
 
     // Assert.
-    expect([ whileOpen, paletteMode.getState().editing ])
+    expect([ whileOpen, paint.mode.getState().editing ])
       .toStrictEqual([ [ 'passability', true ], 'tiles' ]);
   });
 
-  it('sets the window\'s layer from the strip', () =>
+  it('sets the window\'s layer from the strip, which its tools paint on', () =>
   {
     // Arrange.
-    const { controller } = buildWorkspace();
+    const { controller, paint } = buildWorkspace();
     render(
       <WorkspaceProvider controller={controller}>
         <LayersPanel/>
@@ -127,8 +130,8 @@ describe('the palette and the layers panel', () =>
     fireEvent.click(screen.getByRole('button', { name: '3' }));
 
     // Assert: layer 3 is tile layer 2.
-    expect(paintSelection.layer)
-      .toBe(2);
+    expect([ paint.selection.layer, paint.painting.settings.strip ])
+      .toStrictEqual([ 2, 2 ]);
   });
 
   it('reads the cell under the pointer and clears one layer as a step in that map\'s history, handing undo to it', async () =>
@@ -152,11 +155,10 @@ describe('the palette and the layers panel', () =>
       .toStrictEqual([ 0, [ 'Clear layer 1 at 1, 0' ], 'map:5' ]);
   });
 
-  // last, since the palette remembers each tileset's pick for as long as the page lives.
   it('takes up the pen when the shadow pen is picked with the events in hand, handing the window its brush', async () =>
   {
     // Arrange: a window with the events in hand, its palette on the regions tab.
-    const { controller, painting } = buildWorkspace();
+    const { controller, paint } = buildWorkspace();
     render(
       <WorkspaceProvider controller={controller}>
         <PalettePanel/>
@@ -165,13 +167,13 @@ describe('the palette and the layers panel', () =>
     act(() => controller.selectTreeMaps([ 5 ]));
     await screen.findByTestId('palette');
     fireEvent.click(screen.getByRole('tab', { name: 'R' }));
-    const before = painting.settings.tool;
+    const before = paint.painting.settings.tool;
 
     // Act.
     fireEvent.click(screen.getByRole('button', { name: 'Shadow pen' }));
 
     // Assert: the shadow brush is the window's, and the pen is in hand to draw with it.
-    expect([ before, painting.settings.tool, paintSelection.brush.kind ])
-      .toStrictEqual([ 'events', 'pen', 'shadows' ]);
+    expect([ before, paint.painting.settings.tool, paint.selection.brush.kind, paint.painting.settings.brush?.kind ])
+      .toStrictEqual([ 'events', 'pen', 'shadows', 'shadows' ]);
   });
 });

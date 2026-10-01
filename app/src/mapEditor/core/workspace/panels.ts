@@ -89,10 +89,12 @@ const withPanelMinimums = (saved: JsonObject): JsonObject =>
 };
 
 /**
- * What a map panel keeps in the layout: which map it shows.
+ * What a map panel keeps in the layout: which map it shows, and whether its own palette is hidden while it is torn out
+ * into a window of its own.
  */
 type MapPanelParams = {
   readonly mapId: number;
+  readonly paletteHidden?: boolean;
 };
 
 /**

@@ -7,6 +7,7 @@ import type { Camera, MapCell } from '../core/renderer/camera.ts';
 import { GAME_LOOK, type OverlayId } from '../core/renderer/MapRenderer.ts';
 import { openTilesetMarks } from '../core/palette/tilesetMarkEdits.ts';
 import { TilesetLayeringSource } from '../core/tools/tilesetLayering.ts';
+import type { WindowPaint } from '../core/tools/WindowPaint.ts';
 import { EventMenu } from '../events/EventMenu.tsx';
 import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity, type EventToolsRenderer } from '../events/MapEventTools.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
@@ -69,6 +70,12 @@ type MapViewProps = {
    * Tells the author something, such as why a drop was refused. Left out, the view says it in its status line.
    */
   readonly onNotice?: (text: string, severity: EventNoticeSeverity) => void;
+
+  /**
+   * What the view paints with: its window's paint, which the window's palette and layer strip choose. Left out, the
+   * page's own.
+   */
+  readonly paint?: WindowPaint;
 };
 
 /**
@@ -179,6 +186,9 @@ const DrawNotice = (props: { state: DrawState }) =>
  * the painting tools, and a status line naming the zoom, the tile under the pointer, how many events are selected and
  * the GPU drawing it.
  *
+ * The view paints with its window's paint: the page's own for a map docked in the main window, and a torn-out window's
+ * own for a map torn out, so each window's palette, layer strip and tools go together and no further.
+ *
  * The tool in hand decides what the left button does. With the events in hand, the map's events are selected, moved,
  * created, deleted, copied and pasted with the mouse, the keys and a right-click menu, through {@link MapEventTools},
  * into the window's selection; with any painting tool in hand the left button paints, previewed before each click, and
@@ -187,14 +197,16 @@ const DrawNotice = (props: { state: DrawState }) =>
  *
  * A view off screen, behind another tab, lets its GPU context go and draws again, camera and all, when it shows; a map
  * that cannot draw says why over the canvas rather than leaving it blank.
- * @param {MapViewProps} props The map to show, the event to pick out, whether the view is on screen, the selection
- * and where notices go.
+ * @param {MapViewProps} props The map to show, the event to pick out, whether the view is on screen, the selection,
+ * where notices go, and what it paints with.
  * @returns {React.JSX.Element} The view.
  */
 const MapView = (props: MapViewProps) =>
 {
   const { mapId, pickedEventId = null, pickRequest = 0, visible = true, onNotice } = props;
   const services = useMapEditorServices();
+  const paint = props.paint ?? services.paints.main;
+  const { painting } = paint;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<PixiMapRenderer | null>(null);
   const controllerRef = useRef<MapViewController | null>(null);
@@ -251,7 +263,7 @@ const MapView = (props: MapViewProps) =>
       hub: services.hub,
       map: () => controller.map,
       layering: map => layering.layeringFor(map),
-      painting: services.painting,
+      painting,
       overlay: part => overlays.update('tools', part),
     });
     stops.push(painter.attach());
@@ -318,7 +330,7 @@ const MapView = (props: MapViewProps) =>
     toolsRef.current = tools;
 
     // the left button is the event tools' only while the events are in hand; a painting tool stands them down.
-    stops.push(followToolInHand(services.painting, tools));
+    stops.push(followToolInHand(painting, tools));
 
     const view = host.ownerDocument.defaultView;
     if (view !== null && wantsSpeedHooks(view.location.search))
@@ -327,7 +339,7 @@ const MapView = (props: MapViewProps) =>
         renderer,
         hub: services.hub,
         painter,
-        painting: services.painting,
+        painting,
         tools,
         selection,
         map: () => controller.map,
@@ -353,7 +365,7 @@ const MapView = (props: MapViewProps) =>
       rendererRef.current = null;
       renderer.destroy();
     };
-  }, [ services, selection ]);
+  }, [ services, selection, painting ]);
 
   // open the map, and open again whenever the map asked for changes.
   useEffect(() =>
@@ -424,8 +436,8 @@ const MapView = (props: MapViewProps) =>
     rendererRef.current?.setVisible(visible);
   }, [ visible ]);
 
-  // the layer strip, the stack view and the passability editor, followed from this view.
-  usePaletteLinks({ host: hostRef, renderer: rendererRef, mapId, settings, setSettings });
+  // the window's layer strip and passability editor, and the stack view, followed from this view.
+  usePaletteLinks({ host: hostRef, renderer: rendererRef, mapId, settings, setSettings, selection: paint.selection, mode: paint.mode });
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -455,7 +467,7 @@ const MapView = (props: MapViewProps) =>
           />
         ))}
       </Box>
-      <PaintToolBar painting={services.painting}/>
+      <PaintToolBar painting={painting}/>
       <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <Box
           data-testid={'map-view'}

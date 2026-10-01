@@ -3,10 +3,10 @@ import { Alert, Box, Chip, Stack, Tab, Tabs, ToggleButton, ToggleButtonGroup, To
 import { documentHistoryKey } from '../../../core/history/historyKeys.ts';
 import { TILESETS_KEY } from '../../../core/model/documentKeys.ts';
 import type { RmmzTileset } from '../../../core/model/rmmzTypes.ts';
-import { paintSelection } from '../../../core/palette/paintSelection.ts';
-import { brushForPick, type PalettePick } from '../../../core/palette/paletteGeometry.ts';
+import { brushForPick } from '../../../core/palette/paletteGeometry.ts';
 import { isTabAvailable, layoutPaletteTab, PALETTE_TABS, type PaletteRect, type PaletteTab } from '../../../core/palette/paletteLayout.ts';
-import { paletteMode, type PaletteEditing } from '../../../core/palette/paletteMode.ts';
+import { recallPalette, type PaletteMemory } from '../../../core/palette/paletteMemory.ts';
+import type { PaletteEditing } from '../../../core/palette/paletteMode.ts';
 import { describeHover, describePick, FLAG_MODE_WORDS, paletteHint } from '../../../core/palette/paletteWords.ts';
 import {
   editTilesetFlags,
@@ -23,43 +23,13 @@ import { useHeldMap, useTilesets, useWorkspace, useWorkspaceState } from '../../
 import { AutotilePreview } from './AutotilePreview.tsx';
 import { PaletteCanvas, type PaletteHover } from './PaletteCanvas.tsx';
 import { usePaletteMode, useTilesetMarks, useTilesetSheets } from './paletteHooks.ts';
+import { usePaintScope } from './paintScope.tsx';
 
 /**
  * How long the pointer rests on an autotile before its painted patch shows, in milliseconds: long enough that sweeping
  * across the palette shows nothing, short enough to feel immediate once the pointer stops.
  */
 const PREVIEW_DELAY_MS = 250;
-
-/**
- * What the palette remembers for one tileset: the tab on show, and what was picked there.
- */
-type PaletteMemory = {
-  readonly tab: PaletteTab;
-  readonly pick: PalettePick | null;
-};
-
-/**
- * Every tileset's memory, kept for as long as the window is open, so moving between maps on different tilesets comes
- * back to what each had picked.
- */
-const memories = new Map<number, PaletteMemory>();
-
-/**
- * Recalls what a tileset's palette had on show and picked, or starts it on its first tab with nothing picked.
- * @param {RmmzTileset} tileset The tileset.
- * @returns {PaletteMemory} Its memory.
- */
-const memoryFor = (tileset: RmmzTileset): PaletteMemory =>
-{
-  const remembered = memories.get(tileset.id);
-  if (remembered !== undefined && isTabAvailable(remembered.tab, tileset.tilesetNames))
-  {
-    return remembered;
-  }
-
-  const tab = PALETTE_TABS.find(each => isTabAvailable(each, tileset.tilesetNames)) ?? 'R';
-  return { tab, pick: remembered?.pick ?? null };
-};
 
 /**
  * A line in place of the palette, while there is nothing to show.
@@ -94,6 +64,7 @@ const PaletteToolbar = (props: {
 }) =>
 {
   const { tab, flagMode, editing, shadowPicked, unsaved, onPickShadow } = props;
+  const { mode } = usePaintScope();
   return (
     <>
       <Stack direction={'row'} spacing={1} alignItems={'center'} sx={{ px: 1, py: 0.5, flexWrap: 'wrap', rowGap: 0.5 }}>
@@ -105,7 +76,7 @@ const PaletteToolbar = (props: {
           {
             if (value !== null)
             {
-              paletteMode.setEditing(value);
+              mode.setEditing(value);
             }
           }}
         >
@@ -132,7 +103,7 @@ const PaletteToolbar = (props: {
               label={FLAG_MODE_WORDS[each].label}
               color={flagMode === each ? 'primary' : 'default'}
               variant={flagMode === each ? 'filled' : 'outlined'}
-              onClick={() => paletteMode.setFlagMode(each)}
+              onClick={() => mode.setFlagMode(each)}
             />
           ))}
         </Box>
@@ -142,7 +113,8 @@ const PaletteToolbar = (props: {
 };
 
 /**
- * One tileset's palette: its tabs, the cells to pick from, the "goes on top" badges, and the passability editor.
+ * One tileset's palette: its tabs, the cells to pick from, the "goes on top" badges, and the passability editor. It
+ * picks for its paint's window (see usePaintScope), and remembers each tileset's tab and pick there.
  * @param {{ tileset: RmmzTileset }} props The tileset, live from the tilesets document.
  * @returns {React.JSX.Element} The palette.
  */
@@ -151,11 +123,12 @@ const TilesetPalette = (props: { readonly tileset: RmmzTileset }) =>
   const { tileset } = props;
   const controller = useWorkspace();
   const { hub } = controller.services;
+  const paint = usePaintScope();
   const names = tileset.tilesetNames;
   const sheets = useTilesetSheets(tileset);
   const mode = usePaletteMode();
   const marksState = useTilesetMarks(tileset.id);
-  const [ memory, setMemory ] = useState<PaletteMemory>(() => memoryFor(tileset));
+  const [ memory, setMemory ] = useState<PaletteMemory>(() => recallPalette(paint.memories, tileset));
   const [ hover, setHover ] = useState<PaletteHover | null>(null);
   const [ preview, setPreview ] = useState<PaletteHover | null>(null);
   const layout = useMemo(() => layoutPaletteTab(memory.tab, names), [ memory.tab, names ]);
@@ -164,9 +137,9 @@ const TilesetPalette = (props: { readonly tileset: RmmzTileset }) =>
   // what is picked becomes the window's brush, and is remembered for this tileset.
   useEffect(() =>
   {
-    memories.set(tileset.id, memory);
-    paintSelection.setBrush(brushForPick(names, memory.pick, tileset.id));
-  }, [ memory, names, tileset.id ]);
+    paint.memories.set(tileset.id, memory);
+    paint.selection.setBrush(brushForPick(names, memory.pick, tileset.id));
+  }, [ paint, memory, names, tileset.id ]);
 
   // the regions have no passability, so the editor shows a sheet's tiles instead.
   useEffect(() =>
@@ -202,7 +175,7 @@ const TilesetPalette = (props: { readonly tileset: RmmzTileset }) =>
   const pickCells = (rect: PaletteRect) =>
   {
     setMemory(current => ({ ...current, pick: { kind: 'cells', tab: current.tab, rect } }));
-    takeUpPenForPick(controller.services.painting);
+    takeUpPenForPick(paint.painting);
   };
 
   /**
@@ -211,7 +184,7 @@ const TilesetPalette = (props: { readonly tileset: RmmzTileset }) =>
   const pickShadow = () =>
   {
     setMemory(current => ({ ...current, pick: { kind: 'shadow' } }));
-    takeUpPenForPick(controller.services.painting);
+    takeUpPenForPick(paint.painting);
   };
 
   /**
@@ -337,21 +310,24 @@ const TilesetPalette = (props: { readonly tileset: RmmzTileset }) =>
 };
 
 /**
- * The tileset palette: the tiles of the map with focus, sheet by sheet as MZ shows them, each autotile kind as one
- * ready-made tile, with a painted patch of it on hover. A drag picks a rectangle to paint with, the regions tab picks
- * regions and the shadow pen, and a tile's corner badge marks it to go on top of the ground, remembered per tileset.
- * Switched to passability, the same cells edit the tileset's flags instead, while the maps show their passability.
- * @returns {React.JSX.Element} The panel.
+ * The tileset palette for one map: its tiles, sheet by sheet as MZ shows them, each autotile kind as one ready-made
+ * tile, with a painted patch of it on hover. A drag picks a rectangle to paint with, the regions tab picks regions and
+ * the shadow pen, and a tile's corner badge marks it to go on top of the ground, remembered per tileset. Switched to
+ * passability, the same cells edit the tileset's flags instead, while its window's maps show their passability. It
+ * picks for its paint's window (see usePaintScope): the workspace's own palette, or a torn-out map's.
+ * @param {{ mapId: number | null }} props The map whose tiles to show, or null for none.
+ * @returns {React.JSX.Element} The palette.
  */
-const PalettePanel = () =>
+const MapPalette = (props: { readonly mapId: number | null }) =>
 {
-  const mapId = useWorkspaceState(state => state.currentMapId);
+  const { mapId } = props;
   const held = useHeldMap(mapId);
   const tilesets = useTilesets();
+  const { mode } = usePaintScope();
   const { map } = held;
 
   // closing the palette closes its passability editor, so no map goes on showing passability for an editor nobody sees.
-  useEffect(() => () => paletteMode.setEditing('tiles'), []);
+  useEffect(() => () => mode.setEditing('tiles'), [ mode ]);
 
   if (mapId === null || map === null)
   {
@@ -371,4 +347,16 @@ const PalettePanel = () =>
   return <TilesetPalette key={tileset.id} tileset={tileset}/>;
 };
 
-export { PalettePanel };
+/**
+ * The workspace's own palette: the tiles of the map with focus in the main window, or the map picked alone in the tree,
+ * picking for the main window's maps wherever the panel is shown. A torn-out map carries a palette of its own, so
+ * focusing one leaves this one where it was.
+ * @returns {React.JSX.Element} The panel.
+ */
+const PalettePanel = () =>
+{
+  const mapId = useWorkspaceState(state => state.paletteMapId);
+  return <MapPalette mapId={mapId}/>;
+};
+
+export { MapPalette, PalettePanel };
