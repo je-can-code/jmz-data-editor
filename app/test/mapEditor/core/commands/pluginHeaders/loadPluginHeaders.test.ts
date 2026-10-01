@@ -17,7 +17,7 @@ describe('loadPluginHeaders', () =>
 {"name":"gone/Missing","status":true,"description":"","parameters":{}}
 ];`;
 
-  it('parses every enabled plugin\'s header, never fetching a disabled one and leaving out a missing one', async () =>
+  it('parses every enabled plugin\'s header, never fetching a disabled one and leaving out a missing one, alongside every entry it read', async () =>
   {
     // Arrange: a server with J-TIME's source and nothing else.
     const fetched: string[] = [];
@@ -33,13 +33,20 @@ describe('loadPluginHeaders', () =>
     };
 
     // Act.
-    const headers = await loadPluginHeaders(api);
+    const result = await loadPluginHeaders(api);
 
     // Assert.
-    expect([ fetched, headers ])
+    expect([ fetched, result ])
       .toStrictEqual([
         [ 'j/time/J-TIME', 'gone/Missing' ],
-        [ { plugin: 'j/time/J-TIME', description: 'Time.', commands: [ { plugin: 'j/time/J-TIME', command: 'stopTime', text: 'Stop TIME', args: [] } ], structs: [] } ],
+        {
+          entries: [
+            { name: 'j/time/J-TIME', status: true, description: '', parameters: {} },
+            { name: 'j/log/J-Log', status: false, description: '', parameters: {} },
+            { name: 'gone/Missing', status: true, description: '', parameters: {} },
+          ],
+          headers: [ { plugin: 'j/time/J-TIME', description: 'Time.', commands: [ { plugin: 'j/time/J-TIME', command: 'stopTime', text: 'Stop TIME', args: [] } ], structs: [] } ],
+        },
       ]);
   });
 });

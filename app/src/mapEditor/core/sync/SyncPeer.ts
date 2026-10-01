@@ -1,6 +1,7 @@
 import type { ChannelMessageEvent, MessageChannelLike } from '../../../core/infrastructure/messaging/MessageChannelLike.ts';
 import type { DocumentHub, DocumentSnapshot, HubEvent, RemoteOperation } from '../history/DocumentHub.ts';
 import type { DocumentKey } from '../model/documentKeys.ts';
+import type { JsonValue } from '../model/json.ts';
 import { asSyncMessage, compareLineages, type HeldDocument, type SyncMessage } from './SyncProtocol.ts';
 
 /**
@@ -103,7 +104,10 @@ const HEAD_EVENTS: ReadonlySet<HubEvent['type']> = new Set([
  *
  * Everything that happens to the hub here (a step, an undo, a redo, a forget, a save) is posted on the channel,
  * and every such operation posted by another window is repeated here through {@link DocumentHub.applyRemote},
- * which checks it against the head of this window's lineage for each document.
+ * which checks it against the head of this window's lineage for each document. A file changed outside the editor is
+ * read once, by the window reading the change stream, which hands that very version to every window here
+ * ({@link postOutside}); each takes it as the same step, so no two windows ever record different versions of one
+ * change.
  *
  * When the two copies are found to differ, their lineages decide, and nothing is ever settled by throwing work
  * away. A copy that is only behind (its lineage a prefix of the other's) takes the other copy, which holds
@@ -262,6 +266,28 @@ class SyncPeer
     return this.#livePeers()
       .filter(([ , peer ]) => peer.holding.has(key))
       .map(([ clientId ]) => clientId);
+  }
+
+  /**
+   * Lists every document some other live window holds, whatever state it holds it in.
+   * @returns {DocumentKey[]} The documents, each once.
+   */
+  documentsHeldElsewhere(): DocumentKey[]
+  {
+    return [ ...new Set(this.#livePeers().flatMap(([ , peer ]) => [ ...peer.holding.keys() ])) ];
+  }
+
+  /**
+   * Hands every other window one version of a document's file that changed outside the editor, read once here for
+   * all of them, so each takes exactly that version ({@link DocumentHub.applyOutsideContent}) rather than whatever it
+   * would read itself a moment later, which a second write may already have changed.
+   * @param {DocumentKey} key The document.
+   * @param {JsonValue | null} content The file's content, or null when the file was removed.
+   * @param {boolean} recheck True when the file was re-read because the change stream came back, not because it changed.
+   */
+  postOutside(key: DocumentKey, content: JsonValue | null, recheck: boolean): void
+  {
+    this.#post({ type: 'outside', from: this.clientId, document: key, content, recheck });
   }
 
   /**
@@ -489,6 +515,9 @@ class SyncPeer
         break;
       case 'operation':
         this.#hub.applyRemote(message.operation);
+        break;
+      case 'outside':
+        this.#hub.applyOutsideContent(message.document, message.content, message.recheck);
         break;
     }
   }

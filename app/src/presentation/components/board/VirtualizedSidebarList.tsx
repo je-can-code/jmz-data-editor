@@ -109,8 +109,8 @@ type VirtualizedSidebarListProps = {
    */
   searchLabel?: string;
   /**
-   * When set, rows can be Shift-clicked into a run and copied and pasted whole, by shortcut and from a
-   * right-click menu on the rows (see {@link useRowClipboard}).
+   * When set, rows can be Shift-clicked into a run and copied, pasted or cleared whole, by shortcut and
+   * from a right-click menu on the rows (see {@link useRowClipboard}).
    */
   rowClipboard?: RowClipboardHandle;
 };
@@ -219,6 +219,17 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
       internalListRef.current?.scrollToItem(idx, 'auto');
       onSelectIndex(idx);
     }, [ onSelectIndex ]);
+
+    /**
+     * Runs the row clipboard's own key handling- Del clears the selection- before the board's, so a board
+     * that also listens for keys here (arrow-key navigation, say) still sees every key it cares about.
+     * @param {React.KeyboardEvent<HTMLDivElement>} event The key event from the list.
+     */
+    const handleListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) =>
+    {
+      rowClipboard?.onListKeyDown(event);
+      onListKeyDown?.(event);
+    };
 
     const handleSearchChange = (e: ChangeEvent<HTMLInputElement>) =>
     {
@@ -488,7 +499,7 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
             ref={listWrapperRef}
             tabIndex={0}
             role={"listbox"}
-            onKeyDown={onListKeyDown}
+            onKeyDown={handleListKeyDown}
             style={{
               outline: "none",
               width: "100%",

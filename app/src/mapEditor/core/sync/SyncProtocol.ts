@@ -1,6 +1,6 @@
 import type { DocumentSnapshot, RemoteOperation } from '../history/DocumentHub.ts';
 import type { DocumentKey } from '../model/documentKeys.ts';
-import { isJsonObject } from '../model/json.ts';
+import { isJsonObject, type JsonValue } from '../model/json.ts';
 
 /**
  * One document a window holds, and the id of the latest operation applied to it there. Two windows at the same
@@ -24,6 +24,10 @@ type HeldDocument = {
  * - {@code offer}: a window hands its copy to another: to catch up a window that is behind, to tell a window
  *   the two copies went different ways, or, with {@code resolution}, because the person chose this copy.
  * - {@code operation}: a step committed, undone, redone or forgotten, or a document saved.
+ * - {@code outside}: the one window reading the file-change stream read a document's file after it changed outside the
+ *   editor, or, with {@code recheck}, after the stream came back, and hands every window that very version, so they
+ *   all take the same one rather than each whatever it would read a moment later. {@code content} is null when the
+ *   file was removed.
  */
 type SyncMessage =
   | { readonly type: 'hello'; readonly from: string; readonly holding: readonly HeldDocument[] }
@@ -32,12 +36,13 @@ type SyncMessage =
   | { readonly type: 'snapshot-request'; readonly from: string; readonly requestId: string; readonly document: DocumentKey; readonly to: string | null }
   | { readonly type: 'snapshot'; readonly from: string; readonly to: string; readonly requestId: string; readonly snapshot: DocumentSnapshot }
   | { readonly type: 'offer'; readonly from: string; readonly to: string; readonly snapshot: DocumentSnapshot; readonly resolution: boolean }
-  | { readonly type: 'operation'; readonly from: string; readonly operation: RemoteOperation };
+  | { readonly type: 'operation'; readonly from: string; readonly operation: RemoteOperation }
+  | { readonly type: 'outside'; readonly from: string; readonly document: DocumentKey; readonly content: JsonValue | null; readonly recheck: boolean };
 
 /**
  * The message types a window acts on.
  */
-const SYNC_MESSAGE_TYPES: ReadonlySet<string> = new Set([ 'hello', 'presence', 'goodbye', 'snapshot-request', 'snapshot', 'offer', 'operation' ]);
+const SYNC_MESSAGE_TYPES: ReadonlySet<string> = new Set([ 'hello', 'presence', 'goodbye', 'snapshot-request', 'snapshot', 'offer', 'operation', 'outside' ]);
 
 /**
  * Reads a channel message as a sync message, ignoring anything else posted on the channel.

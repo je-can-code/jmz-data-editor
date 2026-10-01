@@ -2,9 +2,11 @@ import { MapEditorApiError, type MapEditorApi } from '../api/MapEditorApi.ts';
 import type { DocumentHub, DocumentSnapshot, HistoryFailure } from '../history/DocumentHub.ts';
 import { TREE_HISTORY_KEY } from '../history/historyKeys.ts';
 import type { FileEffect, HistoryStep } from '../history/HistoryStep.ts';
+import { createDocument } from '../model/createDocument.ts';
 import { MAP_INFOS_KEY, mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
 import type { EditorDocument } from '../model/EditorDocument.ts';
 import { jsonEquals, type JsonValue } from '../model/json.ts';
+import { invertPatch, PatchConflictError } from '../model/patches.ts';
 import type { RmmzMap, RmmzMapInfo } from '../model/rmmzTypes.ts';
 import { TREE_ROOT, type MapInfoRows } from './MapTreeModel.ts';
 import {
@@ -228,6 +230,21 @@ const refusedForFileThere = (error: unknown): boolean =>
 };
 
 /**
+ * Words the refusal of an undo or redo that would list a map again whose file is gone: a step made outside the
+ * editor carries no files, and the change it recorded may have taken the map's file away along with its row.
+ * @param {HistoryStep} step The step.
+ * @param {'backward' | 'forward'} direction Undo or redo.
+ * @param {number} mapId The map it would list.
+ * @param {string} name The map's name in the tree.
+ * @returns {string} The words.
+ */
+const missingFileRefusal = (step: HistoryStep, direction: 'backward' | 'forward', mapId: number, name: string): string =>
+{
+  const verb = direction === 'backward' ? 'undo' : 'redo';
+  return `"${step.label}" cannot ${verb}: map ${mapId} (${name}) has no file, so the tree would list a map that is not there.`;
+};
+
+/**
  * Words the refusal of an undo or redo that would take away a map changed since the step, losing the change.
  * @param {HistoryStep} step The step.
  * @param {'backward' | 'forward'} direction Undo or redo.
@@ -276,7 +293,8 @@ const failedWrite = (label: string, error: unknown, problems: readonly string[],
  * then the files it takes away are deleted, which the server allows only once the tree no longer lists them. A
  * panel waiting on a map that comes back therefore always finds its file. Before undoing or redoing a step that
  * creates or removes files, each file is checked to still hold what the step left there, so a map edited since is
- * never silently deleted or written over. A write that fails partway puts back exactly what it had changed, removed
+ * never silently deleted or written over; and a step that would list a map again is refused when that map has no
+ * file, which is what a change made outside the editor leaves behind when it took a map away, file and all. A write that fails partway puts back exactly what it had changed, removed
  * files first, so the tree never lists a map whose file is missing. When even that cannot finish, the step stays in
  * the history holding every file, the tree stays where it agrees with the disk, and the outcome is an alarm; moving
  * the step again once the disk recovers finishes the job, keeping any file that already holds what the step brings.
@@ -612,6 +630,13 @@ class MapTreeService
       return { ok: false, message: checked.refusal };
     }
 
+    // a map the step lists again needs a file to open, which a step made outside the editor never brings.
+    const unlisted = await this.#checkListedFiles(step, direction);
+    if (unlisted !== null)
+    {
+      return { ok: false, message: unlisted };
+    }
+
     const files = step.files ?? [];
     const progress: WriteProgress = { step, written: [], deleted: [], adopted: [], released: [], rowsMoved: false, treeSaved: false };
     try
@@ -836,6 +861,71 @@ class MapTreeService
     }
 
     return { refusal: null, inPlace };
+  }
+
+  /**
+   * Checks that every map a step would list in the tree again has a file to open: one the step brings itself, or one
+   * already on disk. Moving a step writes back only the files it carries, and a step made outside the editor carries
+   * none, while the change it recorded may have taken a map's file away with its row, as a checkout that removes a map
+   * does; listing that map again would name a map that is not there. A map the window holds a copy of still counts as
+   * having no file, since a copy is not on disk.
+   * @param {HistoryStep} step The step.
+   * @param {'backward' | 'forward'} direction Undo or redo.
+   * @returns {Promise<string | null>} Why the step cannot move, worded for the author, or null when every map it lists
+   * has a file.
+   */
+  async #checkListedFiles(step: HistoryStep, direction: 'backward' | 'forward'): Promise<string | null>
+  {
+    const brought = new Set((step.files ?? [])
+      .filter(file => this.#arriving(file, direction) !== null)
+      .map(file => file.document));
+
+    for (const [ mapId, name ] of this.#mapsListedBy(step, direction))
+    {
+      if (brought.has(mapDocumentKey(mapId)) === false && (await this.#diskFileOf(mapId)) === null)
+      {
+        return missingFileRefusal(step, direction, mapId, name);
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Lists the maps a step would put back into the tree, by moving its rows on a copy of the tree as it stands: every
+   * map with a row once the step has moved that has none now.
+   * @param {HistoryStep} step The step.
+   * @param {'backward' | 'forward'} direction Undo or redo.
+   * @returns {[ number, string ][]} Each such map's id and name; none when the rows no longer fit the tree, which the
+   * move itself then refuses.
+   */
+  #mapsListedBy(step: HistoryStep, direction: 'backward' | 'forward'): [ number, string ][]
+  {
+    const before = this.rows();
+    const copy = createDocument(MAP_INFOS_KEY, before as unknown as JsonValue);
+    const patches = step.entries
+      .filter(entry => entry.document === MAP_INFOS_KEY)
+      .map(entry => entry.patch);
+    const moving = direction === 'forward'
+      ? patches
+      : [ ...patches ].reverse().map(invertPatch);
+
+    try
+    {
+      moving.forEach(patch => copy.apply(patch));
+    }
+    catch (error)
+    {
+      if ((error instanceof PatchConflictError) === false)
+      {
+        throw error;
+      }
+
+      return [];
+    }
+
+    const after = copy.toJson() as unknown as (RmmzMapInfo | null)[];
+    return after.flatMap((row, mapId): [ number, string ][] => (row !== null && (before[mapId] ?? null) === null ? [ [ mapId, row.name ] ] : []));
   }
 
   /**
