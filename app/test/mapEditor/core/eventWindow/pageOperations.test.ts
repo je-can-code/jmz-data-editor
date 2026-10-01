@@ -6,6 +6,8 @@ import {
   copyPages,
   decodePageClipboard,
   deletePage,
+  deletePageOrEvent,
+  deletesTheEvent,
   duplicatePage,
   encodePageClipboard,
   LAST_PAGE_MESSAGE,
@@ -13,6 +15,7 @@ import {
   PAGE_CLIPBOARD_MARKER,
   pastePages,
 } from '../../../../src/mapEditor/core/eventWindow/pageOperations.ts';
+import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { eventWindowHub, eventWindowMap, expectedMap, heldEvent, heldMap, markedPage, TARGET } from '../../support/eventWindowFixtures.ts';
@@ -23,8 +26,10 @@ import { eventWindowHub, eventWindowMap, expectedMap, heldEvent, heldMap, marked
  * else: the neighbouring events, which hold the very same pages, never change. Each answers the page the window should
  * show next (the new page, the neighbour, the page's new place), so the tabs follow the edit.
  *
- * New and pasted pages land right after the page they are put after. Deleting the last page an event has is refused,
- * since MZ never writes an event with none, and so is any edit to a page or an event that has gone. A move changes only
+ * New and pasted pages land right after the page they are put after. Taking the last page an event has off it is
+ * refused, since MZ never writes an event with none; "Delete page" on that last page deletes the event from its map
+ * instead, as one step in the map's history exactly like a delete on the map, which one undo there brings back. Any edit
+ * to a page or an event that has gone is refused. A move changes only
  * the order the game checks pages in. The page clipboard carries exact copies across events, maps and windows, and
  * reads as nothing unless it is a whole page clipboard, so a paste never puts a broken page on an event.
  *
@@ -296,6 +301,78 @@ describe('pageOperations', () =>
 
       // Act.
       const outcomes = [ deletePage(hub, TARGET, 3), deletePage(hub, { mapId: 1, eventId: 4 }, 0) ];
+
+      // Assert.
+      expect([ outcomes, heldMap(hub) ])
+        .toStrictEqual([ [ { ok: false, message: PAGE_GONE_MESSAGE }, { ok: false, message: EVENT_GONE_MESSAGE } ], eventWindowMap() ]);
+    });
+  });
+
+  describe('deletesTheEvent', () =>
+  {
+    it('says "Delete page" takes the event on its last page, and a page while it has others', () =>
+    {
+      // Arrange: an event of one page, and its near miss of two.
+      const one = { ...(eventWindowMap().events[2] as RmmzMapEvent), pages: [ markedPage(1) ] };
+      const two = { ...one, pages: [ markedPage(1), markedPage(2) ] };
+
+      // Act.
+      const takes = [ deletesTheEvent(one), deletesTheEvent(two) ];
+
+      // Assert.
+      expect(takes)
+        .toStrictEqual([ true, false ]);
+    });
+  });
+
+  describe('deletePageOrEvent', () =>
+  {
+    it('takes a page off an event that has others, as a step in the event\'s own history alone', () =>
+    {
+      // Arrange.
+      const hub = eventWindowHub();
+
+      // Act.
+      const outcome = deletePageOrEvent(hub, TARGET, 1);
+
+      // Assert: the map's own history holds nothing.
+      expect([ outcome.ok && outcome.step?.label, outcome.ok && outcome.page, heldMap(hub), hub.history(mapHistoryKey(1)).rows.length ])
+        .toStrictEqual([ 'Delete page 2', 1, withPages([ 1, 3 ]), 0 ]);
+    });
+
+    it('takes the event off its map on its last page, as one step in the map\'s history that one undo there brings back whole', () =>
+    {
+      // Arrange: event 2 down to one page.
+      const oneMore = () =>
+      {
+        const file = eventWindowMap();
+        (file.events[2] as RmmzMapEvent).pages = [ markedPage(1) ];
+        return file;
+      };
+      const hub = eventWindowHub(oneMore());
+
+      // Act.
+      const outcome = deletePageOrEvent(hub, TARGET, 0);
+      const deleted = heldMap(hub);
+      hub.undo(mapHistoryKey(1));
+
+      // Assert: its neighbours stayed, the event's own history never held the step, and the map's undo put it back.
+      expect([
+        outcome.ok && outcome.step?.label,
+        deleted.events.map(event => (event === null ? null : event.id)),
+        hub.history(targetHistory(TARGET)).rows.length,
+        heldMap(hub),
+      ])
+        .toStrictEqual([ 'Delete event', [ null, 1, null, 3, null ], 0, oneMore() ]);
+    });
+
+    it('refuses a page or an event that has gone, changing nothing', () =>
+    {
+      // Arrange.
+      const hub = eventWindowHub();
+
+      // Act.
+      const outcomes = [ deletePageOrEvent(hub, TARGET, 3), deletePageOrEvent(hub, { mapId: 1, eventId: 4 }, 0) ];
 
       // Assert.
       expect([ outcomes, heldMap(hub) ])

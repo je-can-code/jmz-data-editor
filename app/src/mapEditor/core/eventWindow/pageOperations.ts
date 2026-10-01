@@ -1,3 +1,4 @@
+import { deleteEvents } from '../events/eventEdits.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { createEventPage } from '../model/eventModel.ts';
 import { cloneJson, isJsonObject, type JsonValue } from '../model/json.ts';
@@ -215,6 +216,45 @@ const deletePage = (hub: DocumentHub, target: EventWindowTarget, pageIndex: numb
 };
 
 /**
+ * Reports whether "Delete page" takes the whole event rather than one page: on an event's last page it does, since an
+ * event left with no page is one MZ never writes.
+ * @param {RmmzMapEvent} event The event.
+ * @returns {boolean} True when the event has one page left.
+ */
+const deletesTheEvent = (event: RmmzMapEvent): boolean =>
+{
+  return event.pages.length === 1;
+};
+
+/**
+ * "Delete page": takes the page off the event as a step in the event's own history, or, on the event's last page, takes
+ * the whole event off its map. Taking the event off is exactly what deleting it on the map does, one step in the map's
+ * history rather than the event's, which one undo on the map brings back whole.
+ * @param {DocumentHub} hub The window's documents; the event's map must be held.
+ * @param {EventWindowTarget} target The event.
+ * @param {number} pageIndex The page.
+ * @returns {PageOutcome} The step, with the page now in its place to show, or why nothing changed.
+ */
+const deletePageOrEvent = (hub: DocumentHub, target: EventWindowTarget, pageIndex: number): PageOutcome =>
+{
+  const found = locatePage(hub, target, pageIndex);
+  if (found.ok === false)
+  {
+    return found;
+  }
+
+  if (deletesTheEvent(found.event) === false)
+  {
+    return deletePage(hub, target, pageIndex);
+  }
+
+  const outcome = deleteEvents(hub, target.mapId, [ target.eventId ]);
+  return outcome.ok
+    ? { ok: true, step: outcome.step, page: 0 }
+    : outcome;
+};
+
+/**
  * Puts a page back the way a new one starts, as one step: what MZ's Clear Event Page does.
  * @param {DocumentHub} hub The window's documents; the event's map must be held.
  * @param {EventWindowTarget} target The event.
@@ -278,6 +318,8 @@ export {
   copyPages,
   decodePageClipboard,
   deletePage,
+  deletePageOrEvent,
+  deletesTheEvent,
   duplicatePage,
   encodePageClipboard,
   LAST_PAGE_MESSAGE,

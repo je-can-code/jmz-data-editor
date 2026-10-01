@@ -9,6 +9,8 @@ import {
   copyPages,
   decodePageClipboard,
   deletePage,
+  deletePageOrEvent,
+  deletesTheEvent,
   duplicatePage,
   encodePageClipboard,
   movePage,
@@ -50,9 +52,10 @@ type TabMenu = {
 const NO_COPIED_PAGE = 'The clipboard holds no copied page.';
 
 /**
- * The tabs of an event's pages, with what can be done to them: a new page, copy, cut, paste, duplicate, delete, clear
- * and a move left or right, from the buttons, a tab's right-click menu, or the keys while the tabs have focus (Ctrl+C,
- * X, V and D, and Delete). A tab dragged onto another moves its page there. New and pasted pages land after the page
+ * The tabs of an event's pages, with what can be done to them: a new page, copy, cut, paste, duplicate, clear page
+ * (blank, but kept), delete page (on the event's last page, the whole event, from its map) and a move left or right,
+ * from the buttons, a tab's right-click menu, or the keys while the tabs have focus (Ctrl+C, X, V and D, and Delete). A
+ * tab dragged onto another moves its page there. New and pasted pages land after the page
  * shown. Copied pages go on the system clipboard, so they paste into any event, in any window. Every change finds its
  * page by the page itself at the moment it runs, so pages another window adds or takes away in front of it never turn
  * the change onto a neighbour.
@@ -69,6 +72,12 @@ const PageTabs = (props: PageTabsProps) =>
   const lookup = nameLookup(names);
   const last = event.pages.length - 1;
   const shownPage = event.pages[page];
+
+  // on an event's last page, "Delete page" takes the whole event, and says so.
+  const lastPage = deletesTheEvent(event);
+  const deleteLabel = lastPage
+    ? 'Delete this event'
+    : 'Delete page';
 
   /**
    * Runs a page change, telling an unexpected failure rather than losing it.
@@ -203,7 +212,7 @@ const PageTabs = (props: PageTabsProps) =>
     if (keyEvent.key === 'Delete' && command === false)
     {
       keyEvent.preventDefault();
-      runOn(shownPage, at => deletePage(hub, target, at));
+      runOn(shownPage, at => deletePageOrEvent(hub, target, at));
       return;
     }
 
@@ -310,14 +319,14 @@ const PageTabs = (props: PageTabsProps) =>
       <Button size={'small'} startIcon={<Add/>} onClick={() => runOn(shownPage, at => addPage(hub, target, at))}>New</Button>
       <Button size={'small'} startIcon={<ContentCopy/>} onClick={() => copyFromMenu(shownPage, false)}>Copy</Button>
       <Button size={'small'} startIcon={<ContentPaste/>} onClick={pasteFromMenu}>Paste</Button>
-      <Tooltip title={event.pages.length === 1 ? 'An event keeps at least one page' : 'Delete this page (Delete)'}>
-        <span>
-          <Button size={'small'} startIcon={<DeleteOutline/>} disabled={event.pages.length === 1} onClick={() => runOn(shownPage, at => deletePage(hub, target, at))}>
-            Delete
-          </Button>
-        </span>
+      <Tooltip describeChild title={lastPage ? 'Delete this event from its map (Delete)' : 'Delete this page (Delete)'}>
+        <Button size={'small'} startIcon={<DeleteOutline/>} onClick={() => runOn(shownPage, at => deletePageOrEvent(hub, target, at))}>
+          {deleteLabel}
+        </Button>
       </Tooltip>
-      <Button size={'small'} startIcon={<LayersClear/>} onClick={() => runOn(shownPage, at => clearPage(hub, target, at))}>Clear</Button>
+      <Tooltip describeChild title={'Make this page blank, keeping it'}>
+        <Button size={'small'} startIcon={<LayersClear/>} onClick={() => runOn(shownPage, at => clearPage(hub, target, at))}>Clear page</Button>
+      </Tooltip>
       <Tooltip title={'Move this page left'}>
         <span>
           <IconButton size={'small'} aria-label={'Move this page left'} disabled={page === 0} onClick={() => runOn(shownPage, at => movePage(hub, target, at, at - 1))}>
@@ -345,8 +354,8 @@ const PageTabs = (props: PageTabsProps) =>
         <MenuItem onClick={pasteFromMenu}>Paste after</MenuItem>
         <MenuItem onClick={() => runOn(menuPage, at => duplicatePage(hub, target, at))}>Duplicate</MenuItem>
         <Divider/>
-        <MenuItem disabled={event.pages.length === 1} onClick={() => runOn(menuPage, at => deletePage(hub, target, at))}>Delete</MenuItem>
-        <MenuItem onClick={() => runOn(menuPage, at => clearPage(hub, target, at))}>Clear</MenuItem>
+        <MenuItem onClick={() => runOn(menuPage, at => deletePageOrEvent(hub, target, at))}>{deleteLabel}</MenuItem>
+        <MenuItem onClick={() => runOn(menuPage, at => clearPage(hub, target, at))}>Clear page</MenuItem>
         <Divider/>
         <MenuItem disabled={menuPlace <= 0} onClick={() => runOn(menuPage, at => movePage(hub, target, at, at - 1))}>Move left</MenuItem>
         <MenuItem disabled={menuPlace < 0 || menuPlace === last} onClick={() => runOn(menuPage, at => movePage(hub, target, at, at + 1))}>Move right</MenuItem>

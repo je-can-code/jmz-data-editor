@@ -30,12 +30,15 @@ import { eventWindowMap, heldEvent, markedPage, TARGET } from '../../support/eve
  * The event window is the full editor of one event, in its own window. It owes the author the event's map first (another
  * window's live copy or the file), with a message when it cannot be had, and the map's tileset for the graphic picker,
  * read from the server without the window ever holding the tilesets (a window holding a document counts as keeping its
- * edits, for every other window's close guard); then the event's name, note and pages, and on the page shown its conditions, graphic, movement, options,
- * priority, trigger and commands. Every change is one step in the event's own history, never the map's, with undo and
- * redo from the header and from Ctrl+Z and Ctrl+Y anywhere in the window, and Ctrl+S saves the map with whatever is
- * still being typed, unless the map waits for a choice about changes made elsewhere. The page tabs add, move, copy, paste, duplicate and delete pages from their buttons and keys,
- * showing the page each change lands on. The title names the event and its map. When the event goes from the map in
- * another window, a message stands in for the editor until an undo brings the event back.
+ * edits, for every other window's close guard); then the event's name, note and pages, and on the page shown its
+ * conditions, graphic, movement, options, priority, trigger and commands. Every change is one step in the event's own
+ * history, never the map's, with undo and redo from the header and from Ctrl+Z and Ctrl+Y anywhere in the window, and
+ * Ctrl+S saves the map with whatever is still being typed, unless the map waits for a choice about changes made
+ * elsewhere. The page tabs add, move, copy, paste, duplicate, clear and delete pages from their buttons and keys,
+ * showing the page each change lands on; on an event's only page, deleting takes the event off its map, as a step in
+ * the map's history. Pages are followed by the page itself, so pages another window adds in front of the one shown
+ * never take its place or its half-typed values. The title names the event and its map. When the event goes from the
+ * map, a message stands in for the editor until an undo brings the event back.
  *
  * What gets written lives in the services the core tests cover; these check that each control reaches its service.
  * The fixture's event 2 holds pages marked 1, 2 and 3, each with a comment naming it.
@@ -304,14 +307,14 @@ describe('EventWindowView', () =>
     const added = shownTab();
     fireEvent.click(screen.getByRole('button', { name: 'Move this page right' }));
     const moved = shownTab();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete page' }));
 
     // Assert: back to the three pages, in their order.
     expect([ added, moved, shownTab(), heldEvent(hub).pages, stepsOf(hub) ])
       .toStrictEqual([ 'Page 2', 'Page 3', 'Page 3', [ markedPage(1), markedPage(2), markedPage(3) ], [ 'Add page', 'Move page 2', 'Delete page 3' ] ]);
   });
 
-  it('clears the page shown, and offers no delete for an event\'s only page', () =>
+  it('clears the page shown to blank, keeping it, and offers to delete the event itself on its only page', () =>
   {
     // Arrange: an event of one page.
     const map = eventWindowMap();
@@ -319,11 +322,47 @@ describe('EventWindowView', () =>
     const { hub } = renderWindow({ map });
 
     // Act.
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear page' }));
+
+    // Assert: the delete beside it names the event, not a page.
+    expect([ heldEvent(hub).pages, screen.queryByRole('button', { name: 'Delete this event' }) !== null, screen.queryByRole('button', { name: 'Delete page' }), stepsOf(hub) ])
+      .toStrictEqual([ [ createEventPage() ], true, null, [ 'Clear page 1' ] ]);
+  });
+
+  it('deletes the event from its map on its only page, as one step in the map\'s history, and shows it again once the map undoes it', () =>
+  {
+    // Arrange: an event of one page.
+    const map = eventWindowMap();
+    map.events[2]!.pages = [ markedPage(1) ];
+    const { hub } = renderWindow({ map });
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Delete this event' }));
+    const gone = [ heldEvent(hub), screen.queryByText('Event 2 is no longer on Map 1. Undoing its deletion in the map brings it back here.') !== null ];
+    const mapSteps = hub.history(mapHistoryKey(1)).rows.map(row => row.label);
+    act(() =>
+    {
+      hub.undo(mapHistoryKey(1));
+    });
+
+    // Assert: the event's own history never held the step; the map's did, and its undo brought the event back whole.
+    expect([ gone, mapSteps, stepsOf(hub), heldEvent(hub).pages, (screen.getByLabelText('Name') as HTMLInputElement).value ])
+      .toStrictEqual([ [ null, true ], [ 'Delete event' ], [], [ markedPage(1) ], 'EV002' ]);
+  });
+
+  it('deletes the event from the Delete key on its only page, as a step in the map\'s history', () =>
+  {
+    // Arrange: an event of one page.
+    const map = eventWindowMap();
+    map.events[2]!.pages = [ markedPage(1) ];
+    const { hub } = renderWindow({ map });
+
+    // Act.
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Page 1' }), { key: 'Delete' });
 
     // Assert.
-    expect([ (screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled, heldEvent(hub).pages[0].list.length, stepsOf(hub) ])
-      .toStrictEqual([ true, 1, [ 'Clear page 1' ] ]);
+    expect([ heldEvent(hub), hub.history(mapHistoryKey(1)).rows.map(row => row.label), stepsOf(hub) ])
+      .toStrictEqual([ null, [ 'Delete event' ], [] ]);
   });
 
   it('deletes and duplicates the page shown from the keys while the tabs have focus', () =>
@@ -572,7 +611,7 @@ describe('EventWindowView', () =>
     {
       hub.edit('Add page', [ mapHistoryKey(1) ], transaction => transaction.splice('map:1', [ 'events', 2, 'pages' ], 0, 0, [ createEventPage() as unknown as JsonValue ]));
     });
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete page' }));
 
     // Assert: page 2 went, third by then; page 1 and the new page stay.
     expect([ heldEvent(hub).pages, stepsOf(hub) ])
