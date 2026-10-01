@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Box, Chip, Divider, Typography } from '@mui/material';
+import { EVENT_CLIPBOARD_MARKER } from '../core/events/eventClipboard.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { Camera, MapCell } from '../core/renderer/camera.ts';
@@ -261,7 +262,7 @@ const MapView = (props: MapViewProps) =>
           notifyRef.current('The event\'s window was blocked; allow pop-ups for the editor to open it.', 'error');
         }
       },
-      readClipboard: () => services.shell.readClipboard(),
+      readClipboard: () => services.shell.readClipboard(EVENT_CLIPBOARD_MARKER),
       notify: (text: string, severity: EventNoticeSeverity) => notifyRef.current(text, severity),
       openMenu: setMenu,
     });

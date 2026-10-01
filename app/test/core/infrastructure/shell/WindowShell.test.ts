@@ -53,8 +53,15 @@ describe('WindowShell', () =>
     const heard: unknown[] = [];
     relay.addEventListener('message', event => heard.push(event.data));
     const browser = buildBrowser();
-    const shell = new WindowShell({ channel: network.open('jmz-shell'), origin: ORIGIN, openWindow: browser.openWindow });
-    return { network, relay, heard, browser, shell };
+    const replies: ReturnType<MemoryChannelNetwork['open']>[] = [];
+    const openChannel = (name: string) =>
+    {
+      const channel = network.open(name);
+      replies.push(channel);
+      return channel;
+    };
+    const shell = new WindowShell({ channel: network.open('jmz-shell'), origin: ORIGIN, openWindow: browser.openWindow, openChannel });
+    return { network, relay, heard, browser, shell, replies };
   };
 
   it('asks whether the NW.js shell is there as soon as it starts', () =>
@@ -178,45 +185,72 @@ describe('WindowShell', () =>
   /*
    * A paste chosen from a menu has no clipboard event to carry the clipboard's text, so the page reads it. Under the
    * NW.js shell the page asks the shell, since NW.js leaves a page's own read waiting forever on a question it has
-   * nowhere to ask; every window hears every answer, so a read takes only the answer to its own request. A shell that
-   * never answers costs a moment, never a hang. Without the shell, the page reads through the browser, and a refusal
-   * reads as nothing.
+   * nowhere to ask. A read names the kind of clipboard it wants by its marker, and opens a reply channel of its own
+   * under a random name before it asks: the answer is taken from there alone, never from the shell channel every
+   * window hears, and the reply channel is closed once the read is over. A shell that never answers costs a moment,
+   * never a hang. Without the shell, the page reads through the browser, and a refusal reads as nothing.
    */
   describe('readClipboard', () =>
   {
-    it('asks the NW.js shell once it answers, taking only the answer to its own request', async () =>
+    /**
+     * A page's shell the NW.js shell has answered.
+     * @returns {ReturnType<typeof buildShell>} The shell, with the channel's traffic so far cleared.
+     */
+    const relayedShell = () =>
+    {
+      const built = buildShell();
+      built.network.flush();
+      built.relay.postMessage({ type: 'shell-ready' });
+      built.network.flush();
+      built.heard.length = 0;
+      return built;
+    };
+
+    it('asks the NW.js shell for one kind of clipboard, naming a reply channel no other window knows', () =>
     {
       // Arrange.
-      const { network, relay, heard, shell } = buildShell();
-      network.flush();
-      relay.postMessage({ type: 'shell-ready' });
-      network.flush();
-      heard.length = 0;
+      const { network, heard, shell } = relayedShell();
 
-      // Act: another window's answer arrives first, then this one's.
-      const reading = shell.readClipboard();
-      network.flush();
-      const [ request ] = heard as { type: string; requestId: string }[];
-      relay.postMessage({ type: 'clipboard-text', requestId: 'another-window-1', text: 'not ours' });
-      relay.postMessage({ type: 'clipboard-text', requestId: request.requestId, text: 'ours' });
+      // Act.
+      shell.readClipboard('jmz-map-editor/events').catch(() => undefined);
       network.flush();
 
       // Assert.
-      expect([ request.type, typeof request.requestId, await reading ])
-        .toStrictEqual([ 'clipboard-read', 'string', 'ours' ]);
+      const [ request ] = heard as { type: string; marker: string; replyTo: string }[];
+      expect([ heard.length, request.type, request.marker, /^jmz-clipboard-[0-9a-f-]{36}$/u.test(request.replyTo) ])
+        .toStrictEqual([ 1, 'clipboard-read', 'jmz-map-editor/events', true ]);
     });
 
-    it('reads nothing when the NW.js shell does not answer in time', async () =>
+    it('takes the answer from its own reply channel, never from the shell channel, and closes the reply channel', async () =>
+    {
+      // Arrange.
+      const { network, relay, heard, shell, replies } = relayedShell();
+      const reading = shell.readClipboard('jmz-map-editor/events');
+      network.flush();
+      const [ request ] = heard as { replyTo: string }[];
+
+      // Act: an answer said where every window hears it comes first; then the one on the reply channel.
+      relay.postMessage({ type: 'clipboard-text', text: 'said to every window' });
+      network.open(request.replyTo).postMessage({ type: 'clipboard-text', text: 'ours' });
+      network.flush();
+      const text = await reading;
+
+      // Assert.
+      expect([ text, replies.map(reply => [ reply.name, reply.closed ]) ])
+        .toStrictEqual([ 'ours', [ [ request.replyTo, true ] ] ]);
+    });
+
+    it('reads nothing when the only answer is said on the shell channel', async () =>
     {
       // Arrange.
       vi.useFakeTimers();
-      const { network, relay, shell } = buildShell();
-      network.flush();
-      relay.postMessage({ type: 'shell-ready' });
+      const { network, relay, shell } = relayedShell();
+      const reading = shell.readClipboard('jmz-map-editor/events');
       network.flush();
 
       // Act.
-      const reading = shell.readClipboard();
+      relay.postMessage({ type: 'clipboard-text', text: 'said to every window' });
+      network.flush();
       await vi.advanceTimersByTimeAsync(2_000);
       const text = await reading;
       vi.useRealTimers();
@@ -226,6 +260,40 @@ describe('WindowShell', () =>
         .toBeNull();
     });
 
+    it('reads nothing when the NW.js shell does not answer in time, and closes the reply channel', async () =>
+    {
+      // Arrange.
+      vi.useFakeTimers();
+      const { shell, replies } = relayedShell();
+
+      // Act.
+      const reading = shell.readClipboard('jmz-map-editor/events');
+      await vi.advanceTimersByTimeAsync(2_000);
+      const text = await reading;
+      vi.useRealTimers();
+
+      // Assert.
+      expect([ text, replies.map(reply => reply.closed) ])
+        .toStrictEqual([ null, [ true ] ]);
+    });
+
+    it('reads nothing through the shell where it cannot open a reply channel', async () =>
+    {
+      // Arrange: a shell that answers, but no way to open a channel of the page's own.
+      const network = new MemoryChannelNetwork();
+      const relay = network.open('jmz-shell');
+      const shell = new WindowShell({ channel: network.open('jmz-shell'), origin: ORIGIN, openWindow: () => null });
+      relay.postMessage({ type: 'shell-ready' });
+      network.flush();
+
+      // Act.
+      const text = await shell.readClipboard('jmz-map-editor/events');
+
+      // Assert.
+      expect([ shell.isRelayed, text ])
+        .toStrictEqual([ true, null ]);
+    });
+
     it('reads through the browser without the shell, and nothing when the browser refuses', async () =>
     {
       // Arrange.
@@ -233,7 +301,7 @@ describe('WindowShell', () =>
       const shells = reads.map(readClipboardText => new WindowShell({ channel: null, origin: ORIGIN, openWindow: () => null, readClipboardText }));
 
       // Act.
-      const texts = await Promise.all(shells.map(each => each.readClipboard()));
+      const texts = await Promise.all(shells.map(each => each.readClipboard('jmz-map-editor/events')));
 
       // Assert.
       expect(texts)
@@ -246,7 +314,7 @@ describe('WindowShell', () =>
       const shell = new WindowShell({ channel: null, origin: ORIGIN, openWindow: () => null });
 
       // Act.
-      const text = await shell.readClipboard();
+      const text = await shell.readClipboard('jmz-map-editor/events');
 
       // Assert.
       expect(text)

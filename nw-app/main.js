@@ -8,7 +8,9 @@
 //
 // Pages ask the same channel for the clipboard's text, which a page under NW.js cannot read itself: Chromium asks the
 // person before a page reads the clipboard, and NW.js has nowhere to ask, so the read would wait forever. The shell
-// reads it with nw.Clipboard and answers with the request's id, since every window hears every answer.
+// reads it with nw.Clipboard, but hands it over only when it is the kind of clipboard the page asked for (events the
+// editor copied, say), and only on a reply channel the asking page opened under a random name, since every window
+// hears the shell channel. Anything else on the clipboard never reaches a page.
 //
 // The app stays open while any window is. Visible windows are never given a 'close' listener: that would take
 // their closing away from the page, and a page holding unsaved edits asks before it closes through its own
@@ -31,6 +33,9 @@ const rules = require('./shellRules.js');
 const DEFAULT_API_BASE = 'http://127.0.0.1:8080';
 const DEFAULT_UI_URL = 'http://127.0.0.1:3000';
 const SHELL_CHANNEL = 'jmz-shell';
+
+// how long a clipboard reply channel stays open after its answer, in milliseconds.
+const CLIPBOARD_REPLY_LINGER_MS = 5000;
 
 const { argv } = nw.App;
 const logPath = rules.readFlag(argv, '--log') || '';
@@ -232,6 +237,27 @@ function openWindow(url, width, height)
 }
 
 /**
+ * Answers a page's clipboard read on the reply channel the page opened for it, built in the hidden window's realm so
+ * it belongs to the UI's origin. The channel stays open a moment after the answer, so closing it can never overtake
+ * the message; the page waits for an answer far less long than that.
+ * @param {object} win The hidden relay window.
+ * @param {object} request The page's request.
+ */
+function answerClipboardRead(win, request)
+{
+  const answer = rules.clipboardAnswer(request, () => nw.Clipboard.get().get('text'));
+  if (answer === null)
+  {
+    log('refused-clipboard-read', {});
+    return;
+  }
+
+  const reply = new win.window.BroadcastChannel(answer.channel);
+  reply.postMessage(answer.message);
+  setTimeout(() => reply.close(), CLIPBOARD_REPLY_LINGER_MS);
+}
+
+/**
  * Opens the hidden window on the UI's origin and listens on the shell channel through it.
  * @param {string} uiUrl The UI's origin.
  * @param {{ width: number, height: number }} fallbackSize The size for windows that ask for none.
@@ -259,15 +285,11 @@ function startRelay(uiUrl, fallbackSize, ready)
           return;
         }
 
-        // the clipboard's text, for a page's paste that has no clipboard event to carry it.
+        // the clipboard's text, for a page's paste that has no clipboard event to carry it: only the kind of clipboard
+        // the page asked for, and only on the channel the page opened for the answer, never on this one.
         if (request.type === 'clipboard-read')
         {
-          if (typeof request.requestId === 'string')
-          {
-            const text = nw.Clipboard.get().get('text');
-            shellChannel.postMessage({ type: 'clipboard-text', requestId: request.requestId, text: typeof text === 'string' ? text : '' });
-          }
-
+          answerClipboardRead(win, request);
           return;
         }
 

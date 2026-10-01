@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
+import { EVENT_CLIPBOARD_MARKER } from '../../src/mapEditor/core/events/eventClipboard.ts';
 
 /*
  * The NW.js shell's decisions, tested without NW.js. It reads its flags from nw.App.argv, which also carries some
@@ -21,6 +22,8 @@ const rules = load('../../../nw-app/shellRules.js') as {
   serverEnvironment(apiBase: string, uiUrl: string): { JMZ_API_ADDRESS: string; JMZ_UI_ORIGINS: string };
   uiPort(uiUrl: string): number;
   devStackArgs(projectRoot: string, apiBase: string, uiUrl: string): string[];
+  clipboardAnswer(request: Record<string, unknown>, readText: () => unknown): { channel: string; message: { type: string; text: string } } | null;
+  CLIPBOARD_KINDS: Record<string, string>;
 };
 
 describe('shellRules', () =>
@@ -218,6 +221,85 @@ describe('shellRules', () =>
       // Assert.
       expect([ sizes, rules.trimOrigin(' http://a:1// ') ])
         .toStrictEqual([ [ 960, 320, 7680, 1400, 900 ], 'http://a:1' ]);
+    });
+  });
+
+  /*
+   * A page under NW.js reads the clipboard through the shell, and the shell holds the line on what that hands out:
+   * the clipboard's text only when it is the kind of clipboard the page asked for, carrying that kind's marker, and
+   * nothing at all from anything else on it (a password, a message). The answer goes only to the reply channel the
+   * page opened under a random name, never to the shell channel every window hears, and a read naming no such channel
+   * gets no answer, the clipboard not even read.
+   */
+  describe('clipboardAnswer', () =>
+  {
+    const REPLY = 'jmz-clipboard-0f8fad5b-d9cb-469f-a165-70867728950e';
+    const EVENTS = JSON.stringify({ marker: 'jmz-map-editor/events', version: 1, mapId: 3, events: [] });
+
+    it('answers on the reply channel the page named, with the clipboard\'s text when it carries the marker asked for', () =>
+    {
+      // Arrange.
+      const request = { type: 'clipboard-read', marker: 'jmz-map-editor/events', replyTo: REPLY };
+
+      // Act.
+      const answer = rules.clipboardAnswer(request, () => EVENTS);
+
+      // Assert.
+      expect(answer)
+        .toStrictEqual({ channel: REPLY, message: { type: 'clipboard-text', text: EVENTS } });
+    });
+
+    it('answers with nothing when the clipboard holds anything else, or the page asks for a kind the shell never reads', () =>
+    {
+      // Arrange: plain text, a list, the marker under another field, another program's JSON, and a kind not read.
+      const clipboards = [
+        'hunter2',
+        JSON.stringify([ 'jmz-map-editor/events' ]),
+        JSON.stringify({ format: 'jmz-map-editor/events' }),
+        JSON.stringify({ marker: 'something-else/events' }),
+        '{"marker":"jmz-map-editor/events"',
+      ];
+      const kindsNotRead = [ '__proto__', 'jmz-map-editor/secrets' ];
+
+      // Act.
+      const texts = [
+        ...clipboards.map(text => rules.clipboardAnswer({ marker: 'jmz-map-editor/events', replyTo: REPLY }, () => text)),
+        ...kindsNotRead.map(marker => rules.clipboardAnswer({ marker, replyTo: REPLY }, () => EVENTS)),
+      ].map(answer => answer?.message.text);
+
+      // Assert.
+      expect(texts)
+        .toStrictEqual([ '', '', '', '', '', '', '' ]);
+    });
+
+    it('gives no answer, and never reads the clipboard, for a read naming no proper reply channel', () =>
+    {
+      // Arrange: none, the shell channel itself, a guessable name, a name with more after the UUID, and not a name.
+      const replies: unknown[] = [ undefined, 'jmz-shell', 'jmz-clipboard-1', `${REPLY}-x`, 42 ];
+      let reads = 0;
+
+      // Act.
+      const answers = replies.map(replyTo => rules.clipboardAnswer({ marker: 'jmz-map-editor/events', replyTo }, () =>
+      {
+        reads += 1;
+        return EVENTS;
+      }));
+
+      // Assert.
+      expect([ answers, reads ])
+        .toStrictEqual([ [ null, null, null, null, null ], 0 ]);
+    });
+
+    it('reads only the event clipboard the map editor writes', () =>
+    {
+      // Arrange: nothing to set up; the kinds are the shell's own.
+
+      // Act.
+      const kinds = rules.CLIPBOARD_KINDS;
+
+      // Assert.
+      expect(kinds)
+        .toStrictEqual({ [EVENT_CLIPBOARD_MARKER]: 'marker' });
     });
   });
 });

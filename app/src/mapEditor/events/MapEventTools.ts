@@ -70,7 +70,8 @@ type MapEventToolsOptions = {
 
   /**
    * Reads the system clipboard's text for the menu's Paste, which has no clipboard event to carry it: the window
-   * shell's read, which asks the NW.js shell where the page itself may not read. Null when it could not be read.
+   * shell's read of the event clipboard, which asks the NW.js shell where the page itself may not read, and comes back
+   * empty when the clipboard holds anything else. Null when it could not be read.
    */
   readonly readClipboard: () => Promise<string | null>;
   readonly notify: (text: string, severity: EventNoticeSeverity) => void;

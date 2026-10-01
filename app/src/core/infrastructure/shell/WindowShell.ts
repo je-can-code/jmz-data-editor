@@ -4,21 +4,25 @@ import { CHANNEL_NAMES, openBroadcastChannel, type ChannelMessageEvent, type Mes
  * What a page asks the NW.js shell on the shell channel. The shell ({@code nw-app/main.js}) listens through a
  * hidden window on the UI's origin: {@code hello} asks whether it is there, {@code open} asks it to open a URL
  * of that origin as a real window in its own renderer process, or to focus the window already showing it, and
- * {@code clipboard-read} asks it for the text on the system clipboard, which a page under NW.js cannot read itself.
+ * {@code clipboard-read} asks it for the system clipboard's text, which a page under NW.js cannot read itself: only
+ * when the clipboard is the kind the marker names, and answered on the reply channel {@code replyTo} names.
  */
 type ShellRequest =
   | { readonly type: 'hello' }
   | { readonly type: 'open'; readonly url: string; readonly width?: number; readonly height?: number }
-  | { readonly type: 'clipboard-read'; readonly requestId: string };
+  | { readonly type: 'clipboard-read'; readonly marker: string; readonly replyTo: string };
 
 /**
- * What the shell announces: that it is listening, which it says when it starts and in answer to every hello; and
- * the clipboard's text, in answer to the read with the same request id. Every window hears every answer, so each
- * read carries an id no other window's read shares.
+ * What the shell announces on the shell channel: that it is listening, which it says when it starts and in answer to
+ * every hello. Every window hears the shell channel, so nothing read off the clipboard is ever said there.
  */
-type ShellAnnouncement =
-  | { readonly type: 'shell-ready' }
-  | { readonly type: 'clipboard-text'; readonly requestId: string; readonly text: string };
+type ShellAnnouncement = { readonly type: 'shell-ready' };
+
+/**
+ * The shell's answer to a clipboard read, on the read's own reply channel: the clipboard's text when it carries the
+ * marker asked for, and an empty string when the clipboard holds anything else.
+ */
+type ClipboardAnswer = { readonly type: 'clipboard-text'; readonly text: string };
 
 /**
  * One window a page asks for.
@@ -76,7 +80,18 @@ type WindowShellOptions = {
    * Left out, a page with no shell has no way to read it.
    */
   readonly readClipboardText?: () => Promise<string>;
+
+  /**
+   * Opens a channel by name, for a clipboard read's own reply channel. Left out, no read goes through the shell.
+   */
+  readonly openChannel?: (name: string) => MessageChannelLike | null;
 };
+
+/**
+ * What every clipboard reply channel's name starts with; a random UUID follows, so no other window knows it, and the
+ * shell answers on no channel named any other way.
+ */
+const CLIPBOARD_REPLY_PREFIX = 'jmz-clipboard-';
 
 /**
  * How long a read waits for the NW.js shell, which answers at once: long enough for a busy moment, short enough that a
@@ -135,47 +150,22 @@ class WindowShell
 
   #readClipboardText: (() => Promise<string>) | null;
 
+  #openChannel: ((name: string) => MessageChannelLike | null) | null;
+
   #relayed = false;
-
-  /**
-   * The reads waiting for the shell's answer, by request id.
-   */
-  #reads = new Map<string, (text: string) => void>();
-
-  /**
-   * What starts this page's read ids, so no other window's read shares one.
-   */
-  #readPrefix = Math.random().toString(36).slice(2);
-
-  #readCount = 0;
 
   #listener = (event: ChannelMessageEvent) =>
   {
-    const data = event.data as Partial<{ type: string; requestId: unknown; text: unknown }> | null;
-    if (data === null || typeof data !== 'object')
-    {
-      return;
-    }
-
-    if (data.type === 'shell-ready')
+    const data = event.data as Partial<ShellAnnouncement> | null;
+    if (data !== null && typeof data === 'object' && data.type === 'shell-ready')
     {
       this.#relayed = true;
-      return;
-    }
-
-    // an answer to one of this page's reads settles it; answers to other windows' reads are theirs.
-    const waiting = data.type === 'clipboard-text' && typeof data.requestId === 'string' && typeof data.text === 'string'
-      ? this.#reads.get(data.requestId)
-      : undefined;
-    if (waiting !== undefined)
-    {
-      this.#reads.delete(data.requestId as string);
-      waiting(data.text as string);
     }
   };
 
   /**
-   * @param {WindowShellOptions} options The channel, the origin, the browser's window opener and its clipboard read.
+   * @param {WindowShellOptions} options The channel, the origin, the browser's window opener, its clipboard read, and
+   * how to open a read's reply channel.
    */
   constructor(options: WindowShellOptions)
   {
@@ -183,6 +173,7 @@ class WindowShell
     this.#origin = options.origin;
     this.#openWindow = options.openWindow;
     this.#readClipboardText = options.readClipboardText ?? null;
+    this.#openChannel = options.openChannel ?? null;
 
     this.#channel?.addEventListener('message', this.#listener);
     this.#post({ type: 'hello' });
@@ -215,24 +206,21 @@ class WindowShell
   }
 
   /**
-   * Reads the text on the system clipboard, for a paste that has no clipboard event to carry it, such as one chosen
-   * from a menu. Under the NW.js shell the shell reads it: Chromium asks the person before a page reads the clipboard,
-   * and NW.js has nowhere to ask, so a page's own read would wait forever. Without the shell the page reads it itself,
-   * and the browser may ask the person first.
-   * @returns {Promise<string | null>} The text, or null when it could not be read in time or at all.
+   * Reads one of the app's own clipboards off the system clipboard, for a paste that has no clipboard event to carry
+   * it, such as one chosen from a menu. Under the NW.js shell the shell reads it: Chromium asks the person before a
+   * page reads the clipboard, and NW.js has nowhere to ask, so a page's own read would wait forever. The shell hands
+   * the text over only when it carries the marker asked for, and only on a reply channel this read opens under a
+   * random name, so nothing else on the clipboard reaches any page and no other window hears it. Without the shell the
+   * page reads the clipboard itself, whatever it holds, and the browser may ask the person first.
+   * @param {string} marker The marker the wanted clipboard carries, such as {@code jmz-map-editor/events}.
+   * @returns {Promise<string | null>} The text (empty when the shell found another kind of clipboard), or null when it
+   * could not be read in time or at all.
    */
-  readClipboard(): Promise<string | null>
+  readClipboard(marker: string): Promise<string | null>
   {
     if (this.#relayed && this.#channel !== null)
     {
-      this.#readCount += 1;
-      const requestId = `${this.#readPrefix}-${this.#readCount}`;
-      const answered = new Promise<string>(resolve =>
-      {
-        this.#reads.set(requestId, resolve);
-      });
-      this.#post({ type: 'clipboard-read', requestId });
-      return readWithin(answered, SHELL_READ_TIMEOUT_MS).finally(() => this.#reads.delete(requestId));
+      return this.#readThroughShell(marker);
     }
 
     const read = this.#readClipboardText;
@@ -249,6 +237,36 @@ class WindowShell
     this.#channel?.removeEventListener('message', this.#listener);
     this.#channel?.close();
     this.#channel = null;
+  }
+
+  /**
+   * Asks the NW.js shell for a clipboard, on a reply channel of this read's own: opened before the request goes out,
+   * so the answer cannot arrive before anyone listens, and closed once the read is over, answered or not.
+   * @param {string} marker The marker the wanted clipboard carries.
+   * @returns {Promise<string | null>} The shell's answer, or null when it did not come in time.
+   */
+  #readThroughShell(marker: string): Promise<string | null>
+  {
+    const replyTo = `${CLIPBOARD_REPLY_PREFIX}${crypto.randomUUID()}`;
+    const reply = this.#openChannel?.(replyTo) ?? null;
+    if (reply === null)
+    {
+      return Promise.resolve(null);
+    }
+
+    const answered = new Promise<string>(resolve =>
+    {
+      reply.addEventListener('message', event =>
+      {
+        const data = event.data as Partial<ClipboardAnswer> | null;
+        if (data !== null && typeof data === 'object' && data.type === 'clipboard-text' && typeof data.text === 'string')
+        {
+          resolve(data.text);
+        }
+      });
+    });
+    this.#post({ type: 'clipboard-read', marker, replyTo });
+    return readWithin(answered, SHELL_READ_TIMEOUT_MS).finally(() => reply.close());
   }
 
   /**
@@ -327,10 +345,19 @@ const pageWindowShell = (): WindowShell =>
     origin: window.location.origin,
     openWindow: (url, name, features) => window.open(url, name, features),
     readClipboardText: () => navigator.clipboard.readText(),
+    openChannel: openBroadcastChannel,
   });
 
   return sharedShell;
 };
 
-export { DATA_EDITOR_PATH, MAP_EDITOR_PATH, openDataEditor, openMapEditor, pageWindowShell, WindowShell };
-export type { OpenBrowserWindow, ShellAnnouncement, ShellRequest, WindowOpenResult, WindowRequest, WindowShellOptions };
+export { CLIPBOARD_REPLY_PREFIX, DATA_EDITOR_PATH, MAP_EDITOR_PATH, openDataEditor, openMapEditor, pageWindowShell, WindowShell };
+export type {
+  ClipboardAnswer,
+  OpenBrowserWindow,
+  ShellAnnouncement,
+  ShellRequest,
+  WindowOpenResult,
+  WindowRequest,
+  WindowShellOptions,
+};
