@@ -11,14 +11,13 @@ import {
   type EventWindowTarget,
   type PageOutcome,
 } from '../../core/eventWindow/eventWindowTarget.ts';
+import type { MapEditorApi } from '../../core/api/MapEditorApi.ts';
 import { namedRows } from '../../core/commandList/databaseNames.ts';
 import { parseEventMovement, type EventMovementFields } from '../../core/eventPage/eventMovement.ts';
 import { saveTargetMap } from '../../core/eventWindow/eventWindowSave.ts';
 import { setPageCondition, type ConditionChange } from '../../core/eventWindow/pageConditions.ts';
 import { setPageImage, setPageMovement, setPageOption, setPagePriority, setPageTrigger } from '../../core/eventWindow/pageSettings.ts';
-import type { DocumentHub } from '../../core/history/DocumentHub.ts';
-import { TILESETS_KEY } from '../../core/model/documentKeys.ts';
-import type { TilesetsDocument } from '../../core/model/JsonDocument.ts';
+import { loadTilesetRow } from '../../core/eventWindow/tilesetRow.ts';
 import type { RmmzEventImage, RmmzTileset } from '../../core/model/rmmzTypes.ts';
 import { HistoryRouter, type HistoryOutcome } from '../../core/workspace/HistoryRouter.ts';
 import { isTextEntry } from '../../core/workspace/shortcuts.ts';
@@ -65,15 +64,42 @@ const Section = (props: { readonly title: string; readonly children: React.React
 };
 
 /**
- * Reads the tileset a map draws with, once the window holds the tilesets: the graphic picker cuts tile pictures from it.
- * @param {DocumentHub} hub The window's documents.
+ * Reads the tileset a map draws with from the server, for the graphic picker's tile pictures, without the window ever
+ * holding the tilesets (see {@link loadTilesetRow}).
+ * @param {MapEditorApi | null} api The server, or null when the window has none.
  * @param {number} tilesetId The map's tileset.
- * @returns {RmmzTileset | null} The tileset, or null while the tilesets are still on their way.
+ * @returns {RmmzTileset | null} The tileset, or null until it arrives, without a server, or when the project has none
+ * by that id.
  */
-const heldTileset = (hub: DocumentHub, tilesetId: number): RmmzTileset | null =>
+const useTilesetRow = (api: MapEditorApi | null, tilesetId: number): RmmzTileset | null =>
 {
-  return hub.has(TILESETS_KEY)
-    ? (hub.document(TILESETS_KEY) as TilesetsDocument).tileset(tilesetId)
+  const [ loaded, setLoaded ] = useState<{ id: number; row: RmmzTileset | null } | null>(null);
+  useEffect(() =>
+  {
+    if (api === null)
+    {
+      return undefined;
+    }
+
+    // an answer arriving after the map moved to another tileset, or the window went, is dropped.
+    let live = true;
+    loadTilesetRow(api, tilesetId)
+      .then(row =>
+      {
+        if (live)
+        {
+          setLoaded({ id: tilesetId, row });
+        }
+      })
+      .catch(() => undefined);
+    return () =>
+    {
+      live = false;
+    };
+  }, [ api, tilesetId ]);
+
+  return loaded !== null && loaded.id === tilesetId
+    ? loaded.row
     : null;
 };
 
@@ -121,6 +147,9 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
   const eventName = event === null ? null : event.name;
   const mapName = names?.maps[target.mapId] || `Map ${target.mapId}`;
   useReadyMark(event !== null);
+
+  // an event on the map means its map is held; the picker's tileset follows the map's own.
+  const tileset = useTilesetRow(api, event === null ? 0 : hub.map(key).tilesetId);
 
   // the window's title names the event and its map, so a row of event windows reads as the events they edit.
   useEffect(() =>
@@ -224,7 +253,6 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
   // the page shown follows the pages there are, which an undo or another window may have changed.
   const pageIndex = Math.min(selected, event.pages.length - 1);
   const page = event.pages[pageIndex];
-  const tileset = heldTileset(hub, hub.map(key).tilesetId);
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }} data-testid={'event-editor'}>

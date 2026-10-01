@@ -50,7 +50,7 @@ describe('MapEditorApp', () =>
     const catalog = new CommandCatalog();
     registerBuiltInCommands(catalog);
 
-    // an event window's command list reads the catalog and editors; the tilesets it asks for never arrive here.
+    // an event window's command list reads the catalog and editors; the window holds its map already, so it opens nothing.
     const services = {
       view,
       shell,
@@ -61,10 +61,6 @@ describe('MapEditorApp', () =>
       api: null,
       pluginHeaders: new PluginHeaderStore(),
       loadCommandResources: async () => undefined,
-      openDocument: () => new Promise<never>(() =>
-      {
-        // never settles: the tilesets an event window asks for never arrive in this test.
-      }),
     } as unknown as MapEditorServices;
     render(
       <MapEditorServicesProvider services={services}>

@@ -17,7 +17,8 @@ import { DocumentHub, type DocumentStore } from '../../../../src/mapEditor/core/
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { RmmzMap, RmmzTileset } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { SoundPlayerContext } from '../../../../src/mapEditor/views/commandList/commandListResources.ts';
@@ -26,8 +27,9 @@ import { eventWindowMap, heldEvent, markedPage, TARGET } from '../../support/eve
 
 /*
  * The event window is the full editor of one event, in its own window. It owes the author the event's map first (another
- * window's live copy or the file), with a message when it cannot be had, and the tilesets alongside for the graphic
- * picker; then the event's name, note and pages, and on the page shown its conditions, graphic, movement, options,
+ * window's live copy or the file), with a message when it cannot be had, and the map's tileset for the graphic picker,
+ * read from the server without the window ever holding the tilesets (a window holding a document counts as keeping its
+ * edits, for every other window's close guard); then the event's name, note and pages, and on the page shown its conditions, graphic, movement, options,
  * priority, trigger and commands. Every change is one step in the event's own history, never the map's, with undo and
  * redo from the header and from Ctrl+Z and Ctrl+Y anywhere in the window, and Ctrl+S saves the map with whatever is
  * still being typed, unless the map waits for a choice about changes made elsewhere. The page tabs add, move, copy, paste, duplicate and delete pages from their buttons and keys,
@@ -56,11 +58,12 @@ describe('EventWindowView', () =>
     open?: (key: DocumentKey) => Promise<unknown>;
     store?: DocumentStore;
     clipboard?: string;
+    api?: MapEditorApi;
   } = {}) =>
   {
     const map = options.map ?? eventWindowMap();
     const store = options.store ?? {
-      load: vi.fn(async (key: DocumentKey) => (key === 'tilesets' ? TILESETS : map as unknown as JsonValue)),
+      load: vi.fn(async () => map as unknown as JsonValue),
       save: vi.fn(async () => undefined),
     };
     const hub = new DocumentHub({ clientId: 'event-window', store });
@@ -76,7 +79,7 @@ describe('EventWindowView', () =>
       hub,
       catalog,
       commandEditors: new CommandEditorRegistry(),
-      api: null,
+      api: options.api ?? null,
       pluginHeaders: new PluginHeaderStore(),
       loadCommandResources: async () => undefined,
       openDocument,
@@ -118,10 +121,10 @@ describe('EventWindowView', () =>
     });
   };
 
-  it('holds the map first, asking for the tilesets alongside, then shows the event, its pages and the first page\'s commands', async () =>
+  it('holds the map first, and the map alone, then shows the event, its pages and the first page\'s commands', async () =>
   {
     // Arrange: the window holds nothing yet.
-    const { openDocument } = renderWindow({ held: false });
+    const { hub, openDocument } = renderWindow({ held: false });
     const waiting = screen.queryByLabelText('Opening the event') !== null;
 
     // Act.
@@ -130,13 +133,42 @@ describe('EventWindowView', () =>
     // Assert.
     expect([
       waiting,
-      openDocument.mock.calls.map(([ key ]) => key).sort(),
+      openDocument.mock.calls.map(([ key ]) => key),
+      hub.documentKeys(),
       (screen.getByLabelText('Name') as HTMLInputElement).value,
       screen.getAllByRole('tab').map(tab => tab.getAttribute('aria-label')),
       screen.queryByText('page 1') !== null,
       screen.queryByText('page 2'),
     ])
-      .toStrictEqual([ true, [ 'map:1', 'tilesets' ], 'EV002', [ 'Page 1', 'Page 2', 'Page 3' ], true, null ]);
+      .toStrictEqual([ true, [ 'map:1' ], [ 'map:1' ], 'EV002', [ 'Page 1', 'Page 2', 'Page 3' ], true, null ]);
+  });
+
+  it('reads the map\'s tileset from the server for the graphic picker\'s tiles, without ever holding the tilesets', async () =>
+  {
+    // Arrange: a server answering the tilesets; it knows no names or usage, and has no pictures.
+    const loadTilesets = vi.fn(async () => TILESETS as unknown as (RmmzTileset | null)[]);
+    const api = {
+      loadTilesets,
+      loadDatabaseNames: async () => Promise.reject(new Error('no names here')),
+      loadCommandUsage: async () => Promise.reject(new Error('no usage here')),
+      loadImage: async () => null,
+    } as unknown as MapEditorApi;
+    const { hub, openDocument } = renderWindow({ api });
+    await settle();
+
+    // Act: the tile half of the picker.
+    fireEvent.click(screen.getByRole('button', { name: 'Tile' }));
+
+    // Assert: the picker browses the tileset's sheets rather than asking for a typed id, and the window holds the map
+    // alone.
+    expect([
+      screen.getAllByRole('button').filter(button => [ 'B', 'C', 'D', 'E' ].includes(button.textContent ?? '')).length,
+      screen.queryByLabelText('Tile id'),
+      loadTilesets.mock.calls.length,
+      openDocument.mock.calls.length,
+      hub.documentKeys(),
+    ])
+      .toStrictEqual([ 4, null, 1, 0, [ 'map:1' ] ]);
   });
 
   it('says so when the map cannot be opened', async () =>
