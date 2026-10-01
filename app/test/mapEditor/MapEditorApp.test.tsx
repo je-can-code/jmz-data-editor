@@ -61,7 +61,10 @@ describe('MapEditorApp', () =>
       api: null,
       pluginHeaders: new PluginHeaderStore(),
       loadCommandResources: async () => undefined,
-      openDocument: () => new Promise(() => undefined),
+      openDocument: () => new Promise<never>(() =>
+      {
+        // never settles: the tilesets an event window asks for never arrive in this test.
+      }),
     } as unknown as MapEditorServices;
     render(
       <MapEditorServicesProvider services={services}>
