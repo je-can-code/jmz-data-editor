@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box } from '@mui/material';
+import { Box, GlobalStyles } from '@mui/material';
 import {
   DockviewReact,
   themeDark,
@@ -30,7 +30,7 @@ import { attachShortcutsToPopouts, withWindowScope } from './windowScope.tsx';
 import { NoticeBar, WorkspaceBar } from './WorkspaceChrome.tsx';
 import { WorkspaceController } from './WorkspaceController.ts';
 import { WorkspaceProvider } from './workspaceHooks.tsx';
-import { tabMenuItems, WorkspaceTab } from './WorkspaceTab.tsx';
+import { START_TAB_STYLES, tabMenuItems, WorkspaceTab } from './WorkspaceTab.tsx';
 
 declare global
 {
@@ -81,9 +81,12 @@ const holdsTheTree = (group: DockviewDndOverlayEvent['group']): boolean =>
 
 /**
  * The map editor's workspace: one window split into panels (any number of maps, the map tree, the map properties,
- * the history, and the palette, layer strip and quick settings to come) that can be resized, rearranged, stacked as
- * tabs, closed, or torn out into windows of their own, still live and in sync. The layout is kept with the project
- * and comes back as it was left, torn-out windows included.
+ * the history, the palette, the layer strip and the quick settings) that can be resized, rearranged, stacked as tabs,
+ * closed, or torn out into windows of their own, still live and in sync. The layout is kept with the project and comes
+ * back as it was left, torn-out windows included.
+ *
+ * The middle is the centre, which never closes: maps open there, in front, and once the last map in it is closed,
+ * dragged off or torn out it shows the start panel, at the size it had (see CentreKeeper).
  *
  * Any tab opens alone in a window of its own: from its button or its right-click menu, a little off where it sat, or
  * dragged beyond the window's edge and let go, where it lands. Tabs drag with pointer events, never the browser's drag
@@ -194,6 +197,7 @@ const Workspace = () =>
     teardown.current.push(
       () => subscriptions.forEach(subscription => subscription.dispose()),
       attachShortcutsToPopouts(api, onShortcut),
+      controller.centre.attach(api),
       controller.popouts.attach(api),
     );
 
@@ -277,6 +281,7 @@ const Workspace = () =>
 
   return (
     <WorkspaceProvider controller={controller}>
+      <GlobalStyles styles={START_TAB_STYLES}/>
       <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }} data-testid={'map-editor-workspace'}>
         <WorkspaceBar onResetLayout={resetLayout}/>
         <Box sx={{ flex: 1, minHeight: 0 }}>

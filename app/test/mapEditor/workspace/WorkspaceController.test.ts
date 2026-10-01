@@ -15,10 +15,12 @@ import { buildTreeRows } from '../support/treeFixtures.ts';
  * The workspace controller is what every panel acts through, and it owes them the shell's rules. Undo follows focus:
  * a map panel hands undo its map's history and makes its map the one the properties show, the tree and the
  * properties hand undo theirs, and the history panel leaves it alone. A map asked for comes forward where it is
- * already open (bringing its torn-out window with it), and otherwise opens where the maps are in the main window,
- * never inside a torn-out window: into the group last showing a map, in place of the start panel, or beside the
- * tree. Cut then paste moves maps and keeps their ids; copy then paste makes new ones. Save saves every document
- * with unsaved edits and leaves any in conflict for the person to settle.
+ * already open (bringing its torn-out window with it), and otherwise opens in the centre, the main window's group
+ * holding the start panel, in front of the start panel, which stays to hold it: wherever the last map focused sits,
+ * never inside a torn-out window and never beside the tree, so a map never lands in a sliver of a side column. Asked
+ * to, it splits beside the centre; dropped, it opens where it landed; with no centre yet, at the dock's edge. Cut then
+ * paste moves maps and keeps their ids; copy then paste makes new ones. Save saves every document with unsaved edits
+ * and leaves any in conflict for the person to settle.
  *
  * The dock here is a stand-in that records what is added and activated; the tree runs on the real tree service over
  * an in-memory server.
@@ -274,16 +276,19 @@ describe('WorkspaceController', () =>
         ]);
     });
 
-    it('opens a new map as a tab where the maps are in the main window, never in a torn-out window', () =>
+    it('opens a new map as a tab in the centre, not where the last map focused sits, and never in a torn-out window', () =>
     {
-      // Arrange.
+      // Arrange: the start panel holds the centre; a map sits in a side group of the main window, focused last, and
+      // another in a torn-out window.
       const { controller } = buildController();
       const dock = buildDock([
+        { id: 'start', component: 'start', group: MAIN },
         { id: 'map-12', component: 'map', params: { mapId: 12 }, group: TORN },
-        { id: 'map-40', component: 'map', params: { mapId: 40 }, group: MAIN },
+        { id: 'map-40', component: 'map', params: { mapId: 40 }, group: SIDE },
       ]);
       controller.attach(dock.api);
       controller.panelActivated(dock.api.getPanel('map-12'));
+      controller.panelActivated(dock.api.getPanel('map-40'));
 
       // Act.
       controller.openMap(7);
@@ -293,11 +298,14 @@ describe('WorkspaceController', () =>
         .toStrictEqual([ { id: 'map-7', position: { referenceGroup: MAIN, direction: 'within' } } ]);
     });
 
-    it('opens beside the maps on request, and another view of a map already open', () =>
+    it('opens beside the centre on request, and another view of a map already open in the centre', () =>
     {
       // Arrange.
       const { controller } = buildController();
-      const dock = buildDock([ { id: 'map-40', component: 'map', params: { mapId: 40 }, group: MAIN } ]);
+      const dock = buildDock([
+        { id: 'start', component: 'start', group: MAIN },
+        { id: 'map-40', component: 'map', params: { mapId: 40 }, group: SIDE },
+      ]);
       controller.attach(dock.api);
 
       // Act.
@@ -305,11 +313,14 @@ describe('WorkspaceController', () =>
       controller.openMap(40, { newView: true });
 
       // Assert.
-      expect(dock.added.map(each => [ each.id, (each.position as { direction: string }).direction ]))
-        .toStrictEqual([ [ 'map-7', 'right' ], [ 'map-40-2', 'within' ] ]);
+      expect(dock.added)
+        .toStrictEqual([
+          { id: 'map-7', position: { referenceGroup: MAIN, direction: 'right' } },
+          { id: 'map-40-2', position: { referenceGroup: MAIN, direction: 'within' } },
+        ]);
     });
 
-    it('opens the first map in place of the start panel, which then closes', () =>
+    it('opens a map in front of the start panel, which stays to hold the centre', () =>
     {
       // Arrange.
       const { controller } = buildController();
@@ -320,27 +331,27 @@ describe('WorkspaceController', () =>
       controller.openMap(7);
 
       // Assert.
-      expect([ dock.added, dock.closed ])
-        .toStrictEqual([ [ { id: 'map-7', position: { referencePanel: 'start', direction: 'within' } } ], [ 'start' ] ]);
+      expect([ dock.added, dock.closed, dock.api.getPanel('start') !== undefined ])
+        .toStrictEqual([ [ { id: 'map-7', position: { referenceGroup: MAIN, direction: 'within' } } ], [], true ]);
     });
 
-    it('opens beside the tree when no map and no start panel are left, or at the edge without a tree', () =>
+    it('opens at the dock\'s edge while there is no centre, never beside the tree, nor in a torn-out start panel\'s window', () =>
     {
-      // Arrange.
+      // Arrange: one dock with only the tree, and one whose start panel was torn out.
       const withTree = buildController();
       const treeDock = buildDock([ { id: 'map-tree', component: 'map-tree', group: SIDE } ]);
       withTree.controller.attach(treeDock.api);
-      const alone = buildController();
-      const emptyDock = buildDock();
-      alone.controller.attach(emptyDock.api);
+      const strayed = buildController();
+      const strayDock = buildDock([ { id: 'start', component: 'start', group: TORN } ]);
+      strayed.controller.attach(strayDock.api);
 
       // Act.
       withTree.controller.openMap(7);
-      alone.controller.openMap(7);
+      strayed.controller.openMap(7);
 
       // Assert.
-      expect([ treeDock.added[0].position, emptyDock.added[0].position ])
-        .toStrictEqual([ { referencePanel: 'map-tree', direction: 'right' }, { direction: 'right' } ]);
+      expect([ treeDock.added[0].position, strayDock.added[0].position ])
+        .toStrictEqual([ { direction: 'right' }, { direction: 'right' } ]);
     });
 
     it('opens a dropped map where it landed: in the group, or at the dock\'s edge', () =>
