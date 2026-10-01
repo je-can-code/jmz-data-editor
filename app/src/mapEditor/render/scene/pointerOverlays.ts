@@ -10,6 +10,7 @@ const OverlayColour = {
   hover: 0xffffff,
   selection: 0x4fc3f7,
   cells: 0xffd54f,
+  blocked: 0xef5350,
 } as const;
 
 /**
@@ -18,6 +19,7 @@ const OverlayColour = {
 type PointerOverlaysShown = {
   readonly hover: boolean;
   readonly selection: boolean;
+  readonly ghost: boolean;
 };
 
 /**
@@ -63,15 +65,16 @@ const drawCells = (graphics: Graphics, rect: CellRect, colour: number, washAlpha
 };
 
 /**
- * Draws what the tools point at: the selected events, tile area and box (selection), then the cell or footprint under
- * the pointer (hover) on top. Cheap enough to redraw whenever the state changes.
+ * Draws what is selected: the selected events' tiles and the selected tile area. It is drawn apart from the rest of
+ * the pointer overlays, and only when the selection or the events change, since a selection can hold every event on a
+ * map (600 on Map361) while the pointer moves every frame.
  * @param {Graphics} graphics Where to draw.
  * @param {OverlayState} state The tools' state.
  * @param {PointerOverlaysShown} shown Which overlays are on.
  * @param {(eventId: number) => MapCell | null} eventCell Finds where an event stands.
  * @param {number} tileSize The tile size.
  */
-const drawPointerOverlays = (
+const drawSelection = (
   graphics: Graphics,
   state: OverlayState,
   shown: PointerOverlaysShown,
@@ -79,28 +82,58 @@ const drawPointerOverlays = (
   tileSize: number): void =>
 {
   graphics.clear();
-  if (shown.selection)
+  if (shown.selection === false)
   {
-    state.selectedEvents.forEach(id =>
+    return;
+  }
+
+  state.selectedEvents.forEach(id =>
+  {
+    const cell = eventCell(id);
+    if (cell !== null)
     {
-      const cell = eventCell(id);
-      if (cell !== null)
-      {
-        drawCells(graphics, { x: cell.x, y: cell.y, width: 1, height: 1 }, OverlayColour.selection, 0.3, tileSize);
-      }
+      drawCells(graphics, { x: cell.x, y: cell.y, width: 1, height: 1 }, OverlayColour.selection, 0.3, tileSize);
+    }
+  });
+
+  if (state.selectedCells !== null)
+  {
+    drawCells(graphics, state.selectedCells, OverlayColour.cells, 0.15, tileSize);
+  }
+};
+
+/**
+ * Draws what the tools point at, over the selection: the box being dragged (selection), the tile every ghost event
+ * would land on with the tiles it cannot land on in red (ghost), then the cell or footprint under the pointer (hover)
+ * on top. Cheap enough to redraw whenever the state changes.
+ * @param {Graphics} graphics Where to draw.
+ * @param {OverlayState} state The tools' state.
+ * @param {PointerOverlaysShown} shown Which overlays are on.
+ * @param {number} tileSize The tile size.
+ */
+const drawPointerOverlays = (graphics: Graphics, state: OverlayState, shown: PointerOverlaysShown, tileSize: number): void =>
+{
+  graphics.clear();
+  const box = state.selectionBox;
+  if (shown.selection && box !== null)
+  {
+    graphics.rect(box.x, box.y, box.width, box.height).fill({ color: OverlayColour.selection, alpha: 0.15 });
+    graphics.rect(box.x, box.y, box.width, box.height).stroke({ color: OverlayColour.selection, width: 1, pixelLine: true });
+  }
+
+  if (shown.ghost)
+  {
+    // an event with no picture draws no ghost sprite, so its outlined tile is all that shows where it would land.
+    state.ghostEvents.forEach(ghost =>
+    {
+      graphics.rect(ghost.x * tileSize, ghost.y * tileSize, tileSize, tileSize)
+        .stroke({ color: OverlayColour.selection, alpha: 0.9, width: 1, pixelLine: true });
     });
 
-    if (state.selectedCells !== null)
+    (state.blockedCells ?? []).forEach(cell =>
     {
-      drawCells(graphics, state.selectedCells, OverlayColour.cells, 0.15, tileSize);
-    }
-
-    const box = state.selectionBox;
-    if (box !== null)
-    {
-      graphics.rect(box.x, box.y, box.width, box.height).fill({ color: OverlayColour.selection, alpha: 0.15 });
-      graphics.rect(box.x, box.y, box.width, box.height).stroke({ color: OverlayColour.selection, width: 1, pixelLine: true });
-    }
+      drawCells(graphics, { x: cell.x, y: cell.y, width: 1, height: 1 }, OverlayColour.blocked, 0.35, tileSize);
+    });
   }
 
   if (shown.hover && state.hover !== null)
@@ -109,5 +142,5 @@ const drawPointerOverlays = (
   }
 };
 
-export { drawCells, drawGrid, drawPointerOverlays, OverlayColour };
+export { drawCells, drawGrid, drawPointerOverlays, drawSelection, OverlayColour };
 export type { PointerOverlaysShown };

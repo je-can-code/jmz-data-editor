@@ -3,7 +3,7 @@ import type { MapDocument } from '../../core/model/MapDocument.ts';
 import { screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../../core/renderer/camera.ts';
 import type { TilesetLayering } from '../../core/tiles/layering.ts';
 import { shadowQuarterAt } from '../../core/tools/paintPlan.ts';
-import type { PaintState } from '../../core/tools/PaintState.ts';
+import { isPaintingTool, type PaintState } from '../../core/tools/PaintState.ts';
 import { ToolSession, type ToolOverlay, type ToolPointer } from '../../core/tools/ToolSession.ts';
 import { isTextEntry, type KeyTarget } from '../../core/workspace/shortcuts.ts';
 
@@ -183,7 +183,8 @@ class PaintController
 
     listen('pointerdown', event =>
     {
-      if (event.button !== 0)
+      // with the events in hand the left button is the event tools', focus and pointer capture included.
+      if (event.button !== 0 || this.#paints() === false)
       {
         return;
       }
@@ -197,7 +198,9 @@ class PaintController
     listen('pointermove', event => this.#onMove(event));
     listen('pointerup', event =>
     {
-      if (event.button !== 0)
+      // a release ends a stroke whatever is in hand by then, but one with the events in hand that started nothing here
+      // is the event tools' to answer.
+      if (event.button !== 0 || (this.#paints() === false && this.#session.isActive === false))
       {
         return;
       }
@@ -299,8 +302,9 @@ class PaintController
    */
   #onKey(event: KeyboardEvent, down: boolean): void
   {
+    // the keys are the tools' while the pointer is over the map with a painting tool in hand, or a stroke goes on.
     const session = this.#session;
-    const mine = this.#hovering || session.isActive;
+    const mine = (this.#hovering && this.#paints()) || session.isActive;
     if (down && (event.ctrlKey || event.metaKey) && session.isActive && event.key !== 'Control' && event.key !== 'Meta')
     {
       session.interrupt();
@@ -416,6 +420,15 @@ class PaintController
     }
 
     return `${where}|${shift}|${copy}|${override}`;
+  }
+
+  /**
+   * Reports whether the tool in hand paints, rather than leaving the left button to the event tools.
+   * @returns {boolean} True for every tool but the events.
+   */
+  #paints(): boolean
+  {
+    return isPaintingTool(this.#options.painting.settings.tool);
   }
 
   /**

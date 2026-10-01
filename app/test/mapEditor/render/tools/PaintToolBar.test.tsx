@@ -35,6 +35,24 @@ describe('PaintToolBar', () =>
       .toEqual([ 'fill', 'fill' ]);
   });
 
+  it('offers the events first, in hand from the start, and takes them back up when clicked', () =>
+  {
+    // Arrange: a fresh window, then the pen taken up.
+    const painting = new PaintState();
+    render(<PaintToolBar painting={painting}/>);
+    const eventsButton = screen.getByLabelText('Events: select, move and open the events on the map');
+    const pressedAtStart = eventsButton.getAttribute('aria-pressed');
+    fireEvent.click(screen.getByLabelText('Pen: paints as you drag'));
+    const afterPen = painting.settings.tool;
+
+    // Act.
+    fireEvent.click(eventsButton);
+
+    // Assert.
+    expect([ pressedAtStart, afterPen, painting.settings.tool ])
+      .toEqual([ 'true', 'pen', 'events' ]);
+  });
+
   it('makes a tile id typed in the brush, and leaves the brush alone for anything else', () =>
   {
     // Arrange.

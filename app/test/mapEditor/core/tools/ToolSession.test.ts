@@ -429,6 +429,41 @@ describe('ToolSession: strokes that do not end with a release', () =>
   });
 });
 
+describe('ToolSession: with the events in hand', () =>
+{
+  it('starts nothing at a press and shows nothing, where the pen paints the same press', () =>
+  {
+    // Arrange: the same brush, once with the events in hand and once with the pen.
+    const events = sessionOn(benchWith(4, 3, meadow), { tool: 'events', brush: singleTileBrush(kindTile(DIRT)) });
+    const pen = sessionOn(benchWith(4, 3, meadow), { tool: 'pen', brush: singleTileBrush(kindTile(DIRT)) });
+    const before = cellsOf(events.map);
+
+    // Act: hovered, then clicked, with each.
+    events.session.move(at(1, 1));
+    const shown = events.session.overlay();
+    drag(events.session, [ at(1, 1) ]);
+    drag(pen.session, [ at(1, 1) ]);
+
+    // Assert: the events leave the map and its history alone and show nothing; the pen lays the dirt.
+    expect([ cellsOf(events.map), events.hub.history(events.history).rows, shown, stackAt(pen.map, 1, 1)[0] ])
+      .toEqual([ before, [], { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: null }, 'k18' ]);
+  });
+
+  it('never goes back to the events once the eyedropper has picked, since what it picks is for painting', () =>
+  {
+    // Arrange: the events in hand, then the eyedropper taken up.
+    const bench = sessionOn(benchWith(4, 3, meadow), { tool: 'events' });
+    bench.state.setTool('eyedropper');
+
+    // Act: the tree's cell picked.
+    drag(bench.session, [ at(0, 0) ]);
+
+    // Assert: the tree in hand, on the pen.
+    expect([ bench.state.settings.brush?.cells, bench.state.settings.tool ])
+      .toEqual([ [ TREE ], 'pen' ]);
+  });
+});
+
 describe('ToolSession: what the map shows', () =>
 {
   it('previews the pen under the pointer, and nothing once it leaves the map', () =>

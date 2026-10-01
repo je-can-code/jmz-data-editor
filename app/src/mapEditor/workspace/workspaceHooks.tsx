@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
+import type { SelectedEvents } from '../core/events/EventSelection.ts';
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
 import { MAP_INFOS_KEY, mapDocumentKey, parseDocumentKey, TILESETS_KEY } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
@@ -58,6 +59,18 @@ const useWorkspaceState = <T, >(select: (state: WorkspaceState) => T): T =>
 {
   const controller = useWorkspace();
   return useSyncExternalStore(controller.subscribe, () => select(controller.getState()));
+};
+
+/**
+ * Reads the window's event selection, re-rendering when it changes: the map it is on and the events picked there, in
+ * the order they were picked, so the last is the one picked most recently. The quick panel shows the picked events'
+ * settings through it, reading the events themselves from their map's document.
+ * @returns {SelectedEvents} The selection.
+ */
+const useEventSelection = (): SelectedEvents =>
+{
+  const { selection } = useWorkspace();
+  return useSyncExternalStore(selection.subscribe, selection.get);
 };
 
 /**
@@ -328,6 +341,7 @@ const useTilesets = (): readonly (RmmzTileset | null)[] =>
 
 export {
   useDocumentRevision,
+  useEventSelection,
   useHeldMap,
   useHubVersion,
   useMapTreeDocument,

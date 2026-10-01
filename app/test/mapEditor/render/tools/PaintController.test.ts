@@ -298,6 +298,23 @@ describe('PaintController', () =>
       .toEqual([ { x: 3, y: 2, width: 1, height: 1 }, 'Auto: layer 1', null ]);
   });
 
+  it('leaves the left button and the space bar to the event tools while the events are in hand', () =>
+  {
+    // Arrange: the events in hand with a brush picked, and the pointer over the map.
+    const bench = controllerWith({ tool: 'events', brush: singleTileBrush(ROCK), overrideLayer: 2 });
+    pointer(bench.canvas, 'pointerenter', 1, 1);
+
+    // Act: the space bar held through a click.
+    const space = key('keydown', { key: ' ', code: 'Space' });
+    pointer(bench.canvas, 'pointerdown', 1, 1);
+    pointer(bench.canvas, 'pointerup', 1, 1);
+    key('keyup', { key: ' ', code: 'Space' });
+
+    // Assert: nothing painted, the canvas never took the keys from the view, and the space bar reached the page.
+    expect([ bench.hub.history(bench.history).rows, document.activeElement === bench.canvas, space.defaultPrevented ])
+      .toEqual([ [], false, false ]);
+  });
+
   it('shows a new tool at once, and nothing more once it has let go', () =>
   {
     // Arrange.

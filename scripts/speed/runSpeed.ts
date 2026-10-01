@@ -22,7 +22,14 @@
  *   - the warm open: reopening the map after another, once this window holds both;
  *   - shown again: the view hidden, as a panel behind another tab is, which lets its GPU context go, then shown, timed
  *     to the first frame drawn on the context it got back; measured last, since it restarts the page's GPU context;
- *   - dragging events, once P5 provides the hook; until then it reports that it waited.
+ *   - events, with the whole map on screen and the real mouse: twenty clicks selecting one event after another, a box
+ *     drawn from beside the map around every event on it, the top half's events dragged about (on Map361 every tile
+ *     holds an event, so the ghosts show blocked tiles and the drop is refused), and a committed drop: the bottom row
+ *     emptied, every other event selected and dragged one row down. None of them may drop a frame.
+ *
+ * The page shows the map with its quick panel beside it (quick=1), the two sharing one selection as in the workspace,
+ * so whatever the panel renders for a new selection, or for a drop that moves every selected event, lands in the
+ * frames measured; the box and the drop also prove the panel followed the selection.
  *
  * It refuses to time anywhere but the RX 6950 XT: the browser's WebGL renderer and the page's own must both name it
  * (JMZ_SPEED_GPU, or --gpu, overrides the pattern). The exit code is non-zero when any budget is missed.
@@ -30,10 +37,11 @@
 import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { Page } from 'playwright-core';
-import { BUDGETS, judgeCameraPath, judgeOpen, judgeStrokeFrames } from './budgets.ts';
-import type { StrokeResult } from './budgets.ts';
+import { BUDGETS, judgeCameraPath, judgeInteractionFrames, judgeOpen, judgeStrokeFrames } from './budgets.ts';
+import type { InteractionResult, StrokeResult } from './budgets.ts';
 import { startEditorStack } from './editorStack.ts';
 import { addFrameRecorder, startRecording, stopRecording } from './frameRecorder.ts';
+import type { Recording } from './frameRecorder.ts';
 import { REFRESH_60_HZ, summarize, summarizeFrames } from './frameStats.ts';
 import type { RunSummary, Verdict } from './frameStats.ts';
 import { newSpeedPage, openSpeedBrowser } from './gpuChromium.ts';
@@ -92,8 +100,33 @@ type MapResult = {
   strokeWithRings: StrokeResult;
   warmOpenMs: number;
   shownAgainMs: number;
-  drag: string;
+  events: EventsResult;
   verdicts: Record<string, Verdict>;
+};
+
+/**
+ * What the event tools report having done, with how many events the map holds.
+ */
+type EventsState = {
+  selected: number;
+  moving: boolean;
+  ghosts: number;
+  drops: number;
+  refusedDrops: number;
+  total: number;
+};
+
+/**
+ * What the four interactions with events came to on one map: the clicks, the box, the drag with its drop refused or
+ * made, and the committed drop of nearly every event; with how many events the drag and the drop carried.
+ */
+type EventsResult = {
+  click: InteractionResult;
+  box: InteractionResult;
+  drag: InteractionResult;
+  drop: InteractionResult;
+  dragged: number;
+  dropped: number;
 };
 
 /**
@@ -104,6 +137,7 @@ type PageHooks = {
   timings: Record<string, number>;
   info: () => { gpu: { renderer: string } | null; size: number[] | null };
   lookAt: (x: number, y: number, zoom: number) => void;
+  zoomToFit: () => void;
   screenOfCell: (x: number, y: number) => { x: number; y: number };
   startPath: (kind: string) => void;
   stopPath: () => void;
@@ -114,7 +148,15 @@ type PageHooks = {
   enableEveryOverlay: () => void;
   openMap: (mapId: number) => Promise<{ ms: number }>;
   showAgain: () => Promise<{ ms: number; hidden: string; shown: string }>;
-  dragEvents: null | ((options: unknown) => Promise<unknown>);
+  events: {
+    state: () => EventsState;
+    clear: () => void;
+    screenOfEvent: (eventId: number) => { x: number; y: number } | null;
+    cellOf: (eventId: number) => { x: number; y: number } | null;
+    eventIds: () => number[];
+    selectedIds: () => number[];
+    removeRow: (y: number) => number;
+  };
 };
 
 /**
@@ -132,6 +174,34 @@ const STROKE_MOVES = 150;
  * around it.
  */
 const STROKE_FOOTPRINT = 3;
+
+/**
+ * The map's own canvas on the page; the quick panel beside it may draw canvases of its own.
+ */
+const MAP_CANVAS = '[data-testid="map-view"] canvas';
+
+/**
+ * The quick panel beside the map, and the line it shows while nothing is selected.
+ */
+const QUICK_PANEL = '[data-testid="map-quick-panel"]';
+const QUICK_PANEL_QUIET = 'Pick an event on a map to change its settings here.';
+
+/**
+ * How many events the click test picks, one after another.
+ */
+const EVENT_CLICKS = 20;
+
+/**
+ * How many pointer moves a box and a drag make, 4 ms apart.
+ */
+const BOX_MOVES = 60;
+const DRAG_MOVES = 120;
+
+/**
+ * Where a drag wanders, in tiles from where it started, before it lets go: down, across, back up past the start, and
+ * across again.
+ */
+const DRAG_WAYPOINTS: readonly { x: number; y: number }[] = [ { x: 0, y: 6 }, { x: 3, y: 6 }, { x: 3, y: -4 }, { x: -2, y: -4 }, { x: -2, y: 2 } ];
 
 /**
  * The renderer every timing must come from unless overridden.
@@ -330,7 +400,7 @@ const measureStroke = async (page: Page, size: number[]): Promise<StrokeResult> 
   });
 
   // the hooks answer in the canvas's own pixels; the mouse moves in the page's, around the view's bars.
-  const canvas = await page.locator('canvas').boundingBox();
+  const canvas = await page.locator(MAP_CANVAS).boundingBox();
   if (canvas === null)
   {
     throw new Error('the map view has no canvas to paint on');
@@ -365,6 +435,326 @@ const measureStroke = async (page: Page, size: number[]): Promise<StrokeResult> 
 };
 
 /**
+ * Picks evenly spread items from a list.
+ * @param {readonly T[]} items The list.
+ * @param {number} count How many to pick.
+ * @returns {T[]} The picks, in list order.
+ */
+const spread = <T>(items: readonly T[], count: number): T[] =>
+{
+  if (items.length <= count)
+  {
+    return [ ...items ];
+  }
+
+  return Array.from({ length: count }, (_, index) => items[Math.floor((index * items.length) / count)]);
+};
+
+/**
+ * Builds the pointer positions along straight lines through some points, evenly spaced.
+ * @param {readonly { x: number, y: number }[]} points The points, the first being where the pointer starts.
+ * @param {number} moves How many positions in all, the last being the final point.
+ * @returns {{ x: number, y: number }[]} The positions, not including the start.
+ */
+const alongPath = (points: readonly { x: number; y: number }[], moves: number): { x: number; y: number }[] =>
+{
+  const legs = points.slice(1).map((point, index) => ({ from: points[index], to: point }));
+  const lengths = legs.map(leg => Math.hypot(leg.to.x - leg.from.x, leg.to.y - leg.from.y));
+  const total = lengths.reduce((sum, length) => sum + length, 0) || 1;
+  const positions: { x: number; y: number }[] = [];
+  for (let step = 1; step <= moves; step++)
+  {
+    // walk the legs to the share of the whole path this step reaches.
+    let travel = (step / moves) * total;
+    let leg = 0;
+    while (leg < legs.length - 1 && travel > lengths[leg])
+    {
+      travel -= lengths[leg];
+      leg += 1;
+    }
+
+    const { from, to } = legs[leg];
+    const share = lengths[leg] === 0 ? 1 : Math.min(1, travel / lengths[leg]);
+    positions.push({ x: from.x + (to.x - from.x) * share, y: from.y + (to.y - from.y) * share });
+  }
+
+  return positions;
+};
+
+/**
+ * Moves the mouse along positions with the left button held, 4 ms apart, as a hand dragging would.
+ * @param {Page} page The page.
+ * @param {{ x: number, y: number }} start Where the button goes down.
+ * @param {readonly { x: number, y: number }[]} positions Where the pointer goes after.
+ * @param {() => Promise<void>} midway Run halfway along, before the button comes up.
+ */
+const dragMouse = async (
+  page: Page, start: { x: number; y: number }, positions: readonly { x: number; y: number }[], midway: () => Promise<void> = async () => undefined): Promise<void> =>
+{
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  for (const [ index, position ] of positions.entries())
+  {
+    await page.mouse.move(position.x, position.y);
+    await page.waitForTimeout(4);
+    if (index === Math.floor(positions.length / 2))
+    {
+      await midway();
+    }
+  }
+
+  await page.mouse.up();
+};
+
+/**
+ * What the event measurements share: the page, the map's size, where the mouse goes to reach a tile or an event, and
+ * what the event tools report.
+ */
+type EventProbe = {
+  readonly page: Page;
+  readonly width: number;
+  readonly height: number;
+  readonly cellPoint: (x: number, y: number) => Promise<{ x: number; y: number }>;
+  readonly eventPoint: (eventId: number) => Promise<{ x: number; y: number }>;
+  readonly cellOf: (eventId: number) => Promise<{ x: number; y: number }>;
+  readonly state: () => Promise<EventsState>;
+  readonly selectedIds: () => Promise<number[]>;
+  readonly clear: () => Promise<void>;
+};
+
+/**
+ * Builds the probe the event measurements work through, with the whole map on screen.
+ * @param {Page} page The page.
+ * @param {number[]} size The map's size in tiles.
+ * @returns {Promise<EventProbe>} The probe.
+ */
+const eventProbe = async (page: Page, size: number[]): Promise<EventProbe> =>
+{
+  const [ width, height ] = size;
+
+  // the hooks answer in the canvas's own pixels; the mouse moves in the page's, around the view's bars.
+  const canvas = await page.locator(MAP_CANVAS).boundingBox();
+  if (canvas === null)
+  {
+    throw new Error('the map view has no canvas to click on');
+  }
+
+  const onPage = (point: { x: number; y: number }) => ({
+    x: Math.min(canvas.x + canvas.width - 2, Math.max(canvas.x + 2, point.x + canvas.x)),
+    y: Math.min(canvas.y + canvas.height - 2, Math.max(canvas.y + 2, point.y + canvas.y)),
+  });
+
+  return {
+    page,
+    width,
+    height,
+    cellPoint: async (x: number, y: number) =>
+      onPage(await page.evaluate(([ cx, cy ]) => (window as unknown as HookWindow).__jmzMapView.screenOfCell(cx, cy), [ x, y ])),
+    eventPoint: async (eventId: number) =>
+    {
+      const point = await page.evaluate(id => (window as unknown as HookWindow).__jmzMapView.events.screenOfEvent(id), eventId);
+      if (point === null)
+      {
+        throw new Error(`event ${eventId} is not on the map`);
+      }
+
+      return onPage(point);
+    },
+    cellOf: async (eventId: number) =>
+    {
+      const cell = await page.evaluate(id => (window as unknown as HookWindow).__jmzMapView.events.cellOf(id), eventId);
+      if (cell === null)
+      {
+        throw new Error(`event ${eventId} is not on the map`);
+      }
+
+      return cell;
+    },
+    state: () => page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.events.state()),
+    selectedIds: () => page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.events.selectedIds()),
+    clear: () => page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.events.clear()),
+  };
+};
+
+/**
+ * Draws a box with the mouse from beside the map's top-left corner down to a row, every column included.
+ * @param {EventProbe} probe The probe.
+ * @param {number} lastRow The last row inside the box; the map's height reaches past the bottom.
+ * @param {number} moves How many pointer moves the box takes.
+ * @returns {Promise<void>} Settles once the button is up.
+ */
+const boxRows = async (probe: EventProbe, lastRow: number, moves: number): Promise<void> =>
+{
+  const from = await probe.cellPoint(-1, -1);
+  const to = await probe.cellPoint(probe.width, lastRow);
+  await dragMouse(probe.page, from, alongPath([ from, to ], moves));
+};
+
+/**
+ * Records an interaction's frames and inputs: starts recording, runs it, lets its last frames land, and stops.
+ * @param {Page} page The page.
+ * @param {() => Promise<void>} interact The interaction.
+ * @param {number} settleMs How long to keep recording after it.
+ * @returns {Promise<Recording>} What was recorded.
+ */
+const recordInteraction = async (page: Page, interact: () => Promise<void>, settleMs = 400): Promise<Recording> =>
+{
+  await startRecording(page);
+  await interact();
+  await page.waitForTimeout(settleMs);
+  return stopRecording(page);
+};
+
+/**
+ * Reports whether the quick panel beside the map shows its line for nothing selected, rather than any event's settings.
+ * @param {Page} page The page.
+ * @returns {Promise<boolean>} True while it shows nothing picked.
+ */
+const quickPanelIsQuiet = async (page: Page): Promise<boolean> =>
+{
+  return (await page.locator(QUICK_PANEL).innerText()).includes(QUICK_PANEL_QUIET);
+};
+
+/**
+ * Clicks twenty events spread over the map, one after another, each selecting one event alone.
+ * @param {EventProbe} probe The probe.
+ * @returns {Promise<InteractionResult>} What the clicks came to.
+ */
+const measureClicks = async (probe: EventProbe): Promise<InteractionResult> =>
+{
+  const ids = await probe.page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.events.eventIds());
+  const points: { x: number; y: number }[] = [];
+  for (const id of spread(ids, EVENT_CLICKS))
+  {
+    points.push(await probe.eventPoint(id));
+  }
+
+  const recording = await recordInteraction(probe.page, async () =>
+  {
+    for (const point of points)
+    {
+      await probe.page.mouse.move(point.x, point.y);
+      await probe.page.mouse.down();
+      await probe.page.mouse.up();
+      await probe.page.waitForTimeout(40);
+    }
+  });
+  const after = await probe.state();
+  return judgeInteractionFrames(recording.inputs, recording.frames, {
+    ok: after.selected === 1,
+    reason: `the clicks left ${after.selected} events selected, not 1`,
+  });
+};
+
+/**
+ * Draws a box from beside the map around every event on it.
+ * @param {EventProbe} probe The probe.
+ * @returns {Promise<InteractionResult>} What the box came to.
+ */
+const measureBox = async (probe: EventProbe): Promise<InteractionResult> =>
+{
+  await probe.clear();
+  const quietBefore = await quickPanelIsQuiet(probe.page);
+  const recording = await recordInteraction(probe.page, () => boxRows(probe, probe.height, BOX_MOVES));
+  const after = await probe.state();
+  const quietAfter = await quickPanelIsQuiet(probe.page);
+  return judgeInteractionFrames(recording.inputs, recording.frames, {
+    ok: after.total > 0 && after.selected === after.total && quietBefore && quietAfter === false,
+    reason: `the box selected ${after.selected} of ${after.total} events, and the quick panel ${quietAfter ? 'never showed them' : 'showed them'}`,
+  });
+};
+
+/**
+ * Selects the top half's events, drags them about by their bottom-right event, and lets go: the ghosts follow, red on
+ * every tile another event holds, and the drop lands or is refused.
+ * @param {EventProbe} probe The probe.
+ * @returns {Promise<{ result: InteractionResult, dragged: number }>} What the drag came to, and how many events it carried.
+ */
+const measureDrag = async (probe: EventProbe): Promise<{ result: InteractionResult; dragged: number }> =>
+{
+  await probe.clear();
+  await boxRows(probe, Math.max(0, Math.floor(probe.height / 2) - 1), 20);
+  await probe.page.waitForTimeout(150);
+  const half = await probe.selectedIds();
+  const [ handle ] = half.slice(-1);
+  const handleCell = await probe.cellOf(handle);
+  const start = await probe.eventPoint(handle);
+  const waypoints = [ start ];
+  for (const offset of DRAG_WAYPOINTS)
+  {
+    waypoints.push(await probe.cellPoint(handleCell.x + offset.x, handleCell.y + offset.y));
+  }
+
+  const before = await probe.state();
+  let ghostsMidway = 0;
+  const recording = await recordInteraction(probe.page, () => dragMouse(probe.page, start, alongPath(waypoints, DRAG_MOVES), async () =>
+  {
+    ghostsMidway = (await probe.state()).ghosts;
+  }));
+  const after = await probe.state();
+  const ended = after.drops + after.refusedDrops - before.drops - before.refusedDrops;
+  const result = judgeInteractionFrames(recording.inputs, recording.frames, {
+    ok: ghostsMidway === half.length && ended === 1,
+    reason: `the drag showed ${ghostsMidway} of ${half.length} ghosts midway and ended ${ended} drops`,
+  });
+  return { result, dragged: half.length };
+};
+
+/**
+ * Empties the bottom row, selects every other event and drags them all one row down: a drop moving nearly every event
+ * on the map.
+ * @param {EventProbe} probe The probe.
+ * @returns {Promise<{ result: InteractionResult, dropped: number }>} What the drop came to, and how many events it moved.
+ */
+const measureDrop = async (probe: EventProbe): Promise<{ result: InteractionResult; dropped: number }> =>
+{
+  await probe.page.evaluate(y => (window as unknown as HookWindow).__jmzMapView.events.removeRow(y), probe.height - 1);
+  await probe.clear();
+  await boxRows(probe, probe.height, 20);
+  await probe.page.waitForTimeout(150);
+  const everything = await probe.selectedIds();
+  const [ mover ] = everything;
+  const moverCell = await probe.cellOf(mover);
+  const from = await probe.eventPoint(mover);
+  const to = await probe.cellPoint(moverCell.x, moverCell.y + 1);
+  const before = await probe.state();
+  const recording = await recordInteraction(probe.page, () => dragMouse(probe.page, from, alongPath([ from, to ], 8)), 500);
+  const after = await probe.state();
+  const landed = await probe.cellOf(mover);
+  const panelShowsThem = await quickPanelIsQuiet(probe.page) === false;
+  const result = judgeInteractionFrames(recording.inputs, recording.frames, {
+    ok: after.drops === before.drops + 1 && landed.y === moverCell.y + 1 && panelShowsThem,
+    reason: `the drop of ${everything.length} events did not land one row down with the quick panel showing them`,
+  });
+  return { result, dropped: everything.length };
+};
+
+/**
+ * Selects, box-selects and drags events on the map on show with the real mouse, the whole map on screen and every
+ * overlay on, and judges each interaction's frames: none may drop a frame.
+ * @param {Page} page The page.
+ * @param {number[]} size The map's size in tiles.
+ * @returns {Promise<EventsResult>} What each interaction came to.
+ */
+const measureEvents = async (page: Page, size: number[]): Promise<EventsResult> =>
+{
+  await page.evaluate(() =>
+  {
+    const view = (window as unknown as HookWindow).__jmzMapView;
+    view.zoomToFit();
+    view.events.clear();
+  });
+  await page.waitForTimeout(400);
+
+  const probe = await eventProbe(page, size);
+  const click = await measureClicks(probe);
+  const box = await measureBox(probe);
+  const drag = await measureDrag(probe);
+  const drop = await measureDrop(probe);
+  return { click, box, drag: drag.result, drop: drop.result, dragged: drag.dragged, dropped: drop.dropped };
+};
+
+/**
  * Opens one map in a fresh browser and measures everything the budgets cover.
  * @param {Options} options The settings.
  * @param {string} uiBase The UI's origin.
@@ -380,7 +770,7 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
   {
     const page = await newSpeedPage(browser);
     await addFrameRecorder(page);
-    await page.goto(`${uiBase}/map.html?map=${mapId}&speed=1`);
+    await page.goto(`${uiBase}/map.html?map=${mapId}&speed=1&quick=1`);
     await page.waitForFunction(() =>
     {
       const hooks = (window as unknown as { __jmzMapView?: PageHooks }).__jmzMapView;
@@ -407,6 +797,7 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
     }
 
     const stroke = await measureStroke(page, info.size ?? [ 1, 1 ]);
+    const events = await measureEvents(page, info.size ?? [ 1, 1 ]);
 
     // again with a module overlay as heavy as sight rings around every event, which painting must not redraw.
     await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.enableModuleRings());
@@ -417,7 +808,6 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
     const other = options.maps.find(candidate => candidate !== mapId) ?? mapId;
     await page.evaluate(id => (window as unknown as HookWindow).__jmzMapView.openMap(id), other);
     const warm = await page.evaluate(id => (window as unknown as HookWindow).__jmzMapView.openMap(id), mapId);
-    const hasDrag = await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.dragEvents !== null);
 
     // last, since the context it gets back is a new one the frame recorder has not seen.
     const shown = await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.showAgain());
@@ -434,6 +824,10 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
       shownAgain: judgeOpen(shown.ms, BUDGETS.shownAgainMs, 'shown again'),
       stroke: stroke.verdict,
       strokeWithRings: strokeWithRings.verdict,
+      eventClick: events.click.verdict,
+      eventBox: events.box.verdict,
+      eventDrag: events.drag.verdict,
+      eventDrop: events.drop.verdict,
     };
     PATHS.forEach(kind =>
     {
@@ -455,7 +849,7 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
       strokeWithRings,
       warmOpenMs: warm.ms,
       shownAgainMs: shown.ms,
-      drag: hasDrag ? 'hook present but not yet measured by this script' : 'waits for P5, which provides the drag hook',
+      events,
       verdicts,
     };
   }
@@ -511,7 +905,17 @@ const printMap = (result: MapResult): void =>
     console.log(`  ${label.padEnd(9)} inputs ${stroke.inputs} matched ${stroke.matched} frames ${stroke.frames} dropped ${stroke.dropped}`
       + ` cost p50 ${cell(stroke.cost.p50)} max ${cell(stroke.cost.max)} work max ${cell(stroke.work.max)}  ${verdictText(stroke.verdict)}`);
   });
-  console.log(`  drag      ${result.drag}`);
+  const { events } = result;
+  const interaction = (label: string, outcome: InteractionResult) =>
+  {
+    console.log(`  ${label.padEnd(9)} inputs ${String(outcome.inputs).padStart(4)} frames ${String(outcome.frames).padStart(4)}`
+      + ` dropped ${outcome.dropped} cost p50 ${cell(outcome.cost.p50)} max ${cell(outcome.cost.max)} work max ${cell(outcome.work.max)}`
+      + `  ${verdictText(outcome.verdict)}`);
+  };
+  interaction('click', events.click);
+  interaction('box', events.box);
+  interaction(`drag ${events.dragged}`, events.drag);
+  interaction(`drop ${events.dropped}`, events.drop);
 };
 
 /**
@@ -544,6 +948,11 @@ const printSpread = (results: MapResult[], maps: number[]): void =>
     line('stroke dropped mid-stroke', mine.map(result => result.stroke.dropped));
     line('stroke with rings cost max (ms)', mine.map(result => result.strokeWithRings.cost.max));
     line('stroke with rings dropped', mine.map(result => result.strokeWithRings.dropped));
+    ([ 'click', 'box', 'drag', 'drop' ] as const).forEach(kind =>
+    {
+      line(`event ${kind} dropped frames`, mine.map(result => result.events[kind].dropped));
+      line(`event ${kind} frame cost max (ms)`, mine.map(result => result.events[kind].cost.max));
+    });
   });
 };
 

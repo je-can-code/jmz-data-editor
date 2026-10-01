@@ -1,5 +1,6 @@
 // The NW.js shell's decisions, kept apart from main.js so they can be tested without NW.js: reading the app's
-// flags, deciding which page boots, and naming and vetting the windows pages ask for.
+// flags, deciding which page boots, naming and vetting the windows pages ask for, and what a page may read off the
+// clipboard.
 
 /**
  * Reads a flag's value from the app's arguments, in either form the shell accepts: `--name=value` or
@@ -130,6 +131,73 @@ function windowSize(requested, fallback)
 }
 
 /**
+ * The clipboards the shell reads for a page, by the marker each carries and the field it carries it in: events copied
+ * off a map, commands copied out of a command list, and rows copied out of a data editor board. A page asks for one of
+ * these, and gets the system clipboard's text only when it is that clipboard: anything else on it (a password, a
+ * message, another program's data) never reaches a page through the shell.
+ */
+const CLIPBOARD_KINDS = {
+  'jmz-map-editor/events': 'marker',
+  'jmz-map-editor/commands': 'format',
+  'jmz-data-editor/rows': 'format',
+};
+
+/**
+ * The name a page's reply channel must have: a fixed prefix and a random UUID, which no other window knows, so the
+ * answer reaches the asking window alone and never the shell channel every window hears.
+ */
+const CLIPBOARD_REPLY_PATTERN = /^jmz-clipboard-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Reports whether clipboard text is one of the app's own clipboards, of the kind a page asked for.
+ * @param {unknown} text The clipboard's text.
+ * @param {unknown} marker The marker the page asked for.
+ * @returns {boolean} True when the text is JSON carrying that marker, in the field that kind carries it in.
+ */
+function carriesMarker(text, marker)
+{
+  if (typeof marker !== 'string' || Object.hasOwn(CLIPBOARD_KINDS, marker) === false || typeof text !== 'string')
+  {
+    return false;
+  }
+
+  let parsed;
+  try
+  {
+    parsed = JSON.parse(text);
+  }
+  catch
+  {
+    return false;
+  }
+
+  return parsed !== null && typeof parsed === 'object' && Array.isArray(parsed) === false && parsed[CLIPBOARD_KINDS[marker]] === marker;
+}
+
+/**
+ * Works out the shell's answer to a page's clipboard read: the channel to send it on, which is the reply channel the
+ * page opened for it, and the text, which is the clipboard's only when it carries the marker the page asked for, and
+ * empty otherwise. A read naming no proper reply channel gets no answer at all, and the clipboard is not even read.
+ * @param {unknown} request The page's request, as the shell channel delivered it.
+ * @param {() => unknown} readText Reads the system clipboard's text.
+ * @returns {{ channel: string, message: { type: 'clipboard-text', text: string } } | null} The answer, or null for none.
+ */
+function clipboardAnswer(request, readText)
+{
+  const { replyTo, marker } = request;
+  if (typeof replyTo !== 'string' || CLIPBOARD_REPLY_PATTERN.test(replyTo) === false)
+  {
+    return null;
+  }
+
+  const text = readText();
+  return {
+    channel: replyTo,
+    message: { type: 'clipboard-text', text: carriesMarker(text, marker) ? text : '' },
+  };
+}
+
+/**
  * Builds the environment the Go API reads its configuration from, out of the same origins that tell the UI
  * where everything is: the address to listen on, from the API base, and the one page origin allowed to call it,
  * from the UI's URL. A UI moved off port 3000 is then allowed, and the default origins are not.
@@ -185,6 +253,8 @@ function devStackArgs(projectRoot, apiBase, uiUrl)
 
 module.exports = {
   bootPath,
+  clipboardAnswer,
+  CLIPBOARD_KINDS,
   devStackArgs,
   hasFlag,
   readFlag,

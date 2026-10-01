@@ -3,17 +3,29 @@ import type { TileLayerIndex } from '../tiles/tileGrid.ts';
 import type { Brush } from './brush.ts';
 
 /**
- * The painting tools. The pen, eraser and shadow pen paint as they are dragged; the rectangle and ellipse paint their
- * shape when the button comes up; the fill and the swap act on a click; the eyedropper picks a brush off the map; and
- * the select tool lifts a piece of the map to move or copy. The shadow pen and the region pen are the pen with a
- * shadows or regions brush in hand, since the brush says what it paints.
+ * What the left button does on the map. With {@code events} in hand it works on the events, selecting, moving and
+ * opening them, and paints nothing; every other tool paints and leaves the events alone. The pen, eraser and shadow pen
+ * paint as they are dragged; the rectangle and ellipse paint their shape when the button comes up; the fill and the
+ * swap act on a click; the eyedropper picks a brush off the map; and the select tool lifts a piece of the map to move
+ * or copy. The shadow pen and the region pen are the pen with a shadows or regions brush in hand, since the brush says
+ * what it paints.
  */
-type PaintTool = 'pen' | 'rectangle' | 'ellipse' | 'fill' | 'eraser' | 'eyedropper' | 'select' | 'swap';
+type PaintTool = 'events' | 'pen' | 'rectangle' | 'ellipse' | 'fill' | 'eraser' | 'eyedropper' | 'select' | 'swap';
 
 /**
  * Every tool, in the order the tool bar shows them.
  */
-const PAINT_TOOLS: readonly PaintTool[] = [ 'pen', 'rectangle', 'ellipse', 'fill', 'eraser', 'eyedropper', 'select', 'swap' ];
+const PAINT_TOOLS: readonly PaintTool[] = [ 'events', 'pen', 'rectangle', 'ellipse', 'fill', 'eraser', 'eyedropper', 'select', 'swap' ];
+
+/**
+ * Reports whether a tool paints, as every tool but the events one does.
+ * @param {PaintTool} tool The tool.
+ * @returns {boolean} True when the left button paints with it.
+ */
+const isPaintingTool = (tool: PaintTool): boolean =>
+{
+  return tool !== 'events';
+};
 
 /**
  * What the tools paint with, shared by every map view in the window.
@@ -47,9 +59,10 @@ type PaintSettings = {
 type PaintSettingsListener = (settings: PaintSettings) => void;
 
 /**
- * Where a window starts: the pen in hand, nothing picked, automatic layering, and layer 3 for the override.
+ * Where a window starts: the events in hand, so a click on the map selects as it always has, nothing picked, automatic
+ * layering, and layer 3 for the override.
  */
-const INITIAL_PAINT_SETTINGS: PaintSettings = { tool: 'pen', brush: null, strip: 'auto', overrideLayer: 2 };
+const INITIAL_PAINT_SETTINGS: PaintSettings = { tool: 'events', brush: null, strip: 'auto', overrideLayer: 2 };
 
 /**
  * The window's painting settings: the tool, the brush, the layer strip's choice and the override's layer. The palette
@@ -148,5 +161,5 @@ class PaintState
   }
 }
 
-export { INITIAL_PAINT_SETTINGS, PAINT_TOOLS, PaintState };
+export { INITIAL_PAINT_SETTINGS, isPaintingTool, PAINT_TOOLS, PaintState };
 export type { PaintSettings, PaintSettingsListener, PaintTool };

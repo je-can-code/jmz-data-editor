@@ -41,7 +41,7 @@ import { GhostTiles } from './scene/GhostTiles.ts';
 import { ModuleOverlays } from './scene/ModuleOverlays.ts';
 import { drawPassageAtlas, drawRegionAtlas, passageMarkIndex } from './scene/overlayAtlases.ts';
 import { ParallaxLayer } from './scene/ParallaxLayer.ts';
-import { drawGrid, drawPointerOverlays } from './scene/pointerOverlays.ts';
+import { drawGrid, drawPointerOverlays, drawSelection } from './scene/pointerOverlays.ts';
 import { TileChunks } from './scene/TileChunks.ts';
 import { textureSourceFor } from './textureImages.ts';
 
@@ -83,7 +83,8 @@ type RendererStats = {
 /**
  * The world's layers, bottom to top: the engine's black behind the map, the parallax, the tiles below characters,
  * the events in their three priorities around the tiles above characters, the lighting P9 draws, then the editor's
- * own: the dimming and highlighted layer, and the overlays.
+ * own: the dimming and highlighted layer, and the overlays, the selection under the ghosts and the pointer's own
+ * marks over them.
  */
 type Slots = {
   readonly backdrop: Graphics;
@@ -97,6 +98,7 @@ type Slots = {
   readonly passability: Container;
   readonly grid: Graphics;
   readonly modules: Container;
+  readonly selection: Graphics;
   readonly ghosts: Container;
   readonly pointer: Graphics;
   readonly pointerLabel: Text;
@@ -142,6 +144,32 @@ const DIM_ALPHA = 0.6;
  * How far above the hover its words sit, in screen pixels.
  */
 const HOVER_LABEL_GAP = 3;
+
+/**
+ * Reports whether two maps of tiles to the tile-image events on them hold the same, so passability is rebuilt only
+ * when an edit really moved or changed an event that blocks steps.
+ * @param {ReadonlyMap<number, readonly number[]>} left One map.
+ * @param {ReadonlyMap<number, readonly number[]>} right The other.
+ * @returns {boolean} True when both hold the same tiles with the same tile ids.
+ */
+const sameTileEvents = (left: ReadonlyMap<number, readonly number[]>, right: ReadonlyMap<number, readonly number[]>): boolean =>
+{
+  if (left.size !== right.size)
+  {
+    return false;
+  }
+
+  for (const [ cell, tiles ] of left)
+  {
+    const other = right.get(cell);
+    if (other === undefined || other.length !== tiles.length || tiles.some((tile, index) => other[index] !== tile))
+    {
+      return false;
+    }
+  }
+
+  return true;
+};
 
 /**
  * Runs a callback after a delay on the page's timers, for the context keeper.
@@ -240,9 +268,13 @@ class PixiMapRenderer implements MapRenderer
 
   #modulesDirty = true;
 
+  #selectionDirty = true;
+
   #pointerDirty = true;
 
   #ghostsDirty = true;
+
+  #eventsDirty = false;
 
   #frames = new FrameTimeRecorder();
 
@@ -305,6 +337,7 @@ class PixiMapRenderer implements MapRenderer
       passability: new Container(),
       grid: new Graphics(),
       modules: this.#modules.layer,
+      selection: new Graphics(),
       ghosts: new Container(),
       pointer: new Graphics(),
       pointerLabel: new Text({
@@ -332,6 +365,7 @@ class PixiMapRenderer implements MapRenderer
       slots.passability,
       slots.grid,
       slots.modules,
+      slots.selection,
       slots.ghosts,
       slots.pointer,
       slots.pointerLabel,
@@ -521,6 +555,7 @@ class PixiMapRenderer implements MapRenderer
     this.#overlays = overlays;
     this.#modules.setDefinitions(overlays.definitions, overlays.enabled);
     this.#modulesDirty = true;
+    this.#selectionDirty = true;
     this.#pointerDirty = true;
     this.#ghostsDirty = true;
     this.#applyVisibility();
@@ -528,18 +563,30 @@ class PixiMapRenderer implements MapRenderer
 
   setOverlayState(state: OverlayState): void
   {
-    if (state.selectedEvents !== this.#overlayState.selectedEvents)
+    const previous = this.#overlayState;
+    if (state.selectedEvents !== previous.selectedEvents)
     {
       this.#modulesDirty = true;
     }
 
-    if (state.ghostTiles !== this.#overlayState.ghostTiles || state.ghostEvents !== this.#overlayState.ghostEvents)
+    // the selection redraws only when it changes, however often the pointer moves.
+    if (state.selectedEvents !== previous.selectedEvents || state.selectedCells !== previous.selectedCells)
+    {
+      this.#selectionDirty = true;
+    }
+
+    if (state.ghostTiles !== previous.ghostTiles || state.ghostEvents !== previous.ghostEvents)
     {
       this.#ghostsDirty = true;
     }
 
+    const pointerChanged = state.hover !== previous.hover
+      || (state.hoverLabel ?? null) !== (previous.hoverLabel ?? null)
+      || state.selectionBox !== previous.selectionBox
+      || state.ghostEvents !== previous.ghostEvents
+      || state.blockedCells !== previous.blockedCells;
     this.#overlayState = state;
-    this.#pointerDirty = true;
+    this.#pointerDirty ||= pointerChanged;
     this.#needsRender = true;
   }
 
@@ -579,6 +626,12 @@ class PixiMapRenderer implements MapRenderer
     if (document === null)
     {
       return null;
+    }
+
+    // sprites waiting for the next frame are brought up to date first, so a click just after an edit finds what is there.
+    if (this.#eventsDirty)
+    {
+      this.#flushEvents();
     }
 
     // the sprite drawn on top under the point, or failing that the newest event standing on the cell.
@@ -882,6 +935,7 @@ class PixiMapRenderer implements MapRenderer
     this.#measureView();
     this.#pixi?.resize(this.#view.width, this.#view.height, this.#resolution);
     this.#needsRender = true;
+    this.#selectionDirty = true;
     this.#pointerDirty = true;
     this.#loop.start();
   }
@@ -1155,8 +1209,10 @@ class PixiMapRenderer implements MapRenderer
     this.#animationStart = performance.now();
     this.#animationStep = -1;
     this.#modulesDirty = true;
+    this.#selectionDirty = true;
     this.#pointerDirty = true;
     this.#ghostsDirty = true;
+    this.#eventsDirty = false;
     this.#applyVisibility();
 
     // the chunks that drew with the old sheets are gone, so the sheets can go too.
@@ -1309,6 +1365,7 @@ class PixiMapRenderer implements MapRenderer
       }
     }
 
+    this.#selectionDirty = true;
     this.#pointerDirty = true;
     this.#needsRender = true;
   }
@@ -1385,28 +1442,38 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Redraws the events a change touched, and the passability their tile images feed.
+   * Marks the events a change touched, for the next frame to redraw together with the selection on them and the
+   * passability their tile images feed. A drop moving hundreds of events arrives as hundreds of changes, and all of
+   * them cost the frame one rebuild.
    * @param {number | null} id The event, or null when the list itself changed.
    */
   #eventsChanged(id: number | null): void
   {
-    if (id === null)
-    {
-      this.#events.rebuild();
-    }
-    else
-    {
-      this.#events.refreshEvent(id);
-    }
+    this.#events.markChanged(id);
+    this.#eventsDirty = true;
+    this.#selectionDirty = true;
+  }
 
+  /**
+   * Redraws the events changed since the last frame, and rebuilds passability only when the tile-image events that
+   * block steps are not where they were.
+   */
+  #flushEvents(): void
+  {
+    this.#eventsDirty = false;
+    this.#events.flushChanges();
     const document = this.#document;
-    if (document !== null)
+    if (document === null)
     {
-      this.#tileEvents = tileEventsByCell(document);
+      return;
     }
 
-    this.#scene?.passability?.markAllDirty();
-    this.#pointerDirty = true;
+    const tileEvents = tileEventsByCell(document);
+    if (sameTileEvents(tileEvents, this.#tileEvents) === false)
+    {
+      this.#tileEvents = tileEvents;
+      this.#scene?.passability?.markAllDirty();
+    }
   }
 
   /**
@@ -1453,15 +1520,23 @@ class PixiMapRenderer implements MapRenderer
       redrew = true;
     }
 
-    if (this.#pointerDirty)
+    const shown = { hover: this.#isOn('hover'), selection: this.#isOn('selection'), ghost: this.#isOn('ghost') };
+    if (this.#selectionDirty)
     {
-      this.#pointerDirty = false;
+      this.#selectionDirty = false;
       const eventCell = (id: number) =>
       {
         const event = document?.event(id) ?? null;
         return event === null ? null : { x: event.x, y: event.y };
       };
-      drawPointerOverlays(this.#slots.pointer, this.#overlayState, { hover: this.#isOn('hover'), selection: this.#isOn('selection') }, eventCell, TILE_SIZE);
+      drawSelection(this.#slots.selection, this.#overlayState, shown, eventCell, TILE_SIZE);
+      redrew = true;
+    }
+
+    if (this.#pointerDirty)
+    {
+      this.#pointerDirty = false;
+      drawPointerOverlays(this.#slots.pointer, this.#overlayState, shown, TILE_SIZE);
       this.#writeHoverLabel();
       redrew = true;
     }
@@ -1498,6 +1573,11 @@ class PixiMapRenderer implements MapRenderer
       // a map shown for the first time starts whole on screen, once the view has a size to fit it to.
       this.#cameraPlaced = true;
       this.#moveCamera(fitCamera(this.#view, document, TILE_SIZE));
+    }
+
+    if (this.#eventsDirty)
+    {
+      this.#flushEvents();
     }
 
     let changed = this.#tickAnimation(now);

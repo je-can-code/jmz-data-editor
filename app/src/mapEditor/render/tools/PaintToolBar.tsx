@@ -7,6 +7,7 @@ import FindReplace from '@mui/icons-material/FindReplace';
 import FormatColorFill from '@mui/icons-material/FormatColorFill';
 import HighlightAlt from '@mui/icons-material/HighlightAlt';
 import LayersClear from '@mui/icons-material/LayersClear';
+import NearMe from '@mui/icons-material/NearMe';
 import PanoramaFishEye from '@mui/icons-material/PanoramaFishEye';
 import Tag from '@mui/icons-material/Tag';
 import WbShade from '@mui/icons-material/WbShade';
@@ -27,6 +28,7 @@ type ToolButton = {
  * The tools' buttons, in order.
  */
 const TOOL_BUTTONS: readonly ToolButton[] = [
+  { tool: 'events', title: 'Events: select, move and open the events on the map', icon: <NearMe fontSize={'small'}/> },
   { tool: 'pen', title: 'Pen: paints as you drag', icon: <Create fontSize={'small'}/> },
   { tool: 'rectangle', title: 'Rectangle: drag out a filled rectangle', icon: <CropSquare fontSize={'small'}/> },
   { tool: 'ellipse', title: 'Ellipse: drag out a filled ellipse', icon: <PanoramaFishEye fontSize={'small'}/> },

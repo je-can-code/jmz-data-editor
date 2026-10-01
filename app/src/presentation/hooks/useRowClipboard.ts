@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import { MuiSnackbarSeverity } from '@core/enums/MuiSnackbar.ts';
+import { pageWindowShell } from '@core/infrastructure/shell/WindowShell.ts';
 import {
   type DatabaseRow,
   type RowPastePlan,
   type RowPasteWrite,
+  ROW_CLIPBOARD_FORMAT,
   RowClipboard,
 } from '@services/rows/RowClipboard.ts';
 import { RowClear } from '@services/rows/RowClear.ts';
@@ -69,6 +71,23 @@ type RowClipboardOptions<TModel extends DatabaseRow, TRow extends DatabaseRow> =
    * Tells the author how a copy or a paste went.
    */
   notify: (message: string, severity: MuiSnackbarSeverity) => void;
+
+  /**
+   * Reads the clipboard for the menu's paste, which has no clipboard event to carry it, asking for the clipboard the
+   * given marker names; null when it could not be read. Left out, the page's window shell reads it, through the
+   * NW.js shell where the page's own read would wait forever.
+   */
+  readClipboard?: (marker: string) => Promise<string | null>;
+};
+
+/**
+ * Reads the clipboard through the page's window shell.
+ * @param {string} marker The marker the wanted clipboard carries.
+ * @returns {Promise<string | null>} The text, or null when it could not be read.
+ */
+const readThroughShell = (marker: string): Promise<string | null> =>
+{
+  return pageWindowShell().readClipboard(marker);
 };
 
 /**
@@ -208,6 +227,7 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
     blankRow,
     applyPaste,
     notify,
+    readClipboard = readThroughShell,
   } = options;
 
   const [ selection, setSelection ] = useState<RowSelection | null>(null);
@@ -398,19 +418,15 @@ const useRowClipboard = <TModel extends DatabaseRow, TRow extends DatabaseRow>(
   };
 
   /**
-   * Pastes onto the selected rows from the menu, through the async clipboard.
+   * Pastes onto the selected rows from the menu, reading the row clipboard through the window shell: under NW.js the
+   * shell reads it, handing over copied rows and nothing else; in a browser the page reads it, which asks the author's
+   * permission the first time and can be refused.
    */
   const handleMenuPaste = async (): Promise<void> =>
   {
     setMenuPosition(null);
-
-    // read the clipboard, which asks the author's permission the first time and can be refused.
-    let text: string;
-    try
-    {
-      text = await navigator.clipboard.readText();
-    }
-    catch
+    const text = await readClipboard(ROW_CLIPBOARD_FORMAT);
+    if (text === null)
     {
       notify('Pasting from the menu needs clipboard access. Ctrl+V works without it.', MuiSnackbarSeverity.Warning);
       return;

@@ -17,7 +17,7 @@ import {
   type PaintContext,
   type ShadowQuarter,
 } from './paintPlan.ts';
-import type { PaintSettings, PaintTool } from './PaintState.ts';
+import { isPaintingTool, type PaintSettings, type PaintTool } from './PaintState.ts';
 import { applyTileEdit, FreehandTrail, PaintStroke, QuarterTrail } from './strokes.ts';
 import { captureClip, clipGhosts, planPlaceClip, type TileClip } from './tileClip.ts';
 import { choiceFor, layerLabel, NO_PREVIEW, paintContextFor, previewTool, shapeGhosts, type LayerMode } from './toolPreview.ts';
@@ -135,6 +135,11 @@ const STEP_LABELS = {
 const IDLE: Gesture = { kind: 'idle' };
 
 /**
+ * An overlay showing nothing of the tools: no cursor, no words, no ghosts and no selected area.
+ */
+const NO_TOOL_OVERLAY: ToolOverlay = { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: null };
+
+/**
  * One map view's painting: what the tool in hand does as the left button goes down, drags and comes up over the map,
  * and what the map shows for it meanwhile. It knows nothing of pointer events or pixels; the view hands it cells and
  * keys, and draws the overlay it answers with.
@@ -184,7 +189,8 @@ class ToolSession
   }
 
   /**
-   * Starts whatever the tool in hand does at a press of the left button. Off the map, nothing starts.
+   * Starts whatever the tool in hand does at a press of the left button. Off the map, or with the events in hand, which
+   * leave the left button to the event tools, nothing starts.
    * @param {ToolPointer} pointer Where, and the keys held.
    */
   press(pointer: ToolPointer): void
@@ -192,7 +198,7 @@ class ToolSession
     this.#pointer = pointer;
     const map = this.#host.map();
     const { cell } = pointer;
-    if (map === null || cell === null || this.isActive)
+    if (map === null || cell === null || this.isActive || isPaintingTool(this.#host.settings().tool) === false)
     {
       return;
     }
@@ -292,8 +298,8 @@ class ToolSession
 
   /**
    * Follows the tool in hand changing: the selection goes when another tool than the select tool is taken up, since
-   * only that tool shows or uses it, and every tool but the eyedropper is remembered as the one to go back to once
-   * the eyedropper has picked.
+   * only that tool shows or uses it, and every painting tool but the eyedropper is remembered as the one to go back to
+   * once the eyedropper has picked; what it picks is for painting, so it never goes back to the events.
    * @param {PaintTool} tool The tool in hand now.
    */
   toolChanged(tool: PaintTool): void
@@ -303,14 +309,15 @@ class ToolSession
       this.#selection = null;
     }
 
-    if (tool !== 'eyedropper')
+    if (tool !== 'eyedropper' && isPaintingTool(tool))
     {
       this.#toolBeforePick = tool;
     }
   }
 
   /**
-   * Works out what the map shows for the tools now.
+   * Works out what the map shows for the tools now: nothing at all while the events are in hand, since the event tools
+   * show the map then.
    * @returns {ToolOverlay} The overlay.
    */
   overlay(): ToolOverlay
@@ -320,13 +327,18 @@ class ToolSession
     const selectedCells = this.#selection;
     if (map === null)
     {
-      return { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: null };
+      return NO_TOOL_OVERLAY;
     }
 
     const gesture = this.#gesture;
     if (gesture.kind !== 'idle')
     {
       return this.#gestureOverlay(map, gesture, pointer);
+    }
+
+    if (isPaintingTool(this.#host.settings().tool) === false)
+    {
+      return NO_TOOL_OVERLAY;
     }
 
     const preview = pointer === null || pointer.cell === null

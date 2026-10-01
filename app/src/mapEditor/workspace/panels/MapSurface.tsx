@@ -1,6 +1,8 @@
 import React from 'react';
 import { Box } from '@mui/material';
+import type { EventSelection } from '../../core/events/EventSelection.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
+import type { EventNoticeSeverity } from '../../events/MapEventTools.ts';
 import { MapView } from '../../render/MapView.tsx';
 import { usePanelWindow } from '../windowScope.tsx';
 
@@ -19,9 +21,25 @@ type MapSurfaceProps = {
   readonly focusEventId: number | null;
 
   /**
+   * The number of the ask that named that event; a new number asks for the same event to be picked out again. Left
+   * out, each event is picked out once.
+   */
+  readonly focusRequest?: number;
+
+  /**
    * Whether the panel is on screen; false while it is a tab behind another.
    */
   readonly visible: boolean;
+
+  /**
+   * The window's event selection, shared by every map panel and the quick panel.
+   */
+  readonly selection?: EventSelection;
+
+  /**
+   * Tells the author something about the map's events, such as why a drop was refused.
+   */
+  readonly onNotice?: (text: string, severity: EventNoticeSeverity) => void;
 };
 
 /**
@@ -65,12 +83,13 @@ const identityKey = (value: object): number =>
  *
  * A panel behind another tab keeps its view, and tells it it is off screen, so the view lets its GPU context go (a
  * window keeps only so many) and draws again, as it was, when the panel is shown.
- * @param {MapSurfaceProps} props The map, the event to pick out, and whether the panel is on screen.
+ * @param {MapSurfaceProps} props The map, the event to pick out and the ask that named it, and whether the panel is on
+ * screen.
  * @returns {React.JSX.Element} The surface.
  */
 const MapSurface = (props: MapSurfaceProps) =>
 {
-  const { document, focusEventId, visible } = props;
+  const { document, focusEventId, focusRequest = 0, visible, selection, onNotice } = props;
   const panelWindow = usePanelWindow();
 
   // a new window or a new document is a new key, which mounts a new view in place of the old one.
@@ -78,7 +97,15 @@ const MapSurface = (props: MapSurfaceProps) =>
 
   return (
     <Box data-testid={'map-surface'} sx={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-      <MapView key={viewKey} mapId={document.mapId} pickedEventId={focusEventId} visible={visible}/>
+      <MapView
+        key={viewKey}
+        mapId={document.mapId}
+        pickedEventId={focusEventId}
+        pickRequest={focusRequest}
+        visible={visible}
+        selection={selection}
+        onNotice={onNotice}
+      />
     </Box>
   );
 };

@@ -147,6 +147,80 @@ const judgeStrokeFrames = (inputs: readonly InputSample[], frames: readonly Fram
 };
 
 /**
+ * What an interaction with events came to: clicking events, drawing a box around them, or dragging them.
+ */
+type InteractionResult = {
+  readonly inputs: number;
+  readonly matched: number;
+  readonly frames: number;
+  readonly dropped: number;
+  readonly cost: Summary;
+  readonly work: Summary;
+  readonly verdict: Verdict;
+};
+
+/**
+ * What the page reports an interaction did, so one that never reached the events cannot pass on idle frames.
+ */
+type InteractionProof = {
+  readonly ok: boolean;
+  readonly reason: string;
+};
+
+/**
+ * Judges an interaction with events, which must never drop a frame (D3: "selecting, box-selecting and dragging events
+ * on Map361 never drops a frame"): every frame that drew an input under one refresh, no frame dropped between the frame
+ * that drew the first input and the frame that drew the last, and the page's proof that the interaction happened.
+ * @param {readonly InputSample[]} inputs The interaction's pointer events.
+ * @param {readonly FrameSample[]} frames The recorded frames.
+ * @param {InteractionProof} proof What the page reports the interaction did.
+ * @returns {InteractionResult} What the interaction came to.
+ */
+const judgeInteractionFrames = (
+  inputs: readonly InputSample[], frames: readonly FrameSample[], proof: InteractionProof): InteractionResult =>
+{
+  const matches = matchStrokeFrames(inputs, frames);
+  const drawing = [ ...new Set(matches.map(match => match.frame)) ];
+  const first = drawing.length > 0 ? frames.indexOf(drawing[0]) : -1;
+  const last = drawing.length > 0 ? frames.indexOf(drawing[drawing.length - 1]) : -1;
+  const during = first >= 0 ? frames.slice(first, last + 1) : [];
+  const intervals = during.slice(1).map((frame, index) => frame.time - during[index].time);
+  const dropped = countDroppedFrames(intervals);
+  const cost = summarize(drawing.map(frame => frame.work + Math.max(0, frame.gpu)));
+
+  const reasons: string[] = [];
+  if (matches.length === 0)
+  {
+    reasons.push('no input was matched to a frame');
+  }
+
+  if (proof.ok === false)
+  {
+    reasons.push(proof.reason);
+  }
+
+  if (cost.max >= REFRESH_60_HZ)
+  {
+    reasons.push(`worst frame ${cost.max.toFixed(2)} ms`);
+  }
+
+  if (dropped > 0)
+  {
+    reasons.push(`${dropped} frames dropped`);
+  }
+
+  return {
+    inputs: inputs.length,
+    matched: matches.length,
+    frames: drawing.length,
+    dropped,
+    cost,
+    work: summarize(drawing.map(frame => frame.work)),
+    verdict: { pass: reasons.length === 0, reasons },
+  };
+};
+
+/**
  * Judges a camera path: the frame clock never ticked without a new frame.
  * @param {RunSummary} run The recorded stretch.
  * @returns {Verdict} The verdict.
@@ -182,5 +256,5 @@ const judgeOpen = (ms: number, budgetMs: number, what: string): Verdict =>
     : { pass: false, reasons: [ `${what} took ${ms.toFixed(0)} ms, over ${budgetMs} ms` ] };
 };
 
-export { BUDGETS, judgeCameraPath, judgeOpen, judgeStrokeFrames, matchStrokeFrames };
-export type { PaintProof, StrokeFrame, StrokeResult };
+export { BUDGETS, judgeCameraPath, judgeInteractionFrames, judgeOpen, judgeStrokeFrames, matchStrokeFrames };
+export type { InteractionProof, InteractionResult, PaintProof, StrokeFrame, StrokeResult };

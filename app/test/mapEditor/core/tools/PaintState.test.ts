@@ -1,18 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { singleTileBrush } from '../../../../src/mapEditor/core/tools/brush.ts';
-import { INITIAL_PAINT_SETTINGS, PaintState, type PaintSettings } from '../../../../src/mapEditor/core/tools/PaintState.ts';
+import { INITIAL_PAINT_SETTINGS, isPaintingTool, PAINT_TOOLS, PaintState, type PaintSettings } from '../../../../src/mapEditor/core/tools/PaintState.ts';
 
 /*
  * The window's painting settings.
  *
  * Every map view in a window paints with one tool, one brush and one layer choice, so picking a tile once serves every
- * map on screen, and each view hears every change. A layer picked on the strip also becomes the one the override key
- * paints, so after switching back to automatic layering that layer stays a held key away; until one is picked the
- * override paints layer 3. A change that changes nothing tells nobody.
+ * map on screen, and each view hears every change. A window starts with the events in hand, so the left button works
+ * on events, as it does with no painting tool picked, and every other tool paints. A layer picked on the strip also
+ * becomes the one the override key paints, so after switching back to automatic layering that layer stays a held key
+ * away; until one is picked the override paints layer 3. A change that changes nothing tells nobody.
  */
 describe('PaintState', () =>
 {
-  it('starts with the pen, nothing picked, automatic layering, and layer 3 for the override', () =>
+  it('starts with the events in hand, nothing picked, automatic layering, and layer 3 for the override', () =>
   {
     // Arrange: nothing beyond a fresh state.
     const state = new PaintState();
@@ -22,7 +23,20 @@ describe('PaintState', () =>
 
     // Assert.
     expect(settings)
-      .toEqual({ tool: 'pen', brush: null, strip: 'auto', overrideLayer: 2 });
+      .toEqual({ tool: 'events', brush: null, strip: 'auto', overrideLayer: 2 });
+  });
+
+  it('counts every tool but the events as painting', () =>
+  {
+    // Arrange: every tool the bar offers.
+    const tools = PAINT_TOOLS;
+
+    // Act.
+    const painting = tools.filter(isPaintingTool);
+
+    // Assert.
+    expect(painting)
+      .toEqual([ 'pen', 'rectangle', 'ellipse', 'fill', 'eraser', 'eyedropper', 'select', 'swap' ]);
   });
 
   it('tells every listener each change, with the settings after it', () =>
@@ -79,8 +93,8 @@ describe('PaintState', () =>
       heard += 1;
     });
 
-    // Act: the pen again, then a real change after the listener has gone.
-    state.setTool('pen');
+    // Act: the events again, then a real change after the listener has gone.
+    state.setTool('events');
     stop();
     state.setTool('eraser');
 
