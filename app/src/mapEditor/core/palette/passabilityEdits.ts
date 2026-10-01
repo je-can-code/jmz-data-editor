@@ -180,6 +180,20 @@ const ceilingPassage = (shape: number): number =>
 };
 
 /**
+ * Works out the passage bits one tile id keeps however open it is made: a ceiling's shape keeps MZ's edges (see
+ * {@link ceilingPassage}), so opening a ceiling, or one way out of it, never lets a step leave across its edge; every
+ * other tile keeps none.
+ * @param {number} tileId The id, which for an autotile names its shape.
+ * @returns {number} The passage bits.
+ */
+const edgePassage = (tileId: number): number =>
+{
+  return isAutotile(tileId) && isWallTopKind(autotileKind(tileId))
+    ? ceilingPassage(autotileShape(tileId))
+    : 0;
+};
+
+/**
  * Writes a passage state into one tile id's flags, keeping every other bit.
  * @param {number} flag The id's flags now.
  * @param {number} tileId The id, which for an autotile names its shape.
@@ -199,9 +213,7 @@ const withPassage = (flag: number, tileId: number, state: PassageState): number 
     return kept | FlagBit.star;
   }
 
-  return isAutotile(tileId) && isWallTopKind(autotileKind(tileId))
-    ? kept | ceilingPassage(autotileShape(tileId))
-    : kept;
+  return kept | edgePassage(tileId);
 };
 
 /**
@@ -236,7 +248,8 @@ const passageEdit = (flags: ArrayLike<number>, tileId: number): FlagEdit =>
 
 /**
  * Plans a click on one way out of a tile: blocked when it was open, open when it was blocked, going by the shown
- * flags, and written to every shape of an autotile kind.
+ * flags, and written to every shape of an autotile kind. Opening a way out of a ceiling leaves it blocked on the
+ * shapes whose edge faces that way, as opening a ceiling's passage does, so a second click puts every shape back.
  * @param {ArrayLike<number>} flags The tileset's flags.
  * @param {number} tileId The tile.
  * @param {PassageDirection} direction The way out clicked.
@@ -248,7 +261,7 @@ const directionEdit = (flags: ArrayLike<number>, tileId: number, direction: Pass
   const block = (shownFlags(flags, tileId) & bit) === 0;
   return {
     label: `${describeTile(tileId)}: ${direction} ${block ? 'blocked' : 'open'}`,
-    changes: changesFor(flags, flagIdsOf(tileId), flag => (block ? flag | bit : flag & ~bit)),
+    changes: changesFor(flags, flagIdsOf(tileId), (flag, id) => (block ? flag | bit : (flag & ~bit) | (edgePassage(id) & bit))),
   };
 };
 

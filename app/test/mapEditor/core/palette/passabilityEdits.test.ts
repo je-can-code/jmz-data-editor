@@ -24,7 +24,8 @@ import { locateGameProject } from '../../../support/gameProject.ts';
  * tag ride along untouched. An autotile kind is shown from its shape 0 and written to all 48 of its shapes, since the
  * engine reads whichever shape a map stores, and never to the kind beside it. Passage cycles open, blocked, star as
  * MZ's does (stars for plain tiles alone), and an open ceiling gets MZ's own edges, which every open ceiling Chef
- * Adventure ships matches. Each edit is one undoable step in the tilesets' history, and a flags list written short by
+ * Adventure ships matches; opening one way out of a ceiling keeps the edges facing that way too, so clicking a way out
+ * twice changes nothing. Each edit is one undoable step in the tilesets' history, and a flags list written short by
  * a tool is filled out with zeros in the same step, so undo takes that back out too.
  */
 const MZ_BITS = 0x600;
@@ -286,6 +287,39 @@ describe('planFlagEdit', () =>
     const ids = block.changes.map(([ id ]) => id);
     expect([ block.label, block.changes.length, Math.max(...ids), block.changes[0][1], open.label, open.changes[0][1] ])
       .toStrictEqual([ 'A2 decoration 21: down blocked', 48, makeAutotileId(36, 47), MZ_BITS | 0x40 | 0x1, 'A2 decoration 21: down open', MZ_BITS | 0x40 ]);
+  });
+
+  it('opens a way out of a ceiling only where its shape shows no edge that way, so a second click puts every shape back', () =>
+  {
+    // Arrange: ceiling kind 80 open with MZ's edges, its top edge (shape 20) blocking the way up, then the way up
+    // blocked on every shape by a first click.
+    const flags = shippedLikeFlags();
+    flagIdsOf(makeAutotileId(80, 0)).forEach((id, shape) =>
+    {
+      flags[id] = MZ_BITS | ceilingPassage(shape);
+    });
+    const ceiling = makeAutotileId(80, 0);
+    const blocked = applied(flags, planFlagEdit(flags, ceiling, { mode: 'directions', direction: 'up' }).changes);
+
+    // Act.
+    const reopened = applied(blocked, planFlagEdit(blocked, ceiling, { mode: 'directions', direction: 'up' }).changes);
+
+    // Assert: the inside opens again, the top edge keeps the way up blocked, and every shape is back as it was.
+    expect([ reopened[makeAutotileId(80, 0)], reopened[makeAutotileId(80, 20)], reopened.every((value, id) => value === flags[id]) ])
+      .toStrictEqual([ MZ_BITS, MZ_BITS | 0x8, true ]);
+  });
+
+  it('opens a way out of every shape of a kind that is not a ceiling, the wall face under a ceiling included', () =>
+  {
+    // Arrange: wall face kind 88, on the row under ceiling kind 80, with the way up blocked on every shape.
+    const flags = fillKind(shippedLikeFlags(), 88, MZ_BITS | 0x8);
+
+    // Act.
+    const edit = planFlagEdit(flags, makeAutotileId(88, 0), { mode: 'directions', direction: 'up' });
+
+    // Assert.
+    expect([ edit.label, edit.changes.length, edit.changes.every(([ , value ]) => value === MZ_BITS) ])
+      .toStrictEqual([ 'A4 wall face 9: up open', 48, true ]);
   });
 
   it('touches only the way out clicked', () =>
