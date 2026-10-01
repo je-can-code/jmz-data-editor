@@ -98,6 +98,31 @@ const revealMaps = (rows: MapInfoRows, expanded: ReadonlySet<number>, mapIds: re
 };
 
 /**
+ * Moves the selection out of a branch being closed: every selected map inside it gives way to the branch's own map,
+ * so what is picked stays in sight and closing the branch never has to open it again to show the pick. Maps picked
+ * elsewhere stay picked, in order, and the branch's map appears once, where the first map inside it was.
+ * @param {MapInfoRows} rows The tree's rows.
+ * @param {readonly number[]} selection The selection.
+ * @param {number} closedId The map whose branch is being closed.
+ * @returns {number[]} The selection once the branch is closed.
+ */
+const selectionAfterCollapse = (rows: MapInfoRows, selection: readonly number[], closedId: number): number[] =>
+{
+  const inside = new Set(new MapTreeModel(rows).descendants(closedId));
+  const picked: number[] = [];
+  selection.forEach(id =>
+  {
+    const kept = inside.has(id) ? closedId : id;
+    if (picked.includes(kept) === false)
+    {
+      picked.push(kept);
+    }
+  });
+
+  return picked;
+};
+
+/**
  * Selects every line between an anchor and a clicked line, inclusive, in the order shown: a Shift click.
  * @param {readonly TreeLine[]} lines The lines shown.
  * @param {number | null} anchorId The line the selection grew from, or null for none.
@@ -231,6 +256,7 @@ export {
   dropZoneAt,
   initiallyExpanded,
   revealMaps,
+  selectionAfterCollapse,
   selectRange,
   toggleSelection,
   visibleTreeLines,

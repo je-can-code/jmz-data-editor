@@ -582,6 +582,102 @@ describe('MapDocument', () =>
     });
   });
 
+  describe('patchesTo', () =>
+  {
+    it('names only the cells that changed in one tiles patch, and each changed field by its own path', () =>
+    {
+      // Arrange: two cells, the display name and the chest's name change; the door beside the chest does not.
+      const document = buildDocument();
+      const next = buildMapJson();
+      next.data[4] = 99;
+      next.data[20] = 98;
+      next.displayName = 'Harbor';
+      (next.events[3] as { name: string }).name = 'Crate';
+
+      // Act.
+      const patches = document.patchesTo(next as never);
+
+      // Assert.
+      expect(patches)
+        .toStrictEqual([
+          { kind: 'tiles', indices: [ 4, 20 ], before: [ 5, 21 ], after: [ 99, 98 ] },
+          { kind: 'set', path: [ 'displayName' ], before: 'Test Town', after: 'Harbor' },
+          { kind: 'set', path: [ 'events', 3, 'name' ], before: 'Chest', after: 'Crate' },
+        ]);
+    });
+
+    it('swaps size and tiles in one resize when the size changed, and never sets the size by itself', () =>
+    {
+      // Arrange.
+      const document = buildDocument();
+      const next = { ...buildMapJson(), width: 1, height: 1, data: [ 7, 7, 7, 7, 7, 7 ] };
+
+      // Act.
+      const patches = document.patchesTo(next as never);
+
+      // Assert.
+      expect(patches)
+        .toStrictEqual([
+          { kind: 'resize', before: { width: 3, height: 2, data: buildMapJson().data }, after: { width: 1, height: 1, data: [ 7, 7, 7, 7, 7, 7 ] } },
+        ]);
+    });
+
+    it('comes to exactly the new file when applied, and back to exactly the old one when reversed', () =>
+    {
+      // Arrange: tiles, fields, a new event and a removed key, all at once.
+      const document = buildDocument();
+      const original = document.toJson();
+      const next = buildMapJson();
+      next.data[0] = 50;
+      next.note = 'changed outside';
+      next.events.push({ ...createMapEvent(5, 1, 1), name: 'New' });
+      delete (next as Partial<RmmzMap>).encounterList;
+      const patches = document.patchesTo(next as never);
+
+      // Act.
+      patches.forEach(patch => document.apply(patch));
+      const applied = document.toJson();
+      [ ...patches ].reverse().forEach(patch => document.apply(invertPatch(patch)));
+
+      // Assert.
+      expect([ applied, document.toJson() ])
+        .toStrictEqual([ next, original ]);
+    });
+
+    it('says nothing for the same file, and applies nothing while working the patches out', () =>
+    {
+      // Arrange.
+      const document = buildDocument();
+      const changed = buildMapJson();
+      changed.note = 'elsewhere';
+
+      // Act.
+      const same = document.patchesTo(buildMapJson() as never);
+      document.patchesTo(changed as never);
+
+      // Assert.
+      expect([ same, document.revision, document.property('note') ])
+        .toStrictEqual([ [], 0, '' ]);
+    });
+
+    it('refuses a file that is not a map, or holds a cell that is not a tile id', () =>
+    {
+      // Arrange.
+      const document = buildDocument();
+      const badCell = buildMapJson();
+      badCell.data[3] = -1;
+
+      // Act.
+      const attempts = [ () => document.patchesTo({ displayName: 'no events' }), () => document.patchesTo(badCell as never) ];
+
+      // Assert.
+      expect(attempts[0])
+        .toThrow(/events list/u);
+      expect(attempts[1])
+        .toThrow(/not a tile id/u);
+    });
+  });
+
   describe('toJson', () =>
   {
     it('hands back a copy the caller can change freely', () =>

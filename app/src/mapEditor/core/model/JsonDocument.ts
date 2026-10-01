@@ -11,6 +11,7 @@ import {
   type Patch,
   type PatchPath,
 } from './patches.ts';
+import { patchesBetween } from './patchesBetween.ts';
 import type { RmmzMapInfo, RmmzTileset } from './rmmzTypes.ts';
 
 /**
@@ -95,6 +96,11 @@ class JsonDocument implements EditorDocument
     });
 
     return content;
+  }
+
+  patchesTo(content: JsonValue): Patch[] | null
+  {
+    return patchesBetween(this.#content, content);
   }
 
   subscribe(listener: DocumentListener): () => void

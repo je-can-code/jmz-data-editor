@@ -293,9 +293,11 @@ describe('MapEditorServices', () =>
     sources[0].emitChange({ path: 'data/Map001.json', kind: 'write', client: '' });
     await settle();
 
-    // Assert.
+    // Assert: only the outside change became a step.
     expect([ sources.length, afterEcho, (services.hub.document('map:1').toJson() as { note: string }).note ])
       .toStrictEqual([ 1, '', 'from outside' ]);
+    expect(services.hub.history(mapHistoryKey(1)).rows.map(row => row.label))
+      .toStrictEqual([ 'Externally modified' ]);
     services.stop();
   });
 

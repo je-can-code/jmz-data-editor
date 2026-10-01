@@ -22,7 +22,8 @@ import { buildTreeRows } from '../../support/treeFixtures.ts';
  * the history as they were, putting back only what it touched. When even that fails, nothing is lost: the step
  * stays in the history holding every file, the tree never lists a map whose file is missing, the outcome is an
  * alarm, and moving the step again once the disk recovers finishes the job. A stray file the tree does not list is
- * never written over.
+ * never written over. A change made to MapInfos.json outside the editor arrives as a step of its own, and undoes and
+ * redoes, written through, like any other.
  *
  * The disk holds five maps whose files all differ, in a tree with a branch two deep and a free slot (4).
  */
@@ -390,6 +391,118 @@ describe('MapTreeService', () =>
       // Assert.
       expect([ outcome, historyOf(hub), writes ])
         .toStrictEqual([ { ok: false, message: 'A map cannot move inside itself.' }, [], [] ]);
+    });
+
+    it('undoes a change made to the tree outside the editor like any tree step, writing the tree back, and redoes it', async () =>
+    {
+      // Arrange: the town is renamed in MapInfos.json by something else, and the window records it.
+      const { service, hub, state, writes } = buildService();
+      await service.tree();
+      const changed = buildTreeRows();
+      (changed[2] as RmmzMapInfo).name = 'Renamed outside';
+      state.infos = changed;
+      const recorded = await hub.handleExternalChange('mapinfos');
+
+      // Act.
+      succeeded(await service.undo());
+      const afterUndo = [ structuredClone(state.infos), historyOf(hub) ];
+      succeeded(await service.redo());
+
+      // Assert.
+      expect([ recorded, afterUndo, state.infos[2]?.name, historyOf(hub), writes, hub.isDirty('mapinfos') ])
+        .toStrictEqual([ 'recorded', [ buildTreeRows(), [ '(Externally modified)' ] ], 'Renamed outside', [ 'Externally modified' ], [ 'write tree', 'write tree' ], false ]);
+    });
+
+    it('refuses to undo an outside change that took a map away with its file, rather than list a map with no file', async () =>
+    {
+      // Arrange: the cave's row and its file are both removed outside the editor, as a checkout removing the map does.
+      const { service, hub, state, maps, writes } = buildService();
+      await service.tree();
+      const removed = buildTreeRows();
+      removed[5] = null;
+      state.infos = removed;
+      maps.delete(5);
+      await hub.handleExternalChange('mapinfos');
+
+      // Act.
+      const outcome = await service.undo();
+
+      // Assert: nothing moved and nothing was written, so the tree still lists no cave.
+      expect([ outcome, state.infos[5], (hub.document('mapinfos').toJson() as unknown[])[5], historyOf(hub), writes ])
+        .toStrictEqual([
+          { ok: false, message: '"Externally modified" cannot undo: map 5 (Cave) has no file, so the tree would list a map that is not there.' },
+          null,
+          null,
+          [ 'Externally modified' ],
+          [],
+        ]);
+    });
+
+    it('undoes an outside change that took a map\'s row away while its file stayed, listing the map again', async () =>
+    {
+      // Arrange: only the cave's row goes; its file is still on disk.
+      const { service, hub, state } = buildService();
+      await service.tree();
+      const removed = buildTreeRows();
+      removed[5] = null;
+      state.infos = removed;
+      await hub.handleExternalChange('mapinfos');
+
+      // Act.
+      const outcome = await service.undo();
+
+      // Assert.
+      expect([ outcome.ok, state.infos[5]?.name, historyOf(hub) ])
+        .toStrictEqual([ true, 'Cave', [ '(Externally modified)' ] ]);
+    });
+
+    it('leaves an undo whose rows no longer fit the tree for the history to refuse, writing nothing', async () =>
+    {
+      // Arrange: an outside rename is recorded, then the same row changes behind the history's back.
+      const { service, hub, state, writes } = buildService();
+      await service.tree();
+      const changed = buildTreeRows();
+      (changed[2] as RmmzMapInfo).name = 'Renamed outside';
+      state.infos = changed;
+      await hub.handleExternalChange('mapinfos');
+      hub.document('mapinfos').apply({ kind: 'set', path: [ 2, 'name' ], before: 'Renamed outside', after: 'Elsewhere' });
+
+      // Act.
+      const outcome = await service.undo();
+
+      // Assert.
+      expect([ outcome, (hub.document('mapinfos').toJson() as RmmzMapInfo[])[2].name, historyOf(hub), writes ])
+        .toStrictEqual([
+          { ok: false, message: '"Externally modified" cannot undo: 2/name no longer holds the value this change replaced.' },
+          'Elsewhere',
+          [ 'Externally modified' ],
+          [],
+        ]);
+    });
+
+    it('refuses to redo an outside change that added a map whose file has gone since, rather than list it', async () =>
+    {
+      // Arrange: a map arrives in slot 4 with its file, the window records it, the step is undone, and the file goes.
+      const { service, hub, state, maps } = buildService();
+      await service.tree();
+      const added = buildTreeRows();
+      added[4] = { id: 4, expanded: false, name: 'Lake', order: 6, parentId: 0, scrollX: 0, scrollY: 0 };
+      state.infos = added;
+      maps.set(4, fileFor(4));
+      await hub.handleExternalChange('mapinfos');
+      succeeded(await service.undo());
+      maps.delete(4);
+
+      // Act.
+      const outcome = await service.redo();
+
+      // Assert.
+      expect([ outcome, state.infos[4], historyOf(hub) ])
+        .toStrictEqual([
+          { ok: false, message: '"Externally modified" cannot redo: map 4 (Lake) has no file, so the tree would list a map that is not there.' },
+          null,
+          [ '(Externally modified)' ],
+        ]);
     });
   });
 

@@ -14,6 +14,7 @@ import {
   type ResizePatch,
   type TilesPatch,
 } from './patches.ts';
+import { patchesBetween } from './patchesBetween.ts';
 import type { RmmzMap, RmmzMapEvent, RmmzMapProperties } from './rmmzTypes.ts';
 
 /**
@@ -433,6 +434,57 @@ class MapDocument implements EditorDocument
     });
 
     return file;
+  }
+
+  /**
+   * Works out the patches that turn this map into another file of it. The tiles change by one tiles patch naming
+   * only the cells that differ, or by one resize when the size changed too, since size and tiles move together; every
+   * other field, and the events, change by sets and splices reaching down only to what differs.
+   * @param {JsonValue} content The other file.
+   * @returns {Patch[]} The patches, tiles first; empty when the two are the same.
+   * @throws {Error} When the content is not a map file, or holds a cell that is not a tile id.
+   */
+  patchesTo(content: JsonValue): Patch[]
+  {
+    // splitting the file checks it is a map at all, cells included, before anything is compared.
+    const next = MapDocument.#split(content as unknown as RmmzMap);
+    const tiles = this.#tilePatchesTo(next.root.width, next.root.height, next.cells);
+
+    // the size moves only with the tiles, so it stays out of the fields compared; both sides are objects, so a
+    // patch can always say how they differ.
+    const { width: _width, height: _height, ...fields } = this.#root;
+    const { width: _nextWidth, height: _nextHeight, ...nextFields } = next.root;
+    const fieldPatches = patchesBetween(fields as unknown as JsonValue, nextFields as unknown as JsonValue) as Patch[];
+    return [ ...tiles, ...fieldPatches ];
+  }
+
+  /**
+   * Works out how this map's tiles become another set of tiles: one resize when the size differs, otherwise one tiles
+   * patch naming the cells that differ, or nothing when none does.
+   * @param {number} width The other width.
+   * @param {number} height The other height.
+   * @param {Uint16Array} cells The other cells, already checked.
+   * @returns {Patch[]} The patch, or none.
+   */
+  #tilePatchesTo(width: number, height: number, cells: Uint16Array): Patch[]
+  {
+    if (width !== this.width || height !== this.height)
+    {
+      return [ this.resizePatch({ width, height, data: Array.from(cells) }) ];
+    }
+
+    const changed: [ number, number ][] = [];
+    cells.forEach((value, index) =>
+    {
+      if (this.#cells[index] !== value)
+      {
+        changed.push([ index, value ]);
+      }
+    });
+
+    return changed.length === 0
+      ? []
+      : [ this.tilesPatch(changed) ];
   }
 
   subscribe(listener: DocumentListener): () => void
