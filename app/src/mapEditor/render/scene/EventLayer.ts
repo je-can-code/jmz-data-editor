@@ -80,9 +80,19 @@ class EventLayer
 
   #ghostEvents: readonly GhostEvent[] = [];
 
+  /**
+   * The container drawing each ghost, by its place in the ghost list; null for a ghost with nothing to draw yet.
+   */
+  #ghostRoots: (Container | null)[] = [];
+
   #context: EventLayerContext | null = null;
 
   #sprites = new Map<number, EventSprite>();
+
+  /**
+   * The events changed since the last flush, or 'all' when the list itself changed.
+   */
+  #changed: Set<number> | 'all' = new Set();
 
   #characterSources = new Map<string, Promise<TextureSource | null>>();
 
@@ -160,13 +170,70 @@ class EventLayer
   }
 
   /**
-   * Shows events a click or a drag would place, see-through.
+   * Notes that an event changed, to be rebuilt by the next {@link flushChanges}. A drop moving hundreds of events
+   * changes each one twice, and rebuilding and sorting once per change would cost the frame hundreds of sorts.
+   * @param {number | null} id The event, or null when the list itself changed.
+   */
+  markChanged(id: number | null): void
+  {
+    if (id === null)
+    {
+      this.#changed = 'all';
+    }
+    else if (this.#changed !== 'all')
+    {
+      this.#changed.add(id);
+    }
+
+    this.#onChange();
+  }
+
+  /**
+   * Rebuilds every event changed since the last flush, then sorts once: what a frame does before it draws.
+   * @returns {boolean} True when anything was rebuilt.
+   */
+  flushChanges(): boolean
+  {
+    const changed = this.#changed;
+    this.#changed = new Set();
+    if (changed === 'all')
+    {
+      this.rebuild();
+      return true;
+    }
+
+    if (changed.size === 0)
+    {
+      return false;
+    }
+
+    changed.forEach(id =>
+    {
+      this.#remove(id);
+      this.#build(id);
+    });
+    this.#sort();
+    return true;
+  }
+
+  /**
+   * Shows events a click or a drag would place, see-through. A drag hands over the same events tile after tile, only
+   * standing elsewhere, and then the sprites already built are moved rather than built again.
    * @param {readonly GhostEvent[]} ghosts The events.
    */
   setGhosts(ghosts: readonly GhostEvent[]): void
   {
+    const previous = this.#ghostEvents;
     this.#ghostEvents = ghosts;
-    this.#buildGhosts();
+    if (this.#sameLooks(previous, ghosts))
+    {
+      this.#moveGhosts();
+    }
+    else
+    {
+      this.#buildGhosts();
+    }
+
     this.#onChange();
   }
 
@@ -213,18 +280,50 @@ class EventLayer
   }
 
   /**
+   * Reports whether two ghost lists show the same events looking the same way, one for one, wherever they stand.
+   * @param {readonly GhostEvent[]} previous The ghosts on show.
+   * @param {readonly GhostEvent[]} next The ghosts asked for.
+   * @returns {boolean} True when the sprites on show can simply be moved.
+   */
+  #sameLooks(previous: readonly GhostEvent[], next: readonly GhostEvent[]): boolean
+  {
+    return next.length > 0
+      && previous.length === next.length
+      && this.#ghostRoots.length === next.length
+      && next.every((ghost, index) => ghost.image === previous[index].image && ghost.priorityType === previous[index].priorityType);
+  }
+
+  /**
+   * Stands every ghost sprite on show where its ghost now stands.
+   */
+  #moveGhosts(): void
+  {
+    const tileSize = this.#context?.tileSize ?? 0;
+    this.#ghostEvents.forEach((ghost, index) =>
+    {
+      const root = this.#ghostRoots[index];
+      if (root !== null)
+      {
+        const placement = eventPlacement(ghost.x, ghost.y, ghost.image, ghost.priorityType, false, tileSize);
+        root.position.set(placement.x, placement.y);
+      }
+    });
+  }
+
+  /**
    * Rebuilds the ghost sprites from the ghosts asked for, with whatever sheets have loaded.
    */
   #buildGhosts(): void
   {
     this.ghosts.removeChildren().forEach(child => child.destroy({ children: true }));
+    this.#ghostRoots = [];
     const context = this.#context;
     if (context === null)
     {
       return;
     }
 
-    this.#ghostEvents.forEach(ghost =>
+    this.#ghostRoots = this.#ghostEvents.map(ghost =>
     {
       const page = { image: ghost.image } as RmmzEventPage;
       const texture = this.#sourceFor(page);
@@ -232,7 +331,7 @@ class EventLayer
       const frame = eventFrame(ghost.image, size, context.tileSize);
       if (frame === null || texture === null)
       {
-        return;
+        return null;
       }
 
       const placement = eventPlacement(ghost.x, ghost.y, ghost.image, ghost.priorityType, false, context.tileSize);
@@ -241,6 +340,7 @@ class EventLayer
       root.alpha = GHOST_ALPHA;
       this.#addBodies(root, texture, frame, 0);
       this.ghosts.addChild(root);
+      return root;
     });
   }
 

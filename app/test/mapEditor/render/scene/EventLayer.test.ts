@@ -91,4 +91,104 @@ describe('EventLayer', () =>
     expect(found)
       .toStrictEqual([ 2, 4, 5, null ]);
   });
+
+  describe('markChanged and flushChanges', () =>
+  {
+    /**
+     * Draws events on an empty 4x4 map, keeping the document so a test can change it.
+     * @param {RmmzMapEvent[]} events The events, ids 1 up in order.
+     * @returns {{ layer: EventLayer, document: MapDocument, redraws: () => number }} The layer, its map, and how often it
+     * asked for a frame.
+     */
+    const drawnMap = (events: RmmzMapEvent[]) =>
+    {
+      const json = buildMapJson();
+      json.width = 4;
+      json.height = 4;
+      json.data = new Array<number>(4 * 4 * 6).fill(0);
+      json.events = [ null, ...events ];
+      const document = MapDocument.fromJson('map:1', json);
+      let redraws = 0;
+      const layer = new EventLayer(() =>
+      {
+        redraws += 1;
+      });
+      const sheets = [ null, null, null, null, null, new TextureSource({ width: 768, height: 768 }), null, null, null ];
+      layer.setContext({ document, flags: [], sheets, images: null, tileSize: 48 });
+      return { layer, document, redraws: () => redraws };
+    };
+
+    it('redraws a changed event only once flushed, in its new place in the order, asking for a frame at once', () =>
+    {
+      // Arrange: with characters, 1 on row 2 and 2 on row 1; event 1 then moves up to row 0.
+      const { layer, document, redraws } = drawnMap([ tileEvent(1, 0, 2, 1), tileEvent(2, 1, 1, 1) ]);
+      const before = redraws();
+      document.apply(document.setPatch([ 'events', 1, 'y' ], 0));
+
+      // Act.
+      layer.markChanged(1);
+      const pending = idsOf(layer.same);
+      const flushed = layer.flushChanges();
+
+      // Assert: the frame was asked for as the change came, and the order changed only with the flush.
+      expect([ redraws() - before, pending, flushed, idsOf(layer.same), layer.flushChanges() ])
+        .toStrictEqual([ 1, [ 2, 1 ], true, [ 1, 2 ], false ]);
+    });
+
+    it('rebuilds every event when the list itself changed, dropping the ones gone', () =>
+    {
+      // Arrange: event 2 is removed; event 3 stays.
+      const { layer, document } = drawnMap([ tileEvent(1, 0, 2, 1), tileEvent(2, 1, 1, 1), tileEvent(3, 2, 3, 1) ]);
+      document.apply(document.removeEventPatch(2));
+
+      // Act.
+      layer.markChanged(3);
+      layer.markChanged(null);
+      layer.markChanged(1);
+      const flushed = layer.flushChanges();
+
+      // Assert.
+      expect([ flushed, idsOf(layer.same) ])
+        .toStrictEqual([ true, [ 1, 3 ] ]);
+    });
+  });
+
+  describe('setGhosts', () =>
+  {
+    const brick = { tileId: 1, characterName: '', direction: 2, pattern: 0, characterIndex: 0 };
+    const crate = { tileId: 2, characterName: '', direction: 2, pattern: 0, characterIndex: 0 };
+
+    it('moves the ghost sprites already on show when the same ghosts move, rather than building new ones', () =>
+    {
+      // Arrange: two ghosts of the same picture, dragged one tile down.
+      const layer = drawEvents([]);
+      layer.setGhosts([ { x: 0, y: 0, image: brick, priorityType: 1 }, { x: 1, y: 0, image: brick, priorityType: 1 } ]);
+      const shown = [ ...layer.ghosts.children ];
+
+      // Act.
+      layer.setGhosts([ { x: 0, y: 1, image: brick, priorityType: 1 }, { x: 1, y: 1, image: brick, priorityType: 1 } ]);
+
+      // Assert: the same sprites, now one tile lower, standing at the bottom middle of their tiles.
+      const [ first, second ] = layer.ghosts.children;
+      expect([ first === shown[0], second === shown[1], [ first.x, first.y ], [ second.x, second.y ] ])
+        .toStrictEqual([ true, true, [ 24, 96 ], [ 72, 96 ] ]);
+    });
+
+    it('builds the ghosts afresh when one looks different, and clears them when none are asked for', () =>
+    {
+      // Arrange.
+      const layer = drawEvents([]);
+      layer.setGhosts([ { x: 0, y: 0, image: brick, priorityType: 1 }, { x: 1, y: 0, image: brick, priorityType: 1 } ]);
+      const shown = [ ...layer.ghosts.children ];
+
+      // Act.
+      layer.setGhosts([ { x: 0, y: 0, image: brick, priorityType: 1 }, { x: 1, y: 0, image: crate, priorityType: 1 } ]);
+      const rebuilt = [ ...layer.ghosts.children ];
+      layer.setGhosts([]);
+
+      // Assert.
+      expect([ rebuilt.length, rebuilt.some(child => shown.includes(child)), layer.ghosts.children.length ])
+        .toStrictEqual([ 2, false, 0 ]);
+    });
+  });
 });

@@ -7,6 +7,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { WindowShell, type OpenBrowserWindow } from '../../../src/core/infrastructure/shell/WindowShell.ts';
 import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { EventSelection } from '../../../src/mapEditor/core/events/EventSelection.ts';
 import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
@@ -53,9 +54,24 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
 
     drawListeners = new Set<(state: string) => void>();
 
+    // no canvas, so the event tools listen for no pointer here; picking still selects through them.
+    canvas = null;
+
+    camera = { x: 0, y: 0, zoom: 1 };
+
     constructor()
     {
       stand.renderers.push(this.record);
+    }
+
+    eventAt(): null
+    {
+      return null;
+    }
+
+    onContextMenu(): () => void
+    {
+      return () => undefined;
     }
 
     mount(): void
@@ -261,14 +277,15 @@ describe('MapView', () =>
       .toStrictEqual([ true, true, null ]);
   });
 
-  it('picks out the event asked for once the map is open, and each event picked after it', async () =>
+  it('picks out the event asked for once the map is open, and each event picked after it, into the window\'s selection', async () =>
   {
-    // Arrange: the map holds the door at 0, 0 and the chest at 2, 1.
+    // Arrange: the map holds the door at 0, 0 and the chest at 2, 1; the selection is the window's, shared with the quick panel.
     stand.maps.set(5, MapDocument.fromJson('map:5', buildMapJson()));
     const services = served();
+    const selection = new EventSelection();
     const { rerender } = render(
       <MapEditorServicesProvider services={services}>
-        <MapView mapId={5} pickedEventId={3}/>
+        <MapView mapId={5} pickedEventId={3} selection={selection}/>
       </MapEditorServicesProvider>
     );
     await waitFor(() => expect(stand.renderers[0]?.looks.length)
@@ -277,16 +294,73 @@ describe('MapView', () =>
     // Act.
     rerender(
       <MapEditorServicesProvider services={services}>
-        <MapView mapId={5} pickedEventId={1}/>
+        <MapView mapId={5} pickedEventId={1} selection={selection}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert: the map arrives with nothing selected, then each pick selects its event alone and centres on it.
+    await waitFor(() => expect(stand.renderers[0]?.looks.length)
+      .toBe(2));
+    const [ renderer ] = stand.renderers;
+    expect([ stand.renderers.length, renderer.overlays.map(state => state.selectedEvents), renderer.looks, selection.get() ])
+      .toStrictEqual([
+        1,
+        [ [], [ 3 ], [ 1 ] ],
+        [ { cell: { x: 2, y: 1 }, zoom: 1 }, { cell: { x: 0, y: 0 }, zoom: 1 } ],
+        { mapId: 5, eventIds: [ 1 ] },
+      ]);
+  });
+
+  it('picks out the same event again when it is asked for again, after other events were picked', async () =>
+  {
+    // Arrange: the chest is asked for, then the person picks the door instead.
+    stand.maps.set(5, MapDocument.fromJson('map:5', buildMapJson()));
+    const services = served();
+    const selection = new EventSelection();
+    const { rerender } = render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} pickedEventId={3} pickRequest={1} selection={selection}/>
+      </MapEditorServicesProvider>
+    );
+    await waitFor(() => expect(stand.renderers[0]?.looks.length)
+      .toBe(1));
+    act(() => selection.select(5, [ 1 ]));
+
+    // Act: the same link clicked again asks for the chest again.
+    rerender(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} pickedEventId={3} pickRequest={2} selection={selection}/>
       </MapEditorServicesProvider>
     );
 
     // Assert.
     await waitFor(() => expect(stand.renderers[0]?.looks.length)
       .toBe(2));
-    const [ renderer ] = stand.renderers;
-    expect([ stand.renderers.length, renderer.overlays.map(state => state.selectedEvents), renderer.looks ])
-      .toStrictEqual([ 1, [ [ 3 ], [ 1 ] ], [ { cell: { x: 2, y: 1 }, zoom: 1 }, { cell: { x: 0, y: 0 }, zoom: 1 } ] ]);
+    expect([ selection.get(), stand.renderers[0].looks ])
+      .toStrictEqual([ { mapId: 5, eventIds: [ 3 ] }, [ { cell: { x: 2, y: 1 }, zoom: 1 }, { cell: { x: 2, y: 1 }, zoom: 1 } ] ]);
+  });
+
+  it('counts the events selected on its map in the status line, and none selected on another map', async () =>
+  {
+    // Arrange: the chest is picked on map 5.
+    stand.maps.set(5, MapDocument.fromJson('map:5', buildMapJson()));
+    const selection = new EventSelection();
+    render(
+      <MapEditorServicesProvider services={served()}>
+        <MapView mapId={5} pickedEventId={3} selection={selection}/>
+      </MapEditorServicesProvider>
+    );
+    await waitFor(() => expect(screen.getByTestId('map-selection-count').textContent)
+      .toBe('1 event selected'));
+
+    // Act: two events on map 5, then one on another map.
+    act(() => selection.select(5, [ 1, 3 ]));
+    const two = screen.getByTestId('map-selection-count').textContent;
+    act(() => selection.select(9, [ 2 ]));
+
+    // Assert.
+    expect([ two, screen.getByTestId('map-selection-count').textContent ])
+      .toStrictEqual([ '2 events selected', '' ]);
   });
 
   it('tells the renderer whether the view is on screen before mounting it, and again each time that changes', () =>

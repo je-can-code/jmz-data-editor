@@ -4,6 +4,7 @@ import type { CommandEditorRegistry } from '../../core/commands/CommandEditorReg
 import type { CommandCatalogEntry } from '../../core/commands/catalogTypes.ts';
 import { renderSentence, type NameLookup } from '../../core/commands/sentence.ts';
 import { hasElseBranch } from '../../core/commandList/blockReconcile.ts';
+import { CLIPBOARD_FORMAT as COMMAND_CLIPBOARD_FORMAT } from '../../core/commandList/commandClipboard.ts';
 import { CommandListEditor } from '../../core/commandList/CommandListEditor.ts';
 import { isBodyInside, type CommandBlockNode, type CommandNode, type CommandTree } from '../../core/commandList/commandTree.ts';
 import { nameLookup } from '../../core/commandList/databaseNames.ts';
@@ -311,7 +312,7 @@ const DropMarker = (props: { readonly indent: number }) =>
 const CommandList = (props: CommandListProps) =>
 {
   const { documentKey, path, histories, label } = props;
-  const { hub, catalog, commandEditors, api, pluginHeaders, loadCommandResources } = useMapEditorServices();
+  const { hub, catalog, commandEditors, api, pluginHeaders, loadCommandResources, shell } = useMapEditorServices();
   const playSound = useContext(SoundPlayerContext);
 
   // the plugin headers and the names the editors pick from are read once a list shows; the list redraws when the
@@ -885,6 +886,28 @@ const CommandList = (props: CommandListProps) =>
     use(navigator.clipboard).catch((error: unknown) => setNotice(`The clipboard refused: ${(error as Error).message}`));
   };
 
+  /**
+   * Pastes from the context menu, which has no clipboard event to carry the clipboard: the window shell reads the
+   * command clipboard, through the NW.js shell where a page's own read would wait forever, and the commands land where
+   * Ctrl+V would put them.
+   */
+  const pasteFromMenu = () =>
+  {
+    setMenu(null);
+    shell.readClipboard(COMMAND_CLIPBOARD_FORMAT)
+      .then(text =>
+      {
+        if (text === null)
+        {
+          setNotice('The clipboard could not be read here; press Ctrl+V to paste instead.');
+          return;
+        }
+
+        pasteText(text);
+      })
+      .catch(() => undefined);
+  };
+
   //endregion clipboard
 
   //region pointer
@@ -1301,7 +1324,7 @@ const CommandList = (props: CommandListProps) =>
           await clipboard.writeText(editor.copy(chosen));
           deleteSelection();
         })}
-        onPaste={() => withClipboard(async clipboard => pasteText(await clipboard.readText()))}
+        onPaste={pasteFromMenu}
         onDuplicate={fromMenu(duplicateSelection)}
         onDelete={fromMenu(deleteSelection)}
         onToggleElse={fromMenu(() => menu !== null && setElseOf(menu.head, hasElse => hasElse === false))}

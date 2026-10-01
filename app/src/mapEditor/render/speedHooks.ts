@@ -1,8 +1,11 @@
+import { deleteEvents } from '../core/events/eventEdits.ts';
+import type { EventSelection } from '../core/events/EventSelection.ts';
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../core/history/historyKeys.ts';
 import type { Transaction } from '../core/history/Transaction.ts';
 import { mapDocumentKey } from '../core/model/documentKeys.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
+import type { MapEventTools } from '../events/MapEventTools.ts';
 import { TILE_SIZE, type Camera } from '../core/renderer/camera.ts';
 import {
   GAME_LOOK,
@@ -39,11 +42,14 @@ type PaintSettings = {
 type OpenTimings = Record<string, number>;
 
 /**
- * What the hooks need from the map view.
+ * What the hooks need from the map view: its renderer, the window's hub, its event tools and selection, the map on
+ * show, a way to open another, and the page's open timings.
  */
 type SpeedHooksContext = {
   readonly renderer: PixiMapRenderer;
   readonly hub: DocumentHub;
+  readonly tools: MapEventTools;
+  readonly selection: EventSelection;
   readonly map: () => MapDocument | null;
   readonly openMap: (mapId: number) => Promise<void>;
   readonly timings: OpenTimings;
@@ -131,7 +137,7 @@ const cameraOnPath = (
  */
 const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => void) =>
 {
-  const { renderer, hub } = context;
+  const { renderer, hub, tools, selection } = context;
   const stops: (() => void)[] = [];
   let path: CameraPath | null = null;
   let pathStart = 0;
@@ -264,11 +270,13 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     {
       path = null;
     },
+    // the pen owns the left button while it paints, so the event tools stand down, as they will for P3's tools.
     enablePaint: (next: Partial<PaintSettings>) =>
     {
       settings = { ...settings, ...next };
       steps = 0;
       redrawnFrames = 0;
+      tools.setEnabled(false);
       canvas?.addEventListener('pointerdown', onDown);
       canvas?.addEventListener('pointermove', onMove);
       canvas?.addEventListener('pointerup', onUp);
@@ -279,6 +287,7 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       canvas?.removeEventListener('pointerdown', onDown);
       canvas?.removeEventListener('pointermove', onMove);
       canvas?.removeEventListener('pointerup', onUp);
+      tools.setEnabled(true);
     },
     enableEveryOverlay: () =>
     {
@@ -341,8 +350,36 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       renderer.setVisible(true);
       return { ms: (await drawn) - started, hidden, shown: renderer.drawState };
     },
-    // P5 fills this in once events can be dragged; the speed script measures it only when it is there.
-    dragEvents: null as null | ((options: unknown) => Promise<unknown>),
+    // what the speed script needs to select, box-select and drag events with the real mouse, and to prove it did: the
+    // tools' counts, the selection, where an event shows, and a way to empty a row so a big drop has somewhere to land.
+    events: {
+      state: () => ({ ...tools.state(), total: context.map()?.eventIds().length ?? 0 }),
+      clear: () => selection.clear(),
+      screenOfEvent: (eventId: number) =>
+      {
+        const event = context.map()?.event(eventId) ?? null;
+        return event === null ? null : hooks.screenOfCell(event.x, event.y);
+      },
+      cellOf: (eventId: number) =>
+      {
+        const event = context.map()?.event(eventId) ?? null;
+        return event === null ? null : { x: event.x, y: event.y };
+      },
+      eventIds: () => context.map()?.eventIds() ?? [],
+      selectedIds: () => [ ...selection.eventsOn(context.map()?.mapId ?? 0) ],
+      removeRow: (y: number) =>
+      {
+        const map = context.map();
+        if (map === null)
+        {
+          return 0;
+        }
+
+        const row = map.eventIds().filter(id => map.event(id)?.y === y);
+        deleteEvents(hub, map.mapId, row);
+        return row.length;
+      },
+    },
   };
 
   (target as unknown as Record<string, unknown>)[HOOKS_GLOBAL] = hooks;

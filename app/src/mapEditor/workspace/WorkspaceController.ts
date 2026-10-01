@@ -1,4 +1,5 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
+import { EventSelection } from '../core/events/EventSelection.ts';
 import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
 import { MapTreeService, type TreeOutcome } from '../core/tree/MapTreeService.ts';
 import { TREE_ROOT } from '../core/tree/MapTreeModel.ts';
@@ -13,7 +14,7 @@ import {
   SINGLE_PANEL_IDS,
   type PanelDirection,
 } from '../core/workspace/panels.ts';
-import { MAP_INFOS_KEY } from '../core/model/documentKeys.ts';
+import { MAP_INFOS_KEY, mapDocumentKey } from '../core/model/documentKeys.ts';
 import type { RmmzMapInfo } from '../core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../services/MapEditorServices.ts';
 import { documentLabel } from '../views/documentLabels.ts';
@@ -78,9 +79,20 @@ type WorkspaceState = {
 
   /**
    * The event each map should select, by map id: what the data editor asks for when it opens a map at an event.
-   * The events package reads it to pick the event out.
+   * The map's view picks it out, which makes it the window's selection; the quick panel follows the selection, never
+   * this.
    */
-  readonly eventFocus: Readonly<Record<number, number>>;
+  readonly eventFocus: Readonly<Record<number, EventFocus>>;
+};
+
+/**
+ * One ask to pick out an event: the event, and the ask's own number, which is new every time, so asking for the same
+ * event again (a second click on the same link in the data editor) picks it out again, after the person has picked
+ * other events or panned away.
+ */
+type EventFocus = {
+  readonly eventId: number;
+  readonly request: number;
 };
 
 /**
@@ -125,6 +137,13 @@ class WorkspaceController
   readonly layouts: LayoutStore;
 
   /**
+   * The events selected in this window, on one map at a time: every map panel draws and changes it, torn-out ones
+   * included, and the quick panel reads it (see {@link EventSelection} for how to read and follow it). It only ever
+   * names a map this window holds: letting go of that map clears it.
+   */
+  readonly selection = new EventSelection();
+
+  /**
    * Tears panels out into windows of their own, and puts them back where they came from; maps with no place of their
    * own go back among the maps.
    */
@@ -152,6 +171,11 @@ class WorkspaceController
   #noticeCount = 0;
 
   /**
+   * Counts the asks to pick out an event, for each ask's own number.
+   */
+  #focusRequests = 0;
+
+  /**
    * @param {MapEditorServices} services The window's services.
    */
   constructor(services: MapEditorServices)
@@ -162,6 +186,17 @@ class WorkspaceController
       : new MapTreeService({ hub: services.hub, api: services.api, openDocument: key => services.openDocument(key) });
     this.router = new HistoryRouter(services.hub, this.tree);
     this.layouts = new LayoutStore({ api: services.api });
+
+    // a map the window lets go of, such as one deleted from the tree, takes its selected events with it, so the
+    // selection only ever names a map this window holds.
+    services.hub.subscribe(event =>
+    {
+      const { mapId } = this.selection.get();
+      if (event.type === 'released' && mapId !== null && event.document === mapDocumentKey(mapId))
+      {
+        this.selection.clear();
+      }
+    });
   }
 
   //region state
@@ -262,9 +297,12 @@ class WorkspaceController
       return null;
     }
 
+    // every ask is a new one, even for the event asked for last time, so the map picks it out again.
     if (options.focusEventId !== undefined && options.focusEventId !== null)
     {
-      this.#update({ eventFocus: { ...this.#state.eventFocus, [mapId]: options.focusEventId } });
+      this.#focusRequests += 1;
+      const focus: EventFocus = { eventId: options.focusEventId, request: this.#focusRequests };
+      this.#update({ eventFocus: { ...this.#state.eventFocus, [mapId]: focus } });
     }
 
     const open = api.panels.find(panel => panel.api.component === PANEL_COMPONENTS.map && isMapPanelParams(panel.params) && panel.params.mapId === mapId);
@@ -685,4 +723,4 @@ class WorkspaceController
 }
 
 export { TREE_ROOT, WorkspaceController };
-export type { MapClipboard, Notice, NoticeSeverity, OpenMapOptions, WorkspaceState };
+export type { EventFocus, MapClipboard, Notice, NoticeSeverity, OpenMapOptions, WorkspaceState };

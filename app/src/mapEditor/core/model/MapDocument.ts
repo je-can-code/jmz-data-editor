@@ -277,21 +277,15 @@ class MapDocument implements EditorDocument
   }
 
   /**
-   * Finds the lowest empty event slot, or the end of the list when none is empty. Slot 0 is never used.
+   * Names the id a new event takes: the slot just past the end of the list, never an empty slot inside it. A slot a
+   * delete emptied keeps its id unused for good, because a self switch in a save, a command in another event or a
+   * plugin's parameters may still name that id, and a new event there would answer for the one that was deleted.
+   * Slot 0 is never used.
    * @returns {number} The id a new event would take.
    */
   nextFreeEventId(): number
   {
-    const { events } = this.#root;
-    for (let id = 1; id < events.length; id++)
-    {
-      if (events[id] === null)
-      {
-        return id;
-      }
-    }
-
-    return Math.max(events.length, 1);
+    return Math.max(this.#root.events.length, 1);
   }
 
   valueAt(path: PatchPath): JsonValue | undefined
