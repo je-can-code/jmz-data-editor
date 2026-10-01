@@ -1,4 +1,5 @@
 import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../history/historyKeys.ts';
+import { isJsonObject, type JsonObject } from '../model/json.ts';
 
 /**
  * The kinds of panel the workspace holds, by the component name dockview saves in a layout. Renaming one breaks
@@ -32,6 +33,60 @@ const SINGLE_PANEL_IDS = {
   quick: 'quick-settings',
   start: 'start',
 } as const;
+
+/**
+ * The narrowest each side panel may be squeezed, in pixels, however the space is shared out: wide enough that the map
+ * tree reads its names and the properties form keeps its fields legible. Maps and the start panel have no minimum of
+ * their own beyond the dock's, so any number of maps can still sit side by side.
+ */
+const PANEL_MIN_WIDTHS: Readonly<Partial<Record<string, number>>> = {
+  [PANEL_COMPONENTS.mapTree]: 240,
+  [PANEL_COMPONENTS.palette]: 240,
+  [PANEL_COMPONENTS.layers]: 240,
+  [PANEL_COMPONENTS.properties]: 300,
+  [PANEL_COMPONENTS.quick]: 300,
+  [PANEL_COMPONENTS.history]: 240,
+};
+
+/**
+ * Reads the narrowest a kind of panel may be squeezed.
+ * @param {string} component The panel's kind.
+ * @returns {number | undefined} Its minimum width in pixels, or undefined when the dock's own minimum applies.
+ */
+const minimumWidthFor = (component: string): number | undefined =>
+{
+  return PANEL_MIN_WIDTHS[component];
+};
+
+/**
+ * Gives every panel in a saved layout the minimum width its kind has now, before the dock rebuilds the layout. The dock
+ * keeps each panel's minimum in the layout it saves, so without this a layout saved before a minimum existed, or
+ * before one changed, would come back without it, and a column already squeezed to a sliver would stay one.
+ * @param {JsonObject} saved The saved layout.
+ * @returns {JsonObject} A copy with each panel's minimum width set, or cleared where its kind has none.
+ */
+const withPanelMinimums = (saved: JsonObject): JsonObject =>
+{
+  const { panels } = saved;
+  if (isJsonObject(panels) === false)
+  {
+    return saved;
+  }
+
+  const sized = Object.fromEntries(Object.entries(panels).map(([ id, state ]) =>
+  {
+    if (isJsonObject(state) === false)
+    {
+      return [ id, state ];
+    }
+
+    const { minimumWidth: _old, ...rest } = state;
+    const { contentComponent } = state;
+    const minimum = typeof contentComponent === 'string' ? minimumWidthFor(contentComponent) : undefined;
+    return [ id, minimum === undefined ? rest : { ...rest, minimumWidth: minimum } ];
+  }));
+  return { ...saved, panels: sized };
+};
 
 /**
  * What a map panel keeps in the layout: which map it shows.
@@ -186,7 +241,9 @@ export {
   isMapPanelParams,
   MAP_DRAG_TYPE,
   mapPanelId,
+  minimumWidthFor,
   PANEL_COMPONENTS,
   SINGLE_PANEL_IDS,
+  withPanelMinimums,
 };
 export type { DropPosition, MapPanelParams, PanelComponent, PanelDirection };

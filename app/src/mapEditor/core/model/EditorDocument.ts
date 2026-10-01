@@ -70,6 +70,18 @@ interface EditorDocument
   toJsonWithout(patches: readonly Patch[]): JsonValue;
 
   /**
+   * Works out the patches that turn this document's content into other content for the same file, as one edit
+   * would have made them: applied in order they reach exactly that content, and reversed newest first they come back
+   * to this one. Only what differs is addressed, so an edit elsewhere in the document can still be undone around
+   * them. Nothing is applied here.
+   * @param {JsonValue} content The other content, in its file shape.
+   * @returns {Patch[] | null} The patches, empty when the two are the same, or null when no patch can say the
+   * difference, as when the file's whole value changed kind.
+   * @throws {Error} When the content is not a file this kind of document can hold.
+   */
+  patchesTo(content: JsonValue): Patch[] | null;
+
+  /**
    * Listens for changes.
    * @param {DocumentListener} listener Called after every change.
    * @returns {() => void} Stops listening.

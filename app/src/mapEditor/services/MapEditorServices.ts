@@ -12,7 +12,7 @@ import type { DocumentKey } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import { FileChangeFeed, openEventSource, type EventSourceFactory } from '../core/sync/FileChangeFeed.ts';
-import { recheckCleanDocuments, routeFileChange } from '../core/sync/fileChangeRouting.ts';
+import { FileChangeRouter } from '../core/sync/fileChangeRouting.ts';
 import { SharedFileChangeFeed, type LockManagerLike } from '../core/sync/SharedFileChangeFeed.ts';
 import { SyncPeer } from '../core/sync/SyncPeer.ts';
 import { parseMapEditorView, type MapEditorView } from '../views/mapEditorViews.ts';
@@ -310,15 +310,17 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
 
       if (feed !== null)
       {
-        // each change settles on its own; the routing reports what it did rather than throwing at the stream.
+        // only the window reading the stream reads what changed, and hands it to the others; each change settles on
+        // its own, and a read that fails is left for the next change rather than thrown at the stream.
+        const router = new FileChangeRouter(hub, sync, () => feed.isLeader);
         stops.push(
           feed.onChange(change =>
           {
-            routeFileChange(change, hub, sync).catch(() => undefined);
+            router.route(change).catch(() => undefined);
           }),
           feed.onReconnect(() =>
           {
-            recheckCleanDocuments(hub).catch(() => undefined);
+            router.recheck().catch(() => undefined);
           }),
         );
         feed.start();

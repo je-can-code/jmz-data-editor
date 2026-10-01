@@ -7,6 +7,7 @@ import {
   dropZoneAt,
   initiallyExpanded,
   revealMaps,
+  selectionAfterCollapse,
   selectRange,
   toggleSelection,
   visibleTreeLines,
@@ -16,6 +17,7 @@ import { buildTreeRows } from '../../support/treeFixtures.ts';
 /*
  * The tree panel shows and selects maps the way every file tree does, and these rules decide it: lines top to bottom
  * with closed branches folded away; Shift clicks select a run in the order shown and Ctrl clicks add or take out one;
+ * closing a branch moves any pick inside it onto the branch, so the pick stays in sight and the branch stays closed;
  * a drag carries the whole selection when the dragged row is in it; and a drop lands in front of a row from its top
  * quarter, after it from its bottom quarter, and inside it from the middle. The drop's place is what the tree
  * service moves maps to, so it decides what gets written to MapInfos.json. Before a delete, the tree asks in place,
@@ -111,6 +113,33 @@ describe('treeView', () =>
       // Assert.
       expect(runs)
         .toStrictEqual([ [ 5 ], [ 5 ], [] ]);
+    });
+
+    it('moves a pick inside a branch being closed onto the branch, once, keeping picks elsewhere in order', () =>
+    {
+      // Arrange: the inn sits inside the town, which sits inside the world; the cave sits beside the town.
+      const rows = buildTreeRows();
+
+      // Act.
+      const closingTown = selectionAfterCollapse(rows, [ 6, 3, 5 ], 2);
+      const closingWorld = selectionAfterCollapse(rows, [ 3, 6, 2, 5 ], 1);
+
+      // Assert.
+      expect([ closingTown, closingWorld ])
+        .toStrictEqual([ [ 6, 2, 5 ], [ 1, 6 ] ]);
+    });
+
+    it('leaves the selection alone when nothing picked is inside the branch being closed', () =>
+    {
+      // Arrange: the town itself and the cave beside it are picked, neither inside the town's branch.
+      const rows = buildTreeRows();
+
+      // Act.
+      const picked = selectionAfterCollapse(rows, [ 2, 5 ], 2);
+
+      // Assert.
+      expect(picked)
+        .toStrictEqual([ 2, 5 ]);
     });
 
     it('adds a line with a Ctrl click, and takes it out with another', () =>

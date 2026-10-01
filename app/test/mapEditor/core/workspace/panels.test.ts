@@ -6,7 +6,9 @@ import {
   historyOwnedBy,
   isMapPanelParams,
   mapPanelId,
+  minimumWidthFor,
   PANEL_COMPONENTS,
+  withPanelMinimums,
 } from '../../../../src/mapEditor/core/workspace/panels.ts';
 
 /*
@@ -15,7 +17,9 @@ import {
  * of one map gets its own id; a map dropped on a group's middle stacks as a tab while an edge splits the group;
  * only a list of map ids comes off a drag; and undo follows the panel with focus, the tree to the tree's history,
  * a map (or the properties or quick settings of one) to that map's, while the history panel and the placeholders
- * leave it alone.
+ * leave it alone. Side panels are never squeezed below a readable width, while maps keep only the dock's small
+ * minimum so any number can sit side by side; a saved layout comes back with the minimums panels have now, whatever
+ * it was saved with.
  */
 describe('panels', () =>
 {
@@ -105,6 +109,70 @@ describe('panels', () =>
       // Assert.
       expect(owners)
         .toStrictEqual([ null, null, undefined, undefined, undefined ]);
+    });
+  });
+
+  describe('minimum widths', () =>
+  {
+    it('keeps the side panels readable and leaves maps and the start panel to the dock', () =>
+    {
+      // Arrange: every kind of panel.
+      const kinds = Object.values(PANEL_COMPONENTS);
+
+      // Act.
+      const minimums = Object.fromEntries(kinds.map(kind => [ kind, minimumWidthFor(kind) ?? null ]));
+
+      // Assert.
+      expect(minimums)
+        .toStrictEqual({
+          'map': null,
+          'map-tree': 240,
+          'history': 240,
+          'map-properties': 300,
+          'palette': 240,
+          'layers': 240,
+          'quick-settings': 300,
+          'start': null,
+        });
+    });
+
+    it('gives a saved layout\'s panels the minimums their kinds have now, clearing any their kinds no longer keep', () =>
+    {
+      // Arrange: a layout saved before minimums existed, with a stale one on a map, and an entry that is no panel.
+      const saved = {
+        grid: {},
+        panels: {
+          'map-properties': { id: 'map-properties', contentComponent: 'map-properties', title: 'Map properties' },
+          'map-12': { id: 'map-12', contentComponent: 'map', params: { mapId: 12 }, minimumWidth: 500 },
+          'history': { id: 'history', contentComponent: 'history', minimumWidth: 90 },
+          'odd': 7,
+        },
+      };
+
+      // Act.
+      const sized = withPanelMinimums(saved);
+
+      // Assert.
+      expect(sized['panels'])
+        .toStrictEqual({
+          'map-properties': { id: 'map-properties', contentComponent: 'map-properties', title: 'Map properties', minimumWidth: 300 },
+          'map-12': { id: 'map-12', contentComponent: 'map', params: { mapId: 12 } },
+          'history': { id: 'history', contentComponent: 'history', minimumWidth: 240 },
+          'odd': 7,
+        });
+    });
+
+    it('leaves a layout without panels as it was', () =>
+    {
+      // Arrange.
+      const saved = { grid: {} };
+
+      // Act.
+      const sized = withPanelMinimums(saved);
+
+      // Assert.
+      expect(sized)
+        .toBe(saved);
     });
   });
 });
