@@ -1,5 +1,5 @@
-import React, { useState, useSyncExternalStore } from 'react';
-import { Box, Divider, TextField, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from '@mui/material';
+import React, { useSyncExternalStore } from 'react';
+import { Box, Divider, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from '@mui/material';
 import Colorize from '@mui/icons-material/Colorize';
 import Create from '@mui/icons-material/Create';
 import CropSquare from '@mui/icons-material/CropSquare';
@@ -9,10 +9,7 @@ import HighlightAlt from '@mui/icons-material/HighlightAlt';
 import LayersClear from '@mui/icons-material/LayersClear';
 import NearMe from '@mui/icons-material/NearMe';
 import PanoramaFishEye from '@mui/icons-material/PanoramaFishEye';
-import Tag from '@mui/icons-material/Tag';
-import WbShade from '@mui/icons-material/WbShade';
-import type { LayerChoice } from '../../core/tiles/layering.ts';
-import { describeBrush, MAX_REGION_ID, regionBrush, SHADOW_BRUSH, singleTileBrush } from '../../core/tools/brush.ts';
+import { describeBrush } from '../../core/tools/brush.ts';
 import type { PaintSettings, PaintState, PaintTool } from '../../core/tools/PaintState.ts';
 
 /**
@@ -40,17 +37,6 @@ const TOOL_BUTTONS: readonly ToolButton[] = [
 ];
 
 /**
- * The layer choices, as the temporary layer picker offers them.
- */
-const LAYER_CHOICES: readonly { readonly choice: LayerChoice; readonly label: string }[] = [
-  { choice: 'auto', label: 'Auto' },
-  { choice: 0, label: '1' },
-  { choice: 1, label: '2' },
-  { choice: 2, label: '3' },
-  { choice: 3, label: '4' },
-];
-
-/**
  * Reads the window's painting settings, re-rendering whenever they change.
  * @param {PaintState} painting The settings' store.
  * @returns {PaintSettings} The settings.
@@ -61,131 +47,10 @@ const usePaintSettings = (painting: PaintState): PaintSettings =>
 };
 
 /**
- * Reads a whole number typed into a field.
- * @param {string} text The text.
- * @returns {number | null} The number, or null when the text is not a whole number.
- */
-const wholeNumber = (text: string): number | null =>
-{
-  return /^\d+$/u.test(text.trim())
-    ? Number.parseInt(text.trim(), 10)
-    : null;
-};
-
-/**
- * A stand-in for the palette and the layer strip while they are built: a tile id or region id typed in becomes the
- * brush, and the layer strip's choice can be picked. The eyedropper is the other way to pick a brush meanwhile.
- * @param {{ painting: PaintState, settings: PaintSettings }} props The settings' store and the settings.
- * @returns {React.JSX.Element} The picker.
- */
-const StandInPicker = (props: { painting: PaintState; settings: PaintSettings }) =>
-{
-  const { painting, settings } = props;
-  const [ tileText, setTileText ] = useState('');
-  const [ regionText, setRegionText ] = useState('1');
-  const tileId = wholeNumber(tileText);
-  const regionId = wholeNumber(regionText);
-
-  // a tile id takes the brush when it is one; anything else leaves the brush as it was.
-  const takeTile = () =>
-  {
-    if (tileId !== null && tileId < 8192)
-    {
-      painting.setBrush(singleTileBrush(tileId));
-    }
-  };
-
-  return (
-    <>
-      <TextField
-        size={'small'}
-        label={'Tile'}
-        value={tileText}
-        onChange={event => setTileText(event.target.value)}
-        onKeyDown={event =>
-        {
-          // Enter takes the tile and hands the keys back to the map, so the space bar paints rather than types.
-          if (event.key === 'Enter')
-          {
-            takeTile();
-            (event.target as HTMLInputElement).blur();
-          }
-        }}
-        onBlur={takeTile}
-        slotProps={{ htmlInput: { inputMode: 'numeric', 'aria-label': 'Tile to paint with' } }}
-        sx={{ width: 84 }}
-      />
-      <TextField
-        size={'small'}
-        label={'Region'}
-        value={regionText}
-        onChange={event => setRegionText(event.target.value)}
-        slotProps={{ htmlInput: { inputMode: 'numeric', 'aria-label': 'Region to paint' } }}
-        sx={{ width: 72 }}
-      />
-      <Tooltip title={'Region pen: paints the region above'}>
-        <span>
-          <ToggleButton
-            value={'region'}
-            aria-label={'Region pen'}
-            size={'small'}
-            selected={settings.tool === 'pen' && settings.brush?.kind === 'regions'}
-            disabled={regionId === null || regionId > MAX_REGION_ID}
-            onChange={() =>
-            {
-              painting.setBrush(regionBrush(regionId ?? 0));
-              painting.setTool('pen');
-            }}
-          >
-            <Tag fontSize={'small'}/>
-          </ToggleButton>
-        </span>
-      </Tooltip>
-      <Tooltip title={'Shadow pen: adds or removes a shadow on each quarter of a tile you drag over'}>
-        <ToggleButton
-          value={'shadow'}
-          aria-label={'Shadow pen'}
-          size={'small'}
-          selected={settings.tool === 'pen' && settings.brush?.kind === 'shadows'}
-          onChange={() =>
-          {
-            painting.setBrush(SHADOW_BRUSH);
-            painting.setTool('pen');
-          }}
-        >
-          <WbShade fontSize={'small'}/>
-        </ToggleButton>
-      </Tooltip>
-      <Divider flexItem orientation={'vertical'} sx={{ mx: 0.5 }}/>
-      <Typography variant={'caption'} color={'text.secondary'}>
-        Layer
-      </Typography>
-      <ToggleButtonGroup
-        exclusive
-        size={'small'}
-        value={settings.strip}
-        onChange={(_event, choice: LayerChoice | null) =>
-        {
-          if (choice !== null)
-          {
-            painting.setStrip(choice);
-          }
-        }}
-      >
-        {LAYER_CHOICES.map(({ choice, label }) => (
-          <ToggleButton key={label} value={choice} sx={{ px: 1, py: 0.25 }}>
-            {label}
-          </ToggleButton>
-        ))}
-      </ToggleButtonGroup>
-    </>
-  );
-};
-
-/**
- * The painting tools for a map: one button per tool, a readout of the brush in hand, and while the palette and layer
- * strip are being built a stand-in for picking a brush and a layer. Holding Shift lays tiles exactly as picked, shapes
- * and all, and holding the space bar paints one stroke on the layer named beside the tools.
+ * The painting tools for a map: one button per tool, the events first, and a readout of the brush in hand. Brushes
+ * come from the palette (tiles, regions and the shadow pen) and from the eyedropper, and the layer from the layer
+ * strip. Holding Shift lays tiles exactly as picked, shapes and all, and holding the space bar paints one stroke on the
+ * layer named beside the tools.
  * @param {{ painting: PaintState }} props The window's painting settings.
  * @returns {React.JSX.Element} The tool bar.
  */
@@ -222,8 +87,6 @@ const PaintToolBar = (props: { painting: PaintState }) =>
           </ToggleButton>
         ))}
       </ToggleButtonGroup>
-      <Divider flexItem orientation={'vertical'} sx={{ mx: 0.5 }}/>
-      <StandInPicker painting={painting} settings={settings}/>
       <Divider flexItem orientation={'vertical'} sx={{ mx: 0.5 }}/>
       <Typography variant={'caption'} color={'text.secondary'} data-testid={'paint-brush'}>
         {describeBrush(settings.brush)}

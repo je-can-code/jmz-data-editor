@@ -298,9 +298,9 @@ describe('ToolSession: the eyedropper', () =>
     // Act.
     drag(bench.session, [ at(0, 0), at(1, 0) ]);
 
-    // Assert.
+    // Assert: the brush names the map's tileset (4), so it paints only on maps drawn with it.
     expect([ bench.state.settings.brush, bench.state.settings.tool ])
-      .toEqual([ { kind: 'tiles', width: 2, height: 1, cells: [ TREE, makeAutotileId(GRASS, 5) ] }, 'swap' ]);
+      .toEqual([ { kind: 'tiles', width: 2, height: 1, cells: [ TREE, makeAutotileId(GRASS, 5) ], tilesetId: 4 }, 'swap' ]);
   });
 
   it('picks from the override\'s layer while its key is held', () =>
@@ -426,6 +426,44 @@ describe('ToolSession: strokes that do not end with a release', () =>
         .toThrow('finish "Other edit" first');
       other.cancel();
     });
+  });
+});
+
+describe('ToolSession: brushes from another tileset', () =>
+{
+  it('lays nothing with tiles picked from another tileset, and says so, where its own tileset\'s tiles paint', () =>
+  {
+    // Arrange: the bench map draws with tileset 4; the same dirt picked from tileset 7 and from tileset 4.
+    const foreign = sessionOn(benchWith(4, 3, meadow), { tool: 'pen', brush: { ...singleTileBrush(kindTile(DIRT)), tilesetId: 7 } });
+    const own = sessionOn(benchWith(4, 3, meadow), { tool: 'pen', brush: { ...singleTileBrush(kindTile(DIRT)), tilesetId: 4 } });
+    const before = cellsOf(foreign.map);
+
+    // Act: hovered, then a stroke and a fill with each.
+    foreign.session.move(at(1, 1));
+    const shown = foreign.session.overlay();
+    drag(foreign.session, [ at(1, 1), at(2, 1) ]);
+    foreign.state.setTool('fill');
+    drag(foreign.session, [ at(3, 2) ]);
+    drag(own.session, [ at(1, 1) ]);
+
+    // Assert.
+    expect([ cellsOf(foreign.map), foreign.hub.history(foreign.history).rows, shown.hoverLabel, shown.ghostTiles, stackAt(own.map, 1, 1)[0] ])
+      .toEqual([ before, [], 'Picked from another tileset', [], 'k18' ]);
+  });
+
+  it('still paints regions and erases with a brush picked on another tileset\'s palette, since neither lays its tiles', () =>
+  {
+    // Arrange: a region brush and a tiles brush, both from tileset 7's palette.
+    const regions = sessionOn(benchWith(4, 3, meadow), { tool: 'pen', brush: { ...regionBrush(6), tilesetId: 7 } });
+    const eraser = sessionOn(benchWith(4, 3, meadow), { tool: 'eraser', brush: { ...singleTileBrush(kindTile(DIRT)), tilesetId: 7 } });
+
+    // Act.
+    drag(regions.session, [ at(2, 2) ]);
+    drag(eraser.session, [ at(0, 0) ]);
+
+    // Assert: the region painted, and the tree erased.
+    expect([ regions.map.cellAt(2, 2, 5), stackAt(eraser.map, 0, 0)[3] ])
+      .toEqual([ 6, 0 ]);
   });
 });
 

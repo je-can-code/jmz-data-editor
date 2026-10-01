@@ -4,7 +4,7 @@ import type { MapCell } from '../renderer/camera.ts';
 import type { CellRect, GhostTile } from '../renderer/MapRenderer.ts';
 import type { Shaping, TilesetLayering } from '../tiles/layering.ts';
 import type { TileLayerIndex } from '../tiles/tileGrid.ts';
-import type { Brush, BrushKind } from './brush.ts';
+import { fitsTileset, type Brush, type BrushKind } from './brush.ts';
 import { cellsInEllipse, cellsInRect, clipRect, rectangleBetween, rectContains } from './geometry.ts';
 import {
   hasShadow,
@@ -356,25 +356,28 @@ class ToolSession
    */
   #start(map: MapDocument, cell: MapCell, pointer: ToolPointer, label: string | null): void
   {
-    const { tool, brush } = this.#host.settings();
+    const { tool, brush: inHand } = this.#host.settings();
     const mode = this.#layerMode(pointer);
     const context = paintContextFor(mode, pointer.shift ? 'exact' : 'auto', this.#host.layering(map));
+
+    // the eyedropper, the select tool and the eraser lay none of the brush's values, so its tileset is no matter.
     switch (tool)
     {
       case 'eyedropper':
-        this.#gesture = { kind: 'pick', anchor: cell, brushKind: brush?.kind ?? 'tiles', mode };
+        this.#gesture = { kind: 'pick', anchor: cell, brushKind: inHand?.kind ?? 'tiles', mode };
         return;
       case 'select':
         this.#startSelect(map, cell, pointer, mode);
         return;
       case 'eraser':
-        this.#startFreehand(map, cell, brush, brush?.kind ?? 'tiles', context, label);
+        this.#startFreehand(map, cell, inHand, inHand?.kind ?? 'tiles', context, label);
         return;
       default:
         break;
     }
 
-    // every other tool needs a brush in hand.
+    // every other tool lays the brush's values, so it needs a brush in hand, from this map's tileset.
+    const brush = this.#brushFor(map);
     if (brush === null)
     {
       return;
@@ -565,10 +568,11 @@ class ToolSession
       return;
     }
 
+    // what is picked off a map belongs to that map's tileset, and paints only on maps drawn with it.
     const picked = pickBrush(map, rectangleBetween(gesture.anchor, end), gesture.brushKind, choiceFor(gesture.mode));
     if (picked !== null)
     {
-      this.#host.pickBrush(picked);
+      this.#host.pickBrush({ ...picked, tilesetId: map.tilesetId });
       this.#host.pickTool(this.#toolBeforePick);
     }
   }
@@ -678,7 +682,15 @@ class ToolSession
    */
   #idlePreview(map: MapDocument, pointer: ToolPointer, cell: MapCell): ReturnType<typeof previewTool>
   {
-    const { tool, brush } = this.#host.settings();
+    // only the tools that lay the brush's values care which tileset it came from.
+    const { tool, brush: inHand } = this.#host.settings();
+    const lays = tool !== 'eraser' && tool !== 'eyedropper' && tool !== 'select';
+    const brush = lays ? this.#brushFor(map) : inHand;
+    if (inHand !== null && brush === null)
+    {
+      return { hover: { x: cell.x, y: cell.y, width: 1, height: 1 }, ghosts: [], label: 'Picked from another tileset' };
+    }
+
     return previewTool(map, cell, pointer.quarter, {
       tool,
       brush,
@@ -686,6 +698,20 @@ class ToolSession
       shaping: pointer.shift ? 'exact' : 'auto',
       layering: this.#host.layering(map),
     });
+  }
+
+  /**
+   * Finds the brush in hand as a map may be painted with it: tiles picked from another tileset would lay that tileset's
+   * ids here, which draw other pictures, so they count as nothing picked on this map (see {@link fitsTileset}).
+   * @param {MapDocument} map The map.
+   * @returns {Brush | null} The brush, or null when nothing is picked or what is picked is another tileset's.
+   */
+  #brushFor(map: MapDocument): Brush | null
+  {
+    const { brush } = this.#host.settings();
+    return brush !== null && fitsTileset(brush, map.tilesetId)
+      ? brush
+      : null;
   }
 
   /**

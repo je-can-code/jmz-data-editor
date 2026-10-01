@@ -10,9 +10,10 @@ import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.
 import { MAP_INFOS_KEY, TILESETS_KEY, type DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { cellInspector } from '../../../../src/mapEditor/core/palette/cellInspector.ts';
-import { paintSelection } from '../../../../src/mapEditor/core/palette/paintSelection.ts';
+import { EMPTY_BRUSH, paintSelection } from '../../../../src/mapEditor/core/palette/paintSelection.ts';
 import { paletteMode } from '../../../../src/mapEditor/core/palette/paletteMode.ts';
 import { TILESET_MARKS_DOCUMENT } from '../../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
+import { PaintState } from '../../../../src/mapEditor/core/tools/PaintState.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { LayersPanel } from '../../../../src/mapEditor/workspace/panels/layers/LayersPanel.tsx';
 import { PalettePanel } from '../../../../src/mapEditor/workspace/panels/palette/PalettePanel.tsx';
@@ -26,9 +27,10 @@ import { buildTreeRows } from '../../support/treeFixtures.ts';
  *
  * The palette shows the tiles of the map with focus and nothing before a map is picked; its tabs follow the sheets
  * the map's tileset names; switching to passability opens the editor every map follows, and closing the palette
- * closes it. The layers panel's strip sets the window's layer choice, and its stack view reads the cell under the
- * pointer and fixes a layer as one step in that map's history, handing undo to it. The drawing itself needs a canvas
- * this environment lacks, so what is checked here is the wiring around it.
+ * closes it. A pick in the palette is made to be painted, so with the events in hand it takes up the pen. The layers
+ * panel's strip sets the window's layer choice, and its stack view reads the cell under the pointer and fixes a layer
+ * as one step in that map's history, handing undo to it. The drawing itself needs a canvas this environment lacks, so
+ * what is checked here is the wiring around it.
  */
 describe('the palette and the layers panel', () =>
 {
@@ -55,14 +57,16 @@ describe('the palette and the layers panel', () =>
       loadImage: async () => null,
       loadEditorData: async () => contents[TILESET_MARKS_DOCUMENT],
     } as unknown as MapEditorApi;
-    const controller = new WorkspaceController({ hub, api, openDocument } as unknown as MapEditorServices);
-    return { hub, controller };
+    const painting = new PaintState();
+    const controller = new WorkspaceController({ hub, api, openDocument, painting } as unknown as MapEditorServices);
+    return { hub, controller, painting };
   };
 
   afterEach(() =>
   {
     paletteMode.setEditing('tiles');
     paintSelection.setLayer('auto');
+    paintSelection.setBrush(EMPTY_BRUSH);
     cellInspector.forgetMap(5);
   });
 
@@ -146,5 +150,28 @@ describe('the palette and the layers panel', () =>
     // Assert: the cell is empty on layer 1, the step is the map's, and undo now acts on the map.
     expect([ hub.map('map:5').cellAt(1, 0, 0), hub.history('map:5').rows.map(row => row.label), controller.getState().activeHistory ])
       .toStrictEqual([ 0, [ 'Clear layer 1 at 1, 0' ], 'map:5' ]);
+  });
+
+  // last, since the palette remembers each tileset's pick for as long as the page lives.
+  it('takes up the pen when the shadow pen is picked with the events in hand, handing the window its brush', async () =>
+  {
+    // Arrange: a window with the events in hand, its palette on the regions tab.
+    const { controller, painting } = buildWorkspace();
+    render(
+      <WorkspaceProvider controller={controller}>
+        <PalettePanel/>
+      </WorkspaceProvider>
+    );
+    act(() => controller.selectTreeMaps([ 5 ]));
+    await screen.findByTestId('palette');
+    fireEvent.click(screen.getByRole('tab', { name: 'R' }));
+    const before = painting.settings.tool;
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Shadow pen' }));
+
+    // Assert: the shadow brush is the window's, and the pen is in hand to draw with it.
+    expect([ before, painting.settings.tool, paintSelection.brush.kind ])
+      .toStrictEqual([ 'events', 'pen', 'shadows' ]);
   });
 });

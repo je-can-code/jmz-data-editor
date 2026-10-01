@@ -4,6 +4,7 @@ import type { CloseTarget } from '../../../src/mapEditor/core/closeGuard.ts';
 import { BUILT_IN_ENTRIES } from '../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
+import { paintSelection } from '../../../src/mapEditor/core/palette/paintSelection.ts';
 import { createMapEditorServices, type MapEditorEnvironment } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../support/standIns.ts';
@@ -19,7 +20,8 @@ import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../s
  * other live window holds exactly this window's unsaved state, and a closing window says goodbye at once, so no
  * window keeps counting it. Conflicts settle only the way the author chooses. And a stop leaves nothing listening.
  * A started window reads js/plugins.js and switches on the modules whose plugins it enables; one that cannot read it
- * keeps the core's kinds alone.
+ * keeps the core's kinds alone. A started window's painting tools paint with what the palette and the layer strip
+ * pick.
  */
 describe('MapEditorServices', () =>
 {
@@ -480,5 +482,24 @@ describe('MapEditorServices', () =>
     // Assert.
     expect([ window.count(), sources[0].closed ])
       .toStrictEqual([ 0, true ]);
+  });
+
+  it('paints with what the palette and the layer strip pick once started, and stops following them once stopped', () =>
+  {
+    // Arrange: a started window.
+    const { environment } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices(environment);
+    services.start();
+
+    // Act: layer 3 picked on the strip, then the window stopped and layer 2 picked.
+    paintSelection.setLayer(2);
+    const whileStarted = services.painting.settings.strip;
+    services.stop();
+    paintSelection.setLayer(1);
+
+    // Assert.
+    expect([ whileStarted, services.painting.settings.strip ])
+      .toStrictEqual([ 2, 2 ]);
+    paintSelection.setLayer('auto');
   });
 });

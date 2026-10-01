@@ -305,7 +305,7 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       const footprint = next.footprint ?? 3;
       const tileId = next.tileId ?? makeAutotileId(unusedGroundKind(map), 0);
       before ??= painting.settings;
-      painting.setBrush(tileBrush(new Array(footprint * footprint).fill(tileId), footprint, footprint));
+      painting.setBrush({ ...tileBrush(new Array(footprint * footprint).fill(tileId), footprint, footprint), tilesetId: map.tilesetId });
       painting.setStrip('auto');
       painting.setTool('pen');
       painter.resetPaintedInputs();

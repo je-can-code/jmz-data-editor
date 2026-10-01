@@ -3,6 +3,7 @@ import {
   brushFootprint,
   brushValueAt,
   describeBrush,
+  fitsTileset,
   regionBrush,
   SHADOW_BRUSH,
   singleTileBrush,
@@ -16,8 +17,27 @@ import {
  * shadows). The contract the tools depend on is that a brush holds exactly what was picked, refuses anything that is
  * not a tile id or a region id before it can reach a map, and repeats its pattern from wherever a tool started, so a
  * brush of several tiles dragged across the map lays one seamless pattern rather than overlapping stamps, left of its
- * start as well as right.
+ * start as well as right. A tiles brush that names its tileset paints only on maps drawn with it, since the same id
+ * draws another tileset's picture anywhere else; region ids and shadows paint on any map.
  */
+describe('fitsTileset', () =>
+{
+  it('lets a tiles brush paint only on its own tileset\'s maps, and a region brush or a brush naming none anywhere', () =>
+  {
+    // Arrange: tiles from tileset 4, tiles naming no tileset, and regions picked on tileset 4's palette.
+    const tiles = { ...singleTileBrush(2816), tilesetId: 4 };
+    const unnamed = singleTileBrush(2816);
+    const regions = { ...regionBrush(3), tilesetId: 4 };
+
+    // Act: each on a map of tileset 4 and on a map of tileset 7.
+    const fits = [ tiles, unnamed, regions ].map(brush => [ fitsTileset(brush, 4), fitsTileset(brush, 7) ]);
+
+    // Assert.
+    expect(fits)
+      .toEqual([ [ true, false ], [ true, true ], [ true, true ] ]);
+  });
+});
+
 describe('tileBrush', () =>
 {
   it('holds the tiles exactly as given, an autotile in any shape', () =>

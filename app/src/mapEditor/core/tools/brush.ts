@@ -19,6 +19,13 @@ type Brush = {
   readonly kind: BrushKind;
 
   /**
+   * The tileset the tile ids belong to, which a brush picked in the palette or off a map names: a tiles brush naming
+   * one paints only on maps drawn with that tileset, since the same id draws another picture on another. Region ids and
+   * shadows belong to no tileset and paint anywhere. Left out, as on a brush built by hand, it paints on any map.
+   */
+  readonly tilesetId?: number;
+
+  /**
    * How many cells across.
    */
   readonly width: number;
@@ -142,6 +149,19 @@ const brushFootprint = (brush: Brush, cell: MapCell): CellRect =>
 };
 
 /**
+ * Reports whether a brush may paint on a map drawn with a tileset: a tiles brush only on maps of the tileset it names,
+ * since its ids would lay another tileset's pictures anywhere else; regions and shadows, and a brush naming no
+ * tileset, anywhere.
+ * @param {Brush} brush The brush.
+ * @param {number} tilesetId The map's tileset.
+ * @returns {boolean} True when the brush may paint there.
+ */
+const fitsTileset = (brush: Brush, tilesetId: number): boolean =>
+{
+  return brush.kind !== 'tiles' || brush.tilesetId === undefined || brush.tilesetId === tilesetId;
+};
+
+/**
  * Says what a brush holds, in a few words, for a readout beside the tools.
  * @param {Brush | null} brush The brush, or null when nothing is picked.
  * @returns {string} The words.
@@ -164,5 +184,5 @@ const describeBrush = (brush: Brush | null): string =>
     : `${brush.width} by ${brush.height} ${brush.kind === 'regions' ? 'regions' : 'tiles'}`;
 };
 
-export { brushFootprint, brushValueAt, describeBrush, MAX_REGION_ID, regionBrush, SHADOW_BRUSH, singleTileBrush, tileBrush };
+export { brushFootprint, brushValueAt, describeBrush, fitsTileset, MAX_REGION_ID, regionBrush, SHADOW_BRUSH, singleTileBrush, tileBrush };
 export type { Brush, BrushKind };
