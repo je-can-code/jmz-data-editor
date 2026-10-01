@@ -204,7 +204,9 @@ const nextPassageState = (tileId: number, state: PassageState): PassageState =>
 /**
  * Works out the passage bits MZ gives one shape of an open ceiling: each side the shape shows an edge on blocks the
  * step out that way, except the bottom, which only ever meets the wall face beneath; and the palette's sample shape,
- * which no map uses, is blocked every way. Every open ceiling Chef Adventure ships is written exactly this way.
+ * which no map uses, is blocked every way. Every ceiling MZ wrote open in Chef Adventure's tilesets is written exactly
+ * this way. Some open ceilings carry no edges at all (a few in tilesets 7 and 20, and every one in a tileset whose flags
+ * list stops before the ceilings), and opening one of those here gives it MZ's edges.
  * @param {number} shape The shape, 0 to 47.
  * @returns {number} The passage bits.
  */

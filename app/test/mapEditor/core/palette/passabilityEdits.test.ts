@@ -27,9 +27,10 @@ import { locateGameProject } from '../../../support/gameProject.ts';
  * engine reads whichever shape a map stores, and never to the kind beside it; a ladder, bush, counter or damage floor
  * switched back on goes on just the shapes it was on when switched off, since MZ ships grass that is a bush on only
  * some shapes, and switching it off and on again must leave the kind as it was. Passage cycles open, blocked, star as
- * MZ's does (stars for plain tiles alone), and an open ceiling gets MZ's own edges, which every open ceiling Chef
- * Adventure ships matches; opening one way out of a ceiling keeps the edges facing that way too, so clicking a way out
- * twice changes nothing. Each edit is one undoable step in the tilesets' history, and a flags list written short by
+ * MZ's does (stars for plain tiles alone), and an open ceiling gets MZ's own edges, which every ceiling MZ wrote open in
+ * Chef Adventure's tilesets matches (a few in tilesets 7 and 20 carry no edges at all, and opening one here gives it
+ * MZ's); opening one way out of a ceiling keeps the edges facing that way too, so clicking a way out twice changes
+ * nothing. Each edit is one undoable step in the tilesets' history, and a flags list written short by
  * a tool is filled out with zeros in the same step, so undo takes that back out too.
  */
 const MZ_BITS = 0x600;
@@ -152,9 +153,11 @@ const game = locateGameProject();
 
 describe.skipIf(game === null)('the open ceilings Chef Adventure ships', () =>
 {
-  it('are every one written exactly as an open ceiling is written here', () =>
+  it('are, wherever MZ wrote them, written exactly as opening one here writes it', () =>
   {
-    // Arrange: every ceiling kind MZ wrote open: its inside open and its sample shape blocked every way.
+    // Arrange: every ceiling kind MZ wrote open: its inside open and its sample shape blocked every way. Ceilings with
+    // no edges at all, a few in tilesets 7 and 20 and every one in a tileset whose flags stop short, are not MZ's
+    // writing and are left out.
     const tilesets = JSON.parse(readFileSync(`${game as string}/data/Tilesets.json`, 'utf8')) as (RmmzTileset | null)[];
     const open = tilesets.flatMap(tileset => (tileset === null ? [] : Array.from({ length: 128 }, (_, kind) => ({ tileset, kind }))))
       .filter(({ tileset, kind }) =>
@@ -168,9 +171,10 @@ describe.skipIf(game === null)('the open ceilings Chef Adventure ships', () =>
       .filter((id, shape) => ((tileset.flags[id] ?? 0) & 0x0f) !== ceilingPassage(shape))
       .map(id => `${tileset.id}:${id}`));
 
-    // Assert.
-    expect([ open.length, mismatches ])
-      .toStrictEqual([ 390, [] ]);
+    // Assert: some are found, so the check is never empty, and none differs; how many there are is not pinned, since
+    // blocking or opening a ceiling, here or in MZ, changes it.
+    expect([ open.length > 0, mismatches ])
+      .toStrictEqual([ true, [] ]);
   });
 });
 
