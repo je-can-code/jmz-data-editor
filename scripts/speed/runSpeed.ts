@@ -25,7 +25,9 @@
  *   - events, with the whole map on screen and the real mouse: twenty clicks selecting one event after another, a box
  *     drawn from beside the map around every event on it, the top half's events dragged about (on Map361 every tile
  *     holds an event, so the ghosts show blocked tiles and the drop is refused), and a committed drop: the bottom row
- *     emptied, every other event selected and dragged one row down. None of them may drop a frame.
+ *     emptied, every other event selected and dragged one row down. None of them may drop a frame;
+ *   - the event window, last: a real double-click on the map's first event, timed to the first frame of the event's
+ *     window showing it, the window taking the map's live copy from the map's page.
  *
  * The page shows the map with its quick panel beside it (quick=1), the two sharing one selection as in the workspace,
  * so whatever the panel renders for a new selection, or for a drop that moves every selected event, lands in the
@@ -101,7 +103,18 @@ type MapResult = {
   warmOpenMs: number;
   shownAgainMs: number;
   events: EventsResult;
+  eventWindow: EventWindowResult;
   verdicts: Record<string, Verdict>;
+};
+
+/**
+ * What opening one event's window came to: which event, and the time to the first frame of its window showing it,
+ * from the double-click on it and from the window's own navigation start.
+ */
+type EventWindowResult = {
+  eventId: number;
+  doubleClickToReadyMs: number;
+  navigationToReadyMs: number;
 };
 
 /**
@@ -755,6 +768,51 @@ const measureEvents = async (page: Page, size: number[]): Promise<EventsResult> 
 };
 
 /**
+ * Opens an event's window the way the author does, with a real double-click on the event, and times it to the first
+ * frame of the window showing the event. With no NW.js shell to relay to, the page opens the window itself, as a popup
+ * the browser hands over as a new page, and the window takes the map's live copy from this page over the sync channel.
+ * The popup shares this page's process, where the shell gives every window a process of its own, so this times the
+ * window's loading and its copy of the map rather than a new process starting.
+ * @param {Page} page The map page.
+ * @returns {Promise<EventWindowResult>} What it came to.
+ */
+const measureEventWindow = async (page: Page): Promise<EventWindowResult> =>
+{
+  // the map's first event, centred and close up, so the double-click lands on it alone.
+  const eventId = await page.evaluate(() =>
+  {
+    const view = (window as unknown as HookWindow).__jmzMapView;
+    view.events.clear();
+    const [ first ] = view.events.eventIds();
+    const cell = view.events.cellOf(first) as { x: number; y: number };
+    view.lookAt(cell.x, cell.y, 2);
+    return first;
+  });
+  await page.waitForTimeout(400);
+
+  const box = await page.locator(MAP_CANVAS).boundingBox();
+  const at = await page.evaluate(id => (window as unknown as HookWindow).__jmzMapView.events.screenOfEvent(id), eventId);
+  if (box === null || at === null)
+  {
+    throw new Error(`event ${eventId} is not on screen to double-click`);
+  }
+
+  // the clock is read before the double-click, so the time measured is never short of the real one.
+  const opened = page.context().waitForEvent('page', { timeout: 15_000 });
+  const clickedAt = await page.evaluate(() => performance.timeOrigin + performance.now());
+  await page.mouse.dblclick(box.x + at.x, box.y + at.y);
+  const eventPage = await opened;
+  await eventPage.waitForFunction(() => performance.getEntriesByName('jmz-event-window-ready').length > 0, null, { timeout: 15_000 });
+  const ready = await eventPage.evaluate(() =>
+  {
+    const [ mark ] = performance.getEntriesByName('jmz-event-window-ready');
+    return { origin: performance.timeOrigin, startTime: mark.startTime };
+  });
+  await eventPage.close();
+  return { eventId, doubleClickToReadyMs: ready.origin + ready.startTime - clickedAt, navigationToReadyMs: ready.startTime };
+};
+
+/**
  * Opens one map in a fresh browser and measures everything the budgets cover.
  * @param {Options} options The settings.
  * @param {string} uiBase The UI's origin.
@@ -816,12 +874,15 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
       throw new Error(`the view did not let its context go and draw again: hidden "${shown.hidden}", shown "${shown.shown}"`);
     }
 
+    // after every frame recording, since the window it opens shares this page's process.
+    const eventWindow = await measureEventWindow(page);
     await page.close();
 
     const verdicts: Record<string, Verdict> = {
       coldOpen: judgeOpen(coldOpenMs, BUDGETS.coldOpenMs, 'cold open'),
       warmOpen: judgeOpen(warm.ms, BUDGETS.warmOpenMs, 'warm open'),
       shownAgain: judgeOpen(shown.ms, BUDGETS.shownAgainMs, 'shown again'),
+      eventWindow: judgeOpen(eventWindow.doubleClickToReadyMs, BUDGETS.eventWindowOpenMs, 'event window open'),
       stroke: stroke.verdict,
       strokeWithRings: strokeWithRings.verdict,
       eventClick: events.click.verdict,
@@ -850,6 +911,7 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
       warmOpenMs: warm.ms,
       shownAgainMs: shown.ms,
       events,
+      eventWindow,
       verdicts,
     };
   }
@@ -890,6 +952,8 @@ const printMap = (result: MapResult): void =>
   console.log(`  cold open ${cell(result.coldOpenMs, 1)} ms  ${verdictText(result.verdicts['coldOpen'])}`);
   console.log(`  warm open ${cell(result.warmOpenMs, 1)} ms  ${verdictText(result.verdicts['warmOpen'])}`);
   console.log(`  shown again ${cell(result.shownAgainMs, 1)} ms  ${verdictText(result.verdicts['shownAgain'])}`);
+  console.log(`  event window ${cell(result.eventWindow.doubleClickToReadyMs, 1)} ms from the double-click on event ${result.eventWindow.eventId}`
+    + ` (${cell(result.eventWindow.navigationToReadyMs, 1)} ms from its navigation)  ${verdictText(result.verdicts['eventWindow'])}`);
   PATHS.forEach(kind =>
   {
     const { summary, verdict, gpuBusy: busy, stalls } = result.paths[kind];
@@ -938,6 +1002,7 @@ const printSpread = (results: MapResult[], maps: number[]): void =>
     line('cold open (ms)', mine.map(result => result.coldOpenMs));
     line('warm open (ms)', mine.map(result => result.warmOpenMs));
     line('shown again (ms)', mine.map(result => result.shownAgainMs));
+    line('event window open (ms)', mine.map(result => result.eventWindow.doubleClickToReadyMs));
     PATHS.forEach(kind =>
     {
       line(`${kind} dropped frames`, mine.map(result => result.paths[kind].summary.droppedFrames));

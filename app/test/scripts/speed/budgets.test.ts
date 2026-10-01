@@ -177,5 +177,18 @@ describe('budgets', () =>
           { pass: false, reasons: [ 'the cold open never finished' ] },
         ]);
     });
+
+    it('holds an event window to half a second from the double-click, the plan\'s budget', () =>
+    {
+      // Arrange: either side of the line.
+      const opens = [ 499, 500 ];
+
+      // Act.
+      const verdicts = opens.map(ms => judgeOpen(ms, BUDGETS.eventWindowOpenMs, 'event window open'));
+
+      // Assert.
+      expect(verdicts)
+        .toStrictEqual([ { pass: true, reasons: [] }, { pass: false, reasons: [ 'event window open took 500 ms, over 500 ms' ] } ]);
+    });
   });
 });

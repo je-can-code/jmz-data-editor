@@ -1,0 +1,438 @@
+/**
+ * @vitest-environment jsdom
+ */
+import React from 'react';
+import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import { WindowShell } from '../../../../src/core/infrastructure/shell/WindowShell.ts';
+import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
+import { CommandEditorRegistry } from '../../../../src/mapEditor/core/commands/CommandEditorRegistry.ts';
+import { registerBuiltInCommands } from '../../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
+import { PluginHeaderStore } from '../../../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
+import { targetHistory } from '../../../../src/mapEditor/core/eventWindow/eventWindowTarget.ts';
+import { DocumentHub, type DocumentStore } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
+import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
+import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
+import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
+import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
+import { SoundPlayerContext } from '../../../../src/mapEditor/views/commandList/commandListResources.ts';
+import { EventWindowView } from '../../../../src/mapEditor/views/EventWindowView.tsx';
+import { eventWindowMap, heldEvent, markedPage, TARGET } from '../../support/eventWindowFixtures.ts';
+
+/*
+ * The event window is the full editor of one event, in its own window. It owes the author the event's map first (another
+ * window's live copy or the file), with a message when it cannot be had, and the tilesets alongside for the graphic
+ * picker; then the event's name, note and pages, and on the page shown its conditions, graphic, movement, options,
+ * priority, trigger and commands. Every change is one step in the event's own history, never the map's, with undo and
+ * redo from the header and from Ctrl+Z and Ctrl+Y anywhere in the window, and Ctrl+S saves the map with whatever is
+ * still being typed. The page tabs add, move, copy, paste, duplicate and delete pages from their buttons and keys,
+ * showing the page each change lands on. The title names the event and its map. When the event goes from the map in
+ * another window, a message stands in for the editor until an undo brings the event back.
+ *
+ * What gets written lives in the services the core tests cover; these check that each control reaches its service.
+ * The fixture's event 2 holds pages marked 1, 2 and 3, each with a comment naming it.
+ */
+describe('EventWindowView', () =>
+{
+  /**
+   * The tilesets the fixture map draws with: tileset 4.
+   */
+  const TILESETS: JsonValue = [ null, null, null, null, { id: 4, flags: [], mode: 1, name: 'Town', note: '', tilesetNames: [ '', '', '', '', '', '', '', '', '' ] } ];
+
+  /**
+   * Renders the event window over a real hub.
+   * @param {object} options Whether the hub holds the map already, the map, what opening a document does, and the store.
+   * @returns {object} The hub, the store and the opener.
+   */
+  const renderWindow = (options: { held?: boolean; map?: RmmzMap; open?: (key: DocumentKey) => Promise<unknown>; store?: DocumentStore } = {}) =>
+  {
+    const map = options.map ?? eventWindowMap();
+    const store = options.store ?? {
+      load: vi.fn(async (key: DocumentKey) => (key === 'tilesets' ? TILESETS : map as unknown as JsonValue)),
+      save: vi.fn(async () => undefined),
+    };
+    const hub = new DocumentHub({ clientId: 'event-window', store });
+    if (options.held !== false)
+    {
+      hub.adopt('map:1', map as unknown as JsonValue);
+    }
+
+    const catalog = new CommandCatalog();
+    registerBuiltInCommands(catalog);
+    const openDocument = vi.fn(options.open ?? (async (key: DocumentKey) => hub.load(key)));
+    const services = {
+      hub,
+      catalog,
+      commandEditors: new CommandEditorRegistry(),
+      api: null,
+      pluginHeaders: new PluginHeaderStore(),
+      loadCommandResources: async () => undefined,
+      openDocument,
+      shell: new WindowShell({ channel: null, origin: 'http://ui', openWindow: () => null }),
+    } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <SoundPlayerContext.Provider value={vi.fn()}>
+          <EventWindowView mapId={TARGET.mapId} eventId={TARGET.eventId}/>
+        </SoundPlayerContext.Provider>
+      </MapEditorServicesProvider>
+    );
+    return { hub, store, openDocument };
+  };
+
+  /**
+   * Reads the names in the event's own history, oldest first.
+   * @param {DocumentHub} hub The hub.
+   * @returns {string[]} The step names.
+   */
+  const stepsOf = (hub: DocumentHub): string[] => hub.history(targetHistory(TARGET)).rows.map(row => row.label);
+
+  /**
+   * Reads which page tab is shown.
+   * @returns {string | null} The shown tab's name.
+   */
+  const shownTab = (): string | null => screen.getAllByRole('tab').find(tab => tab.getAttribute('aria-selected') === 'true')?.getAttribute('aria-label') ?? null;
+
+  /**
+   * Lets the window's loads settle.
+   */
+  const settle = async (): Promise<void> =>
+  {
+    await act(async () =>
+    {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
+
+  it('holds the map first, asking for the tilesets alongside, then shows the event, its pages and the first page\'s commands', async () =>
+  {
+    // Arrange: the window holds nothing yet.
+    const { openDocument } = renderWindow({ held: false });
+    const waiting = screen.queryByLabelText('Opening the event') !== null;
+
+    // Act.
+    await settle();
+
+    // Assert.
+    expect([
+      waiting,
+      openDocument.mock.calls.map(([ key ]) => key).sort(),
+      (screen.getByLabelText('Name') as HTMLInputElement).value,
+      screen.getAllByRole('tab').map(tab => tab.getAttribute('aria-label')),
+      screen.queryByText('page 1') !== null,
+      screen.queryByText('page 2'),
+    ])
+      .toStrictEqual([ true, [ 'map:1', 'tilesets' ], 'EV002', [ 'Page 1', 'Page 2', 'Page 3' ], true, null ]);
+  });
+
+  it('says so when the map cannot be opened', async () =>
+  {
+    // Arrange.
+    renderWindow({ held: false, open: async () => Promise.reject(new Error('the server is down')) });
+
+    // Act.
+    await settle();
+
+    // Assert.
+    expect(screen.getByText('Map 1 could not be opened: the server is down'))
+      .toBeInTheDocument();
+  });
+
+  it('titles the window after the event and its map', () =>
+  {
+    // Arrange: nothing beyond the render; without the project's names, the map reads as its number.
+
+    // Act.
+    renderWindow();
+
+    // Assert.
+    expect(document.title)
+      .toBe('EV002 - Map 1 - jmz-map-editor');
+  });
+
+  it('renames the event as a step in its own history, never the map\'s', () =>
+  {
+    // Arrange.
+    const { hub } = renderWindow();
+    const name = screen.getByLabelText('Name');
+
+    // Act.
+    fireEvent.change(name, { target: { value: 'Gate Guard' } });
+    fireEvent.blur(name);
+
+    // Assert.
+    expect([ heldEvent(hub).name, stepsOf(hub), hub.history(mapHistoryKey(1)).rows.length, document.title ])
+      .toStrictEqual([ 'Gate Guard', [ 'Rename event' ], 0, 'Gate Guard - Map 1 - jmz-map-editor' ]);
+  });
+
+  it('writes the note exactly as typed', () =>
+  {
+    // Arrange.
+    const { hub } = renderWindow();
+    const note = screen.getByLabelText('Note');
+
+    // Act.
+    fireEvent.change(note, { target: { value: '<blueprint:guard>\nline two' } });
+    fireEvent.blur(note);
+
+    // Assert.
+    expect([ heldEvent(hub).note, stepsOf(hub) ])
+      .toStrictEqual([ '<blueprint:guard>\nline two', [ 'Edit event note' ] ]);
+  });
+
+  it('turns a condition on, and keeps the pickers of conditions not ticked out of reach', () =>
+  {
+    // Arrange: no condition of page 1 is ticked.
+    const { hub } = renderWindow();
+    const reachableBefore = screen.getByTestId('condition-switch1').hasAttribute('inert');
+
+    // Act.
+    fireEvent.click(screen.getByLabelText('Use the switch condition'));
+
+    // Assert: the second switch, still unticked, stays out of reach.
+    expect([
+      reachableBefore,
+      screen.getByTestId('condition-switch1').hasAttribute('inert'),
+      screen.getByTestId('condition-switch2').hasAttribute('inert'),
+      heldEvent(hub).pages[0].conditions.switch1Valid,
+      stepsOf(hub),
+    ])
+      .toStrictEqual([ true, false, true, true, [ 'Turn on switch condition (page 1)' ] ]);
+  });
+
+  it('changes an option, the priority and the trigger, each a step', () =>
+  {
+    // Arrange: page 1 starts by player touch, drawn the same as characters.
+    const { hub } = renderWindow();
+
+    // Act.
+    fireEvent.click(screen.getByLabelText('Through'));
+    fireEvent.mouseDown(screen.getByLabelText('Priority'));
+    fireEvent.click(screen.getByRole('option', { name: 'Above characters' }));
+    fireEvent.mouseDown(screen.getByLabelText('Trigger'));
+    fireEvent.click(screen.getByRole('option', { name: 'Parallel' }));
+
+    // Assert.
+    const [ page ] = heldEvent(hub).pages;
+    expect([ page.through, page.priorityType, page.trigger, stepsOf(hub) ])
+      .toStrictEqual([ true, 2, 4, [ 'Turn on through (page 1)', 'Change priority (page 1)', 'Change trigger (page 1)' ] ]);
+  });
+
+  it('mounts the graphic picker and the movement settings on the page, each change a step of the page shown', () =>
+  {
+    // Arrange: page 1 shows Sheet1, fixed in place.
+    const { hub } = renderWindow();
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'No image' }));
+    fireEvent.mouseDown(screen.getByLabelText('Type'));
+    fireEvent.click(screen.getByRole('option', { name: 'Random' }));
+
+    // Assert.
+    const [ page ] = heldEvent(hub).pages;
+    expect([ page.image.characterName, page.moveType, stepsOf(hub) ])
+      .toStrictEqual([ '', 1, [ 'Change graphic (page 1)', 'Change movement (page 1)' ] ]);
+  });
+
+  it('shows another page from its tab, with its own commands', () =>
+  {
+    // Arrange.
+    renderWindow();
+
+    // Act.
+    fireEvent.click(screen.getByRole('tab', { name: 'Page 2' }));
+
+    // Assert.
+    expect([ shownTab(), screen.queryByText('page 2') !== null, screen.queryByText('page 1') ])
+      .toStrictEqual([ 'Page 2', true, null ]);
+  });
+
+  it('adds a page after the one shown, moves it, and deletes it from the buttons, showing the page each lands on', () =>
+  {
+    // Arrange.
+    const { hub } = renderWindow();
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    const added = shownTab();
+    fireEvent.click(screen.getByRole('button', { name: 'Move this page right' }));
+    const moved = shownTab();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    // Assert: back to the three pages, in their order.
+    expect([ added, moved, shownTab(), heldEvent(hub).pages, stepsOf(hub) ])
+      .toStrictEqual([ 'Page 2', 'Page 3', 'Page 3', [ markedPage(1), markedPage(2), markedPage(3) ], [ 'Add page', 'Move page 2', 'Delete page 3' ] ]);
+  });
+
+  it('clears the page shown, and offers no delete for an event\'s only page', () =>
+  {
+    // Arrange: an event of one page.
+    const map = eventWindowMap();
+    map.events[2]!.pages = [ markedPage(1) ];
+    const { hub } = renderWindow({ map });
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+    // Assert.
+    expect([ (screen.getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled, heldEvent(hub).pages[0].list.length, stepsOf(hub) ])
+      .toStrictEqual([ true, 1, [ 'Clear page 1' ] ]);
+  });
+
+  it('deletes and duplicates the page shown from the keys while the tabs have focus', () =>
+  {
+    // Arrange.
+    const { hub } = renderWindow();
+    const tab = screen.getByRole('tab', { name: 'Page 1' });
+
+    // Act.
+    fireEvent.keyDown(tab, { key: 'Delete' });
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Page 1' }), { key: 'd', ctrlKey: true });
+
+    // Assert.
+    expect([ heldEvent(hub).pages, stepsOf(hub) ])
+      .toStrictEqual([ [ markedPage(2), markedPage(2), markedPage(3) ], [ 'Delete page 1', 'Duplicate page 1' ] ]);
+  });
+
+  it('copies the page shown to the clipboard, and pastes it after the page shown, from the keys', () =>
+  {
+    // Arrange.
+    const { hub } = renderWindow();
+    let copied = '';
+    const setData = vi.fn((_type: string, text: string) =>
+    {
+      copied = text;
+    });
+
+    // Act.
+    fireEvent.copy(screen.getByRole('tab', { name: 'Page 1' }), { clipboardData: { setData } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Page 3' }));
+    fireEvent.paste(screen.getByRole('tab', { name: 'Page 3' }), { clipboardData: { getData: () => copied } });
+
+    // Assert.
+    expect([ heldEvent(hub).pages, shownTab(), stepsOf(hub) ])
+      .toStrictEqual([ [ markedPage(1), markedPage(2), markedPage(3), markedPage(1) ], 'Page 4', [ 'Paste page' ] ]);
+  });
+
+  it('says so when a paste finds no copied page, changing nothing', () =>
+  {
+    // Arrange.
+    const { hub } = renderWindow();
+
+    // Act.
+    fireEvent.paste(screen.getByRole('tab', { name: 'Page 1' }), { clipboardData: { getData: () => 'Hello there' } });
+
+    // Assert.
+    expect([ screen.getByText('The clipboard holds no copied page.') !== null, heldEvent(hub).pages.length ])
+      .toStrictEqual([ true, 3 ]);
+  });
+
+  it('undoes and redoes from the header, and from Ctrl+Z and Ctrl+Y anywhere in the window', () =>
+  {
+    // Arrange: one rename made.
+    const { hub } = renderWindow();
+    const name = screen.getByLabelText('Name');
+    fireEvent.change(name, { target: { value: 'Gate Guard' } });
+    fireEvent.blur(name);
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    const undone = heldEvent(hub).name;
+    fireEvent.keyDown(window, { key: 'y', ctrlKey: true });
+    const redone = heldEvent(hub).name;
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    const undoneAgain = heldEvent(hub).name;
+    fireEvent.click(screen.getByRole('button', { name: 'Redo' }));
+
+    // Assert.
+    expect([ undone, redone, undoneAgain, heldEvent(hub).name ])
+      .toStrictEqual([ 'EV002', 'Gate Guard', 'EV002', 'Gate Guard' ]);
+  });
+
+  it('jumps back to the start from the history list', () =>
+  {
+    // Arrange: two steps made.
+    const { hub } = renderWindow();
+    fireEvent.click(screen.getByLabelText('Through'));
+    fireEvent.click(screen.getByLabelText('Use the item condition'));
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'History' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Start' }));
+
+    // Assert: both undone, both still there to redo.
+    expect([ heldEvent(hub).pages[0], hub.history(targetHistory(TARGET)).position ])
+      .toStrictEqual([ markedPage(1), 0 ]);
+  });
+
+  it('saves the map on Ctrl+S, with the name still being typed', async () =>
+  {
+    // Arrange: a new name typed, the field still holding it.
+    const { hub, store } = renderWindow();
+    const name = screen.getByLabelText('Name') as HTMLInputElement;
+    name.focus();
+    fireEvent.change(name, { target: { value: 'Gate Guard' } });
+
+    // Act.
+    await act(async () =>
+    {
+      fireEvent.keyDown(name, { key: 's', ctrlKey: true });
+      await Promise.resolve();
+    });
+
+    // Assert.
+    const [ [ savedKey, saved ] ] = vi.mocked(store.save).mock.calls;
+    expect([ savedKey, (saved as unknown as RmmzMap).events[2]!.name, hub.isDirty('map:1'), stepsOf(hub) ])
+      .toStrictEqual([ 'map:1', 'Gate Guard', false, [ 'Rename event' ] ]);
+  });
+
+  it('says so when the event goes from the map, and shows it again once an undo brings it back', () =>
+  {
+    // Arrange.
+    const { hub } = renderWindow();
+
+    // Act: another window deletes the event, then undoes it.
+    act(() =>
+    {
+      hub.edit('Delete event', [ mapHistoryKey(1) ], transaction => transaction.set('map:1', [ 'events', 2 ], null));
+    });
+    const gone = screen.queryByText('Event 2 is no longer on Map 1. Undoing its deletion in the map brings it back here.') !== null;
+    act(() =>
+    {
+      hub.undo(mapHistoryKey(1));
+    });
+
+    // Assert.
+    expect([ gone, (screen.getByLabelText('Name') as HTMLInputElement).value ])
+      .toStrictEqual([ true, 'EV002' ]);
+  });
+
+  it('marks its first frame showing the event on the page\'s timeline, once', async () =>
+  {
+    // Arrange: a clean timeline.
+    performance.clearMarks();
+
+    // Act.
+    renderWindow();
+    await act(async () =>
+    {
+      await new Promise(resolve =>
+      {
+        requestAnimationFrame(() => resolve(undefined));
+      });
+      await new Promise(resolve =>
+      {
+        requestAnimationFrame(() => resolve(undefined));
+      });
+    });
+
+    // Assert.
+    expect(performance.getEntriesByName('jmz-event-window-ready').length)
+      .toBe(1);
+  });
+});
