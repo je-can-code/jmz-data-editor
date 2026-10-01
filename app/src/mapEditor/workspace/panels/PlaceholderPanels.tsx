@@ -19,15 +19,9 @@ const Placeholder = (props: { line: string }) =>
 };
 
 /**
- * Where the quick settings go: a picked event's settings, changed live on the map.
- * @returns {React.JSX.Element} The panel.
- */
-const QuickSettingsPanel = () => <Placeholder line={'Pick an event on a map to change its settings here.'}/>;
-
-/**
  * Holds the middle of the workspace until the first map opens there, when it closes itself.
  * @returns {React.JSX.Element} The panel.
  */
 const StartPanel = () => <Placeholder line={'Double-click a map in the tree, or drag it here, to open it.'}/>;
 
-export { QuickSettingsPanel, StartPanel };
+export { StartPanel };
