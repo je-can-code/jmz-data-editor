@@ -41,6 +41,7 @@ describe('PaintToolBar', () =>
     const painting = new PaintState();
     render(<PaintToolBar painting={painting}/>);
     const field = screen.getByLabelText('Tile to paint with');
+    field.focus();
 
     // Act.
     fireEvent.change(field, { target: { value: 'grass' } });
@@ -49,9 +50,9 @@ describe('PaintToolBar', () =>
     fireEvent.change(field, { target: { value: '2864' } });
     fireEvent.keyDown(field, { key: 'Enter' });
 
-    // Assert.
-    expect([ afterWords, painting.settings.brush, screen.getByTestId('paint-brush').textContent ])
-      .toEqual([ null, singleTileBrush(2864), 'Tile 2864' ]);
+    // Assert: the field also lets go of the keys, so the space bar over the map paints rather than types.
+    expect([ afterWords, painting.settings.brush, screen.getByTestId('paint-brush').textContent, document.activeElement === field ])
+      .toEqual([ null, singleTileBrush(2864), 'Tile 2864', false ]);
   });
 
   it('takes up the region pen with the region typed, and the shadow pen', () =>

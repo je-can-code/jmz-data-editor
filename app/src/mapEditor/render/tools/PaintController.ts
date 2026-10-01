@@ -151,6 +151,9 @@ class PaintController
       return () => undefined;
     }
 
+    // the canvas can hold the keyboard's focus, without drawing a focus ring over the map.
+    canvas.tabIndex = -1;
+    canvas.style.outline = 'none';
     this.#listenOnCanvas(canvas);
     this.#listenForKeys(view);
     this.#stops.push(this.#options.painting.subscribe(settings =>
@@ -185,6 +188,9 @@ class PaintController
         return;
       }
 
+      // a press on the map takes the keys from wherever they were, a text field included, so the space bar, Shift and
+      // Escape that follow are the map's.
+      canvas.focus({ preventScroll: true });
       canvas.setPointerCapture(event.pointerId);
       this.#counted(() => this.#session.press(this.#pointerFor(event)));
     });

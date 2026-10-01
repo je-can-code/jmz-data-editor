@@ -102,9 +102,11 @@ const StandInPicker = (props: { painting: PaintState; settings: PaintSettings })
         onChange={event => setTileText(event.target.value)}
         onKeyDown={event =>
         {
+          // Enter takes the tile and hands the keys back to the map, so the space bar paints rather than types.
           if (event.key === 'Enter')
           {
             takeTile();
+            (event.target as HTMLInputElement).blur();
           }
         }}
         onBlur={takeTile}

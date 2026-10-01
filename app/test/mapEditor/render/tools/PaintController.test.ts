@@ -199,6 +199,31 @@ describe('PaintController', () =>
       .toEqual([ ROCK, 0, 0, 0 ]);
   });
 
+  it('takes the keys from a text field at a press on the map, while the space bar typed into the field never overrides', () =>
+  {
+    // Arrange: a text field with the keys, and the pointer over the map.
+    const bench = controllerWith({ tool: 'pen', brush: singleTileBrush(ROCK), overrideLayer: 2 });
+    const field = document.createElement('input');
+    document.body.appendChild(field);
+    field.focus();
+    pointer(bench.canvas, 'pointerenter', 1, 1);
+
+    // Act: the space bar into the field, a stroke, then the space bar again with the keys now the map's.
+    const typed = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: ' ', code: 'Space' });
+    field.dispatchEvent(typed);
+    pointer(bench.canvas, 'pointerdown', 1, 1);
+    pointer(bench.canvas, 'pointerup', 1, 1);
+    const focused = document.activeElement;
+    key('keydown', { key: ' ', code: 'Space' });
+    pointer(bench.canvas, 'pointerdown', 2, 1);
+    pointer(bench.canvas, 'pointerup', 2, 1);
+    field.remove();
+
+    // Assert: the first stroke paints automatically, the second on the override's layer.
+    expect([ typed.defaultPrevented, focused === bench.canvas, stackAt(bench.map, 1, 1), stackAt(bench.map, 2, 1) ])
+      .toEqual([ false, true, [ ROCK, 0, 0, 0 ], [ 'k16', 0, ROCK, 0 ] ]);
+  });
+
   it('lays tiles exactly with Shift held on the press', () =>
   {
     // Arrange.
