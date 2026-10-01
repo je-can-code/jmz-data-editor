@@ -37,7 +37,7 @@ describe('registerCoreEventKinds', () =>
     const battler = event(4, [ page([ { code: 108, indent: 0, parameters: [ '<enemyId:3>' ] } ]) ]);
 
     // Act.
-    const kinds = [ oreChest(1), event(2, [ transferPage() ]), event(3, [ page([]) ]), battler ].map(each => registry.kindOf(each)?.id ?? null);
+    const kinds = [ oreChest(1), event(2, [ transferPage() ]), event(3, [ page([]) ]), battler ].map(each => registry.kindOf(each, 1)?.id ?? null);
 
     // Assert.
     expect(kinds)

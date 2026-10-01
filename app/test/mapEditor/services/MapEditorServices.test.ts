@@ -3,6 +3,7 @@ import { WindowShell } from '../../../src/core/infrastructure/shell/WindowShell.
 import type { CloseTarget } from '../../../src/mapEditor/core/closeGuard.ts';
 import { BUILT_IN_ENTRIES } from '../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
+import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import { createMapEditorServices, type MapEditorEnvironment } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../support/standIns.ts';
@@ -17,6 +18,8 @@ import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../s
  * stream from outside the session reaches the hub, the echo of a session save does not. Closing asks whenever no
  * other live window holds exactly this window's unsaved state, and a closing window says goodbye at once, so no
  * window keeps counting it. Conflicts settle only the way the author chooses. And a stop leaves nothing listening.
+ * A started window reads js/plugins.js and switches on the modules whose plugins it enables; one that cannot read it
+ * keeps the core's kinds alone.
  */
 describe('MapEditorServices', () =>
 {
@@ -206,6 +209,55 @@ describe('MapEditorServices', () =>
       .toStrictEqual([ 0, true, 'Plugin: J-TIME Stop TIME', [ 'j/time/J-TIME' ] ]);
   });
 
+  it('switches on the shipped modules once started, from the plugins js/plugins.js enables, and reads nothing before', async () =>
+  {
+    // Arrange: a project with J-ABS enabled, its action map being map 2.
+    const { fetch, requests } = stubFetch(request => (request.url.endsWith('/api/plugin-metadata')
+      ? new Response('var $plugins = [\n{"name":"j/abs/J-ABS","status":true,"description":"","parameters":{"actionMapId":"2"}}\n];')
+      : envelope({})));
+    const { environment } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    const askedBefore = requests.length;
+    const swing = createMapEvent(32, 0, 0);
+
+    // Act.
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.isActive('jabs'))
+        .toBe(true);
+    });
+
+    // Assert: on the action map the pattern is nobody's; on another map it is decor.
+    expect([ askedBefore, services.modules.kindOf(swing, 2), services.modules.kindOf(swing, 3)?.id ])
+      .toStrictEqual([ 0, null, 'core.decor' ]);
+    services.stop();
+  });
+
+  it('keeps the core\'s kinds alone when js/plugins.js cannot be read', async () =>
+  {
+    // Arrange: a server that answers the plugin list with an error.
+    const { fetch, requests } = stubFetch(request => (request.url.endsWith('/api/plugin-metadata')
+      ? new Response('broken', { status: 500 })
+      : envelope({})));
+    const { environment } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+
+    // Act.
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(requests.some(request => request.url.endsWith('/api/plugin-metadata')))
+        .toBe(true);
+    });
+    await settle();
+
+    // Assert.
+    expect([ services.modules.isActive('jabs'), services.modules.revision ])
+      .toStrictEqual([ false, 0 ]);
+    services.stop();
+  });
+
   it('opens a document from the file when no other window holds it, and hands back the same one after', async () =>
   {
     // Arrange.
@@ -237,7 +289,7 @@ describe('MapEditorServices', () =>
     const document = await pump(network, second.openDocument('map:1'));
 
     // Assert: the unsaved rename arrived, and the stale file was never fetched.
-    expect([ (document.toJson() as { displayName: string }).displayName, secondWindow.requests.length ])
+    expect([ (document.toJson() as { displayName: string }).displayName, secondWindow.requests.filter(request => request.url.includes('/api/maps/')).length ])
       .toStrictEqual([ 'Harbor', 0 ]);
     first.services.stop();
     second.stop();

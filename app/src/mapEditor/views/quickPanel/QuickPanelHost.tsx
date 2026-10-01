@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useSyncExternalStore } from 'react';
 import { Box, Divider, Stack, Typography } from '@mui/material';
 import { groupSelection, type KindGroup } from '../../core/eventKinds/quickFields.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
@@ -105,12 +105,15 @@ const QuickPanelHost = (props: QuickPanelHostProps) =>
   const { document, eventIds } = props;
   const { modules } = useMapEditorServices();
   useRevision(document);
+
+  // the plugin modules switch on once js/plugins.js is read, which can change what kind an event is.
+  useSyncExternalStore(modules.subscribe, () => modules.revision);
   if (document === null || eventIds.length === 0)
   {
     return <Quiet line={'Pick an event on a map to change its settings here.'}/>;
   }
 
-  const { groups, unclaimed } = groupSelection(document.events, eventIds, event => modules.kindOf(event));
+  const { groups, unclaimed } = groupSelection(document.events, eventIds, event => modules.kindOf(event, document.mapId));
   if (groups.length === 0 && unclaimed.length === 0)
   {
     return <Quiet line={'The picked event is no longer on the map.'}/>;

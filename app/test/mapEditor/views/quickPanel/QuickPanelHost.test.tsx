@@ -12,6 +12,7 @@ import { cloneJson, type JsonValue } from '../../../../src/mapEditor/core/model/
 import type { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import { jabsModule } from '../../../../src/mapEditor/modules/jabs/jabsModule.ts';
 import { registerCoreEventKinds } from '../../../../src/mapEditor/services/coreEventKinds.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
@@ -26,6 +27,8 @@ import { CLOSED_GLASS, command, event, eventIn, hubWith, oreChest, page, text, t
  * share, holding their common value or saying they differ. The host takes a map and the picked ids and nothing
  * else, so whatever selects events can drive it. A value half typed when the pick moves to other events, or to
  * another map, is dropped with the section it was typed in: it is never written to events it was not typed for.
+ * An event on a map a plugin copies its events from is the plugin's pattern, so it has no kind and no quick settings,
+ * and the panel follows the modules switching on after it first drew.
  */
 describe('QuickPanelHost', () =>
 {
@@ -33,8 +36,8 @@ describe('QuickPanelHost', () =>
    * Renders the quick panel over a hub holding the given events, with the core's kinds registered.
    * @param {RmmzMapEvent[]} events The map's events.
    * @param {number[]} eventIds The picked events.
-   * @returns {ReturnType<typeof hubWith> & { show: (document: MapDocument, ids: number[]) => void }} The hub, the map
-   * it started from, and a way to show another pick, on that map or another.
+   * @returns {ReturnType<typeof hubWith> & { modules: PluginModuleRegistry, show: (document: MapDocument, ids: number[]) => void }}
+   * The hub, the map it started from, the window's kinds, and a way to show another pick, on that map or another.
    */
   const renderHost = (events: RmmzMapEvent[], eventIds: number[]) =>
   {
@@ -48,7 +51,7 @@ describe('QuickPanelHost', () =>
       </MapEditorServicesProvider>
     );
     const { rerender } = render(host(held.hub.map('map:1'), eventIds));
-    return { ...held, show: (document: MapDocument, ids: number[]) => rerender(host(document, ids)) };
+    return { ...held, modules, show: (document: MapDocument, ids: number[]) => rerender(host(document, ids)) };
   };
 
   it('asks for a pick when nothing is picked, or no map is open', () =>
@@ -214,6 +217,23 @@ describe('QuickPanelHost', () =>
     // Assert: both signs still say what they said, and neither map recorded a step.
     expect([ eventIn(hub, 2), hub.map('map:2').event(2), hub.history(mapHistoryKey(1)).rows.length, hub.history(mapHistoryKey(2)).rows.length ])
       .toStrictEqual([ sign, sign, 0, 0 ]);
+  });
+
+  it('offers nothing for an event on the map J-ABS copies its actions from, once J-ABS turns out to be enabled', () =>
+  {
+    // Arrange: a sword swing's pattern, which runs nothing and so reads as decor until J-ABS's module is on.
+    const { modules } = renderHost([ event(2, [ page([]) ], { name: 'stab 3' }) ], [ 2 ]);
+    const before = [ screen.getByText('Decor').textContent, screen.queryAllByRole('button', { name: 'Make it a chest' }).length ];
+
+    // Act: js/plugins.js arrives, enabling J-ABS with this map as its action map.
+    act(() =>
+    {
+      modules.activate([ jabsModule ], [ { name: 'j/abs/J-ABS', status: true, description: '', parameters: { actionMapId: '1' } } ]);
+    });
+
+    // Assert.
+    expect([ before, screen.getByText('stab 3 has no quick settings.').textContent, screen.queryAllByRole('button', { name: 'Make it a chest' }).length ])
+      .toStrictEqual([ [ 'Decor', 1 ], 'stab 3 has no quick settings.', 0 ]);
   });
 
   it('shows why a change could not be made', () =>

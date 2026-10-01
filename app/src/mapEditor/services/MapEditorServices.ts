@@ -18,6 +18,7 @@ import { SyncPeer } from '../core/sync/SyncPeer.ts';
 import { parseMapEditorView, type MapEditorView } from '../views/mapEditorViews.ts';
 import { wireCommandEditing } from './commandEditing.ts';
 import { registerCoreEventKinds } from './coreEventKinds.ts';
+import { activatePluginModules } from './pluginModules.ts';
 
 /**
  * Everything one map editor window runs on. Later packages reach these through the services context rather than
@@ -72,7 +73,7 @@ type MapEditorServices = {
 
   /**
    * The event kinds and plugin modules; the core's kinds (chests, transfers, dialogue, decor) are registered from
-   * the start.
+   * the start, and the shipped modules switch on once a started window has read which plugins are enabled.
    */
   readonly modules: PluginModuleRegistry;
 
@@ -103,8 +104,9 @@ type MapEditorServices = {
   resolveConflict(key: DocumentKey, choice: 'mine' | 'theirs'): boolean;
 
   /**
-   * Starts syncing, watching for changes and guarding against closing with unsaved edits. When the page goes, it
-   * stops, which tells the other windows at once that this one no longer holds anything.
+   * Starts syncing, watching for changes, guarding against closing with unsaved edits, and switching on the plugin
+   * modules once js/plugins.js is read. When the page goes, it stops, which tells the other windows at once that this
+   * one no longer holds anything.
    */
   start(): void;
 
@@ -302,6 +304,12 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     {
       sync.start();
       stops.push(() => sync.stop());
+
+      if (api !== null)
+      {
+        // the plugin modules switch on once js/plugins.js says which plugins are enabled.
+        activatePluginModules(api, modules);
+      }
 
       // a page going for good says goodbye, so no window counts it as holding anything a moment longer.
       const onPageHide = () => stop();

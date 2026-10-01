@@ -1,7 +1,12 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { CORE_EVENT_KINDS, type CoreEventKind } from '../../../../src/mapEditor/core/eventKinds/coreKinds.ts';
 import { jsonEquals } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import { registerCoreEventKinds } from '../../../../src/mapEditor/services/coreEventKinds.ts';
+import { activatePluginModules } from '../../../../src/mapEditor/services/pluginModules.ts';
 import { listMapFiles, locateGameProject, readDataFile } from '../../../support/gameProject.ts';
 import { applyEdits } from '../../support/eventKindFixtures.ts';
 
@@ -14,7 +19,8 @@ import { applyEdits } from '../../support/eventKindFixtures.ts';
  * light's tags is ever claimed, since those are the plugin modules' kinds; the near misses the game holds stay
  * unclaimed (the bomb wall is a battler until it breaks, one chest gives nothing, and the urn has no sound and no
  * open picture); and every setting a claimed event offers, written back with its own value, leaves the event
- * exactly as it was, so opening a quick panel can never change a map by itself.
+ * exactly as it was, so opening a quick panel can never change a map by itself. Once J-ABS's module has read the
+ * game's own plugins.js, the patterns on its action map are nobody's, though ten of them read as decor anywhere else.
  *
  * It runs against the project JMZ_PROJECT_ROOT names, or the sibling checkout, and skips when neither is there.
  */
@@ -147,5 +153,22 @@ describe.skipIf(project === null)('every shipped event, by kind', () =>
     // Assert.
     expect([ claimed.length, claimed.every(({ model }) => model.fields.length > 0), changed ])
       .toStrictEqual([ 1781, true, [] ]);
+  });
+
+  it('leaves the action map\'s patterns unclaimed once J-ABS\'s module reads the game\'s plugins.js', async () =>
+  {
+    // Arrange: a window's kinds, with the shipped modules switched on from the game's own plugin list.
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+    registerCoreEventKinds(registry);
+    await activatePluginModules({ loadPluginList: async () => readFileSync(`${project}/js/plugins.js`, 'utf8') }, registry);
+    const actionMap = shipped.filter(({ where }) => where.startsWith('Map002#'));
+
+    // Act.
+    const there = actionMap.filter(({ event }) => registry.kindOf(event, 2) !== null).length;
+    const elsewhere = actionMap.filter(({ event }) => registry.kindOf(event, 1) !== null).length;
+
+    // Assert: none is claimed on the action map, while ten would read as decor on any other.
+    expect([ registry.isActive('jabs'), actionMap.length, there, elsewhere ])
+      .toStrictEqual([ true, 58, 0, 10 ]);
   });
 });
