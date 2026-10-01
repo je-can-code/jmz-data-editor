@@ -156,7 +156,7 @@ describe('previewTool', () =>
 
     // Assert.
     expect(labels)
-      .toEqual([ 'Erase every layer', 'Erase layer 2', 'Erase regions', 'Erase shadows' ]);
+      .toEqual([ 'Erase layers 3 and 4', 'Erase layer 2', 'Erase regions', 'Erase shadows' ]);
   });
 
   it('says what the eyedropper picks, even with nothing in hand', () =>

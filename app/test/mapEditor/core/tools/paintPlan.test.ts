@@ -25,10 +25,13 @@ import { layeringWith, stackAt } from './support/paintFixtures.ts';
  * These services decide every cell a tool changes, and they are what makes the tools trustworthy: tiles always go
  * through the layering engine and the autotile refresh (so ground replaces ground and keeps what lies over it, and
  * autotiles fit their neighbours), a region brush writes only the region layer, and the shadow pen only the quarters
- * it crossed. Shift writes exactly and reshapes nothing. The eraser clears every tile layer under automatic layering
- * and only the chosen one otherwise. A fill spreads over exactly the area clicked, a ground fill passing under what
- * lies over the ground; a swap replaces every copy of the tile clicked and nothing like it; and the eyedropper picks
- * tiles exactly as stored. None of them writes the map: each answers with the cells to change.
+ * it crossed. Shift writes exactly and reshapes nothing. Under automatic layering the eraser does what B's empty tile
+ * does in MZ's auto mode: it clears the B to E tiles on layers 3 and 4, and keeps the ground, the decorations and any A
+ * tile laid up there by hand, so wiping an object off the map never takes the ground from under it; under manual
+ * layering, or with the override held, it clears exactly the chosen layer. A fill spreads over exactly the area
+ * clicked, a ground fill passing under what lies over the ground; a swap replaces every copy of the tile clicked and
+ * nothing like it; and the eyedropper picks tiles exactly as stored. None of them writes the map: each answers with
+ * the cells to change.
  *
  * Every rule is pinned with a near miss: a neighbour that must not be reshaped, a cell outside the area that must
  * not be filled, a kind like the one swapped that must be left.
@@ -160,17 +163,32 @@ describe('planErase', () =>
     return put(grid, 0, 0, 5, 3);
   };
 
-  it('clears every tile layer under automatic layering, reshapes the neighbour, and keeps shadows and regions', () =>
+  it('clears the B to E tiles on layers 3 and 4 under automatic layering, keeping the ground, the decoration, the shadow and the region', () =>
   {
     // Arrange.
     const grid = stacked();
 
     // Act.
+    const changes = planErase(grid, 'tiles', [ { x: 0, y: 0 } ], contextWith());
+    const after = applied(grid, changes);
+
+    // Assert: only the tree and the bush go; the grass, the tall grass, the shadow, the region and the grass beside
+    // them stay exactly as they were.
+    expect([ changes, stackAt(after, 0, 0), cellOf(after, 0, 0, 4), cellOf(after, 0, 0, 5) ])
+      .toEqual([ [ [ cellIndex(2, 1, 0, 0, 2), 0 ], [ cellIndex(2, 1, 0, 0, 3), 0 ] ], [ 'k16', 'k20', 0, 0 ], 0b0011, 3 ]);
+  });
+
+  it('keeps an A tile laid on layer 3 by hand when erasing automatically, while the tree above it goes', () =>
+  {
+    // Arrange: grass, the cliff corner laid on layer 3, and a tree on layer 4.
+    const grid = put(put(put(blankGrid(1, 1), 0, 0, 0, kindTile(GRASS)), 0, 0, 2, CLIFF_CORNER), 0, 0, 3, TREE);
+
+    // Act.
     const after = applied(grid, planErase(grid, 'tiles', [ { x: 0, y: 0 } ], contextWith()));
 
-    // Assert: the left cell emptied; the right grass now shows its edge towards it.
-    expect([ stackAt(after, 0, 0), cellOf(after, 0, 0, 4), cellOf(after, 0, 0, 5), cellOf(after, 1, 0, 0) === makeAutotileId(GRASS, 0) ])
-      .toEqual([ [ 0, 0, 0, 0 ], 0b0011, 3, false ]);
+    // Assert.
+    expect(stackAt(after, 0, 0))
+      .toEqual([ 'k16', 0, CLIFF_CORNER, 0 ]);
   });
 
   it('clears only the chosen layer under manual layering', () =>
@@ -186,17 +204,18 @@ describe('planErase', () =>
       .toEqual([ 'k16', 'k20', 0, BUSH ]);
   });
 
-  it('leaves the neighbour\'s shape alone with Shift held', () =>
+  it('reshapes the neighbour of an autotile it clears, and leaves the neighbour\'s shape alone with Shift held', () =>
   {
     // Arrange.
     const grid = stacked();
 
-    // Act.
-    const changes = planErase(grid, 'tiles', [ { x: 0, y: 0 } ], contextWith('auto', 'exact'));
+    // Act: layer 1 chosen and cleared from the left cell, without Shift and with it.
+    const shaped = planErase(grid, 'tiles', [ { x: 0, y: 0 } ], contextWith(0)).map(([ index ]) => index);
+    const exact = planErase(grid, 'tiles', [ { x: 0, y: 0 } ], contextWith(0, 'exact')).map(([ index ]) => index);
 
-    // Assert: the four layers of the left cell, and not the grass beside it.
-    expect(changes.map(([ index ]) => index))
-      .toEqual([ 0, 2, 4, 6 ]);
+    // Assert: the left cell's ground both times; the grass beside it shows its new edge only without Shift.
+    expect([ shaped, exact ])
+      .toEqual([ [ 0, 1 ], [ 0 ] ]);
   });
 
   it('clears the region for a regions brush and the quarters for a shadows brush, leaving the tiles', () =>

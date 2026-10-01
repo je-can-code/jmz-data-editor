@@ -33,6 +33,11 @@ const REGION_LAYER = 5;
 const ALL_QUARTERS = 0b1111;
 
 /**
+ * B's first tile, the empty one: what a cleared layer holds, and what MZ's auto mode clears layers 3 and 4 with.
+ */
+const EMPTY_TILE = 0;
+
+/**
  * Everything a tool paints with that stays fixed for a whole stroke.
  */
 type PaintContext = {
@@ -157,21 +162,13 @@ const planBrush = (grid: TileGrid, brush: Brush, cells: readonly MapCell[], orig
 };
 
 /**
- * Names the tile layers an eraser clears: all four under automatic layering, which empties the cell down to whatever
- * shows beneath the map, and only the chosen one under manual layering or the held override.
- * @param {LayerChoice} choice The layer choice.
- * @returns {readonly TileLayerIndex[]} The layers.
- */
-const erasedLayers = (choice: LayerChoice): readonly TileLayerIndex[] =>
-{
-  return choice === 'auto'
-    ? TILE_LAYERS
-    : [ choice ];
-};
-
-/**
- * Plans what the eraser clears from some cells, by what the brush paints: tiles (see {@link erasedLayers}), with the
- * autotiles around them reshaped unless Shift is held; the region id; or every shadow.
+ * Plans what the eraser clears from some cells, by what the brush paints: tiles, the region id, or every shadow.
+ *
+ * Tiles under automatic layering go as B's empty tile takes them in MZ's auto mode, through the layering engine's own
+ * rule for it: the B to E tiles on layers 3 and 4 are cleared, and the ground, the decorations on layer 2 and any A tile
+ * laid up on layers 3 and 4 by hand all stay, so wiping an object off the map never takes the ground or a hand-laid
+ * tile with it. Under manual layering, or with the override held, the chosen layer alone is cleared, whatever is on it,
+ * with the autotiles around it reshaped unless Shift is held.
  * @param {TileGrid} grid The map as it stands.
  * @param {BrushKind} kind What the brush paints, which is what the eraser clears.
  * @param {readonly MapCell[]} cells The cells the eraser reached; any beyond the map are skipped.
@@ -190,10 +187,18 @@ const planErase = (grid: TileGrid, kind: BrushKind, cells: readonly MapCell[], c
     return writeLayer(grid, cells, SHADOW_LAYER, cell => grid.cells[cellIndex(grid.width, grid.height, cell.x, cell.y, SHADOW_LAYER)] & ~ALL_QUARTERS);
   }
 
-  const writes = erasedLayers(context.choice).flatMap(z => writeLayer(grid, cells, z, () => 0));
-  return context.shaping === 'auto'
-    ? withReshapes(grid, writes, context.layering.mode)
-    : writes.sort((a, b) => a[0] - b[0]);
+  // automatic layering erases with B's empty tile, which the layering engine already clears layers 3 and 4 with.
+  const { choice, layering, shaping } = context;
+  if (choice === 'auto')
+  {
+    const placements = cells.map(({ x, y }) => ({ x, y, tileId: EMPTY_TILE }));
+    return paintStroke(grid, placements, layering, 'auto', shaping).changes;
+  }
+
+  const writes = writeLayer(grid, cells, choice, () => EMPTY_TILE);
+  return shaping === 'auto'
+    ? withReshapes(grid, writes, layering.mode)
+    : writes;
 };
 
 /**
@@ -488,7 +493,6 @@ const pickBrush = (grid: TileGrid, rect: CellRect, kind: BrushKind, choice: Laye
 
 export {
   ALL_QUARTERS,
-  erasedLayers,
   fillCells,
   hasShadow,
   paintBrushTiles,

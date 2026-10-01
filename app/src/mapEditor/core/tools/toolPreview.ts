@@ -93,7 +93,8 @@ const layerLabel = (mode: LayerMode, landing: TileLayerIndex | -1, shaping: Shap
 };
 
 /**
- * Words what the eraser clears, for the brush cursor.
+ * Words what the eraser clears, for the brush cursor: under automatic layering what B's empty tile clears, layers 3
+ * and 4, and otherwise the one layer chosen.
  * @param {Brush} brush The brush in hand, which says what the eraser clears.
  * @param {LayerMode} mode The layer mode.
  * @returns {string} The words.
@@ -107,7 +108,7 @@ const eraserLabel = (brush: Brush, mode: LayerMode): string =>
 
   const choice = choiceFor(mode);
   return choice === 'auto'
-    ? 'Erase every layer'
+    ? 'Erase layers 3 and 4'
     : `Erase layer ${choice + 1}`;
 };
 

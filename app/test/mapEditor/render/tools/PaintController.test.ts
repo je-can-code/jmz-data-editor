@@ -329,7 +329,7 @@ describe('PaintController', () =>
 
     // Assert.
     expect([ label, bench.hub.history(bench.history).rows ])
-      .toEqual([ 'Erase every layer', [] ]);
+      .toEqual([ 'Erase layers 3 and 4', [] ]);
   });
 });
 
