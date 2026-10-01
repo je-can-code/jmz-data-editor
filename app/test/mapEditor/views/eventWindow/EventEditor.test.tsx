@@ -440,7 +440,7 @@ describe('EventWindowView', () =>
     fireEvent.click(screen.getByRole('option', { name: 'C' }));
 
     // Assert.
-    const { conditions } = heldEvent(hub).pages[0];
+    const [ { conditions } ] = heldEvent(hub).pages;
     expect([ conditions.switch1Id, conditions.variableValue, conditions.selfSwitchCh, stepsOf(hub).slice(3) ])
       .toStrictEqual([ 7, 120, 'C', [ 'Change switch condition (page 1)', 'Change variable condition (page 1)', 'Change self switch condition (page 1)' ] ]);
   });
