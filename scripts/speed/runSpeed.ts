@@ -25,6 +25,10 @@
  *     holds an event, so the ghosts show blocked tiles and the drop is refused), and a committed drop: the bottom row
  *     emptied, every other event selected and dragged one row down. None of them may drop a frame.
  *
+ * The page shows the map with its quick panel beside it (quick=1), the two sharing one selection as in the workspace,
+ * so whatever the panel renders for a new selection, or for a drop that moves every selected event, lands in the
+ * frames measured; the box and the drop also prove the panel followed the selection.
+ *
  * It refuses to time anywhere but the RX 6950 XT: the browser's WebGL renderer and the page's own must both name it
  * (JMZ_SPEED_GPU, or --gpu, overrides the pattern). The exit code is non-zero when any budget is missed.
  */
@@ -160,6 +164,17 @@ const PATHS = [ 'pan', 'zoom', 'zoomedout' ];
  * How many pointer moves a stroke makes, 4 ms apart, as a hand dragging a pen would.
  */
 const STROKE_MOVES = 150;
+
+/**
+ * The map's own canvas on the page; the quick panel beside it may draw canvases of its own.
+ */
+const MAP_CANVAS = '[data-testid="map-view"] canvas';
+
+/**
+ * The quick panel beside the map, and the line it shows while nothing is selected.
+ */
+const QUICK_PANEL = '[data-testid="map-quick-panel"]';
+const QUICK_PANEL_QUIET = 'Pick an event on a map to change its settings here.';
 
 /**
  * How many events the click test picks, one after another.
@@ -354,7 +369,7 @@ const measureStroke = async (page: Page, size: number[]): Promise<StrokeResult> 
   }, [ width - 1, height - 1 ]);
 
   // the hooks answer in the canvas's own pixels; the mouse moves in the page's, around the view's bars.
-  const canvas = await page.locator('canvas').boundingBox();
+  const canvas = await page.locator(MAP_CANVAS).boundingBox();
   if (canvas === null)
   {
     throw new Error('the map view has no canvas to paint on');
@@ -487,7 +502,7 @@ const eventProbe = async (page: Page, size: number[]): Promise<EventProbe> =>
   const [ width, height ] = size;
 
   // the hooks answer in the canvas's own pixels; the mouse moves in the page's, around the view's bars.
-  const canvas = await page.locator('canvas').boundingBox();
+  const canvas = await page.locator(MAP_CANVAS).boundingBox();
   if (canvas === null)
   {
     throw new Error('the map view has no canvas to click on');
@@ -560,6 +575,16 @@ const recordInteraction = async (page: Page, interact: () => Promise<void>, sett
 };
 
 /**
+ * Reports whether the quick panel beside the map shows its line for nothing selected, rather than any event's settings.
+ * @param {Page} page The page.
+ * @returns {Promise<boolean>} True while it shows nothing picked.
+ */
+const quickPanelIsQuiet = async (page: Page): Promise<boolean> =>
+{
+  return (await page.locator(QUICK_PANEL).innerText()).includes(QUICK_PANEL_QUIET);
+};
+
+/**
  * Clicks twenty events spread over the map, one after another, each selecting one event alone.
  * @param {EventProbe} probe The probe.
  * @returns {Promise<InteractionResult>} What the clicks came to.
@@ -598,11 +623,13 @@ const measureClicks = async (probe: EventProbe): Promise<InteractionResult> =>
 const measureBox = async (probe: EventProbe): Promise<InteractionResult> =>
 {
   await probe.clear();
+  const quietBefore = await quickPanelIsQuiet(probe.page);
   const recording = await recordInteraction(probe.page, () => boxRows(probe, probe.height, BOX_MOVES));
   const after = await probe.state();
+  const quietAfter = await quickPanelIsQuiet(probe.page);
   return judgeInteractionFrames(recording.inputs, recording.frames, {
-    ok: after.total > 0 && after.selected === after.total,
-    reason: `the box selected ${after.selected} of ${after.total} events`,
+    ok: after.total > 0 && after.selected === after.total && quietBefore && quietAfter === false,
+    reason: `the box selected ${after.selected} of ${after.total} events, and the quick panel ${quietAfter ? 'never showed them' : 'showed them'}`,
   });
 };
 
@@ -663,9 +690,10 @@ const measureDrop = async (probe: EventProbe): Promise<{ result: InteractionResu
   const recording = await recordInteraction(probe.page, () => dragMouse(probe.page, from, alongPath([ from, to ], 8)), 500);
   const after = await probe.state();
   const landed = await probe.cellOf(mover);
+  const panelShowsThem = await quickPanelIsQuiet(probe.page) === false;
   const result = judgeInteractionFrames(recording.inputs, recording.frames, {
-    ok: after.drops === before.drops + 1 && landed.y === moverCell.y + 1,
-    reason: `the drop of ${everything.length} events did not land one row down`,
+    ok: after.drops === before.drops + 1 && landed.y === moverCell.y + 1 && panelShowsThem,
+    reason: `the drop of ${everything.length} events did not land one row down with the quick panel showing them`,
   });
   return { result, dropped: everything.length };
 };
@@ -711,7 +739,7 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
   {
     const page = await newSpeedPage(browser);
     await addFrameRecorder(page);
-    await page.goto(`${uiBase}/map.html?map=${mapId}&speed=1`);
+    await page.goto(`${uiBase}/map.html?map=${mapId}&speed=1&quick=1`);
     await page.waitForFunction(() =>
     {
       const hooks = (window as unknown as { __jmzMapView?: PageHooks }).__jmzMapView;

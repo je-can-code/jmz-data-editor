@@ -6,6 +6,7 @@ import { CommonEventsView } from './views/commonEvents/CommonEventsView.tsx';
 import { ConflictBanner } from './views/ConflictBanner.tsx';
 import { EventWindowView } from './views/EventWindowView.tsx';
 import type { MapEditorView } from './views/mapEditorViews.ts';
+import { MapWithQuickPanel, wantsQuickPanel } from './views/quickPanel/MapWithQuickPanel.tsx';
 import { Workspace } from './workspace/Workspace.tsx';
 
 /**
@@ -18,13 +19,18 @@ const WindowContent = (props: { readonly view: MapEditorView }) =>
   const { view } = props;
 
   // ?map=102 opens that map alone across the whole window instead of the workspace: one map and one canvas on the
-  // page, which is what the speed script and the parity check measure.
+  // page, which is what the parity check measures. &quick=1 stands the map's quick panel beside it, sharing its
+  // selection, which is what the speed script measures.
   const openedMap = view.kind === 'workspace'
     ? mapIdFromQuery(window.location.search)
     : null;
   if (openedMap !== null)
   {
-    return <Box sx={{ height: '100vh' }}><MapView mapId={openedMap}/></Box>;
+    return (
+      <Box sx={{ height: '100vh' }}>
+        {wantsQuickPanel(window.location.search) ? <MapWithQuickPanel mapId={openedMap}/> : <MapView mapId={openedMap}/>}
+      </Box>
+    );
   }
 
   switch (view.kind)

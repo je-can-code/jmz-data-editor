@@ -79,7 +79,8 @@ type WorkspaceState = {
 
   /**
    * The event each map should select, by map id: what the data editor asks for when it opens a map at an event.
-   * The events package reads it to pick the event out.
+   * The map's view picks it out, which makes it the window's selection; the quick panel follows the selection, never
+   * this.
    */
   readonly eventFocus: Readonly<Record<number, number>>;
 };
