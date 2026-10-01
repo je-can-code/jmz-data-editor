@@ -36,8 +36,8 @@ type ToolPointer = {
 };
 
 /**
- * What the map should show for the tools: the brush cursor and its words, the ghost preview, the selected area and
- * the box an eyedropper drag spans.
+ * What the map should show for the tools: the brush cursor (the cells a click would reach, or the extent of a shape or
+ * an eyedropper drag) and its words, the ghost preview, and the selected area.
  */
 type ToolOverlay = {
   readonly hover: CellRect | null;
