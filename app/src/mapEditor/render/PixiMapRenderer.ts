@@ -17,6 +17,7 @@ import {
   type TextureSource as ImageTextureSource,
   type TilesetTextures,
 } from '../core/renderer/MapRenderer.ts';
+import { precisePoint } from '../core/renderer/precisePoint.ts';
 import {
   centerCamera,
   fitCamera,
@@ -83,8 +84,8 @@ type RendererStats = {
 /**
  * The world's layers, bottom to top: the engine's black behind the map, the parallax, the tiles below characters,
  * the events in their three priorities around the tiles above characters, the lighting P9 draws, then the editor's
- * own: the dimming and highlighted layer, and the overlays, the selection under the ghosts and the pointer's own
- * marks over them.
+ * own: the dimming and highlighted layer, and the overlays, the ghosts and the pointer's own marks, then the selection
+ * over them all, so an event shows as selected while the pointer still rests on it after the click that picked it.
  */
 type Slots = {
   readonly backdrop: Graphics;
@@ -290,6 +291,12 @@ class PixiMapRenderer implements MapRenderer
 
   #gesture = new RightButtonGesture();
 
+  /**
+   * Where the pointer last was over the canvas, as precisely as a pointer event reported it: the spot the wheel zooms
+   * about, since a wheel event itself reports whole pixels.
+   */
+  #pointer: ScreenPoint | null = null;
+
   #resizeObserver: ResizeObserver | null = null;
 
   #listeners: (() => void)[] = [];
@@ -348,7 +355,8 @@ class PixiMapRenderer implements MapRenderer
     this.#slots.pointerLabel.anchor.set(0, 1);
     this.#slots.pointerLabel.visible = false;
 
-    // the engine's order: lower tiles, events below and with characters, upper tiles, events above characters.
+    // the engine's order: lower tiles, events below and with characters, upper tiles, events above characters. The
+    // selection goes over the hover, which would otherwise hide it on the very tile just clicked.
     const { slots } = this;
     this.#world.addChild(
       slots.backdrop,
@@ -365,9 +373,9 @@ class PixiMapRenderer implements MapRenderer
       slots.passability,
       slots.grid,
       slots.modules,
-      slots.selection,
       slots.ghosts,
       slots.pointer,
+      slots.selection,
       slots.pointerLabel,
     );
     slots.ghosts.addChild(this.#events.ghosts);
@@ -990,13 +998,16 @@ class PixiMapRenderer implements MapRenderer
       this.#listeners.push(() => canvas.removeEventListener(type, handler));
     };
 
+    // the wheel zooms about the pointer's own spot: the wheel event's whole-pixel spot lies up to two pixels off it at a
+    // device pixel ratio of 1.5, which would shift the map under a still pointer a little more with every notch.
     listen('wheel', event =>
     {
       event.preventDefault();
-      this.#zoomBy(wheelZoomFactor(event.deltaY, event.deltaMode), { x: event.offsetX, y: event.offsetY });
+      this.#zoomBy(wheelZoomFactor(event.deltaY, event.deltaMode), precisePoint({ x: event.offsetX, y: event.offsetY }, this.#pointer));
     }, false);
     listen('pointerdown', event =>
     {
+      this.#pointer = { x: event.offsetX, y: event.offsetY };
       if (event.button === 2)
       {
         this.#gesture.press({ x: event.offsetX, y: event.offsetY });
@@ -1005,6 +1016,7 @@ class PixiMapRenderer implements MapRenderer
     });
     listen('pointermove', event =>
     {
+      this.#pointer = { x: event.offsetX, y: event.offsetY };
       const step = this.#gesture.move({ x: event.offsetX, y: event.offsetY });
       if (step.kind === 'pan')
       {
