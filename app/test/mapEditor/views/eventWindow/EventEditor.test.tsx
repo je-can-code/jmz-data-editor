@@ -164,10 +164,16 @@ describe('EventWindowView', () =>
     fireEvent.click(screen.getByRole('button', { name: 'Tile' }));
 
     // Assert: the picker browses the tileset's sheets rather than asking for a typed id, and the window holds the map
-    // alone.
+    // alone. Both checks go through plain DOM queries rather than getByRole/getByLabelText: the tile grid behind the
+    // picker draws 256 cells of its own, and testing-library's queries walk every candidate's computed style to tell
+    // whether it is hidden from the accessibility tree, which is cheap at the scale most of this suite renders at but
+    // measurably slow at this one's, independent of anything either check below actually cares about. A label's own
+    // text is exactly what getByLabelText resolves a bare string against, so matching it directly is the same check.
+    const tileSheetButtons = [ ...document.querySelectorAll('button') ].filter(button => [ 'B', 'C', 'D', 'E' ].includes(button.textContent ?? '')).length;
+    const tileIdField = [ ...document.querySelectorAll('label') ].find(label => label.textContent === 'Tile id') ?? null;
     expect([
-      screen.getAllByRole('button').filter(button => [ 'B', 'C', 'D', 'E' ].includes(button.textContent ?? '')).length,
-      screen.queryByLabelText('Tile id'),
+      tileSheetButtons,
+      tileIdField,
       loadTilesets.mock.calls.length,
       openDocument.mock.calls.length,
       hub.documentKeys(),
