@@ -169,6 +169,11 @@ describe('MapPanel', () =>
     render(panelFor(controller, api));
     await screen.findByTestId('map-view');
 
+    // the map's tree and tileset load through promises the initial render kicks off but does not await, so the mocked
+    // view's own effect (which notes the paint it was handed) can still be pending once the testid above appears;
+    // flushing here settles it before the paint is read, rather than racing it under whatever load the suite is under.
+    await act(async () => {});
+
     // Assert.
     expect([ views.paints.at(-1) === paints.main, screen.queryByTestId('map-palette-dock'), screen.queryByRole('button', { name: 'Hide the tiles' }) ])
       .toStrictEqual([ true, null, null ]);
