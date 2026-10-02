@@ -6,6 +6,7 @@
     "dev": "bun run scripts/dev-full.ts",
     "dev:ui": "cd app && bun run start",
     "nw:dev": "nw ./nw-app",
+    "map-editor-ca": "bun run nw:dev --project-root /mnt/exdrive/dev/gaming/ca/chef-adventure --maps",
     "build": "cd app && bun run build",
     "test": "cd app && bun run test",
     "lint": "oxlint app/src app/test scripts nw-app",
