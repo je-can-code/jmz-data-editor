@@ -3,12 +3,12 @@ import type { WindowPaint } from '../../../core/tools/WindowPaint.ts';
 import { useWorkspace } from '../../workspaceHooks.tsx';
 
 /**
- * Carries the paint a palette and a layer strip pick for, when it is not the page's own.
+ * Carries the paint a palette, a layer strip or a stack view pick for, when it is not the page's own.
  */
 const PaintScopeContext = createContext<WindowPaint | null>(null);
 
 /**
- * Hands everything inside it a window's paint to pick for: what a torn-out map's own palette and layer strip are
+ * Hands everything inside it a window's paint to pick for: what a torn-out map's own palette and layers panel are
  * wrapped in, so they choose for the map's window and not the main one.
  * @param {{ paint: WindowPaint, children: React.ReactNode }} props The paint, and what picks for it.
  * @returns {React.JSX.Element} The scope.

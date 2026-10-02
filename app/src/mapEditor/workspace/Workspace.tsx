@@ -15,7 +15,8 @@ import { MapLinkHost } from '../../core/infrastructure/shell/MapLink.ts';
 import { readCollapsedGroups, withCollapsedGroups } from '../core/workspace/collapse.ts';
 import type { SavedLayout } from '../core/workspace/LayoutStore.ts';
 import { decodeDraggedMaps, directionForDrop, MAP_DRAG_TYPE, PANEL_COMPONENTS, SINGLE_PANEL_IDS } from '../core/workspace/panels.ts';
-import { APP_WIDE_COMMANDS, appShortcutFor, type KeyTarget, type ShortcutCommand } from '../core/workspace/shortcuts.ts';
+import { APP_WIDE_COMMANDS, appShortcutFor, isTextEntry, type KeyTarget, type ShortcutCommand } from '../core/workspace/shortcuts.ts';
+import { readCollapsedSides, sideForShortcut, withCollapsedSides } from '../core/workspace/sideCollapse.ts';
 import { readOrigins, withOrigins } from '../core/workspace/tearOut.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import { addDefaultPanels, POPOUT_URL, restoreLayout } from './defaultLayout.ts';
@@ -99,6 +100,10 @@ const holdsTheTree = (group: DockviewDndOverlayEvent['group']): boolean =>
  *
  * Undo, redo and save listen on every window, torn-out ones included, and act on whatever has focus. A map dragged
  * from the tree into any pane opens there, and a map the data editor asks for opens with its event picked out.
+ *
+ * The left column and the right column can each fold away whole, past whatever any one group in them has done on its
+ * own (see SideCollapseKeeper): the top bar's two edge buttons, and Ctrl+B and Ctrl+Shift+B, which act only on the
+ * main window, since a side is the main window's own grid and not whatever a torn-out window happens to show.
  * @returns {React.JSX.Element} The workspace.
  */
 const Workspace = () =>
@@ -129,6 +134,25 @@ const Workspace = () =>
     actions[command]?.().catch(() => undefined);
   }, [ controller ]);
 
+  // folding a side is about the main window's own grid, never whichever window has focus, so unlike onShortcut above
+  // this never joins attachShortcutsToPopouts: a torn-out window's own keys stay its own.
+  const onSideShortcut = useCallback((event: KeyboardEvent) =>
+  {
+    if (event.defaultPrevented || isTextEntry(event.target as unknown as KeyTarget))
+    {
+      return;
+    }
+
+    const side = sideForShortcut(event);
+    if (side === null)
+    {
+      return;
+    }
+
+    event.preventDefault();
+    controller.sides.toggle(side);
+  }, [ controller ]);
+
   // a tab's right-click menu; held steady, since the dock takes every new menu builder as a change to its options.
   const tabMenu = useCallback((params: GetTabContextMenuItemsParams) => tabMenuItems(controller.popouts, params.panel), [ controller ]);
 
@@ -138,6 +162,13 @@ const Workspace = () =>
     window.addEventListener('keydown', onShortcut);
     return () => window.removeEventListener('keydown', onShortcut);
   }, [ onShortcut ]);
+
+  // the main window alone; a side fold never reaches into a torn-out window the way undo, redo and save do.
+  useEffect(() =>
+  {
+    window.addEventListener('keydown', onSideShortcut);
+    return () => window.removeEventListener('keydown', onSideShortcut);
+  }, [ onSideShortcut ]);
 
   // a layout still waiting to be written is written as the page goes.
   useEffect(() =>
@@ -179,12 +210,14 @@ const Workspace = () =>
     let restoring = true;
     const keepLayout = () =>
     {
-      // torn-out panels' origins and collapsed groups' sizes both ride along, so a restart brings them back too.
+      // torn-out panels' origins, collapsed groups' sizes and collapsed sides' sizes all ride along, so a restart
+      // brings them all back too.
       if (restoring === false && isCurrent())
       {
         const layout = api.toJSON() as unknown as SavedLayout;
         const withTornOut = withOrigins(layout, controller.popouts.origins);
-        controller.layouts.save(withCollapsedGroups(withTornOut, controller.collapses.collapsed));
+        const withGroups = withCollapsedGroups(withTornOut, controller.collapses.collapsed);
+        controller.layouts.save(withCollapsedSides(withGroups, controller.sides.collapsed));
       }
     };
 
@@ -205,12 +238,14 @@ const Workspace = () =>
       controller.centre.attach(api),
       controller.popouts.attach(api),
       controller.collapses.attach(api),
+      controller.sides.attach(api),
     );
 
     restoreLayout(api, controller.layouts, isCurrent, saved =>
     {
       controller.popouts.adopt(readOrigins(saved));
       controller.collapses.adopt(readCollapsedGroups(saved));
+      controller.sides.adopt(readCollapsedSides(saved));
     })
       .catch(() =>
       {

@@ -10,7 +10,7 @@ import type { MapPanelParams } from '../../core/workspace/panels.ts';
 import { documentLabel } from '../../views/documentLabels.ts';
 import { usePanelVisible, usePanelWindow } from '../windowScope.tsx';
 import { useHeldMap, useWorkspace, useWorkspaceState, type HeldMap } from '../workspaceHooks.tsx';
-import { LayerStrip } from './layers/LayerStrip.tsx';
+import { LayersPanel } from './layers/LayersPanel.tsx';
 import { MapSurface } from './MapSurface.tsx';
 import { PaintScope } from './palette/paintScope.tsx';
 import { MapPalette } from './palette/PalettePanel.tsx';
@@ -108,10 +108,12 @@ const MapAbsent = (props: { held: HeldMap; onClose: () => void }) =>
 };
 
 /**
- * A torn-out map's own palette and layer strip, docked beside it, picking for the map's window alone: its own brush,
- * its own layer, its own tool in hand, so painting there needs nothing from the main window.
+ * A torn-out map's own palette and layers panel, docked beside it, picking for the map's window alone: its own brush,
+ * its own layer, its own tool in hand, and its own stack view of whatever the pointer rests on, so painting there
+ * needs nothing from the main window. The palette keeps the larger share, since picking a tile wants more room than
+ * reading the stack; the layers panel scrolls on its own beneath it.
  * @param {{ mapId: number, paint: WindowPaint }} props The map whose tiles to show, and its window's paint.
- * @returns {React.JSX.Element} The palette and the strip.
+ * @returns {React.JSX.Element} The palette and the layers panel.
  */
 const MapPaletteDock = (props: { readonly mapId: number; readonly paint: WindowPaint }) =>
 {
@@ -122,11 +124,13 @@ const MapPaletteDock = (props: { readonly mapId: number; readonly paint: WindowP
         data-testid={'map-palette-dock'}
         sx={{ width: PALETTE_DOCK_WIDTH, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, borderRight: 1, borderColor: 'divider' }}
       >
-        <Box sx={{ flex: 1, minHeight: 0 }}>
+        <Box sx={{ flex: 3, minHeight: 0 }}>
           <MapPalette mapId={mapId}/>
         </Box>
         <Divider/>
-        <LayerStrip/>
+        <Box sx={{ flex: 2, minHeight: 0 }}>
+          <LayersPanel/>
+        </Box>
       </Box>
     </PaintScope>
   );
@@ -139,9 +143,9 @@ const MapPaletteDock = (props: { readonly mapId: number; readonly paint: WindowP
  * open, side by side, stacked, or torn out into their own windows, and every one shows the same live map; only the
  * ones on screen hold a GPU context to draw with.
  *
- * Each window paints on its own. Docked in the main window, the map paints with what the workspace's palette and layer
- * strip pick. Torn out, it carries its own palette and layer strip beside it, picking for its window alone, so painting
- * there needs nothing from the main window; a toggle on the panel's strip hides that palette, and the layout remembers.
+ * Each window paints on its own. Docked in the main window, the map paints with what the workspace's palette and layers
+ * panel pick. Torn out, it carries its own palette and layers panel beside it, picking for its window alone, so painting
+ * there needs nothing from the main window; a toggle on the panel's strip hides both, and the layout remembers.
  * @param {IDockviewPanelProps<MapPanelParams>} props The dock's panel props; the params name the map.
  * @returns {React.JSX.Element} The panel.
  */

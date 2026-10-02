@@ -280,4 +280,81 @@ describe('WorkspaceChrome', () =>
         .toBe('quick-settings');
     });
   });
+
+  describe('the side fold buttons', () =>
+  {
+    let dock: RealDock;
+
+    beforeEach(() =>
+    {
+      dock = createRealDock();
+    });
+
+    afterEach(() =>
+    {
+      dock.dispose();
+    });
+
+    /**
+     * Renders the bar over a controller watching a real, default-laid-out dock, its side keeper attached the way
+     * Workspace.tsx's own onReady attaches it.
+     * @returns {{ controller: WorkspaceController }} The controller.
+     */
+    const renderWithDock = () =>
+    {
+      const services = { hub: new DocumentHub({ clientId: 'window-a' }), api: null } as unknown as MapEditorServices;
+      const controller = new WorkspaceController(services);
+      controller.attach(dock.api);
+      controller.sides.attach(dock.api);
+      dock.api.layout(1920, 1032);
+      addDefaultPanels(dock.api);
+      render(
+        <WorkspaceProvider controller={controller}>
+          <WorkspaceBar onResetLayout={() => undefined}/>
+        </WorkspaceProvider>
+      );
+
+      return { controller };
+    };
+
+    it('folds the left side away and back, the button\'s label following it both ways', () =>
+    {
+      // Arrange.
+      renderWithDock();
+      const mapTree = (dock.api.getPanel('map-tree') as IDockviewPanel).group;
+
+      // Act.
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse the left side' }));
+      const whileCollapsed = { width: mapTree.api.width, button: screen.queryByRole('button', { name: 'Expand the left side' }) !== null };
+      fireEvent.click(screen.getByRole('button', { name: 'Expand the left side' }));
+
+      // Assert.
+      expect([ whileCollapsed, { width: mapTree.api.width, button: screen.queryByRole('button', { name: 'Collapse the left side' }) !== null } ])
+        .toStrictEqual([
+          { width: 0, button: true },
+          { width: 300, button: true },
+        ]);
+    });
+
+    it('folds the right side away and back, leaving the left side\'s own width untouched', () =>
+    {
+      // Arrange.
+      renderWithDock();
+      const history = (dock.api.getPanel('history') as IDockviewPanel).group;
+      const mapTree = (dock.api.getPanel('map-tree') as IDockviewPanel).group;
+      const leftWidthBefore = mapTree.api.width;
+
+      // Act.
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse the right side' }));
+      const whileCollapsed = { right: history.api.width, left: mapTree.api.width, leftLabel: screen.queryByRole('button', { name: 'Collapse the left side' }) !== null };
+      fireEvent.click(screen.getByRole('button', { name: 'Expand the right side' }));
+
+      // Assert: the right side folded and came back, the left side's width never moved, and its own button never flipped.
+      expect([ whileCollapsed, { right: history.api.width, left: mapTree.api.width } ])
+        .toStrictEqual([
+          { right: 0, left: leftWidthBefore, leftLabel: true },
+          { right: 360, left: leftWidthBefore },
+        ]);
+    });
+  });
 });
