@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
@@ -108,6 +108,12 @@ describe('the palette and the layers panel', () =>
 
     // Act.
     fireEvent.click(screen.getByRole('button', { name: 'Passability' }));
+
+    // the palette above mounted off a tree and a tileset that load through promises the render kicks off but does not
+    // await, so its subscription to the mode (the effect behind useSyncExternalStore) can still be unregistered when
+    // this click fires; the store flips with no one listening, and only the chip's own later catch-up render shows it.
+    // waiting for the chip settles that before the mode is read back out, rather than racing it under suite load.
+    await waitFor(() => expect(screen.queryByText('Terrain tag')).not.toBeNull());
     const whileOpen = [ paint.mode.getState().editing, screen.queryByText('Terrain tag') !== null ];
     unmount();
 
