@@ -7,6 +7,8 @@ import type {
   ReactContextMenuItemConfig,
 } from 'dockview-react';
 import { isStartPanel, isStartTabHidden } from '../core/workspace/centre.ts';
+import { isCollapsibleKind } from '../core/workspace/panels.ts';
+import type { GroupCollapseKeeper } from './GroupCollapseKeeper.ts';
 import type { PopoutKeeper } from './PopoutKeeper.ts';
 import { useWorkspace } from './workspaceHooks.tsx';
 
@@ -16,6 +18,13 @@ import { useWorkspace } from './workspaceHooks.tsx';
  */
 const TEAR_OUT_LABEL = 'Open in its own window';
 const PUT_BACK_LABEL = 'Put back in the main window';
+
+/**
+ * What a side panel's tab offers through its chevron, and through a double click on the tab itself: collapsing its
+ * group to just its tab bar, and restoring it.
+ */
+const COLLAPSE_LABEL = 'Collapse';
+const EXPAND_LABEL = 'Expand';
 
 /**
  * The classes the start panel's tab carries: always, so it can take the whole of the dock's tab, and while it hides,
@@ -44,6 +53,8 @@ const GLYPHS = {
   openInWindow: { viewBox: '0 0 24 24', path: 'M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3z' },
   putBack: { viewBox: '0 0 24 24', path: 'M20 5.41 18.59 4 7 15.59V9H5v10h10v-2H8.41z' },
   close: { viewBox: '0 0 28 28', path: 'M2.1 27.3L0 25.2L11.55 13.65L0 2.1L2.1 0L13.65 11.55L25.2 0L27.3 2.1L15.75 13.65L27.3 25.2L25.2 27.3L13.65 15.75L2.1 27.3Z' },
+  collapse: { viewBox: '0 0 24 24', path: 'M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z' },
+  expand: { viewBox: '0 0 24 24', path: 'M12 8l-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z' },
 } as const;
 
 /**
@@ -69,6 +80,16 @@ const Glyph = (props: { glyph: keyof typeof GLYPHS }) =>
 const keepTabStill = (event: React.PointerEvent) =>
 {
   event.preventDefault();
+};
+
+/**
+ * Keeps a double click on one of a tab's buttons from also reaching the tab itself, which collapses its group on a
+ * double click of its own; a double click on, say, the close button should only close the tab.
+ * @param {React.MouseEvent} event The double click.
+ */
+const stopDoubleClick = (event: React.MouseEvent) =>
+{
+  event.stopPropagation();
 };
 
 /**
@@ -109,6 +130,48 @@ const useTornOut = (api: DockviewPanelApi): boolean =>
   }, [ api ]);
 
   return tornOut;
+};
+
+/**
+ * Follows whether a tab's panel sits in a group that collapses (a side panel's, never a map's or the start panel's,
+ * and never the centre's) and whether that group is collapsed right now, however the panels in it change or it
+ * collapses and expands. Toggling it is what the tab's chevron and a double click on the tab both do.
+ * @param {DockviewPanelApi} api The tab's panel's api.
+ * @param {GroupCollapseKeeper} collapses The keeper.
+ * @returns {{ collapsible: boolean, collapsed: boolean, toggle: () => void }} Whether the tab offers to collapse
+ * its group, whether it has, and how to flip it.
+ */
+const useGroupCollapse = (api: DockviewPanelApi, collapses: GroupCollapseKeeper) =>
+{
+  const [ collapsed, setCollapsed ] = useState(() => collapses.isCollapsed(api.group));
+
+  useEffect(() =>
+  {
+    let watching: { dispose: () => void } | null = null;
+
+    // read afresh on every change, and follow the group's own dimension changes, which is what collapsing is.
+    const update = () => setCollapsed(collapses.isCollapsed(api.group));
+    const watchGroup = () =>
+    {
+      watching?.dispose();
+      update();
+      watching = api.group.api.onDidDimensionsChange(update);
+    };
+
+    watchGroup();
+    const moved = api.onDidGroupChange(watchGroup);
+    return () =>
+    {
+      moved.dispose();
+      watching?.dispose();
+    };
+  }, [ api, collapses ]);
+
+  return {
+    collapsible: isCollapsibleKind(api.component) && collapses.isCollapsible(api.group),
+    collapsed,
+    toggle: () => collapses.toggle(api.group),
+  };
 };
 
 /**
@@ -191,10 +254,11 @@ const StartTab = (props: IDockviewPanelHeaderProps) =>
 };
 
 /**
- * A panel's tab: its title, a window button, and a close button. In the main window the window button opens that one
- * panel in a window of its own; in a torn-out window it puts the panel back where it came from in the main window.
- * Both buttons show on the tab in front and on any tab under the pointer, as the dock's close buttons do, and a middle
- * click closes the tab too.
+ * A panel's tab: its title, a chevron on a side panel's tab, a window button, and a close button. The chevron
+ * collapses its group to just its tab bar, or restores it, the same as a double click anywhere on the tab; in the
+ * main window the window button opens that one panel in a window of its own, and in a torn-out window it puts the
+ * panel back where it came from. Every button shows on the tab in front and on any tab under the pointer, as the
+ * dock's close button does, and a middle click closes the tab too.
  * @param {IDockviewPanelHeaderProps} props The dock's tab props.
  * @returns {React.JSX.Element} The tab.
  */
@@ -204,8 +268,10 @@ const PanelTab = (props: IDockviewPanelHeaderProps) =>
   const controller = useWorkspace();
   const title = usePanelTitle(api);
   const tornOut = useTornOut(api);
+  const { collapsible, collapsed, toggle } = useGroupCollapse(api, controller.collapses);
   const middlePressed = useRef(false);
   const windowLabel = tornOut ? PUT_BACK_LABEL : TEAR_OUT_LABEL;
+  const collapseLabel = collapsed ? EXPAND_LABEL : COLLAPSE_LABEL;
 
   /**
    * Opens this tab's panel in a window of its own, or puts it back from one.
@@ -247,12 +313,42 @@ const PanelTab = (props: IDockviewPanelHeaderProps) =>
       {
         middlePressed.current = false;
       }}
+      onDoubleClick={collapsible ? toggle : undefined}
     >
       <span className={'dv-default-tab-content'}>{title}</span>
-      <button type={'button'} className={'dv-default-tab-action'} aria-label={windowLabel} title={windowLabel} onPointerDown={keepTabStill} onClick={moveWindow}>
+      {collapsible && (
+        <button
+          type={'button'}
+          className={'dv-default-tab-action'}
+          aria-label={collapseLabel}
+          title={collapseLabel}
+          onPointerDown={keepTabStill}
+          onDoubleClick={stopDoubleClick}
+          onClick={toggle}
+        >
+          <Glyph glyph={collapsed ? 'expand' : 'collapse'}/>
+        </button>
+      )}
+      <button
+        type={'button'}
+        className={'dv-default-tab-action'}
+        aria-label={windowLabel}
+        title={windowLabel}
+        onPointerDown={keepTabStill}
+        onDoubleClick={stopDoubleClick}
+        onClick={moveWindow}
+      >
         <Glyph glyph={tornOut ? 'putBack' : 'openInWindow'}/>
       </button>
-      <button type={'button'} className={'dv-default-tab-action'} aria-label={'Close tab'} title={'Close'} onPointerDown={keepTabStill} onClick={() => api.close()}>
+      <button
+        type={'button'}
+        className={'dv-default-tab-action'}
+        aria-label={'Close tab'}
+        title={'Close'}
+        onPointerDown={keepTabStill}
+        onDoubleClick={stopDoubleClick}
+        onClick={() => api.close()}
+      >
         <Glyph glyph={'close'}/>
       </button>
     </div>

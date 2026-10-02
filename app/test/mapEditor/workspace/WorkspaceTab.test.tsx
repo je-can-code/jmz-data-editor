@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { DockviewReact, type DockviewApi, type IDockviewPanel } from 'dockview-react';
+import { COLLAPSED_GROUP_HEIGHT } from '../../../src/mapEditor/core/workspace/collapse.ts';
 import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import type { PopoutKeeper } from '../../../src/mapEditor/workspace/PopoutKeeper.ts';
@@ -72,6 +73,7 @@ describe('WorkspaceTab', () =>
     {
       controller.attach(api);
       controller.popouts.attach(api);
+      controller.collapses.attach(api);
       api.layout(1600, 900);
       api.addPanel({ id: 'a', component: 'plain', title: 'Alpha' });
       api.addPanel({ id: 'b', component: 'plain', title: 'Bravo', position: { referencePanel: 'a', direction: 'within' } });
@@ -134,7 +136,7 @@ describe('WorkspaceTab', () =>
 
     // Assert.
     expect([ buttonsIn(page.popouts[0]).map(button => button.getAttribute('aria-label')), within(tabShowing('Alpha')).getAllByRole('button').length ])
-      .toStrictEqual([ [ 'Put back in the main window', 'Close tab' ], 2 ]);
+      .toStrictEqual([ [ 'Collapse', 'Put back in the main window', 'Close tab' ], 3 ]);
   });
 
   it('puts its panel back where it came from from that button, closing the window it had to itself', async () =>
@@ -150,7 +152,8 @@ describe('WorkspaceTab', () =>
     // Act: clicked with the main page's own event, since the torn-out window's page has no window to make one.
     await act(async () =>
     {
-      buttonsIn(page.popouts[0])[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const putBack = buttonsIn(page.popouts[0]).find(button => button.getAttribute('aria-label') === 'Put back in the main window') as HTMLButtonElement;
+      putBack.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await settle();
     });
 
@@ -198,6 +201,92 @@ describe('WorkspaceTab', () =>
       .toStrictEqual([ 'grid:a' ]);
   });
 
+  describe('collapsing a group', () =>
+  {
+    /**
+     * Renders the dock with a plain panel above Alpha's group, so collapsing Alpha's group has a sibling to give its
+     * height to; the sole group filling the whole dock, as renderDock alone leaves it, has no room to give up.
+     * @returns {Promise<{ api: DockviewApi }>} The dock.
+     */
+    const renderWithSibling = async () =>
+    {
+      const { api } = await renderDock();
+      await act(async () =>
+      {
+        api.addPanel({ id: 'side', component: 'plain', title: 'Side', position: { direction: 'above' } });
+        await settle();
+      });
+
+      return { api };
+    };
+
+    it('collapses the group from the chevron, and restores it from the chevron again', async () =>
+    {
+      // Arrange: the group Alpha, Bravo and Charlie share, at its laid-out height.
+      const { api } = await renderWithSibling();
+      const { group } = api.getPanel('a') as IDockviewPanel;
+      const before = group.api.height;
+
+      // Act.
+      await act(async () =>
+      {
+        fireEvent.click(within(tabShowing('Alpha')).getByRole('button', { name: 'Collapse' }));
+        await settle();
+      });
+      const whileCollapsed = { height: group.api.height, label: within(tabShowing('Alpha')).getByRole('button', { name: 'Expand' }).getAttribute('title') };
+      await act(async () =>
+      {
+        fireEvent.click(within(tabShowing('Alpha')).getByRole('button', { name: 'Expand' }));
+        await settle();
+      });
+
+      // Assert.
+      expect([ whileCollapsed, group.api.height ])
+        .toStrictEqual([ { height: COLLAPSED_GROUP_HEIGHT, label: 'Expand' }, before ]);
+    });
+
+    it('collapses the group from a double click on the tab, every other tab in the group following along', async () =>
+    {
+      // Arrange.
+      const { api } = await renderWithSibling();
+      const { group } = api.getPanel('a') as IDockviewPanel;
+
+      // Act.
+      await act(async () =>
+      {
+        fireEvent.doubleClick(tabShowing('Alpha'));
+        await settle();
+      });
+
+      // Assert: Bravo and Charlie, sharing Alpha's group, offer to expand it too.
+      expect([
+        group.api.height,
+        within(tabShowing('Bravo')).getByRole('button', { name: 'Expand' }).tagName,
+        within(tabShowing('Charlie')).getByRole('button', { name: 'Expand' }).tagName,
+      ])
+        .toStrictEqual([ COLLAPSED_GROUP_HEIGHT, 'BUTTON', 'BUTTON' ]);
+    });
+
+    it('does not collapse from a double click on one of the tab\'s own buttons', async () =>
+    {
+      // Arrange.
+      const { api } = await renderWithSibling();
+      const { group } = api.getPanel('a') as IDockviewPanel;
+      const before = group.api.height;
+
+      // Act.
+      await act(async () =>
+      {
+        fireEvent.doubleClick(within(tabShowing('Alpha')).getByRole('button', { name: 'Close tab' }));
+        await settle();
+      });
+
+      // Assert: the double click closed nothing either, since a plain click is what a close button acts on.
+      expect([ group.api.height, [ ...describeGroups(api) ].sort() ])
+        .toStrictEqual([ before, [ 'grid:a+b+c', 'grid:side' ] ]);
+    });
+  });
+
   describe('the start panel\'s tab', () =>
   {
     /**
@@ -224,9 +313,9 @@ describe('WorkspaceTab', () =>
       // Act.
       const tab = screen.getByTestId('start-tab');
 
-      // Assert: the maps' tabs keep both buttons.
+      // Assert: the maps' tabs keep every button.
       expect([ tab.textContent, tab.getAttribute('data-hidden'), tab.querySelectorAll('button').length, within(tabShowing('Alpha')).getAllByRole('button').length ])
-        .toStrictEqual([ 'Start', 'false', 0, 2 ]);
+        .toStrictEqual([ 'Start', 'false', 0, 3 ]);
     });
 
     it('hides while anything shares its group, and shows again once nothing does', async () =>
@@ -250,6 +339,24 @@ describe('WorkspaceTab', () =>
       // Assert.
       expect([ whileShared, screen.getByTestId('start-tab').getAttribute('data-hidden') ])
         .toStrictEqual([ 'true', 'false' ]);
+    });
+
+    it('offers no chevron on a tab sharing the centre\'s group, since the centre never collapses', async () =>
+    {
+      // Arrange: a panel sharing the start panel's group, the way one put back from a closed window can land.
+      const api = await renderWithStart();
+      await act(async () =>
+      {
+        api.addPanel({ id: 'd', component: 'plain', title: 'Delta', position: { referencePanel: 'start', direction: 'within' } });
+        await settle();
+      });
+
+      // Act.
+      const buttons = within(tabShowing('Delta')).getAllByRole('button');
+
+      // Assert: only the window and close buttons, never a chevron.
+      expect(buttons.map(button => button.getAttribute('aria-label')))
+        .toStrictEqual([ 'Open in its own window', 'Close tab' ]);
     });
 
     it('keeps a Shift press from floating the start panel, as it floats any other tab', async () =>

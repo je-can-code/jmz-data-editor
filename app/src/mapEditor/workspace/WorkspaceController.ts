@@ -20,6 +20,7 @@ import { isStartPanel } from '../core/workspace/centre.ts';
 import { documentLabel } from '../views/documentLabels.ts';
 import { CentreKeeper, centreOf } from './CentreKeeper.ts';
 import { POPOUT_URL } from './defaultLayout.ts';
+import { GroupCollapseKeeper } from './GroupCollapseKeeper.ts';
 import { PopoutKeeper } from './PopoutKeeper.ts';
 
 /**
@@ -165,6 +166,12 @@ class WorkspaceController
     mapsGroup: () => (this.#dockview === null ? null : centreOf(this.#dockview)),
     staysDocked: panel => isStartPanel(panel.id),
   });
+
+  /**
+   * Collapses a side panel's group to just its tab bar, and restores it: what a tab's chevron, a double click on
+   * it, and the Panels menu all act through.
+   */
+  readonly collapses = new GroupCollapseKeeper();
 
   #dockview: DockviewApi | null = null;
 
