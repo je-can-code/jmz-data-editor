@@ -208,7 +208,8 @@ const DrawNotice = (props: { state: DrawState }) =>
  * created, deleted, copied and pasted with the mouse, the keys and a right-click menu, through {@link MapEventTools},
  * into the window's selection; with any painting tool in hand the left button paints, previewed before each click, and
  * the event tools stand down. An event picked out, such as the battler the data editor asked to see, becomes the
- * selection, with the view centred on it.
+ * selection, with the view centred on it at the game's scale; an event picked from the events list is centred at the
+ * zoom the view already has.
  *
  * A view off screen, behind another tab, lets its GPU context go and draws again, camera and all, when it shows; a map
  * that cannot draw says why over the canvas rather than leaving it blank.
@@ -351,6 +352,18 @@ const MapView = (props: MapViewProps) =>
 
     // the left button is the event tools' only while the events are in hand; a painting tool stands them down.
     stops.push(followToolInHand(painting, tools));
+
+    // an event picked from a list comes into sight, centred at the zoom the view has, so browsing the list row by row
+    // walks the map without zooming it in and out.
+    stops.push(selection.onReveal(request =>
+    {
+      const shown = controller.map;
+      const event = shown === null || shown.mapId !== request.mapId ? null : shown.event(request.eventId);
+      if (event !== null)
+      {
+        renderer.lookAt({ x: event.x, y: event.y }, renderer.camera.zoom);
+      }
+    }));
 
     const view = host.ownerDocument.defaultView;
     if (view !== null && wantsSpeedHooks(view.location.search))

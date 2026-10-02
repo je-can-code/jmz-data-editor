@@ -19,6 +19,7 @@ import { APP_WIDE_COMMANDS, appShortcutFor, type KeyTarget, type ShortcutCommand
 import { readOrigins, withOrigins } from '../core/workspace/tearOut.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import { addDefaultPanels, POPOUT_URL, restoreLayout } from './defaultLayout.ts';
+import { EventsPanel } from './panels/EventsPanel.tsx';
 import { HistoryPanel } from './panels/HistoryPanel.tsx';
 import { LayersPanel } from './panels/layers/LayersPanel.tsx';
 import { MapPanel } from './panels/MapPanel.tsx';
@@ -55,6 +56,7 @@ const PANELS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   [PANEL_COMPONENTS.palette]: withWindowScope(PalettePanel),
   [PANEL_COMPONENTS.layers]: withWindowScope(LayersPanel),
   [PANEL_COMPONENTS.quick]: withWindowScope(QuickSettingsPanel),
+  [PANEL_COMPONENTS.events]: withWindowScope(EventsPanel),
   [PANEL_COMPONENTS.start]: withWindowScope(StartPanel),
 };
 
@@ -82,9 +84,9 @@ const holdsTheTree = (group: DockviewDndOverlayEvent['group']): boolean =>
 
 /**
  * The map editor's workspace: one window split into panels (any number of maps, the map tree, the map properties,
- * the history, the palette, the layer strip and the quick settings) that can be resized, rearranged, stacked as tabs,
- * closed, or torn out into windows of their own, still live and in sync. The layout is kept with the project and comes
- * back as it was left, torn-out windows included.
+ * the history, the palette, the layer strip, the quick settings and the events list) that can be resized, rearranged,
+ * stacked as tabs, closed, or torn out into windows of their own, still live and in sync. The layout is kept with the
+ * project and comes back as it was left, torn-out windows included.
  *
  * The middle is the centre, which never closes: maps open there, in front, and once the last map in it is closed,
  * dragged off or torn out it shows the start panel, at the size it had (see CentreKeeper).

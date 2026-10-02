@@ -13,6 +13,19 @@ type SelectedEvents = {
 type SelectionListener = () => void;
 
 /**
+ * An ask to bring one event into sight: the map it is on, and the event.
+ */
+type RevealRequest = {
+  readonly mapId: number;
+  readonly eventId: number;
+};
+
+/**
+ * Hears every ask to bring an event into sight.
+ */
+type RevealListener = (request: RevealRequest) => void;
+
+/**
  * No events: one shared list, so anything comparing lists by identity sees nothing change while nothing is selected.
  */
 const NO_EVENTS: readonly number[] = Object.freeze([]);
@@ -42,6 +55,8 @@ const sameIds = (left: readonly number[], right: readonly number[]): boolean =>
  *   straight to React's {@code useSyncExternalStore} along with {@link subscribe}.
  * - {@link subscribe} hears every change, and returns the call that stops listening.
  * - {@link select} replaces the selection with events on one map; {@link clear} empties it.
+ * - {@link reveal} selects one event and asks every view of its map to bring it into sight, as picking an event from a
+ *   list does; {@link onReveal} is how a view hears it.
  *
  * It holds ids only. The events themselves live in the map's document, which is what changes when they are edited, so
  * a panel showing their settings reads them there and listens to the document for edits.
@@ -51,6 +66,8 @@ class EventSelection
   #current: SelectedEvents = NOTHING_SELECTED;
 
   #listeners = new Set<SelectionListener>();
+
+  #revealListeners = new Set<RevealListener>();
 
   /**
    * Reads the current selection.
@@ -94,6 +111,33 @@ class EventSelection
   {
     this.#replace(NOTHING_SELECTED);
   }
+
+  /**
+   * Selects one event alone and asks every view of its map to bring it into sight: what picking an event from a list
+   * does, where the map may be scrolled anywhere. Asking for the event already selected asks again, since the view may
+   * have been panned away from it since.
+   * @param {number} mapId The map the event is on.
+   * @param {number} eventId The event.
+   */
+  reveal(mapId: number, eventId: number): void
+  {
+    this.select(mapId, [ eventId ]);
+    [ ...this.#revealListeners ].forEach(listener => listener({ mapId, eventId }));
+  }
+
+  /**
+   * Listens for asks to bring an event into sight, as a map view does to centre on it.
+   * @param {RevealListener} listener Called with each ask, once the event is selected.
+   * @returns {() => void} Stops listening.
+   */
+  onReveal = (listener: RevealListener): (() => void) =>
+  {
+    this.#revealListeners.add(listener);
+    return () =>
+    {
+      this.#revealListeners.delete(listener);
+    };
+  };
 
   /**
    * Reads the events selected on one map. The list is the selection's own, the same object until the selection changes,
@@ -142,4 +186,4 @@ class EventSelection
 }
 
 export { EventSelection, NO_EVENTS, NOTHING_SELECTED };
-export type { SelectedEvents, SelectionListener };
+export type { RevealListener, RevealRequest, SelectedEvents, SelectionListener };

@@ -34,8 +34,8 @@ type DefaultPanelSpec = Parameters<DockviewApi['addPanel']>[0];
  * Every panel the workspace lays out the first time or after a reset, in the order they are added: down the left,
  * the map tree, the palette and the layers panel, each in its own group so all three show at once; the start panel
  * in the middle, holding the centre maps open into (see CentreKeeper); and the map properties and quick settings on
- * the right above the history. Reopening one panel on its own (see openSidePanel) adds just that one, by this same
- * spec, so it lands exactly where a reset would put it.
+ * the right above the history, with the events list a tab behind the history. Reopening one panel on its own (see
+ * openSidePanel) adds just that one, by this same spec, so it lands exactly where a reset would put it.
  */
 const DEFAULT_PANEL_SPECS: readonly DefaultPanelSpec[] = [
   { id: SINGLE_PANEL_IDS.mapTree, component: PANEL_COMPONENTS.mapTree, title: 'Maps' },
@@ -45,6 +45,7 @@ const DEFAULT_PANEL_SPECS: readonly DefaultPanelSpec[] = [
   { id: SINGLE_PANEL_IDS.properties, component: PANEL_COMPONENTS.properties, title: 'Map properties', position: { direction: 'right' } },
   { id: SINGLE_PANEL_IDS.quick, component: PANEL_COMPONENTS.quick, title: 'Quick settings', position: { referencePanel: SINGLE_PANEL_IDS.properties, direction: 'within' }, inactive: true },
   { id: SINGLE_PANEL_IDS.history, component: PANEL_COMPONENTS.history, title: 'History', position: { referencePanel: SINGLE_PANEL_IDS.properties, direction: 'below' } },
+  { id: SINGLE_PANEL_IDS.events, component: PANEL_COMPONENTS.events, title: 'Events', position: { referencePanel: SINGLE_PANEL_IDS.history, direction: 'within' }, inactive: true },
 ];
 
 /**
@@ -54,6 +55,73 @@ const DEFAULT_PANEL_SPECS: readonly DefaultPanelSpec[] = [
 const SIDE_PANEL_SPECS: readonly { readonly id: string; readonly title: string }[] = DEFAULT_PANEL_SPECS
   .filter(spec => spec.component !== PANEL_COMPONENTS.map && spec.component !== PANEL_COMPONENTS.start)
   .map(spec => ({ id: spec.id, title: spec.title as string }));
+
+/**
+ * Where a default panel goes, as its spec says.
+ */
+type PanelPlace = DefaultPanelSpec['position'];
+
+/**
+ * Reads the panel a place is given relative to.
+ * @param {PanelPlace} place The place.
+ * @returns {string | null} The panel's id, or null for a place given relative to none.
+ */
+const referenceOf = (place: PanelPlace): string | null =>
+{
+  return place !== undefined && 'referencePanel' in place && typeof place.referencePanel === 'string'
+    ? place.referencePanel
+    : null;
+};
+
+/**
+ * Reports whether a place stacks a panel as a tab with the panel it names.
+ * @param {PanelPlace} place The place.
+ * @returns {boolean} True for a place within another panel's group.
+ */
+const isWithin = (place: PanelPlace): boolean =>
+{
+  return place !== undefined && place.direction === 'within';
+};
+
+/**
+ * Works out where a side panel reopened on its own goes, as near as the dock allows to where a reset would put it:
+ *
+ * - in the group of the panel its spec stacks it with, when that one is open;
+ * - in the group of an open panel whose own spec stacks it with this one, so two panels a reset stacks together come
+ *   back together, whichever closed first;
+ * - beside the panel its spec places it by, when that one is open;
+ * - and, when the panel its spec names is closed, wherever that panel would go itself, since naming a panel the dock
+ *   does not hold makes the dock refuse to add anything at all.
+ * @param {DefaultPanelSpec} spec The panel's spec.
+ * @param {(id: string) => boolean} isOpen Reports whether a panel is open.
+ * @returns {PanelPlace} Where it goes.
+ */
+const reopenPlaceFor = (spec: DefaultPanelSpec, isOpen: (id: string) => boolean): PanelPlace =>
+{
+  const place = spec.position;
+  const reference = referenceOf(place);
+  if (reference !== null && isWithin(place) && isOpen(reference))
+  {
+    return place;
+  }
+
+  const partner = DEFAULT_PANEL_SPECS.find(other => referenceOf(other.position) === spec.id && isWithin(other.position) && isOpen(other.id));
+  if (partner !== undefined)
+  {
+    return { referencePanel: partner.id, direction: 'within' };
+  }
+
+  if (reference === null || isOpen(reference))
+  {
+    return place;
+  }
+
+  // each spec names only a panel listed before it, so this always comes to an end.
+  const referenced = DEFAULT_PANEL_SPECS.find(other => other.id === reference);
+  return referenced === undefined
+    ? undefined
+    : reopenPlaceFor(referenced, isOpen);
+};
 
 /**
  * Adds one of the workspace's own panels, with the minimum width its kind keeps.
@@ -68,8 +136,9 @@ const addPanel = (api: DockviewApi, options: DefaultPanelSpec): void =>
 /**
  * Lays out the workspace the first time, or after a reset: down the left, the map tree, the palette and the layers
  * panel, each in its own group so all three show at once; the start panel in the middle, holding the centre maps open
- * into (see CentreKeeper); and the map properties and quick settings on the right above the history. The side panels
- * keep their minimum widths, so however the maps crowd in, the tree, the palette and the properties stay readable.
+ * into (see CentreKeeper); and the map properties and quick settings on the right above the history and the events
+ * list. The side panels keep their minimum widths, so however the maps crowd in, the tree, the palette and the
+ * properties stay readable.
  * @param {DockviewApi} api The dock.
  */
 const addDefaultPanels = (api: DockviewApi): void =>
@@ -83,9 +152,9 @@ const addDefaultPanels = (api: DockviewApi): void =>
 };
 
 /**
- * Opens one of the workspace's side panels: at its default place if it is not open, or, if it is, brought to the
- * front (its window focused, if it has one of its own) and expanded if it was collapsed. What choosing a panel
- * from the Panels menu does.
+ * Opens one of the workspace's side panels: in front, as near its default place as the panels still open allow (see
+ * reopenPlaceFor) if it is not open, or, if it is, brought to the front (its window focused, if it has one of its own)
+ * and expanded if it was collapsed. What choosing a panel from the Panels menu does.
  * @param {DockviewApi} api The dock.
  * @param {GroupCollapseKeeper} collapses Expands the panel's group if choosing it found it collapsed.
  * @param {string} id The panel's id, among SIDE_PANEL_SPECS.
@@ -95,10 +164,12 @@ const openSidePanel = (api: DockviewApi, collapses: GroupCollapseKeeper, id: str
   const open = api.getPanel(id);
   if (open === undefined)
   {
+    // a panel a reset adds behind another still comes to the front when chosen on its own.
     const spec = DEFAULT_PANEL_SPECS.find(each => each.id === id);
     if (spec !== undefined)
     {
-      addPanel(api, spec);
+      const position = reopenPlaceFor(spec, each => api.getPanel(each) !== undefined);
+      addPanel(api, { id: spec.id, component: spec.component, title: spec.title, position });
     }
 
     return;

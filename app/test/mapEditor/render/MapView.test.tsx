@@ -28,7 +28,7 @@ import { buildMapJson } from '../support/fixtures.ts';
 /**
  * What the stand-in renderers and controllers record and answer: every renderer made, what each was asked to show
  * and where to look, the overlay switches and marker classifiers it was handed, what it was told of the view being on
- * screen (with "mount" where it was mounted), a way to change its draw state, and the maps an open lands on.
+ * screen (with "mount" where it was mounted), ways to change its draw state and its zoom, and the maps an open lands on.
  */
 const stand = vi.hoisted(() => ({
   renderers: [] as {
@@ -38,6 +38,7 @@ const stand = vi.hoisted(() => ({
     classifiers: MarkerClassifier[];
     shown: (boolean | 'mount')[];
     announce: (state: string) => void;
+    zoomTo: (zoom: number) => void;
   }[],
   maps: new Map<number, unknown>(),
 }));
@@ -60,6 +61,10 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       announce: (state: string) =>
       {
         this.drawListeners.forEach(listener => listener(state));
+      },
+      zoomTo: (zoom: number) =>
+      {
+        this.camera = { ...this.camera, zoom };
       },
     };
 
@@ -173,15 +178,16 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
 vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
 {
   /**
-   * Stands in for the controller, opening the maps the test set.
+   * Stands in for the controller, opening the maps the test set and holding the one it opened last.
    */
   class MapViewController
   {
-    map = null;
+    map: unknown = null;
 
     async open(mapId: number): Promise<unknown>
     {
-      return stand.maps.get(mapId) ?? null;
+      this.map = stand.maps.get(mapId) ?? null;
+      return this.map;
     }
 
     close(): void
@@ -199,8 +205,9 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * measure. The view offers the switches for the overlays and the game look and a status line; without a project server
  * it says there is no map to show rather than failing. An event it is asked to pick out, such as the battler the data
  * editor asked to see, shows selected once the map is open, with the view centred on it, and so does each event picked
- * after it; with nothing picked, nothing is selected and the view stays put. The drawing itself happens on the GPU and
- * is proved by the speed script and the parity check, not here.
+ * after it; with nothing picked, nothing is selected and the view stays put. An event revealed from the events list is
+ * centred at the zoom the view already has, so browsing the list never zooms the map, and only by the views of its own
+ * map. The drawing itself happens on the GPU and is proved by the speed script and the parity check, not here.
  *
  * A view behind another tab lets its GPU context go, so the renderer hears whether the view is on screen before it is
  * mounted (a view mounted behind a tab must make no context at all) and each time that changes. And a map that cannot
@@ -366,6 +373,33 @@ describe('MapView', () =>
       .toBe(2));
     expect([ selection.get(), stand.renderers[0].looks ])
       .toStrictEqual([ { mapId: 5, eventIds: [ 3 ] }, [ { cell: { x: 2, y: 1 }, zoom: 1 }, { cell: { x: 2, y: 1 }, zoom: 1 } ] ]);
+  });
+
+  it('centres on an event revealed from a list at the zoom the view has, and only for an event its own map holds', async () =>
+  {
+    // Arrange: map 5 open, holding the door at 0, 0 and the chest at 2, 1, with the view zoomed out to a quarter.
+    stand.maps.set(5, MapDocument.fromJson('map:5', buildMapJson()));
+    const selection = new EventSelection();
+    render(
+      <MapEditorServicesProvider services={served()}>
+        <MapView mapId={5} selection={selection}/>
+      </MapEditorServicesProvider>
+    );
+    await waitFor(() => expect(stand.renderers[0]?.overlays.length)
+      .toBe(1));
+    stand.renderers[0].zoomTo(0.25);
+
+    // Act: the chest on another map, the chest here, then a slot this map leaves empty.
+    act(() =>
+    {
+      selection.reveal(9, 3);
+      selection.reveal(5, 3);
+      selection.reveal(5, 2);
+    });
+
+    // Assert: one look, at the chest, keeping the quarter zoom.
+    expect(stand.renderers[0].looks)
+      .toStrictEqual([ { cell: { x: 2, y: 1 }, zoom: 0.25 } ]);
   });
 
   it('counts the events selected on its map in the status line, and none selected on another map', async () =>

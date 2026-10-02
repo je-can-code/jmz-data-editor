@@ -17,6 +17,10 @@ import { createRealDock, describeGrid, type RealDock } from '../support/realDock
  * beside it) opens readable again, the maps giving up the room. Whatever else the workspace keeps in the saved layout
  * is handed on once the dock has rebuilt it; with nothing saved, the default layout is used.
  *
+ * A side panel chosen from the Panels menu comes back in front, as near where a reset would put it as the panels still
+ * open allow: with the panel a reset stacks it with, whichever of the two closed first, and where a closed panel its
+ * place is given by would go, since the dock refuses outright a place naming a panel it does not hold.
+ *
  * The dock here is the real one; its windows are faked.
  */
 describe('defaultLayout', () =>
@@ -101,10 +105,10 @@ describe('defaultLayout', () =>
     // Act.
     addDefaultPanels(dock.api);
 
-    // Assert.
+    // Assert: the events list waits behind the history.
     expect([ describeGrid(dock.api), widths() ])
       .toStrictEqual([
-        [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ],
+        [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ],
         {
           'map-tree': '300/240',
           'palette': '300/240',
@@ -166,7 +170,7 @@ describe('defaultLayout', () =>
 
     // Assert.
     expect([ outcome, describeGrid(dock.api), onRestored.mock.calls.length ])
-      .toStrictEqual([ 'default', [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ], 0 ]);
+      .toStrictEqual([ 'default', [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ], 0 ]);
   });
 
   it('hands the saved layout on once rebuilt, and lays out afresh when nothing is saved', async () =>
@@ -183,7 +187,7 @@ describe('defaultLayout', () =>
 
     // Assert.
     expect([ restored, fresh, onRestored.mock.calls, describeGrid(dock.api) ])
-      .toStrictEqual([ 'restored', 'default', [ [ saved ] ], [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ] ]);
+      .toStrictEqual([ 'restored', 'default', [ [ saved ] ], [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ] ]);
   });
 
   describe('SIDE_PANEL_SPECS', () =>
@@ -201,8 +205,8 @@ describe('defaultLayout', () =>
       // Assert.
       expect([ ids, titles ])
         .toStrictEqual([
-          [ 'map-tree', 'palette', 'layers', 'map-properties', 'quick-settings', 'history' ],
-          [ 'Maps', 'Tiles', 'Layers', 'Map properties', 'Quick settings', 'History' ],
+          [ 'map-tree', 'palette', 'layers', 'map-properties', 'quick-settings', 'history', 'events' ],
+          [ 'Maps', 'Tiles', 'Layers', 'Map properties', 'Quick settings', 'History', 'Events' ],
         ]);
     });
   });
@@ -226,17 +230,64 @@ describe('defaultLayout', () =>
       addDefaultPanels(dock.api);
     });
 
-    it('adds a closed panel back at its default place', () =>
+    it('adds a closed panel back at its default place, in front', () =>
     {
-      // Arrange: history closed, as its close button would leave it.
+      // Arrange: the layers closed, as their close button would leave them.
+      (dock.api.getPanel('layers') as IDockviewPanel).api.close();
+
+      // Act.
+      openSidePanel(dock.api, collapsesFor(), 'layers');
+
+      // Assert: back where addDefaultPanels put them, below the palette.
+      expect([ describeGrid(dock.api), dock.api.getPanel('layers')?.group.activePanel?.id ])
+        .toStrictEqual([ [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ], 'layers' ]);
+    });
+
+    it('brings a panel a reset leaves behind another to the front when it is reopened on its own', () =>
+    {
+      // Arrange: quick settings closed, while map properties stays open in front of where it was.
+      (dock.api.getPanel('quick-settings') as IDockviewPanel).api.close();
+
+      // Act.
+      openSidePanel(dock.api, collapsesFor(), 'quick-settings');
+
+      // Assert.
+      expect([ describeGrid(dock.api), dock.api.getPanel('quick-settings')?.group.activePanel?.id ])
+        .toStrictEqual([ [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ], 'quick-settings' ]);
+    });
+
+    it('puts a panel back with the open panel a reset stacks with it, whichever of the two closed', () =>
+    {
+      // Arrange: the history closed, leaving the events list alone in their group.
       (dock.api.getPanel('history') as IDockviewPanel).api.close();
 
       // Act.
       openSidePanel(dock.api, collapsesFor(), 'history');
 
-      // Assert: back where addDefaultPanels put it, below the properties and quick settings.
-      expect(describeGrid(dock.api))
-        .toStrictEqual([ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ]);
+      // Assert: back in the events list's group, in front of it, rather than in a group of its own.
+      expect([ describeGrid(dock.api), dock.api.getPanel('history')?.group.activePanel?.id ])
+        .toStrictEqual([ [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'events+history' ], 'history' ]);
+    });
+
+    it('puts a panel whose spec names a closed panel where that panel would go, rather than refusing', () =>
+    {
+      // Arrange: the history and the events list both closed.
+      [ 'history', 'events' ].forEach(id => (dock.api.getPanel(id) as IDockviewPanel).api.close());
+
+      // Act: the events list, whose spec names the history; then, with the properties closed as well, quick settings,
+      // whose spec names the properties.
+      openSidePanel(dock.api, collapsesFor(), 'events');
+      const eventsBack = describeGrid(dock.api);
+      [ 'events', 'map-properties', 'quick-settings' ].forEach(id => (dock.api.getPanel(id) as IDockviewPanel).api.close());
+      openSidePanel(dock.api, collapsesFor(), 'quick-settings');
+
+      // Assert: the events list where the history would be, below the properties; quick settings where the properties
+      // would be, at the right.
+      expect([ eventsBack, describeGrid(dock.api) ])
+        .toStrictEqual([
+          [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'events' ],
+          [ 'map-tree', 'palette', 'layers', 'start', 'quick-settings' ],
+        ]);
     });
 
     it('brings an open panel to the front of its group, leaving the rest of the group where it is', () =>
@@ -249,7 +300,7 @@ describe('defaultLayout', () =>
 
       // Assert.
       expect([ group.activePanel?.id, describeGrid(dock.api) ])
-        .toStrictEqual([ 'quick-settings', [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ] ]);
+        .toStrictEqual([ 'quick-settings', [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ] ]);
     });
 
     it('expands an open panel\'s group if choosing it found it collapsed', () =>

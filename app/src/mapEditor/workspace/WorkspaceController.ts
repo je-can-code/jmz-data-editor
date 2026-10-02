@@ -18,6 +18,7 @@ import type { RmmzMapInfo } from '../core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../services/MapEditorServices.ts';
 import { isStartPanel } from '../core/workspace/centre.ts';
 import { documentLabel } from '../views/documentLabels.ts';
+import { openEventWindow } from '../views/mapEditorViews.ts';
 import { CentreKeeper, centreOf } from './CentreKeeper.ts';
 import { POPOUT_URL } from './defaultLayout.ts';
 import { GroupCollapseKeeper } from './GroupCollapseKeeper.ts';
@@ -349,6 +350,55 @@ class WorkspaceController
       params: { mapId },
       position: this.#placeForMap(api, options),
     });
+  }
+
+  /**
+   * Shows one event of a map, as a click on it in the events list asks: it becomes the selection, and every view of its
+   * map centres on it at the zoom that view has. When no view of the map is on screen, one hidden behind another tab
+   * comes to the front first, unless it shares a group with the panel asking, which would put the list itself out of
+   * sight. A map with no view open at all opens in the centre with the event picked out, as one the data editor asks
+   * for does.
+   * @param {number} mapId The map.
+   * @param {number} eventId The event.
+   * @param {string} askingPanelId The panel asking, which stays on screen.
+   */
+  revealEvent(mapId: number, eventId: number, askingPanelId: string): void
+  {
+    const api = this.#dockview;
+    if (api === null)
+    {
+      return;
+    }
+
+    const views = api.panels.filter(panel => panel.api.component === PANEL_COMPONENTS.map && isMapPanelParams(panel.params) && panel.params.mapId === mapId);
+    if (views.length === 0)
+    {
+      this.openMap(mapId, { focusEventId: eventId });
+      return;
+    }
+
+    // a view already on screen is enough; otherwise the first hidden one outside the asking panel's group comes forward.
+    if (views.some(view => view.api.isVisible) === false)
+    {
+      const asking = api.getPanel(askingPanelId)?.group ?? null;
+      views.find(view => view.group !== asking)?.api.setActive();
+    }
+
+    this.selection.reveal(mapId, eventId);
+  }
+
+  /**
+   * Opens an event's full editor in its own window, or brings forward the window already editing it, as a double-click
+   * on it in the events list asks; a window the page was not allowed to open is said so.
+   * @param {number} mapId The map the event is on.
+   * @param {number} eventId The event.
+   */
+  openEvent(mapId: number, eventId: number): void
+  {
+    if (openEventWindow(this.services.shell, mapId, eventId) === 'blocked')
+    {
+      this.notify('The event\'s window was blocked; allow pop-ups for the editor to open it.', 'error');
+    }
   }
 
   /**
