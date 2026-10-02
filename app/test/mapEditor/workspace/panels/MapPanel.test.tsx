@@ -52,11 +52,11 @@ vi.mock('../../../../src/mapEditor/render/MapView.tsx', async () =>
 
 /*
  * A map panel paints with its window's paint. Docked in the main window, that is the page's own, which the workspace's
- * palette and layer strip pick for, and the panel carries no palette of its own. Torn out into a window of its own, it
- * carries its own palette and layer strip beside the map, picking for that window alone, so painting there needs
+ * palette and layers panel pick for, and the panel carries no palette of its own. Torn out into a window of its own,
+ * it carries its own palette and layers panel beside the map, picking for that window alone, so painting there needs
  * nothing from the main window: a tile or the shadow pen picked there reaches the torn-out map's tools and never the
- * main window's. A toggle on the panel's strip hides that palette, kept in the panel's parameters so the layout
- * remembers it, and shows it again.
+ * main window's. A toggle on the panel's strip hides both the palette and the layers panel, kept in the panel's
+ * parameters so the layout remembers it, and shows them again.
  */
 describe('MapPanel', () =>
 {
@@ -174,7 +174,7 @@ describe('MapPanel', () =>
       .toStrictEqual([ true, null, null ]);
   });
 
-  it('carries its own palette and layer strip once torn out, painting with its window\'s paint alone', async () =>
+  it('carries its own palette and layers panel once torn out, painting with its window\'s paint alone', async () =>
   {
     // Arrange.
     const { controller, paints } = buildWorkspace();
@@ -190,17 +190,17 @@ describe('MapPanel', () =>
     fireEvent.click(within(dock).getByRole('button', { name: 'Shadow pen' }));
     fireEvent.click(within(dock).getByRole('button', { name: '4' }));
 
-    // Assert: the torn-out map paints with its window's paint, which has the pen, the shadow brush and layer 4, and the
-    // main window's paint has none of it.
+    // Assert: the dock carries the whole layers panel, not just the strip; the torn-out map paints with its window's
+    // paint, which has the pen, the shadow brush and layer 4, and the main window's paint has none of it.
     const own = paints.forWindow(popout);
     const settingsOf = (paint: WindowPaint) => [ paint.painting.settings.tool, paint.painting.settings.brush?.kind ?? null, paint.painting.settings.strip ];
-    expect([ views.paints.at(-1) === own, own === paints.main, settingsOf(own), settingsOf(paints.main) ])
-      .toStrictEqual([ true, false, [ 'pen', 'shadows', 3 ], [ 'events', null, 'auto' ] ]);
+    expect([ within(dock).queryByTestId('layers') !== null, views.paints.at(-1) === own, own === paints.main, settingsOf(own), settingsOf(paints.main) ])
+      .toStrictEqual([ true, true, false, [ 'pen', 'shadows', 3 ], [ 'events', null, 'auto' ] ]);
   });
 
-  it('hides its own palette from the toggle, keeping that in its parameters, and shows it again', async () =>
+  it('hides its own palette and layers panel together from the toggle, keeping that in its parameters, and shows both again', async () =>
   {
-    // Arrange: torn out, palette showing.
+    // Arrange: torn out, the whole dock showing.
     const { controller } = buildWorkspace();
     const { api, moveTo, updates } = buildPanel();
     const { rerender } = render(panelFor(controller, api));
@@ -214,7 +214,7 @@ describe('MapPanel', () =>
     const whileHidden = [ screen.queryByTestId('map-palette-dock'), screen.queryByRole('button', { name: 'Show the tiles' }) !== null ];
     fireEvent.click(screen.getByRole('button', { name: 'Show the tiles' }));
 
-    // Assert.
+    // Assert: the dock carrying both the palette and the layers panel is gone outright while hidden, not just one of them.
     expect([ updates, whileHidden ])
       .toStrictEqual([ [ { paletteHidden: true }, { paletteHidden: undefined } ], [ null, true ] ]);
   });
