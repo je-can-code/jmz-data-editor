@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
@@ -108,6 +108,11 @@ describe('the palette and the layers panel', () =>
 
     // Act.
     fireEvent.click(screen.getByRole('button', { name: 'Passability' }));
+
+    // the flag chips read the editor's mode through useSyncExternalStore, which the click above notifies but does not
+    // always finish re-rendering for within the same synchronous act the click runs in; waiting for the chip it draws
+    // settles that before the mode is read back out, rather than racing it under whatever load the suite is under.
+    await waitFor(() => expect(screen.queryByText('Terrain tag')).not.toBeNull());
     const whileOpen = [ paint.mode.getState().editing, screen.queryByText('Terrain tag') !== null ];
     unmount();
 
