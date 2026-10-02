@@ -2,18 +2,21 @@
  * @vitest-environment jsdom
  */
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import type { IDockviewPanel } from 'dockview-react';
 import { WindowShell, type OpenBrowserWindow } from '../../../src/core/infrastructure/shell/WindowShell.ts';
 import { DocumentHub, type DocumentStore } from '../../../src/mapEditor/core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
+import { addDefaultPanels } from '../../../src/mapEditor/workspace/defaultLayout.ts';
 import { NoticeBar, WorkspaceBar } from '../../../src/mapEditor/workspace/WorkspaceChrome.tsx';
 import { WorkspaceController } from '../../../src/mapEditor/workspace/WorkspaceController.ts';
 import { WorkspaceProvider } from '../../../src/mapEditor/workspace/workspaceHooks.tsx';
 import { buildMapJson } from '../support/fixtures.ts';
+import { createRealDock, type RealDock } from '../support/realDock.ts';
 
 /*
  * The workspace's chrome owes the author three things at a glance: whether anything is unsaved, and a way to save
@@ -163,5 +166,101 @@ describe('WorkspaceChrome', () =>
       .toBe('"Delete "Cave"" cannot undo: map 5 has changed since.');
     await waitFor(() => expect(controller.getState().notice)
       .toBeNull());
+  });
+
+  describe('the Panels menu', () =>
+  {
+    let dock: RealDock;
+
+    beforeEach(() =>
+    {
+      dock = createRealDock();
+    });
+
+    afterEach(() =>
+    {
+      dock.dispose();
+    });
+
+    /**
+     * Renders the bar over a controller watching a real, default-laid-out dock.
+     * @returns {{ controller: WorkspaceController }} The controller.
+     */
+    const renderWithDock = () =>
+    {
+      const services = { hub: new DocumentHub({ clientId: 'window-a' }), api: null } as unknown as MapEditorServices;
+      const controller = new WorkspaceController(services);
+      controller.attach(dock.api);
+      controller.collapses.attach(dock.api);
+      dock.api.layout(1920, 1032);
+      addDefaultPanels(dock.api);
+      render(
+        <WorkspaceProvider controller={controller}>
+          <WorkspaceBar onResetLayout={() => undefined}/>
+        </WorkspaceProvider>
+      );
+
+      return { controller };
+    };
+
+    /**
+     * Reads the Panels menu's items as text, with whether each carries the open checkmark.
+     * @returns {[string, boolean][]} Each item's title and whether it is checked.
+     */
+    const menuItems = (): [ string, boolean ][] =>
+    {
+      return screen.getAllByRole('menuitem').map(item => [ item.textContent ?? '', within(item).queryByTestId('panel-open-check') !== null ]);
+    };
+
+    it('lists every side panel, a checkmark on each one open and none on one that is closed', () =>
+    {
+      // Arrange: history closed, as its close button would leave it.
+      renderWithDock();
+      (dock.api.getPanel('history') as IDockviewPanel).api.close();
+
+      // Act.
+      fireEvent.click(screen.getByRole('button', { name: 'Panels' }));
+
+      // Assert.
+      expect(menuItems())
+        .toStrictEqual([
+          [ 'Maps', true ],
+          [ 'Tiles', true ],
+          [ 'Layers', true ],
+          [ 'Map properties', true ],
+          [ 'Quick settings', true ],
+          [ 'History', false ],
+        ]);
+    });
+
+    it('reopens a closed panel at its default place, and closes the menu', () =>
+    {
+      // Arrange.
+      renderWithDock();
+      (dock.api.getPanel('history') as IDockviewPanel).api.close();
+      fireEvent.click(screen.getByRole('button', { name: 'Panels' }));
+
+      // Act.
+      fireEvent.click(screen.getByRole('menuitem', { name: 'History' }));
+
+      // Assert.
+      expect([ dock.api.getPanel('history') !== undefined, screen.queryAllByRole('menuitem').length ])
+        .toStrictEqual([ true, 0 ]);
+    });
+
+    it('brings an open panel to the front of its group when chosen', () =>
+    {
+      // Arrange: quick settings is open but behind map properties, which addDefaultPanels leaves active.
+      renderWithDock();
+      const { group } = dock.api.getPanel('quick-settings') as IDockviewPanel;
+      fireEvent.click(screen.getByRole('button', { name: 'Panels' }));
+
+      // Act.
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Quick settings' }));
+
+      // Assert.
+      expect(group.activePanel?.id)
+        .toBe('quick-settings');
+    });
   });
 });

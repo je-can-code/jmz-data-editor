@@ -49,6 +49,18 @@ const PANEL_MIN_WIDTHS: Readonly<Partial<Record<string, number>>> = {
 };
 
 /**
+ * Reports whether a kind of panel collapses to just its tab bar: every side panel, never a map, since switching
+ * tabs already puts one out of the way, and never the start panel, which holds the centre and must always stay at
+ * the size it was given.
+ * @param {string} component The panel's kind.
+ * @returns {boolean} True for a side panel.
+ */
+const isCollapsibleKind = (component: string): boolean =>
+{
+  return component !== PANEL_COMPONENTS.map && component !== PANEL_COMPONENTS.start;
+};
+
+/**
  * Reads the narrowest a kind of panel may be squeezed.
  * @param {string} component The panel's kind.
  * @returns {number | undefined} Its minimum width in pixels, or undefined when the dock's own minimum applies.
@@ -240,6 +252,7 @@ export {
   directionForDrop,
   encodeDraggedMaps,
   historyOwnedBy,
+  isCollapsibleKind,
   isMapPanelParams,
   MAP_DRAG_TYPE,
   mapPanelId,

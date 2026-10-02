@@ -12,6 +12,7 @@ import {
 } from 'dockview-react';
 import { CHANNEL_NAMES, openBroadcastChannel } from '../../core/infrastructure/messaging/MessageChannelLike.ts';
 import { MapLinkHost } from '../../core/infrastructure/shell/MapLink.ts';
+import { readCollapsedGroups, withCollapsedGroups } from '../core/workspace/collapse.ts';
 import type { SavedLayout } from '../core/workspace/LayoutStore.ts';
 import { decodeDraggedMaps, directionForDrop, MAP_DRAG_TYPE, PANEL_COMPONENTS, SINGLE_PANEL_IDS } from '../core/workspace/panels.ts';
 import { APP_WIDE_COMMANDS, appShortcutFor, type KeyTarget, type ShortcutCommand } from '../core/workspace/shortcuts.ts';
@@ -176,10 +177,12 @@ const Workspace = () =>
     let restoring = true;
     const keepLayout = () =>
     {
-      // torn-out panels' origins ride along, so their windows still bring them home after a restart.
+      // torn-out panels' origins and collapsed groups' sizes both ride along, so a restart brings them back too.
       if (restoring === false && isCurrent())
       {
-        controller.layouts.save(withOrigins(api.toJSON() as unknown as SavedLayout, controller.popouts.origins));
+        const layout = api.toJSON() as unknown as SavedLayout;
+        const withTornOut = withOrigins(layout, controller.popouts.origins);
+        controller.layouts.save(withCollapsedGroups(withTornOut, controller.collapses.collapsed));
       }
     };
 
@@ -199,9 +202,14 @@ const Workspace = () =>
       attachShortcutsToPopouts(api, onShortcut),
       controller.centre.attach(api),
       controller.popouts.attach(api),
+      controller.collapses.attach(api),
     );
 
-    restoreLayout(api, controller.layouts, isCurrent, saved => controller.popouts.adopt(readOrigins(saved)))
+    restoreLayout(api, controller.layouts, isCurrent, saved =>
+    {
+      controller.popouts.adopt(readOrigins(saved));
+      controller.collapses.adopt(readCollapsedGroups(saved));
+    })
       .catch(() =>
       {
         if (isCurrent())

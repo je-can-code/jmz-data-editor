@@ -2,8 +2,11 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { IDockviewPanel } from 'dockview-react';
 import type { LayoutStore, SavedLayout } from '../../../src/mapEditor/core/workspace/LayoutStore.ts';
-import { addDefaultPanels, restoreLayout } from '../../../src/mapEditor/workspace/defaultLayout.ts';
+import { addDefaultPanels, openSidePanel, restoreLayout, SIDE_PANEL_SPECS } from '../../../src/mapEditor/workspace/defaultLayout.ts';
+import { GroupCollapseKeeper } from '../../../src/mapEditor/workspace/GroupCollapseKeeper.ts';
+import { PopoutKeeper } from '../../../src/mapEditor/workspace/PopoutKeeper.ts';
 import { createRealDock, describeGrid, type RealDock } from '../support/realDock.ts';
 
 /*
@@ -181,5 +184,118 @@ describe('defaultLayout', () =>
     // Assert.
     expect([ restored, fresh, onRestored.mock.calls, describeGrid(dock.api) ])
       .toStrictEqual([ 'restored', 'default', [ [ saved ] ], [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ] ]);
+  });
+
+  describe('SIDE_PANEL_SPECS', () =>
+  {
+    it('lists every side panel the Panels menu offers, never a map and never the start panel', () =>
+    {
+      // Arrange: the dock laid out, so every id named below is a real panel.
+      dock.api.layout(1920, 1032);
+      addDefaultPanels(dock.api);
+
+      // Act.
+      const ids = SIDE_PANEL_SPECS.map(spec => spec.id);
+      const titles = SIDE_PANEL_SPECS.map(spec => spec.title);
+
+      // Assert.
+      expect([ ids, titles ])
+        .toStrictEqual([
+          [ 'map-tree', 'palette', 'layers', 'map-properties', 'quick-settings', 'history' ],
+          [ 'Maps', 'Tiles', 'Layers', 'Map properties', 'Quick settings', 'History' ],
+        ]);
+    });
+  });
+
+  describe('openSidePanel', () =>
+  {
+    /**
+     * A collapse keeper watching the dock, for openSidePanel's own tests.
+     * @returns {GroupCollapseKeeper} The keeper.
+     */
+    const collapsesFor = (): GroupCollapseKeeper =>
+    {
+      const keeper = new GroupCollapseKeeper();
+      keeper.attach(dock.api);
+      return keeper;
+    };
+
+    beforeEach(() =>
+    {
+      dock.api.layout(1920, 1032);
+      addDefaultPanels(dock.api);
+    });
+
+    it('adds a closed panel back at its default place', () =>
+    {
+      // Arrange: history closed, as its close button would leave it.
+      (dock.api.getPanel('history') as IDockviewPanel).api.close();
+
+      // Act.
+      openSidePanel(dock.api, collapsesFor(), 'history');
+
+      // Assert: back where addDefaultPanels put it, below the properties and quick settings.
+      expect(describeGrid(dock.api))
+        .toStrictEqual([ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ]);
+    });
+
+    it('brings an open panel to the front of its group, leaving the rest of the group where it is', () =>
+    {
+      // Arrange: quick settings is open but behind map properties, which addDefaultPanels leaves active.
+      const { group } = dock.api.getPanel('quick-settings') as IDockviewPanel;
+
+      // Act.
+      openSidePanel(dock.api, collapsesFor(), 'quick-settings');
+
+      // Assert.
+      expect([ group.activePanel?.id, describeGrid(dock.api) ])
+        .toStrictEqual([ 'quick-settings', [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ] ]);
+    });
+
+    it('expands an open panel\'s group if choosing it found it collapsed', () =>
+    {
+      // Arrange.
+      const collapses = collapsesFor();
+      const { group } = dock.api.getPanel('layers') as IDockviewPanel;
+      const before = group.api.height;
+      collapses.toggle(group);
+
+      // Act.
+      openSidePanel(dock.api, collapses, 'layers');
+
+      // Assert.
+      expect([ collapses.isCollapsed(group), group.api.height ])
+        .toStrictEqual([ false, before ]);
+    });
+
+    it('focuses a torn-out panel\'s own window when choosing it', async () =>
+    {
+      // Arrange.
+      const popouts = new PopoutKeeper({ popoutUrl: '/popout.html', mapsGroup: () => null });
+      popouts.attach(dock.api);
+      await popouts.tearOutBeside(dock.api.getPanel('history') as IDockviewPanel);
+      const torn = dock.api.getPanel('history') as IDockviewPanel;
+      const focus = vi.spyOn(torn.api.getWindow(), 'focus');
+
+      // Act.
+      openSidePanel(dock.api, collapsesFor(), 'history');
+
+      // Assert.
+      expect(focus.mock.calls.length)
+        .toBe(1);
+    });
+
+    it('does nothing for a panel id it does not recognize', () =>
+    {
+      // Arrange.
+      const before = describeGrid(dock.api);
+
+      // Act.
+      openSidePanel(dock.api, collapsesFor(), 'not-a-panel');
+
+      // Assert.
+      expect(describeGrid(dock.api))
+        .toStrictEqual(before);
+    });
   });
 });

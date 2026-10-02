@@ -1,14 +1,86 @@
-import React from 'react';
-import { Alert, AppBar, Button, Snackbar, Toolbar, Typography } from '@mui/material';
-import { ListAlt, Save, Storage } from '@mui/icons-material';
+import React, { useEffect, useState } from 'react';
+import { Alert, AppBar, Button, ListItemIcon, ListItemText, Menu, MenuItem, Snackbar, Toolbar, Typography } from '@mui/material';
+import { Check, ListAlt, Save, Storage } from '@mui/icons-material';
+import type { DockviewApi } from 'dockview-react';
 import { openDataEditor } from '../../core/infrastructure/shell/WindowShell.ts';
 import { APP_TITLE, openCommonEventsWindow } from '../views/mapEditorViews.ts';
+import { openSidePanel, SIDE_PANEL_SPECS } from './defaultLayout.ts';
 import type { NoticeSeverity } from './WorkspaceController.ts';
 import { useHubVersion, useWorkspace, useWorkspaceState } from './workspaceHooks.tsx';
 
 /**
+ * Follows which of the dock's panels are open right now, by id, so the Panels menu can check the ones it lists.
+ * @param {DockviewApi | null} dockview The dock, or null before it is ready.
+ * @returns {ReadonlySet<string>} The open ids.
+ */
+const useOpenPanelIds = (dockview: DockviewApi | null): ReadonlySet<string> =>
+{
+  const [ open, setOpen ] = useState<ReadonlySet<string>>(() => new Set(dockview?.panels.map(panel => panel.id) ?? []));
+
+  useEffect(() =>
+  {
+    if (dockview === null)
+    {
+      return undefined;
+    }
+
+    const update = () => setOpen(new Set(dockview.panels.map(panel => panel.id)));
+    update();
+    const subscriptions = [ dockview.onDidAddPanel(update), dockview.onDidRemovePanel(update) ];
+    return () => subscriptions.forEach(subscription => subscription.dispose());
+  }, [ dockview ]);
+
+  return open;
+};
+
+/**
+ * The menu listing every side panel the workspace registers, a checkmark on each one open right now. Choosing a
+ * closed one reopens it at its default place; choosing an open one brings it to the front and expands it if it was
+ * collapsed.
+ * @returns {React.JSX.Element} The menu's button.
+ */
+const PanelsMenu = () =>
+{
+  const controller = useWorkspace();
+  const open = useOpenPanelIds(controller.dockview);
+  const [ anchor, setAnchor ] = useState<HTMLElement | null>(null);
+
+  /**
+   * Opens one side panel and closes the menu.
+   * @param {string} id The panel's id.
+   */
+  const choose = (id: string) =>
+  {
+    setAnchor(null);
+    const { dockview } = controller;
+    if (dockview !== null)
+    {
+      openSidePanel(dockview, controller.collapses, id);
+    }
+  };
+
+  return (
+    <>
+      <Button color={'inherit'} size={'small'} onClick={event => setAnchor(event.currentTarget)}>
+        Panels
+      </Button>
+      <Menu anchorEl={anchor} open={anchor !== null} onClose={() => setAnchor(null)}>
+        {SIDE_PANEL_SPECS.map(panel => (
+          <MenuItem key={panel.id} selected={open.has(panel.id)} onClick={() => choose(panel.id)}>
+            <ListItemIcon>
+              {open.has(panel.id) && <Check fontSize={'small'} data-testid={'panel-open-check'}/>}
+            </ListItemIcon>
+            <ListItemText>{panel.title}</ListItemText>
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
+  );
+};
+
+/**
  * The strip across the top of the workspace: the app's name, saving (with how many documents have unsaved edits),
- * the layout reset and the way to the common events and the data editor.
+ * the layout reset, the Panels menu, and the way to the common events and the data editor.
  * @param {{ onResetLayout: () => void }} props What resetting the layout does.
  * @returns {React.JSX.Element} The bar.
  */
@@ -38,6 +110,7 @@ const WorkspaceBar = (props: { onResetLayout: () => void }) =>
         <Button color={'inherit'} size={'small'} onClick={onResetLayout}>
           Reset layout
         </Button>
+        <PanelsMenu/>
         <Button color={'inherit'} onClick={() => openCommonEventsWindow(shell)} size={'small'} startIcon={<ListAlt/>} variant={'outlined'}>
           Common events
         </Button>

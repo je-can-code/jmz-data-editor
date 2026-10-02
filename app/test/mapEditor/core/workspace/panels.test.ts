@@ -4,6 +4,7 @@ import {
   directionForDrop,
   encodeDraggedMaps,
   historyOwnedBy,
+  isCollapsibleKind,
   isMapPanelParams,
   mapPanelId,
   minimumWidthFor,
@@ -173,6 +174,31 @@ describe('panels', () =>
       // Assert.
       expect(sized)
         .toBe(saved);
+    });
+  });
+
+  describe('isCollapsibleKind', () =>
+  {
+    it('collapses every side panel, never a map and never the start panel', () =>
+    {
+      // Arrange: every registered kind, map and start among them.
+      const kinds = Object.values(PANEL_COMPONENTS);
+
+      // Act.
+      const collapsible = kinds.map(isCollapsibleKind);
+
+      // Assert.
+      expect(Object.fromEntries(kinds.map((kind, index) => [ kind, collapsible[index] ])))
+        .toStrictEqual({
+          'map': false,
+          'map-tree': true,
+          'history': true,
+          'map-properties': true,
+          'palette': true,
+          'layers': true,
+          'quick-settings': true,
+          'start': false,
+        });
     });
   });
 });
