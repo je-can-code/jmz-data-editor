@@ -35,14 +35,15 @@ const HEADING_HEIGHT = 28;
 
 /**
  * The list's columns, left to right: the id, the name with the event's marker beside it, where it stands, its kind, its
- * trigger and its pages. The name takes whatever room is left.
+ * trigger and its pages. Each but the name is as narrow as its longest words allow ("Action button", "Transfer"), so the
+ * name takes whatever room is left, even in the narrow column the list starts in.
  */
-const GRID_COLUMNS = '34px minmax(56px, 1fr) 56px 64px 84px 48px';
+const GRID_COLUMNS = '38px minmax(64px, 1fr) 48px 60px 82px 40px';
 
 /**
  * The narrowest the columns squeeze, in pixels; a panel narrower still scrolls across.
  */
-const GRID_MIN_WIDTH = 342;
+const GRID_MIN_WIDTH = 332;
 
 /**
  * One column: what it sorts by, its heading, and whether it holds numbers, which line up on the right.
@@ -85,7 +86,6 @@ const LIST_STYLES = {
   },
   '& [data-numeric="true"]': {
     textAlign: 'right',
-    justifyContent: 'flex-end',
   },
   '& .event-line': {
     position: 'absolute',
@@ -225,7 +225,8 @@ const EventLine = (props: EventLineProps) =>
 };
 
 /**
- * The column headings, each sorting the list by its column: a click on the column already sorted flips its way.
+ * The column headings, each sorting the list by its column: a click on the column already sorted flips its way. Only
+ * the column sorted by shows its arrow, so the narrow columns keep room for their words.
  * @param {{ sort: EventSort, onSort: (sort: EventSort) => void }} props The sort, and what to do with a new one.
  * @returns {React.JSX.Element} The headings.
  */
@@ -248,9 +249,9 @@ const Headings = (props: { readonly sort: EventSort; readonly onSort: (sort: Eve
             role={'columnheader'}
             aria-sort={active ? sort.direction : 'none'}
             data-numeric={column.numeric}
-            sx={{ display: 'flex', fontSize: 11, color: 'text.secondary' }}
+            sx={{ fontSize: 11, color: 'text.secondary', '& .MuiTableSortLabel-icon': { fontSize: 14, mx: 0.25 } }}
           >
-            <TableSortLabel active={active} direction={active ? direction : 'asc'} onClick={() => onSort(nextSort(sort, column.key))}>
+            <TableSortLabel active={active} direction={active ? direction : 'asc'} hideSortIcon onClick={() => onSort(nextSort(sort, column.key))}>
               {column.heading}
             </TableSortLabel>
           </Box>
