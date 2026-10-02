@@ -26,6 +26,11 @@ import { readRealCommandLists } from '../../support/realCommandLists.ts';
  * the generated forms alone, and with the hand-built editors registered as a window registers them, Show Choices and
  * Conditional Branch handed their whole block the way the list hands it.
  *
+ * Mounting and tearing down a live React tree per shape is real work, and the game holds well over a hundred shapes
+ * (134 today), so each pass draws its shapes in fixed-size groups rather than one test covering all of them: a single
+ * test that grows with the catalog eventually outgrows vitest's default per-test timeout once the rest of the suite
+ * is competing for the CPU, where a group of a bounded size does not.
+ *
  * It runs against the project JMZ_PROJECT_ROOT names, or the sibling checkout, and skips when neither is there.
  */
 const project = locateGameProject();
@@ -73,14 +78,43 @@ const collectShapes = (catalog: CommandCatalog): Map<string, Shape> =>
 };
 
 /**
- * Draws every shape's editor, noting any that throws, draws nothing, or makes React complain.
+ * How many shapes one test draws, keeping a single test's render pass well inside vitest's default timeout even
+ * while the rest of the suite is competing for the CPU.
+ */
+const SHAPES_PER_GROUP = 20;
+
+/**
+ * Splits a map's entries into fixed-size groups, in collection order.
+ * @param {Map<string, Shape>} shapes Every shape to draw.
+ * @param {number} size How many shapes belong to one group.
+ * @returns {Map<string, Shape>[]} The shapes, grouped; a single empty group when there is nothing to draw.
+ */
+const grouped = (shapes: Map<string, Shape>, size: number): Map<string, Shape>[] =>
+{
+  const entries = [ ...shapes.entries() ];
+  if (entries.length === 0)
+  {
+    return [ new Map() ];
+  }
+
+  const groups: Map<string, Shape>[] = [];
+  for (let start = 0; start < entries.length; start += size)
+  {
+    groups.push(new Map(entries.slice(start, start + size)));
+  }
+
+  return groups;
+};
+
+/**
+ * Draws every shape in one group, noting any that throws, draws nothing, or makes React complain.
  * @param {CommandCatalog} catalog The catalog.
  * @param {CommandEditorRegistry} registry The hand-built editors, or an empty registry for the generated forms alone.
- * @returns {{ count: number, failures: string[], heard: string[] }} How many were drawn, and what went wrong.
+ * @param {Map<string, Shape>} shapes The group to draw.
+ * @returns {{ failures: string[], heard: string[] }} What went wrong, if anything.
  */
-const drawEveryShape = (catalog: CommandCatalog, registry: CommandEditorRegistry) =>
+const drawShapes = (catalog: CommandCatalog, registry: CommandEditorRegistry, shapes: Map<string, Shape>) =>
 {
-  const shapes = collectShapes(catalog);
   const heard: string[] = [];
   const quiet = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => heard.push(String(args[0])));
   const failures: string[] = [];
@@ -117,38 +151,65 @@ const drawEveryShape = (catalog: CommandCatalog, registry: CommandEditorRegistry
   });
   quiet.mockRestore();
 
-  return { count: shapes.size, failures, heard };
+  return { failures, heard };
 };
 
 describe.skipIf(project === null)('every shipped command shape, drawn', () =>
 {
-  it('opens the generated editor of one command of every shape the game holds, without a failure', () =>
+  // the catalog never reads the project, so it builds the same whether or not one is configured; only the shapes
+  // below need the guard, since collecting them reads the shipped lists from disk.
+  const catalog = new CommandCatalog();
+  registerBuiltInCommands(catalog);
+  const shapes = project === null ? new Map<string, Shape>() : collectShapes(catalog);
+  const groups = grouped(shapes, SHAPES_PER_GROUP);
+
+  it('collects well over a hundred shapes', () =>
   {
-    // Arrange: the built-in catalog, and no hand-built editors.
-    const catalog = new CommandCatalog();
-    registerBuiltInCommands(catalog);
-
-    // Act.
-    const { count, failures, heard } = drawEveryShape(catalog, new CommandEditorRegistry());
-
-    // Assert: well over a hundred shapes (134 today), every one drawn, and React never complained about any.
-    expect([ count > 100, failures, heard ])
-      .toStrictEqual([ true, [], [] ]);
+    // Arrange: every shape the game's shipped lists hold, collected above.
+    // Act: nothing further; the count is what collectShapes already found.
+    // Assert: well over a hundred shapes (134 today).
+    expect(shapes.size > 100)
+      .toBe(true);
   });
 
-  it('opens every shape with the hand-built editors registered, block editors given their blocks, without a failure', () =>
+  describe('opens the generated editor of every shape', () =>
+  {
+    // Arrange: the built-in catalog, and no hand-built editors.
+    const registry = new CommandEditorRegistry();
+
+    groups.forEach((group, index) =>
+    {
+      it(`draws group ${index + 1} of ${groups.length}, without a failure`, () =>
+      {
+        // Arrange: nothing further; the catalog and registry above are shared by every group in this pass.
+        // Act.
+        const { failures, heard } = drawShapes(catalog, registry, group);
+
+        // Assert: every shape in this group drew, and React never complained about any.
+        expect([ failures, heard ])
+          .toStrictEqual([ [], [] ]);
+      });
+    });
+  });
+
+  describe('opens every shape with the hand-built editors registered, block editors given their blocks', () =>
   {
     // Arrange: the editors registered as a window registers them, with no server behind them.
-    const catalog = new CommandCatalog();
-    registerBuiltInCommands(catalog);
     const registry = new CommandEditorRegistry();
     registerHandBuiltEditors(registry, { api: null, headers: new PluginHeaderStore() });
 
-    // Act.
-    const { count, failures, heard } = drawEveryShape(catalog, registry);
+    groups.forEach((group, index) =>
+    {
+      it(`draws group ${index + 1} of ${groups.length}, without a failure`, () =>
+      {
+        // Arrange: nothing further; the catalog and registry above are shared by every group in this pass.
+        // Act.
+        const { failures, heard } = drawShapes(catalog, registry, group);
 
-    // Assert.
-    expect([ count > 100, failures, heard ])
-      .toStrictEqual([ true, [], [] ]);
+        // Assert: every shape in this group drew, and React never complained about any.
+        expect([ failures, heard ])
+          .toStrictEqual([ [], [] ]);
+      });
+    });
   });
 });
