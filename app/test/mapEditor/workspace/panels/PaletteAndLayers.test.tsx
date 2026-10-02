@@ -109,9 +109,10 @@ describe('the palette and the layers panel', () =>
     // Act.
     fireEvent.click(screen.getByRole('button', { name: 'Passability' }));
 
-    // the flag chips read the editor's mode through useSyncExternalStore, which the click above notifies but does not
-    // always finish re-rendering for within the same synchronous act the click runs in; waiting for the chip it draws
-    // settles that before the mode is read back out, rather than racing it under whatever load the suite is under.
+    // the palette above mounted off a tree and a tileset that load through promises the render kicks off but does not
+    // await, so its subscription to the mode (the effect behind useSyncExternalStore) can still be unregistered when
+    // this click fires; the store flips with no one listening, and only the chip's own later catch-up render shows it.
+    // waiting for the chip settles that before the mode is read back out, rather than racing it under suite load.
     await waitFor(() => expect(screen.queryByText('Terrain tag')).not.toBeNull());
     const whileOpen = [ paint.mode.getState().editing, screen.queryByText('Terrain tag') !== null ];
     unmount();
