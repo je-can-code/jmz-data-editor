@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, AppBar, Button, ListItemIcon, ListItemText, Menu, MenuItem, Snackbar, Toolbar, Typography } from '@mui/material';
-import { Check, ListAlt, Save, Storage } from '@mui/icons-material';
+import { Alert, AppBar, Button, IconButton, ListItemIcon, ListItemText, Menu, MenuItem, Snackbar, Toolbar, Tooltip, Typography } from '@mui/material';
+import { Check, KeyboardDoubleArrowLeft, KeyboardDoubleArrowRight, ListAlt, Save, Storage } from '@mui/icons-material';
 import type { DockviewApi } from 'dockview-react';
 import { openDataEditor } from '../../core/infrastructure/shell/WindowShell.ts';
+import type { Side } from '../core/workspace/sideCollapse.ts';
 import { APP_TITLE, openCommonEventsWindow } from '../views/mapEditorViews.ts';
 import { openSidePanel, SIDE_PANEL_SPECS } from './defaultLayout.ts';
+import type { SideCollapseKeeper } from './SideCollapseKeeper.ts';
 import type { NoticeSeverity } from './WorkspaceController.ts';
 import { useHubVersion, useWorkspace, useWorkspaceState } from './workspaceHooks.tsx';
 
@@ -31,6 +33,80 @@ const useOpenPanelIds = (dockview: DockviewApi | null): ReadonlySet<string> =>
   }, [ dockview ]);
 
   return open;
+};
+
+/**
+ * Follows whether a side is collapsed right now, however it changes: the button below, its shortcut, or a saved
+ * layout adopted on restart.
+ * @param {SideCollapseKeeper} sides The keeper.
+ * @param {Side} side The side.
+ * @returns {boolean} True while it is collapsed.
+ */
+const useSideCollapsed = (sides: SideCollapseKeeper, side: Side): boolean =>
+{
+  const [ collapsed, setCollapsed ] = useState(() => sides.isCollapsed(side));
+
+  useEffect(() =>
+  {
+    // read afresh as the listener starts, in case the side changed between rendering and now.
+    setCollapsed(sides.isCollapsed(side));
+    return sides.subscribe(() => setCollapsed(sides.isCollapsed(side)));
+  }, [ sides, side ]);
+
+  return collapsed;
+};
+
+/**
+ * What each side's edge button says, by whether it is collapsed right now.
+ */
+const SIDE_TOGGLE_LABELS: Readonly<Record<Side, { readonly expanded: string; readonly collapsed: string }>> = {
+  left: { expanded: 'Collapse the left side', collapsed: 'Expand the left side' },
+  right: { expanded: 'Collapse the right side', collapsed: 'Expand the right side' },
+};
+
+/**
+ * Which way a side's button arrow points: toward its own edge while expanded, since clicking sends the side there,
+ * and back toward the centre while collapsed, since clicking brings it back from there.
+ * @param {Side} side The side the button folds away.
+ * @param {boolean} collapsed Whether it is folded away right now.
+ * @returns {'left' | 'right'} Which way the arrow points.
+ */
+const arrowDirection = (side: Side, collapsed: boolean): 'left' | 'right' =>
+{
+  if (side === 'left')
+  {
+    return collapsed ? 'right' : 'left';
+  }
+
+  return collapsed ? 'left' : 'right';
+};
+
+/**
+ * The button that folds one whole side of the workspace away, or brings it back, its arrow pointing the way it will
+ * move: what Ctrl+B does for the left side and Ctrl+Shift+B for the right (see sideCollapse.ts).
+ * @param {{ side: Side }} props Which side.
+ * @returns {React.JSX.Element} The button.
+ */
+const SideToggle = (props: { readonly side: Side }) =>
+{
+  const { side } = props;
+  const controller = useWorkspace();
+  const collapsed = useSideCollapsed(controller.sides, side);
+  const label = SIDE_TOGGLE_LABELS[side][collapsed ? 'collapsed' : 'expanded'];
+
+  return (
+    <Tooltip title={label}>
+      <IconButton
+        color={'inherit'}
+        size={'small'}
+        aria-label={label}
+        aria-pressed={collapsed}
+        onClick={() => controller.sides.toggle(side)}
+      >
+        {arrowDirection(side, collapsed) === 'left' ? <KeyboardDoubleArrowLeft fontSize={'small'}/> : <KeyboardDoubleArrowRight fontSize={'small'}/>}
+      </IconButton>
+    </Tooltip>
+  );
 };
 
 /**
@@ -79,8 +155,10 @@ const PanelsMenu = () =>
 };
 
 /**
- * The strip across the top of the workspace: the app's name, saving (with how many documents have unsaved edits),
- * the layout reset, the Panels menu, and the way to the common events and the data editor.
+ * The strip across the top of the workspace: the left side's own fold button, the app's name, saving (with how many
+ * documents have unsaved edits), the layout reset, the Panels menu, the way to the common events and the data editor,
+ * and the right side's own fold button. The two fold buttons sit at the bar's own edges, each under the column it
+ * folds, the same side a browser's own minimized side panels sit on.
  * @param {{ onResetLayout: () => void }} props What resetting the layout does.
  * @returns {React.JSX.Element} The bar.
  */
@@ -95,6 +173,7 @@ const WorkspaceBar = (props: { onResetLayout: () => void }) =>
   return (
     <AppBar position={'static'} elevation={0}>
       <Toolbar variant={'dense'} sx={{ gap: 1 }}>
+        <SideToggle side={'left'}/>
         <Typography variant={'h6'} sx={{ flex: 1 }}>
           {APP_TITLE}
         </Typography>
@@ -117,6 +196,7 @@ const WorkspaceBar = (props: { onResetLayout: () => void }) =>
         <Button color={'inherit'} onClick={() => openDataEditor(shell)} size={'small'} startIcon={<Storage/>} variant={'outlined'}>
           Data editor
         </Button>
+        <SideToggle side={'right'}/>
       </Toolbar>
     </AppBar>
   );

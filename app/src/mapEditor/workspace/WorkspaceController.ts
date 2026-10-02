@@ -22,6 +22,7 @@ import { CentreKeeper, centreOf } from './CentreKeeper.ts';
 import { POPOUT_URL } from './defaultLayout.ts';
 import { GroupCollapseKeeper } from './GroupCollapseKeeper.ts';
 import { PopoutKeeper } from './PopoutKeeper.ts';
+import { SideCollapseKeeper } from './SideCollapseKeeper.ts';
 
 /**
  * What the map tree's clipboard holds: maps copied with their files, or maps marked to move on the next paste.
@@ -172,6 +173,12 @@ class WorkspaceController
    * it, and the Panels menu all act through.
    */
   readonly collapses = new GroupCollapseKeeper();
+
+  /**
+   * Folds a whole side of the workspace away, or brings it back: what the top bar's two edge buttons and their
+   * keyboard shortcuts act through.
+   */
+  readonly sides = new SideCollapseKeeper();
 
   #dockview: DockviewApi | null = null;
 
