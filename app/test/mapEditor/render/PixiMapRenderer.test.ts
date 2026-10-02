@@ -4,16 +4,21 @@
 import type { Container } from 'pixi.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
+import { GAME_LOOK } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { PixiMapRenderer } from '../../../src/mapEditor/render/PixiMapRenderer.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 
 /*
- * Two of the pixi renderer's promises can be kept without a GPU, and both are about the pointer. The selection draws
- * over the pointer's marks, so an event shows as selected while the pointer still rests on it after the click that
- * picked it, rather than hidden under the hover's outline on the very same tile. And the wheel zooms about the
- * pointer's own spot: Chromium reports a wheel turn in whole pixels, up to two off the pointer at a device pixel ratio
- * of 1.5, so zooming about the wheel's spot would slide the map under a still pointer a little with every notch. A
- * view mounted off screen makes no GPU context, which is what lets a page without WebGL hold one.
+ * Some of the pixi renderer's promises can be kept without a GPU. The selection draws over the pointer's marks, so an
+ * event shows as selected while the pointer still rests on it after the click that picked it, rather than hidden under
+ * the hover's outline on the very same tile. The wheel zooms about the pointer's own spot: Chromium reports a wheel turn
+ * in whole pixels, up to two off the pointer at a device pixel ratio of 1.5, so zooming about the wheel's spot would
+ * slide the map under a still pointer a little with every notch. A view mounted off screen makes no GPU context, which
+ * is what lets a page without WebGL hold one.
+ *
+ * The markers of events that draw no picture sit over every event, the tiles above characters and the lighting, so
+ * nothing of the game hides them, and under the dimming and the editor's other overlays; they show only while the
+ * events do and the markers overlay is on, which keeps them out of anything drawn as the game would draw it.
  */
 describe('PixiMapRenderer', () =>
 {
@@ -39,6 +44,45 @@ describe('PixiMapRenderer', () =>
     // Assert.
     expect(top)
       .toStrictEqual([ slots.ghosts, slots.pointer, slots.selection, slots.pointerLabel ]);
+  });
+
+  it('draws the markers over the lighting and every event, under the dimming and the editor\'s other overlays', () =>
+  {
+    // Arrange.
+    const renderer = new PixiMapRenderer();
+    built.push(renderer);
+    const { slots } = renderer;
+    const world = slots.markers.parent as Container;
+
+    // Act: the three layers from the lighting up, and what the markers' slot holds.
+    const at = world.children.indexOf(slots.lighting);
+    const layers = world.children.slice(at, at + 3);
+
+    // Assert: the slot holds the event layer's markers, one group.
+    expect([ layers, slots.markers.children.length ])
+      .toStrictEqual([ [ slots.lighting, slots.markers, slots.dim ], 1 ]);
+  });
+
+  it('shows the markers only while the events show and the markers overlay is on', () =>
+  {
+    // Arrange: the event layer's markers, inside their slot.
+    const renderer = new PixiMapRenderer();
+    built.push(renderer);
+    const [ markers ] = renderer.slots.markers.children;
+    const shown: boolean[] = [];
+
+    // Act: the overlay on with the events, the overlay off, then the overlay on with the events hidden.
+    renderer.setOverlays({ enabled: new Set([ 'markers' ]), definitions: [] });
+    shown.push(markers.visible);
+    renderer.setOverlays({ enabled: new Set([ 'grid' ]), definitions: [] });
+    shown.push(markers.visible);
+    renderer.setOverlays({ enabled: new Set([ 'markers' ]), definitions: [] });
+    renderer.setLayerVisibility({ ...GAME_LOOK, layers: { ...GAME_LOOK.layers, events: false } });
+    shown.push(markers.visible);
+
+    // Assert.
+    expect(shown)
+      .toStrictEqual([ true, false, false ]);
   });
 
   it('zooms about the pointer\'s own spot when the wheel reports a whole-pixel spot beside it', () =>

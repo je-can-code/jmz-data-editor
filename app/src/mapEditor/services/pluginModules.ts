@@ -3,11 +3,12 @@ import type { MapEditorApi } from '../core/api/MapEditorApi.ts';
 import type { PluginModule } from '../core/modules/PluginModule.ts';
 import type { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import { jabsModule } from '../modules/jabs/jabsModule.ts';
+import { lightingModule } from '../modules/lighting/lightingModule.ts';
 
 /**
  * Every plugin module the editor ships. Each switches on only while its plugins are enabled in js/plugins.js.
  */
-const SHIPPED_MODULES: readonly PluginModule[] = [ jabsModule ];
+const SHIPPED_MODULES: readonly PluginModule[] = [ jabsModule, lightingModule ];
 
 /**
  * Reads js/plugins.js and switches on every shipped module whose plugins it enables. Never rejects: a list that cannot

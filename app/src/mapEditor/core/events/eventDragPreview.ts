@@ -91,9 +91,10 @@ class EventDragPreview
     const blocked: MapCell[] = [];
     this.#cells.forEach((cell, index) =>
     {
+      // each ghost names its event, so one that draws no picture shows that event's marker.
       const x = cell.x + shift.dx;
       const y = cell.y + shift.dy;
-      ghosts.push({ x, y, ...this.#looks[index] });
+      ghosts.push({ x, y, eventId: cell.id, ...this.#looks[index] });
       if (this.#held.has(y * this.#size.width + x))
       {
         blocked.push({ x, y });
