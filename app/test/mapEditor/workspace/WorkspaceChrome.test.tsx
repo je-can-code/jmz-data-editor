@@ -230,7 +230,24 @@ describe('WorkspaceChrome', () =>
           [ 'Map properties', true ],
           [ 'Quick settings', true ],
           [ 'History', false ],
+          [ 'Events', true ],
         ]);
+    });
+
+    it('opens the events list from the menu in front of the history it waits behind', () =>
+    {
+      // Arrange: the default layout, where the events list is a tab behind the history.
+      renderWithDock();
+      const { group } = dock.api.getPanel('events') as IDockviewPanel;
+      const before = group.activePanel?.id;
+      fireEvent.click(screen.getByRole('button', { name: 'Panels' }));
+
+      // Act.
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Events' }));
+
+      // Assert.
+      expect([ before, group.activePanel?.id ])
+        .toStrictEqual([ 'history', 'events' ]);
     });
 
     it('reopens a closed panel at its default place, and closes the menu', () =>

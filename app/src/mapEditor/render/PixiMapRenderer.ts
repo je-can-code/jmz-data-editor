@@ -10,6 +10,7 @@ import {
   type LayerVisibility,
   type MapContextMenu,
   type MapRenderer,
+  type MarkerClassifier,
   type OverlayId,
   type OverlaySet,
   type OverlayState,
@@ -39,6 +40,7 @@ import { FrameLoop, type FrameWindow } from './FrameLoop.ts';
 import { AtlasChunks } from './scene/AtlasChunks.ts';
 import { EventLayer } from './scene/EventLayer.ts';
 import { GhostTiles } from './scene/GhostTiles.ts';
+import { markerAtlasSource } from './scene/markerAtlas.ts';
 import { ModuleOverlays } from './scene/ModuleOverlays.ts';
 import { drawPassageAtlas, drawRegionAtlas, passageMarkIndex } from './scene/overlayAtlases.ts';
 import { ParallaxLayer } from './scene/ParallaxLayer.ts';
@@ -73,6 +75,7 @@ type RendererStats = {
   readonly quads: number;
   readonly chunks: number;
   readonly eventSprites: number;
+  readonly eventMarkers: number;
 
   /**
    * Pictures still loading: character sheets, and the parallax.
@@ -84,8 +87,10 @@ type RendererStats = {
 /**
  * The world's layers, bottom to top: the engine's black behind the map, the parallax, the tiles below characters,
  * the events in their three priorities around the tiles above characters, the lighting P9 draws, then the editor's
- * own: the dimming and highlighted layer, and the overlays, the ghosts and the pointer's own marks, then the selection
- * over them all, so an event shows as selected while the pointer still rests on it after the click that picked it.
+ * own: the markers of events that draw no picture, which neither the tiles above characters nor the dark of a lit map
+ * may hide, the dimming and highlighted layer, and the overlays, the ghosts and the pointer's own marks, then the
+ * selection over them all, so an event shows as selected while the pointer still rests on it after the click that
+ * picked it.
  */
 type Slots = {
   readonly backdrop: Graphics;
@@ -93,6 +98,7 @@ type Slots = {
   readonly lowerTiles: Container;
   readonly upperTiles: Container;
   readonly lighting: Container;
+  readonly markers: Container;
   readonly dim: Graphics;
   readonly highlightTiles: Container;
   readonly regions: Container;
@@ -235,6 +241,11 @@ class PixiMapRenderer implements MapRenderer
 
   #atlases: { regions: TextureSource; passability: TextureSource } | null = null;
 
+  /**
+   * The atlas every event marker is cut from, drawn the first time a marker needs it.
+   */
+  #markerAtlas: TextureSource | null = null;
+
   #document: MapDocument | null = null;
 
   #unsubscribe: (() => void) | null = null;
@@ -338,6 +349,7 @@ class PixiMapRenderer implements MapRenderer
       lowerTiles: new Container(),
       upperTiles: new Container(),
       lighting: new Container(),
+      markers: new Container(),
       dim: new Graphics(),
       highlightTiles: new Container(),
       regions: new Container(),
@@ -356,7 +368,8 @@ class PixiMapRenderer implements MapRenderer
     this.#slots.pointerLabel.visible = false;
 
     // the engine's order: lower tiles, events below and with characters, upper tiles, events above characters. The
-    // selection goes over the hover, which would otherwise hide it on the very tile just clicked.
+    // markers go over the lighting, so an event no picture shows stays in sight on the darkest map, and the selection
+    // goes over the hover, which would otherwise hide it on the very tile just clicked.
     const { slots } = this;
     this.#world.addChild(
       slots.backdrop,
@@ -367,6 +380,7 @@ class PixiMapRenderer implements MapRenderer
       slots.upperTiles,
       this.#events.above,
       slots.lighting,
+      slots.markers,
       slots.dim,
       slots.highlightTiles,
       slots.regions,
@@ -379,6 +393,7 @@ class PixiMapRenderer implements MapRenderer
       slots.pointerLabel,
     );
     slots.ghosts.addChild(this.#events.ghosts);
+    slots.markers.addChild(this.#events.markers);
     this.#stage.addChild(this.#world);
     this.#applyVisibility();
   }
@@ -439,6 +454,7 @@ class PixiMapRenderer implements MapRenderer
       quads: scene?.tiles.quadCount ?? 0,
       chunks: scene === null ? 0 : scene.grid.columns * scene.grid.rows,
       eventSprites: this.#events.spriteCount,
+      eventMarkers: this.#events.markerCount,
       loadingImages: this.#events.pendingLoads + (this.#parallax.loading ? 1 : 0),
       moduleOverlays: this.#modules.count,
     };
@@ -609,6 +625,14 @@ class PixiMapRenderer implements MapRenderer
   {
     this.#modulesDirty = true;
     this.#needsRender = true;
+  }
+
+  setEventMarkers(classify: MarkerClassifier): void
+  {
+    // every event is rebuilt in the next frame, however many times the classifier changes before it.
+    this.#events.setMarkerClassifier(classify);
+    this.#eventsDirty = true;
+    this.#selectionDirty = true;
   }
 
   frameTimings(): FrameTimings
@@ -821,6 +845,8 @@ class PixiMapRenderer implements MapRenderer
     this.#atlases?.regions.destroy();
     this.#atlases?.passability.destroy();
     this.#atlases = null;
+    this.#markerAtlas?.destroy();
+    this.#markerAtlas = null;
     this.#stage.destroy({ children: true });
     this.#pixi?.destroy();
     this.#pixi = null;
@@ -1082,7 +1108,8 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Places the world under the camera, snapped to device pixels so tiles stay crisp.
+   * Places the world under the camera, snapped to device pixels so tiles stay crisp, and tells the markers the zoom, so
+   * they keep a size that can be read however far out it is.
    */
   #applyCamera(): void
   {
@@ -1090,6 +1117,7 @@ class PixiMapRenderer implements MapRenderer
     const resolution = this.#resolution;
     this.#world.scale.set(zoom);
     this.#world.position.set(Math.round(-x * zoom * resolution) / resolution, Math.round(-y * zoom * resolution) / resolution);
+    this.#events.setZoom(zoom);
     this.#placeHoverLabel();
   }
 
@@ -1181,6 +1209,17 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
+   * Makes the atlas event markers are cut from, once, in the host's document: the first time an event with no picture
+   * needs its marker.
+   * @returns {TextureSource} The atlas.
+   */
+  #markerAtlasSource(): TextureSource
+  {
+    this.#markerAtlas ??= markerAtlasSource(this.#host?.ownerDocument ?? globalThis.document);
+    return this.#markerAtlas;
+  }
+
+  /**
    * Rebuilds everything that depends on the map's size and tileset: the chunks, the per-cell overlays, the grid, the
    * backdrop, the parallax and the events.
    */
@@ -1211,7 +1250,14 @@ class PixiMapRenderer implements MapRenderer
     this.#mountScene(scene);
     this.#drawMapBound(source.width, source.height);
     this.#tileEvents = tileEventsByCell(document);
-    this.#events.setContext({ document, flags: source.flags, sheets: this.#sheetSources, images: this.#images, tileSize: TILE_SIZE });
+    this.#events.setContext({
+      document,
+      flags: source.flags,
+      sheets: this.#sheetSources,
+      images: this.#images,
+      tileSize: TILE_SIZE,
+      markerAtlas: () => this.#markerAtlasSource(),
+    });
     this.#parallax.setMap({
       name: document.property('parallaxName'),
       loopX: document.property('parallaxLoopX'),
@@ -1360,6 +1406,9 @@ class PixiMapRenderer implements MapRenderer
     {
       group.visible = layers.events;
     });
+
+    // the markers show the events no picture shows, so they go with the events, and with nothing of the editor's.
+    this.#events.markers.visible = layers.events && this.#isOn('markers');
     const scene = this.#scene;
     if (scene !== null)
     {

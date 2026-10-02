@@ -1,10 +1,11 @@
-import { TextureSource, type Container } from 'pixi.js';
+import { TextureSource, type Container, type Sprite } from 'pixi.js';
 import { describe, expect, it } from 'vitest';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { TextureImage } from '../../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { EventLayer, type AlphaReader } from '../../../../src/mapEditor/render/scene/EventLayer.ts';
+import { GHOST_ALPHA } from '../../../../src/mapEditor/render/scene/GhostTiles.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
 /*
@@ -358,6 +359,228 @@ describe('EventLayer', () =>
       // Assert.
       expect([ rebuilt.length, rebuilt.some(child => shown.includes(child)), layer.ghosts.children.length ])
         .toStrictEqual([ 2, false, 0 ]);
+    });
+  });
+
+  describe('markers', () =>
+  {
+    /*
+     * An event whose page draws no picture would be invisible, so it draws a marker: a sprite cut from the marker atlas,
+     * standing on its tile's middle in a group of its own over every sprite, its symbol picked by the classifier handed
+     * over. A sheet still loading shows nothing yet; a sheet that turns out missing shows the marker. Markers keep their
+     * size from 50% zoom in and grow past it to stay readable, and zoomed far out a click on the part spilling onto a
+     * tile no event stands on picks the marker's event, while markers show.
+     */
+    const ATLAS = new TextureSource({ width: 512, height: 512 });
+
+    /**
+     * The scale a marker sprite draws at, at its own size: 40 world pixels for the atlas's 112-pixel square.
+     */
+    const OWN_SIZE = 40 / 112;
+
+    /**
+     * Builds an event with no picture, on a cell, starting on a trigger.
+     * @param {number} id The event id.
+     * @param {number} x The column.
+     * @param {number} y The row.
+     * @param {number} trigger The page's trigger.
+     * @returns {RmmzMapEvent} The event.
+     */
+    const blankEvent = (id: number, x: number, y: number, trigger = 0): RmmzMapEvent =>
+    {
+      const event = createMapEvent(id, x, y);
+      event.pages[0].trigger = trigger;
+      return event;
+    };
+
+    /**
+     * Draws events on an empty 4x4 map whose tileset has a B sheet, with a marker atlas to cut markers from.
+     * @param {RmmzMapEvent[]} events The events, ids 1 up in order.
+     * @param {(folder: string, name: string) => Promise<TextureImage | null>} image Loads character sheets; left out,
+     * none can load.
+     * @returns {EventLayer} The layer, built.
+     */
+    const drawMarked = (events: RmmzMapEvent[], image?: (folder: string, name: string) => Promise<TextureImage | null>): EventLayer =>
+    {
+      const json = buildMapJson();
+      json.width = 4;
+      json.height = 4;
+      json.data = new Array<number>(4 * 4 * 6).fill(0);
+      json.events = [ null, ...events ];
+      const layer = new EventLayer(() => undefined);
+      const sheets = [ null, null, null, null, null, new TextureSource({ width: 768, height: 768 }), null, null, null ];
+      const images = image === undefined ? null : { image };
+      layer.setContext({ document: MapDocument.fromJson('map:1', json), flags: [], sheets, images, tileSize: 48, markerAtlas: () => ATLAS });
+      return layer;
+    };
+
+    /**
+     * Reads what each marker shows: its event, where it stands, the frame of the atlas it is cut from, and its scale.
+     * @param {Container} group The markers or the ghosts.
+     * @returns {(number | undefined | number[])[][]} One row per marker.
+     */
+    const markersIn = (group: Container) =>
+    {
+      return group.children.map(child =>
+      {
+        const { frame } = (child as Sprite).texture;
+        return [ (child as Container & { eventId?: number }).eventId, [ child.x, child.y ], [ frame.x, frame.y ], Number(child.scale.x.toFixed(4)) ];
+      });
+    };
+
+    it('draws a marker for each event that draws no picture, lower rows on top, and none for one that does', () =>
+    {
+      // Arrange: on parallel at 3, 2; a tile image at 0, 0; on the action button at 1, 1; on autorun at 2, 1.
+      const events = [ blankEvent(1, 3, 2, 4), tileEvent(2, 0, 0, 1), blankEvent(3, 1, 1, 0), blankEvent(4, 2, 1, 3) ];
+
+      // Act.
+      const layer = drawMarked(events);
+
+      // Assert: row 1's two by id, then row 2's; each on its tile's middle, cut from its trigger's frame, at its own size.
+      const own = Number(OWN_SIZE.toFixed(4));
+      expect([ markersIn(layer.markers), layer.markerCount, layer.spriteCount ])
+        .toStrictEqual([
+          [
+            [ 3, [ 72, 72 ], [ 256, 128 ], own ],
+            [ 4, [ 120, 72 ], [ 128, 256 ], own ],
+            [ 1, [ 168, 120 ], [ 256, 256 ], own ],
+          ],
+          3,
+          1,
+        ]);
+    });
+
+    it('draws no marker without a marker atlas to cut one from', () =>
+    {
+      // Arrange: the layer as the other tests here draw it, with no atlas handed over.
+
+      // Act.
+      const layer = drawEvents([ blankEvent(1, 0, 0) ]);
+
+      // Assert.
+      expect(layer.markerCount)
+        .toBe(0);
+    });
+
+    it('shows nothing while a character sheet loads, and the marker once the sheet turns out missing', async () =>
+    {
+      // Arrange: an event drawing with a sheet the project does not have, which loads on a later turn.
+      const event = createMapEvent(1, 2, 2);
+      event.pages[0].image = { ...event.pages[0].image, characterName: 'missing', characterIndex: 0 };
+      const layer = drawMarked([ event ], async () => null);
+      const whileLoading = layer.markerCount;
+
+      // Act.
+      await new Promise(resolve =>
+      {
+        setTimeout(resolve, 0);
+      });
+
+      // Assert.
+      expect([ whileLoading, markersIn(layer.markers).map(row => row[0]), layer.spriteCount ])
+        .toStrictEqual([ 0, [ 1 ], 0 ]);
+    });
+
+    it('shows an event with no pages at all by the action button\'s marker', () =>
+    {
+      // Arrange.
+      const event = { ...createMapEvent(1, 0, 3), pages: [] };
+
+      // Act.
+      const layer = drawMarked([ event ]);
+
+      // Assert.
+      expect(markersIn(layer.markers).map(row => row.slice(0, 3)))
+        .toStrictEqual([ [ 1, [ 24, 168 ], [ 256, 128 ] ] ]);
+    });
+
+    it('picks each marker\'s symbol through the classifier handed over, redrawing them with a new one once flushed', () =>
+    {
+      // Arrange: an event on the action button, then a classifier calling every event on map 1 a battler.
+      const layer = drawMarked([ blankEvent(1, 0, 0) ]);
+      const asked: number[] = [];
+      layer.setMarkerClassifier((_event, mapId) =>
+      {
+        asked.push(mapId);
+        return 'battler';
+      });
+      const pending = markersIn(layer.markers).map(row => row[2]);
+
+      // Act.
+      const flushed = layer.flushChanges();
+
+      // Assert: the action button's frame until the flush, then the battler's, asked about map 1.
+      expect([ pending, flushed, markersIn(layer.markers).map(row => row[2]), asked ])
+        .toStrictEqual([ [ [ 256, 128 ] ], true, [ [ 0, 128 ] ], [ 1 ] ]);
+    });
+
+    it('keeps markers their own size from 50% zoom in, and grows them further out, ghosts included', () =>
+    {
+      // Arrange: a marked event, and its ghost being dragged.
+      const layer = drawMarked([ blankEvent(1, 0, 0) ]);
+      const blank = createMapEvent(1, 0, 0).pages[0].image;
+      layer.setGhosts([ { x: 1, y: 1, image: blank, priorityType: 0, eventId: 1 } ]);
+
+      // Act: half the game's scale, then a quarter of it.
+      layer.setZoom(0.5);
+      const half = [ layer.markers.children[0].scale.x, layer.ghosts.children[0].scale.x ];
+      layer.setZoom(0.25);
+
+      // Assert: their own size at half, twice it at a quarter.
+      const scales = [ ...half, layer.markers.children[0].scale.x, layer.ghosts.children[0].scale.x ];
+      expect(scales.map(scale => Number((scale / OWN_SIZE).toFixed(4))))
+        .toStrictEqual([ 1, 1, 2, 2 ]);
+    });
+
+    it('finds a marker by its tile, and zoomed far out by the part spilling onto a tile no event stands on, while shown', () =>
+    {
+      // Arrange: a marked event on 1, 1 and a tile image on 2, 1. At a tenth of the game's scale a marker draws five
+      // times its size, 200 world pixels across, so from 1, 1 it spills over both 0, 1 and 2, 1.
+      const layer = drawMarked([ blankEvent(1, 1, 1), tileEvent(2, 2, 1, 1) ]);
+      layer.setZoom(0.1);
+      const points = [ [ 72, 72 ], [ 24, 72 ], [ 120, 72 ] ];
+
+      // Act: the marker's own tile, the empty tile beside it, and the tile image's tile; then the empty tile with the
+      // markers hidden.
+      const shown = points.map(([ x, y ]) => layer.eventAt(x, y, 0.1));
+      layer.markers.visible = false;
+      const hidden = layer.eventAt(24, 72, 0.1);
+
+      // Assert: the tile image keeps its own tile under the spill.
+      expect([ shown, hidden ])
+        .toStrictEqual([ [ 1, 1, 2 ], null ]);
+    });
+
+    it('keeps the spill to the zoom: at the game\'s own scale the tile beside a marker picks nothing', () =>
+    {
+      // Arrange: a marked event on 1, 1.
+      const layer = drawMarked([ blankEvent(1, 1, 1) ]);
+      layer.setZoom(1);
+
+      // Act: the marker's own tile, and the empty tile beside it.
+      const found = [ layer.eventAt(72, 72, 1), layer.eventAt(24, 72, 1) ];
+
+      // Assert.
+      expect(found)
+        .toStrictEqual([ 1, null ]);
+    });
+
+    it('shows a dragged event that draws no picture by its marker, see-through, moved rather than rebuilt', () =>
+    {
+      // Arrange: an autorun event on 0, 0, dragged; and a ghost naming no event on the map.
+      const layer = drawMarked([ blankEvent(1, 0, 0, 3) ]);
+      const blank = createMapEvent(1, 0, 0).pages[0].image;
+      layer.setGhosts([ { x: 1, y: 1, image: blank, priorityType: 0, eventId: 1 }, { x: 2, y: 2, image: blank, priorityType: 0 } ]);
+      const [ built ] = layer.ghosts.children;
+
+      // Act: dragged a tile further.
+      layer.setGhosts([ { x: 2, y: 1, image: blank, priorityType: 0, eventId: 1 }, { x: 3, y: 2, image: blank, priorityType: 0 } ]);
+
+      // Assert: one ghost marker, the same sprite, on 2, 1's middle, cut from autorun's frame, at the ghosts' opacity;
+      // the ghost of no event draws nothing.
+      const [ ghost ] = layer.ghosts.children;
+      expect([ layer.ghosts.children.length, ghost === built, [ ghost.x, ghost.y ], [ (ghost as Sprite).texture.frame.x, (ghost as Sprite).texture.frame.y ], ghost.alpha ])
+        .toStrictEqual([ 1, true, [ 120, 72 ], [ 128, 256 ], GHOST_ALPHA ]);
     });
   });
 });

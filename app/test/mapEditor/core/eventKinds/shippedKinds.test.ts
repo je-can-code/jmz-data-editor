@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { CORE_EVENT_KINDS, type CoreEventKind } from '../../../../src/mapEditor/core/eventKinds/coreKinds.ts';
+import { markerSymbolFor } from '../../../../src/mapEditor/core/eventKinds/eventMarkers.ts';
 import { jsonEquals } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
@@ -20,7 +21,9 @@ import { applyEdits } from '../../support/eventKindFixtures.ts';
  * unclaimed (the bomb wall is a battler until it breaks, one chest gives nothing, and the urn has no sound and no
  * open picture); and every setting a claimed event offers, written back with its own value, leaves the event
  * exactly as it was, so opening a quick panel can never change a map by itself. Once J-ABS's module has read the
- * game's own plugins.js, the patterns on its action map are nobody's, though ten of them read as decor anywhere else.
+ * game's own plugins.js, the patterns on its action map are nobody's, though thirteen of them would be claimed
+ * anywhere else. With the game's modules on, its battlers and lights are named too, and every event whose first page
+ * draws no picture shows a marker of its kind or its trigger, pinned by count so a symbol that moves shows up here.
  *
  * It runs against the project JMZ_PROJECT_ROOT names, or the sibling checkout, and skips when neither is there.
  */
@@ -167,8 +170,51 @@ describe.skipIf(project === null)('every shipped event, by kind', () =>
     const there = actionMap.filter(({ event }) => registry.kindOf(event, 2) !== null).length;
     const elsewhere = actionMap.filter(({ event }) => registry.kindOf(event, 1) !== null).length;
 
-    // Assert: none is claimed on the action map, while ten would read as decor on any other.
+    // Assert: none is claimed on the action map, while on any other ten would read as decor, the fireball as a light,
+    // and the two summons as battlers.
     expect([ registry.isActive('jabs'), actionMap.length, there, elsewhere ])
-      .toStrictEqual([ true, 58, 0, 10 ]);
+      .toStrictEqual([ true, 58, 0, 13 ]);
+  });
+
+  it('names the battlers and lights once the game\'s modules are on, and gives every event drawing no picture a marker', async () =>
+  {
+    // Arrange: a window's kinds with the shipped modules switched on from the game's own plugin list, and every event
+    // whose first page, the one the map shows, draws no picture.
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+    registerCoreEventKinds(registry);
+    await activatePluginModules({ loadPluginList: async () => readFileSync(`${project}/js/plugins.js`, 'utf8') }, registry);
+    const mapIdOf = (where: string) => Number(where.slice(3, 6));
+    const unpictured = shipped.filter(({ event }) => event.pages[0].image.tileId === 0 && event.pages[0].image.characterName === '');
+
+    // Act.
+    const kinds: Record<string, number> = {};
+    shipped.forEach(({ where, event }) =>
+    {
+      const id = registry.kindOf(event, mapIdOf(where))?.id ?? 'unclaimed';
+      kinds[id] = (kinds[id] ?? 0) + 1;
+    });
+    const symbolsOn = (prefix: string) =>
+    {
+      const symbols: Record<string, number> = {};
+      unpictured.filter(({ where }) => where.startsWith(prefix)).forEach(({ where, event }) =>
+      {
+        const symbol = markerSymbolFor(event, registry.kindOf(event, mapIdOf(where)));
+        symbols[symbol] = (symbols[symbol] ?? 0) + 1;
+      });
+      return symbols;
+    };
+
+    // Assert: J-Lighting's module is on beside J-ABS's; ten decor patterns on the action map go to nobody; of the 1,748
+    // events drawing no picture, Map361's 458 placeholders are decor bar one battler, and Map301 shows its quest
+    // chatter as a parallel process and its two teleports as transfers.
+    expect([ registry.isActive('lighting'), kinds, unpictured.length, symbolsOn('Map'), symbolsOn('Map361#'), symbolsOn('Map301#') ])
+      .toStrictEqual([
+        true,
+        { 'core.transfer': 825, 'jabs.battler': 4711, 'unclaimed': 773, 'core.decor': 876, 'lighting.light': 715, 'core.dialogue': 59, 'core.chest': 11 },
+        1748,
+        { 'transfer': 773, 'player-touch': 198, 'autorun': 137, 'event-touch': 16, 'action-button': 54, 'parallel': 69, 'light': 18, 'dialogue': 8, 'decor': 474, 'battler': 1 },
+        { decor: 457, battler: 1 },
+        { parallel: 1, transfer: 2 },
+      ]);
   });
 });

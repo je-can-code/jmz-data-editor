@@ -1,8 +1,11 @@
 import { Container, Rectangle, Sprite, Texture, type TextureSource } from 'pixi.js';
+import { markerSymbolFor, type EventMarkerSymbol } from '../../core/eventKinds/eventMarkers.ts';
+import { createEventPage } from '../../core/model/eventModel.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
-import type { RmmzEventPage, RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
-import type { GhostEvent, TextureSource as ImageSource } from '../../core/renderer/MapRenderer.ts';
+import type { RmmzEventImage, RmmzEventPage, RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
+import type { GhostEvent, MarkerClassifier, TextureSource as ImageSource } from '../../core/renderer/MapRenderer.ts';
 import { GHOST_ALPHA } from './GhostTiles.ts';
+import { MARKER_WORLD_SIZE, markerFrame, markerScale, markerSpriteScale } from './markerAtlas.ts';
 import {
   compareDrawOrder,
   eventFrame,
@@ -15,7 +18,8 @@ import { readSourceAlpha, textureSourceFor } from '../textureImages.ts';
 
 /**
  * One event's sprite: the tile the event stands on, the container placed at its feet, and what it draws with: the
- * frame cut from the sheet, or null while there is nothing to draw, and the sheet itself.
+ * frame cut from the sheet, or null while there is nothing to draw, and the sheet itself; and, for an event that draws
+ * no picture, the marker that shows it instead.
  */
 type EventSprite = {
   readonly id: number;
@@ -24,6 +28,16 @@ type EventSprite = {
   readonly placement: SpritePlacement;
   readonly frame: SpriteFrame | null;
   readonly source: TextureSource | null;
+  readonly marker: Sprite | null;
+};
+
+/**
+ * One ghost's drawing: what draws it, and whether that is a marker, which stands on its tile's middle rather than at a
+ * character's feet.
+ */
+type GhostDrawing = {
+  readonly root: Container;
+  readonly marker: boolean;
 };
 
 /**
@@ -33,7 +47,8 @@ type EventSprite = {
 type AlphaReader = (source: TextureSource, x: number, y: number) => number | null;
 
 /**
- * What the layer draws from.
+ * What the layer draws from. The marker atlas is handed over by whoever draws it, the first time a marker needs it;
+ * left out, events that draw no picture show nothing.
  */
 type EventLayerContext = {
   readonly document: MapDocument;
@@ -41,6 +56,7 @@ type EventLayerContext = {
   readonly sheets: readonly (TextureSource | null)[];
   readonly images: ImageSource | null;
   readonly tileSize: number;
+  readonly markerAtlas?: () => TextureSource;
 };
 
 /**
@@ -55,6 +71,22 @@ const BUSH_ALPHA = 128 / 255;
  * sixth of the game's scale, and its clear surround keeps passing clicks through to the events beside it.
  */
 const SMALL_ON_SCREEN = 32;
+
+/**
+ * The page an event with no pages at all stands in with: a fresh one, which shows no picture and starts on the action
+ * button, so such an event still shows its marker rather than nothing.
+ */
+const FRESH_PAGE = createEventPage();
+
+/**
+ * Picks a marker's symbol from the event's trigger alone, until the window's kinds are handed over.
+ * @param {RmmzMapEvent} event The event.
+ * @returns {EventMarkerSymbol} The symbol.
+ */
+const triggerOnly: MarkerClassifier = (event: RmmzMapEvent): EventMarkerSymbol =>
+{
+  return markerSymbolFor(event, null);
+};
 
 /**
  * The page an event shows in the editor: its first, as MZ's own editor shows it. The game shows whichever page's
@@ -72,6 +104,13 @@ const shownPage = (event: RmmzMapEvent): RmmzEventPage | null =>
  * the engine stands it, sunk into bushes where the engine sinks it, and split into three groups by priority so the
  * tiles above characters draw between them. Within a group, sprites draw in the engine's order: lower on screen on
  * top, then by id.
+ *
+ * An event whose page draws no picture, such as a story sequence on autorun, a parallel process or a spawner, would be
+ * invisible, so it draws a marker instead: a square a little smaller than its tile, in a group of its own over every
+ * sprite, holding the symbol its kind or its trigger shows. Zoomed far out, markers keep a size that can be read and
+ * spill past their tiles; a click on the part that spills over picks the marker's event wherever no event stands on the
+ * tile clicked. An event whose sheet is still loading shows nothing until it loads, and one whose sheet is missing
+ * shows its marker.
  */
 class EventLayer
 {
@@ -91,6 +130,11 @@ class EventLayer
   readonly above = new Container();
 
   /**
+   * The markers of events that draw no picture, over every sprite: lower on screen on top, then by id.
+   */
+  readonly markers = new Container();
+
+  /**
    * Events a ghost preview shows, see-through, over everything.
    */
   readonly ghosts = new Container();
@@ -98,9 +142,9 @@ class EventLayer
   #ghostEvents: readonly GhostEvent[] = [];
 
   /**
-   * The container drawing each ghost, by its place in the ghost list; null for a ghost with nothing to draw yet.
+   * What draws each ghost, by its place in the ghost list; null for a ghost with nothing to draw yet.
    */
-  #ghostRoots: (Container | null)[] = [];
+  #ghostRoots: (GhostDrawing | null)[] = [];
 
   #context: EventLayerContext | null = null;
 
@@ -120,6 +164,20 @@ class EventLayer
   #onChange: () => void;
 
   #readAlpha: AlphaReader;
+
+  #classify: MarkerClassifier = triggerOnly;
+
+  /**
+   * How much bigger than its own size every marker draws at the zoom last handed over (see {@link markerScale}).
+   */
+  #markerScale = 1;
+
+  /**
+   * The atlas the marker textures below are cut from.
+   */
+  #markerSource: TextureSource | null = null;
+
+  #markerTextures = new Map<EventMarkerSymbol, Texture>();
 
   #destroyed = false;
 
@@ -153,6 +211,15 @@ class EventLayer
   }
 
   /**
+   * How many events draw a marker.
+   * @returns {number} The count.
+   */
+  get markerCount(): number
+  {
+    return this.markers.children.length;
+  }
+
+  /**
    * Draws a map's events, replacing whatever was drawn before.
    * @param {EventLayerContext} context What to draw from.
    */
@@ -163,10 +230,48 @@ class EventLayer
   }
 
   /**
-   * Rebuilds every event's sprite.
+   * Chooses how markers pick their symbol, and marks every event to be rebuilt with it by the next
+   * {@link flushChanges}: the window's kinds may read events differently now, such as once its plugin modules have
+   * switched on.
+   * @param {MarkerClassifier} classify Picks an event's symbol.
+   */
+  setMarkerClassifier(classify: MarkerClassifier): void
+  {
+    this.#classify = classify;
+    this.markChanged(null);
+  }
+
+  /**
+   * Follows the zoom the map is drawn at, so markers keep a size that can be read however far out it is: past 50%, they
+   * stop shrinking with the map.
+   * @param {number} zoom The zoom.
+   */
+  setZoom(zoom: number): void
+  {
+    const scale = markerScale(zoom);
+    if (scale === this.#markerScale)
+    {
+      return;
+    }
+
+    this.#markerScale = scale;
+    const spriteScale = markerSpriteScale(scale);
+    this.markers.children.forEach(marker => marker.scale.set(spriteScale));
+    this.#ghostRoots.forEach(drawing =>
+    {
+      if (drawing !== null && drawing.marker)
+      {
+        drawing.root.scale.set(spriteScale);
+      }
+    });
+  }
+
+  /**
+   * Rebuilds every event's sprite, which settles every change noted since the last flush.
    */
   rebuild(): void
   {
+    this.#changed = new Set();
     this.#clear();
     const context = this.#context;
     if (context === null)
@@ -261,13 +366,14 @@ class EventLayer
 
   /**
    * Finds the event a click at a world point picks, as the pointer can aim at the map at the zoom it is drawn at. Each
-   * step takes the event drawn on top:
+   * step takes the event drawn on top, markers first, since they draw over every sprite:
    *
    * - first, an event found by its tile, standing on the tile clicked: a tile image, which is its tile; a character
-   *   drawn small on screen, too few pixels to aim within; or an event drawing nothing at all. Zoomed out, clicking an
-   *   event's tile always picks it, whatever a big sprite draws over it;
+   *   drawn small on screen, too few pixels to aim within; or an event drawing nothing but its marker. Zoomed out,
+   *   clicking an event's tile always picks it, whatever a big sprite or a neighbour's marker draws over it;
    * - then, the sprite drawing the pixel clicked. A frame is mostly clear around its figure (a tree on a big sheet is
    *   94 pixels by 190), so a click on the clear part belongs to whatever shows through it, never to the frame;
+   * - then, a marker spilling past its own tile onto the one clicked, as markers do zoomed far out, while they show;
    * - then, whatever stands on the tile clicked, such as a big character clicked on a clear pixel of its own tile.
    * @param {number} x The point, across, in world pixels.
    * @param {number} y The point, down, in world pixels.
@@ -288,6 +394,7 @@ class EventLayer
     const onTile = (sprite: EventSprite) => sprite.cell.x === column && sprite.cell.y === row;
     const picked = sprites.find(sprite => onTile(sprite) && this.#foundByTile(sprite, zoom))
       ?? sprites.find(sprite => sprite.frame !== null && this.#covers(sprite, x, y) && this.#drawsAt(sprite, x, y))
+      ?? sprites.find(sprite => this.#markerCovers(sprite, x, y))
       ?? sprites.find(onTile);
     return picked === undefined
       ? null
@@ -307,7 +414,9 @@ class EventLayer
     this.below.destroy();
     this.same.destroy();
     this.above.destroy();
+    this.markers.destroy();
     this.ghosts.destroy({ children: true });
+    this.#forgetMarkerTextures();
   }
 
   /**
@@ -321,28 +430,41 @@ class EventLayer
     return next.length > 0
       && previous.length === next.length
       && this.#ghostRoots.length === next.length
-      && next.every((ghost, index) => ghost.image === previous[index].image && ghost.priorityType === previous[index].priorityType);
+      && next.every((ghost, index) =>
+      {
+        const before = previous[index];
+        return ghost.image === before.image && ghost.priorityType === before.priorityType && ghost.eventId === before.eventId;
+      });
   }
 
   /**
-   * Stands every ghost sprite on show where its ghost now stands.
+   * Stands every ghost on show where its ghost now stands: a sprite at its character's feet, a marker on its tile's
+   * middle.
    */
   #moveGhosts(): void
   {
     const tileSize = this.#context?.tileSize ?? 0;
     this.#ghostEvents.forEach((ghost, index) =>
     {
-      const root = this.#ghostRoots[index];
-      if (root !== null)
+      const drawing = this.#ghostRoots[index];
+      if (drawing === null)
       {
-        const placement = eventPlacement(ghost.x, ghost.y, ghost.image, ghost.priorityType, false, tileSize);
-        root.position.set(placement.x, placement.y);
+        return;
       }
+
+      if (drawing.marker)
+      {
+        drawing.root.position.set((ghost.x + 0.5) * tileSize, (ghost.y + 0.5) * tileSize);
+        return;
+      }
+
+      const placement = eventPlacement(ghost.x, ghost.y, ghost.image, ghost.priorityType, false, tileSize);
+      drawing.root.position.set(placement.x, placement.y);
     });
   }
 
   /**
-   * Rebuilds the ghost sprites from the ghosts asked for, with whatever sheets have loaded.
+   * Rebuilds the ghosts from the ghosts asked for, with whatever sheets have loaded.
    */
   #buildGhosts(): void
   {
@@ -354,25 +476,45 @@ class EventLayer
       return;
     }
 
-    this.#ghostRoots = this.#ghostEvents.map(ghost =>
-    {
-      const page = { image: ghost.image } as RmmzEventPage;
-      const texture = this.#sourceFor(page);
-      const size = texture === null ? null : { width: texture.width, height: texture.height };
-      const frame = eventFrame(ghost.image, size, context.tileSize);
-      if (frame === null || texture === null)
-      {
-        return null;
-      }
+    this.#ghostRoots = this.#ghostEvents.map(ghost => this.#buildGhost(ghost, context));
+  }
 
+  /**
+   * Builds one ghost: its picture, see-through, or, for an event on the map that draws no picture, its marker.
+   * @param {GhostEvent} ghost The ghost.
+   * @param {EventLayerContext} context What the layer draws from.
+   * @returns {GhostDrawing | null} What draws it, or null while there is nothing to draw.
+   */
+  #buildGhost(ghost: GhostEvent, context: EventLayerContext): GhostDrawing | null
+  {
+    const page = { image: ghost.image } as RmmzEventPage;
+    const texture = this.#sourceFor(page);
+    const size = texture === null ? null : { width: texture.width, height: texture.height };
+    const frame = eventFrame(ghost.image, size, context.tileSize);
+    if (frame !== null && texture !== null)
+    {
       const placement = eventPlacement(ghost.x, ghost.y, ghost.image, ghost.priorityType, false, context.tileSize);
       const root = new Container();
       root.position.set(placement.x, placement.y);
       root.alpha = GHOST_ALPHA;
       this.#addBodies(root, texture, frame, 0);
       this.ghosts.addChild(root);
-      return root;
-    });
+      return { root, marker: false };
+    }
+
+    // a ghost of an event that draws no picture shows that event's marker, once a sheet still loading is known missing.
+    const event = ghost.eventId === undefined ? null : context.document.event(ghost.eventId);
+    const marker = event === null || this.#awaitsSheet(ghost.image)
+      ? null
+      : this.#markerSprite(event, ghost.x, ghost.y, context);
+    if (marker === null)
+    {
+      return null;
+    }
+
+    marker.alpha = GHOST_ALPHA;
+    this.ghosts.addChild(marker);
+    return { root: marker, marker: true };
   }
 
   /**
@@ -391,19 +533,50 @@ class EventLayer
   }
 
   /**
-   * Lists every event's sprite in the order a click meets them, the top of the draw order first: above characters, then
-   * with them, then below them, and within each group the sprite drawn last first.
+   * Reports whether an event's marker covers a point, at the size markers draw at the zoom last handed over, while they
+   * show.
+   * @param {EventSprite} sprite The event's sprite.
+   * @param {number} x The point, across.
+   * @param {number} y The point, down.
+   * @returns {boolean} True when it has a marker on show over the point.
+   */
+  #markerCovers(sprite: EventSprite, x: number, y: number): boolean
+  {
+    const { marker } = sprite;
+    if (marker === null || this.markers.visible === false)
+    {
+      return false;
+    }
+
+    const half = (MARKER_WORLD_SIZE / 2) * this.#markerScale;
+    return Math.abs(x - marker.x) <= half && Math.abs(y - marker.y) <= half;
+  }
+
+  /**
+   * Lists every event's sprite in the order a click meets them, the top of the draw order first: the markers, then the
+   * sprites above characters, with them, then below them, and within each group the one drawn last first.
    * @returns {EventSprite[]} The sprites.
    */
   #topFirst(): EventSprite[]
   {
     const sprites: EventSprite[] = [];
+    const recordOf = (child: Container) => this.#sprites.get((child as Container & { eventId?: number }).eventId ?? -1);
+    for (let index = this.markers.children.length - 1; index >= 0; index--)
+    {
+      const marked = recordOf(this.markers.children[index]);
+      if (marked !== undefined)
+      {
+        sprites.push(marked);
+      }
+    }
+
+    // an event showing its marker is met there already; its container in its group draws nothing.
     [ this.above, this.same, this.below ].forEach(group =>
     {
       for (let index = group.children.length - 1; index >= 0; index--)
       {
-        const sprite = this.#sprites.get((group.children[index] as Container & { eventId?: number }).eventId ?? -1);
-        if (sprite !== undefined)
+        const sprite = recordOf(group.children[index]);
+        if (sprite !== undefined && sprite.marker === null)
         {
           sprites.push(sprite);
         }
@@ -446,19 +619,20 @@ class EventLayer
   }
 
   /**
-   * Builds one event's sprite, loading its sheet first when it is a character not seen yet.
+   * Builds one event's sprite, loading its sheet first when it is a character not seen yet, or its marker when it draws
+   * no picture.
    * @param {number} id The event id.
    */
   #build(id: number): void
   {
     const context = this.#context;
     const event = context?.document.event(id) ?? null;
-    const page = event === null ? null : shownPage(event);
-    if (context === null || event === null || page === null)
+    if (context === null || event === null)
     {
       return;
     }
 
+    const page = shownPage(event) ?? FRESH_PAGE;
     const { image } = page;
     const { document, flags, tileSize } = context;
     const onBush = isBushCell(document.cells, document.width, document.height, flags, event.x, event.y);
@@ -469,13 +643,106 @@ class EventLayer
     const root = new Container() as Container & { eventId?: number };
     root.eventId = id;
     root.position.set(placement.x, placement.y);
-    if (frame !== null && texture !== null)
+    const pictured = frame !== null && texture !== null;
+    if (pictured)
     {
       this.#addBodies(root, texture, frame, placement.bushDepth);
     }
 
+    // an event with no picture to draw shows its marker, unless its sheet is still on its way.
+    const marker = pictured || this.#awaitsSheet(image)
+      ? null
+      : this.#markerSprite(event, event.x, event.y, context);
+    if (marker !== null)
+    {
+      this.markers.addChild(marker);
+    }
+
     this.#groupFor(placement.z).addChild(root);
-    this.#sprites.set(id, { id, cell: { x: event.x, y: event.y }, root, placement, frame: texture === null ? null : frame, source: texture });
+    this.#sprites.set(id, { id, cell: { x: event.x, y: event.y }, root, placement, frame: texture === null ? null : frame, source: texture, marker });
+  }
+
+  /**
+   * Builds the marker of an event that draws no picture, standing on a tile's middle at the size markers draw at the
+   * zoom last handed over.
+   * @param {RmmzMapEvent} event The event, which names the marker's symbol.
+   * @param {number} x The tile's column.
+   * @param {number} y The tile's row.
+   * @param {EventLayerContext} context What the layer draws from.
+   * @returns {Sprite | null} The marker, not yet added anywhere, or null when no marker atlas was handed over.
+   */
+  #markerSprite(event: RmmzMapEvent, x: number, y: number, context: EventLayerContext): Sprite | null
+  {
+    const texture = this.#markerTexture(this.#classify(event, context.document.mapId), context);
+    if (texture === null)
+    {
+      return null;
+    }
+
+    const sprite = new Sprite(texture) as Sprite & { eventId?: number };
+    sprite.eventId = event.id;
+    sprite.anchor.set(0.5);
+    sprite.position.set((x + 0.5) * context.tileSize, (y + 0.5) * context.tileSize);
+    sprite.scale.set(markerSpriteScale(this.#markerScale));
+    return sprite;
+  }
+
+  /**
+   * Finds the texture a symbol's marker draws with, cut from the atlas once and shared by every marker showing it, so
+   * however many markers a map holds they draw together in one go.
+   * @param {EventMarkerSymbol} symbol The symbol.
+   * @param {EventLayerContext} context What the layer draws from.
+   * @returns {Texture | null} The texture, or null when no marker atlas was handed over.
+   */
+  #markerTexture(symbol: EventMarkerSymbol, context: EventLayerContext): Texture | null
+  {
+    if (context.markerAtlas === undefined)
+    {
+      return null;
+    }
+
+    // a new atlas, as a new renderer's, makes the textures cut from the old one useless.
+    const source = context.markerAtlas();
+    if (source !== this.#markerSource)
+    {
+      this.#forgetMarkerTextures();
+      this.#markerSource = source;
+    }
+
+    let texture = this.#markerTextures.get(symbol);
+    if (texture === undefined)
+    {
+      const { x, y, width, height } = markerFrame(symbol);
+      texture = new Texture({ source, frame: new Rectangle(x, y, width, height) });
+      this.#markerTextures.set(symbol, texture);
+    }
+
+    return texture;
+  }
+
+  /**
+   * Lets go of the textures cut from the marker atlas, leaving the atlas itself to whoever drew it.
+   */
+  #forgetMarkerTextures(): void
+  {
+    this.#markerTextures.forEach(texture => texture.destroy(false));
+    this.#markerTextures.clear();
+    this.#markerSource = null;
+  }
+
+  /**
+   * Reports whether an image's character sheet is still loading, so the event's picture is on its way and it shows no
+   * marker meanwhile.
+   * @param {RmmzEventImage} image The image.
+   * @returns {boolean} True while its sheet loads.
+   */
+  #awaitsSheet(image: RmmzEventImage): boolean
+  {
+    const name = image.characterName;
+    return image.tileId === 0
+      && name !== ''
+      && this.#characterSources.has(name)
+      && this.#loadedSources.has(name) === false;
   }
 
   /**
@@ -571,7 +838,8 @@ class EventLayer
   }
 
   /**
-   * Rebuilds the events that draw with a sheet that just loaded.
+   * Rebuilds the events that draw with a sheet that just loaded, or that turned out to be missing, which then show
+   * their markers.
    * @param {string} name The sheet's name.
    */
   #refreshSheetUsers(name: string): void
@@ -621,7 +889,7 @@ class EventLayer
   }
 
   /**
-   * Puts each group in the engine's draw order.
+   * Puts each group in the engine's draw order, and the markers lower on screen over higher, then later id over earlier.
    */
   #sort(): void
   {
@@ -639,10 +907,15 @@ class EventLayer
       group.removeChildren();
       keyed.forEach(entry => group.addChild(entry.child));
     });
+
+    const markers = this.markers.children.map(child => ({ child, id: (child as Container & { eventId?: number }).eventId ?? 0 }));
+    markers.sort((left, right) => left.child.y - right.child.y || left.id - right.id);
+    this.markers.removeChildren();
+    markers.forEach(entry => this.markers.addChild(entry.child));
   }
 
   /**
-   * Removes one event's sprite.
+   * Removes one event's sprite and its marker.
    * @param {number} id The event id.
    */
   #remove(id: number): void
@@ -651,16 +924,21 @@ class EventLayer
     if (sprite !== undefined)
     {
       sprite.root.destroy({ children: true });
+      sprite.marker?.destroy();
       this.#sprites.delete(id);
     }
   }
 
   /**
-   * Removes every sprite.
+   * Removes every sprite and marker.
    */
   #clear(): void
   {
-    this.#sprites.forEach(sprite => sprite.root.destroy({ children: true }));
+    this.#sprites.forEach(sprite =>
+    {
+      sprite.root.destroy({ children: true });
+      sprite.marker?.destroy();
+    });
     this.#sprites.clear();
   }
 }

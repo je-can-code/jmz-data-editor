@@ -67,6 +67,23 @@ describe('renderer contract', () =>
       .toStrictEqual([ state, rules, 2 ]);
   });
 
+  it('keeps the last way handed over for markers to pick their symbol, none before the first', () =>
+  {
+    // Arrange: two classifiers, the second handed over once the modules switch on.
+    const renderer = buildRenderer();
+    const before = renderer.state.markerClassifier;
+    const triggers = () => 'autorun' as const;
+    const kinds = () => 'battler' as const;
+
+    // Act.
+    renderer.setEventMarkers(triggers);
+    renderer.setEventMarkers(kinds);
+
+    // Assert.
+    expect([ before, renderer.state.markerClassifier ])
+      .toStrictEqual([ null, kinds ]);
+  });
+
   it('raises a right click with the cell and the newest event under it, to every listener until it stops', () =>
   {
     // Arrange.

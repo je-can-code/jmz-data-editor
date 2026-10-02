@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Box, Chip, Divider, Typography } from '@mui/material';
+import { markerSymbolFor } from '../core/eventKinds/eventMarkers.ts';
 import { EVENT_CLIPBOARD_MARKER } from '../core/events/eventClipboard.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
+import type { RmmzMapEvent } from '../core/model/rmmzTypes.ts';
+import type { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import type { Camera, MapCell } from '../core/renderer/camera.ts';
-import { GAME_LOOK, type OverlayId } from '../core/renderer/MapRenderer.ts';
+import { GAME_LOOK, type MarkerClassifier, type OverlayId } from '../core/renderer/MapRenderer.ts';
 import { openTilesetMarks } from '../core/palette/tilesetMarkEdits.ts';
 import { TilesetLayeringSource } from '../core/tools/tilesetLayering.ts';
 import type { WindowPaint } from '../core/tools/WindowPaint.ts';
@@ -114,9 +117,21 @@ type MapViewStatus = {
 };
 
 /**
- * The overlays the tools draw into, on from the start: they draw nothing until a tool gives them something.
+ * The overlays on from the start: the ones the tools draw into, which draw nothing until a tool gives them something,
+ * and the markers of events that draw no picture, which show for as long as the events do.
  */
-const TOOL_OVERLAYS: readonly OverlayId[] = [ 'selection', 'hover', 'ghost' ];
+const STARTING_OVERLAYS: readonly OverlayId[] = [ 'selection', 'hover', 'ghost', 'markers' ];
+
+/**
+ * Builds how a view's markers pick their symbol: by the kind the window's registry makes of each event on its map, a
+ * kind's own symbol, or the event's trigger when no kind claims it or the kind names none.
+ * @param {PluginModuleRegistry} modules The window's kinds.
+ * @returns {MarkerClassifier} The classifier.
+ */
+const markerClassifierFor = (modules: PluginModuleRegistry): MarkerClassifier =>
+{
+  return (event: RmmzMapEvent, mapId: number) => markerSymbolFor(event, modules.kindOf(event, mapId));
+};
 
 /**
  * Reads the map to open from a page's query string: the map editor page opens one straight away with {@code ?map=102},
@@ -193,7 +208,8 @@ const DrawNotice = (props: { state: DrawState }) =>
  * created, deleted, copied and pasted with the mouse, the keys and a right-click menu, through {@link MapEventTools},
  * into the window's selection; with any painting tool in hand the left button paints, previewed before each click, and
  * the event tools stand down. An event picked out, such as the battler the data editor asked to see, becomes the
- * selection, with the view centred on it.
+ * selection, with the view centred on it at the game's scale; an event picked from the events list is centred at the
+ * zoom the view already has.
  *
  * A view off screen, behind another tab, lets its GPU context go and draws again, camera and all, when it shows; a map
  * that cannot draw says why over the canvas rather than leaving it blank.
@@ -217,7 +233,7 @@ const MapView = (props: MapViewProps) =>
   const selected = useSyncExternalStore(selection.subscribe, selection.get);
   const [ openMap, setOpenMap ] = useState<MapDocument | null>(null);
   const [ status, setStatus ] = useState<MapViewStatus>({ gpu: '', zoom: 1, cell: null, problem: null, note: '' });
-  const [ settings, setSettings ] = useState<MapViewSettings>({ visibility: GAME_LOOK, overlays: new Set(TOOL_OVERLAYS) });
+  const [ settings, setSettings ] = useState<MapViewSettings>({ visibility: GAME_LOOK, overlays: new Set(STARTING_OVERLAYS) });
   const [ drawState, setDrawState ] = useState<DrawState>('hidden');
   const [ menu, setMenu ] = useState<EventMenuRequest | null>(null);
 
@@ -250,6 +266,11 @@ const MapView = (props: MapViewProps) =>
     rendererRef.current = renderer;
     const controller = new MapViewController(renderer, services, projectImagesFor(api));
     controllerRef.current = controller;
+
+    // events that draw no picture show markers by their kind, which reads differently once the plugin modules switch on.
+    const classify = markerClassifierFor(services.modules);
+    renderer.setEventMarkers(classify);
+    stops.push(services.modules.subscribe(() => renderer.setEventMarkers(classify)));
     stops.push(renderer.onCameraChange((camera: Camera) =>
     {
       setStatus(current => (current.zoom === camera.zoom ? current : { ...current, zoom: camera.zoom }));
@@ -331,6 +352,18 @@ const MapView = (props: MapViewProps) =>
 
     // the left button is the event tools' only while the events are in hand; a painting tool stands them down.
     stops.push(followToolInHand(painting, tools));
+
+    // an event picked from a list comes into sight, centred at the zoom the view has, so browsing the list row by row
+    // walks the map without zooming it in and out.
+    stops.push(selection.onReveal(request =>
+    {
+      const shown = controller.map;
+      const event = shown === null || shown.mapId !== request.mapId ? null : shown.event(request.eventId);
+      if (event !== null)
+      {
+        renderer.lookAt({ x: event.x, y: event.y }, renderer.camera.zoom);
+      }
+    }));
 
     const view = host.ownerDocument.defaultView;
     if (view !== null && wantsSpeedHooks(view.location.search))

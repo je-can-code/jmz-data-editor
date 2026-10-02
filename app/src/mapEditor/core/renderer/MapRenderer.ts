@@ -1,6 +1,7 @@
 import type { ImageFolder } from '../api/MapEditorApi.ts';
+import type { EventMarkerSymbol } from '../eventKinds/eventMarkers.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
-import type { RmmzEventImage, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { RmmzEventImage, RmmzMapEvent, RmmzTileset } from '../model/rmmzTypes.ts';
 import type { PassabilityRule } from '../modules/PluginModule.ts';
 import type { Camera, MapCell, ScreenPoint } from './camera.ts';
 import type { FrameTimings } from './FrameTimeRecorder.ts';
@@ -74,10 +75,16 @@ const GAME_LOOK: LayerVisibility = {
 
 /**
  * The overlays the core draws: the grid, regions, passability, the highlight of the chosen layer, the selection,
- * the hover and the ghost preview of what a click would place. Plugin modules add their own, named
- * {@code module.overlay} (J-ABS's sight rings would be {@code jabs.sight}).
+ * the hover, the ghost preview of what a click would place, and the markers that show events whose page draws no
+ * picture, which draw only while the events do. Plugin modules add their own, named {@code module.overlay} (J-ABS's
+ * sight rings would be {@code jabs.sight}).
  */
-type CoreOverlayId = 'grid' | 'regions' | 'passability' | 'layer-highlight' | 'selection' | 'hover' | 'ghost';
+type CoreOverlayId = 'grid' | 'regions' | 'passability' | 'layer-highlight' | 'selection' | 'hover' | 'ghost' | 'markers';
+
+/**
+ * Picks the symbol an event's marker shows, for an event on a map: what the window's kinds make of it.
+ */
+type MarkerClassifier = (event: RmmzMapEvent, mapId: number) => EventMarkerSymbol;
 
 /**
  * Names one overlay.
@@ -200,13 +207,15 @@ type GhostTile = {
 };
 
 /**
- * An event a ghost preview shows, such as one being dragged: where it would land and how it looks there.
+ * An event a ghost preview shows, such as one being dragged: where it would land and how it looks there, and, for one
+ * already on the map, which event it is, so a ghost of an event that draws no picture shows that event's marker.
  */
 type GhostEvent = {
   readonly x: number;
   readonly y: number;
   readonly image: RmmzEventImage;
   readonly priorityType: number;
+  readonly eventId?: number;
 };
 
 /**
@@ -337,6 +346,13 @@ interface MapRenderer
   refreshOverlays(): void;
 
   /**
+   * Chooses how events showing no picture pick their marker's symbol, and redraws every marker with it: the window's
+   * kinds can read an event differently once its plugin modules switch on, so this is handed over again then.
+   * @param {MarkerClassifier} classify Picks an event's symbol.
+   */
+  setEventMarkers(classify: MarkerClassifier): void;
+
+  /**
    * Listens for right clicks that did not move, which open the context menu.
    * @param {(menu: MapContextMenu) => void} listener Called with where the click landed.
    * @returns {() => void} Stops listening.
@@ -396,6 +412,7 @@ export type {
   LayerVisibility,
   MapContextMenu,
   MapRenderer,
+  MarkerClassifier,
   OverlayContext,
   OverlayDefinition,
   OverlayId,

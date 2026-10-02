@@ -8,8 +8,9 @@ import { mapWithEvents } from '../../support/eventFixtures.ts';
  * A drag is worked out once as it starts, so each tile the pointer reaches costs only as much as the dragged events.
  * Its promises match the drop's: the group keeps its layout and slides along the map's edge instead of leaving it; a
  * tile held by an event outside the group is blocked, and shown so, while a tile the group leaves never is; every
- * dragged event has a ghost looking as its event looks, picture and priority, even one with no page to draw; and an
- * event not dragged never gets a ghost.
+ * dragged event has a ghost looking as its event looks, picture and priority, even one with no page to draw, and naming
+ * its event, so a ghost of an event that draws no picture can show that event's marker; and an event not dragged never
+ * gets a ghost.
  *
  * The fixture is a 5x4 map: event 1 at 0, 0 and event 2 at 1, 0 (dragged), event 3 at 2, 0 (staying), and event 4, with
  * no pages at all, at 0, 3.
@@ -45,8 +46,9 @@ describe('EventDragPreview', () =>
     const frame = preview.at(0, 2);
 
     // Assert.
-    expect([ preview.eventIds, frame.dx, frame.dy, frame.ghosts.map(ghost => [ ghost.x, ghost.y, ghost.image.characterName, ghost.priorityType ]), frame.blocked, frame.ok ])
-      .toStrictEqual([ [ 1, 2 ], 0, 2, [ [ 0, 2, '', 0 ], [ 1, 2, 'Actor1', 1 ] ], [], true ]);
+    const ghosts = frame.ghosts.map(ghost => [ ghost.eventId, ghost.x, ghost.y, ghost.image.characterName, ghost.priorityType ]);
+    expect([ preview.eventIds, frame.dx, frame.dy, ghosts, frame.blocked, frame.ok ])
+      .toStrictEqual([ [ 1, 2 ], 0, 2, [ [ 1, 0, 2, '', 0 ], [ 2, 1, 2, 'Actor1', 1 ] ], [], true ]);
   });
 
   it('blocks a tile an event outside the group holds, and never one the group itself leaves', () =>
@@ -87,8 +89,8 @@ describe('EventDragPreview', () =>
     const [ ghost ] = preview.at(1, 0).ghosts;
 
     // Assert.
-    expect([ ghost.x, ghost.y, ghost.image.characterName, ghost.image.tileId, ghost.priorityType ])
-      .toStrictEqual([ 1, 3, '', 0, 0 ]);
+    expect([ ghost.eventId, ghost.x, ghost.y, ghost.image.characterName, ghost.image.tileId, ghost.priorityType ])
+      .toStrictEqual([ 4, 1, 3, '', 0, 0 ]);
   });
 
   it('passes over ids the map does not hold, keeping the shift the pointer asks for with nothing to keep on the map', () =>

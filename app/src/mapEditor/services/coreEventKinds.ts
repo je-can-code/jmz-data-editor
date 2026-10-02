@@ -3,8 +3,9 @@ import type { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.
 import { quickPanelFor } from '../views/quickPanel/QuickFieldsPanel.tsx';
 
 /**
- * Registers the core's kinds (chests, transfers, dialogue and decor), each with its quick panel, which every project
- * has whatever its plugins. Plugin modules add their own kinds beside these when their plugins are enabled.
+ * Registers the core's kinds (chests, transfers, dialogue and decor), each with its quick panel and the symbol it shows
+ * on the map when it draws no picture, which every project has whatever its plugins. Plugin modules add their own kinds
+ * beside these when their plugins are enabled.
  * @param {PluginModuleRegistry} registry The window's registry.
  */
 const registerCoreEventKinds = (registry: PluginModuleRegistry): void =>
@@ -17,6 +18,7 @@ const registerCoreEventKinds = (registry: PluginModuleRegistry): void =>
       priority: kind.priority,
       detect: kind.detect,
       quickPanel: quickPanelFor(kind.quick, kind.id),
+      marker: kind.marker,
     });
   });
 };

@@ -7,7 +7,8 @@ import { EventSelection, NO_EVENTS, NOTHING_SELECTED } from '../../../../src/map
  * what React's useSyncExternalStore needs to avoid rendering forever. Every change is heard, and a change to nothing
  * (the same events again) is not, so nobody re-renders for nothing. And it holds only what is really selected: each
  * event once, nothing at all when the list is empty, and never an event its map no longer holds, while the events
- * that do remain stay selected in their order.
+ * that do remain stay selected in their order. An event picked from a list is revealed: selected alone, and every view
+ * of its map asked to bring it into sight.
  */
 describe('EventSelection', () =>
 {
@@ -194,6 +195,75 @@ describe('EventSelection', () =>
       // Assert.
       expect(selection.get())
         .toStrictEqual({ mapId: 12, eventIds: [ 4 ] });
+    });
+  });
+
+  describe('reveal', () =>
+  {
+    /*
+     * Picking an event from a list selects it alone and asks every view of its map to bring it into sight; the views
+     * hear the ask once the event is already the selection, and an ask for the event already selected is heard again,
+     * since the view may have been panned away from it.
+     */
+
+    it('selects the event alone, then tells every reveal listener which event on which map', () =>
+    {
+      // Arrange: three events selected on another map, and two views listening.
+      const selection = new EventSelection();
+      selection.select(30, [ 1, 2, 3 ]);
+      const heard: string[] = [];
+      selection.onReveal(request => heard.push(`first ${request.mapId}:${request.eventId} ${selection.get().eventIds.join(',')}`));
+      selection.onReveal(request => heard.push(`second ${request.mapId}:${request.eventId}`));
+
+      // Act.
+      selection.reveal(12, 7);
+
+      // Assert: the selection was already the event when the first view heard.
+      expect([ selection.get(), heard ])
+        .toStrictEqual([ { mapId: 12, eventIds: [ 7 ] }, [ 'first 12:7 7', 'second 12:7' ] ]);
+    });
+
+    it('asks again for the event already selected, without telling selection listeners of a change', () =>
+    {
+      // Arrange: event 7 selected and revealed once.
+      const selection = new EventSelection();
+      selection.reveal(12, 7);
+      let changes = 0;
+      let reveals = 0;
+      selection.subscribe(() =>
+      {
+        changes += 1;
+      });
+      selection.onReveal(() =>
+      {
+        reveals += 1;
+      });
+
+      // Act.
+      selection.reveal(12, 7);
+
+      // Assert.
+      expect([ changes, reveals ])
+        .toStrictEqual([ 0, 1 ]);
+    });
+
+    it('stops telling a reveal listener once it stops listening', () =>
+    {
+      // Arrange.
+      const selection = new EventSelection();
+      let reveals = 0;
+      const stop = selection.onReveal(() =>
+      {
+        reveals += 1;
+      });
+
+      // Act.
+      stop();
+      selection.reveal(12, 7);
+
+      // Assert: the event is selected all the same.
+      expect([ reveals, selection.eventsOn(12) ])
+        .toStrictEqual([ 0, [ 7 ] ]);
     });
   });
 });

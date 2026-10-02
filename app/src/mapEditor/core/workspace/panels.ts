@@ -13,6 +13,7 @@ const PANEL_COMPONENTS = {
   palette: 'palette',
   layers: 'layers',
   quick: 'quick-settings',
+  events: 'events',
   start: 'start',
 } as const;
 
@@ -31,13 +32,14 @@ const SINGLE_PANEL_IDS = {
   palette: 'palette',
   layers: 'layers',
   quick: 'quick-settings',
+  events: 'events',
   start: 'start',
 } as const;
 
 /**
  * The narrowest each side panel may be squeezed, in pixels, however the space is shared out: wide enough that the map
- * tree reads its names and the properties form keeps its fields legible. Maps and the start panel have no minimum of
- * their own beyond the dock's, so any number of maps can still sit side by side.
+ * tree reads its names, the properties form keeps its fields legible and the events list keeps every column. Maps and
+ * the start panel have no minimum of their own beyond the dock's, so any number of maps can still sit side by side.
  */
 const PANEL_MIN_WIDTHS: Readonly<Partial<Record<string, number>>> = {
   [PANEL_COMPONENTS.mapTree]: 240,
@@ -45,6 +47,7 @@ const PANEL_MIN_WIDTHS: Readonly<Partial<Record<string, number>>> = {
   [PANEL_COMPONENTS.layers]: 240,
   [PANEL_COMPONENTS.properties]: 300,
   [PANEL_COMPONENTS.quick]: 300,
+  [PANEL_COMPONENTS.events]: 300,
   [PANEL_COMPONENTS.history]: 240,
 };
 
@@ -219,12 +222,13 @@ const decodeDraggedMaps = (data: string): number[] =>
 
 /**
  * Works out which history a panel owns, which is what undo acts on while it has focus: a map panel its map's, the
- * tree the tree's, and the properties panel and the quick settings the history of the map they show, since what
- * they change lives in that map. The history panel and the placeholders own none, so focusing them leaves undo
- * where it was.
+ * tree the tree's, and the properties panel, the quick settings and the events list the history of the map they show,
+ * since what they change, or point at, lives in that map. The history panel and the placeholders own none, so focusing
+ * them leaves undo where it was.
  * @param {string} component The panel's kind.
  * @param {unknown} params The panel's parameters.
- * @param {number | null} currentMapId The map the properties panel and the quick settings show, or null.
+ * @param {number | null} currentMapId The map the properties panel, the quick settings and the events list show, or
+ * null.
  * @returns {HistoryKey | null | undefined} The history, null for "none at all", or undefined to keep the last one.
  */
 const historyOwnedBy = (component: string, params: unknown, currentMapId: number | null): HistoryKey | null | undefined =>
@@ -239,6 +243,7 @@ const historyOwnedBy = (component: string, params: unknown, currentMapId: number
       return TREE_HISTORY_KEY;
     case PANEL_COMPONENTS.properties:
     case PANEL_COMPONENTS.quick:
+    case PANEL_COMPONENTS.events:
       return currentMapId === null
         ? null
         : mapHistoryKey(currentMapId);

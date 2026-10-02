@@ -86,8 +86,8 @@ describe('CentreKeeper', () =>
     // Assert: the centre kept its place and size both times; the side columns never moved.
     expect([ afterClosing, describeGrid(api), centre(api) ])
       .toStrictEqual([
-        [ [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history' ], 'start, start in front, 1260x1032' ],
-        [ 'map-tree', 'palette', 'layers', 'start+map-384', 'map-properties+quick-settings', 'history' ],
+        [ [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ], 'start, start in front, 1260x1032' ],
+        [ 'map-tree', 'palette', 'layers', 'start+map-384', 'map-properties+quick-settings', 'history+events' ],
         'start+map-384, map-384 in front, 1260x1032',
       ]);
   });
@@ -106,7 +106,7 @@ describe('CentreKeeper', () =>
     // Assert.
     expect([ describeGrid(api), centre(api) ])
       .toStrictEqual([
-        [ 'map-tree', 'palette+map-1', 'layers', 'start', 'map-properties+quick-settings', 'history' ],
+        [ 'map-tree', 'palette+map-1', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ],
         'start, start in front, 1260x1032',
       ]);
   });
@@ -129,10 +129,10 @@ describe('CentreKeeper', () =>
     expect([ whileTornOut, describeGroups(api), centre(api) ])
       .toStrictEqual([
         [
-          [ 'grid:map-tree', 'grid:palette', 'grid:layers', 'grid:start', 'grid:map-properties+quick-settings', 'grid:history', 'popout:map-1' ],
+          [ 'grid:map-tree', 'grid:palette', 'grid:layers', 'grid:start', 'grid:map-properties+quick-settings', 'grid:history+events', 'popout:map-1' ],
           'start, start in front, 1260x1032',
         ],
-        [ 'grid:map-tree', 'grid:palette', 'grid:layers', 'grid:start+map-1', 'grid:map-properties+quick-settings', 'grid:history' ],
+        [ 'grid:map-tree', 'grid:palette', 'grid:layers', 'grid:start+map-1', 'grid:map-properties+quick-settings', 'grid:history+events' ],
         'start+map-1, map-1 in front, 1260x1032',
       ]);
   });

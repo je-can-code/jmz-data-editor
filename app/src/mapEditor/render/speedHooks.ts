@@ -133,9 +133,10 @@ type SpeedHooksContext = {
 const HOOKS_GLOBAL = '__jmzMapView';
 
 /**
- * Every overlay the core draws, which the speed script switches on together.
+ * Every overlay the core draws, which the speed script switches on together: the event markers among them, so a map
+ * full of events that draw no picture (458 of Map361's 600) is measured with every one of them on show.
  */
-const EVERY_CORE_OVERLAY: readonly CoreOverlayId[] = [ 'grid', 'regions', 'passability', 'layer-highlight', 'selection', 'hover', 'ghost' ];
+const EVERY_CORE_OVERLAY: readonly CoreOverlayId[] = [ 'grid', 'regions', 'passability', 'layer-highlight', 'selection', 'hover', 'ghost', 'markers' ];
 
 /**
  * Builds a representative state for every pointer overlay at once: a brush footprint under the pointer, fifty events

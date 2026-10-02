@@ -11,11 +11,13 @@ import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.
 import { EventSelection } from '../../../src/mapEditor/core/events/EventSelection.ts';
 import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
 import type { DocumentKey } from '../../../src/mapEditor/core/model/documentKeys.ts';
+import { createEventPage, createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
+import type { RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { marksOf, TILESET_MARKS_DOCUMENT } from '../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
-import type { OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import type { MarkerClassifier, OverlaySet, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { WindowPaints } from '../../../src/mapEditor/core/tools/WindowPaint.ts';
 import { MapEditorApp } from '../../../src/mapEditor/MapEditorApp.tsx';
 import { MapView, mapIdFromQuery } from '../../../src/mapEditor/render/MapView.tsx';
@@ -25,15 +27,18 @@ import { buildMapJson } from '../support/fixtures.ts';
 
 /**
  * What the stand-in renderers and controllers record and answer: every renderer made, what each was asked to show
- * and where to look, what it was told of the view being on screen (with "mount" where it was mounted), a way to change
- * its draw state, and the maps an open lands on.
+ * and where to look, the overlay switches and marker classifiers it was handed, what it was told of the view being on
+ * screen (with "mount" where it was mounted), ways to change its draw state and its zoom, and the maps an open lands on.
  */
 const stand = vi.hoisted(() => ({
   renderers: [] as {
     overlays: OverlayState[];
     looks: { cell: MapCell; zoom: number }[];
+    overlaySets: OverlaySet[];
+    classifiers: MarkerClassifier[];
     shown: (boolean | 'mount')[];
     announce: (state: string) => void;
+    zoomTo: (zoom: number) => void;
   }[],
   maps: new Map<number, unknown>(),
 }));
@@ -50,10 +55,16 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
     record = {
       overlays: [] as OverlayState[],
       looks: [] as { cell: MapCell; zoom: number }[],
+      overlaySets: [] as OverlaySet[],
+      classifiers: [] as MarkerClassifier[],
       shown: [] as (boolean | 'mount')[],
       announce: (state: string) =>
       {
         this.drawListeners.forEach(listener => listener(state));
+      },
+      zoomTo: (zoom: number) =>
+      {
+        this.camera = { ...this.camera, zoom };
       },
     };
 
@@ -130,14 +141,19 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       // the switches are not what these tests look at.
     }
 
-    setOverlays(): void
+    setOverlays(overlays: OverlaySet): void
     {
-      // the switches are not what these tests look at.
+      this.record.overlaySets.push(overlays);
     }
 
     setPassabilityRules(): void
     {
       // the switches are not what these tests look at.
+    }
+
+    setEventMarkers(classify: MarkerClassifier): void
+    {
+      this.record.classifiers.push(classify);
     }
 
     setOverlayState(state: OverlayState): void
@@ -162,15 +178,16 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
 vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
 {
   /**
-   * Stands in for the controller, opening the maps the test set.
+   * Stands in for the controller, opening the maps the test set and holding the one it opened last.
    */
   class MapViewController
   {
-    map = null;
+    map: unknown = null;
 
     async open(mapId: number): Promise<unknown>
     {
-      return stand.maps.get(mapId) ?? null;
+      this.map = stand.maps.get(mapId) ?? null;
+      return this.map;
     }
 
     close(): void
@@ -188,8 +205,9 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * measure. The view offers the switches for the overlays and the game look and a status line; without a project server
  * it says there is no map to show rather than failing. An event it is asked to pick out, such as the battler the data
  * editor asked to see, shows selected once the map is open, with the view centred on it, and so does each event picked
- * after it; with nothing picked, nothing is selected and the view stays put. The drawing itself happens on the GPU and
- * is proved by the speed script and the parity check, not here.
+ * after it; with nothing picked, nothing is selected and the view stays put. An event revealed from the events list is
+ * centred at the zoom the view already has, so browsing the list never zooms the map, and only by the views of its own
+ * map. The drawing itself happens on the GPU and is proved by the speed script and the parity check, not here.
  *
  * A view behind another tab lets its GPU context go, so the renderer hears whether the view is on screen before it is
  * mounted (a view mounted behind a tab must make no context at all) and each time that changes. And a map that cannot
@@ -200,6 +218,10 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * through the same open as the palette: a project that never saved marks is seeded from its own maps first. Holding an
  * empty set in the seed's place would paint every marked tile as ground, and the first mark toggled would save over
  * the seed for good.
+ *
+ * Events that draw no picture show markers from the start, picking their symbol by the kind the window's registry makes
+ * of them, or by their trigger when no kind claims them; the registry reads events differently once the plugin modules
+ * switch on, after js/plugins.js is read, so the renderer is handed the classifier again then and redraws the markers.
  */
 describe('MapView', () =>
 {
@@ -229,12 +251,13 @@ describe('MapView', () =>
   };
 
   /**
-   * Builds services with a project server behind them, and no plugin modules.
+   * Builds services with a project server behind them, and no plugin modules: no kind claims any event, and nothing
+   * ever switches on.
    * @returns {MapEditorServices} The services.
    */
   const served = (): MapEditorServices =>
   {
-    const modules = { overlays: () => [], passabilityRules: () => [] };
+    const modules = { overlays: () => [], passabilityRules: () => [], kindOf: () => null, subscribe: () => () => undefined };
     return { ...serverless(), api: {} as MapEditorApi, modules } as unknown as MapEditorServices;
   };
 
@@ -352,6 +375,33 @@ describe('MapView', () =>
       .toStrictEqual([ { mapId: 5, eventIds: [ 3 ] }, [ { cell: { x: 2, y: 1 }, zoom: 1 }, { cell: { x: 2, y: 1 }, zoom: 1 } ] ]);
   });
 
+  it('centres on an event revealed from a list at the zoom the view has, and only for an event its own map holds', async () =>
+  {
+    // Arrange: map 5 open, holding the door at 0, 0 and the chest at 2, 1, with the view zoomed out to a quarter.
+    stand.maps.set(5, MapDocument.fromJson('map:5', buildMapJson()));
+    const selection = new EventSelection();
+    render(
+      <MapEditorServicesProvider services={served()}>
+        <MapView mapId={5} selection={selection}/>
+      </MapEditorServicesProvider>
+    );
+    await waitFor(() => expect(stand.renderers[0]?.overlays.length)
+      .toBe(1));
+    stand.renderers[0].zoomTo(0.25);
+
+    // Act: the chest on another map, the chest here, then a slot this map leaves empty.
+    act(() =>
+    {
+      selection.reveal(9, 3);
+      selection.reveal(5, 3);
+      selection.reveal(5, 2);
+    });
+
+    // Assert: one look, at the chest, keeping the quarter zoom.
+    expect(stand.renderers[0].looks)
+      .toStrictEqual([ { cell: { x: 2, y: 1 }, zoom: 0.25 } ]);
+  });
+
   it('counts the events selected on its map in the status line, and none selected on another map', async () =>
   {
     // Arrange: the chest is picked on map 5.
@@ -449,6 +499,55 @@ describe('MapView', () =>
       .toBe(1));
     expect([ stand.renderers[0].overlays.map(state => state.selectedEvents), stand.renderers[0].looks ])
       .toStrictEqual([ [ [] ], [] ]);
+  });
+
+  it('shows the markers of events that draw no picture from the start, beside the tools\' own overlays', () =>
+  {
+    // Arrange: a view over a project, its switches as they start.
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={served()}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert: the first overlays the renderer hears of switch the markers on, and the grid stays off until asked for.
+    const [ first ] = stand.renderers[0].overlaySets;
+    expect([ [ ...first.enabled ].sort(), first.enabled.has('grid') ])
+      .toStrictEqual([ [ 'ghost', 'hover', 'markers', 'selection' ], false ]);
+  });
+
+  it('picks each marker\'s symbol by the kind the window makes of its event, and again once the modules switch on', () =>
+  {
+    // Arrange: a registry claiming event 1 as a kind with the chest's symbol, the rest for nobody, whose activation the
+    // test raises; event 2 starts on autorun, and event 3 on a player's touch.
+    const activations = new Set<() => void>();
+    const modules = {
+      overlays: () => [],
+      passabilityRules: () => [],
+      kindOf: (event: RmmzMapEvent) => (event.id === 1 ? { marker: 'chest' } : null),
+      subscribe: (listener: () => void) =>
+      {
+        activations.add(listener);
+        return () => activations.delete(listener);
+      },
+    };
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const events = [ 1, 2, 3 ].map(id => ({ ...createMapEvent(id, 0, 0), pages: [ { ...createEventPage(), trigger: id === 2 ? 3 : 1 } ] }));
+
+    // Act: the modules switch on once the renderer holds the first classifier.
+    activations.forEach(listener => listener());
+
+    // Assert: handed over twice, and both read the claimed event by its kind and the others by their triggers.
+    const [ { classifiers } ] = stand.renderers;
+    expect([ classifiers.length, classifiers.map(classify => events.map(event => classify(event, 5))) ])
+      .toStrictEqual([ 2, [ [ 'chest', 'autorun', 'player-touch' ], [ 'chest', 'autorun', 'player-touch' ] ] ]);
   });
 
   it('holds the tiles that go on top from the start, seeded from the maps when the project never saved any', async () =>

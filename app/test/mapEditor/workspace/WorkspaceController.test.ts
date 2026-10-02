@@ -33,11 +33,17 @@ describe('WorkspaceController', () =>
   type FakeGroup = { id: string; api: { location: { type: string } } };
 
   /**
+   * One panel a stand-in dock starts with: its id, kind, parameters and group, and whether it is on screen rather than
+   * behind another tab, which it is unless told otherwise.
+   */
+  type PanelSpec = { id: string; component: string; params?: object; group: FakeGroup; visible?: boolean };
+
+  /**
    * A stand-in dock holding panels, recording every panel added and every panel activated.
-   * @param {object[]} seeded The panels it starts with.
+   * @param {PanelSpec[]} seeded The panels it starts with.
    * @returns {object} The dock, and what it recorded.
    */
-  const buildDock = (seeded: { id: string; component: string; params?: object; group: FakeGroup }[] = []) =>
+  const buildDock = (seeded: PanelSpec[] = []) =>
   {
     const activated: string[] = [];
     const focused: string[] = [];
@@ -47,10 +53,10 @@ describe('WorkspaceController', () =>
 
     /**
      * Makes one stand-in panel.
-     * @param {object} spec The panel's id, kind, parameters and group.
+     * @param {PanelSpec} spec The panel's id, kind, parameters, group and whether it is on screen.
      * @returns {IDockviewPanel} The panel.
      */
-    const makePanel = (spec: { id: string; component: string; params?: object; group: FakeGroup }): IDockviewPanel =>
+    const makePanel = (spec: PanelSpec): IDockviewPanel =>
     {
       const panel = {
         id: spec.id,
@@ -59,6 +65,7 @@ describe('WorkspaceController', () =>
         api: {
           component: spec.component,
           location: spec.group.api.location,
+          isVisible: spec.visible ?? true,
           setActive: () => activated.push(spec.id),
           getWindow: () => ({ focus: () => focused.push(spec.id) }),
           close: () =>
@@ -412,6 +419,175 @@ describe('WorkspaceController', () =>
       // Assert.
       expect(panel)
         .toBeNull();
+    });
+  });
+
+  describe('showing an event from the events list', () =>
+  {
+    /*
+     * A click on a row of the events list selects its event and has every view of its map centre on it. A view already
+     * on screen is enough; a view hidden behind another tab comes forward, unless it sits in the list's own group, which
+     * would hide the list; and a map with no view opens at the event, as the data editor's link opens it.
+     */
+
+    /**
+     * Follows the asks to bring an event into sight that a controller's selection makes.
+     * @param {WorkspaceController} controller The controller.
+     * @returns {string[]} The asks heard so far, as map:event, filled as they come.
+     */
+    const revealsOf = (controller: WorkspaceController): string[] =>
+    {
+      const heard: string[] = [];
+      controller.selection.onReveal(request => heard.push(`${request.mapId}:${request.eventId}`));
+      return heard;
+    };
+
+    it('selects the event and has its map\'s views centre on it, bringing nothing forward while one shows', () =>
+    {
+      // Arrange: map 12 on screen in the centre, and a hidden view of it in the list's group.
+      const { controller } = buildController();
+      const dock = buildDock([
+        { id: 'map-12', component: 'map', params: { mapId: 12 }, group: MAIN },
+        { id: 'map-12-2', component: 'map', params: { mapId: 12 }, group: TORN, visible: false },
+        { id: 'events', component: 'events', group: SIDE },
+      ]);
+      controller.attach(dock.api);
+      const heard = revealsOf(controller);
+
+      // Act.
+      controller.revealEvent(12, 5, 'events');
+
+      // Assert.
+      expect([ controller.selection.get(), heard, dock.activated, dock.added ])
+        .toStrictEqual([ { mapId: 12, eventIds: [ 5 ] }, [ '12:5' ], [], [] ]);
+    });
+
+    it('brings forward a hidden view of the map, passing over one hidden in the list\'s own group', () =>
+    {
+      // Arrange: two views of map 12, both behind other tabs: one in the list's group, then one in the centre.
+      const { controller } = buildController();
+      const dock = buildDock([
+        { id: 'map-12', component: 'map', params: { mapId: 12 }, group: SIDE, visible: false },
+        { id: 'map-12-2', component: 'map', params: { mapId: 12 }, group: MAIN, visible: false },
+        { id: 'map-40', component: 'map', params: { mapId: 40 }, group: MAIN, visible: true },
+        { id: 'events', component: 'events', group: SIDE },
+      ]);
+      controller.attach(dock.api);
+      const heard = revealsOf(controller);
+
+      // Act.
+      controller.revealEvent(12, 5, 'events');
+
+      // Assert: map 40 showing is no view of map 12.
+      expect([ dock.activated, heard ])
+        .toStrictEqual([ [ 'map-12-2' ], [ '12:5' ] ]);
+    });
+
+    it('leaves the map\'s only view behind its tab when it shares the list\'s group, selecting the event all the same', () =>
+    {
+      // Arrange: map 12's one view is a tab behind the list.
+      const { controller } = buildController();
+      const dock = buildDock([
+        { id: 'map-12', component: 'map', params: { mapId: 12 }, group: SIDE, visible: false },
+        { id: 'events', component: 'events', group: SIDE },
+      ]);
+      controller.attach(dock.api);
+      const heard = revealsOf(controller);
+
+      // Act.
+      controller.revealEvent(12, 5, 'events');
+
+      // Assert.
+      expect([ dock.activated, controller.selection.get(), heard ])
+        .toStrictEqual([ [], { mapId: 12, eventIds: [ 5 ] }, [ '12:5' ] ]);
+    });
+
+    it('opens a map with no view at the event, as the data editor\'s link does, leaving the pick to its view', () =>
+    {
+      // Arrange: the centre, with map 40 open but not map 12.
+      const { controller } = buildController();
+      const dock = buildDock([
+        { id: 'start', component: 'start', group: MAIN },
+        { id: 'map-40', component: 'map', params: { mapId: 40 }, group: MAIN },
+        { id: 'events', component: 'events', group: SIDE },
+      ]);
+      controller.attach(dock.api);
+      const heard = revealsOf(controller);
+
+      // Act.
+      controller.revealEvent(12, 5, 'events');
+
+      // Assert.
+      expect([ dock.added, controller.getState().eventFocus, controller.selection.get(), heard ])
+        .toStrictEqual([
+          [ { id: 'map-12', position: { referenceGroup: MAIN, direction: 'within' } } ],
+          { 12: { eventId: 5, request: 1 } },
+          { mapId: null, eventIds: [] },
+          [],
+        ]);
+    });
+
+    it('does nothing before the dock is ready', () =>
+    {
+      // Arrange.
+      const { controller } = buildController();
+      const heard = revealsOf(controller);
+
+      // Act.
+      controller.revealEvent(12, 5, 'events');
+
+      // Assert.
+      expect([ controller.selection.get(), heard ])
+        .toStrictEqual([ { mapId: null, eventIds: [] }, [] ]);
+    });
+  });
+
+  describe('opening an event\'s window', () =>
+  {
+    /**
+     * Builds a controller whose shell answers every window it is asked to open with the same result.
+     * @param {string} result What the shell answers.
+     * @returns {{ controller: WorkspaceController, opened: unknown[] }} The controller, and the windows asked for.
+     */
+    const withShell = (result: string) =>
+    {
+      const { hub, api } = buildController();
+      const opened: unknown[] = [];
+      const shell = {
+        open: (request: unknown) =>
+        {
+          opened.push(request);
+          return result;
+        },
+      };
+      const services = { hub, api, shell, openDocument: (key: string) => hub.load(key as never) } as unknown as MapEditorServices;
+      return { controller: new WorkspaceController(services), opened };
+    };
+
+    it('opens the event\'s window through the shell, saying nothing when it opens', () =>
+    {
+      // Arrange.
+      const { controller, opened } = withShell('opened');
+
+      // Act.
+      controller.openEvent(12, 5);
+
+      // Assert.
+      expect([ opened, controller.getState().notice ])
+        .toStrictEqual([ [ { path: '/map.html?view=event&map=12&event=5', name: 'jmz-event-12-5', width: 1240, height: 820 } ], null ]);
+    });
+
+    it('says so when the page was not allowed to open the window', () =>
+    {
+      // Arrange.
+      const { controller } = withShell('blocked');
+
+      // Act.
+      controller.openEvent(12, 5);
+
+      // Assert.
+      expect([ controller.getState().notice?.text, controller.getState().notice?.severity ])
+        .toStrictEqual([ 'The event\'s window was blocked; allow pop-ups for the editor to open it.', 'error' ]);
     });
   });
 

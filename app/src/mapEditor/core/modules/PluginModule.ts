@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import type { PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.ts';
 import type { CommandCatalogEntry } from '../commands/catalogTypes.ts';
+import type { EventMarkerSymbol } from '../eventKinds/eventMarkers.ts';
 import type { MapDocumentKey } from '../model/documentKeys.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { RmmzMapEvent, RmmzTileset } from '../model/rmmzTypes.ts';
@@ -51,6 +52,12 @@ type EventKindDefinition = {
    * The overlays the kind draws on the map.
    */
   readonly overlays?: readonly OverlayDefinition[];
+
+  /**
+   * The symbol an event of this kind shows on the map when its page draws no picture, so it never goes unseen. Left
+   * out, such an event shows its trigger's symbol, as an event no kind claims does.
+   */
+  readonly marker?: EventMarkerSymbol;
 };
 
 /**

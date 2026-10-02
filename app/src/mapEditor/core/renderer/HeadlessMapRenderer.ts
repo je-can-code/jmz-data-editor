@@ -8,6 +8,7 @@ import {
   type LayerVisibility,
   type MapContextMenu,
   type MapRenderer,
+  type MarkerClassifier,
   type OverlaySet,
   type OverlayState,
   type RendererInfo,
@@ -42,6 +43,8 @@ class HeadlessMapRenderer implements MapRenderer
 
   #overlayRefreshes = 0;
 
+  #markerClassifier: MarkerClassifier | null = null;
+
   #frames = new FrameTimeRecorder();
 
   #destroyed = false;
@@ -67,6 +70,7 @@ class HeadlessMapRenderer implements MapRenderer
       overlayState: this.#overlayState,
       passabilityRules: this.#rules,
       overlayRefreshes: this.#overlayRefreshes,
+      markerClassifier: this.#markerClassifier,
       destroyed: this.#destroyed,
     };
   }
@@ -120,6 +124,11 @@ class HeadlessMapRenderer implements MapRenderer
   refreshOverlays(): void
   {
     this.#overlayRefreshes += 1;
+  }
+
+  setEventMarkers(classify: MarkerClassifier): void
+  {
+    this.#markerClassifier = classify;
   }
 
   onContextMenu(listener: (menu: MapContextMenu) => void): () => void
