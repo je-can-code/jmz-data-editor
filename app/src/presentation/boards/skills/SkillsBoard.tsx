@@ -76,6 +76,9 @@ import {
   VIRTUALIZED_SIDEBAR_DEFAULT_LIST_HEIGHT,
 } from '@presentation/components/board/VirtualizedSidebarList.tsx';
 import { useUrlSelection } from '@presentation/hooks/useUrlSelection.ts';
+import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { BLANK_SKILL_ROW } from '@services/rows/RowClear.ts';
+import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import {
   type UsableItemDamageEditorValue,
   UsableItemDamageSection
@@ -1868,7 +1871,7 @@ const SkillsBoard = () =>
   );
 
   /**
-   * Maps a skill array index to a virtualized sidebar row (spacer for gaps/headers).
+   * Maps a skill array index to a virtualized sidebar row (spacer for a gap past the end of the list).
    *
    * @param index Row index in {@link skills}.
    * @returns Spacer or item descriptor for {@link VirtualizedSidebarList}.
@@ -1877,7 +1880,7 @@ const SkillsBoard = () =>
   {
     const skill = skills[index];
 
-    if (skill === undefined || skill.name.startsWith('==='))
+    if (skill === undefined)
     {
       return {
         type: 'spacer',
@@ -1891,6 +1894,26 @@ const SkillsBoard = () =>
       iconIndex: skill.iconIndex,
     };
   }, [ skills ]);
+
+  // copy and paste whole skills like any other edit, lighting up Save.
+  const rowClipboard = useRowClipboard({
+    table: DatabaseFilenames.Skills,
+    selectedIndex: selectedSkillIndex,
+    onSelectIndex: (index) => handleSkillListItemOnClickEvent(index),
+    listWrapperRef,
+    // read through the pending edit, which also settles it, so a copy takes what the fields show and the
+    // debounce can never fire after a paste to put the row back the way it was.
+    getRows: skillsWithPendingEditApplied,
+    toRow: (skill) => skill.toRmmz(),
+    fromRow: (row) => new RPG_SkillDomainModel(row),
+    blankRow: BLANK_SKILL_ROW,
+    applyPaste: (update) =>
+    {
+      setSkills(update);
+      setCanSave(true);
+    },
+    notify: (message, severity) => handleSnack(message, severity),
+  });
 
   useBoardActions({
     onSave: async () =>
@@ -1990,6 +2013,7 @@ const SkillsBoard = () =>
           }}
           onListKeyDown={handleListKeyDown}
           listWrapperRef={listWrapperRef}
+          rowClipboard={rowClipboard}
         />
           </>
         }

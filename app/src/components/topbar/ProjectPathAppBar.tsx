@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { AppBar, Box, Button, Divider, Toolbar, Typography } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { Save } from '@mui/icons-material';
+import { Map as MapIcon, Save } from '@mui/icons-material';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
 import { useBoardActionsContext } from '@presentation/context/board-actions.context.tsx';
+import { openMapEditor, pageWindowShell } from '@core/infrastructure/shell/WindowShell.ts';
 
 const ProjectPathAppBar = () =>
 {
@@ -30,6 +31,19 @@ const ProjectPathAppBar = () =>
         <Typography variant="h6" sx={{ flexShrink: 0 }}>
           JMZ Data Editor
         </Typography>
+
+        {/* the map editor opens in its own window, or comes forward when it is already open. */}
+        <Button
+          color={'inherit'}
+          data-testid={'open-map-editor'}
+          onClick={() => openMapEditor(pageWindowShell())}
+          size={'small'}
+          startIcon={<MapIcon/>}
+          sx={{ flexShrink: 0 }}
+          variant={'outlined'}
+        >
+          Map editor
+        </Button>
 
         {boardActions && (
           <>

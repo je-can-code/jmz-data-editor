@@ -18,7 +18,9 @@
     "**/.coverage/**",
     "**/dist/**",
     "**/*.d.ts",
-    "bin/**"
+    "bin/**",
+    // third-party code vendored as published; its own headers say what changed and why.
+    "app/src/mapEditor/render/vendor/**"
   ],
   "env": {
     "browser": true

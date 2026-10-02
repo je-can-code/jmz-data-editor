@@ -49,6 +49,9 @@ import { IngredientTypeChips } from '@presentation/components/crafting/Ingredien
 import { FoodTypeSelect } from '@presentation/components/crafting/FoodTypeSelect.tsx';
 import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 import { useJabs } from '@presentation/context/resources/jabs.context.tsx';
+import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { BLANK_ITEM_ROW } from '@services/rows/RowClear.ts';
+import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_UsableEffect = Rmmz.Data.RPG_UsableEffect;
 
 const noteFieldSx = { '& .MuiInputBase-input': { fontFamily: 'monospace' } };
@@ -183,6 +186,20 @@ function ItemsBoard()
 
   const canSave = !loading && !isSaving && !!rmmzDataPath;
 
+  // copy and paste whole items like any other edit, saved the normal way.
+  const rowClipboard = useRowClipboard({
+    table: DatabaseFilenames.Items,
+    selectedIndex,
+    onSelectIndex: setSelectedIndex,
+    listWrapperRef,
+    getRows: () => items,
+    toRow: (item) => item.toRmmz(),
+    fromRow: (row) => new RPG_ItemDomainModel(row),
+    blankRow: BLANK_ITEM_ROW,
+    applyPaste: setData,
+    notify: (message, severity) => setSnackbar({ open: true, message, severity, variant: MuiSnackbarVariant.Filled }),
+  });
+
   const sidebar = (
     <VirtualizedSidebarList
       ref={listRef}
@@ -197,6 +214,7 @@ function ItemsBoard()
       fillContainer
       searchable
       searchLabel={'Search items'}
+      rowClipboard={rowClipboard}
     />
   );
 

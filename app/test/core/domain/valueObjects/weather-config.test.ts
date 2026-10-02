@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import {
   hydrateWeatherConfig,
   serializeWeatherConfig,
   type WeatherConfigRoot,
 } from '../../../../src/core/domain/valueObjects/weather-config.ts';
+import { locateGameProject } from '../../../support/gameProject.ts';
 
-/** Chef Adventure sits beside this repo in the workspace; see the Go unmarshal test for the same path. */
-const CHEF_ADVENTURE_CONFIG = '../../ca/chef-adventure/data/config.weather.json';
+/** Chef Adventure, found the way every real-file test finds it: JMZ_PROJECT_ROOT first, then beside this repo. */
+const PROJECT = locateGameProject();
+
+/** The real weather configuration, when the game is present. */
+const CHEF_ADVENTURE_CONFIG = PROJECT === null
+  ? ''
+  : `${PROJECT}/data/config.weather.json`;
 
 /**
  * The weather configuration owes its callers one thing above all others: **a save must never lose
@@ -283,14 +289,13 @@ describe('weather-config', () =>
         .toEqual([ 0, 5 ]);
     });
 
-    it('round-trips the real Chef Adventure config byte for byte', () =>
+    // reported as a skip, never a silent pass, when the game is not present.
+    it.skipIf(PROJECT === null)('round-trips the real Chef Adventure config byte for byte', () =>
     {
       // Arrange - the synthetic fixture above is the same shape, but only the real file has all
       // seventeen motions, fifteen presets with their per-stop notes, and every authoring comment
       // in the positions an author actually put them. Optional, like the Go unmarshal test beside
-      // it: the check is worth having when the sibling repo is there and worth skipping when not.
-      if (existsSync(CHEF_ADVENTURE_CONFIG) === false) return;
-
+      // it: the check is worth having when the game is there and worth skipping when not.
       const file = JSON.parse(readFileSync(CHEF_ADVENTURE_CONFIG, 'utf8'));
 
       // Act.

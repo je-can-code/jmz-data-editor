@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"jmz-data-editor/server/internal/gametest"
 )
 
 // TestMotionConfigurationRoundTripPreservesEveryBlock is the guard for the failure mode
@@ -103,11 +105,8 @@ func decodeBlock(t *testing.T, raw json.RawMessage) string {
 // file beside this repo, so a block Jeremy adds to the live config is caught here rather than at
 // game boot.
 func TestMotionConfigurationRoundTripPreservesChefAdventureBlocks(t *testing.T) {
-	// Arrange- the sibling `ca` repo is optional; skip when it is not checked out beside this one.
-	caData := filepath.Join("..", "..", "..", "..", "..", "ca", "chef-adventure", "data")
-	if _, err := os.Stat(caData); err != nil {
-		t.Skip("ca/chef-adventure/data not present beside jmz-data-editor (optional)")
-	}
+	// Arrange- the game is optional; gametest decides whether its absence skips or fails.
+	caData := gametest.DataDir(t)
 
 	bytes, err := os.ReadFile(filepath.Join(caData, "config.motion.json"))
 	if err != nil {

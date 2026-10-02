@@ -1,0 +1,566 @@
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Box, Chip, Divider, Typography } from '@mui/material';
+import { markerSymbolFor } from '../core/eventKinds/eventMarkers.ts';
+import { EVENT_CLIPBOARD_MARKER } from '../core/events/eventClipboard.ts';
+import { EventSelection } from '../core/events/EventSelection.ts';
+import type { MapDocument } from '../core/model/MapDocument.ts';
+import type { RmmzMapEvent } from '../core/model/rmmzTypes.ts';
+import type { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
+import type { Camera, MapCell } from '../core/renderer/camera.ts';
+import { GAME_LOOK, type MarkerClassifier, type OverlayId } from '../core/renderer/MapRenderer.ts';
+import { openTilesetMarks } from '../core/palette/tilesetMarkEdits.ts';
+import { TilesetLayeringSource } from '../core/tools/tilesetLayering.ts';
+import type { WindowPaint } from '../core/tools/WindowPaint.ts';
+import { EventMenu } from '../events/EventMenu.tsx';
+import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity, type EventToolsRenderer } from '../events/MapEventTools.ts';
+import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
+import { openEventWindow } from '../views/mapEditorViews.ts';
+import type { DrawState } from './ContextKeeper.ts';
+import {
+  flipSwitch,
+  isSwitchOn,
+  SETTING_SWITCHES,
+  TILE_LAYERS,
+  toggleHighlight,
+  type MapViewSettings,
+} from './mapViewSettings.ts';
+import { MapViewController } from './MapViewController.ts';
+import { whenMapDrawn } from './openTiming.ts';
+import { OverlayComposer } from './overlayComposer.ts';
+import { usePaletteLinks } from './paletteLinks.ts';
+import { PixiMapRenderer } from './PixiMapRenderer.ts';
+import { projectImagesFor } from './projectImages.ts';
+import { installSpeedHooks, wantsSpeedHooks } from './speedHooks.ts';
+import { followToolInHand } from './tools/leftButton.ts';
+import { PaintController } from './tools/PaintController.ts';
+import { PaintToolBar } from './tools/PaintToolBar.tsx';
+
+/**
+ * What a map view shows.
+ */
+type MapViewProps = {
+  /**
+   * The map to show.
+   */
+  readonly mapId: number;
+
+  /**
+   * The event to pick out once the map is open, such as the battler the data editor asked to see: it shows selected,
+   * and the view centres on it. Null, or left out, picks out nothing.
+   */
+  readonly pickedEventId?: number | null;
+
+  /**
+   * The number of the ask that named the event to pick out. A new number picks the same event out again, selecting it
+   * and centring on it, as a second click on the same link in the data editor asks. Left out, each event is picked out
+   * once.
+   */
+  readonly pickRequest?: number;
+
+  /**
+   * Whether the view is on screen; false while its panel is a tab behind another. A view off screen lets its GPU
+   * context go and draws again, as it was, when it shows. Left out, the view is on screen.
+   */
+  readonly visible?: boolean;
+
+  /**
+   * The window's event selection, which every map view and the quick panel share. Left out, as on a page showing one
+   * map alone, the view keeps a selection of its own.
+   */
+  readonly selection?: EventSelection;
+
+  /**
+   * Tells the author something, such as why a drop was refused. Left out, the view says it in its status line.
+   */
+  readonly onNotice?: (text: string, severity: EventNoticeSeverity) => void;
+
+  /**
+   * What the view paints with: its window's paint, which the window's palette and layer strip choose. Left out, the
+   * page's own.
+   */
+  readonly paint?: WindowPaint;
+};
+
+/**
+ * What the view says over the map when it cannot draw it, by draw state; the states not named draw, or are about to.
+ */
+const DRAW_NOTICES: Partial<Record<DrawState, { readonly title: string; readonly detail: string }>> = {
+  waiting: {
+    title: 'Too many maps are on screen at once to draw this one.',
+    detail: 'Close a map, or stack it behind another tab, and this one draws.',
+  },
+  recovering: {
+    title: 'The graphics card let go of this map for a moment.',
+    detail: 'Drawing it again…',
+  },
+  failed: {
+    title: 'This window cannot draw maps with the graphics card.',
+    detail: 'Restarting the editor may bring it back.',
+  },
+};
+
+/**
+ * How far in the view sits when it centres on a picked event: the game's own scale.
+ */
+const PICKED_EVENT_ZOOM = 1;
+
+/**
+ * What the status line under the map says: the GPU, the zoom, the tile under the pointer, why the map is missing, and
+ * the last thing the event tools said, when nobody else hears them.
+ */
+type MapViewStatus = {
+  readonly gpu: string;
+  readonly zoom: number;
+  readonly cell: MapCell | null;
+  readonly problem: string | null;
+  readonly note: string;
+};
+
+/**
+ * The overlays on from the start: the ones the tools draw into, which draw nothing until a tool gives them something,
+ * and the markers of events that draw no picture, which show for as long as the events do.
+ */
+const STARTING_OVERLAYS: readonly OverlayId[] = [ 'selection', 'hover', 'ghost', 'markers' ];
+
+/**
+ * Builds how a view's markers pick their symbol: by the kind the window's registry makes of each event on its map, a
+ * kind's own symbol, or the event's trigger when no kind claims it or the kind names none.
+ * @param {PluginModuleRegistry} modules The window's kinds.
+ * @returns {MarkerClassifier} The classifier.
+ */
+const markerClassifierFor = (modules: PluginModuleRegistry): MarkerClassifier =>
+{
+  return (event: RmmzMapEvent, mapId: number) => markerSymbolFor(event, modules.kindOf(event, mapId));
+};
+
+/**
+ * Reads the map to open from a page's query string: the map editor page opens one straight away with {@code ?map=102},
+ * alone across the whole window in place of the workspace, which is the view the speed script and the parity check
+ * measure.
+ * @param {string} search The query string.
+ * @returns {number | null} The map id, or null when none is asked for.
+ */
+const mapIdFromQuery = (search: string): number | null =>
+{
+  const value = new URLSearchParams(search).get('map');
+  if (value === null || /^\d+$/u.test(value) === false)
+  {
+    return null;
+  }
+
+  const mapId = Number.parseInt(value, 10);
+  return mapId > 0
+    ? mapId
+    : null;
+};
+
+/**
+ * Words a zoom for the status line.
+ * @param {number} zoom The zoom.
+ * @returns {string} The zoom as a percentage.
+ */
+const zoomLabel = (zoom: number): string =>
+{
+  return `${Math.round(zoom * 100)}%`;
+};
+
+/**
+ * Says over the map why it is not drawing, in plain words: every context the window may keep is taken by maps on
+ * screen, the graphics card let go of it for a moment, or the window cannot draw at all.
+ * @param {{ state: DrawState }} props Where the drawing stands.
+ * @returns {React.JSX.Element | null} The notice, or nothing while the map draws or is about to.
+ */
+const DrawNotice = (props: { state: DrawState }) =>
+{
+  const notice = DRAW_NOTICES[props.state];
+  if (notice === undefined)
+  {
+    return null;
+  }
+
+  return (
+    <Box
+      data-testid={'map-draw-notice'}
+      sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', p: 2, textAlign: 'center', pointerEvents: 'none' }}
+    >
+      <Box>
+        <Typography variant={'body1'} color={'text.secondary'}>
+          {notice.title}
+        </Typography>
+        <Typography variant={'body2'} color={'text.disabled'}>
+          {notice.detail}
+        </Typography>
+      </Box>
+    </Box>
+  );
+};
+
+/**
+ * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
+ * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look,
+ * the painting tools, and a status line naming the zoom, the tile under the pointer, how many events are selected and
+ * the GPU drawing it.
+ *
+ * The view paints with its window's paint: the page's own for a map docked in the main window, and a torn-out window's
+ * own for a map torn out, so each window's palette, layer strip and tools go together and no further.
+ *
+ * The tool in hand decides what the left button does. With the events in hand, the map's events are selected, moved,
+ * created, deleted, copied and pasted with the mouse, the keys and a right-click menu, through {@link MapEventTools},
+ * into the window's selection; with any painting tool in hand the left button paints, previewed before each click, and
+ * the event tools stand down. An event picked out, such as the battler the data editor asked to see, becomes the
+ * selection, with the view centred on it at the game's scale; an event picked from the events list is centred at the
+ * zoom the view already has.
+ *
+ * A view off screen, behind another tab, lets its GPU context go and draws again, camera and all, when it shows; a map
+ * that cannot draw says why over the canvas rather than leaving it blank.
+ * @param {MapViewProps} props The map to show, the event to pick out, whether the view is on screen, the selection,
+ * where notices go, and what it paints with.
+ * @returns {React.JSX.Element} The view.
+ */
+const MapView = (props: MapViewProps) =>
+{
+  const { mapId, pickedEventId = null, pickRequest = 0, visible = true, onNotice } = props;
+  const services = useMapEditorServices();
+  const paint = props.paint ?? services.paints.main;
+  const { painting } = paint;
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const rendererRef = useRef<PixiMapRenderer | null>(null);
+  const controllerRef = useRef<MapViewController | null>(null);
+  const toolsRef = useRef<MapEventTools | null>(null);
+  const visibleRef = useRef(visible);
+  const [ ownSelection ] = useState(() => new EventSelection());
+  const selection = props.selection ?? ownSelection;
+  const selected = useSyncExternalStore(selection.subscribe, selection.get);
+  const [ openMap, setOpenMap ] = useState<MapDocument | null>(null);
+  const [ status, setStatus ] = useState<MapViewStatus>({ gpu: '', zoom: 1, cell: null, problem: null, note: '' });
+  const [ settings, setSettings ] = useState<MapViewSettings>({ visibility: GAME_LOOK, overlays: new Set(STARTING_OVERLAYS) });
+  const [ drawState, setDrawState ] = useState<DrawState>('hidden');
+  const [ menu, setMenu ] = useState<EventMenuRequest | null>(null);
+
+  // the event tools outlive any one render, so they tell the author through whoever listens now.
+  const notifyRef = useRef<(text: string, severity: EventNoticeSeverity) => void>(() => undefined);
+  notifyRef.current = onNotice ?? ((text: string) => setStatus(current => ({ ...current, note: text })));
+
+  // keep up with whether the view is on screen, for a renderer mounted after this, which must know before it mounts:
+  // a view mounted behind another tab makes no GPU context until it shows.
+  useEffect(() =>
+  {
+    visibleRef.current = visible;
+  }, [ visible ]);
+
+  // one renderer for the life of the view, whatever map it shows.
+  useEffect(() =>
+  {
+    const host = hostRef.current;
+    const { api } = services;
+    if (host === null || api === null)
+    {
+      setStatus(current => ({ ...current, problem: 'No project server is running, so there is no map to show.' }));
+      return undefined;
+    }
+
+    const renderer = new PixiMapRenderer();
+    const stops: (() => void)[] = [ renderer.onDrawStateChange(setDrawState) ];
+    renderer.setVisible(visibleRef.current);
+    renderer.mount(host);
+    rendererRef.current = renderer;
+    const controller = new MapViewController(renderer, services, projectImagesFor(api));
+    controllerRef.current = controller;
+
+    // events that draw no picture show markers by their kind, which reads differently once the plugin modules switch on.
+    const classify = markerClassifierFor(services.modules);
+    renderer.setEventMarkers(classify);
+    stops.push(services.modules.subscribe(() => renderer.setEventMarkers(classify)));
+    stops.push(renderer.onCameraChange((camera: Camera) =>
+    {
+      setStatus(current => (current.zoom === camera.zoom ? current : { ...current, zoom: camera.zoom }));
+    }));
+
+    // the event tools and the painting tools each hand the renderer their part of the overlay.
+    const overlays = new OverlayComposer(renderer);
+    const layering = new TilesetLayeringSource(services.hub);
+    const painter = new PaintController({
+      surface: renderer,
+      hub: services.hub,
+      map: () => controller.map,
+      layering: map => layering.layeringFor(map),
+      painting,
+      overlay: part => overlays.update('tools', part),
+    });
+    stops.push(painter.attach());
+
+    // the "goes on top" marks decide where painted tiles land, so they are held from the start, through the same open
+    // the palette uses: a project that never saved marks is seeded from its maps first, where opening the document
+    // straight away would hold an empty set in the seed's place, and the first mark toggled would save over the seed.
+    openTilesetMarks(services).catch(() => undefined);
+
+    // the first frame that shows the map complete, sprites and parallax included, ends the page's first open: the cold
+    // open the speed script times.
+    stops.push(whenMapDrawn(renderer, at =>
+    {
+      speedTimings['drawnAt'] ??= at;
+    }));
+
+    // the tile under the pointer, for the status line; React hears only when it changes.
+    const onPointerMove = (event: PointerEvent) =>
+    {
+      const bounds = host.getBoundingClientRect();
+      const cell = renderer.cellAt({ x: event.clientX - bounds.left, y: event.clientY - bounds.top });
+      setStatus(current => (current.cell?.x === cell?.x && current.cell?.y === cell?.y ? current : { ...current, cell }));
+    };
+    host.addEventListener('pointermove', onPointerMove);
+    stops.push(() => host.removeEventListener('pointermove', onPointerMove));
+
+    // a window that cannot draw says so over the map, through the draw state.
+    renderer.whenReady()
+      .then(() => setStatus(current => ({ ...current, gpu: renderer.rendererInfo()?.renderer ?? '' })))
+      .catch(() => undefined);
+
+    // the events on the map answer the mouse, the keys and the clipboard through the tools, never through React; what
+    // they show goes through the composer, beside the painting tools' part.
+    const eventRenderer: EventToolsRenderer = {
+      get canvas()
+      {
+        return renderer.canvas;
+      },
+      get camera()
+      {
+        return renderer.camera;
+      },
+      eventAt: point => renderer.eventAt(point),
+      setOverlayState: state => overlays.update('events', state),
+      onContextMenu: listener => renderer.onContextMenu(listener),
+      onCameraChange: listener => renderer.onCameraChange(listener),
+    };
+    const tools = new MapEventTools({
+      renderer: eventRenderer,
+      host,
+      hub: services.hub,
+      selection,
+      openEvent: (openedMapId: number, eventId: number) =>
+      {
+        if (openEventWindow(services.shell, openedMapId, eventId) === 'blocked')
+        {
+          notifyRef.current('The event\'s window was blocked; allow pop-ups for the editor to open it.', 'error');
+        }
+      },
+      readClipboard: () => services.shell.readClipboard(EVENT_CLIPBOARD_MARKER),
+      notify: (text: string, severity: EventNoticeSeverity) => notifyRef.current(text, severity),
+      openMenu: setMenu,
+    });
+    toolsRef.current = tools;
+
+    // the left button is the event tools' only while the events are in hand; a painting tool stands them down.
+    stops.push(followToolInHand(painting, tools));
+
+    // an event picked from a list comes into sight, centred at the zoom the view has, so browsing the list row by row
+    // walks the map without zooming it in and out.
+    stops.push(selection.onReveal(request =>
+    {
+      const shown = controller.map;
+      const event = shown === null || shown.mapId !== request.mapId ? null : shown.event(request.eventId);
+      if (event !== null)
+      {
+        renderer.lookAt({ x: event.x, y: event.y }, renderer.camera.zoom);
+      }
+    }));
+
+    const view = host.ownerDocument.defaultView;
+    if (view !== null && wantsSpeedHooks(view.location.search))
+    {
+      stops.push(installSpeedHooks(view, {
+        renderer,
+        hub: services.hub,
+        painter,
+        painting,
+        tools,
+        selection,
+        map: () => controller.map,
+        openMap: async (next: number) =>
+        {
+          const opened = await controller.open(next);
+          if (opened !== null)
+          {
+            tools.setMap(opened);
+          }
+        },
+        timings: speedTimings,
+      }));
+    }
+
+    return () =>
+    {
+      stops.forEach(stop => stop());
+      tools.destroy();
+      toolsRef.current = null;
+      controller.close();
+      controllerRef.current = null;
+      rendererRef.current = null;
+      renderer.destroy();
+    };
+  }, [ services, selection, painting ]);
+
+  // open the map, and open again whenever the map asked for changes.
+  useEffect(() =>
+  {
+    const controller = controllerRef.current;
+    if (controller === null)
+    {
+      return;
+    }
+
+    speedTimings['openStartAt'] = performance.now();
+    controller.open(mapId)
+      .then(map =>
+      {
+        speedTimings['openedAt'] = performance.now();
+        if (map !== null)
+        {
+          toolsRef.current?.setMap(map);
+          setOpenMap(map);
+          setStatus(current => ({ ...current, problem: null }));
+        }
+      })
+      .catch((error: unknown) =>
+      {
+        setStatus(current => ({ ...current, problem: `Map ${mapId} could not be opened: ${String(error)}` }));
+      });
+  }, [ mapId ]);
+
+  // pick out the event asked for once the map is open, and again whenever another is asked for, or the same one is
+  // asked for again: it becomes the selection, and the view centres on it. Only a new ask moves the view, so panning
+  // away afterwards is never undone.
+  useEffect(() =>
+  {
+    const renderer = rendererRef.current;
+    const tools = toolsRef.current;
+    if (renderer === null || tools === null || openMap === null || pickedEventId === null)
+    {
+      return;
+    }
+
+    const cell = tools.pick(pickedEventId);
+    if (cell !== null)
+    {
+      renderer.lookAt(cell, PICKED_EVENT_ZOOM);
+    }
+  }, [ openMap, pickedEventId, pickRequest ]);
+
+  // hand the renderer the switches, the modules' overlays and their passability rules.
+  useEffect(() =>
+  {
+    const renderer = rendererRef.current;
+    if (renderer === null)
+    {
+      return;
+    }
+
+    const definitions = services.modules.overlays();
+    const enabled = new Set<OverlayId>(settings.overlays);
+    definitions.filter(definition => definition.defaultOn).forEach(definition => enabled.add(definition.id));
+    renderer.setLayerVisibility(settings.visibility);
+    renderer.setOverlays({ enabled, definitions });
+    renderer.setPassabilityRules(services.modules.passabilityRules());
+  }, [ services, settings ]);
+
+  // tell the renderer as the view goes behind another tab and comes back.
+  useEffect(() =>
+  {
+    rendererRef.current?.setVisible(visible);
+  }, [ visible ]);
+
+  // the window's layer strip and passability editor, and the stack view, followed from this view.
+  usePaletteLinks({ host: hostRef, renderer: rendererRef, mapId, settings, setSettings, selection: paint.selection, mode: paint.mode });
+
+  return (
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5, px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
+        {SETTING_SWITCHES.map(setting => (
+          <Chip
+            color={isSwitchOn(settings, setting) ? 'primary' : 'default'}
+            key={setting.label}
+            label={setting.label}
+            onClick={() => setSettings(current => flipSwitch(current, setting))}
+            size={'small'}
+            variant={isSwitchOn(settings, setting) ? 'filled' : 'outlined'}
+          />
+        ))}
+        <Divider flexItem orientation={'vertical'} sx={{ mx: 0.5 }}/>
+        <Typography variant={'caption'} color={'text.secondary'}>
+          Highlight layer
+        </Typography>
+        {TILE_LAYERS.map((layer, index) => (
+          <Chip
+            color={settings.visibility.highlighted === layer ? 'primary' : 'default'}
+            key={layer}
+            label={String(index + 1)}
+            onClick={() => setSettings(current => toggleHighlight(current, layer))}
+            size={'small'}
+            variant={settings.visibility.highlighted === layer ? 'filled' : 'outlined'}
+          />
+        ))}
+      </Box>
+      <PaintToolBar painting={painting}/>
+      <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <Box
+          data-testid={'map-view'}
+          ref={hostRef}
+          tabIndex={0}
+          sx={{ position: 'absolute', inset: 0, overflow: 'hidden', backgroundColor: '#121212', outline: 'none' }}
+        />
+        <DrawNotice state={drawState}/>
+      </Box>
+      <Box sx={{ display: 'flex', gap: 2, px: 1, py: 0.25, borderTop: 1, borderColor: 'divider' }}>
+        <Typography variant={'caption'} color={'text.secondary'}>
+          {`Map ${mapId}`}
+        </Typography>
+        <Typography variant={'caption'} color={'text.secondary'}>
+          {zoomLabel(status.zoom)}
+        </Typography>
+        <Typography variant={'caption'} color={'text.secondary'}>
+          {status.cell === null ? '' : `${status.cell.x}, ${status.cell.y}`}
+        </Typography>
+        <Typography variant={'caption'} color={'text.secondary'} data-testid={'map-selection-count'}>
+          {selectedLabel(selected.mapId === mapId ? selected.eventIds.length : 0)}
+        </Typography>
+        <Typography variant={'caption'} color={status.problem === null ? 'text.secondary' : 'error'} sx={{ flex: 1 }}>
+          {status.problem ?? status.note}
+        </Typography>
+        <Typography variant={'caption'} color={'text.secondary'} title={'The graphics card drawing this map'}>
+          {status.gpu}
+        </Typography>
+      </Box>
+      <EventMenu
+        request={menu}
+        selectedCount={selected.mapId === mapId ? selected.eventIds.length : 0}
+        tools={toolsRef.current}
+        onClose={() => setMenu(null)}
+      />
+    </Box>
+  );
+};
+
+/**
+ * Words how many events are selected on the map, for the status line.
+ * @param {number} count How many.
+ * @returns {string} The words, or nothing with none selected.
+ */
+const selectedLabel = (count: number): string =>
+{
+  if (count === 0)
+  {
+    return '';
+  }
+
+  return count === 1
+    ? '1 event selected'
+    : `${count} events selected`;
+};
+
+/**
+ * The page's open timings, shared with the speed hooks: when the first open began, landed, and first drew the map
+ * complete (drawnAt).
+ */
+const speedTimings: Record<string, number> = {};
+
+export { MapView, mapIdFromQuery, speedTimings };

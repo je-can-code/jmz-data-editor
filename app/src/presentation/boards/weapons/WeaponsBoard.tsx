@@ -47,6 +47,9 @@ import { StealRatesFields } from '@presentation/components/resources/StealRatesF
 import { IngredientTypeChips } from '@presentation/components/crafting/IngredientTypeChips.tsx';
 import { useCrafting } from '@presentation/context/resources/crafting.context.tsx';
 import { SystemService } from '@services/SystemService.ts';
+import { useRowClipboard } from '@presentation/hooks/useRowClipboard.ts';
+import { BLANK_WEAPON_ROW } from '@services/rows/RowClear.ts';
+import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import RPG_Trait = Rmmz.Data.RPG_Trait;
 
 const noteFieldSx = { '& .MuiInputBase-input': { fontFamily: 'monospace' } };
@@ -172,6 +175,20 @@ function WeaponsBoard()
 
   const canSave = !loading && !isSaving && !!rmmzDataPath;
 
+  // copy and paste whole weapons like any other edit, saved the normal way.
+  const rowClipboard = useRowClipboard({
+    table: DatabaseFilenames.Weapons,
+    selectedIndex,
+    onSelectIndex: setSelectedIndex,
+    listWrapperRef,
+    getRows: () => weapons,
+    toRow: (weapon) => weapon.toRmmz(),
+    fromRow: (row) => new RPG_WeaponDomainModel(row),
+    blankRow: BLANK_WEAPON_ROW,
+    applyPaste: setData,
+    notify: (message, severity) => setSnackbar({ open: true, message, severity, variant: MuiSnackbarVariant.Filled }),
+  });
+
   const sidebar = (
     <VirtualizedSidebarList
       ref={listRef}
@@ -186,6 +203,7 @@ function WeaponsBoard()
       fillContainer
       searchable
       searchLabel={'Search weapons'}
+      rowClipboard={rowClipboard}
     />
   );
 

@@ -78,6 +78,7 @@ field on RMMZ objects.
 bun run dev        # full stack via scripts/dev-full.ts
 bun run dev:ui     # frontend only
 bun run nw:dev     # NW.js desktop shell
+bun run map-editor-ca  # nw:dev, pinned straight at Chef Adventure's map editor
 bun run build      # tsc, then vite build
 ```
 

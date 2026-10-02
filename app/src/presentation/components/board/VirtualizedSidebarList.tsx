@@ -27,6 +27,8 @@ import {
   KeyboardArrowRight,
 } from "@mui/icons-material";
 import { IconSetSprite } from "@presentation/components/icons/IconSetSprite.tsx";
+import { RowClipboardMenu } from '@presentation/components/board/RowClipboardMenu.tsx';
+import type { RowClipboardHandle } from '@presentation/hooks/useRowClipboard.ts';
 
 /**
  * Standard sidebar list-column shell: grows with {@link EditorBoardSplitLayout}, constrains height for react-window.
@@ -106,6 +108,11 @@ type VirtualizedSidebarListProps = {
    * Label shown inside the search field. Defaults to {@code "Search"}.
    */
   searchLabel?: string;
+  /**
+   * When set, rows can be Shift-clicked into a run and copied, pasted or cleared whole, by shortcut and
+   * from a right-click menu on the rows (see {@link useRowClipboard}).
+   */
+  rowClipboard?: RowClipboardHandle;
 };
 
 const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListProps>(
@@ -125,6 +132,7 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
       onContextMenu,
       searchable = false,
       searchLabel = 'Search',
+      rowClipboard,
     } = props;
 
     const listColumnRef = useRef<HTMLDivElement>(null);
@@ -212,6 +220,17 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
       onSelectIndex(idx);
     }, [ onSelectIndex ]);
 
+    /**
+     * Runs the row clipboard's own key handling- Del clears the selection- before the board's, so a board
+     * that also listens for keys here (arrow-key navigation, say) still sees every key it cares about.
+     * @param {React.KeyboardEvent<HTMLDivElement>} event The key event from the list.
+     */
+    const handleListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) =>
+    {
+      rowClipboard?.onListKeyDown(event);
+      onListKeyDown?.(event);
+    };
+
     const handleSearchChange = (e: ChangeEvent<HTMLInputElement>) =>
     {
       const term = e.target.value;
@@ -267,6 +286,11 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
         ? row.title
         : row.label;
 
+      // highlight every row of a copy and paste run, not only the row the board shows.
+      const isRowSelected = rowClipboard === undefined
+        ? selectedIndex === index
+        : rowClipboard.isSelected(index);
+
       return (
         <ListItem
           dense
@@ -305,16 +329,26 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
                   : []),
               ] as SxProps<Theme>
             }
-            selected={selectedIndex === index}
+            selected={isRowSelected}
             onMouseDown={(e) =>
             {
               e.preventDefault();
             }}
             tabIndex={-1}
-            onClick={() =>
+            onClick={(event) =>
             {
-              onSelectIndex(index);
+              // let copy and paste decide the run of selected rows too, when it is on.
+              if (rowClipboard === undefined)
+              {
+                onSelectIndex(index);
+                return;
+              }
+
+              rowClipboard.onRowClick(index, event);
             }}
+            onContextMenu={rowClipboard === undefined
+              ? undefined
+              : (event) => rowClipboard.onRowContextMenu(index, event)}
           >
             <ListItemIcon sx={{
               minWidth: "22px",
@@ -456,7 +490,7 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
             ...(fillContainer
               ? { flex: 1, minHeight: 0 }
               : {}),
-            ...(onContextMenu !== undefined
+            ...(onContextMenu !== undefined || rowClipboard !== undefined
               ? { cursor: 'context-menu' }
               : {}),
           }}
@@ -465,7 +499,7 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
             ref={listWrapperRef}
             tabIndex={0}
             role={"listbox"}
-            onKeyDown={onListKeyDown}
+            onKeyDown={handleListKeyDown}
             style={{
               outline: "none",
               width: "100%",
@@ -497,6 +531,10 @@ const VirtualizedSidebarList = forwardRef<FixedSizeList, VirtualizedSidebarListP
             </FixedSizeList>
           </div>
         </Box>
+
+        {rowClipboard !== undefined && (
+          <RowClipboardMenu {...rowClipboard.menu}/>
+        )}
       </Box>
     );
   },
