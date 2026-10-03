@@ -119,8 +119,7 @@ const ShowTextContent = (props: { readonly draft: CommandDraft; readonly api: Ma
 };
 
 /**
- * A comment's row: every line, and a note when a line gives the event a trigger area KMS_AreaEvent reads, or a
- * warning when it sits where the plugin never reads it.
+ * A comment's row: every line, and a note when a line gives the event a trigger area.
  * @param {{ draft: CommandDraft, list: readonly RmmzEventCommand[], index: number }} props The command and its list.
  * @returns {React.JSX.Element} The row's content.
  */
@@ -138,10 +137,7 @@ const CommentContent = (props: { readonly draft: CommandDraft; readonly list: re
       {area !== null && (
         <Chip
           size={'small'}
-          color={area.effective ? 'default' : 'warning'}
-          label={area.effective
-            ? `Trigger area ${area.width} x ${area.height} tiles`
-            : `Trigger area ${area.width} x ${area.height} is only read at the top of the page`}
+          label={`Trigger area ${area.width} x ${area.height} tiles`}
           sx={{ mt: 0.5 }}
         />
       )}

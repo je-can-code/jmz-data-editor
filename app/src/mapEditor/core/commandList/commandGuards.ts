@@ -13,23 +13,18 @@ const SHOW_CHOICES_CODE = 102;
 const END_CHOICES_CODE = 404;
 
 /**
- * KMS_AreaEvent's tag, as the plugin itself matches it: a trigger area so many tiles wide and high, anchored at the
- * event's own tile.
+ * J-Pixelistics' area tag, as the game reads it: a trigger area so many tiles wide and high, anchored at the event's
+ * own tile, each size at least one. J-Base offers a plugin only comment lines that are one whole tag, so the tag must
+ * be the entire line; a line with anything else on it never reaches the plugin at all.
  */
-const AREA_EVENT_TAG = /<(?:エリアイベント|AreaEvent)\s*[:\s]\s*(\d+)\s*x\s*(\d+)>/iu;
+const AREA_EVENT_TAG = /^<areaEvent: ?\[ ?([1-9]\d*) ?, ?([1-9]\d*) ?\]>$/iu;
 
 /**
- * A trigger area a comment gives its event, and whether the plugin will ever see it.
+ * A trigger area a comment gives its event.
  */
 type AreaEventTag = {
   readonly width: number;
   readonly height: number;
-
-  /**
-   * KMS_AreaEvent reads only the comments at the very top of a page, before any other command, so a tag anywhere
-   * else does nothing.
-   */
-  readonly effective: boolean;
 };
 
 /**
@@ -53,6 +48,7 @@ const joinsChoicesAbove = (list: readonly RmmzEventCommand[], index: number): bo
 
 /**
  * Reads the trigger area a comment gives its event, if it gives one: the first tag across the comment's lines.
+ * J-Pixelistics reads every comment line on a page, wherever it sits, so a tag anywhere on the page counts.
  * @param {readonly RmmzEventCommand[]} list The list.
  * @param {number} index The comment's first line.
  * @returns {AreaEventTag | null} The area, or null when the command is not a comment or holds no tag.
@@ -80,8 +76,7 @@ const areaEventTag = (list: readonly RmmzEventCommand[], index: number): AreaEve
   }
 
   const [ , width, height ] = match;
-  const effective = list.slice(0, index).every(command => command.code === COMMENT_CODE || command.code === COMMENT_LINE_CODE);
-  return { width: Math.max(Number(width), 1), height: Math.max(Number(height), 1), effective };
+  return { width: Number(width), height: Number(height) };
 };
 
 export { areaEventTag, joinsChoicesAbove };

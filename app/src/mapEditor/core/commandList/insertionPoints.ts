@@ -7,10 +7,8 @@ import type { ListRow } from './listRows.ts';
  * commands (a paste, a drop, a new command from the search) lands at one of these, so a command always lands inside
  * a body, at that body's indent, and never between a block's branches.
  *
- * Two shapes the game reads across units are kept whole too. Show Choices blocks sitting back to back are one choice
- * window to HIME_LargeChoices, so no place falls between them. And KMS_AreaEvent reads an event's area from the
- * comments at the very top of a page, stopping at the first command that is not one, so nothing but a comment ever
- * lands above the comment holding the area.
+ * One shape the game reads across units is kept whole too: Show Choices blocks sitting back to back are one choice
+ * window to HIME_LargeChoices, so no place falls between them.
  */
 type InsertionPoint = {
   readonly body: CommandBody;
@@ -21,16 +19,6 @@ type InsertionPoint = {
  * The code of Show Choices, whose back-to-back blocks HIME_LargeChoices shows as one choice window.
  */
 const SHOW_CHOICES_CODE = 102;
-
-/**
- * The codes of a comment's first line and of its further lines, both of which KMS_AreaEvent reads.
- */
-const COMMENT_CODES: ReadonlySet<number> = new Set([ 108, 408 ]);
-
-/**
- * The area tag exactly as KMS_AreaEvent matches it, in either of its names: {@code <areaEvent:5x2>}.
- */
-const AREA_EVENT_TAG = /<(?:エリアイベント|AreaEvent)\s*[:\s]\s*\d+\s*x\s*\d+>/iu;
 
 /**
  * Reports whether a unit is a Show Choices block.
@@ -76,65 +64,6 @@ const outOfChoiceRun = (list: readonly RmmzEventCommand[], point: InsertionPoint
   return position === point.position
     ? point
     : { body, position };
-};
-
-/**
- * Reports whether a command is a comment line, the only kind KMS_AreaEvent reads past on its way to the area.
- * @param {RmmzEventCommand} command The command.
- * @returns {boolean} True for a comment's first line or a further line.
- */
-const isComment = (command: RmmzEventCommand): boolean =>
-{
-  return COMMENT_CODES.has(command.code);
-};
-
-/**
- * Finds how many of the list's top units must stay first for its area tag to keep working: every unit through the
- * comment holding the tag, when that comment sits in the run of comments the page opens with. The game reads the
- * area from those comments alone, so a command that is not a comment landing above the tag stops it working.
- * @param {CommandTree} tree The list's tree.
- * @returns {number} How many top units to keep first; 0 when the page opens with no area tag.
- */
-const areaTagFloor = (tree: CommandTree): number =>
-{
-  const { list, root } = tree;
-  const firstOther = root.nodes.findIndex(node => isComment(list[node.start]) === false);
-  const opening = firstOther === -1
-    ? root.nodes
-    : root.nodes.slice(0, firstOther);
-  const tagged = opening.findIndex(node => list.slice(node.start, node.end).some(command =>
-    isComment(command) && AREA_EVENT_TAG.test(String(command.parameters[0] ?? ''))));
-  return tagged + 1;
-};
-
-/**
- * Reports whether commands landing at a place keep the page's area tag working: anywhere below it, anywhere but
- * the list's own top level, or anywhere at all when every command landing is a comment.
- * @param {CommandTree} tree The list's tree.
- * @param {InsertionPoint} point The place.
- * @param {readonly RmmzEventCommand[]} commands What lands there.
- * @returns {boolean} True when the area tag keeps working.
- */
-const keepsAreaTag = (tree: CommandTree, point: InsertionPoint, commands: readonly RmmzEventCommand[]): boolean =>
-{
-  return point.body !== tree.root
-    || point.position >= areaTagFloor(tree)
-    || commands.every(isComment);
-};
-
-/**
- * Settles where commands really land once it is known what they are: a place that would push the page's area tag
- * out of the comments it opens with moves to just below the tag's comment, and every other place stays.
- * @param {CommandTree} tree The list's tree.
- * @param {InsertionPoint} point The place asked for.
- * @param {readonly RmmzEventCommand[]} commands What lands there.
- * @returns {InsertionPoint} Where they land.
- */
-const settleInsertion = (tree: CommandTree, point: InsertionPoint, commands: readonly RmmzEventCommand[]): InsertionPoint =>
-{
-  return keepsAreaTag(tree, point, commands)
-    ? point
-    : { body: tree.root, position: areaTagFloor(tree) };
 };
 
 /**
@@ -294,8 +223,8 @@ const pointAtRow = (row: ListRow, list: readonly RmmzEventCommand[]): InsertionP
 };
 
 /**
- * Reports whether units may be dropped at a place: never inside one of the units being moved, never between the
- * blocks of a merged Show Choices run, and never above the page's area tag unless every unit moved is a comment.
+ * Reports whether units may be dropped at a place: never inside one of the units being moved, and never between
+ * the blocks of a merged Show Choices run.
  * @param {CommandTree} tree The list's tree.
  * @param {InsertionPoint} point The place.
  * @param {readonly CommandNode[]} moving The units being moved.
@@ -303,10 +232,8 @@ const pointAtRow = (row: ListRow, list: readonly RmmzEventCommand[]): InsertionP
  */
 const canDropAt = (tree: CommandTree, point: InsertionPoint, moving: readonly CommandNode[]): boolean =>
 {
-  const commands = moving.flatMap(node => tree.list.slice(node.start, node.end));
   return moving.every(node => isBodyInside(point.body, node) === false)
-    && splitsChoiceRun(tree.list, point) === false
-    && keepsAreaTag(tree, point, commands);
+    && splitsChoiceRun(tree.list, point) === false;
 };
 
 /**
@@ -319,9 +246,8 @@ type DropTarget = {
 
 /**
  * Finds where a drag over a row lands. The pointer's half of the row picks the gap above or below it; when that
- * gap takes nothing (between a block's parts, inside what is being moved, inside a merged Show Choices run, or above
- * the page's area tag), the nearest gap that does is used, below first, so the marker never sits somewhere the drop
- * would not land.
+ * gap takes nothing (between a block's parts, inside what is being moved, or inside a merged Show Choices run), the
+ * nearest gap that does is used, below first, so the marker never sits somewhere the drop would not land.
  * @param {CommandTree} tree The list's tree.
  * @param {readonly ListRow[]} rows The visible rows.
  * @param {number} rowIndex The row under the pointer.
@@ -354,7 +280,6 @@ const dropTargetAt = (
 };
 
 export {
-  areaTagFloor,
   canDropAt,
   dropTargetAt,
   insertionIndex,
@@ -364,7 +289,6 @@ export {
   pointBeforeNode,
   pointBelowRow,
   pointOfGap,
-  settleInsertion,
   splitsChoiceRun,
 };
 export type { DropTarget, InsertionPoint };

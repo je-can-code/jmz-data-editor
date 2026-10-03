@@ -21,7 +21,7 @@ import {
   type CommandStructure,
   type CommandTree,
 } from './commandTree.ts';
-import { insertionIndex, pointBeforeNode, settleInsertion, type InsertionPoint } from './insertionPoints.ts';
+import { insertionIndex, pointBeforeNode, type InsertionPoint } from './insertionPoints.ts';
 import {
   asJsonCommands,
   duplicateIndex,
@@ -217,8 +217,7 @@ class CommandListEditor
   }
 
   /**
-   * Adds a fresh command where a place is, as the search inserts one. A command that is not a comment never lands
-   * above the page's area tag; it goes in just below the tag's comment instead (see {@code settleInsertion}).
+   * Adds a fresh command where a place is, as the search inserts one.
    * @param {CommandCatalogEntry} entry The command's entry.
    * @param {InsertionPoint} point The place, in the current tree, as the insertion points give it.
    * @returns {ListOutcome} The step, and where the new command now sits.
@@ -226,9 +225,8 @@ class CommandListEditor
   insertNew(entry: CommandCatalogEntry, point: InsertionPoint): ListOutcome
   {
     const unit = createCommandUnit(entry, this.structure);
-    const settled = settleInsertion(this.tree(), point, unit);
-    const index = insertionIndex(settled);
-    const step = this.#commit(`Add ${entry.name}`, insertAt(this.commands(), settled, unit));
+    const index = insertionIndex(point);
+    const step = this.#commit(`Add ${entry.name}`, insertAt(this.commands(), point, unit));
     return { step, index };
   }
 
@@ -245,8 +243,7 @@ class CommandListEditor
   }
 
   /**
-   * Moves some units to a place, as a drop does. Units that are not all comments never land above the page's area
-   * tag; they go in just below the tag's comment instead.
+   * Moves some units to a place, as a drop does.
    * @param {readonly CommandNode[]} nodes The units.
    * @param {InsertionPoint} point The place, in the current tree; never inside one of the units.
    * @returns {ListOutcome} The step, or null when the units were already there, and where they landed.
@@ -255,9 +252,8 @@ class CommandListEditor
   {
     const outer = outermostNodes(nodes);
     const list = this.commands();
-    const settled = settleInsertion(this.tree(), point, unitsAtIndent(list, outer, 0));
-    const index = landingIndex(outer, settled);
-    return { step: this.#commit(`Move ${countPhrase(outer.length)}`, moveNodes(list, outer, settled)), index };
+    const index = landingIndex(outer, point);
+    return { step: this.#commit(`Move ${countPhrase(outer.length)}`, moveNodes(list, outer, point)), index };
   }
 
   /**
@@ -305,8 +301,7 @@ class CommandListEditor
   }
 
   /**
-   * Pastes clipboard text at a place, when it holds whole commands this editor wrote. Commands that are not all
-   * comments never land above the page's area tag; they go in just below the tag's comment instead.
+   * Pastes clipboard text at a place, when it holds whole commands this editor wrote.
    * @param {InsertionPoint} point The place, in the current tree, as the insertion points give it.
    * @param {string} text The clipboard text.
    * @returns {PasteResult} The step and where the pasted commands start, or why nothing was pasted.
@@ -320,9 +315,8 @@ class CommandListEditor
     }
 
     const count = readCommandTree([ ...read.commands, { code: 0, indent: 0, parameters: [] } ], this.structure).root.nodes.length;
-    const settled = settleInsertion(this.tree(), point, read.commands);
-    const index = insertionIndex(settled);
-    const step = this.#commit(`Paste ${countPhrase(count)}`, insertAt(this.commands(), settled, read.commands));
+    const index = insertionIndex(point);
+    const step = this.#commit(`Paste ${countPhrase(count)}`, insertAt(this.commands(), point, read.commands));
     return { ok: true, step, index, count };
   }
 
