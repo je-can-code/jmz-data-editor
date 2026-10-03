@@ -3,11 +3,12 @@ import { areaEventTag, joinsChoicesAbove } from '../../../../src/mapEditor/core/
 import { cmd } from '../../support/commandFixtures.ts';
 
 /*
- * Two plugins Chef Adventure runs read the list's shape rather than any one command, and the editor must neither
- * break nor hide what they rely on. HIME_LargeChoices merges a Show Choices that follows the end of another at once,
- * at the same indent, into one list of choices; KMS_AreaEvent reads a trigger area from a comment tag, but only in
- * the comments at the very top of a page. The guards spot both, so rows can say so, with near misses that must not
- * count: a Show Choices after anything else, or at another indent, and a tag below a command.
+ * Two things Chef Adventure's plugins read deserve a note on their rows. HIME_LargeChoices merges a Show Choices that
+ * follows the end of another at once, at the same indent, into one list of choices, and the editor must neither
+ * break nor hide that merge. J-Pixelistics reads a trigger area from a comment tag on any line of the page, but only
+ * a line that is the whole tag, since J-Base offers plugins nothing else. The guards spot both, with near misses that
+ * must not count: a Show Choices after anything else, or at another indent, and a tag in the old shape, with a size
+ * of zero, or sharing its line with other text.
  */
 describe('commandGuards', () =>
 {
@@ -30,26 +31,25 @@ describe('commandGuards', () =>
 
   describe('areaEventTag', () =>
   {
-    it('reads the area from a tag in the page\'s top comments, on any of its lines', () =>
+    it('reads the area from a tag on any of a comment\'s lines', () =>
     {
       // Arrange.
-      const list = [ cmd(108, 0, [ '<enemyId:5>' ]), cmd(408, 0, [ '<areaEvent:5x2>' ]), cmd(201, 0, [ 0, 2, 1, 1, 0, 0 ]), cmd(0, 0) ];
+      const list = [ cmd(108, 0, [ '<enemyId:5>' ]), cmd(408, 0, [ '<areaEvent:[5, 2]>' ]), cmd(201, 0, [ 0, 2, 1, 1, 0, 0 ]), cmd(0, 0) ];
 
       // Act.
       const tag = areaEventTag(list, 0);
 
       // Assert.
       expect(tag)
-        .toStrictEqual({ width: 5, height: 2, effective: true });
+        .toStrictEqual({ width: 5, height: 2 });
     });
 
-    it('reads the tag the way the plugin does: any case, its Japanese name, spaces, and at least one tile', () =>
+    it('reads the tag the way the game does: any case, and one optional space after the colon and around each size', () =>
     {
       // Arrange.
       const lists = [
-        [ cmd(108, 0, [ '<AREAEVENT : 3 x 4>' ]) ],
-        [ cmd(108, 0, [ '<エリアイベント:2x1>' ]) ],
-        [ cmd(108, 0, [ '<areaEvent:0x0>' ]) ],
+        [ cmd(108, 0, [ '<AREAEVENT: [3, 4]>' ]) ],
+        [ cmd(108, 0, [ '<areaEvent:[ 2 , 1 ]>' ]) ],
       ];
 
       // Act.
@@ -57,26 +57,43 @@ describe('commandGuards', () =>
 
       // Assert.
       expect(tags)
-        .toStrictEqual([ { width: 3, height: 4, effective: true }, { width: 2, height: 1, effective: true }, { width: 1, height: 1, effective: true } ]);
+        .toStrictEqual([ { width: 3, height: 4 }, { width: 2, height: 1 } ]);
     });
 
-    it('marks a tag below any other command as one the plugin never reads', () =>
+    it('reads a tag below other commands, since the game reads every comment line on the page', () =>
     {
       // Arrange.
-      const list = [ cmd(108, 0, [ 'intro' ]), cmd(250, 0, [ {} ]), cmd(108, 0, [ '<areaEvent:9x1>' ]) ];
+      const list = [ cmd(108, 0, [ 'intro' ]), cmd(250, 0, [ {} ]), cmd(108, 0, [ '<areaEvent:[9, 1]>' ]) ];
 
       // Act.
       const tag = areaEventTag(list, 2);
 
       // Assert.
       expect(tag)
-        .toStrictEqual({ width: 9, height: 1, effective: false });
+        .toStrictEqual({ width: 9, height: 1 });
+    });
+
+    it('finds nothing in the old shape, at a size of zero, or with anything else on the line', () =>
+    {
+      // Arrange.
+      const lists = [
+        [ cmd(108, 0, [ '<areaEvent:5x2>' ]) ],
+        [ cmd(108, 0, [ '<areaEvent:[0, 2]>' ]) ],
+        [ cmd(108, 0, [ 'exit: <areaEvent:[5, 2]>' ]) ],
+      ];
+
+      // Act.
+      const tags = lists.map(list => areaEventTag(list, 0));
+
+      // Assert.
+      expect(tags)
+        .toStrictEqual([ null, null, null ]);
     });
 
     it('finds nothing in a comment without the tag, or in a command that is not a comment', () =>
     {
       // Arrange.
-      const list = [ cmd(108, 0, [ '<enemyId:5>' ]), cmd(355, 0, [ '<areaEvent:5x2>' ]) ];
+      const list = [ cmd(108, 0, [ '<enemyId:5>' ]), cmd(355, 0, [ '<areaEvent:[5, 2]>' ]) ];
 
       // Act.
       const tags = [ areaEventTag(list, 0), areaEventTag(list, 1), areaEventTag(list, 9) ];

@@ -480,21 +480,6 @@ const CommandList = (props: CommandListProps) =>
   };
 
   /**
-   * Says so when commands went in somewhere other than where they were aimed, which only happens to keep them from
-   * landing above the comment that sets the event's area.
-   * @param {string} verb What happened to them, such as "Added".
-   * @param {InsertionPoint} aimed Where they were aimed.
-   * @param {number} landed The index they landed at.
-   */
-  const sayIfBelowAreaComment = (verb: string, aimed: InsertionPoint, landed: number) =>
-  {
-    if (landed !== insertionIndex(aimed))
-    {
-      setNotice(`${verb} below the comment that sets this event's area, which only works while nothing but comments comes before it.`);
-    }
-  };
-
-  /**
    * Opens the search at a row.
    * @param {ListRow} row The row it adds at.
    * @param {string} query What is already typed.
@@ -534,7 +519,6 @@ const CommandList = (props: CommandListProps) =>
     setSearch(null);
     const { index } = editor.insertNew(entry, point);
     keepOpenAt(index);
-    sayIfBelowAreaComment('Added', point, index);
     containerRef.current?.focus();
   });
 
@@ -579,7 +563,6 @@ const CommandList = (props: CommandListProps) =>
     if (result.ok)
     {
       selectUnitsAt(result.index, result.count);
-      sayIfBelowAreaComment('Pasted', point, result.index);
       return;
     }
 

@@ -27,7 +27,7 @@ describe('transferKind', () =>
       const route = command(205, [ 0, { repeat: false, skippable: false, wait: true, list: [ { code: 17 }, { code: 0 } ] } ]);
       const events = [
         event(1, [ transferPage([ 0, 5, 3, 4, 2, 0 ]) ]),
-        event(2, [ transferPage([ 0, 6, 1, 14, 6, 0 ], [ command(108, [ '<areaEvent:1x4>' ]) ]) ]),
+        event(2, [ transferPage([ 0, 6, 1, 14, 6, 0 ], [ command(108, [ '<areaEvent:[1, 4]>' ]) ]) ]),
         event(3, [ transferPage([ 0, 7, 2, 2, 8, 1 ], [ route, command(505, [ { code: 17 } ]) ]) ]),
         event(4, [ transferPage([ 0, 8, 5, 10, 8, 0 ], [ command(117, [ 5 ]), command(121, [ 134, 134, 0 ]), command(122, [ 1, 1, 0, 0, 0 ]), command(357, [ 'J-Plugin', 'go', 'Go', {} ]) ]) ]),
       ];

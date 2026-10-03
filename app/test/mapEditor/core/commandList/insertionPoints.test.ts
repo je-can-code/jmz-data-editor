@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readCommandTree, type CommandBlockNode } from '../../../../src/mapEditor/core/commandList/commandTree.ts';
 import {
-  areaTagFloor,
   canDropAt,
   dropTargetAt,
   insertionIndex,
@@ -10,7 +9,6 @@ import {
   pointBeforeNode,
   pointBelowRow,
   pointOfGap,
-  settleInsertion,
   splitsChoiceRun,
   type InsertionPoint,
 } from '../../../../src/mapEditor/core/commandList/insertionPoints.ts';
@@ -25,9 +23,8 @@ import { buildMixedList, cmd, MZ_STRUCTURE } from '../../support/commandFixtures
  * its body, below a folded one its end, below Show Choices' own row nowhere at all), the right index and indent for
  * each point, and a drop target that never marks a gap the drop would not land in.
  *
- * It also owes the game two shapes it reads across units. Show Choices blocks back to back are one choice window
- * to HIME_LargeChoices, so no addition, paste or drop lands between them. And KMS_AreaEvent reads an event's area
- * from the comments a page opens with, so nothing but a comment lands above the comment holding the area tag.
+ * It also owes the game one shape it reads across units: Show Choices blocks back to back are one choice window to
+ * HIME_LargeChoices, so no addition, paste or drop lands between them.
  */
 describe('insertionPoints', () =>
 {
@@ -78,17 +75,6 @@ describe('insertionPoints', () =>
     cmd(102, 0, [ [ 'B' ], -1, -1, 2, 0 ]), cmd(402, 0, [ 0, 'B' ]), cmd(0, 1), cmd(404, 0), // 5 to 8
     cmd(230, 0, [ 6 ]), // 9
     cmd(0, 0), // 10
-  ];
-
-  /**
-   * A page opening with a plain comment, then the area comment (its tag on the comment's second line), then a wait.
-   * @returns {RmmzEventCommand[]} The list.
-   */
-  const buildAreaPage = (): RmmzEventCommand[] => [
-    cmd(108, 0, [ 'a door' ]), // 0
-    cmd(108, 0, [ 'wide:' ]), cmd(408, 0, [ '<areaEvent:3x1>' ]), // 1 to 2
-    cmd(230, 0, [ 5 ]), // 3
-    cmd(0, 0), // 4
   ];
 
   describe('insertionIndex', () =>
@@ -321,68 +307,6 @@ describe('insertionPoints', () =>
     });
   });
 
-  describe('areaTagFloor', () =>
-  {
-    it('keeps every unit through the area comment first, when the page opens with comments holding it', () =>
-    {
-      // Arrange: the area page, the same page with its tag after the wait, and a page with no tag at all.
-      const opening = buildOf(buildAreaPage()).tree;
-      const late = buildOf([ cmd(230, 0, [ 5 ]), cmd(108, 0, [ '<AreaEvent:2x2>' ]), cmd(0, 0) ]).tree;
-      const none = buildOf([ cmd(108, 0, [ 'a note' ]), cmd(0, 0) ]).tree;
-
-      // Act.
-      const floors = [ areaTagFloor(opening), areaTagFloor(late), areaTagFloor(none) ];
-
-      // Assert.
-      expect(floors)
-        .toStrictEqual([ 2, 0, 0 ]);
-    });
-
-    it('reads a page of nothing but comments, and the tag under its other name', () =>
-    {
-      // Arrange.
-      const { tree } = buildOf([ cmd(108, 0, [ 'first' ]), cmd(108, 0, [ '<エリアイベント 2x3>' ]), cmd(0, 0) ]);
-
-      // Act.
-      const floor = areaTagFloor(tree);
-
-      // Assert.
-      expect(floor)
-        .toBe(2);
-    });
-  });
-
-  describe('settleInsertion', () =>
-  {
-    it('moves a command that is not a comment from above the area comment to just below it', () =>
-    {
-      // Arrange.
-      const { tree } = buildOf(buildAreaPage());
-
-      // Act.
-      const settled = settleInsertion(tree, { body: tree.root, position: 0 }, [ cmd(250, 0, [ { name: 'Door', volume: 90, pitch: 100, pan: 0 } ]) ]);
-
-      // Assert.
-      expect(describePoint(settled))
-        .toBe('3@0');
-    });
-
-    it('leaves a comment above the area comment, and anything below it, where they were aimed', () =>
-    {
-      // Arrange.
-      const { tree } = buildOf(buildAreaPage());
-      const top = { body: tree.root, position: 0 };
-      const below = { body: tree.root, position: 2 };
-
-      // Act.
-      const settled = [ settleInsertion(tree, top, [ cmd(108, 0, [ 'more notes' ]) ]), settleInsertion(tree, below, [ cmd(230, 0, [ 1 ]) ]) ];
-
-      // Assert.
-      expect(settled)
-        .toStrictEqual([ top, below ]);
-    });
-  });
-
   describe('canDropAt', () =>
   {
     it('refuses a place inside a unit being moved, and allows one beside it', () =>
@@ -409,24 +333,6 @@ describe('insertionPoints', () =>
 
       // Act.
       const answers = [ 2, 1, 3 ].map(position => canDropAt(tree, { body: tree.root, position }, moving));
-
-      // Assert.
-      expect(answers)
-        .toStrictEqual([ false, true, true ]);
-    });
-
-    it('refuses a command above the area comment, and allows a comment there or a command below it', () =>
-    {
-      // Arrange: the wait and the plain comment, each dragged.
-      const { tree } = buildOf(buildAreaPage());
-      const [ comment, , wait ] = tree.root.nodes;
-
-      // Act.
-      const answers = [
-        canDropAt(tree, { body: tree.root, position: 0 }, [ wait ]),
-        canDropAt(tree, { body: tree.root, position: 2 }, [ comment ]),
-        canDropAt(tree, { body: tree.root, position: 2 }, [ wait ]),
-      ];
 
       // Assert.
       expect(answers)

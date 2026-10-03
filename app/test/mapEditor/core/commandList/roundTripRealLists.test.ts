@@ -36,9 +36,9 @@ import { readRealCommandLists, type RealCommandList } from '../../support/realCo
  * other parameter and key untouched; every block reconciles to itself; every list survives a copy and paste, and a
  * move away and back, whole.
  *
- * Two plugins read the list's shape rather than any one command, and both are checked by name. HIME_LargeChoices
- * merges a Show Choices that follows another's end at once (Map001 event 49 and Map221 event 1 hold the game's
- * two), and KMS_AreaEvent reads `<areaEvent:WxH>` only from the comments at the top of a page (480 events).
+ * Two plugin readings that span more than one command are checked by name. HIME_LargeChoices merges a Show Choices
+ * that follows another's end at once (Map001 event 49 and Map221 event 1 hold the game's two), and J-Pixelistics
+ * reads `<areaEvent:[W, H]>` from any comment line on a page (480 of them).
  *
  * It runs against the project JMZ_PROJECT_ROOT names, or the sibling checkout, and skips when neither is there.
  */
@@ -409,23 +409,18 @@ describe.skipIf(project === null)('every shipped command, round trip', () =>
       .toStrictEqual([ [ true, true, true ], [ true, true, true ] ]);
   });
 
-  it('finds every trigger area where KMS_AreaEvent reads it', () =>
+  it('reads every trigger area the game holds, so none is written in a shape the game would not read', () =>
   {
-    // Arrange.
-    const tags: string[] = [];
+    // Arrange: every comment line that mentions an area at all, read or not.
+    const mentions = lists.flatMap(({ list }) => list.filter(command =>
+      (command.code === 108 || command.code === 408) && /areaEvent/iu.test(String(command.parameters[0] ?? ''))));
 
     // Act.
-    lists.forEach(({ where, list }) => list.forEach((command, index) =>
-    {
-      const tag = command.code === 108 ? areaEventTag(list, index) : null;
-      if (tag !== null)
-      {
-        tags.push(`${where} ${tag.width}x${tag.height} ${tag.effective ? 'read' : 'unread'}`);
-      }
-    }));
+    const tags = lists.flatMap(({ list }) => list.map((command, index) => (command.code === 108 ? areaEventTag(list, index) : null)))
+      .filter(tag => tag !== null);
 
-    // Assert: every tag the game holds is in its page's top comments.
-    expect([ tags.length > 400, tags.filter(tag => tag.endsWith('unread')) ])
-      .toStrictEqual([ true, [] ]);
+    // Assert: well over the 400 the game is known to hold, and one read tag for every line that mentions one.
+    expect([ tags.length > 400, tags.length === mentions.length ])
+      .toStrictEqual([ true, true ]);
   });
 });

@@ -478,24 +478,6 @@ describe('CommandList', () =>
       .toStrictEqual([ true, [ 230, 102, 402, 0, 404, 102 ] ]);
   });
 
-  it('pastes a command aimed above the comment setting the event\'s area just below it, and says so', async () =>
-  {
-    // Arrange: a page opening with its area comment, the focus on it.
-    const { hub, list } = await renderList();
-    act(() =>
-    {
-      hub.edit('Area', [ eventHistoryKey(1, 1) ], tx => tx.splice('map:1', PATH, 0, 0, [ cmd(108, 0, [ '<areaEvent:3x1>' ]) ] as never));
-    });
-    fireEvent.click(document.querySelector('[data-command-index="0"]') as HTMLElement, { ctrlKey: true });
-
-    // Act.
-    fireEvent.paste(list, { clipboardData: { getData: () => writeClipboard([ cmd(230, 0, [ 77 ]) ]) } });
-
-    // Assert.
-    expect([ commandsOf(hub).slice(0, 2), screen.queryByText(/below the comment that sets this event's area/u) !== null ])
-      .toStrictEqual([ [ cmd(108, 0, [ '<areaEvent:3x1>' ]), cmd(230, 0, [ 77 ]) ], true ]);
-  });
-
   /**
    * Lays the rows out one above the other, 20 pixels each, as a browser would, since the test page has no layout.
    * @returns {{ mockRestore: () => void }} The stand-in, to restore after the test.
