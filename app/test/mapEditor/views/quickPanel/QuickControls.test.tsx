@@ -10,8 +10,35 @@ import type { DatabaseNamesJson } from '../../../../src/mapEditor/core/commandLi
 import type { QuickControl as QuickControlKind, SharedField } from '../../../../src/mapEditor/core/eventKinds/quickFields.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMapInfo } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { LocationPickerDialogProps } from '../../../../src/mapEditor/views/locationPicker/LocationPickerDialog.tsx';
 import { QuickControl } from '../../../../src/mapEditor/views/quickPanel/QuickControls.tsx';
 import type { QuickResources } from '../../../../src/mapEditor/views/quickPanel/quickResources.ts';
+
+/**
+ * Where the stand-in location picker was asked to start.
+ */
+const picker = vi.hoisted(() => ({
+  starts: [] as unknown[],
+}));
+
+// the location picker is proved in its own tests; here it stands in as one button picking tile 4, 3 on map 5, and
+// notes where it was asked to start.
+vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerDialog.tsx', () =>
+{
+  /**
+   * Stands in for the location picker.
+   * @param {LocationPickerDialogProps} props Where it starts, and who hears how it ends.
+   * @returns {React.JSX.Element} A button picking a tile.
+   */
+  const LocationPickerDialog = (props: LocationPickerDialogProps) =>
+  {
+    const { start, onClose } = props;
+    picker.starts.push(start);
+    return <button type={'button'} onClick={() => onClose({ mapId: 5, x: 4, y: 3 })}>Pick tile 4, 3 on map 5</button>;
+  };
+
+  return { LocationPickerDialog };
+});
 
 /*
  * Each control shows one shared setting and hands on a new value only when the author has made one: boxes commit
@@ -19,7 +46,9 @@ import type { QuickResources } from '../../../../src/mapEditor/views/quickPanel/
  * setting the selected events hold differently reads "Mixed" rather than any one of their values. Pickers name rows
  * and maps once the names arrive and take a typed id until then, and keep a value their list lacks. The graphic
  * picker lists the character sheets, picks one of a sheet's eight characters unless it holds one alone, reads a
- * tile as a tile, and previews the frame the engine would cut from the sheet.
+ * tile as a tile, and previews the frame the engine would cut from the sheet. The place control picks a map and a
+ * tile together by clicking the tile on the map, starting from the place the events share, waiting while they go to
+ * different places, and offering nothing without a server to read maps from.
  */
 describe('QuickControl', () =>
 {
@@ -272,5 +301,44 @@ describe('QuickControl', () =>
     // Assert: the right-facing row, third frame.
     expect([ frame.style.width, frame.style.height, frame.style.backgroundPosition, frame.style.backgroundSize ])
       .toStrictEqual([ '48px', '48px', '-96px -96px', '144px 192px' ]);
+  });
+
+  it('picks a map and a tile together on the map, starting from the place the events share', () =>
+  {
+    // Arrange: the selected doors all lead to map 20 at 14, 7.
+    picker.starts.splice(0);
+    const { onChange } = renderControl(fieldOf({ kind: 'place' }, { mapId: 20, x: 14, y: 7 }, 'Pick on the map'), { api: {} as MapEditorApi });
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Pick on the map' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick tile 4, 3 on map 5' }));
+
+    // Assert.
+    expect([ picker.starts, onChange.mock.calls ])
+      .toStrictEqual([ [ { mapId: 20, x: 14, y: 7 } ], [ [ { mapId: 5, x: 4, y: 3 } ] ] ]);
+  });
+
+  it('waits to pick while the selected events go to different places', () =>
+  {
+    // Arrange: nothing beyond the control, its events disagreeing.
+
+    // Act.
+    renderControl(fieldOf({ kind: 'place' }, null, 'Pick on the map'), { api: {} as MapEditorApi });
+
+    // Assert.
+    expect(screen.getByRole('button', { name: 'Pick on the map' }))
+      .toBeDisabled();
+  });
+
+  it('offers nothing to pick with, without a server to read maps from', () =>
+  {
+    // Arrange: nothing beyond the control, over no server.
+
+    // Act.
+    renderControl(fieldOf({ kind: 'place' }, { mapId: 20, x: 14, y: 7 }, 'Pick on the map'), { api: null });
+
+    // Assert.
+    expect(screen.queryByRole('button', { name: 'Pick on the map' }))
+      .toBeNull();
   });
 });

@@ -4,10 +4,12 @@ import type { MapEditorApi } from '../../core/api/MapEditorApi.ts';
 import { namedRows, type NamedRow } from '../../core/commandList/databaseNames.ts';
 import { mapLabel, mapOptions, type MapOption } from '../../core/commands/editors/mapOptions.ts';
 import type { GraphicValue, QuickOption, SharedField } from '../../core/eventKinds/quickFields.ts';
+import type { MapLocation } from '../../core/locations/LocationPicks.ts';
 import type { JsonValue } from '../../core/model/json.ts';
 import type { RmmzEventImage } from '../../core/model/rmmzTypes.ts';
 import { parseWholeNumber, type NumberLimits } from '../../core/properties/propertyInputs.ts';
 import { eventFrame, sheetKind } from '../../render/engine/characterFrames.ts';
+import { PickOnMapButton } from '../locationPicker/PickOnMapButton.tsx';
 import type { QuickResources } from './quickResources.ts';
 
 /**
@@ -305,6 +307,32 @@ const MapControl = (props: ControlProps) =>
 };
 
 /**
+ * Picks a map and a tile together by clicking the tile on the map, starting from the place the field holds. Several
+ * events going to different places have no one place to start from, so the button waits until they agree; without a
+ * server there are no maps to pick from, so there is no button at all.
+ * @param {ControlProps} props The field.
+ * @returns {React.JSX.Element | null} The button, or nothing without a server.
+ */
+const PlaceControl = (props: ControlProps) =>
+{
+  const { field, resources, onChange } = props;
+  if (resources.api === null)
+  {
+    return null;
+  }
+
+  // a field the selected events hold differently holds no place, which leaves the button waiting.
+  return (
+    <Box sx={{ minHeight: 40, display: 'flex', alignItems: 'center' }}>
+      <PickOnMapButton
+        start={field.value as unknown as MapLocation | null}
+        onPick={location => onChange(location as unknown as JsonValue)}
+      />
+    </Box>
+  );
+};
+
+/**
  * Shows the frame a page's picture draws, cut from its sheet the way the engine cuts it, shrunk to fit.
  * @param {{ api: MapEditorApi | null, image: RmmzEventImage | undefined }} props The server and the picture.
  * @returns {React.JSX.Element} The preview.
@@ -454,6 +482,8 @@ const QuickControl = (props: ControlProps) =>
       return <MapControl {...props}/>;
     case 'graphic':
       return <GraphicControl {...props}/>;
+    case 'place':
+      return <PlaceControl {...props}/>;
   }
 };
 

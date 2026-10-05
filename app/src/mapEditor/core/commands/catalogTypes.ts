@@ -202,6 +202,16 @@ type CommandBlock = {
 };
 
 /**
+ * Three of a command's fields that together name a place on a map, by their keys: the map, and the tile's x and y.
+ * The generated form offers to pick such a place by clicking it on the map, whenever all three show.
+ */
+type CommandPlace = {
+  readonly map: string;
+  readonly x: string;
+  readonly y: string;
+};
+
+/**
  * One command, described declaratively: its inputs, when each shows, the sentence its row reads as, where it
  * sits in the list, and the words that find it. A generated form covers most commands from this alone; the few
  * that need more register a hand-built editor against the entry's id.
@@ -236,6 +246,11 @@ type CommandCatalogEntry = {
    * Its inputs.
    */
   readonly fields: readonly CommandField[];
+
+  /**
+   * The places on a map among its inputs, each a map and a tile, which can be picked by clicking them on the map.
+   */
+  readonly places?: readonly CommandPlace[];
 
   /**
    * The sentence its row reads as: a template naming fields in braces ({@code 'Switch {switch} = {value}'}), or
@@ -291,6 +306,7 @@ export type {
   CommandCatalogEntry,
   CommandCategory,
   CommandField,
+  CommandPlace,
   CommandFieldKind,
   CommandParamPath,
   FieldCondition,

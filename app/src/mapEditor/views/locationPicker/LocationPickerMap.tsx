@@ -4,7 +4,8 @@ import type { MapDocument } from '../../core/model/MapDocument.ts';
 import type { MapCell } from '../../core/renderer/camera.ts';
 import { GAME_LOOK, NO_OVERLAY_STATE, type CellRect, type MapRenderer, type OverlayId } from '../../core/renderer/MapRenderer.ts';
 import { lookAtDocument } from '../../core/sync/lookAtDocument.ts';
-import { markerClassifierFor } from '../../render/MapView.tsx';
+import type { DrawState } from '../../render/ContextKeeper.ts';
+import { DrawNotice, markerClassifierFor } from '../../render/MapView.tsx';
 import { MapViewController } from '../../render/MapViewController.ts';
 import { PixiMapRenderer } from '../../render/PixiMapRenderer.ts';
 import { projectImagesFor } from '../../render/projectImages.ts';
@@ -101,7 +102,8 @@ const showPickerOverlay = (renderer: MapRenderer, hover: MapCell | null, picked:
  * ({@link lookAtDocument}), so a picker in an event window never counts as keeping a copy of a map it cannot save.
  * Each map opened centres on the focus tile when it has one on that map, and otherwise shows the whole map. Until the
  * map asked for has opened, the map drawn is the one before it, so the pointer picks nothing meanwhile; a map that
- * cannot be opened says why in place of the canvas.
+ * cannot be opened says why in place of the canvas, and so does a window that cannot draw one more map just now, as
+ * every map view does.
  * @param {LocationPickerMapProps} props The map, the tile picked, where to centre, and who hears the clicks.
  * @returns {React.JSX.Element} The map.
  */
@@ -115,6 +117,7 @@ const LocationPickerMap = (props: LocationPickerMapProps) =>
   const hoverRef = useRef<MapCell | null>(null);
   const pickedRef = useRef<CellRect | null>(null);
   const [ problem, setProblem ] = useState<string | null>(null);
+  const [ drawState, setDrawState ] = useState<DrawState>('hidden');
 
   // the pointer listeners outlive any one render, so they read the props as they stand now.
   const latest = useRef({ mapId, focus, onPick, onConfirm });
@@ -130,7 +133,9 @@ const LocationPickerMap = (props: LocationPickerMapProps) =>
       return undefined;
     }
 
+    // the window shares its GPU contexts among every map on screen, so the picker's map can wait its turn, and says so.
     const renderer = new PixiMapRenderer();
+    const stopDrawState = renderer.onDrawStateChange(setDrawState);
     renderer.mount(host);
     rendererRef.current = renderer;
     const controller = new MapViewController(renderer, { openDocument: key => lookAtDocument({ hub, sync }, key) }, projectImagesFor(api));
@@ -213,6 +218,7 @@ const LocationPickerMap = (props: LocationPickerMapProps) =>
       host.removeEventListener('pointerleave', onPointerLeave);
       host.removeEventListener('pointerdown', onPointerDown);
       host.removeEventListener('dblclick', onDoubleClick);
+      stopDrawState();
       stopModules();
       controller.close();
       controllerRef.current = null;
@@ -276,6 +282,7 @@ const LocationPickerMap = (props: LocationPickerMapProps) =>
         ref={hostRef}
         sx={{ position: 'absolute', inset: 0, overflow: 'hidden', backgroundColor: '#121212', cursor: 'crosshair' }}
       />
+      <DrawNotice state={drawState}/>
       {problem === null
         ? null
         : (

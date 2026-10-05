@@ -8,6 +8,7 @@ import {
   type TransferPlayerModel,
 } from '../commands/editors/transferPlayer.ts';
 import { SHOW_TEXT_CODE } from '../commands/editors/showText.ts';
+import type { MapLocation } from '../locations/LocationPicks.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
 import { isEmptyPage, readFlatUnits, readMessage } from './eventPages.ts';
@@ -141,7 +142,8 @@ const isTransfer = (event: RmmzMapEvent): boolean =>
 };
 
 /**
- * Builds the settings of one transfer: the map, the tile, the way the player faces and the fade.
+ * Builds the settings of one transfer: the map, the tile, the two picked together on the map, the way the player faces
+ * and the fade.
  * @param {RmmzMapEvent} event The event.
  * @param {TransferSpot} spot The transfer.
  * @param {number} ordinal Which of the event's transfers it is, from 0; the keys use it, so several transfers that
@@ -168,10 +170,12 @@ const transferFields = (event: RmmzMapEvent, spot: TransferSpot, ordinal: number
   } ];
 
   const coordinate = { kind: 'number', min: 0, max: MAX_COORDINATE } as const;
+  const place: MapLocation = { mapId: model.mapId, x: model.x, y: model.y };
   return [
     { key: `${key}.map`, label: 'Map', section, control: { kind: 'map' }, value: model.mapId, step: 'Change transfer destination', write: value => write({ mapId: value as number }) },
     { key: `${key}.x`, label: 'X', section, control: coordinate, value: model.x, step: 'Change transfer destination', write: value => write({ x: value as number }) },
     { key: `${key}.y`, label: 'Y', section, control: coordinate, value: model.y, step: 'Change transfer destination', write: value => write({ y: value as number }) },
+    { key: `${key}.place`, label: 'Pick on the map', section, control: { kind: 'place' }, value: place, step: 'Change transfer destination', write: value => write(value as unknown as MapLocation) },
     { key: `${key}.direction`, label: 'Facing', section, control: { kind: 'select', options: TRANSFER_DIRECTIONS }, value: model.direction, step: 'Change transfer facing', write: value => write({ direction: value as number }) },
     { key: `${key}.fade`, label: 'Fade', section, control: { kind: 'select', options: TRANSFER_FADES }, value: model.fade, step: 'Change transfer fade', write: value => write({ fade: value as number }) },
   ];

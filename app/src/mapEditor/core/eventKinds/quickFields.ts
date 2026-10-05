@@ -39,7 +39,8 @@ type QuickOption = {
  * - {@code text}: text, over several lines when {@code multiline};
  * - {@code row}: the id of an item, weapon or armor, picked by name;
  * - {@code map}: a map id, picked from the map tree;
- * - {@code graphic}: a page's picture, as {@link GraphicValue}.
+ * - {@code graphic}: a page's picture, as {@link GraphicValue};
+ * - {@code place}: a map and a tile on it, as {@code { mapId, x, y }}, picked by clicking the tile on the map.
  */
 type QuickControl =
   | { readonly kind: 'number'; readonly min: number; readonly max: number }
@@ -47,7 +48,8 @@ type QuickControl =
   | { readonly kind: 'text'; readonly multiline: boolean }
   | { readonly kind: 'row'; readonly list: 'item' | 'weapon' | 'armor' }
   | { readonly kind: 'map' }
-  | { readonly kind: 'graphic' };
+  | { readonly kind: 'graphic' }
+  | { readonly kind: 'place' };
 
 /**
  * What a graphic field holds: the character sheet and which of its characters, or a tile. Facing and frame are

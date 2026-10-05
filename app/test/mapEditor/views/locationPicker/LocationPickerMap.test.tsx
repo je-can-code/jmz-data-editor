@@ -20,8 +20,9 @@ import { buildMapJson } from '../../support/fixtures.ts';
 
 /**
  * What the stand-in renderers record and answer: every renderer made, with the maps and tilesets it was handed, where
- * it was asked to look, every overlay state, overlay set and marker classifier, every point it was asked about and
- * whether it was let go; and the tile every renderer finds under any point.
+ * it was asked to look, every overlay state, overlay set and marker classifier, every point it was asked about,
+ * whether it was let go, and a way to change where its drawing stands; and the tile every renderer finds under any
+ * point.
  */
 const stand = vi.hoisted(() => ({
   renderers: [] as {
@@ -33,6 +34,7 @@ const stand = vi.hoisted(() => ({
     classifiers: MarkerClassifier[];
     points: ScreenPoint[];
     destroyed: boolean;
+    announce: (state: string) => void;
   }[],
   cell: null as MapCell | null,
 }));
@@ -55,11 +57,23 @@ vi.mock('../../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       classifiers: [] as MarkerClassifier[],
       points: [] as ScreenPoint[],
       destroyed: false,
+      announce: (state: string) =>
+      {
+        this.drawListeners.forEach(listener => listener(state));
+      },
     };
+
+    drawListeners = new Set<(state: string) => void>();
 
     constructor()
     {
       stand.renderers.push(this.record);
+    }
+
+    onDrawStateChange(listener: (state: string) => void): () => void
+    {
+      this.drawListeners.add(listener);
+      return () => this.drawListeners.delete(listener);
     }
 
     mount(): void
@@ -555,6 +569,24 @@ describe('LocationPickerMap', () =>
     // Assert.
     expect([ said, screen.queryByText(/could not be opened/u), stand.renderers[0].documents ])
       .toStrictEqual([ true, null, [ 5 ] ]);
+  });
+
+  it('says why it cannot draw while the window has no room for one more map, and stops once it draws', async () =>
+  {
+    // Arrange.
+    const { services } = buildServices();
+    renderMap(services);
+    await landed();
+    const [ renderer ] = stand.renderers;
+
+    // Act: every context the window keeps is taken, then one comes free.
+    act(() => renderer.announce('waiting'));
+    const said = screen.queryByText('Too many maps are on screen at once to draw this one.') !== null;
+    act(() => renderer.announce('drawing'));
+
+    // Assert.
+    expect([ said, screen.queryByText(/Too many maps/u) ])
+      .toStrictEqual([ true, null ]);
   });
 
   it('says nothing about a map the picker moved on from before it failed', async () =>

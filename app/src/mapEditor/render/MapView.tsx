@@ -563,4 +563,4 @@ const selectedLabel = (count: number): string =>
  */
 const speedTimings: Record<string, number> = {};
 
-export { MapView, mapIdFromQuery, markerClassifierFor, speedTimings };
+export { DrawNotice, MapView, mapIdFromQuery, markerClassifierFor, speedTimings };
