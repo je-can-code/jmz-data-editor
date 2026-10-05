@@ -83,7 +83,7 @@ const startWords = (start: RouteStart, startAt: MapCell | null, characterId: num
       return `Starts at ${x}, ${y}, where the moves before it on this page leave it.`;
     case 'placed':
       return characterId < 0
-        ? `Starts at ${x}, ${y}, on the event running it, since the player sets it off from beside it.`
+        ? `Starts at ${x}, ${y}, on the tile of the event running it, the nearest the page can say to where the player stands.`
         : `Starts at ${x}, ${y}, where it stands on the map.`;
     case 'unknown':
       return 'Starts in the middle of the map, since nothing here says where it stands.';

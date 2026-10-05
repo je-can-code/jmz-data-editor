@@ -142,8 +142,9 @@ const moverOf = (characterId: number, setting: RouteSetting): number | null =>
 
 /**
  * Keeps track of where everyone a list moves stands as its commands are replayed, starting each at their placed spot
- * the first time anything asks. The player starts on the event running the list, since a player sets an event off
- * from beside it; on a common event there is no event, so the player's start is unknown.
+ * the first time anything asks. The player starts on the tile of the event running the list: a player sets an event
+ * off from beside it, so that tile is the nearest the page can say. On a common event there is no event, so the
+ * player's start is unknown.
  */
 class Positions
 {

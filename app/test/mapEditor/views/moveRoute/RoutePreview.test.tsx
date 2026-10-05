@@ -367,7 +367,7 @@ describe('RoutePreview', () =>
     const [ renderer ] = stand.renderers;
     const [ ghost ] = renderer.overlays[renderer.overlays.length - 1].ghostEvents;
     expect([ startLine(), ghost.image.characterName ])
-      .toStrictEqual([ 'Starts at 1, 1, on the event running it, since the player sets it off from beside it. Click the map to start it elsewhere.', '' ]);
+      .toStrictEqual([ 'Starts at 1, 1, on the tile of the event running it, the nearest the page can say to where the player stands. Click the map to start it elsewhere.', '' ]);
   });
 
   it('starts in the middle of the map when nothing says where the walker stands', async () =>
