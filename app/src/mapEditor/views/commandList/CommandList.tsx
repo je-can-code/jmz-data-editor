@@ -1150,6 +1150,7 @@ const CommandList = (props: CommandListProps) =>
         names={names}
         api={api}
         playSound={playSound}
+        whereabouts={{ documentKey, listPath: path, before: list.slice(0, index) }}
       />
     );
   };

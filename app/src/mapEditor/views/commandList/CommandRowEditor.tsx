@@ -7,6 +7,7 @@ import type {
   CommandEditor,
   CommandEditorProps,
   CommandEditorRegistry,
+  CommandWhereabouts,
 } from '../../core/commands/CommandEditorRegistry.ts';
 import type { CommandDraft, ListOrigins } from '../../core/commands/fieldValues.ts';
 import type { DatabaseNamesJson } from '../../core/commandList/databaseNames.ts';
@@ -50,6 +51,11 @@ type CommandRowEditorProps = {
   readonly names: DatabaseNamesJson | null;
   readonly api: MapEditorApi | null;
   readonly playSound: SoundPlayer;
+
+  /**
+   * Where the command sits in its list, handed on to a hand-built editor that reads it; absent outside a list.
+   */
+  readonly whereabouts?: CommandWhereabouts;
 };
 
 /**
@@ -73,7 +79,7 @@ const HandBuiltHost = (props: CommandEditorProps & { readonly editor: CommandEdi
  */
 const CommandRowEditor = (props: CommandRowEditorProps) =>
 {
-  const { entry, draft, onChange, block, elseBranch, registry } = props;
+  const { entry, draft, onChange, block, elseBranch, registry, whereabouts } = props;
   const [ asJson, setAsJson ] = useState(false);
   const kind = chooseRowEditor(registry, entry, draft);
   const handBuilt = registry.editorFor(entry);
@@ -96,6 +102,7 @@ const CommandRowEditor = (props: CommandRowEditorProps) =>
         command={draft.command}
         continuation={draft.continuation}
         block={block}
+        whereabouts={whereabouts}
         onChange={(command, continuation) => onChange({ command, continuation })}
       />
     );

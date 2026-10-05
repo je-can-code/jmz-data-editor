@@ -335,6 +335,27 @@ describe('CommandList', () =>
       .toStrictEqual([ 'block of 5', [ cmd(111, 0, [ 0, 2, 0 ]), cmd(0, 1), cmd(412, 0) ], [ 'Edit Conditional Branch' ] ]);
   });
 
+  it('tells an editor where its command sits: the document, the list, and every command before it', async () =>
+  {
+    // Arrange: a stand-in for the Conditional Branch editor, noting where it was told its command sits.
+    const registry = new CommandEditorRegistry();
+    const told: unknown[] = [];
+    const Stub = (props: CommandEditorProps) =>
+    {
+      told.push(props.whereabouts);
+      return null;
+    };
+    registry.registerForCode(111, Stub);
+    const { hub } = await renderList({ registry });
+
+    // Act.
+    fireEvent.click(screen.getByText('If switch #0001 Door Open is ON'));
+
+    // Assert: the branch is the third command, so the two before it.
+    expect(told.at(-1))
+      .toStrictEqual({ documentKey: 'map:1', listPath: PATH, before: commandsOf(hub).slice(0, 2) });
+  });
+
   it('keeps a merged Show Choices open on its first command when its editor reshapes the whole run', async () =>
   {
     // Arrange: two Show Choices back to back, opened from the second, whose editor folds them into one.

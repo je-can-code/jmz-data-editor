@@ -24,7 +24,25 @@ import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEd
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { SoundPlayerContext } from '../../../../src/mapEditor/views/commandList/commandListResources.ts';
 import { EventWindowView } from '../../../../src/mapEditor/views/EventWindowView.tsx';
+import type { RouteSetting } from '../../../../src/mapEditor/core/moveRoutes/routeStart.ts';
+import type { RoutePreviewProps } from '../../../../src/mapEditor/views/moveRoute/RoutePreview.tsx';
 import { eventWindowMap, heldEvent, markedPage, TARGET } from '../../support/eventWindowFixtures.ts';
+
+/**
+ * Where the stand-in route preview was last told a page's own route runs.
+ */
+const preview = vi.hoisted(() => ({
+  setting: null as RouteSetting | null,
+}));
+
+// the route preview is proved in its own tests; here it only notes where it was told the route runs.
+vi.mock('../../../../src/mapEditor/views/moveRoute/RoutePreview.tsx', () => ({
+  RoutePreview: (props: RoutePreviewProps) =>
+  {
+    preview.setting = props.setting;
+    return null;
+  },
+}));
 
 /*
  * The event window is the full editor of one event, in its own window. It owes the author the event's map first (another
@@ -272,6 +290,22 @@ describe('EventWindowView', () =>
     const [ page ] = heldEvent(hub).pages;
     expect([ page.through, page.priorityType, page.trigger, stepsOf(hub) ])
       .toStrictEqual([ true, 2, 4, [ 'Turn on through (page 1)', 'Change priority (page 1)', 'Change trigger (page 1)' ] ]);
+  });
+
+  it('shows a page\'s own route on the event\'s map, walked by the event from the page shown', () =>
+  {
+    // Arrange: the second page shown, its movement made a route of its own.
+    preview.setting = null;
+    renderWindow();
+    fireEvent.click(screen.getByRole('tab', { name: 'Page 2' }));
+
+    // Act.
+    fireEvent.mouseDown(screen.getByLabelText('Type'));
+    fireEvent.click(screen.getByRole('option', { name: 'Custom' }));
+
+    // Assert.
+    expect(preview.setting)
+      .toStrictEqual({ mapId: TARGET.mapId, page: { eventId: TARGET.eventId, pageIndex: 1 }, before: [], characterId: 0 });
   });
 
   it('mounts the graphic picker and the movement settings on the page, each change a step of the page shown', () =>

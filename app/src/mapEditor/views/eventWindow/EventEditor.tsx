@@ -319,6 +319,7 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
           <Section title={'Movement'}>
             <MovementSettings
               value={parseEventMovement(page)}
+              setting={{ mapId: target.mapId, page: { eventId: target.eventId, pageIndex }, before: [], characterId: 0 }}
               onChange={(movement: EventMovementFields) => runOnPage(at => setPageMovement(hub, target, at, movement))}
             />
           </Section>

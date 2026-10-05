@@ -331,18 +331,19 @@ describe('LocationPickerMap', () =>
       .toStrictEqual([ 2, true ]);
   });
 
-  it('draws nothing without a project server', async () =>
+  it('draws nothing without a project server, and picks nothing there', async () =>
   {
     // Arrange.
     const { services } = buildServices(new Map(), { api: null });
 
     // Act.
-    renderMap(services);
+    const { onPick, host } = renderMap(services);
     await landed();
+    fireEvent.pointerDown(host, { button: 0 });
 
-    // Assert: no renderer was made, and the canvas's host stays empty.
-    expect([ stand.renderers.length, screen.getByTestId('location-picker-map').childElementCount ])
-      .toStrictEqual([ 0, 0 ]);
+    // Assert: no renderer was made, the canvas's host stays empty, and the click picked nothing.
+    expect([ stand.renderers.length, host.childElementCount, onPick.mock.calls ])
+      .toStrictEqual([ 0, 0, [] ]);
   });
 
   it('shows the whole map when the focus tile is not on it', async () =>
