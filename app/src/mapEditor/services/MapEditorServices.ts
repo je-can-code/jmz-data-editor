@@ -8,6 +8,7 @@ import { CommandCatalog } from '../core/commands/CommandCatalog.ts';
 import { CommandEditorRegistry } from '../core/commands/CommandEditorRegistry.ts';
 import type { PluginHeaderStore } from '../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { DocumentHub } from '../core/history/DocumentHub.ts';
+import type { LocationPicks } from '../core/locations/LocationPicks.ts';
 import type { DocumentKey } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
@@ -71,6 +72,12 @@ type MapEditorServices = {
    * command they declare, so a list redraws when they change.
    */
   readonly pluginHeaders: PluginHeaderStore;
+
+  /**
+   * The asks to pick a place on a map, such as the transfer editor's "pick on the map", which this window's location
+   * picker shows and settles.
+   */
+  readonly locationPicks: LocationPicks;
 
   /**
    * The event kinds and plugin modules; the core's kinds (chests, transfers, dialogue, decor) are registered from
@@ -258,6 +265,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     catalog,
     commandEditors,
     pluginHeaders: commandEditing.headers,
+    locationPicks: commandEditing.locationPicks,
     modules,
     paints,
     loadCommandResources: commandEditing.load,

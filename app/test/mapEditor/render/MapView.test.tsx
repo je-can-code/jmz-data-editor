@@ -10,6 +10,7 @@ import { apiDocumentStore } from '../../../src/mapEditor/core/api/apiDocumentSto
 import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { EventSelection } from '../../../src/mapEditor/core/events/EventSelection.ts';
 import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
+import { LocationPicks } from '../../../src/mapEditor/core/locations/LocationPicks.ts';
 import type { DocumentKey } from '../../../src/mapEditor/core/model/documentKeys.ts';
 import { createEventPage, createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
@@ -247,7 +248,8 @@ describe('MapView', () =>
     const hub = new DocumentHub({ clientId: 'window-a' });
     const openDocument = vi.fn(() => Promise.reject(new Error('no documents in this test')));
     const paints = new WindowPaints(window);
-    return { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
+    const locationPicks = new LocationPicks();
+    return { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
   };
 
   /**

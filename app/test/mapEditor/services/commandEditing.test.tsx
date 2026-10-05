@@ -8,7 +8,7 @@ import '@testing-library/jest-dom/vitest';
 import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import type { CommandCatalogEntry } from '../../../src/mapEditor/core/commands/catalogTypes.ts';
 import { CommandCatalog } from '../../../src/mapEditor/core/commands/CommandCatalog.ts';
-import { CommandEditorRegistry } from '../../../src/mapEditor/core/commands/CommandEditorRegistry.ts';
+import { CommandEditorRegistry, type CommandEditor } from '../../../src/mapEditor/core/commands/CommandEditorRegistry.ts';
 import { registerBuiltInCommands } from '../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import type { DatabaseNamesJson } from '../../../src/mapEditor/core/commandList/databaseNames.ts';
 import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
@@ -31,6 +31,11 @@ import { buildMapJson } from '../support/fixtures.ts';
  * already in place, and a project whose headers cannot be read still loses nothing but their plugin commands'
  * forms. In the list, Show Choices and Conditional Branch open in their own editors with the whole block, a merged
  * Show Choices run as one list, and a script arrives with its lines.
+ *
+ * The transfer editor's "pick on the map" asks through the window's location asks, starting from where the transfer
+ * lands now, and the place picked becomes the transfer's map and tile, with how it names its place, the facing and
+ * the fade left as they were; giving up changes nothing. Without a server there are no maps to pick from, so the
+ * editor offers no picker at all.
  */
 describe('wireCommandEditing', () =>
 {
@@ -353,6 +358,87 @@ describe('wireCommandEditing', () =>
       // Assert.
       expect((screen.getByLabelText('Script') as HTMLTextAreaElement).value)
         .toBe('a();\nb();');
+    });
+  });
+
+  describe('picking a transfer\'s landing spot', () =>
+  {
+    /**
+     * A transfer to Room of Sacrifice, landing on 22, 13 facing down, with the screen fading to black.
+     */
+    const TRANSFER = cmd(201, 0, [ 0, 322, 22, 13, 2, 0 ]);
+
+    /**
+     * Renders the transfer's editor as a window's wiring binds it, over a server or none, and lets the map tree arrive.
+     * @param {boolean} served Whether the window has a server.
+     * @returns {Promise<object>} The wiring, and who hears the transfer change.
+     */
+    const renderTransfer = async (served: boolean) =>
+    {
+      const { api } = buildApi();
+      const withMaps = { ...api, loadMapInfos: async () => [ null ] } as unknown as MapEditorApi;
+      const { catalog, registry } = buildParts();
+      const editing = wireCommandEditing(served ? withMaps : null, catalog, registry);
+      const entry = catalog.resolve(TRANSFER);
+      const Editor = registry.editorFor(entry) as CommandEditor;
+      const onChange = vi.fn();
+      render(<Editor entry={entry} command={TRANSFER} continuation={[]} onChange={onChange}/>);
+      await act(async () =>
+      {
+        await new Promise(resolve =>
+        {
+          setTimeout(resolve, 0);
+        });
+      });
+      return { editing, onChange };
+    };
+
+    it('asks from where the transfer lands now, and writes the place picked as its map and tile', async () =>
+    {
+      // Arrange.
+      const { editing, onChange } = await renderTransfer(true);
+
+      // Act.
+      fireEvent.click(screen.getByRole('button', { name: 'Pick on the map' }));
+      const asked = editing.locationPicks.current();
+      await act(async () =>
+      {
+        editing.locationPicks.settle(1, { mapId: 5, x: 4, y: 2 });
+      });
+
+      // Assert: the map and tile change; how it names its place, the facing and the fade stay.
+      expect([ asked, onChange.mock.calls ])
+        .toStrictEqual([ { id: 1, start: { mapId: 322, x: 22, y: 13 } }, [ [ cmd(201, 0, [ 0, 5, 4, 2, 2, 0 ]), [] ] ] ]);
+    });
+
+    it('writes nothing when the author gives up', async () =>
+    {
+      // Arrange: the picker was asked for.
+      const { editing, onChange } = await renderTransfer(true);
+      fireEvent.click(screen.getByRole('button', { name: 'Pick on the map' }));
+      const asked = editing.locationPicks.current() !== null;
+
+      // Act.
+      await act(async () =>
+      {
+        editing.locationPicks.settle(1, null);
+      });
+
+      // Assert.
+      expect([ asked, onChange.mock.calls ])
+        .toStrictEqual([ true, [] ]);
+    });
+
+    it('offers no picker without a server', async () =>
+    {
+      // Arrange: nothing beyond the editor, rendered over no server.
+
+      // Act.
+      await renderTransfer(false);
+
+      // Assert: the transfer's tile shows, with no way to pick it on a map.
+      expect([ (screen.getByLabelText('X') as HTMLInputElement).value, screen.queryByRole('button', { name: 'Pick on the map' }) ])
+        .toStrictEqual([ '22', null ]);
     });
   });
 

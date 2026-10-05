@@ -5,6 +5,7 @@ import { useMapEditorServices } from './services/MapEditorServicesContext.tsx';
 import { CommonEventsView } from './views/commonEvents/CommonEventsView.tsx';
 import { ConflictBanner } from './views/ConflictBanner.tsx';
 import { EventWindowView } from './views/EventWindowView.tsx';
+import { LocationPickerHost } from './views/locationPicker/LocationPickerHost.tsx';
 import type { MapEditorView } from './views/mapEditorViews.ts';
 import { MapWithQuickPanel, wantsQuickPanel } from './views/quickPanel/MapWithQuickPanel.tsx';
 import { Workspace } from './workspace/Workspace.tsx';
@@ -45,7 +46,8 @@ const WindowContent = (props: { readonly view: MapEditorView }) =>
 };
 
 /**
- * The map editor's root: shows whatever this window is for, with any document conflict above it.
+ * The map editor's root: shows whatever this window is for, with any document conflict above it, and the location
+ * picker whenever an editor in the window asks for a place on a map.
  * @returns {React.JSX.Element} The window's content.
  */
 const MapEditorApp = () =>
@@ -56,6 +58,7 @@ const MapEditorApp = () =>
     <>
       <WindowContent view={view}/>
       <ConflictBanner/>
+      <LocationPickerHost/>
     </>
   );
 };

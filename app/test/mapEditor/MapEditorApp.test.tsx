@@ -11,6 +11,7 @@ import { CommandEditorRegistry } from '../../src/mapEditor/core/commands/Command
 import { registerBuiltInCommands } from '../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { PluginHeaderStore } from '../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { DocumentHub } from '../../src/mapEditor/core/history/DocumentHub.ts';
+import { LocationPicks } from '../../src/mapEditor/core/locations/LocationPicks.ts';
 import { MapEditorApp } from '../../src/mapEditor/MapEditorApp.tsx';
 import type { MapEditorServices } from '../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider, useMapEditorServices } from '../../src/mapEditor/services/MapEditorServicesContext.tsx';
@@ -31,13 +32,16 @@ vi.mock('../../src/mapEditor/workspace/Workspace.tsx', () => ({
  * Above every view it owes the author every conflict, visibly and at once: a document whose two copies disagree
  * (the file on disk and this window's, or another window's and this one's) is shown with both choices, and
  * nothing is settled until one is picked. A removed file offers nothing to take.
+ *
+ * And whichever view it shows, it owes every editor in the window a picker for a place on a map, shown the moment
+ * an editor asks for one.
  */
 describe('MapEditorApp', () =>
 {
   /**
    * Renders the app for a view, over a real hub and a shell whose browser fallback is a spy.
    * @param {MapEditorView} view What the window shows.
-   * @returns {object} The window opener, the hub and the conflict settler.
+   * @returns {object} The window opener, the hub, the conflict settler and the window's asks for a place on a map.
    */
   const renderApp = (view: MapEditorView) =>
   {
@@ -49,6 +53,7 @@ describe('MapEditorApp', () =>
     const resolveConflict = vi.fn(() => true);
     const catalog = new CommandCatalog();
     registerBuiltInCommands(catalog);
+    const locationPicks = new LocationPicks();
 
     // an event window's command list reads the catalog and editors; the window holds its map already, so it opens nothing.
     const services = {
@@ -60,6 +65,7 @@ describe('MapEditorApp', () =>
       commandEditors: new CommandEditorRegistry(),
       api: null,
       pluginHeaders: new PluginHeaderStore(),
+      locationPicks,
       loadCommandResources: async () => undefined,
     } as unknown as MapEditorServices;
     render(
@@ -67,7 +73,7 @@ describe('MapEditorApp', () =>
         <MapEditorApp/>
       </MapEditorServicesProvider>
     );
-    return { openWindow, hub, resolveConflict };
+    return { openWindow, hub, resolveConflict, locationPicks };
   };
 
   it('shows the workspace for a workspace view, and no conflict', () =>
@@ -108,6 +114,7 @@ describe('MapEditorApp', () =>
       commandEditors: new CommandEditorRegistry(),
       api: null,
       pluginHeaders: new PluginHeaderStore(),
+      locationPicks: new LocationPicks(),
       loadCommandResources: async () => undefined,
       resolveConflict: vi.fn(),
     } as unknown as MapEditorServices;
@@ -122,6 +129,23 @@ describe('MapEditorApp', () =>
     // Assert.
     expect([ screen.queryByText('Wait 30 frames') !== null, screen.queryByTestId('map-editor-workspace') ])
       .toStrictEqual([ true, null ]);
+  });
+
+  it('shows the location picker over the view the moment an editor in the window asks for a place on a map', () =>
+  {
+    // Arrange: an event window, which is where the transfer editor asks from.
+    const { locationPicks } = renderApp({ kind: 'event', mapId: 1, eventId: 3 });
+    const before = screen.queryByRole('dialog');
+
+    // Act.
+    act(() =>
+    {
+      locationPicks.pick({ mapId: 2, x: 1, y: 0 }).catch(() => undefined);
+    });
+
+    // Assert: the picker shows, starting where the ask starts, over the event window.
+    expect([ before, screen.getByRole('dialog', { name: 'Choose the destination' }) !== null, screen.getByText('Lands on 1, 0') !== null, screen.getByLabelText('Name') ])
+      .toStrictEqual([ null, true, true, expect.objectContaining({ value: 'Chest' }) ]);
   });
 
   it('shows a conflict with another window the moment it is flagged, and settles it only as the author picks', () =>

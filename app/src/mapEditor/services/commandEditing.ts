@@ -5,6 +5,7 @@ import { loadPluginHeaders, type PluginHeaders } from '../core/commands/pluginHe
 import { pluginHeaderEntries } from '../core/commands/pluginHeaders/pluginHeaderEntries.ts';
 import { PluginHeaderStore } from '../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { namedRows, type DatabaseNamesJson } from '../core/commandList/databaseNames.ts';
+import { LocationPicks } from '../core/locations/LocationPicks.ts';
 import type { HandBuiltEditorEnvironment } from '../views/commandEditors/editorEnvironment.tsx';
 import { registerHandBuiltEditors } from '../views/commandEditors/registerHandBuiltEditors.tsx';
 import { commandListResourcesOf } from '../views/commandList/commandListResources.ts';
@@ -21,9 +22,15 @@ type CommandEditing = {
   readonly headers: PluginHeaderStore;
 
   /**
-   * What the hand-built editors were bound to: the server, the headers above, and the database names once read.
+   * What the hand-built editors were bound to: the server, the headers above, the database names once read, and,
+   * with a server to read maps from, the picker for a transfer's landing spot.
    */
   readonly environment: HandBuiltEditorEnvironment;
+
+  /**
+   * The asks the editors make to pick a place on a map, which the window's picker shows and settles.
+   */
+  readonly locationPicks: LocationPicks;
 
   /**
    * Reads the plugin headers and the database names from the server, once however often it is asked. Never
@@ -36,22 +43,31 @@ type CommandEditing = {
 
 /**
  * Wires the two halves of command editing together for one window: the eight hand-built editors join the
- * registry, bound to the server, the plugin headers and the database names, and the commands the plugin headers
- * declare join the catalog under their {@code Plugin:} names.
+ * registry, bound to the server, the plugin headers, the database names and the window's location picker, and the
+ * commands the plugin headers declare join the catalog under their {@code Plugin:} names.
  *
  * Nothing is read until {@link CommandEditing.load}, so a window that never shows a command list never fetches a
  * plugin's source. When it does, the names are in place and the catalog holds the plugin entries before the
  * header store tells anyone, so whatever redraws on the headers arriving finds everything else there too.
+ *
+ * The transfer editor's "pick on the map" asks through {@link CommandEditing.locationPicks}, which the window's picker
+ * answers. Without a server there are no maps to pick from, so the editors are handed no picker and offer none.
  * @param {MapEditorApi | null} api The server, or null when the window has none.
  * @param {CommandCatalog} catalog The window's catalog.
  * @param {CommandEditorRegistry} registry The window's hand-built editor registry.
- * @returns {CommandEditing} The shared headers, and how to read them.
+ * @returns {CommandEditing} The shared headers, the location asks, and how to read the headers.
  */
 const wireCommandEditing = (api: MapEditorApi | null, catalog: CommandCatalog, registry: CommandEditorRegistry): CommandEditing =>
 {
   const headers = new PluginHeaderStore();
+  const locationPicks = new LocationPicks();
   let databaseNames: DatabaseNamesJson | null = null;
-  const environment: HandBuiltEditorEnvironment = { api, headers, names: kind => namedRows(databaseNames, kind) };
+  const environment: HandBuiltEditorEnvironment = {
+    api,
+    headers,
+    names: kind => namedRows(databaseNames, kind),
+    pickLocation: api === null ? undefined : locationPicks.pick,
+  };
   registerHandBuiltEditors(registry, environment);
 
   /**
@@ -79,6 +95,7 @@ const wireCommandEditing = (api: MapEditorApi | null, catalog: CommandCatalog, r
   return {
     headers,
     environment,
+    locationPicks,
     load: () =>
     {
       if (api === null)

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useSyncExternalS
 import type { MapEditorApi } from '../../core/api/MapEditorApi.ts';
 import type { CommandFieldKind } from '../../core/commands/catalogTypes.ts';
 import { PluginHeaderStore, type PluginHeaderLibrary } from '../../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
+import type { LocationPicker } from '../../core/locations/LocationPicks.ts';
 import type { RmmzMapInfo } from '../../core/model/rmmzTypes.ts';
 
 /**
@@ -17,21 +18,6 @@ type NamedOption = {
  * one, ids are typed as numbers.
  */
 type DatabaseNames = (kind: CommandFieldKind) => readonly NamedOption[];
-
-/**
- * A place on a map: which map, and the tile.
- */
-type MapLocation = {
-  readonly mapId: number;
-  readonly x: number;
-  readonly y: number;
-};
-
-/**
- * Lets the author pick a place by clicking it on a map, starting from where a transfer goes now. It settles on
- * the place picked, or null when the author gives up.
- */
-type LocationPicker = (current: MapLocation) => Promise<MapLocation | null>;
 
 /**
  * What the hand-built editors run on besides the command they edit: the server (faces, maps and plugin sources
@@ -54,7 +40,8 @@ type HandBuiltEditorEnvironment = {
   readonly names?: DatabaseNames;
 
   /**
-   * Picks a transfer's landing spot on a map; the transfer editor offers it only when present.
+   * Picks a transfer's landing spot on a map; the transfer editor offers it only when present, which it is in every
+   * window with a project server to read maps from.
    */
   readonly pickLocation?: LocationPicker;
 };
@@ -176,4 +163,4 @@ export {
   useMapInfos,
   usePluginHeaders,
 };
-export type { DatabaseNames, HandBuiltEditorEnvironment, LocationPicker, MapLocation, NamedOption };
+export type { DatabaseNames, HandBuiltEditorEnvironment, NamedOption };
