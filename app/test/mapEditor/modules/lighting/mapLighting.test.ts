@@ -53,7 +53,7 @@ describe('mapLighting', () =>
       const field = mapNoted('<weather:rain>');
 
       // Act.
-      const model = mapLightingSource(DEFAULT, true)(field);
+      const model = mapLightingSource(DEFAULT, true, false)(field);
 
       // Assert.
       expect([ model.note, model.fields.map(shown) ])
@@ -72,7 +72,7 @@ describe('mapLighting', () =>
       const cave = mapNoted('<noToneChange>\n<ambient:[85]>');
 
       // Act.
-      const model = mapLightingSource(DEFAULT, true)(cave);
+      const model = mapLightingSource(DEFAULT, true, false)(cave);
 
       // Assert.
       expect(model.fields.map(shown))
@@ -96,7 +96,7 @@ describe('mapLighting', () =>
       const grotto = mapNoted('<ambient:[85, #0A2A2A]>');
 
       // Act.
-      const [ , color ] = mapLightingSource(DEFAULT, true)(grotto).fields;
+      const [ , color ] = mapLightingSource(DEFAULT, true, false)(grotto).fields;
 
       // Assert.
       expect(shown(color))
@@ -115,7 +115,7 @@ describe('mapLighting', () =>
       const map = mapNoted('<ambient:[60, teal]>');
 
       // Act.
-      const [ , color ] = mapLightingSource(DEFAULT, true)(map).fields;
+      const [ , color ] = mapLightingSource(DEFAULT, true, false)(map).fields;
 
       // Assert.
       expect([ color.value, color.hint, color.control ])
@@ -126,7 +126,7 @@ describe('mapLighting', () =>
     {
       // Arrange: a cave with no sky, its settings with J-Weather off and on.
       const cave = mapNoted('<noToneChange>\n<ambient:[85]>');
-      const sources = [ mapLightingSource(DEFAULT, true), mapLightingSource(DEFAULT, true, true) ];
+      const sources = [ mapLightingSource(DEFAULT, true, false), mapLightingSource(DEFAULT, true, true) ];
 
       // Act.
       const skies = sources.map(source => source(cave).fields.find(field => field.key === 'lighting.sky') as MapPropertyField);
@@ -150,7 +150,7 @@ describe('mapLighting', () =>
       const cave = mapNoted('<noToneChange>\n<ambient:[85]>');
 
       // Act.
-      const model = mapLightingSource(DEFAULT, false)(cave);
+      const model = mapLightingSource(DEFAULT, false, false)(cave);
 
       // Assert.
       expect(model.fields.map(field => field.key))
@@ -163,7 +163,7 @@ describe('mapLighting', () =>
       const map = mapNoted('<ambient:[50, #0a2a2a, 5]>');
 
       // Act.
-      const model = mapLightingSource(DEFAULT, false)(map);
+      const model = mapLightingSource(DEFAULT, false, false)(map);
 
       // Assert.
       expect([ model.note, model.fields.map(field => [ field.key, field.value ]) ])
@@ -179,7 +179,7 @@ describe('mapLighting', () =>
       const map = mapNoted('<ambient:[30]>\n<ambient:[70]>');
 
       // Act.
-      const model = mapLightingSource(DEFAULT, false)(map);
+      const model = mapLightingSource(DEFAULT, false, false)(map);
 
       // Assert.
       expect([ model.note, model.fields[0].value ])
@@ -192,7 +192,7 @@ describe('mapLighting', () =>
       const map = mapNoted('<ambient:[30]>\n<ambient:[..]>');
 
       // Act.
-      const model = mapLightingSource(DEFAULT, false)(map);
+      const model = mapLightingSource(DEFAULT, false, false)(map);
 
       // Assert.
       expect(model.note)
@@ -204,7 +204,7 @@ describe('mapLighting', () =>
     {
       // Arrange.
       const cave = mapNoted('<noWeather>\n<noToneChange>\n<ambient:[85]>');
-      const [ darkness, color, sky ] = mapLightingSource(DEFAULT, true)(cave).fields;
+      const [ darkness, color, sky ] = mapLightingSource(DEFAULT, true, false)(cave).fields;
 
       // Act.
       const written = [ darkness.write(60), color.write('#0a2a2a'), sky.write(true) ];

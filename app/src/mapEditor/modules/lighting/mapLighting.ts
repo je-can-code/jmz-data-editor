@@ -6,17 +6,6 @@ import { isHexColor } from './lightTags.ts';
 import { skyFollowsClock, withSkyFollowingClock } from './skyTag.ts';
 
 /**
- * J-Lighting-Time's file name, as js/plugins.js lists it: the plugin that makes a map's sky follow the clock.
- */
-const LIGHTING_TIME_PLUGIN = 'J-Lighting-Time';
-
-/**
- * J-Weather's file name, as js/plugins.js lists it: the plugin that reads the same sky setting to keep the sky's weather
- * off a map without a sky (MapWeatherResolver#declarationFor).
- */
-const WEATHER_PLUGIN = 'J-Weather';
-
-/**
  * The id of the section J-Lighting's module adds to Map Properties.
  */
 const MAP_LIGHTING_ID = 'lighting.map';
@@ -114,11 +103,10 @@ const colorHint = (darkness: MapDarkness): { hint?: string } =>
  * each change writes the note in place, so every other tag and every other word of it stays as written.
  * @param {string} defaultColor The project's colour of the dark, for a colour the game cannot use.
  * @param {boolean} sky Whether J-Lighting-Time is on, which is what gives a map a sky.
- * @param {boolean} weather Whether J-Weather is on, which keeps the sky's weather off a map without a sky; left out, it
- * is taken as off.
+ * @param {boolean} weather Whether J-Weather is on, which keeps the sky's weather off a map without a sky.
  * @returns {MapPropertiesSource} The section's settings, for each map.
  */
-const mapLightingSource = (defaultColor: string, sky: boolean, weather = false): MapPropertiesSource =>
+const mapLightingSource = (defaultColor: string, sky: boolean, weather: boolean): MapPropertiesSource =>
 {
   // the sky setting names the weather too while J-Weather reads it, so unticking it never takes the weather by surprise.
   const skyWords = weather
@@ -171,4 +159,4 @@ const mapLightingSource = (defaultColor: string, sky: boolean, weather = false):
   };
 };
 
-export { DARKNESS_CONTROL, LIGHTING_TIME_PLUGIN, MAP_LIGHTING_ID, mapLightingSource, PLAIN_BLACK_HINT, SKY_HINT, WEATHER_PLUGIN };
+export { DARKNESS_CONTROL, MAP_LIGHTING_ID, mapLightingSource, PLAIN_BLACK_HINT, SKY_HINT };

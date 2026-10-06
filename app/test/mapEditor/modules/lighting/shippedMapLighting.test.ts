@@ -61,9 +61,9 @@ const shipped: ShippedNote[] = project === null
 const DEFAULT = ambientColorFrom(project === null ? null : readDataFile(project, 'config.lighting.json') as JsonValue);
 
 /**
- * The settings, as they show with J-Lighting-Time on, which is how the game ships.
+ * The settings, as they show with J-Lighting-Time and J-Weather on, which is how the game ships.
  */
-const source = mapLightingSource(DEFAULT, true);
+const source = mapLightingSource(DEFAULT, true, true);
 
 /**
  * The sky tag, as every shipped map writes it.

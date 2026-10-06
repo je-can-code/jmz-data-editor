@@ -31,9 +31,9 @@ import { buildMapJson } from '../../support/fixtures.ts';
 describe('ModulePropertiesSection', () =>
 {
   /**
-   * J-Lighting's section, its sky offered, as Chef Adventure runs it.
+   * J-Lighting's section, its sky offered as it is while J-Lighting-Time is on.
    */
-  const LIGHTING: MapPropertiesSection = { id: 'lighting.map', title: 'Lighting', source: mapLightingSource('#000000', true) };
+  const LIGHTING: MapPropertiesSection = { id: 'lighting.map', title: 'Lighting', source: mapLightingSource('#000000', true, false) };
 
   /**
    * Renders a section over a hub holding map 1 with the given note.

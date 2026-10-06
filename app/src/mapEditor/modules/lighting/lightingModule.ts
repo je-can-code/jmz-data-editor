@@ -29,6 +29,13 @@ const LIGHTING_PLUGIN = 'J-Lighting';
 const LIGHTING_TIME_PLUGIN = 'J-Lighting-Time';
 
 /**
+ * J-Weather's file name, as js/plugins.js lists it: the plugin bringing the sky's weather to a map, which reads the same
+ * tag J-Lighting-Time does to know a map has no sky (MapWeatherResolver.declarationFor), and keeps the sky's weather off
+ * such a map.
+ */
+const WEATHER_PLUGIN = 'J-Weather';
+
+/**
  * The id J-Lighting's module registers lights under.
  */
 const LIGHT_KIND_ID = 'lighting.light';
@@ -117,7 +124,8 @@ const registerSky = (contributions: ModuleContributions, context: ModuleContext)
  * is said over every map view, and the sky then stays as it is at every hour.
  *
  * Map Properties gains a Lighting section setting the map's own darkness and its colour, and, while J-Lighting-Time is
- * on, whether the map's sky follows the clock, each written into the map's note in place.
+ * on, whether the map's sky follows the clock, each written into the map's note in place. J-Weather reads the same sky
+ * tag to keep the sky's weather off a map with no sky, so while it is on too the sky setting says so.
  */
 const lightingModule: PluginModule = {
   id: 'lighting',
@@ -167,11 +175,14 @@ const lightingModule: PluginModule = {
       create: stage => new LightRings(stage, defaults, choosePage),
     });
 
-    // a map's own darkness, and its sky once J-Lighting-Time gives maps one, are set in Map Properties.
+    // a map's own darkness, and its sky once J-Lighting-Time gives maps one, are set in Map Properties, the sky worded
+    // for the weather too while J-Weather reads the same tag.
+    const sky = context.plugins.has(LIGHTING_TIME_PLUGIN);
+    const weather = context.plugins.has(WEATHER_PLUGIN);
     contributions.mapProperties({
       id: MAP_LIGHTING_ID,
       title: 'Lighting',
-      source: mapLightingSource(ambientColorFrom(config), context.plugins.has(LIGHTING_TIME_PLUGIN)),
+      source: mapLightingSource(ambientColorFrom(config), sky, weather),
     });
   },
 };

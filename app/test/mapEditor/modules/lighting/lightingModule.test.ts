@@ -85,8 +85,9 @@ vi.mock('pixi.js', async importOriginal =>
  * is never asked for its curve. A curve that cannot be read is said over the map, the clock still offered, the sky still.
  *
  * It adds a Lighting section to Map Properties too (its own tests hold what each setting reads and writes), which offers
- * whether the map's sky follows the clock only while J-Lighting-Time is enabled as well, and shows a colour of the dark
- * the note names but the game cannot use as the project's.
+ * whether the map's sky follows the clock only while J-Lighting-Time is enabled as well, worded for the weather too while
+ * J-Weather, which reads the same tag, is enabled by its exact name, and shows a colour of the dark the note names but
+ * the game cannot use as the project's.
  */
 describe('lightingModule', () =>
 {
@@ -370,15 +371,23 @@ describe('lightingModule', () =>
         .toStrictEqual([]);
     });
 
-    it('adds a Lighting section to Map Properties, offering the sky only while J-Lighting-Time is enabled too', () =>
+    it('adds a Lighting section to Map Properties, offering the sky while J-Lighting-Time is enabled too, worded for the weather while J-Weather is', () =>
     {
-      // Arrange: a cave at 85%, and J-Lighting-Time as js/plugins.js lists it, on and off.
+      // Arrange: a cave at 85%, and the plugins beside J-Lighting as js/plugins.js lists them: J-Lighting-Time alone; with
+      // J-Weather; with J-Weather off and only its time extension on, whose name begins the same; and neither.
       const cave = MapDocument.fromJson('map:1', { ...buildMapJson(), note: '<noToneChange>\n<ambient:[85]>' });
-      const lightingTime = (status: boolean): PluginsJsEntry => ({ name: 'j/lighting/ext/J-Lighting-Time', status, description: '', parameters: {} });
-      const registries = [ lightingTime(true), lightingTime(false) ].map(extension =>
+      const plugin = (name: string, status: boolean): PluginsJsEntry => ({ name, status, description: '', parameters: {} });
+      const lightingTime = plugin('j/lighting/ext/J-Lighting-Time', true);
+      const projects = [
+        [ lightingTime ],
+        [ lightingTime, plugin('j/weather/J-Weather', true) ],
+        [ lightingTime, plugin('j/weather/J-Weather', false), plugin('j/weather/ext/J-Weather-Time', true) ],
+        [ plugin('j/lighting/ext/J-Lighting-Time', false) ],
+      ];
+      const registries = projects.map(plugins =>
       {
         const registry = new PluginModuleRegistry(new CommandCatalog());
-        registry.activate([ lightingModule ], [ lighting(true), extension ]);
+        registry.activate([ lightingModule ], [ lighting(true), ...plugins ]);
         return registry;
       });
 
@@ -386,15 +395,17 @@ describe('lightingModule', () =>
       const sections = registries.map(registry => registry.mapPropertiesSections().map(section => [
         section.id,
         section.title,
-        section.source(cave).fields.map(field => field.key),
+        section.source(cave).fields.map(field => field.label),
       ]));
 
       // Assert.
       expect([ sections, registryWith(lighting(false)).mapPropertiesSections() ])
         .toStrictEqual([
           [
-            [ [ 'lighting.map', 'Lighting', [ 'lighting.darkness', 'lighting.darkColor', 'lighting.sky' ] ] ],
-            [ [ 'lighting.map', 'Lighting', [ 'lighting.darkness', 'lighting.darkColor' ] ] ],
+            [ [ 'lighting.map', 'Lighting', [ 'Darkness', 'Colour of the dark', 'Sky follows the clock' ] ] ],
+            [ [ 'lighting.map', 'Lighting', [ 'Darkness', 'Colour of the dark', 'Sky follows the clock and the weather' ] ] ],
+            [ [ 'lighting.map', 'Lighting', [ 'Darkness', 'Colour of the dark', 'Sky follows the clock' ] ] ],
+            [ [ 'lighting.map', 'Lighting', [ 'Darkness', 'Colour of the dark' ] ] ],
           ],
           [],
         ]);
