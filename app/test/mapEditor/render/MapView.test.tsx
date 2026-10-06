@@ -20,6 +20,7 @@ import { marksOf, TILESET_MARKS_DOCUMENT } from '../../../src/mapEditor/core/pal
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { LightingLayerDefinition } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import type { LayerVisibility, MarkerClassifier, OverlaySet, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import { WindowClock } from '../../../src/mapEditor/core/time/WindowClock.ts';
 import { WindowPaints } from '../../../src/mapEditor/core/tools/WindowPaint.ts';
 import { MapEditorApp } from '../../../src/mapEditor/MapEditorApp.tsx';
 import { MapView, mapIdFromQuery } from '../../../src/mapEditor/render/MapView.tsx';
@@ -42,6 +43,7 @@ const stand = vi.hoisted(() => ({
     lighting: (readonly LightingLayerDefinition[])[];
     classifiers: MarkerClassifier[];
     shown: (boolean | 'mount')[];
+    times: number[];
     announce: (state: string) => void;
     zoomTo: (zoom: number) => void;
   }[],
@@ -65,6 +67,7 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       lighting: [] as (readonly LightingLayerDefinition[])[],
       classifiers: [] as MarkerClassifier[],
       shown: [] as (boolean | 'mount')[],
+      times: [] as number[],
       announce: (state: string) =>
       {
         this.drawListeners.forEach(listener => listener(state));
@@ -153,6 +156,11 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       this.record.lighting.push(definitions);
     }
 
+    setTimeOfDay(minutes: number): void
+    {
+      this.record.times.push(minutes);
+    }
+
     setOverlays(overlays: OverlaySet): void
     {
       this.record.overlaySets.push(overlays);
@@ -239,6 +247,10 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * What the modules draw into the lighting layer is handed to the renderer from the start and again as they switch on,
  * and the bar offers its Lighting switch, after Shadows, only while some module draws there: a project without such a
  * plugin never sees a switch that does nothing. That one switch shows and hides the whole lighting layer.
+ *
+ * The bar shows the window's clock only while a module offers one, naming the time and the part of the day as the
+ * module names it, and the renderer is handed the clock's time from the start and every time it moves, wherever it was
+ * moved from, so every view of the window draws the sky at the same hour.
  */
 describe('MapView', () =>
 {
@@ -265,6 +277,7 @@ describe('MapView', () =>
     revision: 0,
     lightingLayers: () => [],
     notices: () => [],
+    clockOffer: () => null,
   };
 
   /**
@@ -279,7 +292,8 @@ describe('MapView', () =>
     const openDocument = vi.fn(() => Promise.reject(new Error('no documents in this test')));
     const paints = new WindowPaints(window);
     const locationPicks = new LocationPicks();
-    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES };
+    const clock = new WindowClock(840);
+    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES, clock };
     return { ...services, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
   };
 
@@ -736,5 +750,65 @@ describe('MapView', () =>
     const [ { visibilities } ] = stand.renderers;
     expect([ visibilities[0].layers.lighting, visibilities.at(-1)?.layers.lighting ])
       .toStrictEqual([ true, false ]);
+  });
+
+  it('shows the window\'s clock once a module offers one, naming the time and the part of the day as it names them', () =>
+  {
+    // Arrange: a view whose modules offer a clock once they switch on, naming every hour after 20:00 Night.
+    const listeners = new Set<() => void>();
+    const modules = {
+      ...NO_MODULES,
+      offer: null as { startsAt: number; partOfDay: (minutes: number) => string } | null,
+      clockOffer()
+      {
+        return this.offer;
+      },
+      subscribe: (listener: () => void) =>
+      {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const before = screen.queryByTestId('map-clock');
+
+    // Act: the modules switch on, and the window's clock moves to 22:00.
+    act(() =>
+    {
+      modules.offer = { startsAt: 840, partOfDay: minutes => (minutes >= 1200 ? 'Night' : 'Afternoon') };
+      modules.revision += 1;
+      listeners.forEach(listener => listener());
+    });
+    const shown = screen.getByTestId('map-clock').textContent;
+    act(() => services.clock.set(1320));
+
+    // Assert.
+    expect([ before, shown, screen.getByTestId('map-clock').textContent ])
+      .toStrictEqual([ null, '14:00 Afternoon', '22:00 Night' ]);
+  });
+
+  it('hands the renderer the clock\'s time from the start and each time it moves, wherever it was moved from', () =>
+  {
+    // Arrange: two views of one window, as a map docked and a map torn out.
+    const services = served();
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+        <MapView mapId={6}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: the clock moved twice, as a slider in either view moves it.
+    act(() => services.clock.set(1320));
+    act(() => services.clock.set(120));
+
+    // Assert.
+    expect(stand.renderers.map(renderer => renderer.times))
+      .toStrictEqual([ [ 840, 1320, 120 ], [ 840, 1320, 120 ] ]);
   });
 });

@@ -16,6 +16,7 @@ import { EventMenu } from '../events/EventMenu.tsx';
 import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity, type EventToolsRenderer } from '../events/MapEventTools.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import { openEventWindow } from '../views/mapEditorViews.ts';
+import { ClockChip } from './ClockChip.tsx';
 import type { DrawState } from './ContextKeeper.ts';
 import {
   flipSwitch,
@@ -230,8 +231,9 @@ const DrawNotice = (props: { state: DrawState; notices?: readonly ModuleNotice[]
 /**
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
  * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look
- * (Lighting among them while a plugin module lights the map), the painting tools, and a status line naming the zoom,
- * the tile under the pointer, how many events are selected and the GPU drawing it.
+ * (Lighting among them while a plugin module lights the map, and the window's clock while one offers a time of day,
+ * the sky drawn at its hour), the painting tools, and a status line naming the zoom, the tile under the pointer, how
+ * many events are selected and the GPU drawing it.
  *
  * The view paints with its window's paint: the page's own for a map docked in the main window, and a torn-out window's
  * own for a map torn out, so each window's palette, layer strip and tools go together and no further.
@@ -266,9 +268,10 @@ const MapView = (props: MapViewProps) =>
   const selected = useSyncExternalStore(selection.subscribe, selection.get);
 
   // the plugin modules switch on once js/plugins.js is read, which can be after the bar first drew; whether any of them
-  // lights the map decides whether the bar offers its Lighting switch.
+  // lights the map decides whether the bar offers its Lighting switch, and whether one offers a clock, its clock.
   useSyncExternalStore(services.modules.subscribe, () => services.modules.revision);
   const switches = shownSwitches(services.modules.lightingLayers().length > 0);
+  const clockOffer = services.modules.clockOffer();
   const [ openMap, setOpenMap ] = useState<MapDocument | null>(null);
   const [ status, setStatus ] = useState<MapViewStatus>({ gpu: '', zoom: 1, cell: null, problem: null, note: '' });
   const [ settings, setSettings ] = useState<MapViewSettings>({ visibility: GAME_LOOK, overlays: new Set(STARTING_OVERLAYS) });
@@ -310,9 +313,12 @@ const MapView = (props: MapViewProps) =>
     renderer.setEventMarkers(classify);
     stops.push(services.modules.subscribe(() => renderer.setEventMarkers(classify)));
 
-    // the lighting layer holds what the plugin modules draw there, which changes as they switch on and off.
+    // the lighting layer holds what the plugin modules draw there, which changes as they switch on and off, and draws the
+    // sky at the hour the window's clock shows, which every view in the window follows as it moves.
     renderer.setLightingLayers(services.modules.lightingLayers());
     stops.push(services.modules.subscribe(() => renderer.setLightingLayers(services.modules.lightingLayers())));
+    renderer.setTimeOfDay(services.clock.time());
+    stops.push(services.clock.subscribe(() => renderer.setTimeOfDay(services.clock.time())));
     stops.push(renderer.onCameraChange((camera: Camera) =>
     {
       setStatus(current => (current.zoom === camera.zoom ? current : { ...current, zoom: camera.zoom }));
@@ -528,6 +534,9 @@ const MapView = (props: MapViewProps) =>
             variant={isSwitchOn(settings, setting) ? 'filled' : 'outlined'}
           />
         ))}
+        {clockOffer !== null && (
+          <ClockChip clock={services.clock} partOfDay={clockOffer.partOfDay}/>
+        )}
         <Divider flexItem orientation={'vertical'} sx={{ mx: 0.5 }}/>
         <Typography variant={'caption'} color={'text.secondary'}>
           Highlight layer

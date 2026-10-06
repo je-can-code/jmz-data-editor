@@ -5,6 +5,7 @@ import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
 import type { LightingLayerDefinition } from '../renderer/lightingLayer.ts';
 import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
 import type {
+  ClockOffer,
   EventKindDefinition,
   ModuleContributions,
   ModuleNotice,
@@ -38,6 +39,7 @@ type Contributions = {
   catalogIds: string[];
   templateMaps: number[];
   notices: ModuleNotice[];
+  clocks: ClockOffer[];
 };
 
 /**
@@ -53,6 +55,7 @@ const noContributions = (): Contributions => ({
   catalogIds: [],
   templateMaps: [],
   notices: [],
+  clocks: [],
 });
 
 /**
@@ -68,9 +71,24 @@ const enabledPlugins = (plugins: readonly PluginsJsEntry[]): Map<string, Plugins
 };
 
 /**
+ * Lists the config files a module reads with some plugins enabled: every one of its own, and each of its extensions'
+ * whose plugins are all enabled too, so a project without an extension is never asked for that extension's config.
+ * @param {PluginModule} pluginModule The module.
+ * @param {ReadonlyMap<string, PluginsJsEntry>} enabled The enabled plugins, by file name.
+ * @returns {string[]} The configs' names, its own first.
+ */
+const configNamesOf = (pluginModule: PluginModule, enabled: ReadonlyMap<string, PluginsJsEntry>): string[] =>
+{
+  const extensions = (pluginModule.extensionConfigs ?? [])
+    .filter(config => config.plugins.every(name => enabled.has(name)))
+    .map(config => config.name);
+  return [ ...(pluginModule.configs ?? []), ...extensions ];
+};
+
+/**
  * Holds the event kinds, palette entries, passability rules, overlays, lighting layers and command entries the editor
- * knows, the maps whose events are a plugin's patterns, and what the modules say over every map view: the core's
- * kinds, always, and each plugin module's contributions while its plugins are enabled.
+ * knows, the maps whose events are a plugin's patterns, what the modules say over every map view, and the clock they
+ * offer: the core's kinds, always, and each plugin module's contributions while its plugins are enabled.
  */
 class PluginModuleRegistry
 {
@@ -144,7 +162,7 @@ class PluginModuleRegistry
       }
 
       // each module is handed the configs it named, and only those, with why any of them could not be read.
-      const names = pluginModule.configs ?? [];
+      const names = configNamesOf(pluginModule, enabled);
       const own = new Map(names.map(name => [ name, configs.get(name) ?? null ]));
       const ownProblems = new Map(names.flatMap(name =>
       {
@@ -270,6 +288,17 @@ class PluginModuleRegistry
   }
 
   /**
+   * Finds the clock the active modules offer the map views: the first one offered, or none while no module offers one,
+   * which is when no map view shows a clock.
+   * @returns {ClockOffer | null} The offer, or null.
+   */
+  clockOffer(): ClockOffer | null
+  {
+    const [ first ] = this.#contributions.clocks;
+    return first ?? null;
+  }
+
+  /**
    * Builds the contribution sink one module registers through, which holds it to its own id prefix.
    * @param {PluginModule} pluginModule The module.
    * @returns {ModuleContributions} The sink.
@@ -325,6 +354,10 @@ class PluginModuleRegistry
         requirePrefix(notice.id, 'notices');
         this.#contributions.notices.push(notice);
       },
+      clock: offer =>
+      {
+        this.#contributions.clocks.push(offer);
+      },
     };
   }
 
@@ -339,5 +372,5 @@ class PluginModuleRegistry
   }
 }
 
-export { enabledPlugins, PluginModuleRegistry };
+export { configNamesOf, enabledPlugins, PluginModuleRegistry };
 export type { ModuleActivation };

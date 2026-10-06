@@ -4,7 +4,7 @@ import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { PassabilityRule } from '../core/modules/PluginModule.ts';
 import { cellAtPoint, panBy, screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../core/renderer/camera.ts';
 import { FrameTimeRecorder, type FrameTimings } from '../core/renderer/FrameTimeRecorder.ts';
-import type { LightingLayerDefinition } from '../core/renderer/lightingLayer.ts';
+import type { LightingLayerDefinition, ScreenTone } from '../core/renderer/lightingLayer.ts';
 import {
   GAME_LOOK,
   NO_OVERLAY_STATE,
@@ -20,6 +20,7 @@ import {
   type TilesetTextures,
 } from '../core/renderer/MapRenderer.ts';
 import { precisePoint } from '../core/renderer/precisePoint.ts';
+import { castsTone } from '../core/renderer/screenTone.ts';
 import {
   centerCamera,
   fitCamera,
@@ -49,6 +50,7 @@ import { drawPassageAtlas, drawRegionAtlas, passageMarkIndex } from './scene/ove
 import { ParallaxLayer } from './scene/ParallaxLayer.ts';
 import { drawGrid, drawPointerOverlays, drawSelection } from './scene/pointerOverlays.ts';
 import { TileChunks } from './scene/TileChunks.ts';
+import { ToneFilter } from './scene/ToneFilter.ts';
 import { textureSourceFor } from './textureImages.ts';
 
 /**
@@ -88,14 +90,19 @@ type RendererStats = {
 };
 
 /**
- * The world's layers, bottom to top: the engine's black behind the map, the parallax, the tiles below characters,
- * the events in their three priorities around the tiles above characters, the lighting the plugin modules draw, then
- * the editor's own: the markers of events that draw no picture, which neither the tiles above characters nor the dark
- * of a lit map may hide, the dimming and highlighted layer, and the overlays, the ghosts and the pointer's own marks,
- * then the selection over them all, so an event shows as selected while the pointer still rests on it after the click
- * that picked it.
+ * The world's layers, bottom to top: what the game itself draws and tones (the engine's black behind the map, the
+ * parallax, the tiles below characters, and the events in their three priorities around the tiles above characters,
+ * all held in {@link game}), the lighting the plugin modules draw, then the editor's own: the markers of events that
+ * draw no picture, which neither the tiles above characters nor the dark of a lit map may hide, the dimming and
+ * highlighted layer, and the overlays, the ghosts and the pointer's own marks, then the selection over them all, so an
+ * event shows as selected while the pointer still rests on it after the click that picked it.
  */
 type Slots = {
+  /**
+   * Everything the game draws beneath its lighting, which a screen tone casts its colour over, as the engine's base
+   * sprite holds it, and nothing of the editor's.
+   */
+  readonly game: Container;
   readonly backdrop: Graphics;
   readonly parallax: Container;
   readonly lowerTiles: Container;
@@ -242,7 +249,28 @@ class PixiMapRenderer implements MapRenderer
 
   #modules = new ModuleOverlays();
 
-  #lighting = new LightingLayers(TILE_SIZE);
+  #lighting = new LightingLayers(TILE_SIZE, tone => this.#castTone(tone));
+
+  /**
+   * The tone the lighting casts over what the game tones, or null while it casts none; it shows only while the lighting
+   * does.
+   */
+  #tone: ScreenTone | null = null;
+
+  /**
+   * The filter casting {@link #tone}, made the first time a tone shows, and kept for the life of the renderer.
+   */
+  #toneFilter: ToneFilter | null = null;
+
+  /**
+   * Whether the filter is on what the game tones now.
+   */
+  #toning = false;
+
+  /**
+   * The time of day the window's clock shows, in minutes past midnight, which the lighting reads its sky at.
+   */
+  #timeOfDay = 0;
 
   /**
    * How many times drawing has started on a live context: once for the first, and once more each time the graphics
@@ -355,6 +383,7 @@ class PixiMapRenderer implements MapRenderer
     this.#events = new EventLayer(invalidate);
     this.#parallax = new ParallaxLayer(invalidate);
     this.#slots = {
+      game: new Container(),
       backdrop: new Graphics(),
       parallax: this.#parallax.layer,
       lowerTiles: new Container(),
@@ -378,11 +407,12 @@ class PixiMapRenderer implements MapRenderer
     this.#slots.pointerLabel.anchor.set(0, 1);
     this.#slots.pointerLabel.visible = false;
 
-    // the engine's order: lower tiles, events below and with characters, upper tiles, events above characters. The
-    // markers go over the lighting, so an event no picture shows stays in sight on the darkest map, and the selection
-    // goes over the hover, which would otherwise hide it on the very tile just clicked.
+    // the engine's order: lower tiles, events below and with characters, upper tiles, events above characters, all of
+    // it in the one container a screen tone colours, as the engine's base sprite holds it. The markers go over the
+    // lighting, so an event no picture shows stays in sight on the darkest map, and the selection goes over the hover,
+    // which would otherwise hide it on the very tile just clicked.
     const { slots } = this;
-    this.#world.addChild(
+    slots.game.addChild(
       slots.backdrop,
       slots.parallax,
       slots.lowerTiles,
@@ -390,6 +420,9 @@ class PixiMapRenderer implements MapRenderer
       this.#events.same,
       slots.upperTiles,
       this.#events.above,
+    );
+    this.#world.addChild(
+      slots.game,
       slots.lighting,
       slots.markers,
       slots.dim,
@@ -437,6 +470,26 @@ class PixiMapRenderer implements MapRenderer
   {
     this.#lighting.setDefinitions(definitions);
     this.#needsRender = true;
+  }
+
+  /**
+   * Sets the time of day the window's clock shows, which the lighting reads the sky at. Nothing draws for it at once:
+   * the lighting is handed the new time in the next frame, and only what the hour changed is drawn again, which within
+   * one hour may be nothing at all.
+   * @param {number} minutes The time of day, in minutes past midnight.
+   */
+  setTimeOfDay(minutes: number): void
+  {
+    this.#timeOfDay = minutes;
+  }
+
+  /**
+   * The tone the lighting casts over what the game tones, whether or not the lighting shows.
+   * @returns {ScreenTone | null} The tone, or null while it casts none.
+   */
+  get tone(): ScreenTone | null
+  {
+    return this.#tone;
   }
 
   /**
@@ -864,6 +917,10 @@ class PixiMapRenderer implements MapRenderer
     this.#parallax.destroy();
     this.#modules.destroy();
     this.#lighting.destroy();
+    this.#slots.game.filters = null;
+    this.#toning = false;
+    this.#toneFilter?.destroy();
+    this.#toneFilter = null;
     [ ...this.#sheetSources, ...this.#retiredSources ].forEach(source => source?.destroy());
     this.#sheetSources = [];
     this.#retiredSources = [];
@@ -1425,6 +1482,7 @@ class PixiMapRenderer implements MapRenderer
       ? Number(highlighted.slice('tiles'.length)) - 1
       : null;
     slots.lighting.visible = layers.lighting;
+    this.#applyTone();
     slots.parallax.visible = layers.parallax;
     slots.dim.visible = highlight !== null;
     slots.grid.visible = this.#isOn('grid');
@@ -1459,6 +1517,54 @@ class PixiMapRenderer implements MapRenderer
     this.#selectionDirty = true;
     this.#pointerDirty = true;
     this.#needsRender = true;
+  }
+
+  /**
+   * Keeps the tone the lighting casts, and shows it.
+   * @param {ScreenTone | null} tone The tone, or null for none.
+   */
+  #castTone(tone: ScreenTone | null): void
+  {
+    this.#tone = tone;
+    this.#applyTone();
+    this.#needsRender = true;
+  }
+
+  /**
+   * Casts the lighting's tone over what the game tones while the lighting shows and the tone changes anything, and takes
+   * it off otherwise. Nothing filters the map while there is no tone to cast, so a map in plain daylight, or with the
+   * Lighting switch off, costs no more to draw than it ever did.
+   */
+  #applyTone(): void
+  {
+    const { game, lighting } = this.#slots;
+    const tone = this.#tone;
+    if (lighting.visible === false || castsTone(tone) === false)
+    {
+      if (this.#toning)
+      {
+        game.filters = null;
+        this.#toning = false;
+      }
+
+      return;
+    }
+
+    // the filter is made once, the first time a tone shows; after that only its tone changes.
+    if (this.#toneFilter === null)
+    {
+      this.#toneFilter = new ToneFilter(tone);
+    }
+    else
+    {
+      this.#toneFilter.tone = tone;
+    }
+
+    if (this.#toning === false)
+    {
+      game.filters = [ this.#toneFilter ];
+      this.#toning = true;
+    }
   }
 
   /**
@@ -1693,7 +1799,7 @@ class PixiMapRenderer implements MapRenderer
     changed = this.#refreshOverlays() || changed;
     if (document !== null)
     {
-      const clock = lightingClockAt(now, this.#fixedAnimation, this.#visibility.animate);
+      const clock = lightingClockAt(now, this.#fixedAnimation, this.#visibility.animate, this.#timeOfDay);
       changed = this.#lighting.draw({ document, renderer: pixi, context: this.#contexts, clock }) || changed;
     }
 

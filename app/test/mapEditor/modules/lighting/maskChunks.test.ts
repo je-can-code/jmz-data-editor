@@ -17,9 +17,10 @@ import {
  * touching a piece only along a shared edge reaches nothing there. A picture with no pixels reaches nothing. Each piece
  * keeps its lights in the order they came, the order the game adds them.
  *
- * A piece is built again only when what it is built from changes: the dark's fill, or any light reaching it moving or
- * changing picture. A light burning at another strength, which is all an effect ever changes, many times a second, never
- * builds a piece again; it only draws it again, when its lights burn otherwise than they were drawn, light by light.
+ * A piece is built again only when what it is built from changes: any light reaching it moving or changing picture. A
+ * light burning at another strength, which is all an effect ever changes, many times a second, never builds a piece
+ * again, and nor does the dark's fill, which the hour of the window's clock changes; either only draws it again, a
+ * strength only when its lights burn otherwise than they were drawn, light by light.
  */
 
 /**
@@ -164,32 +165,32 @@ describe('maskChunks', () =>
 
   describe('chunkSignature', () =>
   {
-    it('reads the same for a piece built from the same fill and the same lights, however brightly they burn', () =>
+    it('reads the same for a piece built from the same lights, however brightly they burn', () =>
     {
       // Arrange: the same light, made twice, the second burning at 0.8.
       const lights = [ lightAt('torch', 100, 100, 192) ];
 
       // Act.
-      const signatures = [ chunkSignature(0x262626, lights), chunkSignature(0x262626, [ { ...lightAt('torch', 100, 100, 192), strength: 0.8 } ]) ];
+      const signatures = [ chunkSignature(lights), chunkSignature([ { ...lightAt('torch', 100, 100, 192), strength: 0.8 } ]) ];
 
       // Assert.
       expect(signatures)
-        .toStrictEqual([ '2500134|100,100,192:#ffffff:0', '2500134|100,100,192:#ffffff:0' ]);
+        .toStrictEqual([ '100,100,192:#ffffff:0', '100,100,192:#ffffff:0' ]);
     });
 
-    it('reads differently once the fill, a light\'s place or its picture changes', () =>
+    it('reads differently once a light\'s place or its picture changes, or a light comes or goes', () =>
     {
       // Arrange: a lit piece, and the same piece with one thing changed at a time.
       const torch = lightAt('torch', 100, 100, 192);
       const signatures = [
-        chunkSignature(0x262626, [ torch ]),
-        chunkSignature(0x121212, [ torch ]),
-        chunkSignature(0x262626, [ { ...torch, x: 101 } ]),
-        chunkSignature(0x262626, [ { ...torch, y: 99 } ]),
-        chunkSignature(0x262626, [ { ...torch, color: '#ffbb73' } ]),
-        chunkSignature(0x262626, [ { ...torch, intensity: 0.4 } ]),
-        chunkSignature(0x262626, [ { ...torch, radius: 96 } ]),
-        chunkSignature(0x262626, []),
+        chunkSignature([ torch ]),
+        chunkSignature([ { ...torch, x: 101 } ]),
+        chunkSignature([ { ...torch, y: 99 } ]),
+        chunkSignature([ { ...torch, color: '#ffbb73' } ]),
+        chunkSignature([ { ...torch, intensity: 0.4 } ]),
+        chunkSignature([ { ...torch, radius: 96 } ]),
+        chunkSignature([ torch, torch ]),
+        chunkSignature([]),
       ];
 
       // Act.

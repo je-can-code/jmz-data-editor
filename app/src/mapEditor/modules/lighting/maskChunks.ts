@@ -85,22 +85,22 @@ const lightsByChunk = (lights: readonly MaskLight[], width: number, height: numb
 };
 
 /**
- * Writes down what a piece of the mask is built from, so a piece is built again only when this changes: the dark's fill,
- * and each light reaching it, where it sits and the picture it draws. Its colour and intensity are in its picture's
- * name. How brightly each burns is left out on purpose: that is all an effect ever changes, many times a second, and it
- * changes only how strongly a picture already in place is added in ({@link sameStrengths}).
- * @param {number} tint The dark's fill, as {@code 0xRRGGBB}.
+ * Writes down what a piece of the mask is built from, so a piece is built again only when this changes: each light
+ * reaching it, where it sits and the picture it draws. Its colour and intensity are in its picture's name. Two things
+ * are left out on purpose, since neither moves a picture: how brightly each light burns, which is all an effect ever
+ * changes, many times a second, and the dark's fill, which the hour of the window's clock changes; a piece built from
+ * the same lights is drawn again as it stands for either ({@link sameStrengths}).
  * @param {readonly MaskLight[]} lights The lights reaching the piece.
- * @returns {string} What the piece is built from.
+ * @returns {string} What the piece is built from; empty for a piece no light reaches.
  */
-const chunkSignature = (tint: number, lights: readonly MaskLight[]): string =>
+const chunkSignature = (lights: readonly MaskLight[]): string =>
 {
   const drawn = lights.map(light =>
   {
     const picture = pictureKey(light.radius, light.color, light.intensity);
     return `${light.x},${light.y},${picture}`;
   });
-  return `${tint}|${drawn.join(';')}`;
+  return drawn.join(';');
 };
 
 /**

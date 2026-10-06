@@ -133,7 +133,7 @@ const buildRings = () =>
 {
   const children: unknown[] = [];
   const layer = { addChild: (child: unknown) => children.push(child) } as unknown as Container;
-  const rings = new LightRings({ layer, tileSize: 48 }, DEFAULTS);
+  const rings = new LightRings({ layer, tileSize: 48, castTone: () => undefined }, DEFAULTS);
   const [ drawing ] = stand.graphics.slice(-1);
   return { rings, children, drawing, calls: drawing.calls };
 };
@@ -145,7 +145,7 @@ const buildRings = () =>
  */
 const drawOn = (rings: LightRings, document: MapDocument): void =>
 {
-  rings.draw({ document, renderer: {} as Renderer, context: 1, clock: { frames: 0, animating: true } });
+  rings.draw({ document, renderer: {} as Renderer, context: 1, clock: { frames: 0, animating: true, timeOfDay: 0 } });
 };
 
 describe('lightRings', () =>

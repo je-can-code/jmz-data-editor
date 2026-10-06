@@ -3,7 +3,7 @@ import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts
 import type { RmmzEventPage, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { LightingClock } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { mapAmbient, type AmbientSource } from '../../../../src/mapEditor/modules/lighting/ambientTags.ts';
-import { darkSceneOf, lightIdOf, maskLightsOf, type DarkSetup, type LightStrength } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
+import { darkOf, darkSceneOf, lightIdOf, maskLightsOf, type DarkSetup, type LightStrength } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
 import { firstLitPage, type LightPageChoice } from '../../../../src/mapEditor/modules/lighting/lightTags.ts';
 import { command, event, page } from '../../support/eventKindFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
@@ -28,9 +28,9 @@ import { buildMapJson } from '../../support/fixtures.ts';
 const DEFAULTS = { color: '#00ff00', intensity: 0 };
 
 /**
- * The view's clock two seconds in, animating.
+ * The view's clock two seconds in, animating, at 14:00.
  */
-const CLOCK: LightingClock = { frames: 120, animating: true };
+const CLOCK: LightingClock = { frames: 120, animating: true, timeOfDay: 840 };
 
 /**
  * Every light at full strength, as it burns with no effect running.
@@ -134,6 +134,29 @@ describe('darkScene', () =>
       // Assert.
       expect([ scene?.darkness, scene?.tint ])
         .toStrictEqual([ 0.5800000000000001, 0x718383 ]);
+    });
+  });
+
+  describe('darkOf', () =>
+  {
+    it('asks every source about the map at the view\'s clock, and darkens a map no note calls dark', () =>
+    {
+      // Arrange: a field with a torch and no darkness of its own, and a sky reading the clock, dark only after 20:00.
+      const field = mapWith('', [ null, lightAt(1, 2, 2, [ '<light:[4]>' ]) ]);
+      const asked: string[] = [];
+      const sky: AmbientSource = (document, clock) =>
+      {
+        asked.push(`map ${document.mapId} at ${clock.timeOfDay}`);
+        return { darkness: clock.timeOfDay >= 1200 ? 0.5 : 0, color: [ 0, 0, 0 ], declaresColor: false, source: 'time' };
+      };
+      const sources = [ mapAmbient('#000000'), sky ];
+
+      // Act: the afternoon, then 22:00.
+      const darks = [ darkOf(field, sources, CLOCK), darkOf(field, sources, { ...CLOCK, timeOfDay: 1320 }) ];
+
+      // Assert.
+      expect([ darks, asked ])
+        .toStrictEqual([ [ null, { darkness: 0.5, tint: 0x808080 } ], [ 'map 6 at 840', 'map 6 at 1320' ] ]);
     });
   });
 

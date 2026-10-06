@@ -4,8 +4,8 @@ import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandC
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
-import type { LightingClock, LightingLayerDefinition } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
-import { isLight, LIGHT_MASK_ID, LIGHT_RINGS_ID, lightingModule } from '../../../../src/mapEditor/modules/lighting/lightingModule.ts';
+import type { LightingClock, LightingLayerDefinition, LightingStage } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
+import { isLight, LIGHT_MASK_ID, LIGHT_RINGS_ID, lightingModule, SKY_TONE_ID } from '../../../../src/mapEditor/modules/lighting/lightingModule.ts';
 import { LightPictures } from '../../../../src/mapEditor/modules/lighting/lightPictures.ts';
 import { registerCoreEventKinds } from '../../../../src/mapEditor/services/coreEventKinds.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
@@ -76,6 +76,13 @@ vi.mock('pixi.js', async importOriginal =>
  * project without the file, which it then says over the map rather than leave the white to pass for the game's look; a
  * map naming a colour of the dark it cannot use takes the project's; and a light's pool runs its effect as the project
  * tunes that effect, at the view's clock, and burns at full strength while the view does not animate.
+ *
+ * While J-Lighting-Time is enabled too, with J-TIME, the module offers the map views a clock starting at J-TIME's
+ * starting time and naming the parts of the day as the game does, reads the project's config.lighting-time.json, and
+ * follows the clock with the sky: its colour cast over a map with a sky (its own tests hold the curve's arithmetic), and
+ * its darkness joining the map's own in the dark, so a field darkens at night and a dark map compounds both; a map tagged
+ * <noToneChange> gets neither. Without either plugin there is no clock and no sky, and a project without J-Lighting-Time
+ * is never asked for its curve. A curve that cannot be read is said over the map, the clock still offered, the sky still.
  */
 describe('lightingModule', () =>
 {
@@ -101,9 +108,16 @@ describe('lightingModule', () =>
   };
 
   /**
-   * The view's clock at frame 0, animating.
+   * The view's clock at frame 0, animating, at 14:00.
    */
-  const START: LightingClock = { frames: 0, animating: true };
+  const START: LightingClock = { frames: 0, animating: true, timeOfDay: 840 };
+
+  /**
+   * A stage for one drawing: a container, the tile size, and a tone cast nowhere.
+   * @param {Container} layer The container.
+   * @returns {LightingStage} The stage.
+   */
+  const stageOn = (layer: Container): LightingStage => ({ layer, tileSize: 48, castTone: () => undefined });
 
   /**
    * J-Lighting as js/plugins.js lists it.
@@ -137,7 +151,7 @@ describe('lightingModule', () =>
     const json = buildMapJson();
     json.events = [ null, { ...event(1, [ page([ command(108, [ '<light:[2]>' ]) ]) ]), x: 0, y: 0 } ];
     const rings = registry.lightingLayers().find(layer => layer.id === LIGHT_RINGS_ID) as LightingLayerDefinition;
-    const drawing = rings.create({ layer: { addChild: () => undefined } as unknown as Container, tileSize: 48 });
+    const drawing = rings.create(stageOn({ addChild: () => undefined } as unknown as Container));
     drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1, clock: START });
     return stand.dots;
   };
@@ -215,7 +229,7 @@ describe('lightingModule', () =>
       const registry = registryWith(lighting(true), new Map([ [ 'lighting', served('#ffffff', '#102030') ] ]));
       const dark = registry.lightingLayers().find(layer => layer.id === LIGHT_MASK_ID) as LightingLayerDefinition;
       const layer = new Container();
-      const drawing = dark.create({ layer, tileSize: 48 });
+      const drawing = dark.create(stageOn(layer));
       const json = { ...buildMapJson(), note: '<ambient:[85, #10203g]>' };
 
       // Act.
@@ -235,16 +249,16 @@ describe('lightingModule', () =>
       const pictureFor = vi.spyOn(LightPictures.prototype, 'pictureFor').mockReturnValue(Texture.WHITE);
       const registry = registryWith(lighting(true), new Map([ [ 'lighting', served('#ffffff') ] ]));
       const dark = registry.lightingLayers().find(layer => layer.id === LIGHT_MASK_ID) as LightingLayerDefinition;
-      const drawing = dark.create({ layer: new Container(), tileSize: 48 });
+      const drawing = dark.create(stageOn(new Container()));
       const json = { ...buildMapJson(), note: '<ambient:[85]>', events: [ null, { ...event(12, [ page([ command(108, [ '<light:[4, #ffbb73, 40, flicker]>' ]) ]) ]), x: 1, y: 1 } ] };
       const document = MapDocument.fromJson('map:6', json);
       const added: number[][] = [];
       const renderer = { render: (options: { container: Container }) => added.push(options.container.children.map(sprite => sprite.alpha)) } as unknown as Renderer;
-      drawing.draw({ document, renderer, context: 1, clock: { frames: 100, animating: true } });
+      drawing.draw({ document, renderer, context: 1, clock: { ...START, frames: 100 } });
 
       // Act: the next frame, then the same frame with Animate off.
-      const moved = [ drawing.tick({ document, renderer, context: 1, clock: { frames: 101, animating: true } }) ];
-      moved.push(drawing.tick({ document, renderer, context: 1, clock: { frames: 101, animating: false } }));
+      const moved = [ drawing.tick({ document, renderer, context: 1, clock: { ...START, frames: 101 } }) ];
+      moved.push(drawing.tick({ document, renderer, context: 1, clock: { ...START, frames: 101, animating: false } }));
       drawing.destroy();
       pictureFor.mockRestore();
 
@@ -261,16 +275,16 @@ describe('lightingModule', () =>
       const pictureFor = vi.spyOn(LightPictures.prototype, 'pictureFor').mockReturnValue(Texture.WHITE);
       const registry = registryWith(lighting(true), new Map([ [ 'lighting', served('#ffffff') ] ]));
       const dark = registry.lightingLayers().find(layer => layer.id === LIGHT_MASK_ID) as LightingLayerDefinition;
-      const drawing = dark.create({ layer: new Container(), tileSize: 48 });
+      const drawing = dark.create(stageOn(new Container()));
       const json = { ...buildMapJson(), note: '<ambient:[85]>', events: [ null, { ...event(12, [ page([ command(108, [ '<light:[4, #ffbb73, 40, flicker]>' ]) ]) ]), x: 1, y: 1 } ] };
       const document = MapDocument.fromJson('map:6', json);
       const added: number[][] = [];
       const renderer = { render: (options: { container: Container }) => added.push(options.container.children.map(sprite => sprite.alpha)) } as unknown as Renderer;
-      const atFrame100 = { document, renderer, context: 1, clock: { frames: 100, animating: true } };
+      const atFrame100 = { document, renderer, context: 1, clock: { ...START, frames: 100 } };
       drawing.draw(atFrame100);
       document.apply(document.setPatch([ 'events', 1, 'pages', 0, 'list', 0, 'parameters', 0 ], '<light:[5, #ffbb73, 40, flicker]>'));
       document.apply(document.setPatch([ 'events', 1, 'x' ], 2));
-      const afresh = dark.create({ layer: new Container(), tileSize: 48 });
+      const afresh = dark.create(stageOn(new Container()));
 
       // Act.
       drawing.draw(atFrame100);
@@ -350,6 +364,187 @@ describe('lightingModule', () =>
       // Assert.
       expect(registry.notices())
         .toStrictEqual([]);
+    });
+  });
+
+  describe('lightingModule, with J-Lighting-Time', () =>
+  {
+    /**
+     * J-Lighting-Time's curve as Chef Adventure ships it.
+     */
+    const CURVE = {
+      phases: {
+        Moontide: { tone: [ -30, -18, 34, 170 ], darkness: 0.72 },
+        Dawn: { tone: [ 30, 6, -12, 40 ], darkness: 0.3 },
+        Morning: { tone: [ 0, 0, 0, 0 ], darkness: 0 },
+        Afternoon: { tone: [ 12, 8, -4, 0 ], darkness: 0 },
+        Evening: { tone: [ 26, 0, -34, 22 ], darkness: 0.08 },
+        Night: { tone: [ -34, -14, 40, 95 ], darkness: 0.55 },
+      },
+      sequence: [ 'Moontide', 'Dawn', 'Morning', 'Afternoon', 'Evening', 'Night', 'Moontide' ],
+    } as unknown as JsonValue;
+
+    /**
+     * J-Lighting-Time as js/plugins.js lists it.
+     * @param {boolean} status Whether it is enabled.
+     * @returns {PluginsJsEntry} The entry.
+     */
+    const lightingTime = (status: boolean): PluginsJsEntry => ({ name: 'j/lighting/ext/J-Lighting-Time', status, description: '', parameters: {} });
+
+    /**
+     * J-TIME as js/plugins.js lists it, starting a new game at 14:00, as Chef Adventure does.
+     * @param {boolean} status Whether it is enabled.
+     * @returns {PluginsJsEntry} The entry.
+     */
+    const time = (status: boolean): PluginsJsEntry => ({
+      name: 'j/time/J-TIME',
+      status,
+      description: '',
+      parameters: { useRealTime: 'false', startingHour: '14', startingMinute: '0' },
+    });
+
+    /**
+     * A window's registry with the core's kinds, and J-Lighting's module activated over the given plugins.
+     * @param {PluginsJsEntry[]} plugins The project's plugins.
+     * @param {ReadonlyMap<string, JsonValue | null>} configs The configs read before activating.
+     * @param {ReadonlyMap<string, string>} problems Why any could not be read.
+     * @returns {PluginModuleRegistry} The registry.
+     */
+    const registryOver = (
+      plugins: PluginsJsEntry[],
+      configs: ReadonlyMap<string, JsonValue | null> = new Map([ [ 'lighting', served('#ffffff') ], [ 'lighting-time', CURVE ] ]),
+      problems: ReadonlyMap<string, string> = new Map()): PluginModuleRegistry =>
+    {
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registerCoreEventKinds(registry);
+      registry.activate([ lightingModule ], plugins, configs, problems);
+      return registry;
+    };
+
+    /**
+     * Every plugin the sky needs, enabled.
+     */
+    const SKY = () => [ lighting(true), lightingTime(true), time(true) ];
+
+    /**
+     * A 10x10 map with a note, and a torch reaching two tiles at 1, 1.
+     * @param {string} note The note.
+     * @returns {MapDocument} The map.
+     */
+    const litMap = (note: string): MapDocument =>
+    {
+      const torch = { ...event(1, [ page([ command(108, [ '<light:[2]>' ]) ]) ]), x: 1, y: 1 };
+      return MapDocument.fromJson('map:6', { ...buildMapJson(), width: 10, height: 10, data: new Array(10 * 10 * 6).fill(0), note, events: [ null, torch ] });
+    };
+
+    it('casts the sky\'s colour first, then draws the dark and the rings, while J-Lighting-Time and J-TIME are enabled too', () =>
+    {
+      // Arrange: every plugin the sky needs.
+
+      // Act.
+      const layers = registryOver(SKY()).lightingLayers().map(layer => [ layer.id, layer.shownInGame === true ]);
+
+      // Assert.
+      expect(layers)
+        .toStrictEqual([ [ SKY_TONE_ID, true ], [ 'lighting.dark', true ], [ 'lighting.rings', false ] ]);
+    });
+
+    it('offers a clock starting at J-TIME\'s starting time, naming each part of the day as the game does', () =>
+    {
+      // Arrange.
+      const registry = registryOver(SKY());
+
+      // Act.
+      const offer = registry.clockOffer();
+
+      // Assert.
+      expect([ offer?.startsAt, offer?.partOfDay(1320), offer?.partOfDay(0) ])
+        .toStrictEqual([ 840, 'Night', 'Moontide' ]);
+    });
+
+    it('offers no clock and casts no sky without J-Lighting-Time, or with J-TIME disabled', () =>
+    {
+      // Arrange: J-TIME without the extension; the extension with J-TIME off.
+      const projects = [ [ lighting(true), time(true) ], [ lighting(true), lightingTime(true), time(false) ] ];
+
+      // Act.
+      const registries = projects.map(plugins => registryOver(plugins));
+
+      // Assert.
+      expect(registries.map(registry => [ registry.clockOffer(), registry.lightingLayers().map(layer => layer.id) ]))
+        .toStrictEqual([ [ null, [ 'lighting.dark', 'lighting.rings' ] ], [ null, [ 'lighting.dark', 'lighting.rings' ] ] ]);
+    });
+
+    it('names the curve as a config it reads only while J-Lighting-Time and J-TIME are enabled', () =>
+    {
+      // Arrange: the module as the editor ships it.
+
+      // Act.
+      const { extensionConfigs } = lightingModule;
+
+      // Assert.
+      expect(extensionConfigs)
+        .toStrictEqual([ { name: 'lighting-time', plugins: [ 'J-Lighting-Time', 'J-TIME' ] } ]);
+    });
+
+    it('darkens a field at 22:00 with its torch cut through, compounds a dark map\'s own, and leaves a map with no sky its own', () =>
+    {
+      // Arrange: a field with no darkness of its own, a cave at 85% under the sky, and the same cave tagged to have none;
+      // every picture is plain white, as no canvas paints here.
+      const pictureFor = vi.spyOn(LightPictures.prototype, 'pictureFor').mockReturnValue(Texture.WHITE);
+      const dark = registryOver(SKY()).lightingLayers().find(layer => layer.id === LIGHT_MASK_ID) as LightingLayerDefinition;
+      const maps = [ litMap(''), litMap('<ambient:[85]>'), litMap('<noToneChange>\n<ambient:[85]>') ];
+      const cleared: number[][] = [];
+
+      // Act: each drawn at 22:00 by a renderer writing down what each lit piece is cleared to.
+      maps.forEach(document =>
+      {
+        const passes: number[] = [];
+        const renderer = { render: (options: { clearColor: number }) => passes.push(options.clearColor) } as unknown as Renderer;
+        const drawing = dark.create(stageOn(new Container()));
+        drawing.draw({ document, renderer, context: 1, clock: { ...START, timeOfDay: 1320 } });
+        drawing.destroy();
+        cleared.push(passes);
+      });
+      pictureFor.mockRestore();
+
+      // Assert: 63.5% dark over the field, 94.5% over the cave, and the tagged cave's own 85%.
+      expect(cleared)
+        .toStrictEqual([ [ 0x5d5d5d ], [ 0x0e0e0e ], [ 0x262626 ] ]);
+    });
+
+    it('casts the curve\'s tone at the clock\'s hour over a map with a sky, and none over a map tagged to have none', () =>
+    {
+      // Arrange: the sky's drawing for a field and for a tagged cave, each writing down every tone it casts.
+      const sky = registryOver(SKY()).lightingLayers().find(layer => layer.id === SKY_TONE_ID) as LightingLayerDefinition;
+      const cast: (readonly number[] | null)[][] = [];
+
+      // Act: each drawn at 22:00.
+      [ litMap(''), litMap('<noToneChange>') ].forEach(document =>
+      {
+        const tones: (readonly number[] | null)[] = [];
+        const drawing = sky.create({ layer: new Container(), tileSize: 48, castTone: tone => tones.push(tone) });
+        drawing.draw({ document, renderer: {} as Renderer, context: 1, clock: { ...START, timeOfDay: 1320 } });
+        cast.push(tones);
+      });
+
+      // Assert: Night halfway to Moontide over the field; nothing over the cave.
+      expect(cast)
+        .toStrictEqual([ [ [ -32, -16, 37, 133 ] ], [] ]);
+    });
+
+    it('says over the map why the sky stays put when the curve could not be read, still offering the clock', () =>
+    {
+      // Arrange: the curve's file is missing.
+      const configs = new Map<string, JsonValue | null>([ [ 'lighting', served('#ffffff') ], [ 'lighting-time', null ] ]);
+      const problems = new Map([ [ 'lighting-time', 'open /game/data/config.lighting-time.json: no such file or directory' ] ]);
+
+      // Act.
+      const registry = registryOver(SKY(), configs, problems);
+
+      // Assert.
+      expect([ registry.notices().map(notice => notice.id), registry.clockOffer()?.startsAt, registry.lightingLayers().map(layer => layer.id) ])
+        .toStrictEqual([ [ 'lighting.time-config' ], 840, [ 'lighting.dark', 'lighting.rings' ] ]);
     });
   });
 

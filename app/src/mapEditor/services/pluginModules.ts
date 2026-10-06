@@ -2,7 +2,7 @@ import { readPluginEntries, type PluginsJsEntry } from '../../services/plugins/P
 import { MapEditorApiError, type MapEditorApi } from '../core/api/MapEditorApi.ts';
 import { jsonEquals, type JsonValue } from '../core/model/json.ts';
 import type { PluginModule } from '../core/modules/PluginModule.ts';
-import { enabledPlugins, type PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
+import { configNamesOf, enabledPlugins, type PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import { jabsModule } from '../modules/jabs/jabsModule.ts';
 import { lightingModule } from '../modules/lighting/lightingModule.ts';
 
@@ -45,9 +45,10 @@ const problemOf = (error: Error): string =>
 };
 
 /**
- * Reads the config files named by the modules that are about to switch on, and only theirs, so a project without a
- * plugin is never asked for that plugin's config. A file the server cannot give, or a client that cannot read configs
- * at all, reads as null, and why is kept, so the module can say so rather than quietly falling back.
+ * Reads the config files named by the modules that are about to switch on, and only theirs, an extension's only while
+ * that extension is enabled too, so a project without a plugin is never asked for that plugin's config. A file the
+ * server cannot give, or a client that cannot read configs at all, reads as null, and why is kept, so the module can say
+ * so rather than quietly falling back.
  * @param {ModuleSource} api The server.
  * @param {readonly PluginModule[]} modules The modules.
  * @param {readonly PluginsJsEntry[]} plugins The project's plugins.
@@ -61,7 +62,7 @@ const readModuleConfigs = async (
   const enabled = enabledPlugins(plugins);
   const names = new Set(modules
     .filter(pluginModule => pluginModule.plugins.every(name => enabled.has(name)))
-    .flatMap(pluginModule => pluginModule.configs ?? []));
+    .flatMap(pluginModule => configNamesOf(pluginModule, enabled)));
   const read = async (name: string): Promise<{ name: string; content: JsonValue | null; problem: string | null }> =>
   {
     if (api.loadPluginConfig === undefined)
@@ -111,7 +112,8 @@ const sameInputs = (left: ModuleInputs, right: ModuleInputs): boolean =>
 };
 
 /**
- * Reports whether a changed file is a config one of the modules reads, so the modules should read their configs again.
+ * Reports whether a changed file is a config one of the modules reads, an extension's included, so the modules should
+ * read their configs again.
  * @param {string} path The file, relative to the project root, as the change stream names it.
  * @param {readonly PluginModule[]} modules The modules; by default, the ones the editor ships.
  * @returns {boolean} True for a config some module names.
@@ -125,7 +127,11 @@ const isModuleConfigFile = (path: string, modules: readonly PluginModule[] = SHI
   }
 
   const [ , name ] = match;
-  return modules.some(pluginModule => (pluginModule.configs ?? []).includes(name));
+  return modules.some(pluginModule =>
+  {
+    const extensions = (pluginModule.extensionConfigs ?? []).map(config => config.name);
+    return [ ...(pluginModule.configs ?? []), ...extensions ].includes(name);
+  });
 };
 
 /**

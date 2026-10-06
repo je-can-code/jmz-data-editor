@@ -41,12 +41,19 @@ type MaskLight = {
 };
 
 /**
+ * How dark a map is, all sources composed: how much light is gone, and the colour the mask is filled with before any
+ * light is cut through it.
+ */
+type MapDark = {
+  readonly darkness: number;
+  readonly tint: number;
+};
+
+/**
  * What the dark over a map is, all sources composed: how much light is gone, the colour the mask is filled with before
  * any light is cut through it, and every light cutting through it, by event and then in the order its page writes them.
  */
-type DarkScene = {
-  readonly darkness: number;
-  readonly tint: number;
+type DarkScene = MapDark & {
   readonly lights: readonly MaskLight[];
 };
 
@@ -118,19 +125,19 @@ const maskLightsOf = (document: MapDocument, setup: DarkSetup, clock: LightingCl
 };
 
 /**
- * Works out the dark over a map as J-Lighting composes it: every source's darkness compounded, the colour of the dark
- * settled among the sources that named one, and every light on the map, burning as it does at the clock's moment. A map
- * nobody calls dark has no dark at all, as in the game, where lights alone never earn a mask.
+ * Works out how dark a map is at the clock's moment as J-Lighting composes it: every source's darkness compounded, and
+ * the colour of the dark settled among the sources that named one. A map nobody calls dark has no dark at all, as in the
+ * game, where lights alone never earn a mask.
  * @param {MapDocument} document The map.
- * @param {DarkSetup} setup What the dark is worked out from.
+ * @param {readonly AmbientSource[]} sources Everything that darkens it.
  * @param {LightingClock} clock The view's clock.
- * @returns {DarkScene | null} The dark, or null when the map is not dark.
+ * @returns {MapDark | null} How dark it is, or null when it is not dark.
  */
-const darkSceneOf = (document: MapDocument, setup: DarkSetup, clock: LightingClock): DarkScene | null =>
+const darkOf = (document: MapDocument, sources: readonly AmbientSource[], clock: LightingClock): MapDark | null =>
 {
-  const ambients = setup.sources.flatMap(source =>
+  const ambients = sources.flatMap(source =>
   {
-    const declared = source(document);
+    const declared = source(document, clock);
     return declared === null
       ? []
       : [ declared ];
@@ -141,12 +148,27 @@ const darkSceneOf = (document: MapDocument, setup: DarkSetup, clock: LightingClo
     return null;
   }
 
-  return {
-    darkness,
-    tint: maskTintFor(darkness, composeAmbientColor(ambients)),
-    lights: maskLightsOf(document, setup, clock),
-  };
+  return { darkness, tint: maskTintFor(darkness, composeAmbientColor(ambients)) };
 };
 
-export { darkSceneOf, lightIdOf, maskLightsOf };
-export type { BurningLight, DarkScene, DarkSetup, LightStrength, MaskLight };
+/**
+ * Works out the dark over a map as J-Lighting composes it ({@link darkOf}), with every light on the map, burning as it
+ * does at the clock's moment. A map nobody calls dark has no dark at all, however many lights it holds.
+ * @param {MapDocument} document The map.
+ * @param {DarkSetup} setup What the dark is worked out from.
+ * @param {LightingClock} clock The view's clock.
+ * @returns {DarkScene | null} The dark, or null when the map is not dark.
+ */
+const darkSceneOf = (document: MapDocument, setup: DarkSetup, clock: LightingClock): DarkScene | null =>
+{
+  const dark = darkOf(document, setup.sources, clock);
+  if (dark === null)
+  {
+    return null;
+  }
+
+  return { ...dark, lights: maskLightsOf(document, setup, clock) };
+};
+
+export { darkOf, darkSceneOf, lightIdOf, maskLightsOf };
+export type { BurningLight, DarkScene, DarkSetup, LightStrength, MapDark, MaskLight };

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { LightingClock } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
-import { mapAmbient } from '../../../../src/mapEditor/modules/lighting/ambientTags.ts';
+import { mapAmbient, type AmbientSource } from '../../../../src/mapEditor/modules/lighting/ambientTags.ts';
 import type { LightStrength } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
 import { pictureKey } from '../../../../src/mapEditor/modules/lighting/lightFalloff.ts';
 import { LightMask } from '../../../../src/mapEditor/modules/lighting/lightMask.ts';
@@ -163,17 +163,23 @@ vi.mock('pixi.js', () =>
  * each light reaching it added in, its picture centred on it at its strength at the view's clock, in the order the game
  * adds them; the sprite then shows that texture untinted. A map nobody calls dark has no mask, and holds nothing for one.
  *
- * Asked to draw again, the mask builds again only the pieces whose fill or lights changed: nothing at all when nothing
- * did, the pieces a moved light left and entered when one moves, every piece when the darkness changes; a piece whose
- * lights only burn at another strength is drawn again with the sprites it has. A piece the last light leaves goes back to
- * a plain fill and lets its texture go. A context the graphics card gave back holds no texture's pixels, so every lit
- * piece is drawn again on it, in the texture it already has. A map of another size gets pieces of its own, and the old
- * ones go. Pictures no light draws any more are let go after each draw, and destroying the mask lets go of everything.
+ * Asked to draw again, the mask builds again only the pieces whose lights changed: nothing at all when nothing did, and
+ * the pieces a moved light left and entered when one moves; a piece whose lights only burn at another strength, or whose
+ * dark only deepened or lifted, is drawn again with the sprites it has, and a plain piece is only tinted afresh. A piece
+ * the last light leaves goes back to a plain fill and lets its texture go. A context the graphics card gave back holds no
+ * texture's pixels, so every lit piece is drawn again on it, in the texture it already has. A map of another size gets
+ * pieces of its own, and the old ones go. Pictures no light draws any more are let go after each draw, and destroying
+ * the mask lets go of everything.
  *
  * Between draws the clock moves on. Only the pieces a light whose effect runs reaches have anything to do: each works
  * out how brightly its lights burn now and is drawn again, as it stands, only when one burns otherwise than it was drawn.
  * A piece reached by steady lights alone is never touched, and a map with no dark, or no light whose effect runs, costs
  * a tick nothing, its strength never even asked.
+ *
+ * The window's clock moves too, and the sky at its hour is one of the sources darkening a map. A tick finding the clock
+ * moved works out the dark at the new hour: the same dark draws nothing; a deeper or lighter one draws the lit pieces
+ * again as they stand and tints the plain ones; a map the hour darkens for the first time gets its mask, every light cut
+ * through it at its strength now; and an hour lifting the dark takes the mask away.
  */
 
 /**
@@ -281,11 +287,35 @@ const steady: LightStrength = () => 1;
 const dimming: LightStrength = (light, clock) => (light.effect === 'steady' ? 1 : 1 - (clock.frames / 100));
 
 /**
- * The view's clock at a frame, animating.
+ * The view's clock at a frame, animating, at the time of day given, 14:00 unless another is.
  * @param {number} frames The frame.
+ * @param {number} timeOfDay The time of day, in minutes past midnight.
  * @returns {LightingClock} The clock.
  */
-const at = (frames: number): LightingClock => ({ frames, animating: true });
+const at = (frames: number, timeOfDay = 840): LightingClock => ({ frames, animating: true, timeOfDay });
+
+/**
+ * A sky darkening the map by the hour of the clock, naming no colour, under the time source.
+ * @param {(hour: number) => number} darknessAt The darkness at each hour.
+ * @returns {AmbientSource} The source.
+ */
+const skyOf = (darknessAt: (hour: number) => number): AmbientSource =>
+{
+  return (_document, clock) => ({ darkness: darknessAt(Math.floor(clock.timeOfDay / 60)), color: [ 0, 0, 0 ], declaresColor: false, source: 'time' });
+};
+
+/**
+ * A sky clear by day and half dark from 20:00, three quarters from 22:00.
+ */
+const NIGHTFALL = skyOf(hour =>
+{
+  if (hour >= 22)
+  {
+    return 0.75;
+  }
+
+  return hour >= 20 ? 0.5 : 0;
+});
 
 /**
  * A map of the given size, note and events.
@@ -303,9 +333,10 @@ const mapOf = (size: number, note: string, events: (RmmzMapEvent | null)[]): Map
  * A mask on a fresh stage, cut into pieces of 256 pixels, so a 16x16 map is 3 by 3 pieces, with what each strength it
  * is asked for, in order.
  * @param {LightStrength} strengthOf How brightly each light burns.
+ * @param {AmbientSource[]} sky Sources darkening the map beside its own note; none unless given.
  * @returns {object} The mask, its stage, its pictures, a renderer writing down its passes, and the strengths asked for.
  */
-const maskOnStage = (strengthOf: LightStrength = steady) =>
+const maskOnStage = (strengthOf: LightStrength = steady, sky: AmbientSource[] = []) =>
 {
   const layer = new Container();
   const named = namedPictures();
@@ -315,8 +346,9 @@ const maskOnStage = (strengthOf: LightStrength = steady) =>
     asked.push(`${light.id} at ${clock.frames}`);
     return strengthOf(light, clock);
   };
-  const setup = { sources: [ mapAmbient('#000000') ], defaults: { color: '#ffffff', intensity: 0 }, choosePage: firstLitPage, strengthOf: counted };
-  const mask = new LightMask({ layer, tileSize: 48 }, setup, named.pictures, 256);
+  const sources = [ mapAmbient('#000000'), ...sky ];
+  const setup = { sources, defaults: { color: '#ffffff', intensity: 0 }, choosePage: firstLitPage, strengthOf: counted };
+  const mask = new LightMask({ layer, tileSize: 48, castTone: () => undefined }, setup, named.pictures, 256);
   const { renderer, passes, containers } = recordingRenderer();
   const draw = (document: MapDocument, context = 1, clock = at(0)) => mask.draw({ document, renderer, context, clock });
   const tick = (document: MapDocument, clock: LightingClock) => mask.tick({ document, renderer, context: 1, clock });
@@ -504,18 +536,22 @@ describe('LightMask', () =>
       .toStrictEqual([ 4, true, true, 2 ]);
   });
 
-  it('fills every piece afresh when the darkness changes', () =>
+  it('fills every piece afresh when the darkness changes, drawing the lit one again with the sprites it has', () =>
   {
     // Arrange: a cave at 85% with a torch.
-    const { draw, sprites, passes } = maskOnStage();
+    const { draw, sprites, passes, containers } = maskOnStage();
     draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1) ]));
+    const made = stand.sprites;
 
     // Act: the note now says 93%.
     draw(mapOf(16, '<ambient:[93]>', [ null, torchAt(1, 1, 1) ]));
 
-    // Assert: the lit piece cleared to the new fill, and every plain one tinted with it.
+    // Assert: the lit piece cleared to the new fill with the same sprites into the same texture, nothing made, and every
+    // plain one tinted with it.
     expect([ passes.map(pass => pass.clearColor), sprites().slice(1).every(sprite => sprite.tint === 0x121212) ])
       .toStrictEqual([ [ 0x262626, 0x121212 ], true ]);
+    expect([ containers[1] === containers[0], passes[1].target === passes[0].target, stand.sprites - made, stand.textures.length ])
+      .toStrictEqual([ true, true, 0, 1 ]);
   });
 
   it('covers a map of another size with pieces of its own, letting go of the old ones and their textures', () =>
@@ -660,6 +696,107 @@ describe('LightMask', () =>
       // Assert.
       expect([ moved, passes.length, asked ])
         .toStrictEqual([ false, 1, [] ]);
+    });
+  });
+
+  describe('tick, with the clock moved', () =>
+  {
+    it('gives a map its mask once the clock reaches an hour that darkens it, every light cut through at its strength now', () =>
+    {
+      // Arrange: a field with a flickering torch, no darkness of its own, drawn at 14:00 under a sky dark after 20:00.
+      const { draw, tick, sprites, passes, mask } = maskOnStage(dimming, [ NIGHTFALL ]);
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1, 'flicker') ]);
+      draw(field, 1, at(0));
+
+      // Act: 20:00, ten frames on.
+      const moved = tick(field, at(10, 1200));
+
+      // Assert: half dark, the torch cut into the first piece at 0.9, the rest plain.
+      expect([ moved, passes.map(pass => [ pass.clearColor, pass.added.map(added => added.alpha) ]), mask.litChunks ])
+        .toStrictEqual([ true, [ [ 0x808080, [ 0.9 ] ] ], 1 ]);
+      expect(sprites().slice(1).every(sprite => sprite.tint === 0x808080))
+        .toBe(true);
+    });
+
+    it('draws nothing again when the clock moves within the dark it already shows', () =>
+    {
+      // Arrange: the field drawn at 20:00, already half dark.
+      const { draw, tick, passes } = maskOnStage(steady, [ NIGHTFALL ]);
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1) ]);
+      draw(field, 1, at(0, 1200));
+
+      // Act: 21:30, still half dark.
+      const moved = tick(field, at(0, 1290));
+
+      // Assert.
+      expect([ moved, passes.length ])
+        .toStrictEqual([ false, 1 ]);
+    });
+
+    it('draws the lit pieces again as they stand and tints the plain ones when the hour deepens the dark', () =>
+    {
+      // Arrange: the field drawn at 20:00, half dark.
+      const { draw, tick, sprites, passes, containers } = maskOnStage(steady, [ NIGHTFALL ]);
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1) ]);
+      draw(field, 1, at(0, 1200));
+      const made = stand.sprites;
+
+      // Act: 22:00, three quarters dark.
+      const moved = tick(field, at(0, 1320));
+
+      // Assert: the lit piece cleared to the deeper fill with the sprites it has, and the plain ones tinted with it.
+      expect([ moved, passes.map(pass => pass.clearColor), containers[1] === containers[0], stand.sprites - made ])
+        .toStrictEqual([ true, [ 0x808080, 0x404040 ], true, 0 ]);
+      expect(sprites().slice(1).every(sprite => sprite.tint === 0x404040))
+        .toBe(true);
+    });
+
+    it('takes the mask away when the clock moves to an hour that lifts the dark', () =>
+    {
+      // Arrange: the field drawn at 22:00.
+      const { draw, tick, sprites, mask } = maskOnStage(steady, [ NIGHTFALL ]);
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1) ]);
+      draw(field, 1, at(0, 1320));
+      const drawn = [ ...sprites() ];
+
+      // Act: back to 14:00.
+      const moved = tick(field, at(0, 840));
+
+      // Assert.
+      expect([ moved, drawn.every(sprite => sprite.destroyed), stand.textures[0].destroyed, mask.litChunks ])
+        .toStrictEqual([ true, true, true, 0 ]);
+    });
+
+    it('changes nothing when the clock moves on a map no hour darkens', () =>
+    {
+      // Arrange: a field drawn at 14:00 with no sky over it.
+      const { draw, tick, passes } = maskOnStage();
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1) ]);
+      draw(field, 1, at(0));
+
+      // Act: 22:00.
+      const moved = tick(field, at(0, 1320));
+
+      // Assert.
+      expect([ moved, passes.length ])
+        .toStrictEqual([ false, 0 ]);
+    });
+
+    it('cuts the lights it worked out before the hour lifted the dark through it again when the dark returns', () =>
+    {
+      // Arrange: a flickering torch in the field drawn at 22:00, then the clock moved to 14:00, lifting the dark.
+      const { draw, tick, passes, asked } = maskOnStage(dimming, [ NIGHTFALL ]);
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1, 'flicker') ]);
+      draw(field, 1, at(0, 1320));
+      tick(field, at(0, 840));
+      asked.splice(0);
+
+      // Act: back to 20:00, twenty frames on.
+      const moved = tick(field, at(20, 1200));
+
+      // Assert: the torch cut through again at its strength twenty frames on, asked after once for that.
+      expect([ moved, passes.map(pass => [ pass.clearColor, pass.added.map(added => added.alpha) ]), asked ])
+        .toStrictEqual([ true, [ [ 0x404040, [ 1 ] ], [ 0x808080, [ 0.8 ] ] ], [ 'page:1#0 at 20' ] ]);
     });
   });
 

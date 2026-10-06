@@ -1,17 +1,34 @@
 import { Container } from 'pixi.js';
-import type { LightingDrawing, LightingFrame, LightingLayerDefinition } from '../../core/renderer/lightingLayer.ts';
+import type { LightingDrawing, LightingFrame, LightingLayerDefinition, ScreenTone } from '../../core/renderer/lightingLayer.ts';
+import { sameTone } from '../../core/renderer/screenTone.ts';
 import type { ChangeEffect } from '../documentChanges.ts';
 
 /**
- * One module's lighting in this view: what it was made from, the container it draws in, the drawing itself, and whether
- * it moves on with the clock between draws, which it does until a part of it fails, and again once it draws.
+ * One module's lighting in this view: what it was made from, the container it draws in, the drawing itself, whether it
+ * moves on with the clock between draws, which it does until a part of it fails, and again once it draws, and the tone
+ * it casts over the view, if any.
  */
 type LightingEntry = {
   readonly definition: LightingLayerDefinition;
   readonly root: Container;
-  readonly drawing: LightingDrawing;
+  drawing: LightingDrawing;
   ticking: boolean;
+  tone: ScreenTone | null;
 };
+
+/**
+ * What an entry holds for the moment its drawing is being made, before there is one: a drawing that draws nothing.
+ */
+const NOT_YET_MADE: LightingDrawing = {
+  draw: () => undefined,
+  tick: () => false,
+  destroy: () => undefined,
+};
+
+/**
+ * Hears the tone the view's lighting casts over what the game tones, whenever it changes.
+ */
+type ToneListener = (tone: ScreenTone | null) => void;
 
 /**
  * Everything plugin modules draw into a view's lighting layer: one drawing per lighting layer they contribute, each in
@@ -25,6 +42,10 @@ type LightingEntry = {
  *
  * In every other frame the layer shows, each drawing is handed the clock to move on to, and the frame has something new
  * to show only when one of them changed. While the layer is hidden nothing is ticked at all.
+ *
+ * A drawing may also cast a tone over what the game tones beneath the layer, the way the engine's screen tone does.
+ * The layers keep each drawing's tone and pass on the one cast by the drawing contributed last, whenever that changes,
+ * so the view shows one tone, as the game's screen does; a drawing let go takes its tone with it.
  */
 class LightingLayers
 {
@@ -39,12 +60,27 @@ class LightingLayers
 
   #stale = true;
 
+  #tone: ScreenTone | null = null;
+
+  #onTone: ToneListener;
+
   /**
    * @param {number} tileSize The tile size the drawings draw at.
+   * @param {ToneListener} onTone Hears the tone the drawings cast, each time it changes; by default nobody does.
    */
-  constructor(tileSize: number)
+  constructor(tileSize: number, onTone: ToneListener = () => undefined)
   {
     this.#tileSize = tileSize;
+    this.#onTone = onTone;
+  }
+
+  /**
+   * The tone the drawings cast now: the one cast by the drawing contributed last, or null while none casts one.
+   * @returns {ScreenTone | null} The tone.
+   */
+  get tone(): ScreenTone | null
+  {
+    return this.#tone;
   }
 
   /**
@@ -70,15 +106,14 @@ class LightingLayers
         return known;
       }
 
-      const root = new Container();
-      this.layer.addChild(root);
-      const entry = { definition, root, drawing: definition.create({ layer: root, tileSize: this.#tileSize }), ticking: false };
+      const entry = this.#entryFor(definition);
       made.push(entry);
       return entry;
     });
 
-    // the containers follow the order the modules contributed in.
+    // the containers follow the order the modules contributed in, and a drawing let go cast its last tone.
     this.#entries.forEach((entry, index) => this.layer.setChildIndex(entry.root, index));
+    this.#composeTone();
     this.#stale ||= made.length > 0;
   }
 
@@ -152,6 +187,55 @@ class LightingLayers
   }
 
   /**
+   * Makes one lighting layer's drawing, in a container of its own at the top of the layer, with a stage whose tone is
+   * the entry's own.
+   * @param {LightingLayerDefinition} definition The lighting layer.
+   * @returns {LightingEntry} Its entry, holding the drawing.
+   */
+  #entryFor(definition: LightingLayerDefinition): LightingEntry
+  {
+    const root = new Container();
+    this.layer.addChild(root);
+
+    // the entry comes first, so a tone the drawing casts, even while it is made, has an entry to be kept on.
+    const entry: LightingEntry = { definition, root, drawing: NOT_YET_MADE, ticking: false, tone: null };
+    entry.drawing = definition.create({
+      layer: root,
+      tileSize: this.#tileSize,
+      castTone: tone => this.#castTone(entry, tone),
+    });
+    return entry;
+  }
+
+  /**
+   * Keeps the tone one drawing casts, and passes on the view's tone if that changed it.
+   * @param {LightingEntry} entry The drawing's entry.
+   * @param {ScreenTone | null} tone The tone, or null for none.
+   */
+  #castTone(entry: LightingEntry, tone: ScreenTone | null): void
+  {
+    entry.tone = tone;
+    this.#composeTone();
+  }
+
+  /**
+   * Settles the view's tone, the one cast by the drawing contributed last, and passes it on when it changed.
+   */
+  #composeTone(): void
+  {
+    const casting = this.#entries.filter(entry => entry.tone !== null);
+    const [ last ] = casting.slice(-1);
+    const tone = last === undefined ? null : last.tone;
+    if (sameTone(tone, this.#tone))
+    {
+      return;
+    }
+
+    this.#tone = tone;
+    this.#onTone(tone);
+  }
+
+  /**
    * Hands one drawing the clock, unless it failed since it last drew.
    * @param {LightingEntry} entry The drawing.
    * @param {LightingFrame} frame The map, the renderer and the clock.
@@ -197,3 +281,4 @@ class LightingLayers
 }
 
 export { LightingLayers };
+export type { ToneListener };

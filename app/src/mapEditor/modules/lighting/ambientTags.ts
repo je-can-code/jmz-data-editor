@@ -1,12 +1,14 @@
 import type { MapDocument } from '../../core/model/MapDocument.ts';
+import type { LightingClock } from '../../core/renderer/lightingLayer.ts';
 import { rgbOf, type AmbientDeclaration } from './lightingComposition.ts';
 import { isFiniteNumber, isHexColor, readPayload } from './lightTags.ts';
 
 /**
- * Something that darkens a map, as J-Lighting composes it: handed the map, it says how dark it makes it, or nothing.
- * The map's own note is one such source; the clock's darkness is another, and joins the same composition.
+ * Something that darkens a map, as J-Lighting composes it: handed the map and the view's clock, it says how dark it
+ * makes the map, or nothing. The map's own note is one such source, whatever the clock says; the sky at the clock's hour
+ * is another, and joins the same composition.
  */
-type AmbientSource = (document: MapDocument) => AmbientDeclaration | null;
+type AmbientSource = (document: MapDocument, clock: LightingClock) => AmbientDeclaration | null;
 
 /**
  * The ambient tag exactly as J-Lighting declares it (J.LIGHTING.RegExp.Ambient): a darkness of digits and dots, then any
@@ -106,7 +108,8 @@ const parseAmbient = (payload: string, defaultColor: string, source: string): Am
 
 /**
  * The map's own darkness, as MapAmbientCoordinator#refresh declares it when the player arrives: the ambient tag its note
- * holds, under the map's source. A note without one, or whose tag gives no darkness, darkens nothing.
+ * holds, under the map's source, at every hour alike. A note without one, or whose tag gives no darkness, darkens
+ * nothing.
  * @param {string} defaultColor The project's colour of the dark, a hex colour.
  * @returns {AmbientSource} The source.
  */

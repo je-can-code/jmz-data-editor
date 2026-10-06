@@ -135,8 +135,9 @@ type ModuleContext = {
   readonly plugins: ReadonlyMap<string, PluginsJsEntry>;
 
   /**
-   * The project config files the module names in {@link PluginModule.configs}, read before it switches on, by the name
-   * it gave; null for a project without the file, or a file the server could not read.
+   * The project config files the module names in {@link PluginModule.configs}, and those it names in
+   * {@link PluginModule.extensionConfigs} whose plugins are enabled, read before it switches on, by the name it gave;
+   * null for a project without the file, or a file the server could not read.
    */
   readonly configs: ReadonlyMap<string, JsonValue | null>;
 
@@ -146,6 +147,37 @@ type ModuleContext = {
    * entry, so a module can say what is wrong rather than quietly falling back.
    */
   readonly configProblems: ReadonlyMap<string, string>;
+};
+
+/**
+ * A clock a module offers the map views, for a plugin that gives the game a time of day: where the window's clock
+ * starts, which is the game's own starting time, and what the game calls each part of the day. The map views show the
+ * clock only while some module offers one, and the window has one clock, whichever module offers it, so every map in
+ * it shows the same hour.
+ */
+type ClockOffer = {
+  /**
+   * The time of day the game starts at, in minutes past midnight, which the window's clock shows until the author moves
+   * it.
+   */
+  readonly startsAt: number;
+
+  /**
+   * Names the part of the day a time falls in, as the game names it, such as Night.
+   * @param {number} minutes The time of day, in minutes past midnight.
+   * @returns {string} The name.
+   */
+  readonly partOfDay: (minutes: number) => string;
+};
+
+/**
+ * A project config file a module reads only while some plugins beyond its own are enabled too, such as an extension's
+ * config, which is read only while the extension is on: the name the server serves it under, and those plugins, by
+ * file name.
+ */
+type ExtensionConfig = {
+  readonly name: string;
+  readonly plugins: readonly string[];
 };
 
 /**
@@ -195,6 +227,14 @@ type ModuleContributions = {
    * @param {ModuleNotice} notice What to say.
    */
   notice(notice: ModuleNotice): void;
+
+  /**
+   * Offers the map views a clock, for as long as the module is on: the views show it, and the window's clock starts at
+   * the time the offer gives. Should several modules offer one, the first to offer says where it starts and how the day
+   * is named.
+   * @param {ClockOffer} offer Where the clock starts, and what each part of the day is called.
+   */
+  clock(offer: ClockOffer): void;
 };
 
 /**
@@ -226,6 +266,13 @@ type PluginModule = {
   readonly configs?: readonly string[];
 
   /**
+   * The project config files it reads only while further plugins are enabled beside its own, such as an extension's
+   * config, read only while the extension is on. Each is read, like {@link configs}, before the module switches on and
+   * handed over in its context, and a project without those plugins is never asked for it. Left out, it reads none.
+   */
+  readonly extensionConfigs?: readonly ExtensionConfig[];
+
+  /**
    * Adds the module's contributions.
    * @param {ModuleContributions} contributions Where to add them.
    * @param {ModuleContext} context The enabled plugins, the configs the module reads, and why any of them could not be
@@ -235,7 +282,9 @@ type PluginModule = {
 };
 
 export type {
+  ClockOffer,
   EventKindDefinition,
+  ExtensionConfig,
   ModuleContext,
   ModuleContributions,
   ModuleNotice,

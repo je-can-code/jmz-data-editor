@@ -24,12 +24,12 @@ const SHIPPED: EffectTunings = {
 };
 
 /**
- * The view's clock at a frame.
+ * The view's clock at a frame, at midnight.
  * @param {number} frames The frame.
  * @param {boolean} animating Whether the view animates.
  * @returns {LightingClock} The clock.
  */
-const at = (frames: number, animating = true): LightingClock => ({ frames, animating });
+const at = (frames: number, animating = true): LightingClock => ({ frames, animating, timeOfDay: 0 });
 
 describe('lightEffects', () =>
 {

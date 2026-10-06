@@ -2,6 +2,13 @@ import type { Container, Renderer } from 'pixi.js';
 import type { MapDocument } from '../model/MapDocument.ts';
 
 /**
+ * A colour cast over everything the game tones, as the engine takes a screen tone (Game_Screen#tone, which the colour
+ * filter on the spriteset's base sprite applies): red, green and blue, each added to every pixel's own on a scale of
+ * 255, then grey, how much of every pixel's colour is drained away, from 0 (none) to 255 (all of it).
+ */
+type ScreenTone = readonly [ number, number, number, number ];
+
+/**
  * Where a module's lighting draws in one map view: a container of its own inside the view's lighting layer, which
  * sits over the map and its events and under the editor's overlays, and shows only while the view's Lighting switch
  * is on. Its units are world pixels: the map's top-left corner is 0, 0 and a tile is {@link tileSize} across.
@@ -9,10 +16,20 @@ import type { MapDocument } from '../model/MapDocument.ts';
 type LightingStage = {
   readonly layer: Container;
   readonly tileSize: number;
+
+  /**
+   * Casts a tone over what the game tones in the view, as the engine's screen tone does: the map, its parallax and its
+   * events, and never the editor's own overlays, markers or rings, nor the lighting layer, which the game draws above
+   * its tone too. It holds until the drawing casts another, and shows only while the Lighting switch is on. Null, or a
+   * tone of all zeroes, casts none. Should several drawings cast one, the one contributed last shows.
+   * @param {ScreenTone | null} tone The tone, or null for none.
+   */
+  readonly castTone: (tone: ScreenTone | null) => void;
 };
 
 /**
- * The view's clock, as one frame reads it: the engine frame it is on, and whether the game look moves at all.
+ * The view's clock, as one frame reads it: the engine frame it is on, whether the game look moves at all, and the time
+ * of day the window's clock shows.
  */
 type LightingClock = {
   /**
@@ -28,6 +45,12 @@ type LightingClock = {
    * animation running, every light at its full strength.
    */
   readonly animating: boolean;
+
+  /**
+   * The time of day the window's clock shows, in minutes past midnight, 0 to 1439: the hour the sky is drawn at. The
+   * author moves it; it never runs on its own, so a drawing that reads it draws again only when it moves.
+   */
+  readonly timeOfDay: number;
 };
 
 /**
@@ -63,8 +86,8 @@ type LightingFrame = {
  *
  * In every other frame the view shows the lighting, it hands the drawing the clock instead, through {@link tick}: that is
  * where anything that moves between edits moves, such as a torch guttering, and where a drawing reading anything the map
- * does not hold, such as a clock's hour, draws again once that changes. A view behind another tab, a closed one, or one
- * with its Lighting switch off hands out no ticks at all.
+ * does not hold, such as the time of day the window's clock shows, draws again once that changes. A view behind another
+ * tab, a closed one, or one with its Lighting switch off hands out no ticks at all.
  */
 interface LightingDrawing
 {
@@ -84,7 +107,7 @@ interface LightingDrawing
   tick(frame: LightingFrame): boolean;
 
   /**
-   * Lets go of everything it made, for a view closing or a module switching off.
+   * Lets go of everything it made, for a view closing or a module switching off, a tone it cast included.
    */
   destroy(): void;
 }
@@ -112,4 +135,4 @@ type LightingLayerDefinition = {
   readonly create: (stage: LightingStage) => LightingDrawing;
 };
 
-export type { LightingClock, LightingDrawing, LightingFrame, LightingLayerDefinition, LightingStage };
+export type { LightingClock, LightingDrawing, LightingFrame, LightingLayerDefinition, LightingStage, ScreenTone };

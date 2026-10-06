@@ -12,6 +12,7 @@ import type { LocationPicks } from '../core/locations/LocationPicks.ts';
 import type { DocumentKey } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
+import { WindowClock } from '../core/time/WindowClock.ts';
 import { WindowPaints } from '../core/tools/WindowPaint.ts';
 import { FileChangeFeed, openEventSource, type EventSourceFactory } from '../core/sync/FileChangeFeed.ts';
 import { FileChangeRouter } from '../core/sync/fileChangeRouting.ts';
@@ -94,6 +95,12 @@ type MapEditorServices = {
   readonly paints: WindowPaints;
 
   /**
+   * The time of day the window shows: one clock for every map view in it, torn-out windows included. It starts at the
+   * game's own starting time once a plugin module offering a clock switches on, and keeps the hour the author picks.
+   */
+  readonly clock: WindowClock;
+
+  /**
    * Reads what command editing needs from the server, once per window however often it is asked: the plugin
    * headers, whose commands join the catalog, and the database names the editors' pickers offer. A window that
    * never shows a command list never asks. Never rejects.
@@ -122,8 +129,9 @@ type MapEditorServices = {
 
   /**
    * Starts syncing, watching for changes, guarding against closing with unsaved edits, and switching on the plugin
-   * modules once js/plugins.js is read, and afresh whenever a config file one of them reads changes on disk. When the
-   * page goes, it stops, which tells the other windows at once that this one no longer holds anything.
+   * modules once js/plugins.js is read, and afresh whenever a config file one of them reads changes on disk, with the
+   * window's clock following the starting time a module offers. When the page goes, it stops, which tells the other
+   * windows at once that this one no longer holds anything.
    */
   start(): void;
 
@@ -240,6 +248,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
 
   // the window the close guard listens on is the page's own, the one whose paint the page starts with.
   const paints = new WindowPaints(environment.closeTarget);
+  const clock = new WindowClock();
 
   // the change stream is shared by every window, and only exists with a server to stream from.
   const feed = api === null
@@ -273,6 +282,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     locationPicks: commandEditing.locationPicks,
     modules,
     paints,
+    clock,
     loadCommandResources: commandEditing.load,
     openDocument: async (key: DocumentKey) =>
     {
@@ -336,6 +346,17 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
       // what the palette and the layer strip pick is what the painting tools paint with, and the eyedropper's picks go
       // back to them; a torn-out map's window links its own paint the first time it is asked for.
       stops.push(paints.main.link());
+
+      // the window's clock starts where the game does once a module offering it switches on, before any view draws the
+      // sky the module brings.
+      stops.push(modules.subscribe(() =>
+      {
+        const offer = modules.clockOffer();
+        if (offer !== null)
+        {
+          clock.startAt(offer.startsAt);
+        }
+      }));
 
       // the plugin modules switch on once js/plugins.js says which plugins are enabled.
       activation?.refresh();

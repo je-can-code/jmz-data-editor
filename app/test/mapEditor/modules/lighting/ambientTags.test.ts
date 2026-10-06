@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
+import type { LightingClock } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { ambientPayloadOf, mapAmbient, parseAmbient } from '../../../../src/mapEditor/modules/lighting/ambientTags.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
@@ -11,8 +12,14 @@ import { buildMapJson } from '../../support/fixtures.ts';
  *
  * What follows the darkness is the colour of the dark: a hex colour is used, and anything else falls back to the
  * project's. Writing anything there at all says the map names its colour, which is what lets a map keep its colour
- * against a source that outranks it but only knows how dark it is; a tag writing nothing there names none.
+ * against a source that outranks it but only knows how dark it is; a tag writing nothing there names none. A map's own
+ * darkness is what the place always is, so it is the same at every hour of the window's clock.
  */
+
+/**
+ * The view's clock at 14:00, the hour Chef Adventure starts at.
+ */
+const AFTERNOON: LightingClock = { frames: 0, animating: true, timeOfDay: 840 };
 
 /**
  * A map whose note is the given text.
@@ -187,11 +194,28 @@ describe('ambientTags', () =>
       const cave = mapNoted('<noToneChange>\n<ambient:[85]>');
 
       // Act.
-      const declared = mapAmbient('#000000')(cave);
+      const declared = mapAmbient('#000000')(cave, AFTERNOON);
 
       // Assert.
       expect(declared)
         .toStrictEqual({ darkness: 0.85, color: [ 0, 0, 0 ], declaresColor: false, source: 'map' });
+    });
+
+    it('declares the same darkness at every hour of the clock', () =>
+    {
+      // Arrange: a cave read at 14:00 and again at 22:00.
+      const cave = mapNoted('<ambient:[60, #0a2a2a]>');
+      const source = mapAmbient('#000000');
+
+      // Act.
+      const declared = [ source(cave, AFTERNOON), source(cave, { ...AFTERNOON, timeOfDay: 1320 }) ];
+
+      // Assert.
+      expect(declared)
+        .toStrictEqual([
+          { darkness: 0.6, color: [ 10, 42, 42 ], declaresColor: true, source: 'map' },
+          { darkness: 0.6, color: [ 10, 42, 42 ], declaresColor: true, source: 'map' },
+        ]);
     });
 
     it('declares nothing for a map whose note holds no tag', () =>
@@ -200,7 +224,7 @@ describe('ambientTags', () =>
       const field = mapNoted('<noToneChange>');
 
       // Act.
-      const declared = mapAmbient('#000000')(field);
+      const declared = mapAmbient('#000000')(field, AFTERNOON);
 
       // Assert.
       expect(declared)
