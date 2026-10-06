@@ -1,6 +1,6 @@
 import type { JsonValue } from '../../core/model/json.ts';
 import type { ModuleNotice } from '../../core/modules/PluginModule.ts';
-import { isHexColor, PLUGIN_DEFAULTS, type LightDefaults } from './lightTags.ts';
+import { isHexColor, PLUGIN_DEFAULTS, type LightDefaults, type LightEffect } from './lightTags.ts';
 
 /**
  * The name the server serves J-Lighting's config under, from {@code data/config.lighting.json}.
@@ -29,7 +29,9 @@ const CLEARS_ONCE_FIXED = 'This clears as soon as the file is fixed.';
 const ORDINARY_BLACK = '#000000';
 
 /**
- * How strongly and how fast one light effect runs.
+ * How strongly and how fast one light effect runs: how much brightness it may take away at its worst, from 0 to 1; how
+ * many frames one cycle of it takes; how likely a cycle is to fault at all, which glitch alone reads; and how far either
+ * side of that period one light may sit, as a fraction.
  */
 type LightEffectTuning = {
   readonly depth: number;
@@ -37,6 +39,16 @@ type LightEffectTuning = {
   readonly chance: number;
   readonly variance: number;
 };
+
+/**
+ * The effects a light can run over time: every effect but steady, which is what a light does with none.
+ */
+type AnimatedEffect = Exclude<LightEffect, 'steady'>;
+
+/**
+ * How strongly and how fast each effect runs in a project.
+ */
+type EffectTunings = Readonly<Record<AnimatedEffect, LightEffectTuning>>;
 
 /**
  * J-Lighting's config as the server serves it ({@code server/internal/models/plugins/lighting.go}): read strictly, so
@@ -56,6 +68,45 @@ type LightingConfig = {
   readonly ambient: {
     readonly color: string;
   };
+};
+
+/**
+ * The tuning of an effect with nothing to run by, as J_LIGHTING_PluginMetadata.STEADY_TUNING has it: no depth, so it
+ * takes no brightness away, and a cycle of one frame.
+ */
+const STEADY_TUNING: LightEffectTuning = { depth: 0, period: 1, chance: 0, variance: 0 };
+
+/**
+ * Keeps a tuning that can run a cycle, and runs one that cannot steady instead: the server reads the file strictly, so
+ * an effect the file leaves out arrives with every number at zero, where the game, finding no entry for it, hands out
+ * the steady tuning; a cycle of no frames could mean nothing else.
+ * @param {LightEffectTuning} tuning The tuning as the server served it.
+ * @returns {LightEffectTuning} The tuning, or the steady tuning in place of one whose period is not a positive number.
+ */
+const runnableTuning = (tuning: LightEffectTuning): LightEffectTuning =>
+{
+  return tuning.period > 0
+    ? tuning
+    : STEADY_TUNING;
+};
+
+/**
+ * Settles how each effect runs in a project, from its J-Lighting config's {@code light.effects}, as
+ * J_LIGHTING_PluginMetadata#tuningFor hands them out. A project without the file runs every effect steady: J-Lighting
+ * cannot start without it, and {@link lightingConfigNotice} says so over the map.
+ * @param {JsonValue | null} config The config as the server served it, or null when the project has none.
+ * @returns {EffectTunings} How each effect runs.
+ */
+const effectTuningsFrom = (config: JsonValue | null): EffectTunings =>
+{
+  if (config === null)
+  {
+    return { flicker: STEADY_TUNING, pulse: STEADY_TUNING, glitch: STEADY_TUNING };
+  }
+
+  // the server read the file into its model, so every effect is there.
+  const { effects } = (config as unknown as LightingConfig).light;
+  return { flicker: runnableTuning(effects.flicker), pulse: runnableTuning(effects.pulse), glitch: runnableTuning(effects.glitch) };
 };
 
 /**
@@ -136,5 +187,13 @@ const ambientColorFrom = (config: JsonValue | null): string =>
     : ORDINARY_BLACK;
 };
 
-export { ambientColorFrom, LIGHTING_CONFIG, LIGHTING_CONFIG_NOTICE_ID, lightDefaultsFrom, lightingConfigNotice };
-export type { LightEffectTuning, LightingConfig };
+export {
+  ambientColorFrom,
+  effectTuningsFrom,
+  LIGHTING_CONFIG,
+  LIGHTING_CONFIG_NOTICE_ID,
+  lightDefaultsFrom,
+  lightingConfigNotice,
+  STEADY_TUNING,
+};
+export type { AnimatedEffect, EffectTunings, LightEffectTuning, LightingConfig };

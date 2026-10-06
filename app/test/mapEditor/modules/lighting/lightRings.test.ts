@@ -145,7 +145,7 @@ const buildRings = () =>
  */
 const drawOn = (rings: LightRings, document: MapDocument): void =>
 {
-  rings.draw({ document, renderer: {} as Renderer, context: 1 });
+  rings.draw({ document, renderer: {} as Renderer, context: 1, clock: { frames: 0, animating: true } });
 };
 
 describe('lightRings', () =>
@@ -384,6 +384,22 @@ describe('lightRings', () =>
       // Assert.
       expect([ moved, retagged, repaged ])
         .toStrictEqual([ 'circle 120,42 r96', 'circle 120,42 r144', 'circle 120,42 r48' ]);
+    });
+
+    it('draws nothing as the clock moves, however its lights gutter', () =>
+    {
+      // Arrange: a flickering torch drawn once.
+      const { rings, calls } = buildRings();
+      const map = mapWith([ lightAt(1, 0, 0, [ '<light:[2, flicker]>' ]) ]);
+      drawOn(rings, map);
+      const before = calls.length;
+
+      // Act: two frames on.
+      const moved = [ rings.tick(), rings.tick() ];
+
+      // Assert.
+      expect([ moved, calls.length ])
+        .toStrictEqual([ [ false, false ], before ]);
     });
 
     it('clears the rings when the last light goes out', () =>

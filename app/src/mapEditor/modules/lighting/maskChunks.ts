@@ -85,22 +85,34 @@ const lightsByChunk = (lights: readonly MaskLight[], width: number, height: numb
 };
 
 /**
- * Writes down everything a piece of the mask is drawn from, so a piece is drawn again only when this changes: the dark's
- * fill, and each light reaching it, where it sits, the picture it draws and how brightly it burns. Its colour and
- * intensity are in its picture's name, and its effect only ever shows as its strength.
+ * Writes down what a piece of the mask is built from, so a piece is built again only when this changes: the dark's fill,
+ * and each light reaching it, where it sits and the picture it draws. Its colour and intensity are in its picture's
+ * name. How brightly each burns is left out on purpose: that is all an effect ever changes, many times a second, and it
+ * changes only how strongly a picture already in place is added in ({@link sameStrengths}).
  * @param {number} tint The dark's fill, as {@code 0xRRGGBB}.
  * @param {readonly MaskLight[]} lights The lights reaching the piece.
- * @returns {string} What the piece is drawn from.
+ * @returns {string} What the piece is built from.
  */
 const chunkSignature = (tint: number, lights: readonly MaskLight[]): string =>
 {
   const drawn = lights.map(light =>
   {
     const picture = pictureKey(light.radius, light.color, light.intensity);
-    return `${light.x},${light.y},${picture},${light.strength}`;
+    return `${light.x},${light.y},${picture}`;
   });
   return `${tint}|${drawn.join(';')}`;
 };
 
-export { chunkSignature, lightsByChunk, MASK_CHUNK_SIZE, maskChunksFor };
+/**
+ * Reports whether a piece's lights burn as brightly as they did when it was last drawn, light by light.
+ * @param {readonly number[]} drawn The strengths the piece was last drawn at, in its lights' order.
+ * @param {readonly number[]} now The strengths its lights burn at now, in the same order.
+ * @returns {boolean} True when every light burns at the strength it was drawn at.
+ */
+const sameStrengths = (drawn: readonly number[], now: readonly number[]): boolean =>
+{
+  return drawn.length === now.length && now.every((strength, index) => strength === drawn[index]);
+};
+
+export { chunkSignature, lightsByChunk, MASK_CHUNK_SIZE, maskChunksFor, sameStrengths };
 export type { MaskChunk };

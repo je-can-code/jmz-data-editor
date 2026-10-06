@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { MaskLight } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
-import { chunkSignature, lightsByChunk, MASK_CHUNK_SIZE, maskChunksFor } from '../../../../src/mapEditor/modules/lighting/maskChunks.ts';
+import {
+  chunkSignature,
+  lightsByChunk,
+  MASK_CHUNK_SIZE,
+  maskChunksFor,
+  sameStrengths,
+} from '../../../../src/mapEditor/modules/lighting/maskChunks.ts';
 
 /*
  * The mask over a whole map comes in pieces, so no one texture ever has to cover a map the size of the largest, and a
@@ -11,8 +17,9 @@ import { chunkSignature, lightsByChunk, MASK_CHUNK_SIZE, maskChunksFor } from '.
  * touching a piece only along a shared edge reaches nothing there. A picture with no pixels reaches nothing. Each piece
  * keeps its lights in the order they came, the order the game adds them.
  *
- * A piece is redrawn only when what it is drawn from changes: the dark's fill, or any light reaching it moving, changing
- * picture, or burning at another strength.
+ * A piece is built again only when what it is built from changes: the dark's fill, or any light reaching it moving or
+ * changing picture. A light burning at another strength, which is all an effect ever changes, many times a second, never
+ * builds a piece again; it only draws it again, when its lights burn otherwise than they were drawn, light by light.
  */
 
 /**
@@ -157,20 +164,20 @@ describe('maskChunks', () =>
 
   describe('chunkSignature', () =>
   {
-    it('reads the same for a piece drawn from the same fill and the same lights', () =>
+    it('reads the same for a piece built from the same fill and the same lights, however brightly they burn', () =>
     {
-      // Arrange: the same light, made twice.
+      // Arrange: the same light, made twice, the second burning at 0.8.
       const lights = [ lightAt('torch', 100, 100, 192) ];
 
       // Act.
-      const signatures = [ chunkSignature(0x262626, lights), chunkSignature(0x262626, [ lightAt('torch', 100, 100, 192) ]) ];
+      const signatures = [ chunkSignature(0x262626, lights), chunkSignature(0x262626, [ { ...lightAt('torch', 100, 100, 192), strength: 0.8 } ]) ];
 
       // Assert.
       expect(signatures)
-        .toStrictEqual([ '2500134|100,100,192:#ffffff:0,1', '2500134|100,100,192:#ffffff:0,1' ]);
+        .toStrictEqual([ '2500134|100,100,192:#ffffff:0', '2500134|100,100,192:#ffffff:0' ]);
     });
 
-    it('reads differently once the fill, a light\'s place, its picture or its strength changes', () =>
+    it('reads differently once the fill, a light\'s place or its picture changes', () =>
     {
       // Arrange: a lit piece, and the same piece with one thing changed at a time.
       const torch = lightAt('torch', 100, 100, 192);
@@ -182,7 +189,6 @@ describe('maskChunks', () =>
         chunkSignature(0x262626, [ { ...torch, color: '#ffbb73' } ]),
         chunkSignature(0x262626, [ { ...torch, intensity: 0.4 } ]),
         chunkSignature(0x262626, [ { ...torch, radius: 96 } ]),
-        chunkSignature(0x262626, [ { ...torch, strength: 0.8 } ]),
         chunkSignature(0x262626, []),
       ];
 
@@ -191,7 +197,49 @@ describe('maskChunks', () =>
 
       // Assert.
       expect(distinct.size)
-        .toBe(9);
+        .toBe(8);
+    });
+  });
+
+  describe('sameStrengths', () =>
+  {
+    it('holds when every light burns at the strength it was drawn at', () =>
+    {
+      // Arrange: two lights, burning as drawn.
+      const drawn = [ 0.8, 1 ];
+
+      // Act.
+      const same = sameStrengths(drawn, [ 0.8, 1 ]);
+
+      // Assert.
+      expect(same)
+        .toBe(true);
+    });
+
+    it('fails once any light burns otherwise, however little', () =>
+    {
+      // Arrange: the second light a hair dimmer than drawn.
+      const drawn = [ 0.8, 1 ];
+
+      // Act.
+      const same = sameStrengths(drawn, [ 0.8, 0.9999 ]);
+
+      // Assert.
+      expect(same)
+        .toBe(false);
+    });
+
+    it('fails for a different number of lights, even when every light there now burns as one drawn did', () =>
+    {
+      // Arrange: two lights drawn, and only the first of them now.
+      const drawn = [ 0.8, 1 ];
+
+      // Act.
+      const same = sameStrengths(drawn, [ 0.8 ]);
+
+      // Assert.
+      expect(same)
+        .toBe(false);
     });
   });
 });

@@ -1,11 +1,12 @@
-import { Container, type Renderer, type Sprite } from 'pixi.js';
+import { Container, Texture, type Renderer, type Sprite } from 'pixi.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
-import type { LightingLayerDefinition } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
+import type { LightingClock, LightingLayerDefinition } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { isLight, LIGHT_MASK_ID, LIGHT_RINGS_ID, lightingModule } from '../../../../src/mapEditor/modules/lighting/lightingModule.ts';
+import { LightPictures } from '../../../../src/mapEditor/modules/lighting/lightPictures.ts';
 import { registerCoreEventKinds } from '../../../../src/mapEditor/services/coreEventKinds.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
 import { command, event, page, text, transferPage } from '../../support/eventKindFixtures.ts';
@@ -72,8 +73,9 @@ vi.mock('pixi.js', async importOriginal =>
  * While J-Lighting is enabled the module also draws into the lighting layer a dark map's darkness, first, as what the
  * game itself shows (its own tests hold how), and each light's ring over it, as an aid. It reads the project's
  * config.lighting.json first, so a light naming no colour is drawn in the colour the project configures, or white for a
- * project without the file, which it then says over the map rather than leave the white to pass for the game's look; and
- * a map naming a colour of the dark it cannot use takes the project's.
+ * project without the file, which it then says over the map rather than leave the white to pass for the game's look; a
+ * map naming a colour of the dark it cannot use takes the project's; and a light's pool runs its effect as the project
+ * tunes that effect, at the view's clock, and burns at full strength while the view does not animate.
  */
 describe('lightingModule', () =>
 {
@@ -81,6 +83,27 @@ describe('lightingModule', () =>
   {
     stand.dots.splice(0);
   });
+
+  /**
+   * J-Lighting's config as the server serves it: every field there, the effects tuned as Chef Adventure ships them.
+   * @param {string} color The colour of a light naming none.
+   * @param {string} ambient The colour of a dark naming none.
+   * @returns {JsonValue} The config.
+   */
+  const served = (color: string, ambient = '#000000'): JsonValue =>
+  {
+    const effects = {
+      flicker: { depth: 0.2, period: 40, chance: 0, variance: 0.18 },
+      pulse: { depth: 0.45, period: 165, chance: 0, variance: 0.22 },
+      glitch: { depth: 0.85, period: 55, chance: 0.28, variance: 0.12 },
+    };
+    return { light: { radius: 5, color, intensity: 0, effects }, ambient: { color: ambient } } as unknown as JsonValue;
+  };
+
+  /**
+   * The view's clock at frame 0, animating.
+   */
+  const START: LightingClock = { frames: 0, animating: true };
 
   /**
    * J-Lighting as js/plugins.js lists it.
@@ -115,7 +138,7 @@ describe('lightingModule', () =>
     json.events = [ null, { ...event(1, [ page([ command(108, [ '<light:[2]>' ]) ]) ]), x: 0, y: 0 } ];
     const rings = registry.lightingLayers().find(layer => layer.id === LIGHT_RINGS_ID) as LightingLayerDefinition;
     const drawing = rings.create({ layer: { addChild: () => undefined } as unknown as Container, tileSize: 48 });
-    drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1 });
+    drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1, clock: START });
     return stand.dots;
   };
 
@@ -189,21 +212,45 @@ describe('lightingModule', () =>
     it('fills a dark map from its note, in the project\'s colour of the dark where the note names one it cannot use', () =>
     {
       // Arrange: a project whose dark falls back to slate, and a cave at 85% naming a colour with a typo.
-      const config = { light: { radius: 5, color: '#ffffff', intensity: 0, effects: {} }, ambient: { color: '#102030' } } as unknown as JsonValue;
-      const registry = registryWith(lighting(true), new Map([ [ 'lighting', config ] ]));
+      const registry = registryWith(lighting(true), new Map([ [ 'lighting', served('#ffffff', '#102030') ] ]));
       const dark = registry.lightingLayers().find(layer => layer.id === LIGHT_MASK_ID) as LightingLayerDefinition;
       const layer = new Container();
       const drawing = dark.create({ layer, tileSize: 48 });
       const json = { ...buildMapJson(), note: '<ambient:[85, #10203g]>' };
 
       // Act.
-      drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1 });
+      drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1, clock: START });
 
       // Assert: one piece, a plain fill of 85% slate.
       const [ root ] = layer.children;
       expect(root.children.map(piece => (piece as Sprite).tint))
         .toStrictEqual([ 0x34414f ]);
       drawing.destroy();
+    });
+
+    it('runs a light\'s effect in the dark as the project tunes it, at the view\'s clock, and holds it at full strength while the view does not animate', () =>
+    {
+      // Arrange: map 6, a cave at 85% holding event 12's flickering torch, drawn at frame 100 by a renderer writing down
+      // how strongly each light is added in; every picture is plain white, as no canvas paints here.
+      const pictureFor = vi.spyOn(LightPictures.prototype, 'pictureFor').mockReturnValue(Texture.WHITE);
+      const registry = registryWith(lighting(true), new Map([ [ 'lighting', served('#ffffff') ] ]));
+      const dark = registry.lightingLayers().find(layer => layer.id === LIGHT_MASK_ID) as LightingLayerDefinition;
+      const drawing = dark.create({ layer: new Container(), tileSize: 48 });
+      const json = { ...buildMapJson(), note: '<ambient:[85]>', events: [ null, { ...event(12, [ page([ command(108, [ '<light:[4, #ffbb73, 40, flicker]>' ]) ]) ]), x: 1, y: 1 } ] };
+      const document = MapDocument.fromJson('map:6', json);
+      const added: number[][] = [];
+      const renderer = { render: (options: { container: Container }) => added.push(options.container.children.map(sprite => sprite.alpha)) } as unknown as Renderer;
+      drawing.draw({ document, renderer, context: 1, clock: { frames: 100, animating: true } });
+
+      // Act: the next frame, then the same frame with Animate off.
+      const moved = [ drawing.tick({ document, renderer, context: 1, clock: { frames: 101, animating: true } }) ];
+      moved.push(drawing.tick({ document, renderer, context: 1, clock: { frames: 101, animating: false } }));
+      drawing.destroy();
+      pictureFor.mockRestore();
+
+      // Assert: the torch at the shipped flicker's strengths for map 6's event 12 at frames 100 and 101, then full.
+      expect([ added, moved ])
+        .toStrictEqual([ [ [ 0.9115909902530034 ], [ 0.9360984519453811 ], [ 1 ] ], [ true, true ] ]);
     });
 
     it('names the project\'s lighting config as the one config it reads', () =>
@@ -221,8 +268,7 @@ describe('lightingModule', () =>
     it('draws a light naming no colour in the colour the project configures', () =>
     {
       // Arrange: a project whose lights are red unless their tags say otherwise.
-      const config = { light: { radius: 5, color: '#ff0000', intensity: 0, effects: {} }, ambient: { color: '#000000' } } as unknown as JsonValue;
-      const registry = registryWith(lighting(true), new Map([ [ 'lighting', config ] ]));
+      const registry = registryWith(lighting(true), new Map([ [ 'lighting', served('#ff0000') ] ]));
 
       // Act.
       const colours = ringColoursFrom(registry);
@@ -265,7 +311,7 @@ describe('lightingModule', () =>
     it('says nothing over the map when the config serves', () =>
     {
       // Arrange.
-      const config = { light: { radius: 5, color: '#ff0000', intensity: 0, effects: {} }, ambient: { color: '#000000' } } as unknown as JsonValue;
+      const config = served('#ff0000');
 
       // Act.
       const registry = registryWith(lighting(true), new Map([ [ 'lighting', config ] ]));

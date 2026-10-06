@@ -38,7 +38,7 @@ describe('renderer contract', () =>
     const { visibility, overlayState } = renderer.state;
 
     // Assert.
-    expect([ visibility.layers.shadows, visibility.animateWater, overlayState, renderer.rendererInfo() ])
+    expect([ visibility.layers.shadows, visibility.animate, overlayState, renderer.rendererInfo() ])
       .toStrictEqual([ false, true, NO_OVERLAY_STATE, null ]);
     expect(GAME_LOOK.layers.parallax)
       .toBe(true);

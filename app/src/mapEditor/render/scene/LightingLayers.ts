@@ -3,12 +3,14 @@ import type { LightingDrawing, LightingFrame, LightingLayerDefinition } from '..
 import type { ChangeEffect } from '../documentChanges.ts';
 
 /**
- * One module's lighting in this view: what it was made from, the container it draws in, and the drawing itself.
+ * One module's lighting in this view: what it was made from, the container it draws in, the drawing itself, and whether
+ * it moves on with the clock between draws, which it does until a part of it fails, and again once it draws.
  */
 type LightingEntry = {
   readonly definition: LightingLayerDefinition;
   readonly root: Container;
   readonly drawing: LightingDrawing;
+  ticking: boolean;
 };
 
 /**
@@ -20,6 +22,9 @@ type LightingEntry = {
  * graphics card gave the context back, or an edit touched anything but the tiles. Tile edits are what a brush stroke
  * makes, many times a second, and nothing a module lights the map with reads them. However many changes arrive before
  * a frame, the drawings draw once in it, and not at all while the layer is hidden: they catch up when it shows.
+ *
+ * In every other frame the layer shows, each drawing is handed the clock to move on to, and the frame has something new
+ * to show only when one of them changed. While the layer is hidden nothing is ticked at all.
  */
 class LightingLayers
 {
@@ -67,7 +72,7 @@ class LightingLayers
 
       const root = new Container();
       this.layer.addChild(root);
-      const entry = { definition, root, drawing: definition.create({ layer: root, tileSize: this.#tileSize }) };
+      const entry = { definition, root, drawing: definition.create({ layer: root, tileSize: this.#tileSize }), ticking: false };
       made.push(entry);
       return entry;
     });
@@ -99,35 +104,32 @@ class LightingLayers
   }
 
   /**
-   * Asks every drawing to draw, when they are due and the layer shows. A drawing that throws is left as it was, and its
-   * error is raised on its own, so it is seen without stopping the map or the other drawings from drawing.
-   * @param {LightingFrame} frame The map and the renderer.
-   * @returns {boolean} True when the drawings drew, so the frame has something new to show.
+   * Brings every drawing up to the frame while the layer shows: asks each to draw when they are due, and otherwise hands
+   * each the clock to move on to. A drawing that throws is left as it was, its error raised on its own, so it is seen
+   * without stopping the map or the other drawings; it is not ticked again until it next draws, so a fault in moving on
+   * is raised once rather than every frame.
+   * @param {LightingFrame} frame The map, the renderer and the clock.
+   * @returns {boolean} True when any drawing drew or moved, so the frame has something new to show.
    */
   draw(frame: LightingFrame): boolean
   {
-    if (this.#stale === false || this.layer.visible === false || this.#entries.length === 0)
+    if (this.layer.visible === false || this.#entries.length === 0)
     {
       return false;
     }
 
-    this.#stale = false;
-    this.#entries.forEach(entry =>
+    if (this.#stale)
     {
-      try
+      this.#stale = false;
+      this.#entries.forEach(entry =>
       {
-        entry.drawing.draw(frame);
-      }
-      catch (error)
-      {
-        queueMicrotask(() =>
-        {
-          throw error;
-        });
-      }
-    });
+        entry.ticking = this.#attempt(() => entry.drawing.draw(frame));
+      });
+      return true;
+    }
 
-    return true;
+    // between draws, only what moves with the clock has anything to do.
+    return this.#entries.reduce((moved, entry) => this.#tickEntry(entry, frame) || moved, false);
   }
 
   /**
@@ -147,6 +149,50 @@ class LightingLayers
     this.#entries.forEach(entry => entry.drawing.destroy());
     this.#entries = [];
     this.layer.destroy({ children: true });
+  }
+
+  /**
+   * Hands one drawing the clock, unless it failed since it last drew.
+   * @param {LightingEntry} entry The drawing.
+   * @param {LightingFrame} frame The map, the renderer and the clock.
+   * @returns {boolean} True when it changed what it shows.
+   */
+  #tickEntry(entry: LightingEntry, frame: LightingFrame): boolean
+  {
+    if (entry.ticking === false)
+    {
+      return false;
+    }
+
+    let moved = false;
+    entry.ticking = this.#attempt(() =>
+    {
+      moved = entry.drawing.tick(frame);
+    });
+    return moved;
+  }
+
+  /**
+   * Runs one drawing's part of a frame, raising anything it throws on its own, after the frame, rather than letting it
+   * stop the frame.
+   * @param {() => void} part The drawing's part.
+   * @returns {boolean} True when it ran through without throwing.
+   */
+  #attempt(part: () => void): boolean
+  {
+    try
+    {
+      part();
+      return true;
+    }
+    catch (error)
+    {
+      queueMicrotask(() =>
+      {
+        throw error;
+      });
+      return false;
+    }
   }
 }
 

@@ -247,8 +247,11 @@ describe('MapEditorServices', () =>
         return new Response('var $plugins = [\n{"name":"j/lighting/J-Lighting","status":true,"description":"","parameters":{}}\n];');
       }
 
+      // the server serves every effect, as its model declares.
+      const tuning = { depth: 0.2, period: 40, chance: 0, variance: 0.18 };
+      const effects = { flicker: tuning, pulse: tuning, glitch: tuning };
       return request.url.endsWith('/api/config/lighting')
-        ? envelope({ light: { radius: 5, color: lightColor, intensity: 0, effects: {} }, ambient: { color: '#000000' } })
+        ? envelope({ light: { radius: 5, color: lightColor, intensity: 0, effects }, ambient: { color: '#000000' } })
         : envelope({});
     });
     const { environment, sources } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');

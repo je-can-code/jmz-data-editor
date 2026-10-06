@@ -38,6 +38,7 @@ import { animationFrameAt, animationVector, engineFramesAt } from './engine/anim
 import { cellPassage, passabilityQuery, tileEventsByCell } from './engine/passability.ts';
 import type { TileSource } from './engine/spotWriter.ts';
 import { FrameLoop, type FrameWindow } from './FrameLoop.ts';
+import { lightingClockAt } from './lightingClock.ts';
 import { AtlasChunks } from './scene/AtlasChunks.ts';
 import { EventLayer } from './scene/EventLayer.ts';
 import { GhostTiles } from './scene/GhostTiles.ts';
@@ -198,9 +199,9 @@ const scheduleOnTimers = (callback: () => void, delayMs: number): (() => void) =
  * edit, and draws a frame only when something changed. Frames are scheduled on whichever window hosts it, so a
  * torn-out map keeps drawing.
  *
- * The game look is the default: water animates, the parallax scrolls, events stand where the engine stands them and
- * auto-shadows stay off, since the game never draws them. The camera is its own: the wheel zooms about the pointer,
- * the right button held pans, and a right click that does not move raises a context-menu event.
+ * The game look is the default: water animates, the parallax scrolls, lights run their effects, events stand where the
+ * engine stands them and auto-shadows stay off, since the game never draws them. The camera is its own: the wheel zooms
+ * about the pointer, the right button held pans, and a right click that does not move raises a context-menu event.
  *
  * Its WebGL context is held only while the view is on screen, through a {@link ContextKeeper}: a view behind another
  * tab lets it go and asks for it back when shown, keeping its map, its camera and everything else, and a context the
@@ -768,7 +769,8 @@ class PixiMapRenderer implements MapRenderer
 
   /**
    * Holds the game look's animation still at one moment, or lets it run again: water at an animation step, and a
-   * scrolling parallax a number of engine frames in. The parity check uses it to match a frame of the game.
+   * scrolling parallax and the lighting's clock a number of engine frames in. The parity check uses it to match a frame
+   * of the game.
    * @param {{ step: number, frames: number } | null} moment The moment, or null to follow the clock.
    */
   holdAnimation(moment: { step: number; frames: number } | null): void
@@ -1582,7 +1584,7 @@ class PixiMapRenderer implements MapRenderer
     }
 
     const elapsed = Math.max(0, now - this.#animationStart);
-    const animate = this.#visibility.animateWater;
+    const { animate } = this.#visibility;
     const fixed = this.#fixedAnimation;
     const step = fixed?.step ?? (animate ? animationFrameAt(elapsed) : 0);
     const frames = fixed?.frames ?? (animate ? engineFramesAt(elapsed) : 0);
@@ -1648,7 +1650,7 @@ class PixiMapRenderer implements MapRenderer
   /**
    * Brings the scene up to date for a frame: rebuilds the map when it went stale, places a new map whole on screen,
    * moves the animation, culls to the camera, rebuilds dirty chunks and overlays, and lets the lighting draw when it is
-   * due.
+   * due, or move on with the clock when it is not.
    * @param {number} now The frame's time.
    * @param {WebGLRenderer} pixi The renderer the frame draws with, which the lighting may draw into textures with.
    * @returns {{ changed: boolean, rebuiltChunks: number }} Whether anything changed, and how many tile chunks rebuilt.
@@ -1691,7 +1693,8 @@ class PixiMapRenderer implements MapRenderer
     changed = this.#refreshOverlays() || changed;
     if (document !== null)
     {
-      changed = this.#lighting.draw({ document, renderer: pixi, context: this.#contexts }) || changed;
+      const clock = lightingClockAt(now, this.#fixedAnimation, this.#visibility.animate);
+      changed = this.#lighting.draw({ document, renderer: pixi, context: this.#contexts, clock }) || changed;
     }
 
     return { changed, rebuiltChunks };

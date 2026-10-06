@@ -301,7 +301,11 @@ describe('MapView', () =>
   const lightingModules = () =>
   {
     const listeners = new Set<() => void>();
-    const light: LightingLayerDefinition = { id: 'lighting.rings', title: 'Light rings', create: () => ({ draw: () => undefined, destroy: () => undefined }) };
+    const light: LightingLayerDefinition = {
+      id: 'lighting.rings',
+      title: 'Light rings',
+      create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }),
+    };
     const modules = {
       ...NO_MODULES,
       layers: [] as LightingLayerDefinition[],
@@ -353,7 +357,7 @@ describe('MapView', () =>
     );
 
     // Assert.
-    const switches = [ 'Grid', 'Regions', 'Passability', 'Animate water', 'Parallax', 'Events', 'Shadows', 'Highlight layer' ];
+    const switches = [ 'Grid', 'Regions', 'Passability', 'Animate', 'Parallax', 'Events', 'Shadows', 'Highlight layer' ];
     expect([ ...switches.map(label => screen.getByText(label) !== null), screen.getByText('No project server is running, so there is no map to show.') !== null ])
       .toStrictEqual([ ...switches.map(() => true), true ]);
   });

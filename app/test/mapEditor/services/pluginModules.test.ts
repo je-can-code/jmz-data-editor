@@ -39,6 +39,15 @@ import type { PluginsJsEntry } from '../../../src/services/plugins/PluginsJsRead
 const plugin = (name: string, status: boolean): PluginsJsEntry => ({ name, status, description: '', parameters: {} });
 
 /**
+ * How J-Lighting's effects run, as Chef Adventure ships them; the server serves every effect, as its model declares.
+ */
+const EFFECTS = {
+  flicker: { depth: 0.2, period: 40, chance: 0, variance: 0.18 },
+  pulse: { depth: 0.45, period: 165, chance: 0, variance: 0.22 },
+  glitch: { depth: 0.85, period: 55, chance: 0.28, variance: 0.12 },
+};
+
+/**
  * A module needing one plugin and naming some configs.
  * @param {string} id The module's id.
  * @param {string} needs The plugin it needs.
@@ -171,7 +180,7 @@ describe('pluginModules', () =>
       // Arrange: a project enabling J-Lighting and not J-ABS.
       const list = 'var $plugins =\n[\n{"name":"j/lighting/J-Lighting","status":true,"description":"","parameters":{}},\n'
         + '{"name":"j/abs/J-ABS","status":false,"description":"","parameters":{}}\n];\n';
-      const lightingConfig = { light: { radius: 5, color: '#ffffff', intensity: 0, effects: {} }, ambient: { color: '#000000' } };
+      const lightingConfig = { light: { radius: 5, color: '#ffffff', intensity: 0, effects: EFFECTS }, ambient: { color: '#000000' } };
       const { api, asked } = serverWith(list, () => lightingConfig);
       const registry = new PluginModuleRegistry(new CommandCatalog());
 
@@ -230,7 +239,7 @@ describe('pluginModules', () =>
      * @param {string} color The colour.
      * @returns {JsonValue} The config.
      */
-    const lightingConfig = (color: string): JsonValue => ({ light: { radius: 5, color, intensity: 0, effects: {} }, ambient: { color: '#000000' } });
+    const lightingConfig = (color: string): JsonValue => ({ light: { radius: 5, color, intensity: 0, effects: EFFECTS }, ambient: { color: '#000000' } });
 
     /**
      * A server answering the plugin list and J-Lighting's config from whatever the project holds now, counting reads.

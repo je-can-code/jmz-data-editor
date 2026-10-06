@@ -144,7 +144,8 @@ const paintRings = (graphics: Graphics, rings: readonly LightRing[]): void =>
  *
  * Asked to draw whenever anything on the map but its tiles changed, it works the rings out again, which is cheap, and
  * redraws them only when one moved, grew, changed colour, came or went, so an edit elsewhere on the map costs it a
- * comparison and a brush stroke costs it nothing at all.
+ * comparison and a brush stroke costs it nothing at all. Nothing about a ring moves with time, so the clock moving
+ * costs it nothing either.
  */
 class LightRings implements LightingDrawing
 {
@@ -181,6 +182,16 @@ class LightRings implements LightingDrawing
 
     this.#drawn = rings;
     paintRings(this.#graphics, rings);
+  }
+
+  /**
+   * Moves on with the clock, which changes no ring: a ring marks how far a light reaches, and however its light gutters,
+   * its reach stays where the tag puts it.
+   * @returns {boolean} False, always.
+   */
+  tick(): boolean
+  {
+    return false;
   }
 
   destroy(): void

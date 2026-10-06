@@ -18,14 +18,15 @@ type SettingSwitch =
 
 /**
  * The switches the bar can offer, in the order it shows them: the overlays an author edits with, then the game look.
- * Lighting shows and hides everything plugin modules draw into the lighting layer, such as a light's reach and a map's
- * darkness, so it is offered only while some module draws there ({@link shownSwitches}).
+ * Animate starts and stops everything that moves in the game at once: water and waterfalls, a drifting parallax, and the
+ * lights' flicker, pulse and glitch. Lighting shows and hides everything plugin modules draw into the lighting layer, such
+ * as a light's reach and a map's darkness, so it is offered only while some module draws there ({@link shownSwitches}).
  */
 const SETTING_SWITCHES: readonly SettingSwitch[] = [
   { kind: 'overlay', id: 'grid', label: 'Grid' },
   { kind: 'overlay', id: 'regions', label: 'Regions' },
   { kind: 'overlay', id: 'passability', label: 'Passability' },
-  { kind: 'animation', label: 'Animate water' },
+  { kind: 'animation', label: 'Animate' },
   { kind: 'layer', id: 'parallax', label: 'Parallax' },
   { kind: 'layer', id: 'events', label: 'Events' },
   { kind: 'layer', id: 'shadows', label: 'Shadows' },
@@ -63,7 +64,7 @@ const isSwitchOn = (settings: MapViewSettings, setting: SettingSwitch): boolean 
     case 'layer':
       return settings.visibility.layers[setting.id];
     case 'animation':
-      return settings.visibility.animateWater;
+      return settings.visibility.animate;
   }
 };
 
@@ -98,7 +99,7 @@ const flipSwitch = (settings: MapViewSettings, setting: SettingSwitch): MapViewS
         overlays,
       };
     case 'animation':
-      return { visibility: { ...visibility, animateWater: visibility.animateWater === false }, overlays };
+      return { visibility: { ...visibility, animate: visibility.animate === false }, overlays };
   }
 };
 

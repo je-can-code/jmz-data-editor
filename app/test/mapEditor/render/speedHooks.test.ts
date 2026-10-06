@@ -23,7 +23,8 @@ import { buildMapJson } from '../support/fixtures.ts';
  *
  * The parity check holds the editor's drawing against the game's own, which it runs with no shadows, and with its light
  * mask only when the check compares a map dark; so the editor draws no shadows then, and its lighting only when asked,
- * and only what the game itself shows of it, never an aid such as a light's ring.
+ * and only what the game itself shows of it, never an aid such as a light's ring. The game copy's lights are held
+ * steady, so the editor draws nothing moving, every light at full strength, and a run is the same every time.
  */
 describe('speedHooks', () =>
 {
@@ -129,6 +130,18 @@ describe('speedHooks', () =>
         ]);
     });
 
+    it('draws it still, every light at full strength, as the game copy holds its lights steady', () =>
+    {
+      // Arrange: a dark frame, the one pass that draws lights, where the game look would animate.
+
+      // Act.
+      const look = parityLook(false, true);
+
+      // Assert.
+      expect([ GAME_LOOK.animate, look.animate ])
+        .toStrictEqual([ true, false ]);
+    });
+
     it('draws the lighting too when a dark frame asks for it, and still no shadows', () =>
     {
       // Arrange: a dark frame without its events, and one saying outright it wants no lighting.
@@ -151,7 +164,7 @@ describe('speedHooks', () =>
     {
       // Arrange: the dark, the rings, and an aid saying outright it is not shown in the game.
       const layer = (id: `${string}.${string}`, shownInGame?: boolean): LightingLayerDefinition =>
-        ({ id, title: id, shownInGame, create: () => ({ draw: () => undefined, destroy: () => undefined }) });
+        ({ id, title: id, shownInGame, create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) });
       const layers = [ layer('lighting.dark', true), layer('lighting.rings'), layer('lighting.notes', false) ];
 
       // Act.

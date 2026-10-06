@@ -69,7 +69,7 @@ describe('PluginModuleRegistry', () =>
       contributions.paletteEntry({ id: 'jabs.battler', title: 'Battler', kind: 'jabs.battler', createEvent: createMapEvent });
       contributions.passabilityRule({ id: 'jabs.blocked', title: 'Blocked', deny: () => null });
       contributions.overlay({ id: 'jabs.pursuit', title: `Pursuit (${context.plugins.get('J-ABS')?.parameters['actionMapId']})`, defaultOn: false, draw: () => undefined });
-      contributions.lightingLayer({ id: 'jabs.glow', title: 'Glow', create: () => ({ draw: () => undefined, destroy: () => undefined }) });
+      contributions.lightingLayer({ id: 'jabs.glow', title: 'Glow', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) });
       contributions.catalogEntry(pluginCommandEntry({ plugin: 'J-ABS', command: 'spawn', args: [] }));
       contributions.notice({ id: 'jabs.config', title: 'Battlers fight as their database says.', detail: 'Their config was not read.' });
     },
@@ -286,7 +286,12 @@ describe('PluginModuleRegistry', () =>
       { id: 'b', title: 'B', plugins: [], register: add => add.paletteEntry({ id: 'chest', title: 'x', kind: 'x', createEvent: createMapEvent }) },
       { id: 'c', title: 'C', plugins: [], register: add => add.passabilityRule({ id: 'core.x', title: 'x', deny: () => null }) },
       { id: 'd', title: 'D', plugins: [], register: add => add.overlay({ id: 'grid.x', title: 'x', defaultOn: false, draw: () => undefined }) },
-      { id: 'e', title: 'E', plugins: [], register: add => add.lightingLayer({ id: 'core.x', title: 'x', create: () => ({ draw: () => undefined, destroy: () => undefined }) }) },
+      {
+        id: 'e',
+        title: 'E',
+        plugins: [],
+        register: add => add.lightingLayer({ id: 'core.x', title: 'x', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) }),
+      },
       { id: 'f', title: 'F', plugins: [], register: add => add.notice({ id: 'core.x', title: 'x', detail: 'x' }) },
     ];
 

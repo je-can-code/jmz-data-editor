@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import { ambientColorFrom, lightDefaultsFrom, lightingConfigNotice, type LightingConfig } from '../../../../src/mapEditor/modules/lighting/lightingConfig.ts';
+import {
+  ambientColorFrom,
+  effectTuningsFrom,
+  lightDefaultsFrom,
+  lightingConfigNotice,
+  type LightingConfig,
+} from '../../../../src/mapEditor/modules/lighting/lightingConfig.ts';
 
 /*
  * A light whose tag names no colour or intensity takes the project's own, from data/config.lighting.json, as the server
@@ -15,6 +21,11 @@ import { ambientColorFrom, lightDefaultsFrom, lightingConfigNotice, type Lightin
  *
  * A map's dark falls back to the project's own colour of the dark, which J-Lighting fills in for a map writing a colour
  * it cannot use; a project without the file, or whose colour of the dark is no colour, falls back to ordinary black.
+ *
+ * Each effect runs as the project tunes it. The server reads the file strictly, so an effect the file leaves out arrives
+ * with every number at zero, where the game, finding no entry, runs it with its steady tuning, taking nothing away; a
+ * cycle of no frames could mean nothing else, so the editor runs such an effect steady too. A project without the file
+ * runs every effect steady.
  */
 
 /**
@@ -175,6 +186,67 @@ describe('lightingConfig', () =>
       // Assert.
       expect(color)
         .toBe('#000000');
+    });
+  });
+
+  describe('effectTuningsFrom', () =>
+  {
+    /**
+     * The config the game ships, with its effects as given.
+     * @param {object} effects The effects block.
+     * @returns {JsonValue} The config, as the server serves it.
+     */
+    const tuned = (effects: object): JsonValue =>
+    {
+      return { light: { radius: 5, color: '#ffffff', intensity: 0, effects }, ambient: { color: '#000000' } } as unknown as JsonValue;
+    };
+
+    it('runs each effect as the project tunes it', () =>
+    {
+      // Arrange: Chef Adventure's shipped tunings.
+      const shipped = {
+        flicker: { depth: 0.2, period: 40, chance: 0, variance: 0.18 },
+        pulse: { depth: 0.45, period: 165, chance: 0, variance: 0.22 },
+        glitch: { depth: 0.85, period: 55, chance: 0.28, variance: 0.12 },
+      };
+
+      // Act.
+      const tunings = effectTuningsFrom(tuned(shipped));
+
+      // Assert.
+      expect(tunings)
+        .toStrictEqual(shipped);
+    });
+
+    it('runs steady an effect whose cycle takes no frames, as the server serves one the file leaves out', () =>
+    {
+      // Arrange: glitch left out of the file, so served all zeros, beside a flicker and a pulse tuned as shipped.
+      const flicker = { depth: 0.2, period: 40, chance: 0, variance: 0.18 };
+      const pulse = { depth: 0.45, period: 165, chance: 0, variance: 0.22 };
+      const glitch = { depth: 0, period: 0, chance: 0, variance: 0 };
+
+      // Act.
+      const tunings = effectTuningsFrom(tuned({ flicker, pulse, glitch }));
+
+      // Assert: the steady tuning in glitch's place, the others as given.
+      expect(tunings)
+        .toStrictEqual({ flicker, pulse, glitch: { depth: 0, period: 1, chance: 0, variance: 0 } });
+    });
+
+    it('runs every effect steady for a project without the file', () =>
+    {
+      // Arrange: nothing was read.
+
+      // Act.
+      const tunings = effectTuningsFrom(null);
+
+      // Assert.
+      expect(tunings)
+        .toStrictEqual({
+          flicker: { depth: 0, period: 1, chance: 0, variance: 0 },
+          pulse: { depth: 0, period: 1, chance: 0, variance: 0 },
+          glitch: { depth: 0, period: 1, chance: 0, variance: 0 },
+        });
     });
   });
 });

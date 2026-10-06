@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzEventPage, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { LightingClock } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { mapAmbient, type AmbientSource } from '../../../../src/mapEditor/modules/lighting/ambientTags.ts';
 import {
   darkSceneOf,
@@ -24,13 +25,19 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * choice is handed over, centred where the game centres it and where its ring is drawn (the tile's middle, at its foot,
  * six pixels up for a character that is not an object), its reach in pixels, its colour and intensity as its tag gives
  * them or the project's when it gives none, and its name as J-Lighting gives it: its event's source and its place among
- * that page's lights. Each burns at the strength handed over for it, which is full strength while no effect runs.
+ * that page's lights. Each burns at the strength handed over for it at the view's clock, asked after by its map, its name
+ * and its effect; the steady strength is full strength, always.
  */
 
 /**
  * The project's light defaults: a colour no tag below writes, and a soft pool.
  */
 const DEFAULTS = { color: '#00ff00', intensity: 0 };
+
+/**
+ * The view's clock two seconds in, animating.
+ */
+const CLOCK: LightingClock = { frames: 120, animating: true };
 
 /**
  * An event at a cell with one page holding the given comment lines.
@@ -79,7 +86,7 @@ describe('darkScene', () =>
       const field = mapWith('<noToneChange>', [ null, lightAt(1, 2, 2, [ '<light:[4]>' ]) ]);
 
       // Act.
-      const scene = darkSceneOf(field, setupWith());
+      const scene = darkSceneOf(field, setupWith(), CLOCK);
 
       // Assert.
       expect(scene)
@@ -92,7 +99,7 @@ describe('darkScene', () =>
       const dusk = mapWith('<ambient:[0]>', [ null, lightAt(1, 2, 2, [ '<light:[4]>' ]) ]);
 
       // Act.
-      const scene = darkSceneOf(dusk, setupWith());
+      const scene = darkSceneOf(dusk, setupWith(), CLOCK);
 
       // Assert.
       expect(scene)
@@ -105,7 +112,7 @@ describe('darkScene', () =>
       const cave = mapWith('<ambient:[85]>', [ null, lightAt(1, 2, 3, [ '<light:[4, #ffbb73, 40, flicker]>' ]), lightAt(2, 5, 5, [ '<enemyId:3>' ]), null ]);
 
       // Act.
-      const scene = darkSceneOf(cave, setupWith());
+      const scene = darkSceneOf(cave, setupWith(), CLOCK);
 
       // Assert.
       expect(scene)
@@ -123,7 +130,7 @@ describe('darkScene', () =>
       const clock: AmbientSource = () => ({ darkness: 0.4, color: [ 0, 0, 0 ], declaresColor: false, source: 'time' });
 
       // Act.
-      const scene = darkSceneOf(cave, setupWith([ clock ]));
+      const scene = darkSceneOf(cave, setupWith([ clock ]), CLOCK);
 
       // Assert.
       expect([ scene?.darkness, scene?.tint ])
@@ -141,7 +148,7 @@ describe('darkScene', () =>
       const crate = lightAt(3, 6, 6, [ '<light:5>' ]);
 
       // Act.
-      const lights = maskLightsOf([ null, brazier, lamp, crate ], setupWith());
+      const lights = maskLightsOf(mapWith('', [ null, brazier, lamp, crate ]), setupWith(), CLOCK);
 
       // Assert.
       expect(lights)
@@ -158,7 +165,7 @@ describe('darkScene', () =>
       const torch = lightAt(1, 2, 3, [ '<light:[4]>' ], { image: { tileId: 0, characterName: '!Other2', direction: 2, pattern: 0, characterIndex: 7 } });
 
       // Act.
-      const [ light ] = maskLightsOf([ null, torch ], setupWith());
+      const [ light ] = maskLightsOf(mapWith('', [ null, torch ]), setupWith(), CLOCK);
 
       // Assert.
       expect([ light.x, light.y ])
@@ -172,31 +179,31 @@ describe('darkScene', () =>
       const second: LightPageChoice = (chosen, defaults) => ({ page: chosen.pages[1], pageIndex: 1, lights: [ { radius: 5, color: defaults.color, intensity: 0, effect: 'steady' } ] });
 
       // Act.
-      const lights = maskLightsOf([ null, lamp ], setupWith([], second));
+      const lights = maskLightsOf(mapWith('', [ null, lamp ]), setupWith([], second), CLOCK);
 
       // Assert.
       expect(lights.map(light => light.radius))
         .toStrictEqual([ 240 ]);
     });
 
-    it('burns each light at the strength handed over for it, by its name and effect', () =>
+    it('burns each light at the strength handed over for it, asked by its map, its name and its effect, at the clock', () =>
     {
-      // Arrange: a flickering torch and a steady lamp, and a strength dimming only what flickers.
+      // Arrange: a flickering torch and a steady lamp on map 6, and a strength dimming only what flickers.
       const torch = lightAt(1, 0, 0, [ '<light:[2, flicker]>' ]);
       const lamp = lightAt(2, 3, 0, [ '<light:[2]>' ]);
       const asked: string[] = [];
-      const strengthOf: LightStrength = light =>
+      const strengthOf: LightStrength = (light, clock) =>
       {
-        asked.push(light.id);
+        asked.push(`${light.mapId} ${light.id} ${light.effect} at ${clock.frames}`);
         return light.effect === 'flicker' ? 0.8 : 1;
       };
 
       // Act.
-      const lights = maskLightsOf([ null, torch, lamp ], setupWith([], firstLitPage, strengthOf));
+      const lights = maskLightsOf(mapWith('', [ null, torch, lamp ]), setupWith([], firstLitPage, strengthOf), CLOCK);
 
       // Assert.
       expect([ lights.map(light => light.strength), asked ])
-        .toStrictEqual([ [ 0.8, 1 ], [ 'page:1#0', 'page:2#0' ] ]);
+        .toStrictEqual([ [ 0.8, 1 ], [ '6 page:1#0 flicker at 120', '6 page:2#0 steady at 120' ] ]);
     });
   });
 
@@ -205,10 +212,10 @@ describe('darkScene', () =>
     it('burns every light at full strength', () =>
     {
       // Arrange: a flickering light, which still burns fully while no effect runs.
-      const torch = { id: 'page:4#0', effect: 'flicker' as const };
+      const torch = { mapId: 6, id: 'page:4#0', effect: 'flicker' as const };
 
       // Act.
-      const strength = steadyStrength(torch);
+      const strength = steadyStrength(torch, CLOCK);
 
       // Assert.
       expect(strength)

@@ -104,7 +104,7 @@ describe('PixiMapRenderer', () =>
       create: stage =>
       {
         stages.push(stage);
-        return { draw: () => undefined, destroy: () => destroyed.push('rings') };
+        return { draw: () => undefined, tick: () => false, destroy: () => destroyed.push('rings') };
       },
     };
 

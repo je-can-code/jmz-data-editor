@@ -17,15 +17,21 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * stroke makes, many times a second, and nothing a module lights the map with reads tiles, so it never makes them due.
  * While the layer is hidden they do not draw, and they catch up once it shows. A drawing that throws is reported on its
  * own and never stops the others drawing.
+ *
+ * In every frame they are not due, each drawing is handed the clock to move on to instead, and the frame has something
+ * new to show only when one of them moved. While the layer is hidden, as with the Lighting switch off, nothing is handed
+ * the clock at all. A drawing that throws, drawing or moving on, is left still, ticked no more until it next draws, so
+ * its failure is raised once rather than in every frame.
  */
 
 /**
  * A lighting layer whose drawing writes down what happens to it, and the stage each drawing was made on.
  * @param {string} id The lighting layer's id.
  * @param {string[]} log Where everything is written.
+ * @param {boolean} moves Whether its drawing changes what it shows as the clock moves.
  * @returns {{ definition: LightingLayerDefinition, stages: LightingStage[] }} The lighting layer and its stages.
  */
-const loggedLayer = (id: `${string}.${string}`, log: string[]) =>
+const loggedLayer = (id: `${string}.${string}`, log: string[], moves = false) =>
 {
   const stages: LightingStage[] = [];
   const definition: LightingLayerDefinition = {
@@ -37,6 +43,11 @@ const loggedLayer = (id: `${string}.${string}`, log: string[]) =>
       log.push(`${id} made`);
       return {
         draw: (given: LightingFrame) => log.push(`${id} drew map ${given.document.mapId}`),
+        tick: (given: LightingFrame) =>
+        {
+          log.push(`${id} moved on to frame ${given.clock.frames}`);
+          return moves;
+        },
         destroy: () => log.push(`${id} let go`),
       };
     },
@@ -45,10 +56,17 @@ const loggedLayer = (id: `${string}.${string}`, log: string[]) =>
 };
 
 /**
- * What a frame hands the drawings: map 7, a renderer nothing here draws with, and the view's first context.
+ * What a frame hands the drawings: map 7, a renderer nothing here draws with, the view's first context, and the view's
+ * clock.
+ * @param {number} frames The clock's frame.
  * @returns {LightingFrame} The frame.
  */
-const frame = (): LightingFrame => ({ document: MapDocument.fromJson('map:7', buildMapJson()), renderer: {} as Renderer, context: 1 });
+const frame = (frames = 0): LightingFrame => ({
+  document: MapDocument.fromJson('map:7', buildMapJson()),
+  renderer: {} as Renderer,
+  context: 1,
+  clock: { frames, animating: true },
+});
 
 /**
  * A view's lighting holding the given lighting layers, drawn once so nothing is due.
@@ -131,11 +149,44 @@ describe('LightingLayers', () =>
     lighting.setDefinitions([ loggedLayer('lighting.rings', log).definition, loggedLayer('lighting.dark', log).definition ]);
 
     // Act.
-    const drew = [ lighting.draw(frame()), lighting.draw(frame()) ];
+    const drew = [ lighting.draw(frame()), lighting.draw(frame(1)) ];
+
+    // Assert: drawn in the first frame, and only moved on in the second.
+    expect([ drew, log.slice(2) ])
+      .toStrictEqual([
+        [ true, false ],
+        [ 'lighting.rings drew map 7', 'lighting.dark drew map 7', 'lighting.rings moved on to frame 1', 'lighting.dark moved on to frame 1' ],
+      ]);
+  });
+
+  it('hands every drawing the clock between draws, and has something new to show when any of them moved', () =>
+  {
+    // Arrange: a still drawing before one that moves with time, both drawn.
+    const log: string[] = [];
+    const lighting = drawnWith([ loggedLayer('lighting.rings', log).definition, loggedLayer('lighting.dark', log, true).definition ]);
+
+    // Act.
+    const moved = lighting.draw(frame(5));
 
     // Assert.
-    expect([ drew, log.slice(2) ])
-      .toStrictEqual([ [ true, false ], [ 'lighting.rings drew map 7', 'lighting.dark drew map 7' ] ]);
+    expect([ moved, log.slice(-2) ])
+      .toStrictEqual([ true, [ 'lighting.rings moved on to frame 5', 'lighting.dark moved on to frame 5' ] ]);
+  });
+
+  it('hands out no clock while the layer is hidden, as with the Lighting switch off', () =>
+  {
+    // Arrange: a drawing that moves with time, drawn, then the layer hidden.
+    const log: string[] = [];
+    const lighting = drawnWith([ loggedLayer('lighting.dark', log, true).definition ]);
+    const before = log.length;
+    lighting.layer.visible = false;
+
+    // Act.
+    const moved = [ lighting.draw(frame(1)), lighting.draw(frame(2)) ];
+
+    // Assert.
+    expect([ moved, log.length - before ])
+      .toStrictEqual([ [ false, false ], 0 ]);
   });
 
   it('is not made due by a change to the tiles alone', () =>
@@ -238,6 +289,7 @@ describe('LightingLayers', () =>
         {
           throw new Error('no light');
         },
+        tick: () => false,
         destroy: () => undefined,
       }),
     };
@@ -254,6 +306,88 @@ describe('LightingLayers', () =>
       .toStrictEqual([ true, [ 'lighting.rings made', 'lighting.rings drew map 7' ], 1 ]);
     expect(() => raised[0]())
       .toThrow('no light');
+  });
+
+  it('leaves a drawing that failed to draw still, handing it no clock until it draws again', () =>
+  {
+    // Arrange: a drawing whose first draw fails and whose next works, its ticks written down.
+    const log: string[] = [];
+    let draws = 0;
+    const flaky: LightingLayerDefinition = {
+      id: 'lighting.flaky',
+      title: 'Flaky',
+      create: () => ({
+        draw: () =>
+        {
+          draws += 1;
+          if (draws === 1)
+          {
+            throw new Error('not yet');
+          }
+        },
+        tick: given =>
+        {
+          log.push(`moved on to frame ${given.clock.frames}`);
+          return false;
+        },
+        destroy: () => undefined,
+      }),
+    };
+    vi.spyOn(globalThis, 'queueMicrotask').mockImplementation(() => undefined);
+    const lighting = new LightingLayers(48);
+    lighting.setDefinitions([ flaky ]);
+
+    // Act: the failed draw, a frame after it, the draw that works, and a frame after that.
+    lighting.draw(frame(0));
+    lighting.draw(frame(1));
+    lighting.markStale();
+    lighting.draw(frame(2));
+    lighting.draw(frame(3));
+
+    // Assert.
+    expect(log)
+      .toStrictEqual([ 'moved on to frame 3' ]);
+  });
+
+  it('raises a drawing\'s failure to move on once, leaves it still until it next draws, and still moves the others', () =>
+  {
+    // Arrange: a drawing whose ticks fail, beside one that moves; both drawn.
+    const log: string[] = [];
+    let attempts = 0;
+    const stuck: LightingLayerDefinition = {
+      id: 'lighting.stuck',
+      title: 'Stuck',
+      create: () => ({
+        draw: () => log.push('stuck drew'),
+        tick: () =>
+        {
+          attempts += 1;
+          throw new Error('cannot move');
+        },
+        destroy: () => undefined,
+      }),
+    };
+    const raised: (() => void)[] = [];
+    vi.spyOn(globalThis, 'queueMicrotask').mockImplementation(callback => raised.push(callback));
+    const lighting = drawnWith([ stuck, loggedLayer('lighting.dark', log, true).definition ]);
+
+    // Act: two frames, a draw, and a frame after it.
+    const moved = [ lighting.draw(frame(1)), lighting.draw(frame(2)) ];
+    lighting.markStale();
+    lighting.draw(frame(3));
+    lighting.draw(frame(4));
+
+    // Assert: tried in the first frame and again only once it drew; each failure raised once; the other moved on in
+    // every frame.
+    expect([ moved, attempts, raised.length, log.filter(line => line.includes('moved on')) ])
+      .toStrictEqual([
+        [ true, true ],
+        2,
+        2,
+        [ 'lighting.dark moved on to frame 1', 'lighting.dark moved on to frame 2', 'lighting.dark moved on to frame 4' ],
+      ]);
+    expect(() => raised[0]())
+      .toThrow('cannot move');
   });
 
   it('lets every drawing go, and the layer with them', () =>

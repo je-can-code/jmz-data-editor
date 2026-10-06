@@ -110,14 +110,16 @@ const ringsOverlay = (): OverlayDefinition =>
 
 /**
  * Builds what the parity check draws: the game look, still, with events or without, never the shadows, and the
- * lighting only when the game it is held against draws its light mask over its base layer too.
+ * lighting only when the game it is held against draws its light mask over its base layer too. Nothing animates: the
+ * check holds the water and the parallax at the game's moment, and the game copy's lights are held steady, so every
+ * light draws at its full strength, as it does with no effect running.
  * @param {boolean} events Whether the events show.
  * @param {boolean | undefined} lighting Whether the lighting shows; left out, it does not.
  * @returns {LayerVisibility} The visibility.
  */
 const parityLook = (events: boolean, lighting?: boolean): LayerVisibility =>
 {
-  return { ...GAME_LOOK, layers: { ...GAME_LOOK.layers, events, shadows: false, lighting: lighting === true } };
+  return { ...GAME_LOOK, animate: false, layers: { ...GAME_LOOK.layers, events, shadows: false, lighting: lighting === true } };
 };
 
 /**

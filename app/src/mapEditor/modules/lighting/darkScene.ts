@@ -1,16 +1,25 @@
 import type { MapDocument } from '../../core/model/MapDocument.ts';
-import type { RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
+import type { LightingClock } from '../../core/renderer/lightingLayer.ts';
 import type { AmbientSource } from './ambientTags.ts';
 import { composeAmbientColor, composeDarkness, hasMask, maskTintFor } from './lightingComposition.ts';
 import { lightCentre } from './lightRings.ts';
 import type { LightDefaults, LightEffect, LightPageChoice } from './lightTags.ts';
 
 /**
- * How brightly a light burns at the moment the dark is drawn, from 0 to 1: the strength its picture is added into the
- * dark at. Handed the light's name and its effect, it answers for that light alone. J-Lighting's effects move this and
- * nothing else, which is why a guttering torch and a steady one share one picture.
+ * A light as its strength is asked after: the map it burns on, its name as J-Lighting gives it, and its effect.
  */
-type LightStrength = (light: { readonly id: string; readonly effect: LightEffect }) => number;
+type BurningLight = {
+  readonly mapId: number;
+  readonly id: string;
+  readonly effect: LightEffect;
+};
+
+/**
+ * How brightly a light burns at a moment of the view's clock, from 0 to 1: the strength its picture is added into the
+ * dark at. Handed one light and the clock, it answers for that light alone. J-Lighting's effects move this and nothing
+ * else, which is why a guttering torch and a steady one share one picture.
+ */
+type LightStrength = (light: BurningLight, clock: LightingClock) => number;
 
 /**
  * One light as the dark is cut by it, in world pixels: its name, where its pool is centred, how far it reaches, its
@@ -55,7 +64,7 @@ type DarkSetup = {
 
 /**
  * How brightly a light burns with no effect running: at full strength, always, as LightingEasing#strengthFor answers
- * for a steady light. Every light is drawn so until effects animate.
+ * for a steady light.
  * @returns {number} 1.
  */
 const steadyStrength: LightStrength = () => 1;
@@ -74,15 +83,17 @@ const lightIdOf = (eventId: number, ordinal: number): string =>
 /**
  * Lists the lights a map's events cut through its dark: one per light on the page each event shows its lights from,
  * centred where the game centres the event's light and where its ring is drawn, so a light's pool and its ring always
- * agree.
- * @param {readonly (RmmzMapEvent | null)[]} events The map's events, with empty slots.
+ * agree, each burning at its strength at the clock's moment.
+ * @param {MapDocument} document The map.
  * @param {DarkSetup} setup The defaults, the tile size, the page choice and the strength.
+ * @param {LightingClock} clock The view's clock.
  * @returns {MaskLight[]} The lights, by event, then in the order the page writes them.
  */
-const maskLightsOf = (events: readonly (RmmzMapEvent | null)[], setup: DarkSetup): MaskLight[] =>
+const maskLightsOf = (document: MapDocument, setup: DarkSetup, clock: LightingClock): MaskLight[] =>
 {
   const { defaults, tileSize, choosePage, strengthOf } = setup;
-  return events.flatMap(event =>
+  const { mapId } = document;
+  return document.events.flatMap(event =>
   {
     if (event === null)
     {
@@ -107,7 +118,7 @@ const maskLightsOf = (events: readonly (RmmzMapEvent | null)[], setup: DarkSetup
         color: light.color,
         intensity: light.intensity,
         effect: light.effect,
-        strength: strengthOf({ id, effect: light.effect }),
+        strength: strengthOf({ mapId, id, effect: light.effect }, clock),
       };
     });
   });
@@ -115,13 +126,14 @@ const maskLightsOf = (events: readonly (RmmzMapEvent | null)[], setup: DarkSetup
 
 /**
  * Works out the dark over a map as J-Lighting composes it: every source's darkness compounded, the colour of the dark
- * settled among the sources that named one, and every light on the map. A map nobody calls dark has no dark at all, as
- * in the game, where lights alone never earn a mask.
+ * settled among the sources that named one, and every light on the map, burning as it does at the clock's moment. A map
+ * nobody calls dark has no dark at all, as in the game, where lights alone never earn a mask.
  * @param {MapDocument} document The map.
  * @param {DarkSetup} setup What the dark is worked out from.
+ * @param {LightingClock} clock The view's clock.
  * @returns {DarkScene | null} The dark, or null when the map is not dark.
  */
-const darkSceneOf = (document: MapDocument, setup: DarkSetup): DarkScene | null =>
+const darkSceneOf = (document: MapDocument, setup: DarkSetup, clock: LightingClock): DarkScene | null =>
 {
   const ambients = setup.sources.flatMap(source =>
   {
@@ -139,9 +151,9 @@ const darkSceneOf = (document: MapDocument, setup: DarkSetup): DarkScene | null 
   return {
     darkness,
     tint: maskTintFor(darkness, composeAmbientColor(ambients)),
-    lights: maskLightsOf(document.events, setup),
+    lights: maskLightsOf(document, setup, clock),
   };
 };
 
 export { darkSceneOf, lightIdOf, maskLightsOf, steadyStrength };
-export type { DarkScene, DarkSetup, LightStrength, MaskLight };
+export type { BurningLight, DarkScene, DarkSetup, LightStrength, MaskLight };

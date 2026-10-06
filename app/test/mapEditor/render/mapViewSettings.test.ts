@@ -12,9 +12,10 @@ import {
 /*
  * The map view's bar switches the overlays and the game look. Each switch must flip exactly its own setting and
  * leave every other alone, and the layer highlight must switch the dimming on with the layer and off with it, since
- * the renderer only dims while both say so. Lighting, beside Shadows, shows and hides everything plugin modules draw
- * into the lighting layer, and is offered only while some module draws there, so a project without such a plugin
- * never shows a switch that does nothing.
+ * the renderer only dims while both say so. Animate is the one switch for everything that moves, the water and the
+ * lights' effects alike, so one click freezes it all. Lighting, beside Shadows, shows and hides everything plugin
+ * modules draw into the lighting layer, and is offered only while some module draws there, so a project without such a
+ * plugin never shows a switch that does nothing.
  */
 
 /**
@@ -27,7 +28,7 @@ describe('mapViewSettings', () =>
 {
   describe('isSwitchOn and flipSwitch', () =>
   {
-    it('starts with the game look: water animating, the parallax, events and lighting on, shadows and the overlays off', () =>
+    it('starts with the game look: everything animating, the parallax, events and lighting on, shadows and the overlays off', () =>
     {
       // Arrange.
       const settings = start();
@@ -41,12 +42,26 @@ describe('mapViewSettings', () =>
           [ 'Grid', false ],
           [ 'Regions', false ],
           [ 'Passability', false ],
-          [ 'Animate water', true ],
+          [ 'Animate', true ],
           [ 'Parallax', true ],
           [ 'Events', true ],
           [ 'Shadows', false ],
           [ 'Lighting', true ],
         ]);
+    });
+
+    it('stops all motion with Animate, and nothing else', () =>
+    {
+      // Arrange.
+      const settings = start();
+      const animate = SETTING_SWITCHES.find(setting => setting.label === 'Animate') as (typeof SETTING_SWITCHES)[number];
+
+      // Act.
+      const flipped = flipSwitch(settings, animate);
+
+      // Assert: the one setting the water and the lights' effects both follow went off, every layer left as it was.
+      expect([ flipped.visibility, flipped.overlays ])
+        .toStrictEqual([ { ...GAME_LOOK, animate: false }, settings.overlays ]);
     });
 
     it('switches the lighting layer with Lighting, and nothing else', () =>
@@ -90,7 +105,7 @@ describe('mapViewSettings', () =>
 
       // Assert.
       expect(labels)
-        .toStrictEqual([ 'Grid', 'Regions', 'Passability', 'Animate water', 'Parallax', 'Events', 'Shadows', 'Lighting' ]);
+        .toStrictEqual([ 'Grid', 'Regions', 'Passability', 'Animate', 'Parallax', 'Events', 'Shadows', 'Lighting' ]);
     });
 
     it('leaves Lighting out while no module lights the map, and every other overlay and layer switch in', () =>
@@ -102,7 +117,7 @@ describe('mapViewSettings', () =>
 
       // Assert.
       expect(labels)
-        .toStrictEqual([ 'Grid', 'Regions', 'Passability', 'Animate water', 'Parallax', 'Events', 'Shadows' ]);
+        .toStrictEqual([ 'Grid', 'Regions', 'Passability', 'Animate', 'Parallax', 'Events', 'Shadows' ]);
     });
   });
 
