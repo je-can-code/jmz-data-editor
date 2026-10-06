@@ -113,6 +113,19 @@ describe('skyTag', () =>
         .toStrictEqual([ 'cave\n<noWeather>', true ]);
     });
 
+    it('leaves tags only named like the sky\'s as written when taking the sky\'s out', () =>
+    {
+      // Arrange: the name in another case, the tag itself, and a longer name.
+      const note = '<NoToneChange>\n<noToneChange>\n<noToneChanges>';
+
+      // Act.
+      const written = withSkyFollowingClock(note, true);
+
+      // Assert.
+      expect(written)
+        .toBe('<NoToneChange>\n<noToneChanges>');
+    });
+
     it('refuses to take the sky\'s tag out when a stray bracket would then swallow the tag after it, saying why', () =>
     {
       // Arrange: a bracket the sky's tag closes off, and time stopped on the map after it.
