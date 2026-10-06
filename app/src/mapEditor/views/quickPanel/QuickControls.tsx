@@ -381,6 +381,22 @@ const SliderControl = (props: ControlProps & { control: SliderSpec }) =>
 };
 
 /**
+ * Hands on the colour a picker settled on, once, when it was picking: what ends its choosing, whether it closes on a
+ * colour or is left, hands on whatever it shows, and a picker that showed nothing new hands on nothing.
+ * @param {HTMLInputElement} picker The colour picker.
+ * @param {React.RefObject<boolean>} picking Whether it has shown a colour since it last handed one on.
+ * @param {(value: JsonValue) => void} onChange What to hand the colour to.
+ */
+const settlePicked = (picker: HTMLInputElement, picking: React.RefObject<boolean>, onChange: (value: JsonValue) => void): void =>
+{
+  if (picking.current)
+  {
+    picking.current = false;
+    onChange(picker.value);
+  }
+};
+
+/**
  * Picks a colour: the system's colour picker behind a swatch of the colour as it is, its digits beside it, then the
  * swatches the kind offers. The picker shows each colour on the map as it is chosen, and hands on the colour it settles
  * on as one change, when it closes on a new one or is left; a picker opened and closed untouched hands on nothing. A
@@ -396,24 +412,16 @@ const ColorControl = (props: ControlProps) =>
   const picking = useRef(false);
   const value = field.mixed ? null : field.value as string;
 
-  // the picker hands on what it settles on once, however its choosing ends; the latest handler is kept for the listener.
-  const settle = useRef<() => void>(() => undefined);
-  settle.current = () =>
-  {
-    const picker = pickerRef.current as HTMLInputElement;
-    if (picking.current)
-    {
-      picking.current = false;
-      onChange(picker.value);
-    }
-  };
+  // the listener below outlives a render, so it hands on through whichever handler the latest render was given.
+  const latest = useRef(onChange);
+  latest.current = onChange;
 
   // React hears a colour input change with each colour it passes through; the colour it closes on comes as the input's
   // own change event, which only a listener on the input itself hears.
   useEffect(() =>
   {
     const picker = pickerRef.current as HTMLInputElement;
-    const closed = () => settle.current();
+    const closed = () => settlePicked(picker, picking, latest.current);
     picker.addEventListener('change', closed);
     return () => picker.removeEventListener('change', closed);
   }, []);
@@ -435,7 +443,7 @@ const ColorControl = (props: ControlProps) =>
             picking.current = true;
             onPreview(event.target.value);
           }}
-          onBlur={() => settle.current()}
+          onBlur={(event: React.FocusEvent<HTMLInputElement>) => settlePicked(event.currentTarget, picking, onChange)}
           sx={{ width: 44, height: 30, p: 0, border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'transparent', cursor: 'pointer' }}
         />
         <Typography variant={'body2'} sx={{ fontFamily: 'monospace', minWidth: 64 }}>
