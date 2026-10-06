@@ -43,6 +43,12 @@ const TRAILING_BREAKS = /[\r\n]*$/;
 const ENGINE_META_TAG = /<([^<>:]+)(:?)([^>]*)>/g;
 
 /**
+ * Why a change was refused when the note it would write has the engine read the rest of it otherwise, such as a stray
+ * opening bracket reaching past a tag taken out to swallow the one after it, or swallowing a line added after it.
+ */
+const OTHER_TAGS_MISREAD = 'the game would read the rest of this note differently; look for a stray < in it';
+
+/**
  * The line break a note writes when it has to write one: the first one it already holds, so a new line reads as
  * written by the same hand, or a plain newline, as MZ's note box writes, for a note holding none.
  * @param {string} note The note.
@@ -215,5 +221,35 @@ const noteMetaOf = (note: string): Map<string, string | true> =>
   return new Map(metaTagsOf(note).map(tag => [ tag.key, tag.value ]));
 };
 
-export { lineBreakOf, metaTagsOf, noteLines, noteMetaOf, withLineAdded, withSpanRemoved };
+/**
+ * Reports whether a written note gives the engine's metadata every name the note gave before, each holding the same
+ * value, and no name it did not, leaving aside the names the change is about. The engine reads a note in one search, so
+ * a stray opening bracket swallows the tag after it: taking a tag out can leave such a bracket reaching on to the next
+ * tag, and a line added after one is swallowed whole. Either way a tag the change never touched reads otherwise, and
+ * this is how a writer finds out before handing the note on.
+ * @param {string} before The note as it was.
+ * @param {string} after The note as written.
+ * @param {(key: string) => boolean} isAbout Whether a name is one the change is about, which may read otherwise.
+ * @returns {boolean} True when every other name reads exactly as it did.
+ */
+const keepsOtherMeta = (before: string, after: string, isAbout: (key: string) => boolean): boolean =>
+{
+  const others = (note: string) => [ ...noteMetaOf(note) ].filter(([ key ]) => isAbout(key) === false);
+  const was = others(before);
+  const now = new Map(others(after));
+
+  // a value is a word or true, never undefined, so a name gone from the note can never read as one kept.
+  return was.length === now.size && was.every(([ key, value ]) => now.get(key) === value);
+};
+
+export {
+  keepsOtherMeta,
+  lineBreakOf,
+  metaTagsOf,
+  noteLines,
+  noteMetaOf,
+  OTHER_TAGS_MISREAD,
+  withLineAdded,
+  withSpanRemoved,
+};
 export type { MetaTag, NoteLine };

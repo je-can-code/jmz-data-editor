@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  keepsOtherMeta,
   lineBreakOf,
   metaTagsOf,
   noteLines,
@@ -15,6 +16,8 @@ import {
  * opening bracket swallows the tag after it. These helpers read a note the way each reader does, with where everything
  * sits, add a line at the end without touching anything already there, and take a tag out cleanly: a tag alone on its
  * line takes the line and one line break with it, and a tag among words takes one space with it so the words close up.
+ * Since a stray bracket can swallow a tag nobody touched once a tag beside it is added or taken out, a writer can ask
+ * whether every name the engine reads, other than the ones its change is about, still reads exactly as it did.
  */
 describe('noteText', () =>
 {
@@ -298,6 +301,49 @@ describe('noteText', () =>
       // Assert.
       expect([ ...meta ])
         .toStrictEqual([ [ 'noToneChange', '' ], [ 'weather', 'fog' ] ]);
+    });
+  });
+
+  describe('keepsOtherMeta', () =>
+  {
+    /**
+     * Says a change is about the darkness tag's name, in any case.
+     * @param {string} key The name.
+     * @returns {boolean} True for the darkness tag's name.
+     */
+    const aboutAmbient = (key: string): boolean => key.toLowerCase() === 'ambient';
+
+    it('holds when only the names the change is about read otherwise, whatever their case', () =>
+    {
+      // Arrange: the darkness taken off one line in capitals and put back on another, every other tag kept.
+      const before = '<noWeather>\n<AMBIENT:[50]>\n<weather:fog>';
+      const after = '<noWeather>\n<weather:fog>\n<ambient:[60]>';
+
+      // Act.
+      const kept = keepsOtherMeta(before, after, aboutAmbient);
+
+      // Assert.
+      expect(kept)
+        .toBe(true);
+    });
+
+    it('fails when a name the change is not about reads otherwise, goes, or comes', () =>
+    {
+      // Arrange: another value; a tag swallowed by a stray bracket once the tag before it is out; a broken tag closed
+      // by a line added after it; and a tag only named like the one the change is about, gone.
+      const cases: [ string, string ][] = [
+        [ '<weather:fog>\n<ambient:[50]>', '<weather:rain>' ],
+        [ 'a < b <ambient:[50]> <noToneChange>', 'a < b <noToneChange>' ],
+        [ '<timeBlock:', '<timeBlock:\n<ambient:[60]>' ],
+        [ '<ambientSound:[50]>\n<ambient:[50]>', '<ambient:[50]>' ],
+      ];
+
+      // Act.
+      const kept = cases.map(([ before, after ]) => keepsOtherMeta(before, after, aboutAmbient));
+
+      // Assert.
+      expect(kept)
+        .toStrictEqual([ false, false, false, false ]);
     });
   });
 });

@@ -1,4 +1,11 @@
-import { metaTagsOf, noteMetaOf, withLineAdded, withSpanRemoved } from '../../core/properties/noteText.ts';
+import {
+  keepsOtherMeta,
+  metaTagsOf,
+  noteMetaOf,
+  OTHER_TAGS_MISREAD,
+  withLineAdded,
+  withSpanRemoved,
+} from '../../core/properties/noteText.ts';
 
 /**
  * The name J-Lighting-Time reads from a map's metadata to learn the map has no sky: {@code $dataMap.meta['noToneChange']},
@@ -59,7 +66,9 @@ const withoutNoSkyTags = (note: string): string =>
  * Says whether a map's sky follows the clock, by writing its note in place: a map whose sky stays put gains the tag on a
  * line of its own at the end of the note, and a map whose sky follows the clock again loses every such tag, each taken
  * out cleanly. Every other character of the note stays as it was, and the note is read back as the game reads it before
- * it is handed on, so a note the game would read otherwise is refused.
+ * it is handed on, so a note the game would read otherwise is refused: one whose sky reads otherwise than asked, and one
+ * where a stray bracket would swallow some other tag once the sky's is added or taken out, such as the one stopping
+ * time on the map.
  * @param {string} note The map's note.
  * @param {boolean} follows Whether the sky follows the clock.
  * @returns {string} The note, unchanged when the sky already does as asked.
@@ -77,6 +86,12 @@ const withSkyFollowingClock = (note: string, follows: boolean): string =>
   if (skyFollowsClock(written) !== follows)
   {
     throw new Error(SKY_MISREAD);
+  }
+
+  // the sky's own tag is the only one the change is about; every other must read as it did.
+  if (keepsOtherMeta(note, written, key => key === NO_SKY_KEY) === false)
+  {
+    throw new Error(OTHER_TAGS_MISREAD);
   }
 
   return written;

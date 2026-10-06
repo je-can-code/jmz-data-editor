@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { OTHER_TAGS_MISREAD } from '../../../../src/mapEditor/core/properties/noteText.ts';
 import {
   ambientTagsIn,
   checkedDarkness,
@@ -24,7 +25,8 @@ import {
  *
  * Every write is read back as the game reads it before it is handed on, so the editor never writes a tag J-Lighting
  * would refuse or read as some other dark. Tags that only look like the darkness tag, such as <ambientSound:...>, and
- * every other plugin's tags are never touched.
+ * every other plugin's tags are never touched, and the game must read every one of them as it did: a darkness tag taken
+ * out or added beside a stray bracket, which would leave the game reading some other tag otherwise, is refused.
  */
 
 /**
@@ -347,6 +349,22 @@ describe('ambientNote', () =>
       // Assert.
       expect(write)
         .toThrow(DARKNESS_MISREAD);
+    });
+
+    it('refuses a darkness that would have the game read another tag in the note otherwise, saying why', () =>
+    {
+      // Arrange: a stray bracket that would swallow the sky's tag once the darkness beside it is out; and a broken tag
+      // that a darkness line added after it would close.
+      const cases: [ string, number ][] = [ [ 'a < b <ambient:[50]> <noToneChange>', 0 ], [ '<timeBlock:', 60 ] ];
+
+      // Act.
+      const writes = cases.map(([ note, percent ]) => () => withDarkness(note, percent, DEFAULT));
+
+      // Assert.
+      expect(writes[0])
+        .toThrow(OTHER_TAGS_MISREAD);
+      expect(writes[1])
+        .toThrow(OTHER_TAGS_MISREAD);
     });
   });
 

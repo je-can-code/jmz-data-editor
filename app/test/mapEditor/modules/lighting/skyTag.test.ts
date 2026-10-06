@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { OTHER_TAGS_MISREAD } from '../../../../src/mapEditor/core/properties/noteText.ts';
 import { SKY_MISREAD, skyFollowsClock, withSkyFollowingClock } from '../../../../src/mapEditor/modules/lighting/skyTag.ts';
 
 /*
@@ -8,8 +9,10 @@ import { SKY_MISREAD, skyFollowsClock, withSkyFollowingClock } from '../../../..
  * its colon does not, and a name in another case, or with anything added, is another name.
  *
  * Saying a map has no sky adds the bare tag on a line of its own at the end of the note; saying it has one takes every
- * tag of that name out, cleanly, since any of them could keep it still. Every other character of the note stays exactly
- * as written, and a note the game would read back otherwise is refused rather than written.
+ * tag of that name out, cleanly, since any of them could keep it still, and leaves a tag only named like it alone. Every
+ * other character of the note stays exactly as written, and a note the game would read back otherwise is refused rather
+ * than written: one whose sky would read otherwise, and one where some other tag would, as when a stray bracket would
+ * swallow the tag after the one taken out.
  */
 describe('skyTag', () =>
 {
@@ -108,6 +111,19 @@ describe('skyTag', () =>
       // Assert.
       expect([ written, skyFollowsClock(written) ])
         .toStrictEqual([ 'cave\n<noWeather>', true ]);
+    });
+
+    it('refuses to take the sky\'s tag out when a stray bracket would then swallow the tag after it, saying why', () =>
+    {
+      // Arrange: a bracket the sky's tag closes off, and time stopped on the map after it.
+      const note = '<<noToneChange> <timeBlock>';
+
+      // Act.
+      const write = () => withSkyFollowingClock(note, true);
+
+      // Assert.
+      expect(write)
+        .toThrow(OTHER_TAGS_MISREAD);
     });
 
     it('refuses to write a tag the game would not read, saying why', () =>

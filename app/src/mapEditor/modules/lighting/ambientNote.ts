@@ -1,4 +1,4 @@
-import { noteLines, withLineAdded, withSpanRemoved } from '../../core/properties/noteText.ts';
+import { keepsOtherMeta, noteLines, OTHER_TAGS_MISREAD, withLineAdded, withSpanRemoved } from '../../core/properties/noteText.ts';
 import { AMBIENT_PARAMETER_LIMIT, AMBIENT_TAG, MAP_SOURCE, MAX_DARKNESS_PERCENT, parseAmbient } from './ambientTags.ts';
 import { rgbOf, type AmbientDeclaration } from './lightingComposition.ts';
 import { isHexColor, normalizeHex } from './lightTags.ts';
@@ -248,6 +248,39 @@ const checkedDarkness = (written: string, meant: MeantDarkness | null, defaultCo
 };
 
 /**
+ * Reports whether a name in a note's metadata is a darkness tag's, in whatever case it is written: the only names a
+ * change to the darkness writes, adds or takes away.
+ * @param {string} key The name.
+ * @returns {boolean} True for the darkness tag's name.
+ */
+const isAmbientName = (key: string): boolean =>
+{
+  return key.toLowerCase() === 'ambient';
+};
+
+/**
+ * Hands on a changed note only when the game reads it back as the darkness meant ({@link checkedDarkness}) and reads
+ * every other tag in it as it did before the change. A darkness tag taken out or added can leave a stray bracket
+ * earlier in the note swallowing a tag the change never touched, such as the one saying the map has no sky, and such a
+ * change is refused rather than written.
+ * @param {string} note The note as it was.
+ * @param {string} written The note as it would be written.
+ * @param {MeantDarkness | null} meant The darkness it must give, or null for none.
+ * @param {string} defaultColor The project's colour of the dark.
+ * @returns {string} The written note.
+ */
+const checkedChange = (note: string, written: string, meant: MeantDarkness | null, defaultColor: string): string =>
+{
+  const checked = checkedDarkness(written, meant, defaultColor);
+  if (keepsOtherMeta(note, checked, isAmbientName) === false)
+  {
+    throw new Error(OTHER_TAGS_MISREAD);
+  }
+
+  return checked;
+};
+
+/**
  * Takes every darkness tag out of a note, the last first so each one still sits where it was read. Every one goes, not
  * only the one the game reads: with that one gone, the game would read the one before it instead.
  * @param {string} note The map's note.
@@ -282,7 +315,8 @@ const withDarknessWritten = (note: string, tag: AmbientTagSpan, text: string): s
  * the end of the note; a dark map has the darkness of the tag the game reads written over, and nothing else; and no
  * darkness at all takes every darkness tag out, each cleanly, since with the one the game reads gone it would read an
  * earlier one. A tag the game cannot read is mended by the change, whatever darkness it is given. Every other character
- * of the note stays as it was, and the note is read back as the game reads it before it is handed on.
+ * of the note stays as it was, and the note is read back as the game reads it before it is handed on, its darkness and
+ * every other tag in it alike ({@link checkedChange}).
  * @param {string} note The map's note.
  * @param {number} percent How dark the map is to be, 0 to 100; taken to two places.
  * @param {string} defaultColor The project's colour of the dark, for a colour the game cannot use.
@@ -307,7 +341,7 @@ const withDarkness = (note: string, percent: number, defaultColor: string): stri
 
   if (rounded === 0)
   {
-    return checkedDarkness(withoutAmbientTags(note), null, defaultColor);
+    return checkedChange(note, withoutAmbientTags(note), null, defaultColor);
   }
 
   // a number to two places from 0 to 100 is written plainly, never in the exponent form the tag's pattern refuses.
@@ -315,14 +349,15 @@ const withDarkness = (note: string, percent: number, defaultColor: string): stri
   const darkness = rounded / MAX_DARKNESS_PERCENT;
   if (tag === null)
   {
-    return checkedDarkness(withLineAdded(note, `<ambient:[${text}]>`), { darkness, declaresColor: false }, defaultColor);
+    const added = withLineAdded(note, `<ambient:[${text}]>`);
+    return checkedChange(note, added, { darkness, declaresColor: false }, defaultColor);
   }
 
   // a tag the game reads keeps whatever it says of the colour; one it cannot read says whatever its second value says.
   const meant = declared === null
     ? { darkness }
     : { darkness, declaresColor: declared.declaresColor, color: declared.color };
-  return checkedDarkness(withDarknessWritten(note, tag, text), meant, defaultColor);
+  return checkedChange(note, withDarknessWritten(note, tag, text), meant, defaultColor);
 };
 
 /**
@@ -332,7 +367,7 @@ const withDarkness = (note: string, percent: number, defaultColor: string): stri
  * already shows, whatever case or length it is written in, changes nothing: the project's in place of one the game
  * cannot use included, and plain black for a tag naming none, as the light panel leaves a light showing its default.
  * Every other character of the note stays as it was, and the note is read back as the game reads it before it is handed
- * on.
+ * on, its darkness and every other tag in it alike ({@link checkedChange}).
  * @param {string} note The map's note; the game must read a darkness from it.
  * @param {string} color The colour, such as #0a2a2a, or empty for none.
  * @param {string} defaultColor The project's colour of the dark, for a colour the game cannot use.
@@ -357,9 +392,14 @@ const withDarkColor = (note: string, color: string, defaultColor: string): strin
   const [ written, named ] = tag.values;
   if (color === '')
   {
-    return named === undefined
-      ? note
-      : checkedDarkness(`${note.slice(0, written.end)}${note.slice(named.end)}`, { darkness, declaresColor: false }, defaultColor);
+    if (named === undefined)
+    {
+      return note;
+    }
+
+    // the colour goes with the separator before it, leaving the darkness alone in the list.
+    const uncoloured = `${note.slice(0, written.end)}${note.slice(named.end)}`;
+    return checkedChange(note, uncoloured, { darkness, declaresColor: false }, defaultColor);
   }
 
   // the colour the dark already shows changes nothing, the plain black of a tag naming none included.
@@ -369,12 +409,10 @@ const withDarkColor = (note: string, color: string, defaultColor: string): strin
   }
 
   const meant = { darkness, declaresColor: true, color: rgbOf(color) };
-  if (named === undefined)
-  {
-    return checkedDarkness(`${note.slice(0, written.end)}${PLAIN_SEPARATOR}${color}${note.slice(written.end)}`, meant, defaultColor);
-  }
-
-  return checkedDarkness(`${note.slice(0, named.start)}${inCaseOf(color, named.text)}${note.slice(named.end)}`, meant, defaultColor);
+  const coloured = named === undefined
+    ? `${note.slice(0, written.end)}${PLAIN_SEPARATOR}${color}${note.slice(written.end)}`
+    : `${note.slice(0, named.start)}${inCaseOf(color, named.text)}${note.slice(named.end)}`;
+  return checkedChange(note, coloured, meant, defaultColor);
 };
 
 export {
