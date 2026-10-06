@@ -5,13 +5,21 @@
 
 /**
  * One map the probe draws: where the display sits for each view, which A1 animation steps to draw, and whether to draw
- * it dark too, with J-Lighting's light mask over its tiles.
+ * it dark too, with J-Lighting's light mask over its tiles. A map given a time of day is drawn under its sky instead:
+ * the game's clock is set to that time and stopped before the player arrives, so the sky is already there on arrival,
+ * and the map's tiles are drawn with the screen's tone over them and the light mask, if the hour or the map darkens it,
+ * multiplied over that.
  */
 type ProbeMap = {
   mapId: number;
   views: { x: number; y: number }[];
   steps: number[];
   dark: boolean;
+
+  /**
+   * The time of day to draw the map's sky at, in minutes past midnight; left out, the map is drawn without its sky.
+   */
+  time?: number;
 };
 
 /**
@@ -29,15 +37,20 @@ type ProbeConfig = {
 };
 
 /**
- * One picture the probe drew: the events as the game shows them, the tiles alone, or the tiles alone with the light
- * mask multiplied over them.
+ * One picture the probe drew: the events as the game shows them, the tiles alone, the tiles alone with the light mask
+ * multiplied over them, or the tiles alone under the sky at a time of day, toned, with the light mask over them.
  */
 type ProbeCapture = {
   mapId: number;
   file: string;
   display: { x: number; y: number };
   step: number;
-  pass: 'events' | 'tiles' | 'dark';
+  pass: 'events' | 'tiles' | 'dark' | 'sky';
+
+  /**
+   * The time of day a sky picture was drawn at, in minutes past midnight; absent from every other pass.
+   */
+  time?: number;
 };
 
 /**
@@ -68,13 +81,14 @@ type ProbeEvent = {
 };
 
 /**
- * What the probe reports when it finishes.
+ * What the probe reports when it finishes. The events are kept by map, under the map's id, or under the id and the time
+ * of day for a map drawn under its sky ({@code 337@1320}), since which page an event shows can depend on the hour.
  */
 type ProbeReport = {
   phase: string;
   screen: { width: number; height: number };
   captures: ProbeCapture[];
-  events: Record<number, ProbeEvent[]>;
+  events: Record<string, ProbeEvent[]>;
   errors: string[];
   log: string[];
 };

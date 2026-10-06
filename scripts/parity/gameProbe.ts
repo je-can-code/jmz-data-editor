@@ -2,7 +2,10 @@
  * The probe the parity check injects into the real game: it walks the game to each fixture map, holds everything
  * still, and draws the map's base layer (parallax, tiles and characters, with no screen tone, lighting, weather or
  * interface above it) into a picture per view, animation step and pass. A dark map is drawn once more with J-Lighting's
- * light mask multiplied over its tiles, as the game composites it over the map.
+ * light mask multiplied over its tiles, as the game composites it over the map. A map given a time of day is walked to
+ * with the game's clock set to that time and stopped, so J-Lighting-Time's sky is already there when the player
+ * arrives, and is drawn under it: its tiles with the screen's tone over them, as the base layer's colour filter casts
+ * it, and the light mask multiplied over that whenever the hour or the map darkens it.
  *
  * It is serialized with toString() and run inside NW.js ahead of the game's own scripts, so it must stay one
  * self-contained function in plain JavaScript: nothing from this module's scope survives the trip, and the engine's
@@ -109,7 +112,7 @@ const parityProbe = (config: ProbeConfig): void =>
     hooksInstalled = true;
   };
 
-  const capture = (map: ProbeMap, view: { x: number; y: number }, step: number, pass: 'events' | 'tiles' | 'dark'): void =>
+  const capture = (map: ProbeMap, view: { x: number; y: number }, step: number, pass: 'events' | 'tiles' | 'dark' | 'sky'): void =>
   {
     const scene = engine.SceneManager._scene;
     const spriteset = scene._spriteset;
@@ -136,11 +139,15 @@ const parityProbe = (config: ProbeConfig): void =>
     spriteset.updateParallax();
     tilemap.animationFrame = step;
 
-    // draw the base layer alone: without the screen tone its colour filter carries, and without anything a plugin put
-    // beside the map there (J-Weather's particles live in it, so the lighting darkens them).
+    // draw the base layer alone: without the screen tone its colour filter carries, except under the sky, which is that
+    // tone; and without anything a plugin put beside the map there (J-Weather's particles live in it, so the lighting
+    // darkens them).
     const base = spriteset._baseSprite;
     const { filters } = base;
-    base.filters = null;
+    if (pass !== 'sky')
+    {
+      base.filters = null;
+    }
     const kept = new Set([ spriteset._blackScreen, spriteset._parallax, tilemap ]);
     const setAside = base.children.filter((child: any) => kept.has(child) === false && child.visible);
     setAside.forEach((child: any) =>
@@ -151,17 +158,19 @@ const parityProbe = (config: ProbeConfig): void =>
     const texture = engine.PIXI.RenderTexture.create({ width: engine.Graphics.width, height: engine.Graphics.height });
     renderer.render(base, texture);
 
-    // the dark pass multiplies J-Lighting's light mask over the base, as the game does above the weather, its lights
-    // placed afresh for this view first: the mask's own update composes the lights and draws them into its texture.
-    // The mask's texture is kept too, a tile wider than the screen on every side, so a difference can be traced to the
-    // mask itself or to its multiplying.
-    if (pass === 'dark')
+    // the dark and sky passes multiply J-Lighting's light mask over the base, as the game does above the weather, its
+    // lights placed afresh for this view first: the mask's own update composes the lights and draws them into its
+    // texture, and hides the mask while nothing darkens the map, as at noon under a clear sky. The mask's texture is kept
+    // too, a tile wider than the screen on every side, so a difference can be traced to the mask itself or to its
+    // multiplying.
+    const at = map.time === undefined ? '' : `-t${map.time}`;
+    if (pass === 'dark' || pass === 'sky')
     {
       const mask = spriteset.lightMask();
       mask.update();
       renderer.render(mask, texture, false);
       const maskUrl: string = renderer.extract.base64(mask.renderTexture());
-      const maskFile = `${config.outDir}/mask-${map.mapId}-${display.x}-${display.y}-s${step}.png`;
+      const maskFile = `${config.outDir}/mask-${map.mapId}-${display.x}-${display.y}-s${step}${at}.png`;
       fs.writeFileSync(maskFile, NodeBuffer.from(maskUrl.split(',')[1], 'base64'));
     }
 
@@ -173,9 +182,11 @@ const parityProbe = (config: ProbeConfig): void =>
     base.filters = filters;
     texture.destroy(true);
 
-    const file = `game-${map.mapId}-${display.x}-${display.y}-s${step}-${pass}.png`;
+    const file = `game-${map.mapId}-${display.x}-${display.y}-s${step}${at}-${pass}.png`;
     fs.writeFileSync(`${config.outDir}/${file}`, NodeBuffer.from(url.split(',')[1], 'base64'));
-    report.captures.push({ mapId: map.mapId, file, display, step, pass });
+    report.captures.push(map.time === undefined
+      ? { mapId: map.mapId, file, display, step, pass }
+      : { mapId: map.mapId, file, display, step, pass, time: map.time });
   };
 
   // names what the base layer and the tilemap hold, so anything a plugin added beside the map can be told apart.
@@ -252,11 +263,13 @@ const parityProbe = (config: ProbeConfig): void =>
     return departures;
   };
 
-  // records each event's active page, whether the game draws it and how, before any pass hides anything.
+  // records each event's active page, whether the game draws it and how, before any pass hides anything; under its
+  // own key for a map drawn at a time of day, since an event's page can depend on the hour.
   const recordEvents = (map: ProbeMap): void =>
   {
     const spriteset = engine.SceneManager._scene._spriteset;
-    report.events[map.mapId] = spriteset._characterSprites
+    const key = map.time === undefined ? String(map.mapId) : `${map.mapId}@${map.time}`;
+    report.events[key] = spriteset._characterSprites
       .filter((sprite: any) => sprite._character instanceof engine.Game_Event)
       .map((sprite: any) =>
       {
@@ -276,27 +289,42 @@ const parityProbe = (config: ProbeConfig): void =>
       });
   };
 
-  // names what J-Lighting composed for a dark map: how dark, in what colour, and the lights cut through it.
+  // names what J-Lighting composed for a dark map or a sky: how dark, in what colour, the screen's tone, the hour on the
+  // game's clock, the filters on the base layer, and the lights cut through it.
   const describeDark = (map: ProbeMap): void =>
   {
     const composition = engine.ScreenLightingComposer.compose();
     const lights = composition.lights().map((light: any) => `${light.sourceKey()} r${light.radius()} ${light.color()} i${light.intensity()} ${light.effect()}`);
-    report.log.push(`map ${map.mapId} dark: darkness ${composition.darkness()} colour ${JSON.stringify(composition.ambientColor())}`
-      + ` tone ${JSON.stringify(composition.tone())}, ${lights.length} lights: ${lights.join('; ')}`);
+    const filters = (engine.SceneManager._scene._spriteset._baseSprite.filters ?? []).map((filter: any) => filter.constructor.name).join(',');
+    const clock = engine.$gameTime === undefined ? 'no clock' : `${engine.$gameTime.hours()}:${engine.$gameTime.minutes()}`;
+    report.log.push(`map ${map.mapId} ${map.time === undefined ? 'dark' : 'sky'}: darkness ${composition.darkness()}`
+      + ` colour ${JSON.stringify(composition.ambientColor())} tone ${JSON.stringify(composition.tone())} clock ${clock}`
+      + ` base filters [${filters}], ${lights.length} lights: ${lights.join('; ')}`);
+  };
+
+  // which pictures a map gets: events as the game shows them, then the tiles alone, with every event hidden, then, for
+  // a dark map, the tiles alone again under the light mask; or, for a map drawn at a time of day, the tiles alone under
+  // its sky and nothing else.
+  const passesFor = (map: ProbeMap): ('events' | 'tiles' | 'dark' | 'sky')[] =>
+  {
+    if (map.time !== undefined)
+    {
+      return [ 'sky' ];
+    }
+
+    return map.dark ? [ 'events', 'tiles', 'dark' ] : [ 'events', 'tiles' ];
   };
 
   const captureMap = (map: ProbeMap): void =>
   {
     describeScene();
     recordEvents(map);
-    if (map.dark)
+    if (map.dark || map.time !== undefined)
     {
       describeDark(map);
     }
 
-    // events first, as the game shows them; then the tiles alone, with every event hidden; then, for a dark map, the
-    // tiles alone again under the light mask.
-    const passes: ('events' | 'tiles' | 'dark')[] = map.dark ? [ 'events', 'tiles', 'dark' ] : [ 'events', 'tiles' ];
+    const passes = passesFor(map);
     passes.forEach(pass =>
     {
       map.views.forEach(view =>
@@ -307,9 +335,20 @@ const parityProbe = (config: ProbeConfig): void =>
     report.log.push(`map ${map.mapId}: ${map.views.length} views, steps ${map.steps.join(',')}`);
   };
 
+  // a map drawn at a time of day is arrived at with the game's clock already there, set straight into its fields so no
+  // hour is announced on the way, and stopped, so no minute ticks by and turns the hour while it is drawn: arriving is
+  // what makes J-Lighting-Time cast the sky at once, rather than spend five seconds travelling toward it.
   const transferNext = (): void =>
   {
-    engine.$gamePlayer.reserveTransfer(config.maps[mapIndex].mapId, 0, 0, 2, 2);
+    const next = config.maps[mapIndex];
+    if (next.time !== undefined)
+    {
+      engine.$gameTime.deactivate();
+      engine.$gameTime.setHours(Math.floor(next.time / 60));
+      engine.$gameTime.setMinutes(next.time % 60);
+    }
+
+    engine.$gamePlayer.reserveTransfer(next.mapId, 0, 0, 2, 2);
     phase = 'transferring';
     settle = 0;
   };

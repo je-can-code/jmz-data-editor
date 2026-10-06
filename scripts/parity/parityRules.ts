@@ -1,11 +1,13 @@
 /**
  * The parity check's rules, apart from the browser and the game so they can be tested: which views cover a map,
- * which maps are worth comparing at every animation step and which dark, what explains a difference in the events pass
- * and in the dark pass, how the game copy's lights are held steady, and which differences the engine predicts against
- * snapshot.js.
+ * which maps are worth comparing at every animation step, which dark and which under their sky at a time of day, what
+ * explains a difference in the events pass and in the dark and sky passes, how the game copy's lights are held steady,
+ * and which differences the engine predicts against snapshot.js.
  */
+import { hasMetaFlag } from '../../app/src/mapEditor/core/model/noteMeta.ts';
 import type { RmmzMapEvent } from '../../app/src/mapEditor/core/model/rmmzTypes.ts';
 import { ambientPayloadOf } from '../../app/src/mapEditor/modules/lighting/ambientTags.ts';
+import { NO_TONE_CHANGE } from '../../app/src/mapEditor/modules/lighting/sky.ts';
 import { firstLitPage, lightsOf, PLUGIN_DEFAULTS } from '../../app/src/mapEditor/modules/lighting/lightTags.ts';
 import type { ProbeEvent, ProbeMap } from './probeTypes.ts';
 
@@ -21,7 +23,7 @@ type DifferingCell = {
  * One compared view, as far as the verdict reads it: which pass it belongs to, and the differing cells nothing explains.
  */
 type JudgedView = {
-  readonly pass: 'events' | 'tiles' | 'dark';
+  readonly pass: 'events' | 'tiles' | 'dark' | 'sky';
   readonly unexplained: readonly DifferingCell[];
 };
 
@@ -129,6 +131,50 @@ const probeMapFor = (mapId: number, map: MapFile, screen: { width: number; heigh
   const ys = coverAxis(map.height, screen.height / TILE);
   const views = xs.flatMap(x => ys.map(y => ({ x, y })));
   return { mapId, views, steps: animates(map) ? [ 0, 1, 2, 3 ] : [ 0 ], dark: ambientPayloadOf(map.note) !== null };
+};
+
+/**
+ * Names the events a capture is explained by, as the probe keys them in its report: by the map's id, and by the time of
+ * day too for a picture of the map under its sky, since which page an event shows can depend on the hour.
+ * @param {{ mapId: number, time?: number }} capture The capture.
+ * @returns {string} The key, such as {@code 4} or {@code 337@1320}.
+ */
+const eventsKeyOf = (capture: { readonly mapId: number; readonly time?: number }): string =>
+{
+  return capture.time === undefined
+    ? String(capture.mapId)
+    : `${capture.mapId}@${capture.time}`;
+};
+
+/**
+ * Reports whether a map lies under the sky, as J-Lighting-Time reads it from the map's meta: unless its note carries
+ * <noToneChange>.
+ * @param {MapFile} map The map.
+ * @returns {boolean} True when the clock casts its sky over it.
+ */
+const hasSkyOver = (map: MapFile): boolean =>
+{
+  return hasMetaFlag(map.note, NO_TONE_CHANGE) === false;
+};
+
+/**
+ * Builds what the probe draws for one map under its sky at a time of day: the same views and steps as any pass over the
+ * map, drawn at that time. A map with no sky has nothing the clock changes, so it is refused, rather than compared at an
+ * hour it ignores and reported as though the sky matched.
+ * @param {number} mapId The map.
+ * @param {MapFile} map Its file.
+ * @param {{ width: number, height: number }} screen The game's screen, in pixels.
+ * @param {number} time The time of day, in minutes past midnight.
+ * @returns {ProbeMap} The probe's orders.
+ */
+const skyProbeMapFor = (mapId: number, map: MapFile, screen: { width: number; height: number }, time: number): ProbeMap =>
+{
+  if (hasSkyOver(map) === false)
+  {
+    throw new Error(`Map${String(mapId).padStart(3, '0')} has no sky to compare: its note carries <${NO_TONE_CHANGE}>`);
+  }
+
+  return { ...probeMapFor(mapId, map, screen), dark: false, time };
 };
 
 /**
@@ -317,11 +363,14 @@ export {
   animates,
   coverAxis,
   darkLightsOf,
+  eventsKeyOf,
   explainCell,
   explainDarkCell,
   gameParityHolds,
+  hasSkyOver,
   lightReaches,
   probeMapFor,
+  skyProbeMapFor,
   snapshotPredictions,
   spriteCovers,
   steadyLighting,

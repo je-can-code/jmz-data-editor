@@ -4,11 +4,14 @@ import {
   animates,
   coverAxis,
   darkLightsOf,
+  eventsKeyOf,
   explainCell,
   explainDarkCell,
   gameParityHolds,
+  hasSkyOver,
   lightReaches,
   probeMapFor,
+  skyProbeMapFor,
   snapshotPredictions,
   spriteCovers,
   steadyLighting,
@@ -26,6 +29,10 @@ import { command, event, page } from '../../mapEditor/support/eventKindFixtures.
  * difference in the dark pass counts as explained only within the reach of a light the game shows from another page
  * than the first one giving light, which is the editor's; snapshot.js differences count as predicted only on star-order
  * and table cells; and any cell left unexplained, in any pass, fails the check.
+ *
+ * A map is drawn under its sky only when it has one: a map tagged <noToneChange> is refused rather than compared at an
+ * hour it ignores. Its views and steps are any pass's, at the time of day asked for, and the events that explain its
+ * differences are the ones the game showed at that hour, kept apart from the same map's other passes.
  *
  * The game copy the check runs holds every light steady, each effect's depth at 0 and the rest of its config as it was,
  * so every frame of the game shows every light at full strength, as the editor draws them.
@@ -114,6 +121,32 @@ describe('parityRules', () =>
           { mapId: 7, views: [ { x: 0, y: 0 }, { x: 0, y: 7.5 }, { x: 10, y: 0 }, { x: 10, y: 7.5 } ], steps: [ 0, 1, 2, 3 ], dark: false },
           { mapId: 8, views: [ { x: 0, y: 0 }, { x: 0, y: 7.5 }, { x: 10, y: 0 }, { x: 10, y: 7.5 } ], steps: [ 0 ], dark: false },
         ]);
+    });
+
+    it('asks for a map under its sky at a time of day, at every view and step, drawn not as a dark map but as a sky', () =>
+    {
+      // Arrange: a 50x30 field with moving water and a darkness of its own, at 22:00.
+      const field = mapFile(50, 30, { 0: 2048 + 5 * 48 }, '<ambient:[30]>');
+
+      // Act.
+      const order = skyProbeMapFor(337, field, { width: 1920, height: 1080 }, 1320);
+
+      // Assert.
+      expect(order)
+        .toStrictEqual({ mapId: 337, views: [ { x: 0, y: 0 }, { x: 0, y: 7.5 }, { x: 10, y: 0 }, { x: 10, y: 7.5 } ], steps: [ 0, 1, 2, 3 ], dark: false, time: 1320 });
+    });
+
+    it('refuses to draw a map tagged to have no sky under one', () =>
+    {
+      // Arrange: a cave out from under the sky.
+      const cave = mapFile(40, 23, {}, '<noToneChange>\n<ambient:[85]>');
+
+      // Act.
+      const attempt = () => skyProbeMapFor(4, cave, { width: 1920, height: 1080 }, 1320);
+
+      // Assert.
+      expect(attempt)
+        .toThrow('Map004 has no sky to compare: its note carries <noToneChange>');
     });
 
     it('asks for a map dark as well when its note declares darkness, as J-Lighting reads a note', () =>
@@ -235,18 +268,52 @@ describe('parityRules', () =>
   {
     it('holds only when no view of any pass leaves a differing cell unexplained', () =>
     {
-      // Arrange: every view clean; one unexplained cell in an events pass; one in a tiles pass; one in a dark pass.
-      const clean = [ { pass: 'tiles', unexplained: [] }, { pass: 'events', unexplained: [] }, { pass: 'dark', unexplained: [] } ] as const;
+      // Arrange: every view clean; one unexplained cell in an events pass; one in a tiles pass; one in a dark pass; one in
+      // a sky.
+      const clean = [ { pass: 'tiles', unexplained: [] }, { pass: 'events', unexplained: [] }, { pass: 'dark', unexplained: [] }, { pass: 'sky', unexplained: [] } ] as const;
       const eventsDiffer = [ { pass: 'tiles', unexplained: [] }, { pass: 'events', unexplained: [ { x: 4, y: 2 } ] } ] as const;
       const tilesDiffer = [ { pass: 'tiles', unexplained: [ { x: 0, y: 0 } ] }, { pass: 'events', unexplained: [] } ] as const;
       const darkDiffers = [ { pass: 'tiles', unexplained: [] }, { pass: 'dark', unexplained: [ { x: 9, y: 9 } ] } ] as const;
+      const skyDiffers = [ { pass: 'tiles', unexplained: [] }, { pass: 'sky', unexplained: [ { x: 3, y: 1 } ] } ] as const;
 
       // Act.
-      const verdicts = [ clean, eventsDiffer, tilesDiffer, darkDiffers ].map(views => gameParityHolds(views));
+      const verdicts = [ clean, eventsDiffer, tilesDiffer, darkDiffers, skyDiffers ].map(views => gameParityHolds(views));
 
       // Assert.
       expect(verdicts)
-        .toStrictEqual([ true, false, false, false ]);
+        .toStrictEqual([ true, false, false, false, false ]);
+    });
+  });
+
+  describe('hasSkyOver', () =>
+  {
+    it('puts a map under the sky unless its note takes it out, read as the engine reads a note\'s tags', () =>
+    {
+      // Arrange: a field; a cave; a near miss in another case.
+      const maps = [ mapFile(10, 10, {}, ''), mapFile(10, 10, {}, '<noToneChange>'), mapFile(10, 10, {}, '<NoToneChange>') ];
+
+      // Act.
+      const skies = maps.map(hasSkyOver);
+
+      // Assert.
+      expect(skies)
+        .toStrictEqual([ true, false, true ]);
+    });
+  });
+
+  describe('eventsKeyOf', () =>
+  {
+    it('keys a pass by its map, and a sky by its map and its time of day', () =>
+    {
+      // Arrange: a dark pass on map 4, and two skies on map 337.
+      const captures = [ { mapId: 4 }, { mapId: 337, time: 1320 }, { mapId: 337, time: 840 } ];
+
+      // Act.
+      const keys = captures.map(eventsKeyOf);
+
+      // Assert.
+      expect(keys)
+        .toStrictEqual([ '4', '337@1320', '337@840' ]);
     });
   });
 

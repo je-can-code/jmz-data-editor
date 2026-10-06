@@ -4,8 +4,9 @@
  * draws each fixture map view by view, and the editor draws the same views; the two are compared pixel by pixel inside
  * the map.
  *
- *   bun run parity [--maps 102,31,94,316] [--mode game|snapshot|both] [--scratch <base folder>] [--project <game>]
- *                  [--ui-port 18200] [--api-port 18201] [--display :90] [--nw <binary>]
+ *   bun run parity [--maps 102,31,94,316] [--sky 337@22:00,337@14:00] [--mode game|snapshot|both]
+ *                  [--scratch <base folder>] [--project <game>] [--ui-port 18200] [--api-port 18201] [--display :90]
+ *                  [--nw <binary>]
  *
  * Each invocation works in a folder of its own inside the base folder (the system's temporary folder unless --scratch
  * names another), builds the editor afresh there, and leaves its pictures and report there; it prints where.
@@ -19,6 +20,12 @@
  * of its lighting: a differing cell there is explained only by a light the game shows from another page than the
  * editor's, which reads every event's lights from its first page giving any. Any cell left unexplained, in any pass,
  * fails the check.
+ *
+ * The sky pass draws an outdoor map under J-Lighting-Time's sky at a time of day (--sky; Map337 at 22:00 and at 14:00
+ * unless told otherwise): the game's clock is set to that time and stopped before the player arrives, so the sky is
+ * already there, and its tiles are drawn with the screen's tone over them and the light mask multiplied over that; the
+ * editor draws the same view at the same hour, its sky's tone and its dark the only lighting it shows. A differing cell
+ * is explained as in the dark pass, by a light the game shows from another page at that hour.
  *
  * Maps with water or waterfalls are compared at all four animation steps. The game draws on SwiftShader, which is
  * fine for pictures and meaningless for timing. The game runs from a copy in the run's folder, muted, on a virtual
@@ -40,10 +47,12 @@ import type { ProbeCapture, ProbeReport } from './probeTypes.ts';
 import { runHeadlessGame } from './headlessGame.ts';
 import {
   darkLightsOf,
+  eventsKeyOf,
   explainCell,
   explainDarkCell,
   gameParityHolds,
   probeMapFor,
+  skyProbeMapFor,
   snapshotPredictions,
   steadyLighting,
   TILE,
@@ -52,10 +61,19 @@ import {
 } from './parityRules.ts';
 
 /**
+ * One map to draw under its sky, and the time of day to draw it at, in minutes past midnight.
+ */
+type SkyFixture = {
+  mapId: number;
+  time: number;
+};
+
+/**
  * The script's settings.
  */
 type Options = {
   maps: number[];
+  sky: SkyFixture[];
   mode: 'game' | 'snapshot' | 'both';
   scratch: string;
   project: string;
@@ -83,7 +101,7 @@ type HookWindow = {
   __jmzMapView?: {
     ready: () => boolean;
     info: () => { stats: { loadingImages: number } };
-    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean }) => void;
+    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean; time?: number }) => void;
     extract: (rect: { x: number; y: number; width: number; height: number }) => Promise<string>;
   };
 };
@@ -98,6 +116,48 @@ const FIXTURES: Record<number, string> = {
   316: 'the most star tiles, 1,123, under a still parallax',
   4: 'dark: a cave at 85%, seven torches alike, kept from the clock by <noToneChange>',
   6: 'dark: a cave at 85%, torches and ghosts of three looks, one of them lit only behind a switch',
+  337: 'under the sky: an outdoor map with no darkness of its own and dozens of lights, lit only by night',
+};
+
+/**
+ * The maps drawn under their sky, and when: night, when the sky is deepest and every light shows, and the afternoon the
+ * game starts in, whose faint dusk still earns a mask.
+ */
+const SKY_FIXTURES = '337@22:00,337@14:00';
+
+/**
+ * A map and a time of day as --sky takes them: the map's id, an at sign, then hours and minutes on a 24-hour clock.
+ */
+const SKY_FIXTURE = /^(\d+)@([01]?\d|2[0-3]):([0-5]\d)$/u;
+
+/**
+ * Reads --sky's list of maps and times.
+ * @param {string} list The list, such as {@code 337@22:00,337@14:00}; empty for none.
+ * @returns {SkyFixture[]} The maps and times, in the order given.
+ */
+const parseSkyFixtures = (list: string): SkyFixture[] =>
+{
+  return list.split(',').filter(entry => entry !== '').map(entry =>
+  {
+    const match = SKY_FIXTURE.exec(entry);
+    if (match === null)
+    {
+      throw new Error(`--sky takes a map and a time, such as 337@22:00, not ${entry}`);
+    }
+
+    const [ , mapId, hours, minutes ] = match;
+    return { mapId: Number(mapId), time: (Number(hours) * 60) + Number(minutes) };
+  });
+};
+
+/**
+ * Words a time of day as a 24-hour clock writes it.
+ * @param {number} time The time of day, in minutes past midnight.
+ * @returns {string} The time, such as 22:00.
+ */
+const clockOf = (time: number): string =>
+{
+  return `${String(Math.floor(time / 60)).padStart(2, '0')}:${String(time % 60).padStart(2, '0')}`;
 };
 
 /**
@@ -142,7 +202,8 @@ const parseOptions = (argv: string[]): Options =>
   });
 
   return {
-    maps: (flags.get('maps') ?? Object.keys(FIXTURES).join(',')).split(',').map(Number),
+    maps: (flags.get('maps') ?? '102,31,94,316,4,6').split(',').map(Number),
+    sky: parseSkyFixtures(flags.get('sky') ?? SKY_FIXTURES),
     mode: (flags.get('mode') ?? 'both') as Options['mode'],
     scratch: flags.get('scratch') ?? tmpdir(),
     project: flags.get('project') ?? process.env['JMZ_PROJECT_ROOT'] ?? '',
@@ -198,12 +259,12 @@ const openEditorMap = async (page: Page, uiBase: string, mapId: number): Promise
  */
 const drawInEditor = async (page: Page, capture: ProbeCapture, screen: { width: number; height: number }, file: string): Promise<void> =>
 {
-  const url = await page.evaluate(async ({ pass, step, rect }) =>
+  const url = await page.evaluate(async ({ pass, step, time, rect }) =>
   {
     const hooks = (window as unknown as HookWindow).__jmzMapView;
-    hooks?.prepareParity({ events: pass === 'events', step, frames: 0, lighting: pass === 'dark' });
+    hooks?.prepareParity({ events: pass === 'events', step, frames: 0, lighting: pass === 'dark' || pass === 'sky', time: time ?? undefined });
     return hooks?.extract(rect) ?? '';
-  }, { pass: capture.pass, step: capture.step, rect: { x: capture.display.x * TILE, y: capture.display.y * TILE, ...screen } });
+  }, { pass: capture.pass, step: capture.step, time: capture.time ?? null, rect: { x: capture.display.x * TILE, y: capture.display.y * TILE, ...screen } });
   await saveDataUrl(url, file);
 };
 
@@ -227,7 +288,7 @@ const compareCapture = async (capture: ProbeCapture, map: MapFile, report: Probe
     await writePng(differencePicture(game, editor, TOLERANCE), `${folder}/${capture.file.replace(/^game-/u, 'diff-')}`);
   }
 
-  const events = report.events[capture.mapId] ?? [];
+  const events = report.events[eventsKeyOf(capture)] ?? [];
   const lights = darkLightsOf(map);
   const explained: CellDifference[] = [];
   const unexplained: CellDifference[] = [];
@@ -239,6 +300,7 @@ const compareCapture = async (capture: ProbeCapture, map: MapFile, report: Probe
       case 'events':
         return explainCell(cell, events);
       case 'dark':
+      case 'sky':
         return explainDarkCell(cell, lights, events);
       case 'tiles':
         return null;
@@ -271,12 +333,17 @@ const runGameParity = async (options: Options): Promise<boolean> =>
   mkdirSync(folder, { recursive: true });
   const screen = { width: 1920, height: 1080 };
   const maps = new Map<number, MapFile>();
-  for (const mapId of options.maps)
+  const mapIds = [ ...new Set([ ...options.maps, ...options.sky.map(fixture => fixture.mapId) ]) ];
+  for (const mapId of mapIds)
   {
     maps.set(mapId, await readMap(options.project, mapId));
   }
 
-  const probeMaps = options.maps.map(mapId => probeMapFor(mapId, maps.get(mapId) as MapFile, screen));
+  // the skies come last, so the game has always arrived somewhere before its clock is set for one.
+  const probeMaps = [
+    ...options.maps.map(mapId => probeMapFor(mapId, maps.get(mapId) as MapFile, screen)),
+    ...options.sky.map(fixture => skyProbeMapFor(fixture.mapId, maps.get(fixture.mapId) as MapFile, screen, fixture.time)),
+  ];
   const report = await runHeadlessGame(
     {
       projectRoot: options.project,
@@ -298,7 +365,7 @@ const runGameParity = async (options: Options): Promise<boolean> =>
   try
   {
     const page = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
-    for (const mapId of options.maps)
+    for (const mapId of mapIds)
     {
       await openEditorMap(page, stack.uiBase, mapId);
       for (const capture of report.captures.filter(each => each.mapId === mapId))
@@ -320,7 +387,7 @@ const runGameParity = async (options: Options): Promise<boolean> =>
   }
 
   await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results }, null, 2));
-  return printGameParity(options.maps, results);
+  return printGameParity(mapIds, results);
 };
 
 /**
@@ -334,9 +401,13 @@ const printGameParity = (maps: number[], results: ViewResult[]): boolean =>
   maps.forEach(mapId =>
   {
     console.log(`Map${String(mapId).padStart(3, '0')}: ${FIXTURES[mapId] ?? 'fixture'}`);
-    [ 'tiles', 'events', 'dark' ].forEach(pass =>
+
+    // each pass as it comes, a sky once for every time of day it was drawn at.
+    const times = [ ...new Set(results.flatMap(result => (result.capture.mapId === mapId && result.capture.time !== undefined ? [ result.capture.time ] : []))) ];
+    const passes = [ ...[ 'tiles', 'events', 'dark' ].map(pass => ({ pass, time: undefined as number | undefined })), ...times.map(time => ({ pass: 'sky', time })) ];
+    passes.forEach(({ pass, time }) =>
     {
-      const mine = results.filter(result => result.capture.mapId === mapId && result.capture.pass === pass);
+      const mine = results.filter(result => result.capture.mapId === mapId && result.capture.pass === pass && result.capture.time === time);
       if (mine.length === 0)
       {
         return;
@@ -351,7 +422,8 @@ const printGameParity = (maps: number[], results: ViewResult[]): boolean =>
       const views = new Set(mine.map(result => `${result.capture.display.x},${result.capture.display.y}`)).size;
       const steps = new Set(mine.map(result => result.capture.step)).size;
       const verdict = unexplained.length === 0 ? 'MATCH' : `DIFFER at ${unexplained.length} cells: ${unexplained.slice(0, 12).join(' ')}`;
-      console.log(`  ${pass.padEnd(6)} ${views} views x ${steps} steps, ${pixels} pixels compared, ${differing} beyond ${TOLERANCE}`
+      const label = time === undefined ? pass : `${pass} ${clockOf(time)}`;
+      console.log(`  ${label.padEnd(6)} ${views} views x ${steps} steps, ${pixels} pixels compared, ${differing} beyond ${TOLERANCE}`
         + ` (max delta ${maxDelta}), ${explained} cells explained  ${verdict}`);
       reasons.slice(0, 8).forEach(reason => console.log(`           ${reason}`));
       if (reasons.length > 8)
