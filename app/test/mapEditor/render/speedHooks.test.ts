@@ -8,9 +8,11 @@ import { makeAutotileId } from '../../../src/mapEditor/core/tiles/tileIds.ts';
 import { fitZoom } from '../../../src/mapEditor/render/cameraControls.ts';
 import {
   cameraOnPath,
+  clockOnPath,
   parityLightingLayers,
   parityLook,
   ringsOverlay,
+  timeFromQuery,
   unusedGroundKind,
   wantsSpeedHooks,
 } from '../../../src/mapEditor/render/speedHooks.ts';
@@ -19,7 +21,10 @@ import { buildMapJson } from '../support/fixtures.ts';
 /*
  * The speed script drives the page through hooks that exist only when the page was opened for measuring, and its
  * camera paths decide what the budgets are measured on: a pan at zoom 1, a zoom sweep between 2x and the whole map,
- * and the whole map held on screen. If a path never reached the whole map, the budget for it would pass untested.
+ * the whole map held on screen, and the whole map held still while the window's clock sweeps the day, every hour of it
+ * passing. If a path never reached the whole map, the budget for it would pass untested. A page can be opened at an
+ * hour of the day, written in the address as a 24-hour clock writes it, so a map is measured at night from its first
+ * frame; anything no clock shows asks for nothing.
  *
  * The parity check holds the editor's drawing against the game's own, which it runs with no shadows, and with its light
  * mask only when the check compares a map dark; so the editor draws no shadows then, and its lighting only when asked,
@@ -91,6 +96,65 @@ describe('speedHooks', () =>
       // Assert: always the whole map's zoom, and not standing still.
       expect([ cameras.map(camera => camera.zoom), cameras[0].x !== cameras[1].x ])
         .toStrictEqual([ [ whole, whole ], true ]);
+    });
+
+    it('holds the whole map still, centred, while the clock sweeps', () =>
+    {
+      // Arrange.
+      const whole = fitZoom(view, map, 48);
+
+      // Act.
+      const cameras = [ cameraOnPath('clock', 0, map, view), cameraOnPath('clock', 1, map, view) ];
+      const centre = screenToWorld(cameras[0], { x: view.width / 2, y: view.height / 2 });
+
+      // Assert.
+      expect([ cameras[1], centre.x, centre.y, cameras[0].zoom ])
+        .toStrictEqual([ cameras[0], 1800, 1800, whole ]);
+    });
+  });
+
+  describe('clockOnPath', () =>
+  {
+    it('sweeps the whole day every eight seconds from midnight, three minutes a frame, round and round', () =>
+    {
+      // Arrange: the start, a frame in, the hour's first turn, halfway, and a whole day and a frame on.
+      const seconds = [ 0, 1 / 60, 1 / 3, 4, 8 + (1 / 60) ];
+
+      // Act.
+      const times = seconds.map(clockOnPath);
+
+      // Assert.
+      expect(times)
+        .toStrictEqual([ 0, 3, 60, 720, 3 ]);
+    });
+  });
+
+  describe('timeFromQuery', () =>
+  {
+    it('reads the time of day a page is asked to show, an hour of one digit or two', () =>
+    {
+      // Arrange: 22:00, 2:05, and midnight.
+      const searches = [ '?map=337&speed=1&time=22:00', '?time=2:05', '?time=00:00' ];
+
+      // Act.
+      const times = searches.map(timeFromQuery);
+
+      // Assert.
+      expect(times)
+        .toStrictEqual([ 1320, 125, 0 ]);
+    });
+
+    it('reads nothing when no time is asked for, or one no clock shows', () =>
+    {
+      // Arrange: none; 24:00; a minute of 60; minutes alone; words.
+      const searches = [ '?map=337&speed=1', '?time=24:00', '?time=22:60', '?time=1320', '?time=night' ];
+
+      // Act.
+      const times = searches.map(timeFromQuery);
+
+      // Assert.
+      expect(times)
+        .toStrictEqual([ null, null, null, null, null ]);
     });
   });
 

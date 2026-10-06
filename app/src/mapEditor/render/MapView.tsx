@@ -434,6 +434,7 @@ const MapView = (props: MapViewProps) =>
         },
         timings: speedTimings,
         lightingLayers: () => services.modules.lightingLayers(),
+        clock: services.clock,
       }));
     }
 

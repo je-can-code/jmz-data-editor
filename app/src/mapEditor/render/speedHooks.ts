@@ -7,6 +7,8 @@ import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { MapEventTools } from '../events/MapEventTools.ts';
 import { TILE_SIZE, type Camera } from '../core/renderer/camera.ts';
 import type { LightingLayerDefinition } from '../core/renderer/lightingLayer.ts';
+import { onTheClock, timeOfDayAt } from '../core/time/timeOfDay.ts';
+import type { WindowClock } from '../core/time/WindowClock.ts';
 import {
   GAME_LOOK,
   NO_OVERLAY_STATE,
@@ -27,10 +29,17 @@ import type { PaintController } from './tools/PaintController.ts';
 
 /**
  * The camera paths the speed script records, each driven from the renderer's own frame clock so every run draws the
- * same frames: a pan at zoom 1, a zoom sweep from 2x out to the whole map and back, and the whole map held on screen
- * and drifting, so every frame is a real redraw.
+ * same frames: a pan at zoom 1, a zoom sweep from 2x out to the whole map and back, the whole map held on screen and
+ * drifting, so every frame is a real redraw, and the whole map held still while the window's clock sweeps the day
+ * ({@link clockOnPath}), so the sky is drawn again at every hour it passes.
  */
-type CameraPath = 'pan' | 'zoom' | 'zoomedout';
+type CameraPath = 'pan' | 'zoom' | 'zoomedout' | 'clock';
+
+/**
+ * How many minutes of the day a clock sweep passes in each second: a whole day every eight seconds, three minutes a
+ * frame, so the hour turns every twentieth frame and every phase of the day goes by.
+ */
+const CLOCK_SWEEP_MINUTES_PER_SECOND = 180;
 
 /**
  * What the speed script's stroke paints with: a square brush of one tile, painted by the real pen through automatic
@@ -110,9 +119,10 @@ const ringsOverlay = (): OverlayDefinition =>
 
 /**
  * Builds what the parity check draws: the game look, still, with events or without, never the shadows, and the
- * lighting only when the game it is held against draws its light mask over its base layer too. Nothing animates: the
- * check holds the water and the parallax at the game's moment, and the game copy's lights are held steady, so every
- * light draws at its full strength, as it does with no effect running.
+ * lighting only when the game it is held against draws its lighting too: its light mask over its base layer, and the
+ * sky's tone over the base layer itself. Nothing animates: the check holds the water and the parallax at the game's
+ * moment, and the game copy's lights are held steady, so every light draws at its full strength, as it does with no
+ * effect running.
  * @param {boolean} events Whether the events show.
  * @param {boolean | undefined} lighting Whether the lighting shows; left out, it does not.
  * @returns {LayerVisibility} The visibility.
@@ -154,6 +164,11 @@ type SpeedHooksContext = {
   readonly openMap: (mapId: number) => Promise<void>;
   readonly timings: OpenTimings;
   readonly lightingLayers: () => readonly LightingLayerDefinition[];
+
+  /**
+   * The window's clock, which the page is set to, and which a clock sweep moves.
+   */
+  readonly clock: WindowClock;
 };
 
 /**
@@ -227,7 +242,47 @@ const cameraOnPath = (
     return centerCamera(width / 2 + swingX * 0.2, height / 2 + swingY * 0.2, zoom, view);
   }
 
+  // the clock's sweep holds the whole map still, so the sky is all that moves.
+  if (path === 'clock')
+  {
+    return centerCamera(width / 2, height / 2, whole, view);
+  }
+
   return centerCamera(width / 2 + Math.sin(seconds * 2) * 96, height / 2 + Math.cos(seconds * 2) * 96, whole, view);
+};
+
+/**
+ * Picks the time of day a clock sweep shows a moment in: a whole day every eight seconds from midnight, round and round.
+ * @param {number} seconds Seconds since the sweep started.
+ * @returns {number} The time of day, in minutes past midnight.
+ */
+const clockOnPath = (seconds: number): number =>
+{
+  return onTheClock(Math.floor(seconds * CLOCK_SWEEP_MINUTES_PER_SECOND));
+};
+
+/**
+ * The time of day a page is asked to show, as the speed script and the parity check write it in the address: hours and
+ * minutes on a 24-hour clock, such as {@code time=22:00}.
+ */
+const TIME_QUERY = /^([01]?\d|2[0-3]):([0-5]\d)$/u;
+
+/**
+ * Reads the time of day a page opened for measuring is asked to show, so a map can be measured at night from its very
+ * first frame.
+ * @param {string} search The page's query string.
+ * @returns {number | null} The time of day, in minutes past midnight, or null when none is asked for.
+ */
+const timeFromQuery = (search: string): number | null =>
+{
+  const match = TIME_QUERY.exec(new URLSearchParams(search).get('time') ?? '');
+  if (match === null)
+  {
+    return null;
+  }
+
+  const [ , hours, minutes ] = match;
+  return timeOfDayAt(Number(hours), Number(minutes));
 };
 
 /**
@@ -239,15 +294,24 @@ const cameraOnPath = (
  */
 const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => void) =>
 {
-  const { renderer, hub, tools, selection } = context;
+  const { renderer, hub, tools, selection, clock } = context;
   const stops: (() => void)[] = [];
   let path: CameraPath | null = null;
   let pathStart = 0;
+  let timeBeforeSweep = clock.time();
   let overlayState: OverlayState = NO_OVERLAY_STATE;
   let hoverFollows = false;
 
+  // a page asked for an hour shows it from its first frame, as an author's chosen hour holds, whatever the game's start.
+  const asked = timeFromQuery(target.location.search);
+  if (asked !== null)
+  {
+    clock.set(asked);
+  }
+
   // camera paths move the camera at the start of each frame, so the frame that draws the move is the one timed; with
-  // every overlay on, the hover follows the view's centre, as it follows a pointer held still while the map moves.
+  // every overlay on, the hover follows the view's centre, as it follows a pointer held still while the map moves. A
+  // clock sweep moves the window's clock there too.
   stops.push(renderer.onBeforeFrame(time =>
   {
     const map = context.map();
@@ -256,7 +320,13 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       return;
     }
 
-    const camera = cameraOnPath(path, (time - pathStart) / 1000, map, renderer.viewSize);
+    const seconds = (time - pathStart) / 1000;
+    if (path === 'clock')
+    {
+      clock.set(clockOnPath(seconds));
+    }
+
+    const camera = cameraOnPath(path, seconds, map, renderer.viewSize);
     renderer.setCamera(camera);
     if (hoverFollows)
     {
@@ -313,15 +383,24 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       const { x: cameraX, y: cameraY, zoom } = renderer.camera;
       return { x: (x * TILE_SIZE + TILE_SIZE / 2 - cameraX) * zoom, y: (y * TILE_SIZE + TILE_SIZE / 2 - cameraY) * zoom };
     },
+    // a clock sweep puts the clock back where it found it once it stops, so what is measured after it is measured at
+    // the hour the run asked for.
     startPath: (kind: CameraPath) =>
     {
       path = kind;
       pathStart = performance.now();
+      timeBeforeSweep = clock.time();
     },
     stopPath: () =>
     {
+      if (path === 'clock')
+      {
+        clock.set(timeBeforeSweep);
+      }
+
       path = null;
     },
+    time: () => clock.time(),
     // picks up the pen with a square brush of one tile, remembering what was in hand to put it back afterwards; the pen
     // owns the left button while it is in hand, so the event tools stand down until the tool in hand goes back.
     enablePaint: (next: Partial<StrokeSettings>) =>
@@ -374,11 +453,17 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       hoverFollows = true;
     },
     // the parity check draws the map as the game would, still, with nothing of the editor's on top: of the lighting,
-    // only what the game itself shows, such as a map's darkness, and never an aid like a light's ring.
-    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean }) =>
+    // only what the game itself shows, such as a map's darkness and the sky's colour, and never an aid like a light's
+    // ring; at the hour the game's clock was set to, when it says one.
+    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean; time?: number }) =>
     {
       hoverFollows = false;
       overlayState = NO_OVERLAY_STATE;
+      if (options.time !== undefined)
+      {
+        clock.set(options.time);
+      }
+
       renderer.setOverlayState(overlayState);
       renderer.setOverlays({ enabled: new Set(), definitions: [] });
       renderer.setLightingLayers(parityLightingLayers(context.lightingLayers()));
@@ -475,11 +560,14 @@ const wantsSpeedHooks = (search: string): boolean =>
 
 export {
   cameraOnPath,
+  CLOCK_SWEEP_MINUTES_PER_SECOND,
+  clockOnPath,
   HOOKS_GLOBAL,
   installSpeedHooks,
   parityLightingLayers,
   parityLook,
   ringsOverlay,
+  timeFromQuery,
   unusedGroundKind,
   wantsSpeedHooks,
 };
