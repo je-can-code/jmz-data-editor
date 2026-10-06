@@ -2,11 +2,12 @@
  * @vitest-environment jsdom
  */
 import type { Container } from 'pixi.js';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import type { LightingLayerDefinition, LightingStage } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { GAME_LOOK } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { PixiMapRenderer } from '../../../src/mapEditor/render/PixiMapRenderer.ts';
+import { LightingLayers } from '../../../src/mapEditor/render/scene/LightingLayers.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 
 /*
@@ -23,7 +24,8 @@ import { buildMapJson } from '../support/fixtures.ts';
  *
  * What the plugin modules light the map with draws inside the lighting layer, each module's drawing on a container of
  * its own, made once and let go with the renderer; the whole layer shows only while the layer visibility's lighting is
- * on, which is what the view's Lighting switch flips.
+ * on, which is what the view's Lighting switch flips. Every change to the map is passed on to the lighting, tile edits
+ * included, so the lighting itself decides which of them make its drawings draw again.
  */
 describe('PixiMapRenderer', () =>
 {
@@ -133,6 +135,26 @@ describe('PixiMapRenderer', () =>
     // Assert.
     expect(shown)
       .toStrictEqual([ true, false, true ]);
+  });
+
+  it('passes every change to its map on to the lighting, a tile edit as well as an event edit', () =>
+  {
+    // Arrange: a renderer holding a map, and an ear on what its lighting hears.
+    const renderer = new PixiMapRenderer();
+    built.push(renderer);
+    const map = MapDocument.fromJson('map:1', buildMapJson());
+    renderer.setDocument(map);
+    const hear = vi.spyOn(LightingLayers.prototype, 'hear');
+
+    // Act: the door renamed, then a tile painted.
+    map.apply(map.setPatch([ 'events', 1, 'name' ], 'Gate'));
+    map.apply(map.tilesPatch([ [ 0, 99 ] ]));
+    const heard = hear.mock.calls.map(([ effect ]) => effect);
+    hear.mockRestore();
+
+    // Assert.
+    expect(heard)
+      .toStrictEqual([ { kind: 'event', id: 1 }, { kind: 'tiles', indices: [ 0 ] } ]);
   });
 
   it('zooms about the pointer\'s own spot when the wheel reports a whole-pixel spot beside it', () =>
