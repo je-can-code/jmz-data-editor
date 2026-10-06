@@ -206,6 +206,21 @@ describe('PixiMapRenderer', () =>
       .toStrictEqual([ [ [ slots.backdrop, slots.parallax, slots.lowerTiles ], 7 ], [ slots.game, slots.lighting, slots.markers ], false, true ]);
   });
 
+  it('reads the sky at midnight until told the time of day, and at the time it was told after', () =>
+  {
+    // Arrange.
+    const renderer = new PixiMapRenderer();
+    built.push(renderer);
+    const before = renderer.timeOfDay;
+
+    // Act: 22:00.
+    renderer.setTimeOfDay(1320);
+
+    // Assert.
+    expect([ before, renderer.timeOfDay ])
+      .toStrictEqual([ 0, 1320 ]);
+  });
+
   describe('tone', () =>
   {
     /**

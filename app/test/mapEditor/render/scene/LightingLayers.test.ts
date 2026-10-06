@@ -498,6 +498,21 @@ describe('LightingLayers', () =>
         .toStrictEqual([ [ NIGHT ], NIGHT ]);
     });
 
+    it('keeps the tone a drawing casts with nobody listening', () =>
+    {
+      // Arrange: lighting made with nobody to tell.
+      const sky = tonedLayer('lighting.sky');
+      const lighting = new LightingLayers(48);
+      lighting.setDefinitions([ sky.definition ]);
+
+      // Act.
+      sky.stages[0].castTone(EVENING);
+
+      // Assert.
+      expect(lighting.tone)
+        .toStrictEqual(EVENING);
+    });
+
     it('takes a drawing\'s tone back when it is let go', () =>
     {
       // Arrange: the night cast by a drawing.

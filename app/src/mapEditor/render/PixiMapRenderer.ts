@@ -484,6 +484,15 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
+   * The time of day the lighting reads the sky at, as last set.
+   * @returns {number} The time of day, in minutes past midnight.
+   */
+  get timeOfDay(): number
+  {
+    return this.#timeOfDay;
+  }
+
+  /**
    * The tone the lighting casts over what the game tones, whether or not the lighting shows.
    * @returns {ScreenTone | null} The tone, or null while it casts none.
    */

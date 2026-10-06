@@ -4,6 +4,13 @@ import { sameTone } from '../../core/renderer/screenTone.ts';
 import type { ChangeEffect } from '../documentChanges.ts';
 
 /**
+ * Where one drawing's tone is kept: made before the drawing, so a tone it casts while it is being made is kept too.
+ */
+type ToneSlot = {
+  tone: ScreenTone | null;
+};
+
+/**
  * One module's lighting in this view: what it was made from, the container it draws in, the drawing itself, whether it
  * moves on with the clock between draws, which it does until a part of it fails, and again once it draws, and the tone
  * it casts over the view, if any.
@@ -11,18 +18,9 @@ import type { ChangeEffect } from '../documentChanges.ts';
 type LightingEntry = {
   readonly definition: LightingLayerDefinition;
   readonly root: Container;
-  drawing: LightingDrawing;
+  readonly drawing: LightingDrawing;
+  readonly cast: ToneSlot;
   ticking: boolean;
-  tone: ScreenTone | null;
-};
-
-/**
- * What an entry holds for the moment its drawing is being made, before there is one: a drawing that draws nothing.
- */
-const NOT_YET_MADE: LightingDrawing = {
-  draw: () => undefined,
-  tick: () => false,
-  destroy: () => undefined,
 };
 
 /**
@@ -197,24 +195,24 @@ class LightingLayers
     const root = new Container();
     this.layer.addChild(root);
 
-    // the entry comes first, so a tone the drawing casts, even while it is made, has an entry to be kept on.
-    const entry: LightingEntry = { definition, root, drawing: NOT_YET_MADE, ticking: false, tone: null };
-    entry.drawing = definition.create({
+    // the slot comes first, so a tone the drawing casts, even while it is made, has somewhere to be kept.
+    const cast: ToneSlot = { tone: null };
+    const drawing = definition.create({
       layer: root,
       tileSize: this.#tileSize,
-      castTone: tone => this.#castTone(entry, tone),
+      castTone: tone => this.#castTone(cast, tone),
     });
-    return entry;
+    return { definition, root, drawing, cast, ticking: false };
   }
 
   /**
    * Keeps the tone one drawing casts, and passes on the view's tone if that changed it.
-   * @param {LightingEntry} entry The drawing's entry.
+   * @param {ToneSlot} cast The drawing's slot.
    * @param {ScreenTone | null} tone The tone, or null for none.
    */
-  #castTone(entry: LightingEntry, tone: ScreenTone | null): void
+  #castTone(cast: ToneSlot, tone: ScreenTone | null): void
   {
-    entry.tone = tone;
+    cast.tone = tone;
     this.#composeTone();
   }
 
@@ -223,9 +221,9 @@ class LightingLayers
    */
   #composeTone(): void
   {
-    const casting = this.#entries.filter(entry => entry.tone !== null);
+    const casting = this.#entries.filter(entry => entry.cast.tone !== null);
     const [ last ] = casting.slice(-1);
-    const tone = last === undefined ? null : last.tone;
+    const tone = last === undefined ? null : last.cast.tone;
     if (sameTone(tone, this.#tone))
     {
       return;
