@@ -94,7 +94,11 @@ const lightsByChunk = (lights: readonly MaskLight[], width: number, height: numb
  */
 const chunkSignature = (tint: number, lights: readonly MaskLight[]): string =>
 {
-  const drawn = lights.map(light => `${light.x},${light.y},${pictureKey(light.radius, light.color, light.intensity)},${light.strength}`);
+  const drawn = lights.map(light =>
+  {
+    const picture = pictureKey(light.radius, light.color, light.intensity);
+    return `${light.x},${light.y},${picture},${light.strength}`;
+  });
   return `${tint}|${drawn.join(';')}`;
 };
 

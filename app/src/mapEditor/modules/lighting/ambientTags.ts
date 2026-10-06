@@ -121,5 +121,13 @@ const mapAmbient = (defaultColor: string): AmbientSource =>
   };
 };
 
-export { AMBIENT_PARAMETER_LIMIT, AMBIENT_TAG, ambientPayloadOf, MAP_SOURCE, mapAmbient, MAX_DARKNESS_PERCENT, parseAmbient };
+export {
+  AMBIENT_PARAMETER_LIMIT,
+  AMBIENT_TAG,
+  ambientPayloadOf,
+  MAP_SOURCE,
+  mapAmbient,
+  MAX_DARKNESS_PERCENT,
+  parseAmbient,
+};
 export type { AmbientSource };

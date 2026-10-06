@@ -59,7 +59,11 @@ class LightMask implements LightingDrawing
    * @param {LightPictures} pictures Where light pictures are painted and kept; by default, a cache of its own.
    * @param {number} chunkSize How wide and tall each piece of the mask is.
    */
-  constructor(stage: LightingStage, setup: MaskSetup, pictures: LightPictures = new LightPictures(), chunkSize: number = MASK_CHUNK_SIZE)
+  constructor(
+    stage: LightingStage,
+    setup: MaskSetup,
+    pictures: LightPictures = new LightPictures(),
+    chunkSize: number = MASK_CHUNK_SIZE)
   {
     this.#setup = { ...setup, tileSize: stage.tileSize };
     this.#pictures = pictures;
