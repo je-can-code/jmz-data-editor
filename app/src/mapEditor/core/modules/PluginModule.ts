@@ -5,7 +5,8 @@ import type { EventMarkerSymbol } from '../eventKinds/eventMarkers.ts';
 import type { MapDocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
-import type { RmmzMapEvent, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { RmmzEventPage, RmmzMapEvent, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { PageCondition } from '../pageRule/pageRule.ts';
 import type { MapPropertiesSource } from '../properties/moduleProperties.ts';
 import type { LightingLayerDefinition } from '../renderer/lightingLayer.ts';
 import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
@@ -169,6 +170,15 @@ type ModuleContext = {
    * entry, so a module can say what is wrong rather than quietly falling back.
    */
   readonly configProblems: ReadonlyMap<string, string>;
+
+  /**
+   * Words when an event page shows, as an author would say it: what its own conditions wait for, then what every page
+   * condition the active modules add asks of it, such as "from 18:00 to 05:00". It reads the conditions as they stand
+   * when it is asked, so one a module added after this one switched on is heard too.
+   * @param {RmmzEventPage} page The page.
+   * @returns {readonly string[]} The words, one entry for each thing the page waits for; none for a page waiting for nothing.
+   */
+  readonly pageWords: (page: RmmzEventPage) => readonly string[];
 };
 
 /**
@@ -263,6 +273,14 @@ type ModuleContributions = {
    * @param {MapPropertiesSection} section The section.
    */
   mapProperties(section: MapPropertiesSection): void;
+
+  /**
+   * Adds a condition to the game's page rule, for as long as the module is on, as J-TIME adds its hours: every map view
+   * then shows each event's page as the game would on a fresh save at the clock's time, this condition judged beside
+   * the engine's own.
+   * @param {PageCondition} condition How the plugin reads a page, and when what the page asks holds.
+   */
+  pageCondition(condition: PageCondition): void;
 };
 
 /**

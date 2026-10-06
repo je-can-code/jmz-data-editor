@@ -1,7 +1,8 @@
 import { pluginBasename, type PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.ts';
 import type { CommandCatalog } from '../commands/CommandCatalog.ts';
 import type { JsonValue } from '../model/json.ts';
-import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
+import type { RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
+import { pageWordsOf, type PageCondition } from '../pageRule/pageRule.ts';
 import type { LightingLayerDefinition } from '../renderer/lightingLayer.ts';
 import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
 import type {
@@ -42,6 +43,7 @@ type Contributions = {
   notices: ModuleNotice[];
   clocks: ClockOffer[];
   mapProperties: MapPropertiesSection[];
+  pageConditions: PageCondition[];
 };
 
 /**
@@ -59,6 +61,7 @@ const noContributions = (): Contributions => ({
   notices: [],
   clocks: [],
   mapProperties: [],
+  pageConditions: [],
 });
 
 /**
@@ -91,8 +94,8 @@ const configNamesOf = (pluginModule: PluginModule, enabled: ReadonlyMap<string, 
 /**
  * Holds the event kinds, palette entries, passability rules, overlays, lighting layers and command entries the editor
  * knows, the maps whose events are a plugin's patterns, what the modules say over every map view, the clock they offer,
- * and the sections they add to Map Properties: the core's kinds, always, and each plugin module's contributions while
- * its plugins are enabled.
+ * the sections they add to Map Properties and the conditions they add to the game's page rule: the core's kinds, always,
+ * and each plugin module's contributions while its plugins are enabled.
  */
 class PluginModuleRegistry
 {
@@ -173,7 +176,9 @@ class PluginModuleRegistry
         const problem = problems.get(name);
         return problem === undefined ? [] : [ [ name, problem ] as const ];
       }));
-      pluginModule.register(this.#contributionsFor(pluginModule), { plugins: enabled, configs: own, configProblems: ownProblems });
+      // a page's words read the conditions as they stand when asked, so those added by modules after this one count.
+      const pageWords = (page: RmmzEventPage) => pageWordsOf(page, this.#contributions.pageConditions);
+      pluginModule.register(this.#contributionsFor(pluginModule), { plugins: enabled, configs: own, configProblems: ownProblems, pageWords });
       this.#active.push(pluginModule.id);
     });
 
@@ -313,6 +318,16 @@ class PluginModuleRegistry
   }
 
   /**
+   * Lists the conditions the active modules add to the game's page rule, in the order they added them; empty while none
+   * adds one, when every map shows each event's page by the engine's own conditions alone.
+   * @returns {readonly PageCondition[]} The conditions.
+   */
+  pageConditions(): readonly PageCondition[]
+  {
+    return this.#contributions.pageConditions;
+  }
+
+  /**
    * Builds the contribution sink one module registers through, which holds it to its own id prefix.
    * @param {PluginModule} pluginModule The module.
    * @returns {ModuleContributions} The sink.
@@ -376,6 +391,11 @@ class PluginModuleRegistry
       {
         requirePrefix(section.id, 'map properties sections');
         this.#contributions.mapProperties.push(section);
+      },
+      pageCondition: condition =>
+      {
+        requirePrefix(condition.id, 'page conditions');
+        this.#contributions.pageConditions.push(condition);
       },
     };
   }

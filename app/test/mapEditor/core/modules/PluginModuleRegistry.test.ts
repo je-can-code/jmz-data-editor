@@ -24,6 +24,10 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  *
  * A module may offer the map views a clock; the first one offered among the active modules is the window's, and none is
  * offered once the modules offering it switch off.
+ *
+ * A module may add conditions to the game's page rule, as J-TIME adds its hours, kept while it is on and taken back
+ * when it switches off. Every module is handed words for a page, read from the page's own conditions and from every
+ * page condition the active modules add, a module switching on after it included.
  */
 describe('PluginModuleRegistry', () =>
 {
@@ -302,6 +306,7 @@ describe('PluginModuleRegistry', () =>
       },
       { id: 'f', title: 'F', plugins: [], register: add => add.notice({ id: 'core.x', title: 'x', detail: 'x' }) },
       { id: 'g', title: 'G', plugins: [], register: add => add.mapProperties({ id: 'core.x', title: 'x', source: () => ({ note: null, fields: [] }) }) },
+      { id: 'h', title: 'H', plugins: [], register: add => add.pageCondition({ id: 'core.x', read: () => null }) },
     ];
 
     // Act.
@@ -322,6 +327,8 @@ describe('PluginModuleRegistry', () =>
       .toThrow('f can only add notices whose id starts with "f.", not core.x');
     expect(failures[6])
       .toThrow('g can only add map properties sections whose id starts with "g.", not core.x');
+    expect(failures[7])
+      .toThrow('h can only add page conditions whose id starts with "h.", not core.x');
   });
 
   describe('enabledPlugins', () =>
@@ -402,6 +409,88 @@ describe('PluginModuleRegistry', () =>
       // Assert.
       expect(registry.clockOffer())
         .toBeNull();
+    });
+  });
+
+  describe('pageConditions', () =>
+  {
+    /**
+     * A module adding a page condition that asks a page for the words of its first comment, once its plugin is on, and
+     * keeping what it is handed.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @param {{ context?: ModuleContext }} kept Where it keeps the context it is handed.
+     * @returns {PluginModule} The module.
+     */
+    const gatingModule = (id: string, pluginName: string, kept: { context?: ModuleContext } = {}): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: (contributions, context) =>
+      {
+        kept.context = context;
+        contributions.pageCondition({
+          id: `${id}.pages`,
+          read: page => ({ followsClock: true, holds: () => true, words: [ `${id} reads ${String(page.list[0].parameters[0])}` ] }),
+        });
+      },
+    });
+
+    it('lists the page conditions of the active modules in the order they added them, and none while they are off', () =>
+    {
+      // Arrange: two modules gating pages, and a registry where neither is on.
+      const modules = [ gatingModule('time', 'J-TIME'), gatingModule('weather', 'J-Weather-Time') ];
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      both.activate(modules, [ plugin('j/time/J-TIME', true), plugin('j/weather/ext/J-Weather-Time', true) ]);
+      neither.activate(modules, [ plugin('j/time/J-TIME', false) ]);
+
+      // Assert.
+      expect([ both.pageConditions().map(condition => condition.id), neither.pageConditions() ])
+        .toStrictEqual([ [ 'time.pages', 'weather.pages' ], [] ]);
+    });
+
+    it('takes a module\'s page conditions back once it switches off', () =>
+    {
+      // Arrange: the module on.
+      const time = gatingModule('time', 'J-TIME');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ time ], [ plugin('j/time/J-TIME', true) ]);
+
+      // Act.
+      registry.activate([ time ], [ plugin('j/time/J-TIME', false) ]);
+
+      // Assert.
+      expect(registry.pageConditions())
+        .toStrictEqual([]);
+    });
+
+    it('hands a module words for a page from a page\'s own conditions and every page condition, those added after it included', () =>
+    {
+      // Arrange: a module switching on first, keeping its context, then one gating pages; a page waiting for switch 4.
+      const kept: { context?: ModuleContext } = {};
+      const lighting: PluginModule = {
+        id: 'lighting',
+        title: 'Lighting',
+        plugins: [ 'J-Lighting' ],
+        register: (_add, context) =>
+        {
+          kept.context = context;
+        },
+      };
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ lighting, gatingModule('time', 'J-TIME') ], [ plugin('j/lighting/J-Lighting', true), plugin('j/time/J-TIME', true) ]);
+      const page = commentedEvent('<hourRangePage:18-5>').pages[0];
+      page.conditions = { ...page.conditions, switch1Valid: true, switch1Id: 4 };
+
+      // Act.
+      const words = kept.context?.pageWords(page);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'while switch 4 is on', 'time reads <hourRangePage:18-5>' ]);
     });
   });
 
