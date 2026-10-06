@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isClockMinute, startingTimeOf } from '../../../../src/mapEditor/modules/time/timeParameters.ts';
+import { DEFAULT_STARTING_DATE, isClockMinute, startingDateOf, startingTimeOf } from '../../../../src/mapEditor/modules/time/timeParameters.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
 
 /*
@@ -7,6 +7,10 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * Hour and Starting Minute, each a number from text, so an empty parameter reads as 0. A game running on real time
  * starts at the time on the player's own clock, as the game would show it. A starting value the clock cannot show (an
  * hour of 25, a minute of 60, a parameter js/plugins.js does not have) falls back to J-TIME's own default, 9:00.
+ *
+ * What the clock never moves comes from the same parameters: the Starting Second, Day, Month and Year, each kept when it
+ * is a whole number, an empty one reading as 0 as the plugin reads it, and J-TIME's own default otherwise, 29 May 2021
+ * at second 0. On real time it is today's date, at the top of the minute.
  */
 describe('timeParameters', () =>
 {
@@ -77,6 +81,51 @@ describe('timeParameters', () =>
       // Assert.
       expect(starts)
         .toStrictEqual([ 540, 570, 540 ]);
+    });
+  });
+
+  describe('startingDateOf', () =>
+  {
+    it('reads the Starting Second, Day, Month and Year on artificial time, an empty one as 0', () =>
+    {
+      // Arrange: Chef Adventure's 16 December 2026, and a start whose second was left empty.
+      const plugins = [
+        time({ useRealTime: 'false', startingSecond: '0', startingDay: '16', startingMonth: '12', startingYear: '2026' }),
+        time({ useRealTime: 'false', startingSecond: '', startingDay: '3', startingMonth: '7', startingYear: '1999' }),
+      ];
+
+      // Act.
+      const dates = plugins.map(plugin => startingDateOf(plugin, NOW));
+
+      // Assert.
+      expect(dates)
+        .toStrictEqual([ { seconds: 0, days: 16, months: 12, years: 2026 }, { seconds: 0, days: 3, months: 7, years: 1999 } ]);
+    });
+
+    it('falls back to J-TIME\'s own start for values that are no whole number, or parameters it does not have', () =>
+    {
+      // Arrange: fractions and words, and no parameters at all.
+      const plugins = [ time({ startingSecond: '1.5', startingDay: 'x', startingMonth: '2.5', startingYear: 'soon' }), time({}) ];
+
+      // Act.
+      const dates = plugins.map(plugin => startingDateOf(plugin, NOW));
+
+      // Assert.
+      expect(dates)
+        .toStrictEqual([ DEFAULT_STARTING_DATE, { seconds: 0, days: 29, months: 5, years: 2021 } ]);
+    });
+
+    it('reads today\'s date on real time, at the top of the minute', () =>
+    {
+      // Arrange: real time, whatever the starting parameters say.
+      const plugin = time({ useRealTime: 'true', startingDay: '16', startingMonth: '12', startingYear: '2026' });
+
+      // Act.
+      const date = startingDateOf(plugin, NOW);
+
+      // Assert.
+      expect(date)
+        .toStrictEqual({ seconds: 0, days: 6, months: 10, years: 2026 });
     });
   });
 

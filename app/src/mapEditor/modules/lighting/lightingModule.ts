@@ -1,9 +1,7 @@
-import type { PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.ts';
 import type { JsonValue } from '../../core/model/json.ts';
 import type { ModuleContext, ModuleContributions, PluginModule } from '../../core/modules/PluginModule.ts';
 import { quickPanelFor } from '../../views/quickPanel/QuickFieldsPanel.tsx';
-import { partOfDay } from '../time/timePhases.ts';
-import { startingTimeOf, TIME_PLUGIN } from '../time/timeParameters.ts';
+import { TIME_PLUGIN } from '../time/timeParameters.ts';
 import { mapAmbient, type AmbientSource } from './ambientTags.ts';
 import { effectStrength } from './lightEffects.ts';
 import { ambientColorFrom, effectTuningsFrom, LIGHTING_CONFIG, lightDefaultsFrom, lightingConfigNotice } from './lightingConfig.ts';
@@ -66,9 +64,9 @@ const hasTimeOfDay = (context: ModuleContext): boolean =>
 };
 
 /**
- * Adds what J-Lighting-Time brings, while it is on: the clock every map view shows, starting at the hour the game starts
- * at; the sky's colour at the clock's hour, cast over the map; and, unless the curve fails it, which is then said over
- * every map view, the curve it is all drawn with, for the sky's darkness to join the map's own.
+ * Adds what J-Lighting-Time brings, while it is on: the sky's colour at the hour of the clock J-TIME's module offers,
+ * cast over the map; and, unless the curve fails it, which is then said over every map view, the curve it is all drawn
+ * with, for the sky's darkness to join the map's own.
  * @param {ModuleContributions} contributions Where to add them.
  * @param {ModuleContext} context The enabled plugins and the configs read.
  * @returns {SkyCurve | null} The day and night curve, or null when there is none to draw the sky with.
@@ -82,10 +80,6 @@ const registerSky = (contributions: ModuleContributions, context: ModuleContext)
   {
     contributions.notice(notice);
   }
-
-  // the module is on with J-TIME enabled here, so J-TIME is listed.
-  const time = context.plugins.get(TIME_PLUGIN) as PluginsJsEntry;
-  contributions.clock({ startsAt: startingTimeOf(time, new Date()), partOfDay });
 
   const curve = skyCurveFrom(config);
   if (curve === null)
@@ -116,12 +110,12 @@ const registerSky = (contributions: ModuleContributions, context: ModuleContext)
  * fails them, so that lights fall back to white and burn steady, is said over every map view rather than left to look
  * like the game's own colours.
  *
- * While its extension J-Lighting-Time is on too, with J-TIME keeping the hour, the map views show a clock, and the sky
- * follows it as the extension casts it, from the project's day and night curve: its colour over the map, the way the
- * engine tints the screen, and its darkness as one more source of the map's dark, compounding with the map's own, so a
- * field with no darkness of its own darkens at night and its lights show through it. A map tagged to have no sky, a cave
- * or an interior, gets neither. The Lighting switch shows and hides the sky with the rest. A curve the module cannot use
- * is said over every map view, and the sky then stays as it is at every hour.
+ * While its extension J-Lighting-Time is on too, with J-TIME keeping the hour, the sky follows the clock J-TIME's module
+ * offers the map views, as the extension casts it, from the project's day and night curve: its colour over the map, the
+ * way the engine tints the screen, and its darkness as one more source of the map's dark, compounding with the map's
+ * own, so a field with no darkness of its own darkens at night and its lights show through it. A map tagged to have no
+ * sky, a cave or an interior, gets neither. The Lighting switch shows and hides the sky with the rest. A curve the module
+ * cannot use is said over every map view, and the sky then stays as it is at every hour.
  *
  * Map Properties gains a Lighting section setting the map's own darkness and its colour, and, while J-Lighting-Time or
  * J-Weather is on, whether the map has a sky, which J-Lighting-Time reads to tint and darken it by the hour and J-Weather

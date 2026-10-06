@@ -77,12 +77,12 @@ vi.mock('pixi.js', async importOriginal =>
  * map naming a colour of the dark it cannot use takes the project's; and a light's pool runs its effect as the project
  * tunes that effect, at the view's clock, and burns at full strength while the view does not animate.
  *
- * While J-Lighting-Time is enabled too, with J-TIME, the module offers the map views a clock starting at J-TIME's
- * starting time and naming the parts of the day as the game does, reads the project's config.lighting-time.json, and
- * follows the clock with the sky: its colour cast over a map with a sky (its own tests hold the curve's arithmetic), and
- * its darkness joining the map's own in the dark, so a field darkens at night and a dark map compounds both; a map tagged
- * <noToneChange> gets neither. Without either plugin there is no clock and no sky, and a project without J-Lighting-Time
- * is never asked for its curve. A curve that cannot be read is said over the map, the clock still offered, the sky still.
+ * While J-Lighting-Time is enabled too, with J-TIME, the module reads the project's config.lighting-time.json and follows
+ * the clock J-TIME's own module offers with the sky: its colour cast over a map with a sky (its own tests hold the
+ * curve's arithmetic), and its darkness joining the map's own in the dark, so a field darkens at night and a dark map
+ * compounds both; a map tagged <noToneChange> gets neither. It never offers a clock of its own, so the map views show one.
+ * Without either plugin there is no sky, and a project without J-Lighting-Time is never asked for its curve. A curve that
+ * cannot be read is said over the map, the sky still.
  *
  * It adds a Lighting section to Map Properties too (its own tests hold what each setting reads and writes), which offers
  * whether the map has a sky only while J-Lighting-Time or J-Weather, both reading it from the same tag, is enabled as
@@ -510,7 +510,7 @@ describe('lightingModule', () =>
         .toStrictEqual([ [ SKY_TONE_ID, true ], [ 'lighting.dark', true ], [ 'lighting.rings', false ] ]);
     });
 
-    it('offers a clock starting at J-TIME\'s starting time, naming each part of the day as the game does', () =>
+    it('offers no clock of its own, even casting the sky, since J-TIME\'s module offers the one clock', () =>
     {
       // Arrange.
       const registry = registryOver(SKY());
@@ -519,11 +519,11 @@ describe('lightingModule', () =>
       const offer = registry.clockOffer();
 
       // Assert.
-      expect([ offer?.startsAt, offer?.partOfDay(1320), offer?.partOfDay(0) ])
-        .toStrictEqual([ 840, 'Night', 'Moontide' ]);
+      expect([ offer, registry.lightingLayers().map(layer => layer.id) ])
+        .toStrictEqual([ null, [ SKY_TONE_ID, 'lighting.dark', 'lighting.rings' ] ]);
     });
 
-    it('offers no clock and casts no sky without J-Lighting-Time, or with J-TIME disabled', () =>
+    it('casts no sky without J-Lighting-Time, or with J-TIME disabled', () =>
     {
       // Arrange: J-TIME without the extension; the extension with J-TIME off.
       const projects = [ [ lighting(true), time(true) ], [ lighting(true), lightingTime(true), time(false) ] ];
@@ -532,8 +532,8 @@ describe('lightingModule', () =>
       const registries = projects.map(plugins => registryOver(plugins));
 
       // Assert.
-      expect(registries.map(registry => [ registry.clockOffer(), registry.lightingLayers().map(layer => layer.id) ]))
-        .toStrictEqual([ [ null, [ 'lighting.dark', 'lighting.rings' ] ], [ null, [ 'lighting.dark', 'lighting.rings' ] ] ]);
+      expect(registries.map(registry => registry.lightingLayers().map(layer => layer.id)))
+        .toStrictEqual([ [ 'lighting.dark', 'lighting.rings' ], [ 'lighting.dark', 'lighting.rings' ] ]);
     });
 
     it('names the curve as a config it reads only while J-Lighting-Time and J-TIME are enabled', () =>
@@ -594,7 +594,7 @@ describe('lightingModule', () =>
         .toStrictEqual([ [ [ -32, -16, 37, 133 ] ], [] ]);
     });
 
-    it('says over the map why the sky stays put when the curve could not be read, still offering the clock', () =>
+    it('says over the map why the sky stays put when the curve could not be read', () =>
     {
       // Arrange: the curve's file is missing.
       const configs = new Map<string, JsonValue | null>([ [ 'lighting', served('#ffffff') ], [ 'lighting-time', null ] ]);
@@ -604,8 +604,8 @@ describe('lightingModule', () =>
       const registry = registryOver(SKY(), configs, problems);
 
       // Assert.
-      expect([ registry.notices().map(notice => notice.id), registry.clockOffer()?.startsAt, registry.lightingLayers().map(layer => layer.id) ])
-        .toStrictEqual([ [ 'lighting.time-config' ], 840, [ 'lighting.dark', 'lighting.rings' ] ]);
+      expect([ registry.notices().map(notice => notice.id), registry.lightingLayers().map(layer => layer.id) ])
+        .toStrictEqual([ [ 'lighting.time-config' ], [ 'lighting.dark', 'lighting.rings' ] ]);
     });
   });
 

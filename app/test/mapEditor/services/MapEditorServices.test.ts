@@ -294,9 +294,10 @@ describe('MapEditorServices', () =>
     services.stop();
   });
 
-  it('starts the window\'s clock where the game does once the lighting module offers one, keeping the author\'s hour after', async () =>
+  it('starts the window\'s clock where the game does once J-TIME\'s module offers one, keeping the author\'s hour after', async () =>
   {
-    // Arrange: a project enabling J-Lighting, J-Lighting-Time and J-TIME, whose game starts at the hour the test says.
+    // Arrange: a project enabling J-Lighting, J-Lighting-Time and J-TIME, whose game starts at the hour the test says;
+    // J-TIME's module offers the clock, the lighting module casting its sky by it.
     let startingHour = '14';
     const { fetch } = stubFetch(request =>
     {
