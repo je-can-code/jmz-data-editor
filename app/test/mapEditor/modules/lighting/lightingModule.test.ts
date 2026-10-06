@@ -65,7 +65,8 @@ vi.mock('pixi.js', async importOriginal =>
  * everywhere in the editor (its own tests hold the rules): a reach in tiles, fractions allowed, then any of a colour,
  * an intensity and an effect, on any page (a torch that can be lit carries the tag on its lit page alone), any case.
  * The same words anywhere but a comment, a reach left out, or a map's ambient darkness make no light. The kind switches
- * on only while J-Lighting is enabled, ranks below the transfer a glowing door still is, and shows the light's symbol.
+ * on only while J-Lighting is enabled, ranks below the transfer a glowing door still is, shows the light's symbol, and
+ * gives a light the quick panel a single click shows (its own tests, and the quick panel host's, hold what it does).
  *
  * While J-Lighting is enabled the module also draws each light's ring into the lighting layer, and reads the project's
  * config.lighting.json first, so a light naming no colour is drawn in the colour the project configures, or white for a
@@ -129,6 +130,19 @@ describe('lightingModule', () =>
       // Assert.
       expect([ enabled.isActive('lighting'), enabled.kindOf(lamp, 3)?.id, enabled.kindOf(lamp, 3)?.marker, disabled.kindOf(lamp, 3) ])
         .toStrictEqual([ true, 'lighting.light', 'light', null ]);
+    });
+
+    it('gives a light the quick panel a single click shows, named after the kind', () =>
+    {
+      // Arrange: a lamp.
+      const lamp = event(4, [ page([ command(108, [ '<light:[5]>' ]) ]) ]);
+
+      // Act.
+      const panel = registryWith(lighting(true)).kindOf(lamp, 3)?.quickPanel;
+
+      // Assert.
+      expect(panel?.displayName)
+        .toBe('QuickPanel(lighting.light)');
     });
 
     it('leaves a glowing door the transfer it is', () =>

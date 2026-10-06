@@ -13,6 +13,7 @@ import type { MapDocument } from '../../../../src/mapEditor/core/model/MapDocume
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import { jabsModule } from '../../../../src/mapEditor/modules/jabs/jabsModule.ts';
+import { lightingModule } from '../../../../src/mapEditor/modules/lighting/lightingModule.ts';
 import { registerCoreEventKinds } from '../../../../src/mapEditor/services/coreEventKinds.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
@@ -28,7 +29,9 @@ import { CLOSED_GLASS, command, event, eventIn, hubWith, oreChest, page, text, t
  * else, so whatever selects events can drive it. A value half typed when the pick moves to other events, or to
  * another map, is dropped with the section it was typed in: it is never written to events it was not typed for.
  * An event on a map a plugin copies its events from is the plugin's pattern, so it has no kind and no quick settings,
- * and the panel follows the modules switching on after it first drew.
+ * and the panel follows the modules switching on after it first drew: once J-Lighting's module is on, a light shows its
+ * reach, colour, intensity and effect, says which page they change when it is not the first, and a change rewrites its
+ * tag alone, as one step.
  */
 describe('QuickPanelHost', () =>
 {
@@ -234,6 +237,54 @@ describe('QuickPanelHost', () =>
     // Assert.
     expect([ before, screen.getByText('stab 3 has no quick settings.').textContent, screen.queryAllByRole('button', { name: 'Make it a chest' }).length ])
       .toStrictEqual([ [ 'Decor', 1 ], 'stab 3 has no quick settings.', 0 ]);
+  });
+
+  it('shows a light\'s reach, colour, intensity and effect once J-Lighting is on, and a reach typed there rewrites its tag as one step', () =>
+  {
+    // Arrange: a torch beside a second one that is not picked.
+    const tag = '<light:[4, #ffbb73, 30, flicker]>';
+    const torches = [ 1, 2 ].map(id => event(id, [ page([ command(108, [ tag ]) ]) ], { name: `torch ${id}` }));
+    const { hub, modules } = renderHost(torches, [ 1 ]);
+    act(() =>
+    {
+      modules.activate([ lightingModule ], [ { name: 'j/lighting/J-Lighting', status: true, description: '', parameters: {} } ]);
+    });
+    const shown = [
+      screen.getByText('Light').textContent,
+      (screen.getByRole('textbox', { name: 'Radius' }) as HTMLInputElement).value,
+      (screen.getByLabelText('Colour') as HTMLInputElement).value,
+      (screen.getByRole('textbox', { name: 'Intensity' }) as HTMLInputElement).value,
+      screen.getByLabelText('Effect').textContent,
+    ];
+
+    // Act.
+    fireEvent.change(screen.getByRole('textbox', { name: 'Radius' }), { target: { value: '5.5' } });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Radius' }));
+
+    // Assert.
+    expect([ shown, [ 1, 2 ].map(id => eventIn(hub, id)?.pages[0].list[0].parameters[0]), hub.history(mapHistoryKey(1)).rows.map(row => row.label) ])
+      .toStrictEqual([
+        [ 'Light', '4', '#ffbb73', '30', 'Flicker' ],
+        [ '<light:[5.5, #ffbb73, 30, flicker]>', tag ],
+        [ 'Change light radius' ],
+      ]);
+  });
+
+  it('says which page a light\'s settings change when it is not the first', () =>
+  {
+    // Arrange: a torch, cold on page 1 and lit on page 2.
+    const torch = event(1, [ page([]), page([ command(108, [ '<light:[4]>' ]) ]) ], { name: 'torch' });
+    const { modules } = renderHost([ torch ], [ 1 ]);
+
+    // Act.
+    act(() =>
+    {
+      modules.activate([ lightingModule ], [ { name: 'j/lighting/J-Lighting', status: true, description: '', parameters: {} } ]);
+    });
+
+    // Assert.
+    expect(screen.getByTestId('quick-note').textContent)
+      .toBe('Changes page 2, the first page with a light.');
   });
 
   it('shows why a change could not be made', () =>
