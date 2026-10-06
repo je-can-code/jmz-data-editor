@@ -146,6 +146,19 @@ describe('lightTags', () =>
         .toStrictEqual([ '#123456', '#123456' ]);
     });
 
+    it('takes a colour only from a word that starts with a hash, passing over one with a hash inside it', () =>
+    {
+      // Arrange: a word with a hash in its middle comes before the colour, and the tag allows it.
+      const payload = '[5, a#b, #fff]';
+
+      // Act.
+      const light = parseLight(payload, DEFAULTS);
+
+      // Assert.
+      expect(light?.color)
+        .toBe('#fff');
+    });
+
     it('reads the first number as the intensity, held to 0 to 100', () =>
     {
       // Arrange: half, a second number after it, past the top, and below the bottom.
