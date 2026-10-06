@@ -67,7 +67,7 @@ const dim = (hex: string, strength: number): string =>
  * Lays out a light's falloff as J-Lighting draws it (LightTextureCache#generate): its own colour at its heart, black at
  * its rim, and one stop between whose place and strength its intensity decides. At 0 the stop sits not quite halfway out
  * and keeps a third of the colour, so the light is brightest at its heart and fades away, a flame in the open; at 1 it
- * sits at the rim at full colour, so the whole circle burns evenly and stops dead, a spotlight.
+ * sits just short of the rim at full colour, so the whole circle burns evenly and stops dead, a spotlight.
  * @param {string} color The light's colour, a hex colour.
  * @param {number} intensity How evenly the circle is filled, 0 to 1.
  * @returns {FalloffStop[]} The three stops, heart to rim.
