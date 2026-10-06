@@ -194,6 +194,21 @@ describe('darkScene', () =>
         .toStrictEqual([ 120, 192 ]);
     });
 
+    it('centres a pool where the page giving the light stands its picture, whatever the first page shows', () =>
+    {
+      // Arrange: a lamp whose unlit first page is an object, standing at its tile's very foot, and whose lit second page
+      // is a character, standing six pixels up.
+      const object = { tileId: 0, characterName: '!Other2', direction: 2, pattern: 0, characterIndex: 7 };
+      const lamp: RmmzMapEvent = { ...event(1, [ page([], { image: object }), page([ command(108, [ '<light:[4]>' ]) ]) ]), x: 2, y: 3 };
+
+      // Act.
+      const [ light ] = maskLightsOf(mapWith('', [ null, lamp ]), setupWith(), CLOCK);
+
+      // Assert.
+      expect([ light.x, light.y ])
+        .toStrictEqual([ 120, 186 ]);
+    });
+
     it('reads lights from the page the choice handed over picks', () =>
     {
       // Arrange: a lamp lit on both pages, and a choice picking its second.
