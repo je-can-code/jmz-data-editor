@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
@@ -22,7 +22,9 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * map's own history. A value still being chosen, as a colour picker passes through colours or a slider is dragged,
  * shows on the map as it goes, before it is a step, and becomes one step once chosen; one still showing when another
  * setting changes, or when the section goes, is kept as its own step first, so no change is lost or merged into another.
- * A change the map cannot take is refused, saying why, and leaves the map as it was.
+ * A change the map cannot take is refused, saying why, and leaves the map as it was. The section reads its settings
+ * again whenever the map's own properties change, even mid-edit, and never for a brush stroke's tiles or an event moved,
+ * which change many times a second.
  *
  * J-Lighting's own section stands in for any module's here, over a cave at 85% darkness with no sky.
  */
@@ -193,6 +195,42 @@ describe('ModulePropertiesSection', () =>
     // Assert.
     expect([ screen.getByRole('alert').textContent, noteIn(hub), stepsIn(hub) ])
       .toStrictEqual([ 'That change could not be made: the game would not read this map\'s sky back as written', 'the gate < the wall', [] ]);
+  });
+
+  it('reads its settings again for a change to the map\'s own properties mid-edit, never for its tiles or events', () =>
+  {
+    // Arrange: J-Lighting's section, counting each time it reads the map, and an edit left open as a brush stroke leaves
+    // it.
+    let reads = 0;
+    const counted: MapPropertiesSection = {
+      ...LIGHTING,
+      source: map =>
+      {
+        reads += 1;
+        return LIGHTING.source(map);
+      },
+    };
+    const { hub } = renderSection('<noToneChange>\n<ambient:[85]>', counted);
+    const before = reads;
+    const stroke = hub.begin('Paint', [ mapHistoryKey(1) ]);
+
+    // Act: a tile painted and an event moved, then the note changed, all inside the open edit.
+    act(() =>
+    {
+      stroke.tiles('map:1', [ [ 0, 99 ] ]);
+      stroke.set('map:1', [ 'events', 1, 'x' ], 2);
+    });
+    const readsForStroke = reads - before;
+    act(() =>
+    {
+      stroke.set('map:1', [ 'note' ], '<noToneChange>\n<ambient:[40]>');
+    });
+    const shown = (screen.getByRole('textbox', { name: 'Darkness' }) as HTMLInputElement).value;
+    stroke.cancel();
+
+    // Assert: the stroke cost no read at all, and the note's change showed at once.
+    expect([ readsForStroke, shown ])
+      .toStrictEqual([ 0, '40' ]);
   });
 
   it('lets what it said about a refused change be dismissed', () =>

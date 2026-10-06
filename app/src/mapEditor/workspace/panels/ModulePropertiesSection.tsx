@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Box, Stack, Typography } from '@mui/material';
 import type { SharedField } from '../../core/eventKinds/quickFields.ts';
+import type { DocumentChange } from '../../core/model/EditorDocument.ts';
 import type { JsonValue } from '../../core/model/json.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
 import type { MapPropertiesSection } from '../../core/modules/PluginModule.ts';
 import { editModuleProperty, ModulePropertyDrag, type MapPropertyField } from '../../core/properties/moduleProperties.ts';
 import { QuickControl } from '../../views/quickPanel/QuickControls.tsx';
 import type { QuickResources } from '../../views/quickPanel/quickResources.ts';
-import { useDocumentRevision, useWorkspace } from '../workspaceHooks.tsx';
+import { useWorkspace } from '../workspaceHooks.tsx';
 import { SectionTitle } from './propertyFields.tsx';
 
 /**
@@ -28,6 +29,46 @@ const settleDrag = (drag: React.RefObject<ModulePropertyDrag | null>): void =>
 };
 
 /**
+ * Reports whether a change to a map can change a setting of the map's own: anything but its tiles and its events, which
+ * are what is on the map rather than the map itself.
+ * @param {DocumentChange} change The change.
+ * @returns {boolean} True when a setting of the map's own may read otherwise.
+ */
+const touchesMapSettings = (change: DocumentChange): boolean =>
+{
+  if (change.kind === 'replaced')
+  {
+    return true;
+  }
+
+  const { patch } = change;
+  if (patch.kind === 'tiles')
+  {
+    return false;
+  }
+
+  return patch.kind === 'resize' || patch.path[0] !== 'events';
+};
+
+/**
+ * Draws a section again whenever its map changes in a way a setting of the map's own could read, since a value being
+ * dragged changes the map before it is a step; never for a brush stroke's tiles or a moved event, which change many
+ * times a second and are no setting of the map's.
+ * @param {MapDocument} map The map.
+ */
+const useMapSettingsRevision = (map: MapDocument): void =>
+{
+  const [ , setTick ] = useState(0);
+  useEffect(() => map.subscribe(change =>
+  {
+    if (touchesMapSettings(change))
+    {
+      setTick(current => current + 1);
+    }
+  }), [ map ]);
+};
+
+/**
  * Shows a map's setting the way a quick panel shows an event's: one map holds one value, so it is never mixed.
  * @param {MapPropertyField} field The setting.
  * @returns {SharedField} The setting as a control reads it.
@@ -43,7 +84,8 @@ const sharedOf = (field: MapPropertyField): SharedField =>
  * each change applied at once as one step in the map's history, so the map redraws as it changes and undo takes it back
  * from the map, these properties or the history panel alike. A value still being chosen, as a slider is dragged, shows
  * on the map as it goes and becomes one step when it is chosen; one still showing when the section goes, as when another
- * map is picked, is kept as that step. A change the map cannot take is refused, saying why.
+ * map is picked, is kept as that step. A change the map cannot take is refused, saying why. The section follows changes
+ * to the map's own properties, and sits still while a brush paints or an event moves.
  * @param {{ mapId: number, map: MapDocument, section: MapPropertiesSection }} props The map and the section.
  * @returns {React.JSX.Element} The section.
  */
@@ -55,7 +97,7 @@ const ModulePropertiesSection = (props: { mapId: number; map: MapDocument; secti
   const drag = useRef<ModulePropertyDrag | null>(null);
 
   // a value being dragged changes the map before it is a step, so the settings follow the map itself.
-  useDocumentRevision(map);
+  useMapSettingsRevision(map);
 
   // a value still showing when the section goes is kept, as the step it would have been.
   useEffect(() => () => settleDrag(drag), []);
