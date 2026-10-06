@@ -333,6 +333,23 @@ describe('quickFields', () =>
         .toStrictEqual([ 'no container at events/1/nowhere/at', 3, 3, null ]);
     });
 
+    it('keeps the map free while it shows a value every selected event already holds', () =>
+    {
+      // Arrange: the walkers already move at 3.
+      const { hub, drag } = walkers();
+
+      // Act.
+      drag.move(3);
+      const painted = hub.edit('Paint', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set('map:1', [ 'events', 3, 'pages', 0, 'moveSpeed' ], 5);
+      });
+
+      // Assert: the map was free for the next edit, and the drag has nothing to record.
+      expect([ painted?.label, speedIn(hub, 3), drag.commit() ])
+        .toStrictEqual([ 'Paint', 5, null ]);
+    });
+
     it('opens nothing for a setting none of the selected events has', () =>
     {
       // Arrange: the walkers have no "pace".
