@@ -1,10 +1,11 @@
-import type { Container, Renderer } from 'pixi.js';
+import { Container, type Renderer, type Sprite } from 'pixi.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
-import { isLight, lightingModule } from '../../../../src/mapEditor/modules/lighting/lightingModule.ts';
+import type { LightingLayerDefinition } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
+import { isLight, LIGHT_MASK_ID, LIGHT_RINGS_ID, lightingModule } from '../../../../src/mapEditor/modules/lighting/lightingModule.ts';
 import { registerCoreEventKinds } from '../../../../src/mapEditor/services/coreEventKinds.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
 import { command, event, page, text, transferPage } from '../../support/eventKindFixtures.ts';
@@ -68,9 +69,11 @@ vi.mock('pixi.js', async importOriginal =>
  * on only while J-Lighting is enabled, ranks below the transfer a glowing door still is, shows the light's symbol, and
  * gives a light the quick panel a single click shows (its own tests, and the quick panel host's, hold what it does).
  *
- * While J-Lighting is enabled the module also draws each light's ring into the lighting layer, and reads the project's
+ * While J-Lighting is enabled the module also draws into the lighting layer a dark map's darkness, first, as what the
+ * game itself shows (its own tests hold how), and each light's ring over it, as an aid. It reads the project's
  * config.lighting.json first, so a light naming no colour is drawn in the colour the project configures, or white for a
- * project without the file, which it then says over the map rather than leave the white to pass for the game's look.
+ * project without the file, which it then says over the map rather than leave the white to pass for the game's look; and
+ * a map naming a colour of the dark it cannot use takes the project's.
  */
 describe('lightingModule', () =>
 {
@@ -110,9 +113,9 @@ describe('lightingModule', () =>
   {
     const json = buildMapJson();
     json.events = [ null, { ...event(1, [ page([ command(108, [ '<light:[2]>' ]) ]) ]), x: 0, y: 0 } ];
-    const [ rings ] = registry.lightingLayers();
+    const rings = registry.lightingLayers().find(layer => layer.id === LIGHT_RINGS_ID) as LightingLayerDefinition;
     const drawing = rings.create({ layer: { addChild: () => undefined } as unknown as Container, tileSize: 48 });
-    drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer });
+    drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1 });
     return stand.dots;
   };
 
@@ -158,7 +161,7 @@ describe('lightingModule', () =>
         .toBe('core.transfer');
     });
 
-    it('draws light rings into the lighting layer while J-Lighting is enabled, and nothing there while it is not', () =>
+    it('draws the dark and the light rings into the lighting layer while J-Lighting is enabled, and nothing there while it is not', () =>
     {
       // Arrange: the module over J-Lighting on, and over J-Lighting off.
 
@@ -167,7 +170,40 @@ describe('lightingModule', () =>
 
       // Assert.
       expect(layers)
-        .toStrictEqual([ [ 'lighting.rings' ], [] ]);
+        .toStrictEqual([ [ 'lighting.dark', 'lighting.rings' ], [] ]);
+    });
+
+    it('draws the dark first, as what the game itself shows, and the rings over it as an aid', () =>
+    {
+      // Arrange.
+      const registry = registryWith(lighting(true));
+
+      // Act.
+      const layers = registry.lightingLayers().map(layer => [ layer.id, layer.shownInGame === true ]);
+
+      // Assert.
+      expect(layers)
+        .toStrictEqual([ [ 'lighting.dark', true ], [ 'lighting.rings', false ] ]);
+    });
+
+    it('fills a dark map from its note, in the project\'s colour of the dark where the note names one it cannot use', () =>
+    {
+      // Arrange: a project whose dark falls back to slate, and a cave at 85% naming a colour with a typo.
+      const config = { light: { radius: 5, color: '#ffffff', intensity: 0, effects: {} }, ambient: { color: '#102030' } } as unknown as JsonValue;
+      const registry = registryWith(lighting(true), new Map([ [ 'lighting', config ] ]));
+      const dark = registry.lightingLayers().find(layer => layer.id === LIGHT_MASK_ID) as LightingLayerDefinition;
+      const layer = new Container();
+      const drawing = dark.create({ layer, tileSize: 48 });
+      const json = { ...buildMapJson(), note: '<ambient:[85, #10203g]>' };
+
+      // Act.
+      drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1 });
+
+      // Assert: one piece, a plain fill of 85% slate.
+      const [ root ] = layer.children;
+      expect(root.children.map(piece => (piece as Sprite).tint))
+        .toStrictEqual([ 0x34414f ]);
+      drawing.destroy();
     });
 
     it('names the project\'s lighting config as the one config it reads', () =>
@@ -222,7 +258,7 @@ describe('lightingModule', () =>
       expect(registry.notices().map(notice => [ notice.id, notice.detail ]))
         .toStrictEqual([ [
           'lighting.config',
-          'It could not be read: open /game/data/config.lighting.json: no such file or directory. Reopen the map editor once it is fixed.',
+          'It could not be read: open /game/data/config.lighting.json: no such file or directory. This clears as soon as the file is fixed.',
         ] ]);
     });
 

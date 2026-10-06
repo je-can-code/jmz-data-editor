@@ -1,7 +1,10 @@
 import type { JsonValue } from '../../core/model/json.ts';
 import type { PluginModule } from '../../core/modules/PluginModule.ts';
 import { quickPanelFor } from '../../views/quickPanel/QuickFieldsPanel.tsx';
-import { LIGHTING_CONFIG, lightDefaultsFrom, lightingConfigNotice } from './lightingConfig.ts';
+import { mapAmbient } from './ambientTags.ts';
+import { steadyStrength } from './darkScene.ts';
+import { ambientColorFrom, LIGHTING_CONFIG, lightDefaultsFrom, lightingConfigNotice } from './lightingConfig.ts';
+import { LightMask } from './lightMask.ts';
 import { lightPanelOptions, lightQuickModel } from './lightPanel.ts';
 import { LightRings } from './lightRings.ts';
 import { firstLitPage, isLight, type LightPageChoice } from './lightTags.ts';
@@ -22,15 +25,22 @@ const LIGHT_KIND_ID = 'lighting.light';
 const LIGHT_RINGS_ID = 'lighting.rings';
 
 /**
- * What the editor knows of J-Lighting: its lights, read from their tags exactly as the plugin reads them; the ring
- * each light shows on the map, drawn in the lighting layer so the view's Lighting switch shows and hides them with the
- * rest of what J-Lighting draws; and the quick panel a single click on a light shows, which changes its reach, colour,
- * intensity and effect by rewriting its tag in place. A light ranks below the transfers and chests that sometimes carry
- * one too, since a door that glows is still a door, and above dialogue and decor, which a comment-tagged event never is
- * anyway; its ring shows whatever kind it is. The rings and the panel fall back to the project's own config for what a
- * light leaves out, and both read a light from the page one choice picks, so the panel always changes the light the
- * ring shows. A config that fails them, so that lights fall back to white, is said over every map view rather than
- * left to look like the game's own colours.
+ * The id of the darkness J-Lighting's module draws into the lighting layer, with every light cut through it.
+ */
+const LIGHT_MASK_ID = 'lighting.dark';
+
+/**
+ * What the editor knows of J-Lighting: its lights, read from their tags exactly as the plugin reads them; a dark map's
+ * darkness, from the ambient tag in its note, with each light's pool cut through it by the plugin's own falloff, as the
+ * game composes it; the ring each light shows on the map, over the dark; and the quick panel a single click on a light
+ * shows, which changes its reach, colour, intensity and effect by rewriting its tag in place. The dark and the rings
+ * draw in the lighting layer, so the view's Lighting switch shows and hides them together. A light ranks below the
+ * transfers and chests that sometimes carry one too, since a door that glows is still a door, and above dialogue and
+ * decor, which a comment-tagged event never is anyway; its ring and its pool show whatever kind it is. The dark, the
+ * rings and the panel fall back to the project's own config for what a tag leaves out, and all three read a light from
+ * the page one choice picks, so the panel always changes the light the ring and the pool show. A config that fails
+ * them, so that lights fall back to white, is said over every map view rather than left to look like the game's own
+ * colours.
  */
 const lightingModule: PluginModule = {
   id: 'lighting',
@@ -57,6 +67,15 @@ const lightingModule: PluginModule = {
       marker: 'light',
       quickPanel: quickPanelFor(lightQuickModel(defaults, choosePage), LIGHT_KIND_ID, lightPanelOptions(defaults, choosePage)),
     });
+
+    // the dark goes in first, so the rings draw over it and stay in sight on the darkest map.
+    const sources = [ mapAmbient(ambientColorFrom(config)) ];
+    contributions.lightingLayer({
+      id: LIGHT_MASK_ID,
+      title: 'Darkness',
+      shownInGame: true,
+      create: stage => new LightMask(stage, { sources, defaults, choosePage, strengthOf: steadyStrength }),
+    });
     contributions.lightingLayer({
       id: LIGHT_RINGS_ID,
       title: 'Light rings',
@@ -65,4 +84,4 @@ const lightingModule: PluginModule = {
   },
 };
 
-export { isLight, LIGHT_KIND_ID, LIGHT_RINGS_ID, lightingModule };
+export { isLight, LIGHT_KIND_ID, LIGHT_MASK_ID, LIGHT_RINGS_ID, lightingModule };

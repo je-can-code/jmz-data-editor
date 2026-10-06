@@ -20,7 +20,7 @@ import { SyncPeer } from '../core/sync/SyncPeer.ts';
 import { parseMapEditorView, type MapEditorView } from '../views/mapEditorViews.ts';
 import { wireCommandEditing } from './commandEditing.ts';
 import { registerCoreEventKinds } from './coreEventKinds.ts';
-import { activatePluginModules } from './pluginModules.ts';
+import { isModuleConfigFile, ModuleActivation } from './pluginModules.ts';
 
 /**
  * Everything one map editor window runs on. Later packages reach these through the services context rather than
@@ -122,8 +122,8 @@ type MapEditorServices = {
 
   /**
    * Starts syncing, watching for changes, guarding against closing with unsaved edits, and switching on the plugin
-   * modules once js/plugins.js is read. When the page goes, it stops, which tells the other windows at once that this
-   * one no longer holds anything.
+   * modules once js/plugins.js is read, and afresh whenever a config file one of them reads changes on disk. When the
+   * page goes, it stops, which tells the other windows at once that this one no longer holds anything.
    */
   start(): void;
 
@@ -233,6 +233,11 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   const modules = new PluginModuleRegistry(catalog);
   registerCoreEventKinds(modules);
 
+  // the modules switch on from what the server reads, and switch on afresh when a config they read changes on disk.
+  const activation = api === null
+    ? null
+    : new ModuleActivation(api, modules);
+
   // the window the close guard listens on is the page's own, the one whose paint the page starts with.
   const paints = new WindowPaints(environment.closeTarget);
 
@@ -332,11 +337,8 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
       // back to them; a torn-out map's window links its own paint the first time it is asked for.
       stops.push(paints.main.link());
 
-      if (api !== null)
-      {
-        // the plugin modules switch on once js/plugins.js says which plugins are enabled.
-        activatePluginModules(api, modules);
-      }
+      // the plugin modules switch on once js/plugins.js says which plugins are enabled.
+      activation?.refresh();
 
       // a page going for good says goodbye, so no window counts it as holding anything a moment longer.
       const onPageHide = () => stop();
@@ -346,16 +348,23 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
       if (feed !== null)
       {
         // only the window reading the stream reads what changed, and hands it to the others; each change settles on
-        // its own, and a read that fails is left for the next change rather than thrown at the stream.
+        // its own, and a read that fails is left for the next change rather than thrown at the stream. A config a
+        // module reads is read again by every window, so tuning it shows everywhere at once, and so is every config
+        // when the stream comes back, since a change made while it was down was never announced.
         const router = new FileChangeRouter(hub, sync, () => feed.isLeader);
         stops.push(
           feed.onChange(change =>
           {
             router.route(change).catch(() => undefined);
+            if (isModuleConfigFile(change.path))
+            {
+              activation?.refresh();
+            }
           }),
           feed.onReconnect(() =>
           {
             router.recheck().catch(() => undefined);
+            activation?.refresh();
           }),
         );
         feed.start();

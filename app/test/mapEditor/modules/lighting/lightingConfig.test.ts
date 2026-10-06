@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import { lightDefaultsFrom, lightingConfigNotice, type LightingConfig } from '../../../../src/mapEditor/modules/lighting/lightingConfig.ts';
+import { ambientColorFrom, lightDefaultsFrom, lightingConfigNotice, type LightingConfig } from '../../../../src/mapEditor/modules/lighting/lightingConfig.ts';
 
 /*
  * A light whose tag names no colour or intensity takes the project's own, from data/config.lighting.json, as the server
@@ -9,8 +9,12 @@ import { lightDefaultsFrom, lightingConfigNotice, type LightingConfig } from '..
  * whatever its colour.
  *
  * That fallback is never quiet. A config that could not be read, or whose colour is no colour, comes with a notice that
- * names the file, says why in the server's words or its own, and says lights draw in white until the file is fixed; a
- * config that serves comes with none.
+ * names the file, says why in the server's words or its own, says lights draw in white until the file is fixed, and
+ * says the notice clears as soon as it is, since the file is read again whenever it changes; a config that serves comes
+ * with none.
+ *
+ * A map's dark falls back to the project's own colour of the dark, which J-Lighting fills in for a map writing a colour
+ * it cannot use; a project without the file, or whose colour of the dark is no colour, falls back to ordinary black.
  */
 
 /**
@@ -99,7 +103,7 @@ describe('lightingConfig', () =>
         .toStrictEqual({
           id: 'lighting.config',
           title: 'Lights without a colour of their own draw in white until data/config.lighting.json is fixed.',
-          detail: 'It could not be read: decoding /game/data/config.lighting.json: json: unknown field "tint". Reopen the map editor once it is fixed.',
+          detail: 'It could not be read: decoding /game/data/config.lighting.json: json: unknown field "tint". This clears as soon as the file is fixed.',
         });
     });
 
@@ -112,7 +116,7 @@ describe('lightingConfig', () =>
 
       // Assert.
       expect(notice?.detail)
-        .toBe('It was not read. Reopen the map editor once it is fixed.');
+        .toBe('It was not read. This clears as soon as the file is fixed.');
     });
 
     it('says a configured colour that is no colour is why lights draw in white', () =>
@@ -128,8 +132,49 @@ describe('lightingConfig', () =>
         .toStrictEqual({
           id: 'lighting.config',
           title: 'Lights without a colour of their own draw in white until data/config.lighting.json is fixed.',
-          detail: 'Its light colour is "white", and the game takes only a hex colour such as #ffbb73. Reopen the map editor once it is fixed.',
+          detail: 'Its light colour is "white", and the game takes only a hex colour such as #ffbb73. This clears as soon as the file is fixed.',
         });
+    });
+  });
+
+  describe('ambientColorFrom', () =>
+  {
+    it('takes the colour of the dark the project configures', () =>
+    {
+      // Arrange: a project whose dark is teal.
+      const teal = { ...config('#ffffff') as object, ambient: { color: '#0a2a2a' } } as unknown as JsonValue;
+
+      // Act.
+      const color = ambientColorFrom(teal);
+
+      // Assert.
+      expect(color)
+        .toBe('#0a2a2a');
+    });
+
+    it('falls back to ordinary black for a configured colour of the dark that is no colour', () =>
+    {
+      // Arrange: a colour by name.
+      const named = { ...config('#ffffff') as object, ambient: { color: 'teal' } } as unknown as JsonValue;
+
+      // Act.
+      const color = ambientColorFrom(named);
+
+      // Assert.
+      expect(color)
+        .toBe('#000000');
+    });
+
+    it('falls back to ordinary black for a project without the file', () =>
+    {
+      // Arrange: nothing was read.
+
+      // Act.
+      const color = ambientColorFrom(null);
+
+      // Assert.
+      expect(color)
+        .toBe('#000000');
     });
   });
 });

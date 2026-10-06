@@ -6,6 +6,7 @@ import { mapDocumentKey } from '../core/model/documentKeys.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { MapEventTools } from '../events/MapEventTools.ts';
 import { TILE_SIZE, type Camera } from '../core/renderer/camera.ts';
+import type { LightingLayerDefinition } from '../core/renderer/lightingLayer.ts';
 import {
   GAME_LOOK,
   NO_OVERLAY_STATE,
@@ -108,14 +109,26 @@ const ringsOverlay = (): OverlayDefinition =>
 };
 
 /**
- * Builds what the parity check draws: the game look, still, with events or without, and with neither the shadows nor
- * the lighting, since the game it is held against draws its base layer with no lighting at all.
+ * Builds what the parity check draws: the game look, still, with events or without, never the shadows, and the
+ * lighting only when the game it is held against draws its light mask over its base layer too.
  * @param {boolean} events Whether the events show.
+ * @param {boolean | undefined} lighting Whether the lighting shows; left out, it does not.
  * @returns {LayerVisibility} The visibility.
  */
-const parityLook = (events: boolean): LayerVisibility =>
+const parityLook = (events: boolean, lighting?: boolean): LayerVisibility =>
 {
-  return { ...GAME_LOOK, layers: { ...GAME_LOOK.layers, events, shadows: false, lighting: false } };
+  return { ...GAME_LOOK, layers: { ...GAME_LOOK.layers, events, shadows: false, lighting: lighting === true } };
+};
+
+/**
+ * Picks what the parity check lets draw into the lighting layer: only what the game itself shows, such as a map's
+ * darkness, and never an aid like the ring marking a light's reach, which the game never draws.
+ * @param {readonly LightingLayerDefinition[]} layers What the plugin modules draw there.
+ * @returns {LightingLayerDefinition[]} What the game shows of it.
+ */
+const parityLightingLayers = (layers: readonly LightingLayerDefinition[]): LightingLayerDefinition[] =>
+{
+  return layers.filter(layer => layer.shownInGame === true);
 };
 
 /**
@@ -125,7 +138,8 @@ type OpenTimings = Record<string, number>;
 
 /**
  * What the hooks need from the map view: its renderer, the window's hub, its painting tools and their settings, its
- * event tools and selection, the map on show, a way to open another, and the page's open timings.
+ * event tools and selection, the map on show, a way to open another, the page's open timings, and what the plugin
+ * modules draw into the lighting layer.
  */
 type SpeedHooksContext = {
   readonly renderer: PixiMapRenderer;
@@ -137,6 +151,7 @@ type SpeedHooksContext = {
   readonly map: () => MapDocument | null;
   readonly openMap: (mapId: number) => Promise<void>;
   readonly timings: OpenTimings;
+  readonly lightingLayers: () => readonly LightingLayerDefinition[];
 };
 
 /**
@@ -356,14 +371,16 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       renderer.setOverlayState(overlayState);
       hoverFollows = true;
     },
-    // the parity check draws the map as the game would, still, with nothing of the editor's on top.
-    prepareParity: (options: { events: boolean; step: number; frames: number }) =>
+    // the parity check draws the map as the game would, still, with nothing of the editor's on top: of the lighting,
+    // only what the game itself shows, such as a map's darkness, and never an aid like a light's ring.
+    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean }) =>
     {
       hoverFollows = false;
       overlayState = NO_OVERLAY_STATE;
       renderer.setOverlayState(overlayState);
       renderer.setOverlays({ enabled: new Set(), definitions: [] });
-      renderer.setLayerVisibility(parityLook(options.events));
+      renderer.setLightingLayers(parityLightingLayers(context.lightingLayers()));
+      renderer.setLayerVisibility(parityLook(options.events, options.lighting));
       renderer.holdAnimation({ step: options.step, frames: options.frames });
     },
     extract: (rect: { x: number; y: number; width: number; height: number }) => renderer.extract(rect),
@@ -454,5 +471,14 @@ const wantsSpeedHooks = (search: string): boolean =>
   return new URLSearchParams(search).get('speed') === '1';
 };
 
-export { cameraOnPath, HOOKS_GLOBAL, installSpeedHooks, parityLook, ringsOverlay, unusedGroundKind, wantsSpeedHooks };
+export {
+  cameraOnPath,
+  HOOKS_GLOBAL,
+  installSpeedHooks,
+  parityLightingLayers,
+  parityLook,
+  ringsOverlay,
+  unusedGroundKind,
+  wantsSpeedHooks,
+};
 export type { CameraPath, SpeedHooksContext, StrokeSettings };

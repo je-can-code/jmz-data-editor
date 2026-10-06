@@ -12,12 +12,19 @@ type LightingStage = {
 };
 
 /**
- * What a lighting drawing is handed each time it is asked to draw: the map as it now stands, and the view's pixi
- * renderer, for anything drawn into a render texture first, such as a map's darkness with light cut out of it.
+ * What a lighting drawing is handed each time it is asked to draw: the map as it now stands, the view's pixi renderer,
+ * for anything drawn into a render texture first, such as a map's darkness with light cut out of it, and which GPU
+ * context the view draws on.
  */
 type LightingFrame = {
   readonly document: MapDocument;
   readonly renderer: Renderer;
+
+  /**
+   * The view's GPU contexts, counted from 1: it goes up each time the graphics card gives the view its context back, and
+   * a render texture drawn on an earlier one has lost its pixels, so whatever was drawn into it must be drawn again.
+   */
+  readonly context: number;
 };
 
 /**
@@ -25,10 +32,10 @@ type LightingFrame = {
  *
  * The view asks it to draw in the frame after the map opened, after anything on the map but its tiles changed (an
  * edit, a move, an undo, a copy from another window, a change to the file on disk), and after the graphics card gave
- * the view's context back, which takes any render texture's pixels with it; however many changes arrive before that
- * frame, it draws once. A brush stroke changes only tiles, so it never asks. While the Lighting switch is off it is
- * not asked at all, and draws once the switch is back on. What it does with each ask is its own business: it may
- * well find nothing it draws has changed, and keep what it has.
+ * the view's context back, which takes any render texture's pixels with it, as the frame's context says; however many
+ * changes arrive before that frame, it draws once. A brush stroke changes only tiles, so it never asks. While the
+ * Lighting switch is off it is not asked at all, and draws once the switch is back on. What it does with each ask is
+ * its own business: it may well find nothing it draws has changed, and keep what it has.
  */
 interface LightingDrawing
 {
@@ -51,6 +58,13 @@ interface LightingDrawing
 type LightingLayerDefinition = {
   readonly id: `${string}.${string}`;
   readonly title: string;
+
+  /**
+   * Whether it draws what the game itself shows, such as a map's darkness and the light cut through it, rather than an
+   * aid for the author, such as a ring marking how far a light reaches. The parity check draws only what the game
+   * shows. Left out, it is an aid.
+   */
+  readonly shownInGame?: boolean;
 
   /**
    * Makes the drawing for one map view, once per view.

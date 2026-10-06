@@ -243,6 +243,12 @@ class PixiMapRenderer implements MapRenderer
 
   #lighting = new LightingLayers(TILE_SIZE);
 
+  /**
+   * How many times drawing has started on a live context: once for the first, and once more each time the graphics
+   * card gives the context back. The lighting reads it to know its render textures hold nothing.
+   */
+  #contexts = 0;
+
   #atlases: { regions: TextureSource; passability: TextureSource } | null = null;
 
   /**
@@ -981,7 +987,7 @@ class PixiMapRenderer implements MapRenderer
   /**
    * Draws again on a context that has just come up. Pixi uploads every texture and buffer afresh as the first frame
    * draws, and edits made meanwhile, in this window or another, are already marked in the chunks they touched. What
-   * the lighting drew into render textures went with the old context, so it draws again too.
+   * the lighting drew into render textures went with the old context, so it draws again too, told the context is new.
    */
   #resumeDrawing(): void
   {
@@ -990,6 +996,7 @@ class PixiMapRenderer implements MapRenderer
     this.#needsRender = true;
     this.#selectionDirty = true;
     this.#pointerDirty = true;
+    this.#contexts += 1;
     this.#lighting.markStale();
     this.#loop.start();
   }
@@ -1684,7 +1691,7 @@ class PixiMapRenderer implements MapRenderer
     changed = this.#refreshOverlays() || changed;
     if (document !== null)
     {
-      changed = this.#lighting.draw({ document, renderer: pixi }) || changed;
+      changed = this.#lighting.draw({ document, renderer: pixi, context: this.#contexts }) || changed;
     }
 
     return { changed, rebuiltChunks };

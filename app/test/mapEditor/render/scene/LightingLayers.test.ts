@@ -45,10 +45,10 @@ const loggedLayer = (id: `${string}.${string}`, log: string[]) =>
 };
 
 /**
- * What a frame hands the drawings: map 7, and a renderer nothing here draws with.
+ * What a frame hands the drawings: map 7, a renderer nothing here draws with, and the view's first context.
  * @returns {LightingFrame} The frame.
  */
-const frame = (): LightingFrame => ({ document: MapDocument.fromJson('map:7', buildMapJson()), renderer: {} as Renderer });
+const frame = (): LightingFrame => ({ document: MapDocument.fromJson('map:7', buildMapJson()), renderer: {} as Renderer, context: 1 });
 
 /**
  * A view's lighting holding the given lighting layers, drawn once so nothing is due.

@@ -2,10 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import { screenToWorld } from '../../../src/mapEditor/core/renderer/camera.ts';
+import type { LightingLayerDefinition } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { GAME_LOOK, type OverlayPainter } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { makeAutotileId } from '../../../src/mapEditor/core/tiles/tileIds.ts';
 import { fitZoom } from '../../../src/mapEditor/render/cameraControls.ts';
-import { cameraOnPath, parityLook, ringsOverlay, unusedGroundKind, wantsSpeedHooks } from '../../../src/mapEditor/render/speedHooks.ts';
+import {
+  cameraOnPath,
+  parityLightingLayers,
+  parityLook,
+  ringsOverlay,
+  unusedGroundKind,
+  wantsSpeedHooks,
+} from '../../../src/mapEditor/render/speedHooks.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 
 /*
@@ -13,8 +21,9 @@ import { buildMapJson } from '../support/fixtures.ts';
  * camera paths decide what the budgets are measured on: a pan at zoom 1, a zoom sweep between 2x and the whole map,
  * and the whole map held on screen. If a path never reached the whole map, the budget for it would pass untested.
  *
- * The parity check holds the editor's drawing against the game's own, which it runs with no shadows and no lighting,
- * so the editor draws neither then, however many lights the map holds.
+ * The parity check holds the editor's drawing against the game's own, which it runs with no shadows, and with its light
+ * mask only when the check compares a map dark; so the editor draws no shadows then, and its lighting only when asked,
+ * and only what the game itself shows of it, never an aid such as a light's ring.
  */
 describe('speedHooks', () =>
 {
@@ -118,6 +127,39 @@ describe('speedHooks', () =>
           { ...GAME_LOOK.layers, events: true, shadows: false, lighting: false },
           { ...GAME_LOOK.layers, events: false, shadows: false, lighting: false },
         ]);
+    });
+
+    it('draws the lighting too when a dark frame asks for it, and still no shadows', () =>
+    {
+      // Arrange: a dark frame without its events, and one saying outright it wants no lighting.
+
+      // Act.
+      const looks = [ parityLook(false, true), parityLook(false, false) ];
+
+      // Assert.
+      expect(looks.map(look => look.layers))
+        .toStrictEqual([
+          { ...GAME_LOOK.layers, events: false, shadows: false, lighting: true },
+          { ...GAME_LOOK.layers, events: false, shadows: false, lighting: false },
+        ]);
+    });
+  });
+
+  describe('parityLightingLayers', () =>
+  {
+    it('keeps only what the game itself shows of the lighting, leaving out every aid', () =>
+    {
+      // Arrange: the dark, the rings, and an aid saying outright it is not shown in the game.
+      const layer = (id: `${string}.${string}`, shownInGame?: boolean): LightingLayerDefinition =>
+        ({ id, title: id, shownInGame, create: () => ({ draw: () => undefined, destroy: () => undefined }) });
+      const layers = [ layer('lighting.dark', true), layer('lighting.rings'), layer('lighting.notes', false) ];
+
+      // Act.
+      const kept = parityLightingLayers(layers);
+
+      // Assert.
+      expect(kept.map(each => each.id))
+        .toStrictEqual([ 'lighting.dark' ]);
     });
   });
 

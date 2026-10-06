@@ -19,7 +19,8 @@ import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../s
  * other live window holds exactly this window's unsaved state, and a closing window says goodbye at once, so no
  * window keeps counting it. Conflicts settle only the way the author chooses. And a stop leaves nothing listening.
  * A started window reads js/plugins.js and switches on the modules whose plugins it enables; one that cannot read it
- * keeps the core's kinds alone. A started window's painting tools paint with what the palette and the layer strip
+ * keeps the core's kinds alone. It reads the modules' configs again whenever one of them changes on disk, and when the
+ * stream comes back after dropping, so a config fixed by hand shows at once. A started window's painting tools paint with what the palette and the layer strip
  * pick, and any other window the page draws into, a torn-out map's, paints with a paint of its own.
  */
 describe('MapEditorServices', () =>
@@ -232,6 +233,57 @@ describe('MapEditorServices', () =>
     // Assert: on the action map the pattern is nobody's; on another map it is decor.
     expect([ askedBefore, services.modules.kindOf(swing, 2), services.modules.kindOf(swing, 3)?.id ])
       .toStrictEqual([ 0, null, 'core.decor' ]);
+    services.stop();
+  });
+
+  it('switches the modules on afresh when a config one of them reads changes on disk, or the stream comes back', async () =>
+  {
+    // Arrange: a project enabling J-Lighting whose config's light colour is no colour, so J-Lighting says so.
+    let lightColor = 'white';
+    const { fetch, requests } = stubFetch(request =>
+    {
+      if (request.url.endsWith('/api/plugin-metadata'))
+      {
+        return new Response('var $plugins = [\n{"name":"j/lighting/J-Lighting","status":true,"description":"","parameters":{}}\n];');
+      }
+
+      return request.url.endsWith('/api/config/lighting')
+        ? envelope({ light: { radius: 5, color: lightColor, intensity: 0, effects: {} }, ambient: { color: '#000000' } })
+        : envelope({});
+    });
+    const { environment, sources } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.notices().length)
+        .toBe(1);
+    });
+    const configReads = () => requests.filter(request => request.url.endsWith('/api/config/lighting')).length;
+    const readsBefore = configReads();
+
+    // Act: another file changes, then the config is fixed and its change announced.
+    sources[0].emitChange({ path: 'data/Map001.json', kind: 'write', client: '' });
+    await settle();
+    const readsAfterMap = configReads();
+    lightColor = '#ffbb73';
+    sources[0].emitChange({ path: 'data/config.lighting.json', kind: 'write', client: '' });
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.notices().length)
+        .toBe(0);
+    });
+
+    // Assert: a map's change read no config; the config's change read it again; the stream coming back reads it too.
+    sources[0].emit('error');
+    sources[0].emit('open');
+    await vi.waitFor(() =>
+    {
+      expect(configReads())
+        .toBe(readsBefore + 2);
+    });
+    expect(readsAfterMap)
+      .toBe(readsBefore);
     services.stop();
   });
 

@@ -145,7 +145,7 @@ const buildRings = () =>
  */
 const drawOn = (rings: LightRings, document: MapDocument): void =>
 {
-  rings.draw({ document, renderer: {} as Renderer });
+  rings.draw({ document, renderer: {} as Renderer, context: 1 });
 };
 
 describe('lightRings', () =>

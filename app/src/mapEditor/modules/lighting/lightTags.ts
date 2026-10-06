@@ -391,6 +391,7 @@ export {
   parseLight,
   PLUGIN_DEFAULTS,
   readLightLine,
+  readPayload,
   readValue,
 };
 export type { LightDeclaration, LightDefaults, LightEffect, LightLine, LightPageChoice, LitPage, TagValue };

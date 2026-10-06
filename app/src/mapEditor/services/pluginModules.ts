@@ -1,6 +1,6 @@
 import { readPluginEntries, type PluginsJsEntry } from '../../services/plugins/PluginsJsReader.ts';
 import { MapEditorApiError, type MapEditorApi } from '../core/api/MapEditorApi.ts';
-import type { JsonValue } from '../core/model/json.ts';
+import { jsonEquals, type JsonValue } from '../core/model/json.ts';
 import type { PluginModule } from '../core/modules/PluginModule.ts';
 import { enabledPlugins, type PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import { jabsModule } from '../modules/jabs/jabsModule.ts';
@@ -82,6 +82,128 @@ const readModuleConfigs = async (
 };
 
 /**
+ * What one switching on was built from: js/plugins.js as read, and the configs read for it.
+ */
+type ModuleInputs = {
+  readonly list: string;
+  readonly configs: ModuleConfigs;
+};
+
+/**
+ * Where a project's config files sit, as the server's config routes read them: {@code data/config.lighting.json} holds
+ * the config named {@code lighting}.
+ */
+const CONFIG_FILE = /^data\/config\.([a-z0-9-]+)\.json$/u;
+
+/**
+ * Reports whether two reads found the project the same: the same plugin list, the same configs, and the same reasons
+ * for any config that could not be read. The same list enables the same modules, which name the same configs, so the
+ * two reads hold the same names and compare name by name; a config read in one and not the other differs in content.
+ * @param {ModuleInputs} left One read.
+ * @param {ModuleInputs} right The other.
+ * @returns {boolean} True when switching the modules on from either would make the same modules.
+ */
+const sameInputs = (left: ModuleInputs, right: ModuleInputs): boolean =>
+{
+  return left.list === right.list
+    && [ ...left.configs.contents ].every(([ name, content ]) => jsonEquals(content, right.configs.contents.get(name)))
+    && [ ...left.configs.problems ].every(([ name, problem ]) => problem === right.configs.problems.get(name));
+};
+
+/**
+ * Reports whether a changed file is a config one of the modules reads, so the modules should read their configs again.
+ * @param {string} path The file, relative to the project root, as the change stream names it.
+ * @param {readonly PluginModule[]} modules The modules; by default, the ones the editor ships.
+ * @returns {boolean} True for a config some module names.
+ */
+const isModuleConfigFile = (path: string, modules: readonly PluginModule[] = SHIPPED_MODULES): boolean =>
+{
+  const match = CONFIG_FILE.exec(path);
+  if (match === null)
+  {
+    return false;
+  }
+
+  const [ , name ] = match;
+  return modules.some(pluginModule => (pluginModule.configs ?? []).includes(name));
+};
+
+/**
+ * Keeps one window's plugin modules switched on as the project stands. Each refresh reads js/plugins.js, then the config
+ * files of the modules it enables, and switches those modules on, unless what it read is exactly what they were last
+ * switched on from, so asking again when nothing changed costs two reads and nothing more. Reads never overlap: asks
+ * that come while a read is running are answered by one more read after it, however many came. A refresh never
+ * rejects: a list that cannot be read leaves the modules as they were, which before the first read is the core's kinds
+ * on their own, as in a project without those plugins.
+ */
+class ModuleActivation
+{
+  #api: ModuleSource;
+
+  #registry: PluginModuleRegistry;
+
+  #applied: ModuleInputs | null = null;
+
+  #queue: Promise<void> = Promise.resolve();
+
+  #waiting = false;
+
+  /**
+   * @param {ModuleSource} api The server.
+   * @param {PluginModuleRegistry} registry The window's registry.
+   */
+  constructor(api: ModuleSource, registry: PluginModuleRegistry)
+  {
+    this.#api = api;
+    this.#registry = registry;
+  }
+
+  /**
+   * Reads the project again and switches the modules on afresh if anything they are built from changed.
+   * @returns {Promise<void>} Settles once a read that started after this ask has finished.
+   */
+  refresh(): Promise<void>
+  {
+    // a read queued but not yet begun will see whatever this ask is about.
+    if (this.#waiting)
+    {
+      return this.#queue;
+    }
+
+    this.#waiting = true;
+    this.#queue = this.#queue.then(() =>
+    {
+      this.#waiting = false;
+      return this.#read();
+    });
+    return this.#queue;
+  }
+
+  /**
+   * Reads the plugin list and the configs, and switches the modules on when either differs from what they were last
+   * switched on from.
+   * @returns {Promise<void>} Settles once done, or once the list has proved unreadable.
+   */
+  #read(): Promise<void>
+  {
+    return this.#api.loadPluginList()
+      .then(async list =>
+      {
+        const plugins = readPluginEntries(list);
+        const read: ModuleInputs = { list, configs: await readModuleConfigs(this.#api, SHIPPED_MODULES, plugins) };
+        if (this.#applied !== null && sameInputs(this.#applied, read))
+        {
+          return;
+        }
+
+        this.#applied = read;
+        this.#registry.activate(SHIPPED_MODULES, plugins, read.configs.contents, read.configs.problems);
+      })
+      .catch(() => undefined);
+  }
+}
+
+/**
  * Reads js/plugins.js, then the config files of the modules it switches on, and switches those modules on. Never
  * rejects: a list that cannot be read leaves the core's kinds on their own, as in a project without those plugins.
  * @param {ModuleSource} api The server.
@@ -90,15 +212,8 @@ const readModuleConfigs = async (
  */
 const activatePluginModules = (api: ModuleSource, registry: PluginModuleRegistry): Promise<void> =>
 {
-  return api.loadPluginList()
-    .then(async text =>
-    {
-      const plugins = readPluginEntries(text);
-      const { contents, problems } = await readModuleConfigs(api, SHIPPED_MODULES, plugins);
-      registry.activate(SHIPPED_MODULES, plugins, contents, problems);
-    })
-    .catch(() => undefined);
+  return new ModuleActivation(api, registry).refresh();
 };
 
-export { activatePluginModules, readModuleConfigs, SHIPPED_MODULES };
+export { activatePluginModules, isModuleConfigFile, ModuleActivation, readModuleConfigs, SHIPPED_MODULES };
 export type { ModuleConfigs, ModuleSource };
