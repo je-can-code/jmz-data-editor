@@ -11,6 +11,7 @@ import {
   NO_OVERLAY_STATE,
   type CoreOverlayId,
   type GhostTile,
+  type LayerVisibility,
   type MapContextMenu,
   type OverlayDefinition,
   type OverlayState,
@@ -104,6 +105,17 @@ const ringsOverlay = (): OverlayDefinition =>
       });
     },
   };
+};
+
+/**
+ * Builds what the parity check draws: the game look, still, with events or without, and with neither the shadows nor
+ * the lighting, since the game it is held against draws its base layer with no lighting at all.
+ * @param {boolean} events Whether the events show.
+ * @returns {LayerVisibility} The visibility.
+ */
+const parityLook = (events: boolean): LayerVisibility =>
+{
+  return { ...GAME_LOOK, layers: { ...GAME_LOOK.layers, events, shadows: false, lighting: false } };
 };
 
 /**
@@ -351,7 +363,7 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       overlayState = NO_OVERLAY_STATE;
       renderer.setOverlayState(overlayState);
       renderer.setOverlays({ enabled: new Set(), definitions: [] });
-      renderer.setLayerVisibility({ ...GAME_LOOK, layers: { ...GAME_LOOK.layers, events: options.events, shadows: false } });
+      renderer.setLayerVisibility(parityLook(options.events));
       renderer.holdAnimation({ step: options.step, frames: options.frames });
     },
     extract: (rect: { x: number; y: number; width: number; height: number }) => renderer.extract(rect),
@@ -442,5 +454,5 @@ const wantsSpeedHooks = (search: string): boolean =>
   return new URLSearchParams(search).get('speed') === '1';
 };
 
-export { cameraOnPath, HOOKS_GLOBAL, installSpeedHooks, ringsOverlay, unusedGroundKind, wantsSpeedHooks };
+export { cameraOnPath, HOOKS_GLOBAL, installSpeedHooks, parityLook, ringsOverlay, unusedGroundKind, wantsSpeedHooks };
 export type { CameraPath, SpeedHooksContext, StrokeSettings };

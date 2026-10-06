@@ -1,6 +1,8 @@
 import { pluginBasename, type PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.ts';
 import type { CommandCatalog } from '../commands/CommandCatalog.ts';
+import type { JsonValue } from '../model/json.ts';
 import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
+import type { LightingLayerDefinition } from '../renderer/lightingLayer.ts';
 import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
 import type {
   EventKindDefinition,
@@ -31,6 +33,7 @@ type Contributions = {
   palette: PaletteEntry[];
   rules: PassabilityRule[];
   overlays: OverlayDefinition[];
+  lighting: LightingLayerDefinition[];
   catalogIds: string[];
   templateMaps: number[];
 };
@@ -39,12 +42,24 @@ type Contributions = {
  * Starts an empty set of contributions.
  * @returns {Contributions} The empty set.
  */
-const noContributions = (): Contributions => ({ kinds: [], palette: [], rules: [], overlays: [], catalogIds: [], templateMaps: [] });
+const noContributions = (): Contributions => ({ kinds: [], palette: [], rules: [], overlays: [], lighting: [], catalogIds: [], templateMaps: [] });
 
 /**
- * Holds the event kinds, palette entries, passability rules, overlays and command entries the editor knows, and the
- * maps whose events are a plugin's patterns: the core's kinds, always, and each plugin module's contributions while
- * its plugins are enabled.
+ * Reads which plugins js/plugins.js enables, by file name: {@code J-ABS} for {@code j/abs/J-ABS}.
+ * @param {readonly PluginsJsEntry[]} plugins The project's plugins.
+ * @returns {Map<string, PluginsJsEntry>} The enabled ones, by file name.
+ */
+const enabledPlugins = (plugins: readonly PluginsJsEntry[]): Map<string, PluginsJsEntry> =>
+{
+  return new Map(plugins
+    .filter(plugin => plugin.status)
+    .map(plugin => [ pluginBasename(plugin.name), plugin ]));
+};
+
+/**
+ * Holds the event kinds, palette entries, passability rules, overlays, lighting layers and command entries the editor
+ * knows, and the maps whose events are a plugin's patterns: the core's kinds, always, and each plugin module's
+ * contributions while its plugins are enabled.
  */
 class PluginModuleRegistry
 {
@@ -91,15 +106,18 @@ class PluginModuleRegistry
    * Switches on every module whose plugins are all enabled, replacing whatever an earlier activation added.
    * @param {readonly PluginModule[]} modules The modules the editor ships.
    * @param {readonly PluginsJsEntry[]} plugins The project's plugins, from {@code js/plugins.js}.
+   * @param {ReadonlyMap<string, JsonValue | null>} configs The config files the modules read, by name, as read
+   * beforehand; a module naming one missing here gets null for it. Left out, none were read.
    * @returns {ModuleActivation} Which modules are on, and what each of the others is missing.
    */
-  activate(modules: readonly PluginModule[], plugins: readonly PluginsJsEntry[]): ModuleActivation
+  activate(
+    modules: readonly PluginModule[],
+    plugins: readonly PluginsJsEntry[],
+    configs: ReadonlyMap<string, JsonValue | null> = new Map()): ModuleActivation
   {
     this.#deactivate();
 
-    const enabled = new Map(plugins
-      .filter(plugin => plugin.status)
-      .map(plugin => [ pluginBasename(plugin.name), plugin ]));
+    const enabled = enabledPlugins(plugins);
     const inactive: { id: string; missing: string[] }[] = [];
 
     modules.forEach(pluginModule =>
@@ -111,7 +129,9 @@ class PluginModuleRegistry
         return;
       }
 
-      pluginModule.register(this.#contributionsFor(pluginModule), { plugins: enabled });
+      // each module is handed the configs it named, and only those.
+      const own = new Map((pluginModule.configs ?? []).map(name => [ name, configs.get(name) ?? null ]));
+      pluginModule.register(this.#contributionsFor(pluginModule), { plugins: enabled, configs: own });
       this.#active.push(pluginModule.id);
     });
 
@@ -210,6 +230,16 @@ class PluginModuleRegistry
   }
 
   /**
+   * Lists what the active modules draw into the lighting layer, in the order they added it; empty while no module
+   * draws there, which is when no map view offers its Lighting switch.
+   * @returns {readonly LightingLayerDefinition[]} The lighting layers.
+   */
+  lightingLayers(): readonly LightingLayerDefinition[]
+  {
+    return this.#contributions.lighting;
+  }
+
+  /**
    * Builds the contribution sink one module registers through, which holds it to its own id prefix.
    * @param {PluginModule} pluginModule The module.
    * @returns {ModuleContributions} The sink.
@@ -246,6 +276,11 @@ class PluginModuleRegistry
         requirePrefix(overlay.id, 'overlays');
         this.#contributions.overlays.push(overlay);
       },
+      lightingLayer: layer =>
+      {
+        requirePrefix(layer.id, 'lighting layers');
+        this.#contributions.lighting.push(layer);
+      },
       catalogEntry: entry =>
       {
         this.#catalog.register(entry);
@@ -269,5 +304,5 @@ class PluginModuleRegistry
   }
 }
 
-export { PluginModuleRegistry };
+export { enabledPlugins, PluginModuleRegistry };
 export type { ModuleActivation };

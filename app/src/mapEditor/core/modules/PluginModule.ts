@@ -3,8 +3,10 @@ import type { PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.t
 import type { CommandCatalogEntry } from '../commands/catalogTypes.ts';
 import type { EventMarkerSymbol } from '../eventKinds/eventMarkers.ts';
 import type { MapDocumentKey } from '../model/documentKeys.ts';
+import type { JsonValue } from '../model/json.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { RmmzMapEvent, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { LightingLayerDefinition } from '../renderer/lightingLayer.ts';
 import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
 
 /**
@@ -131,6 +133,12 @@ type ModuleContext = {
    * The enabled plugins, by file name ({@code J-ABS}), with their parameters.
    */
   readonly plugins: ReadonlyMap<string, PluginsJsEntry>;
+
+  /**
+   * The project config files the module names in {@link PluginModule.configs}, read before it switches on, by the name
+   * it gave; null for a project without the file, or a file the server could not read.
+   */
+  readonly configs: ReadonlyMap<string, JsonValue | null>;
 };
 
 /**
@@ -143,6 +151,13 @@ type ModuleContributions = {
   passabilityRule(rule: PassabilityRule): void;
   overlay(overlay: OverlayDefinition): void;
   catalogEntry(entry: CommandCatalogEntry): void;
+
+  /**
+   * Draws into every map view's lighting layer, which the view's Lighting switch shows and hides as one, and which
+   * the switch is offered for only while some module draws there.
+   * @param {LightingLayerDefinition} layer What the module draws there.
+   */
+  lightingLayer(layer: LightingLayerDefinition): void;
 
   /**
    * Names a map the plugin copies events from while the game runs, such as J-ABS's action map. Its events are
@@ -175,9 +190,16 @@ type PluginModule = {
   readonly plugins: readonly string[];
 
   /**
+   * The project config files it reads, by the name the server serves each under ({@code lighting} for
+   * {@code data/config.lighting.json}). Each is read before the module switches on and handed over in its context.
+   * Left out, it reads none.
+   */
+  readonly configs?: readonly string[];
+
+  /**
    * Adds the module's contributions.
    * @param {ModuleContributions} contributions Where to add them.
-   * @param {ModuleContext} context The enabled plugins.
+   * @param {ModuleContext} context The enabled plugins, and the configs the module reads.
    */
   readonly register: (contributions: ModuleContributions, context: ModuleContext) => void;
 };

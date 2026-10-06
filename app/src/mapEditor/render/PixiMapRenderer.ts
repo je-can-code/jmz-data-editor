@@ -4,6 +4,7 @@ import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { PassabilityRule } from '../core/modules/PluginModule.ts';
 import { cellAtPoint, panBy, screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../core/renderer/camera.ts';
 import { FrameTimeRecorder, type FrameTimings } from '../core/renderer/FrameTimeRecorder.ts';
+import type { LightingLayerDefinition } from '../core/renderer/lightingLayer.ts';
 import {
   GAME_LOOK,
   NO_OVERLAY_STATE,
@@ -40,6 +41,7 @@ import { FrameLoop, type FrameWindow } from './FrameLoop.ts';
 import { AtlasChunks } from './scene/AtlasChunks.ts';
 import { EventLayer } from './scene/EventLayer.ts';
 import { GhostTiles } from './scene/GhostTiles.ts';
+import { LightingLayers } from './scene/LightingLayers.ts';
 import { markerAtlasSource } from './scene/markerAtlas.ts';
 import { ModuleOverlays } from './scene/ModuleOverlays.ts';
 import { drawPassageAtlas, drawRegionAtlas, passageMarkIndex } from './scene/overlayAtlases.ts';
@@ -239,6 +241,8 @@ class PixiMapRenderer implements MapRenderer
 
   #modules = new ModuleOverlays();
 
+  #lighting = new LightingLayers(TILE_SIZE);
+
   #atlases: { regions: TextureSource; passability: TextureSource } | null = null;
 
   /**
@@ -348,7 +352,7 @@ class PixiMapRenderer implements MapRenderer
       parallax: this.#parallax.layer,
       lowerTiles: new Container(),
       upperTiles: new Container(),
-      lighting: new Container(),
+      lighting: this.#lighting.layer,
       markers: new Container(),
       dim: new Graphics(),
       highlightTiles: new Container(),
@@ -408,12 +412,24 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * The container P9's lighting draws into: above the map and its events, below the editor's overlays.
+   * The container the plugin modules' lighting draws into: above the map and its events, below the editor's overlays,
+   * shown while the layer visibility's lighting is on.
    * @returns {Container} The layer.
    */
   get lightingLayer(): Container
   {
     return this.#slots.lighting;
+  }
+
+  /**
+   * Chooses what the plugin modules draw into the lighting layer, making each drawing once and keeping it for as long
+   * as its lighting layer is handed over again; one no longer handed over is let go.
+   * @param {readonly LightingLayerDefinition[]} definitions The lighting layers of the active modules.
+   */
+  setLightingLayers(definitions: readonly LightingLayerDefinition[]): void
+  {
+    this.#lighting.setDefinitions(definitions);
+    this.#needsRender = true;
   }
 
   /**
@@ -805,7 +821,7 @@ class PixiMapRenderer implements MapRenderer
     const saved = { camera: this.#camera, view: this.#view };
     this.#camera = { x: rect.x, y: rect.y, zoom: 1 };
     this.#view = { width: rect.width, height: rect.height };
-    this.#prepareFrame(performance.now());
+    this.#prepareFrame(performance.now(), pixi);
     this.#world.scale.set(1);
     this.#world.position.set(-rect.x, -rect.y);
     try
@@ -839,6 +855,7 @@ class PixiMapRenderer implements MapRenderer
     this.#events.destroy();
     this.#parallax.destroy();
     this.#modules.destroy();
+    this.#lighting.destroy();
     [ ...this.#sheetSources, ...this.#retiredSources ].forEach(source => source?.destroy());
     this.#sheetSources = [];
     this.#retiredSources = [];
@@ -963,7 +980,8 @@ class PixiMapRenderer implements MapRenderer
 
   /**
    * Draws again on a context that has just come up. Pixi uploads every texture and buffer afresh as the first frame
-   * draws, and edits made meanwhile, in this window or another, are already marked in the chunks they touched.
+   * draws, and edits made meanwhile, in this window or another, are already marked in the chunks they touched. What
+   * the lighting drew into render textures went with the old context, so it draws again too.
    */
   #resumeDrawing(): void
   {
@@ -972,6 +990,7 @@ class PixiMapRenderer implements MapRenderer
     this.#needsRender = true;
     this.#selectionDirty = true;
     this.#pointerDirty = true;
+    this.#lighting.markStale();
     this.#loop.start();
   }
 
@@ -1268,6 +1287,7 @@ class PixiMapRenderer implements MapRenderer
     this.#animationStart = performance.now();
     this.#animationStep = -1;
     this.#modulesDirty = true;
+    this.#lighting.markStale();
     this.#selectionDirty = true;
     this.#pointerDirty = true;
     this.#ghostsDirty = true;
@@ -1442,11 +1462,14 @@ class PixiMapRenderer implements MapRenderer
     const effect = changeEffect(change);
 
     // the modules draw from events and regions, so a tile edit that leaves the regions alone never redraws them: a
-    // brush stroke would otherwise redraw every sight ring and light on the map at every step.
+    // brush stroke would otherwise redraw every sight ring and light on the map at every step. The lighting reads no
+    // tiles at all, so no tile edit ever asks it to draw.
     if (effect.kind !== 'tiles' || this.#touchesRegions(effect.indices))
     {
       this.#modulesDirty = true;
     }
+
+    this.#lighting.hear(effect);
 
     switch (effect.kind)
     {
@@ -1617,11 +1640,13 @@ class PixiMapRenderer implements MapRenderer
 
   /**
    * Brings the scene up to date for a frame: rebuilds the map when it went stale, places a new map whole on screen,
-   * moves the animation, culls to the camera and rebuilds dirty chunks and overlays.
+   * moves the animation, culls to the camera, rebuilds dirty chunks and overlays, and lets the lighting draw when it is
+   * due.
    * @param {number} now The frame's time.
+   * @param {WebGLRenderer} pixi The renderer the frame draws with, which the lighting may draw into textures with.
    * @returns {{ changed: boolean, rebuiltChunks: number }} Whether anything changed, and how many tile chunks rebuilt.
    */
-  #prepareFrame(now: number): { changed: boolean; rebuiltChunks: number }
+  #prepareFrame(now: number, pixi: WebGLRenderer): { changed: boolean; rebuiltChunks: number }
   {
     if (this.#mapDirty)
     {
@@ -1657,6 +1682,11 @@ class PixiMapRenderer implements MapRenderer
     }
 
     changed = this.#refreshOverlays() || changed;
+    if (document !== null)
+    {
+      changed = this.#lighting.draw({ document, renderer: pixi }) || changed;
+    }
+
     return { changed, rebuiltChunks };
   }
 
@@ -1674,7 +1704,7 @@ class PixiMapRenderer implements MapRenderer
 
     const started = performance.now();
     this.#beforeFrameListeners.forEach(listener => listener(time));
-    const { changed, rebuiltChunks } = this.#prepareFrame(started);
+    const { changed, rebuiltChunks } = this.#prepareFrame(started, pixi);
     if (changed === false && this.#needsRender === false)
     {
       return;

@@ -18,7 +18,8 @@ import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { marksOf, TILESET_MARKS_DOCUMENT } from '../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
-import type { MarkerClassifier, OverlaySet, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import type { LightingLayerDefinition } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
+import type { LayerVisibility, MarkerClassifier, OverlaySet, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { WindowPaints } from '../../../src/mapEditor/core/tools/WindowPaint.ts';
 import { MapEditorApp } from '../../../src/mapEditor/MapEditorApp.tsx';
 import { MapView, mapIdFromQuery } from '../../../src/mapEditor/render/MapView.tsx';
@@ -28,14 +29,17 @@ import { buildMapJson } from '../support/fixtures.ts';
 
 /**
  * What the stand-in renderers and controllers record and answer: every renderer made, what each was asked to show
- * and where to look, the overlay switches and marker classifiers it was handed, what it was told of the view being on
- * screen (with "mount" where it was mounted), ways to change its draw state and its zoom, and the maps an open lands on.
+ * and where to look, the overlay switches, layer visibilities, lighting layers and marker classifiers it was handed,
+ * what it was told of the view being on screen (with "mount" where it was mounted), ways to change its draw state and
+ * its zoom, and the maps an open lands on.
  */
 const stand = vi.hoisted(() => ({
   renderers: [] as {
     overlays: OverlayState[];
     looks: { cell: MapCell; zoom: number }[];
     overlaySets: OverlaySet[];
+    visibilities: LayerVisibility[];
+    lighting: (readonly LightingLayerDefinition[])[];
     classifiers: MarkerClassifier[];
     shown: (boolean | 'mount')[];
     announce: (state: string) => void;
@@ -57,6 +61,8 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       overlays: [] as OverlayState[],
       looks: [] as { cell: MapCell; zoom: number }[],
       overlaySets: [] as OverlaySet[],
+      visibilities: [] as LayerVisibility[],
+      lighting: [] as (readonly LightingLayerDefinition[])[],
       classifiers: [] as MarkerClassifier[],
       shown: [] as (boolean | 'mount')[],
       announce: (state: string) =>
@@ -137,9 +143,14 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       return null;
     }
 
-    setLayerVisibility(): void
+    setLayerVisibility(visibility: LayerVisibility): void
     {
-      // the switches are not what these tests look at.
+      this.record.visibilities.push(visibility);
+    }
+
+    setLightingLayers(definitions: readonly LightingLayerDefinition[]): void
+    {
+      this.record.lighting.push(definitions);
     }
 
     setOverlays(overlays: OverlaySet): void
@@ -223,6 +234,10 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * Events that draw no picture show markers from the start, picking their symbol by the kind the window's registry makes
  * of them, or by their trigger when no kind claims them; the registry reads events differently once the plugin modules
  * switch on, after js/plugins.js is read, so the renderer is handed the classifier again then and redraws the markers.
+ *
+ * What the modules draw into the lighting layer is handed to the renderer from the start and again as they switch on,
+ * and the bar offers its Lighting switch, after Shadows, only while some module draws there: a project without such a
+ * plugin never sees a switch that does nothing. That one switch shows and hides the whole lighting layer.
  */
 describe('MapView', () =>
 {
@@ -238,6 +253,19 @@ describe('MapView', () =>
   });
 
   /**
+   * A window's plugin modules with none switched on: no kind claims any event, nothing draws into the lighting layer,
+   * and nothing ever switches on.
+   */
+  const NO_MODULES = {
+    overlays: () => [],
+    passabilityRules: () => [],
+    kindOf: () => null,
+    subscribe: () => () => undefined,
+    revision: 0,
+    lightingLayers: () => [],
+  };
+
+  /**
    * Builds services with no project server behind them.
    * @returns {MapEditorServices} The services.
    */
@@ -249,18 +277,49 @@ describe('MapView', () =>
     const openDocument = vi.fn(() => Promise.reject(new Error('no documents in this test')));
     const paints = new WindowPaints(window);
     const locationPicks = new LocationPicks();
-    return { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
+    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES };
+    return { ...services, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
   };
 
   /**
-   * Builds services with a project server behind them, and no plugin modules: no kind claims any event, and nothing
-   * ever switches on.
+   * Builds services with a project server behind them, and no plugin modules.
    * @returns {MapEditorServices} The services.
    */
   const served = (): MapEditorServices =>
   {
-    const modules = { overlays: () => [], passabilityRules: () => [], kindOf: () => null, subscribe: () => () => undefined };
-    return { ...serverless(), api: {} as MapEditorApi, modules } as unknown as MapEditorServices;
+    return { ...serverless(), api: {} as MapEditorApi } as unknown as MapEditorServices;
+  };
+
+  /**
+   * A window's plugin modules that switch on when the test says, and from then on light the map with one lighting
+   * layer, as J-Lighting's module does.
+   * @returns {{ modules: object, light: LightingLayerDefinition, switchOn: () => void }} The modules, what they draw
+   * once on, and the switch.
+   */
+  const lightingModules = () =>
+  {
+    const listeners = new Set<() => void>();
+    const light: LightingLayerDefinition = { id: 'lighting.rings', title: 'Light rings', create: () => ({ draw: () => undefined, destroy: () => undefined }) };
+    const modules = {
+      ...NO_MODULES,
+      layers: [] as LightingLayerDefinition[],
+      lightingLayers()
+      {
+        return this.layers;
+      },
+      subscribe: (listener: () => void) =>
+      {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const switchOn = () =>
+    {
+      modules.layers = [ light ];
+      modules.revision += 1;
+      listeners.forEach(listener => listener());
+    };
+    return { modules, light, switchOn };
   };
 
   describe('mapIdFromQuery', () =>
@@ -526,8 +585,7 @@ describe('MapView', () =>
     // test raises; event 2 starts on autorun, and event 3 on a player's touch.
     const activations = new Set<() => void>();
     const modules = {
-      overlays: () => [],
-      passabilityRules: () => [],
+      ...NO_MODULES,
       kindOf: (event: RmmzMapEvent) => (event.id === 1 ? { marker: 'chest' } : null),
       subscribe: (listener: () => void) =>
       {
@@ -589,5 +647,47 @@ describe('MapView', () =>
     const seed = { tilesets: { '1': { tiles: [ cliffCorner ], kinds: [] } } };
     expect([ saves, marksOf(hub.document(TILESET_MARKS_DOCUMENT)) ])
       .toStrictEqual([ [ { schemaVersion: 1, data: seed } ], seed ]);
+  });
+
+  it('offers Lighting after Shadows once a module lights the map, and hands the renderer what it draws there', () =>
+  {
+    // Arrange: a view over a project whose lighting module switches on after the view first drew.
+    const { modules, light, switchOn } = lightingModules();
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const before = screen.queryByText('Lighting');
+
+    // Act.
+    act(() => switchOn());
+
+    // Assert: no switch before, the switch right after Shadows once on, and the renderer handed nothing, then the light.
+    const labels = screen.getAllByRole('button').map(chip => chip.textContent);
+    expect([ before, labels.slice(labels.indexOf('Shadows'), labels.indexOf('Shadows') + 2), stand.renderers[0].lighting ])
+      .toStrictEqual([ null, [ 'Shadows', 'Lighting' ], [ [], [ light ] ] ]);
+  });
+
+  it('hides the whole lighting layer with the Lighting switch', () =>
+  {
+    // Arrange: a view whose lighting module is already on.
+    const { modules, switchOn } = lightingModules();
+    switchOn();
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act.
+    act(() => screen.getByText('Lighting').click());
+
+    // Assert: the layer showed from the start, and the switch hid it.
+    const { visibilities } = stand.renderers[0];
+    expect([ visibilities[0].layers.lighting, visibilities.at(-1)?.layers.lighting ])
+      .toStrictEqual([ true, false ]);
   });
 });

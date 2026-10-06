@@ -19,7 +19,7 @@ import type { DrawState } from './ContextKeeper.ts';
 import {
   flipSwitch,
   isSwitchOn,
-  SETTING_SWITCHES,
+  shownSwitches,
   TILE_LAYERS,
   toggleHighlight,
   type MapViewSettings,
@@ -197,9 +197,9 @@ const DrawNotice = (props: { state: DrawState }) =>
 
 /**
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
- * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look,
- * the painting tools, and a status line naming the zoom, the tile under the pointer, how many events are selected and
- * the GPU drawing it.
+ * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look
+ * (Lighting among them while a plugin module lights the map), the painting tools, and a status line naming the zoom,
+ * the tile under the pointer, how many events are selected and the GPU drawing it.
  *
  * The view paints with its window's paint: the page's own for a map docked in the main window, and a torn-out window's
  * own for a map torn out, so each window's palette, layer strip and tools go together and no further.
@@ -231,6 +231,11 @@ const MapView = (props: MapViewProps) =>
   const [ ownSelection ] = useState(() => new EventSelection());
   const selection = props.selection ?? ownSelection;
   const selected = useSyncExternalStore(selection.subscribe, selection.get);
+
+  // the plugin modules switch on once js/plugins.js is read, which can be after the bar first drew; whether any of them
+  // lights the map decides whether the bar offers its Lighting switch.
+  useSyncExternalStore(services.modules.subscribe, () => services.modules.revision);
+  const switches = shownSwitches(services.modules.lightingLayers().length > 0);
   const [ openMap, setOpenMap ] = useState<MapDocument | null>(null);
   const [ status, setStatus ] = useState<MapViewStatus>({ gpu: '', zoom: 1, cell: null, problem: null, note: '' });
   const [ settings, setSettings ] = useState<MapViewSettings>({ visibility: GAME_LOOK, overlays: new Set(STARTING_OVERLAYS) });
@@ -271,6 +276,10 @@ const MapView = (props: MapViewProps) =>
     const classify = markerClassifierFor(services.modules);
     renderer.setEventMarkers(classify);
     stops.push(services.modules.subscribe(() => renderer.setEventMarkers(classify)));
+
+    // the lighting layer holds what the plugin modules draw there, which changes as they switch on and off.
+    renderer.setLightingLayers(services.modules.lightingLayers());
+    stops.push(services.modules.subscribe(() => renderer.setLightingLayers(services.modules.lightingLayers())));
     stops.push(renderer.onCameraChange((camera: Camera) =>
     {
       setStatus(current => (current.zoom === camera.zoom ? current : { ...current, zoom: camera.zoom }));
@@ -475,7 +484,7 @@ const MapView = (props: MapViewProps) =>
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5, px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
-        {SETTING_SWITCHES.map(setting => (
+        {switches.map(setting => (
           <Chip
             color={isSwitchOn(settings, setting) ? 'primary' : 'default'}
             key={setting.label}

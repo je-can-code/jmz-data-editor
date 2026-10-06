@@ -159,6 +159,15 @@ interface MapEditorApi
   loadPluginList(): Promise<string>;
 
   /**
+   * Reads one of the project's plugin config files, such as {@code data/config.lighting.json}, which the plugin modules
+   * draw with. Optional, so a client that cannot read them still serves everything else; a module without its config
+   * falls back as its plugin would.
+   * @param {string} name The name the server serves the file under: {@code lighting} for config.lighting.json.
+   * @returns {Promise<JsonValue>} The file's content; rejects for a project without the file.
+   */
+  loadPluginConfig?(name: string): Promise<JsonValue>;
+
+  /**
    * Reads an editor-only document.
    * @param {string} key Its name: lowercase letters, digits and hyphens.
    * @returns {Promise<JsonValue | null>} The document, or null when none has been saved yet.
@@ -286,6 +295,22 @@ const requireEditorDataKey = (key: string): string =>
   }
 
   return key;
+};
+
+/**
+ * Checks a plugin config's name before it becomes part of a URL: the server serves each config under a name of
+ * lowercase letters, digits and hyphens, so nothing else could name one.
+ * @param {string} name The name.
+ * @returns {string} The same name.
+ */
+const requireConfigName = (name: string): string =>
+{
+  if (/^[a-z0-9-]+$/u.test(name) === false)
+  {
+    throw new MapEditorApiError(`a config's name is lowercase letters, digits and hyphens, not "${name}"`, 0);
+  }
+
+  return name;
 };
 
 /**
@@ -444,6 +469,11 @@ class HttpMapEditorApi implements MapEditorApi
     const response = await this.#fetch(`${this.#base}/api/plugin-metadata`, { method: 'GET' });
     await this.#requireOk(response, 'GET plugin-metadata');
     return response.text();
+  }
+
+  async loadPluginConfig(name: string): Promise<JsonValue>
+  {
+    return this.#getJson<JsonValue>(`/api/config/${requireConfigName(name)}`);
   }
 
   async loadEditorData(key: string): Promise<JsonValue | null>
