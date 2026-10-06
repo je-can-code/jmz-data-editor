@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { pluginCommandEntry } from '../../../../src/mapEditor/core/commands/pluginCommands.ts';
 import { createMapEvent, pageCommentText } from '../../../../src/mapEditor/core/model/eventModel.ts';
-import type { EventKindDefinition, PluginModule } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
-import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
+import type { EventKindDefinition, ModuleContext, PluginModule } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
+import { enabledPlugins, PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
 
@@ -11,11 +12,14 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * The core editor works on any MZ project; each plugin's awareness is its own module, switched on only when that
  * plugin is enabled in js/plugins.js. The registry owes the editor exactly that: a module whose plugin is off (or
  * missing, or only a near namesake like J-ABS-Metrics) contributes nothing, a module that is on contributes its
- * kinds, palette entries, passability rules, overlays and command entries, a module can never claim a core kind,
- * and the core's own kinds are on in every project. When several kinds recognise one event, the higher priority
- * wins, since a battler is also a comment-only event. A map an active module copies its events from, such as J-ABS's
- * action map, holds the plugin's patterns, so no kind claims an event there. Every activation is announced, since
- * modules switch on after the views that show kinds have drawn.
+ * kinds, palette entries, passability rules, overlays, lighting layers and command entries, a module can never claim
+ * a core kind, and the core's own kinds are on in every project. When several kinds recognise one event, the higher
+ * priority wins, since a battler is also a comment-only event. A map an active module copies its events from, such as
+ * J-ABS's action map, holds the plugin's patterns, so no kind claims an event there. Every activation is announced,
+ * since modules switch on after the views that show kinds have drawn.
+ *
+ * A module naming project config files gets each one as it was read before switching on, and null for one that was
+ * not, and never another module's.
  */
 describe('PluginModuleRegistry', () =>
 {
@@ -65,6 +69,7 @@ describe('PluginModuleRegistry', () =>
       contributions.paletteEntry({ id: 'jabs.battler', title: 'Battler', kind: 'jabs.battler', createEvent: createMapEvent });
       contributions.passabilityRule({ id: 'jabs.blocked', title: 'Blocked', deny: () => null });
       contributions.overlay({ id: 'jabs.pursuit', title: `Pursuit (${context.plugins.get('J-ABS')?.parameters['actionMapId']})`, defaultOn: false, draw: () => undefined });
+      contributions.lightingLayer({ id: 'jabs.glow', title: 'Glow', create: () => ({ draw: () => undefined, destroy: () => undefined }) });
       contributions.catalogEntry(pluginCommandEntry({ plugin: 'J-ABS', command: 'spawn', args: [] }));
     },
   });
@@ -88,6 +93,7 @@ describe('PluginModuleRegistry', () =>
       registry.passabilityRules().map(rule => rule.id),
       registry.overlays().map(overlay => overlay.id),
       registry.overlays()[0].title,
+      registry.lightingLayers().map(layer => layer.id),
       catalog.entry('plugin:J-ABS:spawn')?.name,
     ])
       .toStrictEqual([
@@ -98,6 +104,7 @@ describe('PluginModuleRegistry', () =>
         [ 'jabs.blocked' ],
         [ 'jabs.pursuit', 'jabs.sight' ],
         'Pursuit (2)',
+        [ 'jabs.glow' ],
         'Plugin: spawn',
       ]);
   });
@@ -139,8 +146,47 @@ describe('PluginModuleRegistry', () =>
     registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', false) ]);
 
     // Assert.
-    expect([ registry.isActive('jabs'), registry.eventKinds().map(kind => kind.id), registry.overlays(), catalog.entry('plugin:J-ABS:spawn') ])
-      .toStrictEqual([ false, [ 'core.decor' ], [], null ]);
+    expect([
+      registry.isActive('jabs'),
+      registry.eventKinds().map(kind => kind.id),
+      registry.overlays(),
+      registry.lightingLayers(),
+      catalog.entry('plugin:J-ABS:spawn'),
+    ])
+      .toStrictEqual([ false, [ 'core.decor' ], [], [], null ]);
+  });
+
+  it('hands a module each config it names as it was read, null for one that was not, and no other module\'s', () =>
+  {
+    // Arrange: a module naming its own config and one never read, beside another module's config.
+    const register = vi.fn();
+    const lighting: PluginModule = { id: 'lighting', title: 'Lighting', plugins: [ 'J-Lighting' ], configs: [ 'lighting', 'lighting-time' ], register };
+    const read = new Map<string, JsonValue | null>([ [ 'lighting', { light: { color: '#ffbb73' } } ], [ 'jabs', { teams: [] } ] ]);
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+
+    // Act.
+    registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', true) ], read);
+
+    // Assert.
+    const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+    expect([ ...context.configs ])
+      .toStrictEqual([ [ 'lighting', { light: { color: '#ffbb73' } } ], [ 'lighting-time', null ] ]);
+  });
+
+  it('hands a module naming no configs none, whatever was read', () =>
+  {
+    // Arrange.
+    const register = vi.fn();
+    const plain: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register };
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+
+    // Act.
+    registry.activate([ plain ], [ plugin('j/abs/J-ABS', true) ], new Map([ [ 'jabs', { teams: [] } ] ]));
+
+    // Assert.
+    const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+    expect(context.configs.size)
+      .toBe(0);
   });
 
   it('gives an event the highest-priority kind that recognises it', () =>
@@ -218,6 +264,7 @@ describe('PluginModuleRegistry', () =>
       { id: 'b', title: 'B', plugins: [], register: add => add.paletteEntry({ id: 'chest', title: 'x', kind: 'x', createEvent: createMapEvent }) },
       { id: 'c', title: 'C', plugins: [], register: add => add.passabilityRule({ id: 'core.x', title: 'x', deny: () => null }) },
       { id: 'd', title: 'D', plugins: [], register: add => add.overlay({ id: 'grid.x', title: 'x', defaultOn: false, draw: () => undefined }) },
+      { id: 'e', title: 'E', plugins: [], register: add => add.lightingLayer({ id: 'core.x', title: 'x', create: () => ({ draw: () => undefined, destroy: () => undefined }) }) },
     ];
 
     // Act.
@@ -232,6 +279,24 @@ describe('PluginModuleRegistry', () =>
       .toThrow('c can only add passability rules whose id starts with "c.", not core.x');
     expect(failures[3])
       .toThrow('d can only add overlays whose id starts with "d.", not grid.x');
+    expect(failures[4])
+      .toThrow('e can only add lighting layers whose id starts with "e.", not core.x');
+  });
+
+  describe('enabledPlugins', () =>
+  {
+    it('reads the enabled plugins by file name, leaving out the disabled', () =>
+    {
+      // Arrange: two enabled in folders, one disabled beside them.
+      const plugins = [ plugin('j/base/J-Base', true), plugin('j/abs/J-ABS', false), plugin('j/lighting/J-Lighting', true) ];
+
+      // Act.
+      const enabled = enabledPlugins(plugins);
+
+      // Assert.
+      expect([ ...enabled.keys() ])
+        .toStrictEqual([ 'J-Base', 'J-Lighting' ]);
+    });
   });
 
   it('refuses a core kind that is not named as one, or registered twice', () =>

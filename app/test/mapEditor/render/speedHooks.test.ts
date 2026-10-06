@@ -2,16 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import { screenToWorld } from '../../../src/mapEditor/core/renderer/camera.ts';
-import type { OverlayPainter } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import { GAME_LOOK, type OverlayPainter } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { makeAutotileId } from '../../../src/mapEditor/core/tiles/tileIds.ts';
 import { fitZoom } from '../../../src/mapEditor/render/cameraControls.ts';
-import { cameraOnPath, ringsOverlay, unusedGroundKind, wantsSpeedHooks } from '../../../src/mapEditor/render/speedHooks.ts';
+import { cameraOnPath, parityLook, ringsOverlay, unusedGroundKind, wantsSpeedHooks } from '../../../src/mapEditor/render/speedHooks.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 
 /*
  * The speed script drives the page through hooks that exist only when the page was opened for measuring, and its
  * camera paths decide what the budgets are measured on: a pan at zoom 1, a zoom sweep between 2x and the whole map,
  * and the whole map held on screen. If a path never reached the whole map, the budget for it would pass untested.
+ *
+ * The parity check holds the editor's drawing against the game's own, which it runs with no shadows and no lighting,
+ * so the editor draws neither then, however many lights the map holds.
  */
 describe('speedHooks', () =>
 {
@@ -97,6 +100,24 @@ describe('speedHooks', () =>
       // Assert.
       expect(kind)
         .toBe(18);
+    });
+  });
+
+  describe('parityLook', () =>
+  {
+    it('draws the game look with the events asked for, and neither shadows nor lighting', () =>
+    {
+      // Arrange: a parity frame with its events, and one without.
+
+      // Act.
+      const looks = [ parityLook(true), parityLook(false) ];
+
+      // Assert.
+      expect(looks.map(look => look.layers))
+        .toStrictEqual([
+          { ...GAME_LOOK.layers, events: true, shadows: false, lighting: false },
+          { ...GAME_LOOK.layers, events: false, shadows: false, lighting: false },
+        ]);
     });
   });
 

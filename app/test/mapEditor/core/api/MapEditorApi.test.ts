@@ -493,6 +493,40 @@ describe('HttpMapEditorApi', () =>
     });
   });
 
+  describe('plugin configs', () =>
+  {
+    it('reads a plugin config from its route and unwraps the envelope', async () =>
+    {
+      // Arrange.
+      const config = { light: { color: '#ffbb73' }, ambient: { color: '#000000' } };
+      const { api, requests } = buildApi(() => envelope(config));
+
+      // Act.
+      const loaded = await api.loadPluginConfig('lighting');
+
+      // Assert.
+      expect([ loaded, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ config, [ `GET ${BASE}/api/config/lighting` ] ]);
+    });
+
+    it('refuses a config name no route could have, before asking the server', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(() => envelope({}));
+
+      // Act.
+      const attempts = [ api.loadPluginConfig('Lighting'), api.loadPluginConfig('../System') ];
+
+      // Assert.
+      await expect(attempts[0])
+        .rejects.toThrow('a config\'s name is lowercase letters, digits and hyphens, not "Lighting"');
+      await expect(attempts[1])
+        .rejects.toThrow('a config\'s name is lowercase letters, digits and hyphens, not "../System"');
+      expect(requests)
+        .toHaveLength(0);
+    });
+  });
+
   describe('editor data', () =>
   {
     it('reads a saved document, and null for one never saved', async () =>

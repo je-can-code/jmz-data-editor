@@ -4,6 +4,7 @@
 import type { Container } from 'pixi.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
+import type { LightingLayerDefinition, LightingStage } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { GAME_LOOK } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { PixiMapRenderer } from '../../../src/mapEditor/render/PixiMapRenderer.ts';
 import { buildMapJson } from '../support/fixtures.ts';
@@ -19,6 +20,10 @@ import { buildMapJson } from '../support/fixtures.ts';
  * The markers of events that draw no picture sit over every event, the tiles above characters and the lighting, so
  * nothing of the game hides them, and under the dimming and the editor's other overlays; they show only while the
  * events do and the markers overlay is on, which keeps them out of anything drawn as the game would draw it.
+ *
+ * What the plugin modules light the map with draws inside the lighting layer, each module's drawing on a container of
+ * its own, made once and let go with the renderer; the whole layer shows only while the layer visibility's lighting is
+ * on, which is what the view's Lighting switch flips.
  */
 describe('PixiMapRenderer', () =>
 {
@@ -83,6 +88,51 @@ describe('PixiMapRenderer', () =>
     // Assert.
     expect(shown)
       .toStrictEqual([ true, false, false ]);
+  });
+
+  it('makes each module\'s lighting on a container of its own inside the lighting layer, and lets it go with the renderer', () =>
+  {
+    // Arrange: a lighting layer whose drawing notes where it was made and when it is let go.
+    const renderer = new PixiMapRenderer();
+    const stages: LightingStage[] = [];
+    const destroyed: string[] = [];
+    const rings: LightingLayerDefinition = {
+      id: 'lighting.rings',
+      title: 'Light rings',
+      create: stage =>
+      {
+        stages.push(stage);
+        return { draw: () => undefined, destroy: () => destroyed.push('rings') };
+      },
+    };
+
+    // Act.
+    renderer.setLightingLayers([ rings ]);
+    const children = [ ...renderer.lightingLayer.children ];
+    renderer.destroy();
+
+    // Assert.
+    expect([ children, stages.map(stage => stage.tileSize), destroyed ])
+      .toStrictEqual([ [ stages[0].layer ], [ 48 ], [ 'rings' ] ]);
+  });
+
+  it('shows the lighting layer only while the layer visibility\'s lighting is on', () =>
+  {
+    // Arrange.
+    const renderer = new PixiMapRenderer();
+    built.push(renderer);
+    const shown: boolean[] = [];
+
+    // Act: the game look, then lighting off, then on again.
+    shown.push(renderer.lightingLayer.visible);
+    renderer.setLayerVisibility({ ...GAME_LOOK, layers: { ...GAME_LOOK.layers, lighting: false } });
+    shown.push(renderer.lightingLayer.visible);
+    renderer.setLayerVisibility(GAME_LOOK);
+    shown.push(renderer.lightingLayer.visible);
+
+    // Assert.
+    expect(shown)
+      .toStrictEqual([ true, false, true ]);
   });
 
   it('zooms about the pointer\'s own spot when the wheel reports a whole-pixel spot beside it', () =>

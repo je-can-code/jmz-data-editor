@@ -686,7 +686,7 @@ describe('MapView', () =>
     act(() => screen.getByText('Lighting').click());
 
     // Assert: the layer showed from the start, and the switch hid it.
-    const { visibilities } = stand.renderers[0];
+    const [ { visibilities } ] = stand.renderers;
     expect([ visibilities[0].layers.lighting, visibilities.at(-1)?.layers.lighting ])
       .toStrictEqual([ true, false ]);
   });
