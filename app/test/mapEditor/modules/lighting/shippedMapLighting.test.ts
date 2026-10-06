@@ -156,6 +156,21 @@ const addedWrongly = (before: string, after: string, line: string): string | nul
 };
 
 /**
+ * Says what is wrong with a line taken out of a note, if anything: the note must be exactly what taking the line out by
+ * hand leaves.
+ * @param {string} before The note before.
+ * @param {string} after The note after.
+ * @param {string} line The line taken out.
+ * @returns {string | null} What is wrong, or null when nothing is.
+ */
+const cutWrongly = (before: string, after: string, line: string): string | null =>
+{
+  return after === lineCut(before, line)
+    ? null
+    : `${JSON.stringify(before)} became ${JSON.stringify(after)}`;
+};
+
+/**
  * Reads what a note's settings come to: how dark, the colour as written, and whether the sky follows the clock.
  * @param {string} note The note.
  * @returns {{ darkness: MapDarkness, sky: boolean }} The settings.
@@ -194,7 +209,7 @@ const darknessProblems = (map: ShippedNote): { checked: number; problems: string
     }
     else if (line !== null)
     {
-      shape = after === lineCut(note, line) ? null : `${note} became ${after}`;
+      shape = cutWrongly(note, after, line);
     }
     else
     {
@@ -278,7 +293,7 @@ const skyProblems = (map: ShippedNote): { checked: number; problems: string[] } 
   // a sky stilled gains the tag at the end; a sky following the clock again loses its tag whole.
   const shape = was.sky
     ? addedWrongly(note, after, NO_SKY_LINE)
-    : (after === lineCut(note, NO_SKY_LINE) ? null : `${note} became ${after}`);
+    : cutWrongly(note, after, NO_SKY_LINE);
 
   // stilling it and letting it go again puts back the bytes; letting it go and stilling it again puts the tag last.
   const roundTrip = was.sky
