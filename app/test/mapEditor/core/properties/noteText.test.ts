@@ -302,6 +302,32 @@ describe('noteText', () =>
       expect([ ...meta ])
         .toStrictEqual([ [ 'noToneChange', '' ], [ 'weather', 'fog' ] ]);
     });
+
+    it('keeps each name in its own case and each value exactly as written after its colon, among other words', () =>
+    {
+      // Arrange: one name in two cases, the lower written twice, and a value with a space before it on a line of words.
+      const note = '<level:3><Level:4><level:5>\nthe cave <zoom: 2> below';
+
+      // Act.
+      const meta = noteMetaOf(note);
+
+      // Assert.
+      expect([ ...meta ])
+        .toStrictEqual([ [ 'level', '5' ], [ 'Level', '4' ], [ 'zoom', ' 2' ] ]);
+    });
+
+    it('reads nothing from a bracket no closing one follows', () =>
+    {
+      // Arrange: a tag, then a bracket left open to the end of the note.
+      const note = '<weather:fog>\nthe gate < the wall';
+
+      // Act.
+      const meta = noteMetaOf(note);
+
+      // Assert.
+      expect([ ...meta ])
+        .toStrictEqual([ [ 'weather', 'fog' ] ]);
+    });
   });
 
   describe('keepsOtherMeta', () =>

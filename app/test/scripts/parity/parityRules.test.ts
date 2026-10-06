@@ -8,7 +8,6 @@ import {
   explainCell,
   explainDarkCell,
   gameParityHolds,
-  hasSkyOver,
   lightReaches,
   probeMapFor,
   skyProbeMapFor,
@@ -282,22 +281,6 @@ describe('parityRules', () =>
       // Assert.
       expect(verdicts)
         .toStrictEqual([ true, false, false, false, false ]);
-    });
-  });
-
-  describe('hasSkyOver', () =>
-  {
-    it('puts a map under the sky unless its note takes it out, read as the engine reads a note\'s tags', () =>
-    {
-      // Arrange: a field; a cave; a near miss in another case.
-      const maps = [ mapFile(10, 10, {}, ''), mapFile(10, 10, {}, '<noToneChange>'), mapFile(10, 10, {}, '<NoToneChange>') ];
-
-      // Act.
-      const skies = maps.map(hasSkyOver);
-
-      // Assert.
-      expect(skies)
-        .toStrictEqual([ true, false, true ]);
     });
   });
 

@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { LightingClock } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
-import { hasSky, skyAmbient, skyToneOf, TIME_SOURCE } from '../../../../src/mapEditor/modules/lighting/sky.ts';
+import { skyAmbient, skyToneOf, TIME_SOURCE } from '../../../../src/mapEditor/modules/lighting/sky.ts';
 import type { SkyCurve } from '../../../../src/mapEditor/modules/lighting/timeTone.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
 /*
  * The sky over a map follows the window's clock as J-Lighting-Time declares it. Every map lies under the sky unless its
- * note carries <noToneChange>, read as the engine reads a note's tags: case and all, bare or with any text after a
- * colon. Over a map with a sky, the clock's hour darkens by the curve, under the time source and naming no colour of its
- * own, declared even when it takes nothing away, as the plugin declares it; and casts the curve's tone, a phase tinting
- * nothing casting a tone of zeroes. Over a map with no sky, the clock declares nothing at all and casts no tone, which is
- * not the same as declaring nothing dark: the map's own darkness then stands alone.
+ * note carries <noToneChange>, read by the one reader of that tag (its own tests hold how the engine reads it). Over a
+ * map with a sky, the clock's hour darkens by the curve, under the time source and naming no colour of its own, declared
+ * even when it takes nothing away, as the plugin declares it; and casts the curve's tone, a phase tinting nothing
+ * casting a tone of zeroes. Over a map with no sky, the clock declares nothing at all and casts no tone, which is not the
+ * same as declaring nothing dark: the map's own darkness then stands alone.
  */
 
 /**
@@ -49,48 +49,6 @@ const mapNoted = (note: string): MapDocument =>
 
 describe('sky', () =>
 {
-  describe('hasSky', () =>
-  {
-    it('puts every map under the sky unless its note takes it out', () =>
-    {
-      // Arrange: a field with nothing in its note, and one with another plugin's tags.
-      const maps = [ mapNoted(''), mapNoted('<ambient:[30]>\n<zoom:2>') ];
-
-      // Act.
-      const skies = maps.map(hasSky);
-
-      // Assert.
-      expect(skies)
-        .toStrictEqual([ true, true ]);
-    });
-
-    it('takes a map out from under the sky with the tag bare, with text after a colon, or beside other words', () =>
-    {
-      // Arrange: bare; with false written after it, which still reads as on; on a line shared with other words.
-      const maps = [ mapNoted('<noToneChange>'), mapNoted('<noToneChange:false>'), mapNoted('a cave <noToneChange> below') ];
-
-      // Act.
-      const skies = maps.map(hasSky);
-
-      // Assert.
-      expect(skies)
-        .toStrictEqual([ false, false, false ]);
-    });
-
-    it('leaves a map under the sky for a near miss: another case, or a colon with nothing after it', () =>
-    {
-      // Arrange.
-      const maps = [ mapNoted('<NoToneChange>'), mapNoted('<notonechange>'), mapNoted('<noToneChange:>') ];
-
-      // Act.
-      const skies = maps.map(hasSky);
-
-      // Assert.
-      expect(skies)
-        .toStrictEqual([ true, true, true ]);
-    });
-  });
-
   describe('skyAmbient', () =>
   {
     it('darkens a map with a sky by the curve at the clock\'s hour, naming no colour, under the time source', () =>

@@ -4,11 +4,10 @@
  * explains a difference in the events pass and in the dark and sky passes, how the game copy's lights are held steady,
  * and which differences the engine predicts against snapshot.js.
  */
-import { hasMetaFlag } from '../../app/src/mapEditor/core/model/noteMeta.ts';
 import type { RmmzMapEvent } from '../../app/src/mapEditor/core/model/rmmzTypes.ts';
 import { ambientPayloadOf } from '../../app/src/mapEditor/modules/lighting/ambientTags.ts';
-import { NO_TONE_CHANGE } from '../../app/src/mapEditor/modules/lighting/sky.ts';
 import { firstLitPage, lightsOf, PLUGIN_DEFAULTS } from '../../app/src/mapEditor/modules/lighting/lightTags.ts';
+import { NO_SKY_TAG, skyFollowsClock } from '../../app/src/mapEditor/modules/lighting/skyTag.ts';
 import type { ProbeEvent, ProbeMap } from './probeTypes.ts';
 
 /**
@@ -147,20 +146,9 @@ const eventsKeyOf = (capture: { readonly mapId: number; readonly time?: number }
 };
 
 /**
- * Reports whether a map lies under the sky, as J-Lighting-Time reads it from the map's meta: unless its note carries
- * <noToneChange>.
- * @param {MapFile} map The map.
- * @returns {boolean} True when the clock casts its sky over it.
- */
-const hasSkyOver = (map: MapFile): boolean =>
-{
-  return hasMetaFlag(map.note, NO_TONE_CHANGE) === false;
-};
-
-/**
  * Builds what the probe draws for one map under its sky at a time of day: the same views and steps as any pass over the
- * map, drawn at that time. A map with no sky has nothing the clock changes, so it is refused, rather than compared at an
- * hour it ignores and reported as though the sky matched.
+ * map, drawn at that time. A map with no sky, read from its note as the editor's sky reads it, has nothing the clock
+ * changes, so it is refused, rather than compared at an hour it ignores and reported as though the sky matched.
  * @param {number} mapId The map.
  * @param {MapFile} map Its file.
  * @param {{ width: number, height: number }} screen The game's screen, in pixels.
@@ -169,9 +157,10 @@ const hasSkyOver = (map: MapFile): boolean =>
  */
 const skyProbeMapFor = (mapId: number, map: MapFile, screen: { width: number; height: number }, time: number): ProbeMap =>
 {
-  if (hasSkyOver(map) === false)
+  // a cave or an interior keeps its sky still at every hour, so it has no sky to compare.
+  if (skyFollowsClock(map.note) === false)
   {
-    throw new Error(`Map${String(mapId).padStart(3, '0')} has no sky to compare: its note carries <${NO_TONE_CHANGE}>`);
+    throw new Error(`Map${String(mapId).padStart(3, '0')} has no sky to compare: its note carries ${NO_SKY_TAG}`);
   }
 
   return { ...probeMapFor(mapId, map, screen), dark: false, time };
@@ -367,7 +356,6 @@ export {
   explainCell,
   explainDarkCell,
   gameParityHolds,
-  hasSkyOver,
   lightReaches,
   probeMapFor,
   skyProbeMapFor,

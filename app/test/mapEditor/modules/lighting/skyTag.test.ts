@@ -31,17 +31,18 @@ describe('skyTag', () =>
         .toStrictEqual([ true, true, true, true, true ]);
     });
 
-    it('keeps still on a map tagged with no sky, whatever the tag goes on to say', () =>
+    it('keeps still on a map tagged with no sky, wherever the tag sits and whatever it goes on to say', () =>
     {
-      // Arrange: the bare tag among others; a written value, which the game reads as true however it reads.
-      const notes = [ '<noWeather>\n<noToneChange>\n<ambient:[85]>', '<noToneChange:false>' ];
+      // Arrange: the bare tag among others; a written value, which the game reads as true however it reads; the tag on a
+      // line shared with other words, which the engine's one search over the note finds all the same.
+      const notes = [ '<noWeather>\n<noToneChange>\n<ambient:[85]>', '<noToneChange:false>', 'a cave <noToneChange> below' ];
 
       // Act.
       const follows = notes.map(skyFollowsClock);
 
       // Assert.
       expect(follows)
-        .toStrictEqual([ false, false ]);
+        .toStrictEqual([ false, false, false ]);
     });
 
     it('follows the clock when the last tag of the name holds nothing after its colon', () =>

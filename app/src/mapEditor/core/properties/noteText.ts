@@ -211,8 +211,9 @@ const metaTagsOf = (note: string): MetaTag[] =>
 };
 
 /**
- * Reads a note's metadata as the engine holds it in {@code meta}: each tag's value by its name, a later tag of a name
- * replacing an earlier one.
+ * Reads a note's metadata as the engine holds it in {@code meta}: each tag's value by its name as written, case and all,
+ * a later tag of a name replacing an earlier one. A plugin reading {@code meta} rather than the note itself, as
+ * J-Lighting-Time reads {@code noToneChange}, sees exactly this.
  * @param {string} note The note.
  * @returns {Map<string, string | true>} The values, by name.
  */

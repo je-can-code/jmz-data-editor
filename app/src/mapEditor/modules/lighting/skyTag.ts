@@ -39,7 +39,8 @@ const SKY_MISREAD = 'the game would not read this map\'s sky back as written';
  * Reports whether a map's sky follows the clock, as J-Lighting-Time decides on arrival
  * ({@code TimeLightingCoordinator.refreshMapSuppression}): it does unless the map's metadata holds a value under
  * {@code noToneChange} that is truthy. A bare tag holds true and any written value holds its text, so only a tag written
- * with nothing after its colon leaves the sky following the clock.
+ * with nothing after its colon leaves the sky following the clock. Everything that asks whether a map has a sky asks it
+ * here: the sky the map views cast at the clock's hour, the sky setting in Map Properties, and the parity check.
  * @param {string} note The map's note.
  * @returns {boolean} True when the sky follows the clock.
  */
