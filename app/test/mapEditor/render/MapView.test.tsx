@@ -224,7 +224,8 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * A view behind another tab lets its GPU context go, so the renderer hears whether the view is on screen before it is
  * mounted (a view mounted behind a tab must make no context at all) and each time that changes. And a map that cannot
  * draw says why over the canvas, in plain words, rather than leaving it blank: every context the window may keep is
- * taken by maps on screen, the graphics card let go of it for a moment, or the window cannot draw at all.
+ * taken by maps on screen, the graphics card let go of it for a moment, or the window cannot draw at all. Whatever the
+ * plugin modules say, such as a config one could not read, shows along the top of the map, drawing or not.
  *
  * The tiles marked to go on top decide where the painting tools lay tiles, so a view holds the marks from the start,
  * through the same open as the palette: a project that never saved marks is seeded from its own maps first. Holding an
@@ -263,6 +264,7 @@ describe('MapView', () =>
     subscribe: () => () => undefined,
     revision: 0,
     lightingLayers: () => [],
+    notices: () => [],
   };
 
   /**
@@ -539,6 +541,47 @@ describe('MapView', () =>
         null,
         'The graphics card let go of this map for a moment.Drawing it again…',
         null,
+        'This window cannot draw maps with the graphics card.Restarting the editor may bring it back.',
+      ]);
+  });
+
+  it('says what the modules say along the top of a map that draws, for as long as they say it', () =>
+  {
+    // Arrange: a module that could not read its config, and a map drawing.
+    const notice = { id: 'lighting.config', title: 'Lights draw in white.', detail: 'The file is missing.' };
+    const services = { ...served(), modules: { ...NO_MODULES, notices: () => [ notice ] } } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    act(() => stand.renderers[0].announce('drawing'));
+
+    // Assert: the map is drawing, so nothing says why it is not.
+    expect([ screen.getByRole('status').textContent, screen.queryByTestId('map-draw-notice') ])
+      .toStrictEqual([ 'Lights draw in white.The file is missing.', null ]);
+  });
+
+  it('says what the modules say beside why the map is not drawing', () =>
+  {
+    // Arrange.
+    const notice = { id: 'lighting.config', title: 'Lights draw in white.', detail: 'The file is missing.' };
+    const services = { ...served(), modules: { ...NO_MODULES, notices: () => [ notice ] } } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    act(() => stand.renderers[0].announce('failed'));
+
+    // Assert.
+    expect([ screen.getByTestId('map-module-notices').textContent, screen.getByTestId('map-draw-notice').textContent ])
+      .toStrictEqual([
+        'Lights draw in white.The file is missing.',
         'This window cannot draw maps with the graphics card.Restarting the editor may bring it back.',
       ]);
   });

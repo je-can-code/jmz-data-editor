@@ -139,6 +139,28 @@ type ModuleContext = {
    * it gave; null for a project without the file, or a file the server could not read.
    */
   readonly configs: ReadonlyMap<string, JsonValue | null>;
+
+  /**
+   * Why each config the module names could not be read, by the name it gave, in the server's words where it gave any:
+   * the file is missing, is not JSON, or holds a field the strict read refuses. A config read as it should be has no
+   * entry, so a module can say what is wrong rather than quietly falling back.
+   */
+  readonly configProblems: ReadonlyMap<string, string>;
+};
+
+/**
+ * Something a module says over every map view for as long as it is on, such as why what it draws differs from what the
+ * game will show: what is wrong and what it means, in one line, then the reason and what to do about it.
+ */
+type ModuleNotice = {
+  /**
+   * Unique, prefixed like event kinds.
+   */
+  readonly id: string;
+
+  readonly title: string;
+
+  readonly detail: string;
 };
 
 /**
@@ -166,6 +188,13 @@ type ModuleContributions = {
    * @param {number} mapId The map.
    */
   templateMap(mapId: number): void;
+
+  /**
+   * Says something over every map view for as long as the module is on, such as a config it could not read and what
+   * it draws differently because of it. Nothing dismisses it but the cause going away.
+   * @param {ModuleNotice} notice What to say.
+   */
+  notice(notice: ModuleNotice): void;
 };
 
 /**
@@ -199,7 +228,8 @@ type PluginModule = {
   /**
    * Adds the module's contributions.
    * @param {ModuleContributions} contributions Where to add them.
-   * @param {ModuleContext} context The enabled plugins, and the configs the module reads.
+   * @param {ModuleContext} context The enabled plugins, the configs the module reads, and why any of them could not be
+   * read.
    */
   readonly register: (contributions: ModuleContributions, context: ModuleContext) => void;
 };
@@ -208,6 +238,7 @@ export type {
   EventKindDefinition,
   ModuleContext,
   ModuleContributions,
+  ModuleNotice,
   PaletteEntry,
   PassabilityQuery,
   PassabilityRule,

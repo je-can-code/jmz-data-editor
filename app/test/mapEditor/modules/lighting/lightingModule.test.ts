@@ -70,7 +70,7 @@ vi.mock('pixi.js', async importOriginal =>
  *
  * While J-Lighting is enabled the module also draws each light's ring into the lighting layer, and reads the project's
  * config.lighting.json first, so a light naming no colour is drawn in the colour the project configures, or white for a
- * project without the file.
+ * project without the file, which it then says over the map rather than leave the white to pass for the game's look.
  */
 describe('lightingModule', () =>
 {
@@ -207,6 +207,36 @@ describe('lightingModule', () =>
       // Assert.
       expect(colours)
         .toStrictEqual([ 0xffffff ]);
+    });
+
+    it('says over the map why its lights draw in white when the config could not be read', () =>
+    {
+      // Arrange: the file is missing.
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      const problems = new Map([ [ 'lighting', 'open /game/data/config.lighting.json: no such file or directory' ] ]);
+
+      // Act.
+      registry.activate([ lightingModule ], [ lighting(true) ], new Map([ [ 'lighting', null ] ]), problems);
+
+      // Assert.
+      expect(registry.notices().map(notice => [ notice.id, notice.detail ]))
+        .toStrictEqual([ [
+          'lighting.config',
+          'It could not be read: open /game/data/config.lighting.json: no such file or directory. Reopen the map editor once it is fixed.',
+        ] ]);
+    });
+
+    it('says nothing over the map when the config serves', () =>
+    {
+      // Arrange.
+      const config = { light: { radius: 5, color: '#ff0000', intensity: 0, effects: {} }, ambient: { color: '#000000' } } as unknown as JsonValue;
+
+      // Act.
+      const registry = registryWith(lighting(true), new Map([ [ 'lighting', config ] ]));
+
+      // Assert.
+      expect(registry.notices())
+        .toStrictEqual([]);
     });
   });
 

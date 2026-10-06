@@ -12,14 +12,14 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * The core editor works on any MZ project; each plugin's awareness is its own module, switched on only when that
  * plugin is enabled in js/plugins.js. The registry owes the editor exactly that: a module whose plugin is off (or
  * missing, or only a near namesake like J-ABS-Metrics) contributes nothing, a module that is on contributes its
- * kinds, palette entries, passability rules, overlays, lighting layers and command entries, a module can never claim
- * a core kind, and the core's own kinds are on in every project. When several kinds recognise one event, the higher
- * priority wins, since a battler is also a comment-only event. A map an active module copies its events from, such as
- * J-ABS's action map, holds the plugin's patterns, so no kind claims an event there. Every activation is announced,
- * since modules switch on after the views that show kinds have drawn.
+ * kinds, palette entries, passability rules, overlays, lighting layers, command entries and notices, a module can never
+ * claim a core kind, and the core's own kinds are on in every project. When several kinds recognise one event, the
+ * higher priority wins, since a battler is also a comment-only event. A map an active module copies its events from,
+ * such as J-ABS's action map, holds the plugin's patterns, so no kind claims an event there. Every activation is
+ * announced, since modules switch on after the views that show kinds have drawn.
  *
  * A module naming project config files gets each one as it was read before switching on, and null for one that was
- * not, and never another module's.
+ * not, with why it could not be read, and never another module's.
  */
 describe('PluginModuleRegistry', () =>
 {
@@ -71,6 +71,7 @@ describe('PluginModuleRegistry', () =>
       contributions.overlay({ id: 'jabs.pursuit', title: `Pursuit (${context.plugins.get('J-ABS')?.parameters['actionMapId']})`, defaultOn: false, draw: () => undefined });
       contributions.lightingLayer({ id: 'jabs.glow', title: 'Glow', create: () => ({ draw: () => undefined, destroy: () => undefined }) });
       contributions.catalogEntry(pluginCommandEntry({ plugin: 'J-ABS', command: 'spawn', args: [] }));
+      contributions.notice({ id: 'jabs.config', title: 'Battlers fight as their database says.', detail: 'Their config was not read.' });
     },
   });
 
@@ -95,6 +96,7 @@ describe('PluginModuleRegistry', () =>
       registry.overlays()[0].title,
       registry.lightingLayers().map(layer => layer.id),
       catalog.entry('plugin:J-ABS:spawn')?.name,
+      registry.notices().map(notice => notice.id),
     ])
       .toStrictEqual([
         { active: [ 'jabs' ], inactive: [] },
@@ -106,6 +108,7 @@ describe('PluginModuleRegistry', () =>
         'Pursuit (2)',
         [ 'jabs.glow' ],
         'Plugin: spawn',
+        [ 'jabs.config' ],
       ]);
   });
 
@@ -152,8 +155,9 @@ describe('PluginModuleRegistry', () =>
       registry.overlays(),
       registry.lightingLayers(),
       catalog.entry('plugin:J-ABS:spawn'),
+      registry.notices(),
     ])
-      .toStrictEqual([ false, [ 'core.decor' ], [], [], null ]);
+      .toStrictEqual([ false, [ 'core.decor' ], [], [], null, [] ]);
   });
 
   it('hands a module each config it names as it was read, null for one that was not, and no other module\'s', () =>
@@ -173,6 +177,24 @@ describe('PluginModuleRegistry', () =>
       .toStrictEqual([ [ 'lighting', { light: { color: '#ffbb73' } } ], [ 'lighting-time', null ] ]);
   });
 
+  it('hands a module why each config it names could not be read, and no other module\'s problems', () =>
+  {
+    // Arrange: its own second config is missing, and so is another module's.
+    const register = vi.fn();
+    const lighting: PluginModule = { id: 'lighting', title: 'Lighting', plugins: [ 'J-Lighting' ], configs: [ 'lighting', 'lighting-time' ], register };
+    const read = new Map<string, JsonValue | null>([ [ 'lighting', {} ], [ 'lighting-time', null ], [ 'jabs', null ] ]);
+    const problems = new Map([ [ 'lighting-time', 'the file is missing' ], [ 'jabs', 'the file is not JSON' ] ]);
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+
+    // Act.
+    registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', true) ], read, problems);
+
+    // Assert.
+    const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+    expect([ ...context.configProblems ])
+      .toStrictEqual([ [ 'lighting-time', 'the file is missing' ] ]);
+  });
+
   it('hands a module naming no configs none, whatever was read', () =>
   {
     // Arrange.
@@ -181,12 +203,12 @@ describe('PluginModuleRegistry', () =>
     const registry = new PluginModuleRegistry(new CommandCatalog());
 
     // Act.
-    registry.activate([ plain ], [ plugin('j/abs/J-ABS', true) ], new Map([ [ 'jabs', { teams: [] } ] ]));
+    registry.activate([ plain ], [ plugin('j/abs/J-ABS', true) ], new Map([ [ 'jabs', null ] ]), new Map([ [ 'jabs', 'the file is missing' ] ]));
 
     // Assert.
     const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
-    expect(context.configs.size)
-      .toBe(0);
+    expect([ context.configs.size, context.configProblems.size ])
+      .toStrictEqual([ 0, 0 ]);
   });
 
   it('gives an event the highest-priority kind that recognises it', () =>
@@ -265,6 +287,7 @@ describe('PluginModuleRegistry', () =>
       { id: 'c', title: 'C', plugins: [], register: add => add.passabilityRule({ id: 'core.x', title: 'x', deny: () => null }) },
       { id: 'd', title: 'D', plugins: [], register: add => add.overlay({ id: 'grid.x', title: 'x', defaultOn: false, draw: () => undefined }) },
       { id: 'e', title: 'E', plugins: [], register: add => add.lightingLayer({ id: 'core.x', title: 'x', create: () => ({ draw: () => undefined, destroy: () => undefined }) }) },
+      { id: 'f', title: 'F', plugins: [], register: add => add.notice({ id: 'core.x', title: 'x', detail: 'x' }) },
     ];
 
     // Act.
@@ -281,6 +304,8 @@ describe('PluginModuleRegistry', () =>
       .toThrow('d can only add overlays whose id starts with "d.", not grid.x');
     expect(failures[4])
       .toThrow('e can only add lighting layers whose id starts with "e.", not core.x');
+    expect(failures[5])
+      .toThrow('f can only add notices whose id starts with "f.", not core.x');
   });
 
   describe('enabledPlugins', () =>

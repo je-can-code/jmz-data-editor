@@ -10,7 +10,9 @@ import { envelope, stubFetch } from '../../support/standIns.ts';
  * that is not an envelope is an error, never a quiet undefined: a route that changed shape must fail on its first
  * call. Saves are PUTs of the raw RMMZ shape (no envelope, nothing extra, since the server decodes strictly), each
  * carrying this window's id in X-Jmz-Client so the window can recognise its own save when the change stream echoes
- * it. Missing files answer null where the contract says 404 means "absent", and throw where it means "broken".
+ * it. Missing files answer null where the contract says 404 means "absent", and throw where it means "broken". An
+ * error carries the server's own words apart from the route, such as which file it could not read and why: the error
+ * its envelope gave, or its answer's text, never the envelope whole.
  */
 describe('HttpMapEditorApi', () =>
 {
@@ -155,8 +157,49 @@ describe('HttpMapEditorApi', () =>
       const error = await api.loadMap(99).catch((caught: unknown) => caught);
 
       // Assert.
-      expect([ error instanceof MapEditorApiError, (error as MapEditorApiError).status, (error as Error).message ])
-        .toStrictEqual([ true, 404, 'GET /api/maps/99 answered 404: data/Map099.json does not exist' ]);
+      expect([ error instanceof MapEditorApiError, (error as MapEditorApiError).status, (error as Error).message, (error as MapEditorApiError).detail ])
+        .toStrictEqual([ true, 404, 'GET /api/maps/99 answered 404: data/Map099.json does not exist', 'data/Map099.json does not exist' ]);
+    });
+
+    it('raises a failed status answered in the envelope with the error the envelope carries, not the envelope whole', async () =>
+    {
+      // Arrange: a config the server's strict read refused.
+      const words = 'decoding /game/data/config.lighting.json: json: unknown field "tint"';
+      const { api } = buildApi(() => new Response(`${JSON.stringify({ path: '/game', error: words })}\n`, { status: 500 }));
+
+      // Act.
+      const error = await api.loadPluginConfig('lighting').catch((caught: unknown) => caught) as MapEditorApiError;
+
+      // Assert.
+      expect([ error.message, error.detail ])
+        .toStrictEqual([ `GET /api/config/lighting answered 500: ${words}`, words ]);
+    });
+
+    it('keeps a failed answer\'s JSON as it stands when it is no envelope carrying an error', async () =>
+    {
+      // Arrange: an envelope with an empty error, one with no path, and a list.
+      const bodies = [ '{"path":"/game","error":""}', '{"error":"boom"}', '[1]' ];
+      const { api } = buildApi(url => new Response(bodies[Number(url.slice(-1)) - 1], { status: 500 }));
+
+      // Act.
+      const errors = await Promise.all([ 1, 2, 3 ].map(mapId => api.loadMap(mapId).catch((caught: unknown) => caught)));
+
+      // Assert.
+      expect(errors.map(error => (error as MapEditorApiError).detail))
+        .toStrictEqual(bodies);
+    });
+
+    it('carries the error an envelope gives on success as the server\'s words', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response(JSON.stringify({ path: '/p', error: 'decoding data/Map012.json: unknown field "x"' })));
+
+      // Act.
+      const error = await api.loadMap(12).catch((caught: unknown) => caught) as MapEditorApiError;
+
+      // Assert.
+      expect(error.detail)
+        .toBe('decoding data/Map012.json: unknown field "x"');
     });
 
     it('refuses a map id no map can have, before asking the server', async () =>

@@ -226,16 +226,47 @@ class MapEditorApiError extends Error
   readonly status: number;
 
   /**
+   * What the server said went wrong, in its own words, such as the file it could not read and why: the error its
+   * envelope carried, or the text of its answer. Empty when it said nothing, or nothing was asked of it.
+   */
+  readonly detail: string;
+
+  /**
    * @param {string} message What went wrong, naming the route.
    * @param {number} status The HTTP status.
+   * @param {string} detail What the server said, or empty.
    */
-  constructor(message: string, status: number)
+  constructor(message: string, status: number, detail = '')
   {
     super(message);
     this.name = 'MapEditorApiError';
     this.status = status;
+    this.detail = detail;
   }
 }
+
+/**
+ * Reads what a failed answer says went wrong: the error its envelope carries when it is one, as every JSON route
+ * answers, or else its text as it stands.
+ * @param {string} text The answer's text, trimmed.
+ * @returns {string} The server's words, or empty when it said nothing.
+ */
+const serverWords = (text: string): string =>
+{
+  let envelope: unknown = null;
+  try
+  {
+    envelope = JSON.parse(text);
+  }
+  catch
+  {
+    return text;
+  }
+
+  return isJsonObject(envelope) && typeof envelope['path'] === 'string' && typeof envelope['error'] === 'string' && envelope['error'] !== ''
+    ? envelope['error']
+    : text;
+};
 
 /**
  * Options for the HTTP client.
@@ -546,7 +577,7 @@ class HttpMapEditorApi implements MapEditorApi
     const { error, data } = envelope;
     if (typeof error === 'string' && error !== '')
     {
-      throw new MapEditorApiError(`GET ${route}: ${error}`, response.status);
+      throw new MapEditorApiError(`GET ${route}: ${error}`, response.status, error);
     }
 
     return data as T;
@@ -575,7 +606,8 @@ class HttpMapEditorApi implements MapEditorApi
   }
 
   /**
-   * Throws, naming the route and the server's words, unless the response succeeded.
+   * Throws, naming the route and the server's words, unless the response succeeded. A failed JSON route answers in
+   * the envelope, whose error is what it has to say, so that is what the error says rather than the envelope whole.
    * @param {Response} response The response.
    * @param {string} what The request, for the message.
    */
@@ -586,8 +618,8 @@ class HttpMapEditorApi implements MapEditorApi
       return;
     }
 
-    const detail = (await response.text()).trim();
-    throw new MapEditorApiError(`${what} answered ${response.status}${detail === '' ? '' : `: ${detail}`}`, response.status);
+    const detail = serverWords((await response.text()).trim());
+    throw new MapEditorApiError(`${what} answered ${response.status}${detail === '' ? '' : `: ${detail}`}`, response.status, detail);
   }
 }
 

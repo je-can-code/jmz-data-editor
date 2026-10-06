@@ -1,7 +1,7 @@
 import type { JsonValue } from '../../core/model/json.ts';
 import type { PluginModule } from '../../core/modules/PluginModule.ts';
 import { quickPanelFor } from '../../views/quickPanel/QuickFieldsPanel.tsx';
-import { LIGHTING_CONFIG, lightDefaultsFrom } from './lightingConfig.ts';
+import { LIGHTING_CONFIG, lightDefaultsFrom, lightingConfigNotice } from './lightingConfig.ts';
 import { lightPanelOptions, lightQuickModel } from './lightPanel.ts';
 import { LightRings } from './lightRings.ts';
 import { firstLitPage, isLight, type LightPageChoice } from './lightTags.ts';
@@ -29,7 +29,8 @@ const LIGHT_RINGS_ID = 'lighting.rings';
  * one too, since a door that glows is still a door, and above dialogue and decor, which a comment-tagged event never is
  * anyway; its ring shows whatever kind it is. The rings and the panel fall back to the project's own config for what a
  * light leaves out, and both read a light from the page one choice picks, so the panel always changes the light the
- * ring shows.
+ * ring shows. A config that fails them, so that lights fall back to white, is said over every map view rather than
+ * left to look like the game's own colours.
  */
 const lightingModule: PluginModule = {
   id: 'lighting',
@@ -38,8 +39,15 @@ const lightingModule: PluginModule = {
   configs: [ LIGHTING_CONFIG ],
   register: (contributions, context) =>
   {
-    // the registry hands over every config the module names, null for one the project lacks.
-    const defaults = lightDefaultsFrom(context.configs.get(LIGHTING_CONFIG) as JsonValue | null);
+    // the registry hands over every config the module names, null for one the project lacks, with why it lacks it.
+    const config = context.configs.get(LIGHTING_CONFIG) as JsonValue | null;
+    const defaults = lightDefaultsFrom(config);
+    const notice = lightingConfigNotice(config, context.configProblems.get(LIGHTING_CONFIG));
+    if (notice !== null)
+    {
+      contributions.notice(notice);
+    }
+
     const choosePage: LightPageChoice = firstLitPage;
     contributions.eventKind({
       id: LIGHT_KIND_ID,

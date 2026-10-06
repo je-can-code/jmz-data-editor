@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Box, Chip, Divider, Typography } from '@mui/material';
+import { Box, Chip, Divider, Stack, Typography } from '@mui/material';
 import { markerSymbolFor } from '../core/eventKinds/eventMarkers.ts';
 import { EVENT_CLIPBOARD_MARKER } from '../core/events/eventClipboard.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { RmmzMapEvent } from '../core/model/rmmzTypes.ts';
+import type { ModuleNotice } from '../core/modules/PluginModule.ts';
 import type { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import type { Camera, MapCell } from '../core/renderer/camera.ts';
 import { GAME_LOOK, type MarkerClassifier, type OverlayId } from '../core/renderer/MapRenderer.ts';
@@ -165,33 +166,64 @@ const zoomLabel = (zoom: number): string =>
 };
 
 /**
- * Says over the map why it is not drawing, in plain words: every context the window may keep is taken by maps on
- * screen, the graphics card let go of it for a moment, or the window cannot draw at all.
- * @param {{ state: DrawState }} props Where the drawing stands.
- * @returns {React.JSX.Element | null} The notice, or nothing while the map draws or is about to.
+ * Says over the map what keeps it from drawing as the game would, in plain words. Why it is not drawing at all (every
+ * context the window may keep is taken by maps on screen, the graphics card let go of it for a moment, or the window
+ * cannot draw) is centred over the empty canvas. What the plugin modules say, such as a config one could not read and
+ * what it draws differently because of it, sits in a strip along the top for as long as they say it, over the map
+ * without hiding it, and lets the pointer through to the map beneath.
+ * @param {{ state: DrawState, notices?: readonly ModuleNotice[] }} props Where the drawing stands, and what the modules
+ * say; nothing, when left out.
+ * @returns {React.JSX.Element | null} The notices, or nothing while the map draws and no module has anything to say.
  */
-const DrawNotice = (props: { state: DrawState }) =>
+const DrawNotice = (props: { state: DrawState; notices?: readonly ModuleNotice[] }) =>
 {
-  const notice = DRAW_NOTICES[props.state];
-  if (notice === undefined)
+  const { state, notices = [] } = props;
+  const notice = DRAW_NOTICES[state];
+  if (notice === undefined && notices.length === 0)
   {
     return null;
   }
 
   return (
-    <Box
-      data-testid={'map-draw-notice'}
-      sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', p: 2, textAlign: 'center', pointerEvents: 'none' }}
-    >
-      <Box>
-        <Typography variant={'body1'} color={'text.secondary'}>
-          {notice.title}
-        </Typography>
-        <Typography variant={'body2'} color={'text.disabled'}>
-          {notice.detail}
-        </Typography>
-      </Box>
-    </Box>
+    <>
+      {notice !== undefined && (
+        <Box
+          data-testid={'map-draw-notice'}
+          sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', p: 2, textAlign: 'center', pointerEvents: 'none' }}
+        >
+          <Box>
+            <Typography variant={'body1'} color={'text.secondary'}>
+              {notice.title}
+            </Typography>
+            <Typography variant={'body2'} color={'text.disabled'}>
+              {notice.detail}
+            </Typography>
+          </Box>
+        </Box>
+      )}
+      {notices.length > 0 && (
+        <Stack
+          data-testid={'map-module-notices'}
+          spacing={0.75}
+          sx={{ position: 'absolute', top: 8, left: 8, right: 8, alignItems: 'flex-start', pointerEvents: 'none' }}
+        >
+          {notices.map(each => (
+            <Box
+              key={each.id}
+              role={'status'}
+              sx={{ maxWidth: 720, px: 1.5, py: 0.75, bgcolor: 'background.paper', borderLeft: 4, borderColor: 'warning.main', borderRadius: 1, boxShadow: 4 }}
+            >
+              <Typography variant={'body2'}>
+                {each.title}
+              </Typography>
+              <Typography variant={'caption'} color={'text.secondary'}>
+                {each.detail}
+              </Typography>
+            </Box>
+          ))}
+        </Stack>
+      )}
+    </>
   );
 };
 
@@ -212,7 +244,8 @@ const DrawNotice = (props: { state: DrawState }) =>
  * zoom the view already has.
  *
  * A view off screen, behind another tab, lets its GPU context go and draws again, camera and all, when it shows; a map
- * that cannot draw says why over the canvas rather than leaving it blank.
+ * that cannot draw says why over the canvas rather than leaving it blank, and whatever the plugin modules say, such as
+ * a config they could not read, shows along the top of the map for as long as they say it.
  * @param {MapViewProps} props The map to show, the event to pick out, whether the view is on screen, the selection,
  * where notices go, and what it paints with.
  * @returns {React.JSX.Element} The view.
@@ -517,7 +550,7 @@ const MapView = (props: MapViewProps) =>
           tabIndex={0}
           sx={{ position: 'absolute', inset: 0, overflow: 'hidden', backgroundColor: '#121212', outline: 'none' }}
         />
-        <DrawNotice state={drawState}/>
+        <DrawNotice state={drawState} notices={services.modules.notices()}/>
       </Box>
       <Box sx={{ display: 'flex', gap: 2, px: 1, py: 0.25, borderTop: 1, borderColor: 'divider' }}>
         <Typography variant={'caption'} color={'text.secondary'}>

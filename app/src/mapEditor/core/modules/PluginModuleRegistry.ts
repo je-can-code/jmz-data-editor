@@ -7,6 +7,7 @@ import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
 import type {
   EventKindDefinition,
   ModuleContributions,
+  ModuleNotice,
   PaletteEntry,
   PassabilityRule,
   PluginModule,
@@ -36,6 +37,7 @@ type Contributions = {
   lighting: LightingLayerDefinition[];
   catalogIds: string[];
   templateMaps: number[];
+  notices: ModuleNotice[];
 };
 
 /**
@@ -50,6 +52,7 @@ const noContributions = (): Contributions => ({
   lighting: [],
   catalogIds: [],
   templateMaps: [],
+  notices: [],
 });
 
 /**
@@ -66,8 +69,8 @@ const enabledPlugins = (plugins: readonly PluginsJsEntry[]): Map<string, Plugins
 
 /**
  * Holds the event kinds, palette entries, passability rules, overlays, lighting layers and command entries the editor
- * knows, and the maps whose events are a plugin's patterns: the core's kinds, always, and each plugin module's
- * contributions while its plugins are enabled.
+ * knows, the maps whose events are a plugin's patterns, and what the modules say over every map view: the core's
+ * kinds, always, and each plugin module's contributions while its plugins are enabled.
  */
 class PluginModuleRegistry
 {
@@ -116,12 +119,15 @@ class PluginModuleRegistry
    * @param {readonly PluginsJsEntry[]} plugins The project's plugins, from {@code js/plugins.js}.
    * @param {ReadonlyMap<string, JsonValue | null>} configs The config files the modules read, by name, as read
    * beforehand; a module naming one missing here gets null for it. Left out, none were read.
+   * @param {ReadonlyMap<string, string>} problems Why each config that could not be read could not, by name. Left out,
+   * none were read, so none failed.
    * @returns {ModuleActivation} Which modules are on, and what each of the others is missing.
    */
   activate(
     modules: readonly PluginModule[],
     plugins: readonly PluginsJsEntry[],
-    configs: ReadonlyMap<string, JsonValue | null> = new Map()): ModuleActivation
+    configs: ReadonlyMap<string, JsonValue | null> = new Map(),
+    problems: ReadonlyMap<string, string> = new Map()): ModuleActivation
   {
     this.#deactivate();
 
@@ -137,9 +143,15 @@ class PluginModuleRegistry
         return;
       }
 
-      // each module is handed the configs it named, and only those.
-      const own = new Map((pluginModule.configs ?? []).map(name => [ name, configs.get(name) ?? null ]));
-      pluginModule.register(this.#contributionsFor(pluginModule), { plugins: enabled, configs: own });
+      // each module is handed the configs it named, and only those, with why any of them could not be read.
+      const names = pluginModule.configs ?? [];
+      const own = new Map(names.map(name => [ name, configs.get(name) ?? null ]));
+      const ownProblems = new Map(names.flatMap(name =>
+      {
+        const problem = problems.get(name);
+        return problem === undefined ? [] : [ [ name, problem ] as const ];
+      }));
+      pluginModule.register(this.#contributionsFor(pluginModule), { plugins: enabled, configs: own, configProblems: ownProblems });
       this.#active.push(pluginModule.id);
     });
 
@@ -248,6 +260,16 @@ class PluginModuleRegistry
   }
 
   /**
+   * Lists what the active modules say over every map view, in the order they said it; empty while none has anything to
+   * say.
+   * @returns {readonly ModuleNotice[]} The notices.
+   */
+  notices(): readonly ModuleNotice[]
+  {
+    return this.#contributions.notices;
+  }
+
+  /**
    * Builds the contribution sink one module registers through, which holds it to its own id prefix.
    * @param {PluginModule} pluginModule The module.
    * @returns {ModuleContributions} The sink.
@@ -297,6 +319,11 @@ class PluginModuleRegistry
       templateMap: mapId =>
       {
         this.#contributions.templateMaps.push(mapId);
+      },
+      notice: notice =>
+      {
+        requirePrefix(notice.id, 'notices');
+        this.#contributions.notices.push(notice);
       },
     };
   }
