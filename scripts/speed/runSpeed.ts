@@ -3,18 +3,21 @@
  * The map editor's speed script: opens the heavy fixture maps in the real map editor page, in headless chromium on
  * the machine's real GPU (spike S3's recipe), and fails on any speed budget from the plan's D3.
  *
- *   bun run speed [--runs 3] [--seconds 5] [--maps 102,361] [--ui-port 18200] [--api-port 18201]
+ *   bun run speed [--runs 3] [--seconds 5] [--maps 102,361] [--time 22:00] [--ui-port 18200] [--api-port 18201]
  *                 [--scratch <base folder>] [--project <game>] [--json <file>]
  *
  * Each invocation builds the editor afresh in a folder of its own inside the base folder (the system's temporary
  * folder unless --scratch names another), so it always times the code as it stands and never shares a build or a
  * mirror with another run; the folder is removed when the run ends.
  *
- * Every map in every run gets a fresh browser, so every open is cold. Per map it measures, with the game look and
- * every overlay on:
+ * Every map in every run gets a fresh browser, so every open is cold. With --time, every map is opened at that hour of
+ * the window's clock, from its first frame, so a map whose lights show only at night is measured with them on show;
+ * left out, the clock stands where the game starts. Per map it measures, with the game look and every overlay on:
  *   - the cold open: navigation start to the first frame that showed the map complete, sprites and parallax loaded;
- *   - three camera paths driven from the page's own frame clock: a pan at zoom 1, a zoom sweep from 2x out to the
- *     whole map and back, and the whole map held on screen and drifting;
+ *   - four paths driven from the page's own frame clock: a pan at zoom 1, a zoom sweep from 2x out to the whole map
+ *     and back, the whole map held on screen and drifting, and the whole map held still while the window's clock
+ *     sweeps the whole day every eight seconds, so the sky is drawn again at every hour it passes, the clock put back
+ *     once it stops;
  *   - a brush stroke: real pointer moves with the left button held, one cell apart, each painting a fresh 3x3 patch
  *     of ground with the map view's own pen, through the layering engine and the autotile refresh, matched to the
  *     frames that drew them; and the same again with a stand-in for a plugin module's overlay (two rings around every
@@ -57,6 +60,7 @@ type Options = {
   runs: number;
   seconds: number;
   maps: number[];
+  time: string | undefined;
   uiPort: number;
   apiPort: number;
   scratch: string;
@@ -90,6 +94,7 @@ type PathResult = {
 type MapResult = {
   map: number;
   run: number;
+  time: string;
   loadBefore: number;
   loadAfter: number;
   report: GpuReport;
@@ -154,6 +159,7 @@ type PageHooks = {
   screenOfCell: (x: number, y: number) => { x: number; y: number };
   startPath: (kind: string) => void;
   stopPath: () => void;
+  time: () => number;
   enablePaint: (settings: Record<string, unknown>) => number | null;
   disablePaint: () => void;
   enableModuleRings: () => void;
@@ -173,9 +179,14 @@ type PageHooks = {
 };
 
 /**
- * The camera paths, in the order they are recorded.
+ * The paths, in the order they are recorded: the camera's three, then the clock's sweep.
  */
-const PATHS = [ 'pan', 'zoom', 'zoomedout' ];
+const PATHS = [ 'pan', 'zoom', 'zoomedout', 'clock' ];
+
+/**
+ * A time of day as --time takes it: hours and minutes on a 24-hour clock.
+ */
+const TIME_OPTION = /^([01]?\d|2[0-3]):[0-5]\d$/u;
 
 /**
  * How many pointer moves a stroke makes, 4 ms apart, as a hand dragging a pen would.
@@ -239,10 +250,17 @@ const parseOptions = (argv: string[]): Options =>
   });
 
   const gpu = flags.get('gpu') ?? process.env['JMZ_SPEED_GPU'] ?? DEFAULT_GPU;
+  const time = flags.get('time');
+  if (time !== undefined && TIME_OPTION.test(time) === false)
+  {
+    throw new Error(`--time takes an hour and minutes on a 24-hour clock, such as 22:00, not ${time}`);
+  }
+
   return {
     runs: Number(flags.get('runs') ?? 3),
     seconds: Number(flags.get('seconds') ?? 5),
     maps: (flags.get('maps') ?? '102,361').split(',').map(Number),
+    time,
     uiPort: Number(flags.get('ui-port') ?? 18200),
     apiPort: Number(flags.get('api-port') ?? 18201),
     scratch: flags.get('scratch') ?? tmpdir(),
@@ -828,7 +846,8 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
   {
     const page = await newSpeedPage(browser);
     await addFrameRecorder(page);
-    await page.goto(`${uiBase}/map.html?map=${mapId}&speed=1&quick=1`);
+    const atTime = options.time === undefined ? '' : `&time=${options.time}`;
+    await page.goto(`${uiBase}/map.html?map=${mapId}&speed=1&quick=1${atTime}`);
     await page.waitForFunction(() =>
     {
       const hooks = (window as unknown as { __jmzMapView?: PageHooks }).__jmzMapView;
@@ -847,6 +866,10 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
     const coldOpenMs = timings['drawnAt'] ?? -1;
     await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.enableEveryOverlay());
     await page.waitForTimeout(1000);
+
+    // the hour everything after is measured at, read once the plugin modules have surely switched on.
+    const minutes = await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.time());
+    const time = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 
     const paths: Record<string, PathResult> = {};
     for (const kind of PATHS)
@@ -898,6 +921,7 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
     return {
       map: mapId,
       run,
+      time,
       loadBefore,
       loadAfter: await loadAverage(),
       report,
@@ -948,7 +972,7 @@ const verdictText = (verdict: Verdict): string =>
  */
 const printMap = (result: MapResult): void =>
 {
-  console.log(`Map${result.map} run ${result.run}: load ${result.loadBefore.toFixed(2)} -> ${result.loadAfter.toFixed(2)}`);
+  console.log(`Map${result.map} run ${result.run} at ${result.time}: load ${result.loadBefore.toFixed(2)} -> ${result.loadAfter.toFixed(2)}`);
   console.log(`  cold open ${cell(result.coldOpenMs, 1)} ms  ${verdictText(result.verdicts['coldOpen'])}`);
   console.log(`  warm open ${cell(result.warmOpenMs, 1)} ms  ${verdictText(result.verdicts['warmOpen'])}`);
   console.log(`  shown again ${cell(result.shownAgainMs, 1)} ms  ${verdictText(result.verdicts['shownAgain'])}`);
