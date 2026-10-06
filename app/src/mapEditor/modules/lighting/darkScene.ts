@@ -63,13 +63,6 @@ type DarkSetup = {
 };
 
 /**
- * How brightly a light burns with no effect running: at full strength, always, as LightingEasing#strengthFor answers
- * for a steady light.
- * @returns {number} 1.
- */
-const steadyStrength: LightStrength = () => 1;
-
-/**
  * Names a light as LightingRenderLayer names it: its event's source key, then its place among that page's lights.
  * @param {number} eventId The event's id.
  * @param {number} ordinal Its place among its page's lights, from 0.
@@ -155,5 +148,5 @@ const darkSceneOf = (document: MapDocument, setup: DarkSetup, clock: LightingClo
   };
 };
 
-export { darkSceneOf, lightIdOf, maskLightsOf, steadyStrength };
+export { darkSceneOf, lightIdOf, maskLightsOf };
 export type { BurningLight, DarkScene, DarkSetup, LightStrength, MaskLight };

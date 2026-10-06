@@ -3,14 +3,7 @@ import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts
 import type { RmmzEventPage, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { LightingClock } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { mapAmbient, type AmbientSource } from '../../../../src/mapEditor/modules/lighting/ambientTags.ts';
-import {
-  darkSceneOf,
-  lightIdOf,
-  maskLightsOf,
-  steadyStrength,
-  type DarkSetup,
-  type LightStrength,
-} from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
+import { darkSceneOf, lightIdOf, maskLightsOf, type DarkSetup, type LightStrength } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
 import { firstLitPage, type LightPageChoice } from '../../../../src/mapEditor/modules/lighting/lightTags.ts';
 import { command, event, page } from '../../support/eventKindFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
@@ -26,7 +19,7 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * six pixels up for a character that is not an object), its reach in pixels, its colour and intensity as its tag gives
  * them or the project's when it gives none, and its name as J-Lighting gives it: its event's source and its place among
  * that page's lights. Each burns at the strength handed over for it at the view's clock, asked after by its map, its name
- * and its effect; the steady strength is full strength, always.
+ * and its effect.
  */
 
 /**
@@ -38,6 +31,12 @@ const DEFAULTS = { color: '#00ff00', intensity: 0 };
  * The view's clock two seconds in, animating.
  */
 const CLOCK: LightingClock = { frames: 120, animating: true };
+
+/**
+ * Every light at full strength, as it burns with no effect running.
+ * @returns {number} 1.
+ */
+const steady: LightStrength = () => 1;
 
 /**
  * An event at a cell with one page holding the given comment lines.
@@ -71,7 +70,7 @@ const mapWith = (note: string, events: (RmmzMapEvent | null)[]): MapDocument =>
  * @param {LightStrength} strengthOf How brightly each light burns.
  * @returns {DarkSetup} The setup.
  */
-const setupWith = (extra: AmbientSource[] = [], choosePage: LightPageChoice = firstLitPage, strengthOf: LightStrength = steadyStrength): DarkSetup =>
+const setupWith = (extra: AmbientSource[] = [], choosePage: LightPageChoice = firstLitPage, strengthOf: LightStrength = steady): DarkSetup =>
 {
   return { sources: [ mapAmbient('#000000'), ...extra ], defaults: DEFAULTS, tileSize: 48, choosePage, strengthOf };
 };
@@ -204,22 +203,6 @@ describe('darkScene', () =>
       // Assert.
       expect([ lights.map(light => light.strength), asked ])
         .toStrictEqual([ [ 0.8, 1 ], [ '6 page:1#0 flicker at 120', '6 page:2#0 steady at 120' ] ]);
-    });
-  });
-
-  describe('steadyStrength', () =>
-  {
-    it('burns every light at full strength', () =>
-    {
-      // Arrange: a flickering light, which still burns fully while no effect runs.
-      const torch = { mapId: 6, id: 'page:4#0', effect: 'flicker' as const };
-
-      // Act.
-      const strength = steadyStrength(torch, CLOCK);
-
-      // Assert.
-      expect(strength)
-        .toBe(1);
     });
   });
 

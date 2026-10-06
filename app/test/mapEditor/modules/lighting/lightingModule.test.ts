@@ -253,6 +253,37 @@ describe('lightingModule', () =>
         .toStrictEqual([ [ [ 0.9115909902530034 ], [ 0.9360984519453811 ], [ 1 ] ], [ true, true ] ]);
     });
 
+    it('keeps a light where it was in its cycle through an edit to its tag, a move, and a view drawing it afresh', () =>
+    {
+      // Arrange: map 6's cave holding event 12's flickering torch, drawn at frame 100, where it burns at 0.91; then its
+      // reach and its place changed, as the quick panel and a drag change them, and a second view's drawing made, as a
+      // map opened again makes one.
+      const pictureFor = vi.spyOn(LightPictures.prototype, 'pictureFor').mockReturnValue(Texture.WHITE);
+      const registry = registryWith(lighting(true), new Map([ [ 'lighting', served('#ffffff') ] ]));
+      const dark = registry.lightingLayers().find(layer => layer.id === LIGHT_MASK_ID) as LightingLayerDefinition;
+      const drawing = dark.create({ layer: new Container(), tileSize: 48 });
+      const json = { ...buildMapJson(), note: '<ambient:[85]>', events: [ null, { ...event(12, [ page([ command(108, [ '<light:[4, #ffbb73, 40, flicker]>' ]) ]) ]), x: 1, y: 1 } ] };
+      const document = MapDocument.fromJson('map:6', json);
+      const added: number[][] = [];
+      const renderer = { render: (options: { container: Container }) => added.push(options.container.children.map(sprite => sprite.alpha)) } as unknown as Renderer;
+      const atFrame100 = { document, renderer, context: 1, clock: { frames: 100, animating: true } };
+      drawing.draw(atFrame100);
+      document.apply(document.setPatch([ 'events', 1, 'pages', 0, 'list', 0, 'parameters', 0 ], '<light:[5, #ffbb73, 40, flicker]>'));
+      document.apply(document.setPatch([ 'events', 1, 'x' ], 2));
+      const afresh = dark.create({ layer: new Container(), tileSize: 48 });
+
+      // Act.
+      drawing.draw(atFrame100);
+      afresh.draw(atFrame100);
+      drawing.destroy();
+      afresh.destroy();
+      pictureFor.mockRestore();
+
+      // Assert: the torch added in at the strength it had before, after the edits and in the new view alike.
+      expect(added)
+        .toStrictEqual([ [ 0.9115909902530034 ], [ 0.9115909902530034 ], [ 0.9115909902530034 ] ]);
+    });
+
     it('names the project\'s lighting config as the one config it reads', () =>
     {
       // Arrange: the module as the editor ships it.

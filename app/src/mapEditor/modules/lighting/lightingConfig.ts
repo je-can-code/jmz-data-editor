@@ -194,6 +194,5 @@ export {
   LIGHTING_CONFIG_NOTICE_ID,
   lightDefaultsFrom,
   lightingConfigNotice,
-  STEADY_TUNING,
 };
 export type { AnimatedEffect, EffectTunings, LightEffectTuning, LightingConfig };

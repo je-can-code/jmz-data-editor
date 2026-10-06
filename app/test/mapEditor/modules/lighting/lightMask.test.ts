@@ -4,7 +4,7 @@ import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { LightingClock } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { mapAmbient } from '../../../../src/mapEditor/modules/lighting/ambientTags.ts';
-import { steadyStrength, type LightStrength } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
+import type { LightStrength } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
 import { pictureKey } from '../../../../src/mapEditor/modules/lighting/lightFalloff.ts';
 import { LightMask } from '../../../../src/mapEditor/modules/lighting/lightMask.ts';
 import type { LightPictures } from '../../../../src/mapEditor/modules/lighting/lightPictures.ts';
@@ -266,6 +266,12 @@ const torchAt = (id: number, x: number, y: number, effect = ''): RmmzMapEvent =>
 };
 
 /**
+ * Every light at full strength, as it burns with no effect running.
+ * @returns {number} 1.
+ */
+const steady: LightStrength = () => 1;
+
+/**
  * A strength under which every light whose effect runs dims by a hundredth each frame of the clock, and every steady
  * light burns at full strength.
  * @param {{ effect: string }} light The light.
@@ -299,7 +305,7 @@ const mapOf = (size: number, note: string, events: (RmmzMapEvent | null)[]): Map
  * @param {LightStrength} strengthOf How brightly each light burns.
  * @returns {object} The mask, its stage, its pictures, a renderer writing down its passes, and the strengths asked for.
  */
-const maskOnStage = (strengthOf: LightStrength = steadyStrength) =>
+const maskOnStage = (strengthOf: LightStrength = steady) =>
 {
   const layer = new Container();
   const named = namedPictures();
