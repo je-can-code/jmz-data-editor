@@ -22,9 +22,9 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * map's own history. A value still being chosen, as a colour picker passes through colours or a slider is dragged,
  * shows on the map as it goes, before it is a step, and becomes one step once chosen; one still showing when another
  * setting changes, or when the section goes, is kept as its own step first, so no change is lost or merged into another.
- * A change the map cannot take is refused, saying why, and leaves the map as it was. The section reads its settings
- * again whenever the map's own properties change, even mid-edit, and never for a brush stroke's tiles or an event moved,
- * which change many times a second.
+ * A change the map cannot take is refused, saying why, and leaves the map as it was; the refusal goes once a change is
+ * made. The section reads its settings again whenever the map's own properties change, even mid-edit, and never for a
+ * brush stroke's tiles or an event moved, which change many times a second.
  *
  * J-Lighting's own section stands in for any module's here, over a cave at 85% darkness with no sky.
  */
@@ -195,6 +195,24 @@ describe('ModulePropertiesSection', () =>
     // Assert.
     expect([ screen.getByRole('alert').textContent, noteIn(hub), stepsIn(hub) ])
       .toStrictEqual([ 'That change could not be made: the game would not read this map\'s sky back as written', 'the gate < the wall', [] ]);
+  });
+
+  it('stops saying a change was refused once a change is made', () =>
+  {
+    // Arrange: a stray bracket at the note's end swallows a sky tag added after it, while the darkness above it still
+    // takes a change in place; the sky is refused first.
+    const { hub } = renderSection('<ambient:[85]>\nthe gate < the wall');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Sky follows the clock' }));
+    const refused = screen.queryByRole('alert') !== null;
+    const box = screen.getByRole('textbox', { name: 'Darkness' });
+
+    // Act.
+    fireEvent.change(box, { target: { value: '60' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    // Assert.
+    expect([ refused, screen.queryByRole('alert'), noteIn(hub) ])
+      .toStrictEqual([ true, null, '<ambient:[60]>\nthe gate < the wall' ]);
   });
 
   it('reads its settings again for a change to the map\'s own properties mid-edit, never for its tiles or events', () =>
