@@ -16,7 +16,11 @@
  * compositing mode from chrome://gpu, and refuses to hand over a browser that is not what the mode claims.
  *
  * The environment loses WAYLAND_DISPLAY and DISPLAY, so nothing launched here can reach the desktop.
+ *
+ * Every child process the run spawns is held until the run ends ({@link holdSpawnedProcesses}), or a browser launched
+ * after another was closed can be cut off from Playwright mid-run.
  */
+import { createRequire } from 'node:module';
 import { chromium } from 'playwright-core';
 import type { Browser, Page } from 'playwright-core';
 
@@ -112,6 +116,42 @@ const MODE_ARGS: Record<RenderMode, string[]> = {
  * The flags that unlock the frame clock.
  */
 const UNTHROTTLED_ARGS = [ '--disable-frame-rate-limit', '--disable-gpu-vsync' ];
+
+/**
+ * Node's child_process module as Playwright reaches it, through require, so a change to it is the one Playwright sees.
+ */
+const childProcess = createRequire(import.meta.url)('node:child_process') as { spawn: (...args: unknown[]) => unknown };
+
+/**
+ * Every child process spawned through Node's child_process since this module loaded, held until the run ends.
+ */
+const SPAWNED: unknown[] = [];
+
+/**
+ * Holds on to every child process spawned through Node's child_process from now on, for as long as this process runs.
+ *
+ * Playwright talks to a browser it launched through two pipes it hands the browser as file descriptors 3 and 4. Under
+ * Bun, once a closed browser's child process is garbage collected, those descriptors are closed a second time, by
+ * number; by then the kernel has handed the same numbers to the pipes of a browser launched since, so the collection
+ * cuts that browser off. It exits, Playwright is never told, and whatever it was waiting on never settles. That is why a
+ * speed run used to stop dead a few maps in (on the fourth map of a single run) with no browser left and nothing said.
+ * Measured 2026-10-06, Bun 1.3.13 and Playwright 1.61.1: with a collection forced every 200 calls, the third browser
+ * launched was cut off at the first one, every time; holding the child processes kept six in a row running through
+ * three hundred collections each. Held, a closed browser's process is never collected, so its descriptors are closed
+ * only the once; each costs a few objects.
+ */
+const holdSpawnedProcesses = (): void =>
+{
+  const { spawn } = childProcess;
+  childProcess.spawn = (...args: unknown[]) =>
+  {
+    const child = spawn(...args);
+    SPAWNED.push(child);
+    return child;
+  };
+};
+
+holdSpawnedProcesses();
 
 /**
  * Renderer names that mean software rendering.
