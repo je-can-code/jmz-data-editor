@@ -329,9 +329,10 @@ const withDarkness = (note: string, percent: number, defaultColor: string): stri
  * Gives a dark map's dark a new colour by writing its note in place: written over the colour the tag names, a usable one
  * or not, in the case it was written in, or put in after the darkness when the tag names none. No colour at all takes
  * the colour the tag names off it, with the separator before it, so the dark goes back to plain black. A colour the dark
- * already shows, whatever case or length it is written in, the project's in place of one the game cannot use included,
- * changes nothing. Every other character of the note stays as it was, and the note is read back as the game reads it
- * before it is handed on.
+ * already shows, whatever case or length it is written in, changes nothing: the project's in place of one the game
+ * cannot use included, and plain black for a tag naming none, as the light panel leaves a light showing its default.
+ * Every other character of the note stays as it was, and the note is read back as the game reads it before it is handed
+ * on.
  * @param {string} note The map's note; the game must read a darkness from it.
  * @param {string} color The colour, such as #0a2a2a, or empty for none.
  * @param {string} defaultColor The project's colour of the dark, for a colour the game cannot use.
@@ -361,15 +362,16 @@ const withDarkColor = (note: string, color: string, defaultColor: string): strin
       : checkedDarkness(`${note.slice(0, written.end)}${note.slice(named.end)}`, { darkness, declaresColor: false }, defaultColor);
   }
 
+  // the colour the dark already shows changes nothing, the plain black of a tag naming none included.
+  if (shownColor(named === undefined ? '' : named.text, defaultColor) === normalizeHex(color))
+  {
+    return note;
+  }
+
   const meant = { darkness, declaresColor: true, color: rgbOf(color) };
   if (named === undefined)
   {
     return checkedDarkness(`${note.slice(0, written.end)}${PLAIN_SEPARATOR}${color}${note.slice(written.end)}`, meant, defaultColor);
-  }
-
-  if (shownColor(named.text, defaultColor) === normalizeHex(color))
-  {
-    return note;
   }
 
   return checkedDarkness(`${note.slice(0, named.start)}${inCaseOf(color, named.text)}${note.slice(named.end)}`, meant, defaultColor);

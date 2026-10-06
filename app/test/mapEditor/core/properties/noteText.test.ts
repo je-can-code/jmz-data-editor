@@ -112,17 +112,48 @@ describe('noteText', () =>
         .toStrictEqual([ '<noToneChange>\n<ambient:[60]>', '<noWeather>\r\n<noToneChange>\r\n<ambient:[60]>' ]);
     });
 
-    it('keeps the line breaks a note ends on after the new line, and a note of breaks alone keeps them all', () =>
+    it('keeps the line breaks a note ends on after the new line', () =>
     {
       // Arrange.
-      const notes = [ '<noToneChange>\n<weather:fog>\n', 'end\n\n', '\n' ];
+      const notes = [ '<noToneChange>\n<weather:fog>\n', 'end\n\n' ];
 
       // Act.
       const added = notes.map(note => withLineAdded(note, '<ambient:[60]>'));
 
       // Assert.
       expect(added)
-        .toStrictEqual([ '<noToneChange>\n<weather:fog>\n<ambient:[60]>\n', 'end\n<ambient:[60]>\n\n', '<ambient:[60]>\n' ]);
+        .toStrictEqual([ '<noToneChange>\n<weather:fog>\n<ambient:[60]>\n', 'end\n<ambient:[60]>\n\n' ]);
+    });
+
+    it('puts the new line first in a note of line breaks alone, bringing its own break ahead of them', () =>
+    {
+      // Arrange.
+      const notes = [ '\n', '\r\n\r\n' ];
+
+      // Act.
+      const added = notes.map(note => withLineAdded(note, '<ambient:[60]>'));
+
+      // Assert.
+      expect(added)
+        .toStrictEqual([ '<ambient:[60]>\n\n', '<ambient:[60]>\r\n\r\n\r\n' ]);
+    });
+
+    it('gives back the note exactly as it was when the line is taken out again', () =>
+    {
+      // Arrange: no text at all, text alone, text ending on breaks, and breaks alone.
+      const notes = [ '', 'a', 'a\r\n', 'a\n\n', '\n', '\r\n\r\n' ];
+
+      // Act.
+      const restored = notes.map(note =>
+      {
+        const added = withLineAdded(note, '<t>');
+        const at = added.indexOf('<t>');
+        return withSpanRemoved(added, at, at + 3);
+      });
+
+      // Assert.
+      expect(restored)
+        .toStrictEqual([ '', 'a', 'a\r\n', 'a\n\n', '\n', '\r\n\r\n' ]);
     });
   });
 

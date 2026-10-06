@@ -78,9 +78,11 @@ const noteLines = (note: string): NoteLine[] =>
 };
 
 /**
- * Adds a line to the end of a note, after its last line of text and before any line breaks it ends on, written with the
- * note's own line break. Every character the note already holds stays exactly as it was: a note ending on a line break
- * still does, and an empty note becomes the line alone.
+ * Adds a line to the end of a note, after its last line of text and before any line breaks it ends on. Every character
+ * the note already holds stays exactly as it was, and the line brings one line break with it, written as the note writes
+ * them: before it, after the text, or in a note holding nothing but line breaks, after it, ahead of those. An empty note
+ * becomes the line alone. Taking the line out again with {@link withSpanRemoved}, which takes the break after a line or,
+ * on the last line, the one before it, therefore gives back the note exactly as it was.
  * @param {string} note The note.
  * @param {string} line The line to add, holding no line break.
  * @returns {string} The note with the line added.
@@ -90,10 +92,14 @@ const withLineAdded = (note: string, line: string): string =>
   // the pattern matches at the very end whatever the note holds, if only the empty string.
   const [ trailing ] = TRAILING_BREAKS.exec(note) as RegExpExecArray;
   const body = note.slice(0, note.length - trailing.length);
-  const lead = body === ''
-    ? ''
-    : lineBreakOf(note);
-  return `${body}${lead}${line}${trailing}`;
+  if (body !== '')
+  {
+    return `${body}${lineBreakOf(note)}${line}${trailing}`;
+  }
+
+  return trailing === ''
+    ? line
+    : `${line}${lineBreakOf(note)}${trailing}`;
 };
 
 /**

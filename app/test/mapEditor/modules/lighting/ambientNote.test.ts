@@ -267,7 +267,7 @@ describe('ambientNote', () =>
           '<ambient:[60]>',
           '<ambientSound:[50]>\n<light:[5]>\n<ambient:[60]>',
           '<noToneChange>\n<weather:fog>\n<ambient:[60]>\n',
-          '<ambient:[60]>\n',
+          '<ambient:[60]>\n\n',
         ]);
     });
 
@@ -420,17 +420,18 @@ describe('ambientNote', () =>
         .toStrictEqual([ '<AMBIENT: [85,#AABBCC]>', '<ambient:[60, #aabbcc]>' ]);
     });
 
-    it('leaves the note as it is for the colour the dark already shows, shorthand or the project\'s alike', () =>
+    it('leaves the note as it is for the colour the dark already shows, shorthand, the project\'s or plain black alike', () =>
     {
-      // Arrange: shorthand for the colour asked for, and a colour the game cannot use, which shows the project's.
-      const cases: [ string, string ][] = [ [ '<ambient:[85, #0A2]>', '#00aa22' ], [ '<ambient:[60, teal]>', DEFAULT ] ];
+      // Arrange: shorthand for the colour asked for; a colour the game cannot use, which shows the project's; and a tag
+      // naming no colour, which shows plain black.
+      const cases: [ string, string ][] = [ [ '<ambient:[85, #0A2]>', '#00aa22' ], [ '<ambient:[60, teal]>', DEFAULT ], [ '<ambient:[85]>', '#000000' ] ];
 
       // Act.
       const written = cases.map(([ note, color ]) => withDarkColor(note, color, DEFAULT));
 
       // Assert.
       expect(written)
-        .toStrictEqual([ '<ambient:[85, #0A2]>', '<ambient:[60, teal]>' ]);
+        .toStrictEqual([ '<ambient:[85, #0A2]>', '<ambient:[60, teal]>', '<ambient:[85]>' ]);
     });
 
     it('takes the colour off with its separator for no colour, so the dark goes back to plain black', () =>
