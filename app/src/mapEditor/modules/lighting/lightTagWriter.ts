@@ -68,6 +68,31 @@ const intensityPercent = (intensity: number): number =>
 };
 
 /**
+ * Splits a tag's bracketed list into its values as JsonMapper#parseArrayFromString splits it, on a comma with or without
+ * one space after it, each value with where it sits and the separator written before it.
+ * @param {string} list The list, brackets included, such as {@code [5, #ffbb73]}.
+ * @param {number} at Where the list's opening bracket sits, in whatever text holds it.
+ * @returns {TagValueSpan[]} The values, in order.
+ */
+const valueSpansOf = (list: string, at: number): TagValueSpan[] =>
+{
+  const pieces = list.slice(1, -1).split(/(, |,)/u);
+  const values: TagValueSpan[] = [];
+  let cursor = at + 1;
+  for (let index = 0; index < pieces.length; index += 2)
+  {
+    // the pieces alternate value and separator, since the tag's pattern allows nothing else between the brackets.
+    const separator = index === 0 ? '' : pieces[index - 1];
+    const text = pieces[index];
+    const start = cursor + separator.length;
+    values.push({ text, start, end: start + text.length, separator });
+    cursor = start + text.length;
+  }
+
+  return values;
+};
+
+/**
  * Splits a light tag's list into its values, each with where it sits on the line, and finds which value J-Lighting
  * reads as each part of the light. The line must hold a light tag, as every line {@link lightLines} finds does.
  * @param {string} line The comment line.
@@ -78,18 +103,7 @@ const lightTagParts = (line: string): LightTagParts =>
   // the line holds a light tag, so the match is there; its list opens at the tag's first bracket.
   const match = LIGHT_TAG.exec(line) as RegExpExecArray;
   const [ tag, list ] = match;
-  const pieces = list.slice(1, -1).split(/(, |,)/u);
-  const values: TagValueSpan[] = [];
-  let cursor = match.index + tag.indexOf('[') + 1;
-  for (let index = 0; index < pieces.length; index += 2)
-  {
-    // the pieces alternate value and separator, since the tag's pattern allows nothing else between the brackets.
-    const separator = index === 0 ? '' : pieces[index - 1];
-    const text = pieces[index];
-    const start = cursor + separator.length;
-    values.push({ text, start, end: start + text.length, separator });
-    cursor = start + text.length;
-  }
+  const values = valueSpansOf(list, match.index + tag.indexOf('['));
 
   // each part is the first value after the reach that looks like one, as LightingTagParser#parseLightPayload reads it.
   const read = values.map(value => readValue(value.text));
@@ -328,5 +342,5 @@ const withEffect = (line: string, effect: LightEffect, defaults: LightDefaults):
   return checked(replaced(line, parts.values[parts.effect], effect), meant, defaults);
 };
 
-export { intensityPercent, lightTagParts, withColor, withEffect, withIntensity, withRadius };
+export { inCaseOf, intensityPercent, lightTagParts, valueSpansOf, withColor, withEffect, withIntensity, withRadius };
 export type { LightTagParts, TagValueSpan };

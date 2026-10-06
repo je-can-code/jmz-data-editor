@@ -67,6 +67,20 @@ type SliderControl = {
 };
 
 /**
+ * A colour picked, or chosen from the swatches the kind offers. A colour that may be left unset, such as the colour of a
+ * map's dark, names the button that unsets it.
+ */
+type ColorControl = {
+  readonly kind: 'color';
+
+  /**
+   * What the button that unsets the colour says, such as "Plain black"; it hands on an empty value. Left out, there is
+   * no such button.
+   */
+  readonly clear?: string;
+};
+
+/**
  * The control a quick field shows, which also says what its value holds:
  * - {@code number}: a whole number within the bounds;
  * - {@code select}: one of the choices' numbers;
@@ -76,7 +90,9 @@ type SliderControl = {
  * - {@code graphic}: a page's picture, as {@link GraphicValue};
  * - {@code place}: a map and a tile on it, as {@code { mapId, x, y }}, picked by clicking the tile on the map;
  * - {@code slider}: a number, dragged or typed, as {@link SliderControl} describes;
- * - {@code color}: a colour as {@code #rrggbb}, picked, or chosen from the swatches the kind offers.
+ * - {@code color}: a colour as {@code #rrggbb}, picked, or chosen from the swatches the kind offers, or empty once
+ *   unset, as {@link ColorControl} describes;
+ * - {@code check}: true or false, ticked or not.
  */
 type QuickControl =
   | { readonly kind: 'number'; readonly min: number; readonly max: number }
@@ -87,7 +103,8 @@ type QuickControl =
   | { readonly kind: 'graphic' }
   | { readonly kind: 'place' }
   | SliderControl
-  | { readonly kind: 'color' };
+  | ColorControl
+  | { readonly kind: 'check' };
 
 /**
  * What a graphic field holds: the character sheet and which of its characters, or a tile. Facing and frame are
@@ -755,6 +772,7 @@ export {
   sharedFields,
 };
 export type {
+  ColorControl,
   EventEdit,
   GraphicValue,
   KindGroup,

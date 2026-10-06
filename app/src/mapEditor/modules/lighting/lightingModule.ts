@@ -12,6 +12,7 @@ import { LightMask } from './lightMask.ts';
 import { lightPanelOptions, lightQuickModel } from './lightPanel.ts';
 import { LightRings } from './lightRings.ts';
 import { firstLitPage, isLight, type LightPageChoice } from './lightTags.ts';
+import { MAP_LIGHTING_ID, mapLightingSource } from './mapLighting.ts';
 import { skyAmbient } from './sky.ts';
 import { SkyTone } from './skyTone.ts';
 import type { SkyCurve } from './timeTone.ts';
@@ -114,6 +115,9 @@ const registerSky = (contributions: ModuleContributions, context: ModuleContext)
  * field with no darkness of its own darkens at night and its lights show through it. A map tagged to have no sky, a cave
  * or an interior, gets neither. The Lighting switch shows and hides the sky with the rest. A curve the module cannot use
  * is said over every map view, and the sky then stays as it is at every hour.
+ *
+ * Map Properties gains a Lighting section setting the map's own darkness and its colour, and, while J-Lighting-Time is
+ * on, whether the map's sky follows the clock, each written into the map's note in place.
  */
 const lightingModule: PluginModule = {
   id: 'lighting',
@@ -161,6 +165,13 @@ const lightingModule: PluginModule = {
       id: LIGHT_RINGS_ID,
       title: 'Light rings',
       create: stage => new LightRings(stage, defaults, choosePage),
+    });
+
+    // a map's own darkness, and its sky once J-Lighting-Time gives maps one, are set in Map Properties.
+    contributions.mapProperties({
+      id: MAP_LIGHTING_ID,
+      title: 'Lighting',
+      source: mapLightingSource(ambientColorFrom(config), context.plugins.has(LIGHTING_TIME_PLUGIN)),
     });
   },
 };

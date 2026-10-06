@@ -1,9 +1,28 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Autocomplete, Box, ButtonBase, InputAdornment, MenuItem, Slider, Stack, TextField, Typography } from '@mui/material';
+import {
+  Autocomplete,
+  Box,
+  Button,
+  ButtonBase,
+  Checkbox,
+  FormControlLabel,
+  InputAdornment,
+  MenuItem,
+  Slider,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
 import type { MapEditorApi } from '../../core/api/MapEditorApi.ts';
 import { namedRows, type NamedRow } from '../../core/commandList/databaseNames.ts';
 import { mapLabel, mapOptions, type MapOption } from '../../core/commands/editors/mapOptions.ts';
-import type { GraphicValue, QuickOption, SharedField, SliderControl as SliderSpec } from '../../core/eventKinds/quickFields.ts';
+import type {
+  ColorControl as ColorSpec,
+  GraphicValue,
+  QuickOption,
+  SharedField,
+  SliderControl as SliderSpec,
+} from '../../core/eventKinds/quickFields.ts';
 import type { MapLocation } from '../../core/locations/LocationPicks.ts';
 import type { JsonValue } from '../../core/model/json.ts';
 import type { RmmzEventImage } from '../../core/model/rmmzTypes.ts';
@@ -401,13 +420,13 @@ const settlePicked = (picker: HTMLInputElement, picking: React.RefObject<boolean
  * swatches the kind offers. The picker shows each colour on the map as it is chosen, and hands on the colour it settles
  * on as one change, when it closes on a new one or is left; a picker opened and closed untouched hands on nothing. A
  * swatch hands on its colour at once, and the swatch of the colour the events hold is ringed. Events holding different
- * colours read "Mixed".
- * @param {ControlProps} props The field.
+ * colours read "Mixed". A colour that may be unset has a button that hands on an empty value at once.
+ * @param {ControlProps & { control: ColorSpec }} props The field, and whether its colour may be unset.
  * @returns {React.JSX.Element} The control.
  */
-const ColorControl = (props: ControlProps) =>
+const ColorControl = (props: ControlProps & { control: ColorSpec }) =>
 {
-  const { field, resources, onChange, onPreview } = props;
+  const { field, resources, onChange, onPreview, control } = props;
   const pickerRef = useRef<HTMLInputElement | null>(null);
   const picking = useRef(false);
   const value = field.mixed ? null : field.value as string;
@@ -458,7 +477,32 @@ const ColorControl = (props: ControlProps) =>
             sx={{ width: 20, height: 20, borderRadius: 0.5, bgcolor: swatch, border: 2, borderColor: swatch === value ? 'text.primary' : 'divider' }}
           />
         ))}
+        {control.clear !== undefined && (
+          <Button size={'small'} onClick={() => onChange('')}>
+            {control.clear}
+          </Button>
+        )}
       </Stack>
+      <SmallPrint line={field.hint}/>
+    </Box>
+  );
+};
+
+/**
+ * A tick box, committed as soon as it is clicked, with the field's hint under it. Events holding it differently show it
+ * half ticked, and a click ticks it for all of them.
+ * @param {ControlProps} props The field.
+ * @returns {React.JSX.Element} The tick box.
+ */
+const CheckControl = (props: ControlProps) =>
+{
+  const { field, onChange } = props;
+  return (
+    <Box>
+      <FormControlLabel
+        control={<Checkbox size={'small'} checked={field.value === true} indeterminate={field.mixed} onChange={event => onChange(event.target.checked)}/>}
+        label={<Typography variant={'body2'}>{field.label}</Typography>}
+      />
       <SmallPrint line={field.hint}/>
     </Box>
   );
@@ -724,7 +768,9 @@ const QuickControl = (props: ControlProps) =>
     case 'slider':
       return <SliderControl {...props} control={control}/>;
     case 'color':
-      return <ColorControl {...props}/>;
+      return <ColorControl {...props} control={control}/>;
+    case 'check':
+      return <CheckControl {...props}/>;
   }
 };
 

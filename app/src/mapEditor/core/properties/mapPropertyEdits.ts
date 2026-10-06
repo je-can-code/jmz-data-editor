@@ -1,6 +1,7 @@
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { mapHistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
+import type { Transaction } from '../history/Transaction.ts';
 import { mapDocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
@@ -59,6 +60,20 @@ const labelForProperties = (names: readonly EditableMapProperty[]): string =>
 };
 
 /**
+ * Writes some of a map's properties inside an open transaction; a property already holding its new value adds nothing
+ * to it.
+ * @param {Transaction} tx The open transaction.
+ * @param {number} mapId The map.
+ * @param {MapPropertyChanges} changes The properties and their new values.
+ */
+const applyPropertyChanges = (tx: Transaction, mapId: number, changes: MapPropertyChanges): void =>
+{
+  const key = mapDocumentKey(mapId);
+  const names = Object.keys(changes) as EditableMapProperty[];
+  names.forEach(name => tx.set(key, [ name ], changes[name] as unknown as JsonValue));
+};
+
+/**
  * Changes some of a map's properties as one step in the map's own history, so it undoes from that map's panel,
  * its properties or the history panel alike. Properties already holding their new values change nothing, and a
  * change that changes nothing records nothing.
@@ -69,17 +84,13 @@ const labelForProperties = (names: readonly EditableMapProperty[]): string =>
  */
 const editMapProperties = (hub: DocumentHub, mapId: number, changes: MapPropertyChanges): HistoryStep | null =>
 {
-  const key = mapDocumentKey(mapId);
   const names = Object.keys(changes) as EditableMapProperty[];
   if (names.length === 0)
   {
     return null;
   }
 
-  return hub.edit(labelForProperties(names), [ mapHistoryKey(mapId) ], tx =>
-  {
-    names.forEach(name => tx.set(key, [ name ], changes[name] as unknown as JsonValue));
-  });
+  return hub.edit(labelForProperties(names), [ mapHistoryKey(mapId) ], tx => applyPropertyChanges(tx, mapId, changes));
 };
 
 /**
@@ -127,5 +138,5 @@ const resizeMap = (hub: DocumentHub, mapId: number, width: number, height: numbe
   });
 };
 
-export { editMapProperties, labelForProperties, previewResize, PROPERTY_LABELS, resizeMap };
+export { applyPropertyChanges, editMapProperties, labelForProperties, previewResize, PROPERTY_LABELS, resizeMap };
 export type { EditableMapProperty, MapPropertyChanges };

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { Alert, Box, Button, CircularProgress, IconButton, Stack, TextField, Tooltip, Typography } from '@mui/material';
 import { Add, Close, FiberManualRecord } from '@mui/icons-material';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
@@ -14,6 +14,7 @@ import {
 import { describeStranded, type StrandedArrival } from '../../core/properties/arrivals.ts';
 import { MAX_MAP_SIZE, MIN_MAP_SIZE, RESIZE_ANCHORS, type ResizeAnchor } from '../../core/properties/resizeMap.ts';
 import { useHeldMap, useStrandedArrivals, useTilesets, useWorkspace, useWorkspaceState } from '../workspaceHooks.tsx';
+import { ModulePropertiesSection } from './ModulePropertiesSection.tsx';
 import { CheckField, CommitNumberField, CommitTextField, FieldRow, SectionTitle, SelectField } from './propertyFields.tsx';
 
 /**
@@ -400,7 +401,8 @@ const EncounterFields = (props: { map: MapDocument; edit: EditProperties }) =>
 /**
  * Every property of the map in focus (the last one focused in a panel or picked alone in the tree), each change
  * one step in that map's history, so it undoes like any other edit to the map: from here, from the map, or from the
- * history panel.
+ * history panel. The sections the plugin modules add, such as J-Lighting's darkness, sit just above the note they
+ * write into, and come and go with their plugins.
  * @returns {React.JSX.Element} The panel.
  */
 const MapPropertiesPanel = () =>
@@ -409,6 +411,10 @@ const MapPropertiesPanel = () =>
   const mapId = useWorkspaceState(state => state.currentMapId);
   const held = useHeldMap(mapId);
   const tilesets = useTilesets();
+  const { modules } = controller.services;
+
+  // the plugin modules switch on once js/plugins.js is read, which can be after the panel first drew.
+  useSyncExternalStore(modules.subscribe, () => modules.revision);
 
   if (mapId === null || held.map === null)
   {
@@ -466,6 +472,9 @@ const MapPropertiesPanel = () =>
       <BattlebackFields map={map} edit={edit}/>
       <ParallaxFields map={map} edit={edit}/>
       <EncounterFields map={map} edit={edit}/>
+      {modules.mapPropertiesSections().map(section => (
+        <ModulePropertiesSection key={`${mapId} ${section.id}`} mapId={mapId} map={map} section={section}/>
+      ))}
       <SectionTitle>Note</SectionTitle>
       <CommitTextField label={'Note'} value={map.property('note')} multiline onCommit={note => edit({ note })}/>
     </Box>

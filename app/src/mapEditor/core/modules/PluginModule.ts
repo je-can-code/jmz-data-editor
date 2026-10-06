@@ -6,6 +6,7 @@ import type { MapDocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { RmmzMapEvent, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { MapPropertiesSource } from '../properties/moduleProperties.ts';
 import type { LightingLayerDefinition } from '../renderer/lightingLayer.ts';
 import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
 
@@ -126,6 +127,27 @@ type PassabilityRule = {
 };
 
 /**
+ * A section a module adds to Map Properties, such as J-Lighting's darkness: settings of the map itself rather than of
+ * anything on it, each change one step in the map's history like any other property's.
+ */
+type MapPropertiesSection = {
+  /**
+   * Unique, prefixed like event kinds.
+   */
+  readonly id: string;
+
+  /**
+   * The heading the section shows under.
+   */
+  readonly title: string;
+
+  /**
+   * Works out the section's settings for a map, from the map as it stands.
+   */
+  readonly source: MapPropertiesSource;
+};
+
+/**
  * What a module receives when it switches on.
  */
 type ModuleContext = {
@@ -235,6 +257,12 @@ type ModuleContributions = {
    * @param {ClockOffer} offer Where the clock starts, and what each part of the day is called.
    */
   clock(offer: ClockOffer): void;
+
+  /**
+   * Adds a section to Map Properties, shown for every map while the module is on.
+   * @param {MapPropertiesSection} section The section.
+   */
+  mapProperties(section: MapPropertiesSection): void;
 };
 
 /**
@@ -285,6 +313,7 @@ export type {
   ClockOffer,
   EventKindDefinition,
   ExtensionConfig,
+  MapPropertiesSection,
   ModuleContext,
   ModuleContributions,
   ModuleNotice,

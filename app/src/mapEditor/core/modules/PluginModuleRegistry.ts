@@ -7,6 +7,7 @@ import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
 import type {
   ClockOffer,
   EventKindDefinition,
+  MapPropertiesSection,
   ModuleContributions,
   ModuleNotice,
   PaletteEntry,
@@ -40,6 +41,7 @@ type Contributions = {
   templateMaps: number[];
   notices: ModuleNotice[];
   clocks: ClockOffer[];
+  mapProperties: MapPropertiesSection[];
 };
 
 /**
@@ -56,6 +58,7 @@ const noContributions = (): Contributions => ({
   templateMaps: [],
   notices: [],
   clocks: [],
+  mapProperties: [],
 });
 
 /**
@@ -87,8 +90,9 @@ const configNamesOf = (pluginModule: PluginModule, enabled: ReadonlyMap<string, 
 
 /**
  * Holds the event kinds, palette entries, passability rules, overlays, lighting layers and command entries the editor
- * knows, the maps whose events are a plugin's patterns, what the modules say over every map view, and the clock they
- * offer: the core's kinds, always, and each plugin module's contributions while its plugins are enabled.
+ * knows, the maps whose events are a plugin's patterns, what the modules say over every map view, the clock they offer,
+ * and the sections they add to Map Properties: the core's kinds, always, and each plugin module's contributions while
+ * its plugins are enabled.
  */
 class PluginModuleRegistry
 {
@@ -299,6 +303,16 @@ class PluginModuleRegistry
   }
 
   /**
+   * Lists the sections the active modules add to Map Properties, in the order they added them; empty while none adds
+   * any.
+   * @returns {readonly MapPropertiesSection[]} The sections.
+   */
+  mapPropertiesSections(): readonly MapPropertiesSection[]
+  {
+    return this.#contributions.mapProperties;
+  }
+
+  /**
    * Builds the contribution sink one module registers through, which holds it to its own id prefix.
    * @param {PluginModule} pluginModule The module.
    * @returns {ModuleContributions} The sink.
@@ -357,6 +371,11 @@ class PluginModuleRegistry
       clock: offer =>
       {
         this.#contributions.clocks.push(offer);
+      },
+      mapProperties: section =>
+      {
+        requirePrefix(section.id, 'map properties sections');
+        this.#contributions.mapProperties.push(section);
       },
     };
   }
