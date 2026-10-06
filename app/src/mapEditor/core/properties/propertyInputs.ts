@@ -51,6 +51,40 @@ const parseWholeNumber = (text: string, limits: NumberLimits): number | null =>
 };
 
 /**
+ * What a field taking fractions accepts: the smallest and largest values, and how many decimal places.
+ */
+type DecimalLimits = NumberLimits & {
+  readonly places: number;
+};
+
+/**
+ * Reads a number typed into a field that takes fractions, such as a reach of 2.5 tiles, refusing anything that is not
+ * a plain number, has more decimal places than the field allows, or falls outside its limits. A field allowing no
+ * places takes whole numbers alone.
+ * @param {string} text What was typed.
+ * @param {DecimalLimits} limits The smallest and largest values allowed, and how many decimal places.
+ * @returns {number | null} The number, or null when the text is not an allowed number.
+ */
+const parseDecimal = (text: string, limits: DecimalLimits): number | null =>
+{
+  const trimmed = text.trim();
+  if (/^[-+]?(\d+(\.\d*)?|\.\d+)$/u.test(trimmed) === false)
+  {
+    return null;
+  }
+
+  // the places are counted as typed, so 2.50 has two even though it is 2.5.
+  const dot = trimmed.indexOf('.');
+  const places = dot === -1
+    ? 0
+    : trimmed.length - dot - 1;
+  const value = Number(trimmed);
+  return places <= limits.places && value >= limits.min && value <= limits.max
+    ? value
+    : null;
+};
+
+/**
  * Reads a list of region ids typed as numbers separated by commas or spaces. An empty field is an empty list,
  * which MZ reads as "every region"; any entry that is not a region id refuses the whole list, and repeats are kept
  * once.
@@ -88,5 +122,5 @@ const formatRegionList = (regions: readonly number[]): string =>
   return regions.join(', ');
 };
 
-export { formatRegionList, parseRegionList, parseWholeNumber, PROPERTY_LIMITS, SCROLL_TYPES };
-export type { NumberLimits };
+export { formatRegionList, parseDecimal, parseRegionList, parseWholeNumber, PROPERTY_LIMITS, SCROLL_TYPES };
+export type { DecimalLimits, NumberLimits };

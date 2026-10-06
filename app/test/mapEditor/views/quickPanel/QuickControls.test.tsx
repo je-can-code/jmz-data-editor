@@ -7,7 +7,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import type { DatabaseNamesJson } from '../../../../src/mapEditor/core/commandList/databaseNames.ts';
-import type { QuickControl as QuickControlKind, SharedField } from '../../../../src/mapEditor/core/eventKinds/quickFields.ts';
+import type { QuickControl as QuickControlKind, SharedField, SliderControl as SliderSpec } from '../../../../src/mapEditor/core/eventKinds/quickFields.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMapInfo } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { LocationPickerDialogProps } from '../../../../src/mapEditor/views/locationPicker/LocationPickerDialog.tsx';
@@ -49,6 +49,12 @@ vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerDialog.tsx
  * tile as a tile, and previews the frame the engine would cut from the sheet. The place control picks a map and a
  * tile together by clicking the tile on the map, starting from the place the events share, waiting while they go to
  * different places, and offering nothing without a server to read maps from.
+ *
+ * A slider and a colour picker are chosen over time, so they show each value as it is chosen (a preview) and hand on
+ * only the value chosen, once: the slider's when it stops moving, never for a press that moved nothing; the picker's
+ * when it closes on a new colour or is left, never when left untouched. A swatch is a choice at once. The slider's box
+ * takes fractions to its places and refuses anything else, and a value past the track's end shows in the box with the
+ * thumb held at the end.
  */
 describe('QuickControl', () =>
 {
@@ -75,16 +81,23 @@ describe('QuickControl', () =>
   });
 
   /**
-   * Renders a control with a spy for its changes.
+   * What a control reads besides its field when nothing has arrived: no server, names, map tree or sheets, and no
+   * swatches.
+   */
+  const NO_RESOURCES: QuickResources = { api: null, names: null, mapRows: null, sheets: null, swatches: [] };
+
+  /**
+   * Renders a control with spies for its changes and the values it shows while they are still being chosen.
    * @param {SharedField} field The field.
    * @param {Partial<QuickResources>} resources What it reads besides.
-   * @returns {{ onChange: ReturnType<typeof vi.fn> }} The spy.
+   * @returns {{ onChange: ReturnType<typeof vi.fn>, onPreview: ReturnType<typeof vi.fn> }} The spies.
    */
   const renderControl = (field: SharedField, resources: Partial<QuickResources> = {}) =>
   {
     const onChange = vi.fn();
-    render(<QuickControl field={field} resources={{ api: null, names: null, mapRows: null, sheets: null, ...resources }} onChange={onChange}/>);
-    return { onChange };
+    const onPreview = vi.fn();
+    render(<QuickControl field={field} resources={{ ...NO_RESOURCES, ...resources }} onChange={onChange} onPreview={onPreview}/>);
+    return { onChange, onPreview };
   };
 
   /**
@@ -138,7 +151,7 @@ describe('QuickControl', () =>
     renderControl(fieldOf({ kind: 'select', options }, null, 'Fade'));
 
     // Act.
-    render(<QuickControl field={fieldOf({ kind: 'select', options }, 7, 'Other fade')} resources={{ api: null, names: null, mapRows: null, sheets: null }} onChange={vi.fn()}/>);
+    render(<QuickControl field={fieldOf({ kind: 'select', options }, 7, 'Other fade')} resources={NO_RESOURCES} onChange={vi.fn()} onPreview={vi.fn()}/>);
 
     // Assert.
     expect([ screen.getByLabelText('Fade').textContent, screen.getByLabelText('Other fade').textContent ])
@@ -155,7 +168,7 @@ describe('QuickControl', () =>
     // Act.
     fireEvent.change(input, { target: { value: 'ore' } });
     fireEvent.click(screen.getByRole('option', { name: '2 Silver Ore' }));
-    render(<QuickControl field={fieldOf({ kind: 'row', list: 'item' }, 5, 'Plain item')} resources={{ api: null, names: null, mapRows: null, sheets: null }} onChange={vi.fn()}/>);
+    render(<QuickControl field={fieldOf({ kind: 'row', list: 'item' }, 5, 'Plain item')} resources={NO_RESOURCES} onChange={vi.fn()} onPreview={vi.fn()}/>);
 
     // Assert.
     expect([ shown, onChange.mock.calls, (screen.getByLabelText('Plain item') as HTMLInputElement).value ])
@@ -168,7 +181,7 @@ describe('QuickControl', () =>
     renderControl(fieldOf({ kind: 'row', list: 'item' }, 99, 'Item'), { names: buildNames() });
 
     // Act.
-    render(<QuickControl field={fieldOf({ kind: 'row', list: 'item' }, null, 'Mixed item')} resources={{ api: null, names: buildNames(), mapRows: null, sheets: null }} onChange={vi.fn()}/>);
+    render(<QuickControl field={fieldOf({ kind: 'row', list: 'item' }, null, 'Mixed item')} resources={{ ...NO_RESOURCES, names: buildNames() }} onChange={vi.fn()} onPreview={vi.fn()}/>);
 
     // Assert.
     expect([ (screen.getByLabelText('Item') as HTMLInputElement).value, (screen.getByLabelText('Mixed item') as HTMLInputElement).placeholder ])
@@ -191,7 +204,7 @@ describe('QuickControl', () =>
     fireEvent.mouseDown(input);
     const offered = screen.getAllByRole('option').map(option => option.textContent);
     fireEvent.click(screen.getByRole('option', { name: '002 Inn' }));
-    render(<QuickControl field={fieldOf({ kind: 'map' }, 40, 'Lost map')} resources={{ api: null, names: null, mapRows: rows, sheets: null }} onChange={vi.fn()}/>);
+    render(<QuickControl field={fieldOf({ kind: 'map' }, 40, 'Lost map')} resources={{ ...NO_RESOURCES, mapRows: rows }} onChange={vi.fn()} onPreview={vi.fn()}/>);
 
     // Assert.
     expect([ shown, offered, onChange.mock.calls, (screen.getByLabelText('Lost map') as HTMLInputElement).value ])
@@ -259,7 +272,7 @@ describe('QuickControl', () =>
     renderControl(fieldOf({ kind: 'graphic' }, { characterName: '', characterIndex: 0, tileId: 423 }, 'Tile picture'), { sheets: [ '!Chest' ] });
 
     // Act.
-    render(<QuickControl field={fieldOf({ kind: 'graphic' }, { characterName: '$gone', characterIndex: 0, tileId: 0 }, 'Gone picture')} resources={{ api: null, names: null, mapRows: null, sheets: [ '!Chest' ] }} onChange={vi.fn()}/>);
+    render(<QuickControl field={fieldOf({ kind: 'graphic' }, { characterName: '$gone', characterIndex: 0, tileId: 0 }, 'Gone picture')} resources={{ ...NO_RESOURCES, sheets: [ '!Chest' ] }} onChange={vi.fn()} onPreview={vi.fn()}/>);
     fireEvent.mouseDown(screen.getByLabelText('Gone picture'));
 
     // Assert.
@@ -340,5 +353,278 @@ describe('QuickControl', () =>
     // Assert.
     expect(screen.queryByRole('button', { name: 'Pick on the map' }))
       .toBeNull();
+  });
+
+  it('shows a drop-down\'s hint under it', () =>
+  {
+    // Arrange.
+    const options = [ { value: 0, label: 'Steady' }, { value: 1, label: 'Flicker' } ];
+    const field = { ...fieldOf({ kind: 'select', options }, 1, 'Effect'), hint: 'Erratic, like a torch.' };
+
+    // Act.
+    renderControl(field);
+
+    // Assert.
+    expect(screen.getByText('Erratic, like a torch.'))
+      .toBeInTheDocument();
+  });
+
+  describe('slider', () =>
+  {
+    /**
+     * A light's reach: a half-tile track from half a tile to twelve, and a box taking two places up to 99, in tiles.
+     */
+    const reach: SliderSpec = { kind: 'slider', min: 0.01, max: 99, places: 2, track: [ 0.5, 12 ], step: 0.5, unit: 'tiles' };
+
+    /**
+     * A light's intensity: a track and a box from 0 to 100 in whole numbers, each end named, and a line saying what it
+     * is.
+     */
+    const intensity: SliderSpec = {
+      kind: 'slider',
+      min: 0,
+      max: 100,
+      places: 0,
+      track: [ 0, 100 ],
+      step: 1,
+      unit: '',
+      ends: [ 'Soft pool', 'Hard rim' ],
+      about: 'Its shape, not its brightness.',
+    };
+
+    it('shows each value as the track moves, and hands on the value it stops at', () =>
+    {
+      // Arrange: a reach of 4, one half-tile step from 4.5.
+      const { onChange, onPreview } = renderControl(fieldOf(reach, 4, 'Radius'));
+
+      // Act.
+      fireEvent.keyDown(screen.getByRole('slider', { name: 'Radius' }), { key: 'ArrowRight' });
+
+      // Assert.
+      expect([ onPreview.mock.calls, onChange.mock.calls ])
+        .toStrictEqual([ [ [ 4.5 ] ], [ [ 4.5 ] ] ]);
+    });
+
+    it('hands on nothing for a press that moves nothing', () =>
+    {
+      // Arrange: already at the start of the track, so Home goes nowhere.
+      const { onChange, onPreview } = renderControl(fieldOf(intensity, 0, 'Intensity'));
+
+      // Act.
+      fireEvent.keyDown(screen.getByRole('slider', { name: 'Intensity' }), { key: 'Home' });
+
+      // Assert.
+      expect([ onPreview.mock.calls, onChange.mock.calls ])
+        .toStrictEqual([ [], [] ]);
+    });
+
+    it('commits a typed fraction on Enter, and passes over any other key', () =>
+    {
+      // Arrange.
+      const { onChange } = renderControl(fieldOf(reach, 4, 'Radius'));
+      const box = screen.getByRole('textbox', { name: 'Radius' });
+
+      // Act.
+      fireEvent.change(box, { target: { value: '2.25' } });
+      fireEvent.keyDown(box, { key: 'Tab' });
+      const beforeEnter = onChange.mock.calls.length;
+      fireEvent.keyDown(box, { key: 'Enter' });
+
+      // Assert.
+      expect([ beforeEnter, onChange.mock.calls ])
+        .toStrictEqual([ 0, [ [ 2.25 ] ] ]);
+    });
+
+    it('refuses a number with more places than it takes, saying what it takes, and puts the value back when left', () =>
+    {
+      // Arrange.
+      const { onChange } = renderControl(fieldOf(reach, 4, 'Radius'));
+      const box = screen.getByRole('textbox', { name: 'Radius' }) as HTMLInputElement;
+
+      // Act.
+      fireEvent.change(box, { target: { value: '2.255' } });
+      const refusal = screen.getByText('0.01 to 99').textContent;
+      fireEvent.blur(box);
+
+      // Assert.
+      expect([ refusal, box.value, onChange.mock.calls ])
+        .toStrictEqual([ '0.01 to 99', '4', [] ]);
+    });
+
+    it('leaves the value alone when left untouched, and Escape puts back what was typed', () =>
+    {
+      // Arrange.
+      const { onChange } = renderControl(fieldOf(reach, 4, 'Radius'));
+      const box = screen.getByRole('textbox', { name: 'Radius' }) as HTMLInputElement;
+
+      // Act.
+      fireEvent.blur(box);
+      fireEvent.change(box, { target: { value: '6' } });
+      fireEvent.keyDown(box, { key: 'Escape' });
+
+      // Assert.
+      expect([ box.value, onChange.mock.calls ])
+        .toStrictEqual([ '4', [] ]);
+    });
+
+    it('shows a value past the end of the track in the box, with the thumb held at that end', () =>
+    {
+      // Arrange: a reach of 30 tiles, past the track's 12.
+
+      // Act.
+      renderControl(fieldOf(reach, 30, 'Radius'));
+
+      // Assert.
+      expect([ (screen.getByRole('textbox', { name: 'Radius' }) as HTMLInputElement).value, screen.getByRole('slider', { name: 'Radius' }).getAttribute('aria-valuenow') ])
+        .toStrictEqual([ '30', '12' ]);
+    });
+
+    it('reads a mixed number as mixed, with the thumb at the start of the track', () =>
+    {
+      // Arrange: nothing beyond the control, its events disagreeing.
+
+      // Act.
+      renderControl(fieldOf(reach, null, 'Radius'));
+
+      // Assert.
+      expect([ (screen.getByRole('textbox', { name: 'Radius' }) as HTMLInputElement).placeholder, screen.getByRole('slider', { name: 'Radius' }).getAttribute('aria-valuenow') ])
+        .toStrictEqual([ 'Mixed', '0.5' ]);
+    });
+
+    it('shows its unit after the box', () =>
+    {
+      // Arrange: nothing beyond the control.
+
+      // Act.
+      renderControl(fieldOf(reach, 4, 'Radius'));
+
+      // Assert.
+      expect(screen.getByText('tiles'))
+        .toBeInTheDocument();
+    });
+
+    it('names what each end of the track means, says what the setting is, and shows its hint', () =>
+    {
+      // Arrange.
+      const field = { ...fieldOf(intensity, 30, 'Intensity'), hint: 'The project\'s default.' };
+
+      // Act.
+      renderControl(field);
+
+      // Assert.
+      expect([ 'Soft pool', 'Hard rim', 'Its shape, not its brightness.', 'The project\'s default.' ].map(line => screen.getByText(line).textContent))
+        .toStrictEqual([ 'Soft pool', 'Hard rim', 'Its shape, not its brightness.', 'The project\'s default.' ]);
+    });
+  });
+
+  describe('colour', () =>
+  {
+    /**
+     * Finds the colour picker.
+     * @param {string} label The setting's name.
+     * @returns {HTMLInputElement} The picker.
+     */
+    const pickerOf = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
+
+    /**
+     * Renders the colour control as the quick panel holds it, its value following every colour it shows or hands on,
+     * as the map does, and writes both down.
+     * @param {string} start The colour the events hold.
+     * @returns {{ previews: JsonValue[], changes: JsonValue[] }} The colours shown, and the colours handed on.
+     */
+    const renderFollowing = (start: string) =>
+    {
+      const previews: JsonValue[] = [];
+      const changes: JsonValue[] = [];
+
+      /**
+       * Holds the colour as the map would.
+       * @returns {React.JSX.Element} The control.
+       */
+      const Following = () =>
+      {
+        const [ value, setValue ] = React.useState<JsonValue>(start);
+        const follow = (into: JsonValue[]) => (next: JsonValue) =>
+        {
+          into.push(next);
+          setValue(next);
+        };
+
+        return <QuickControl field={fieldOf({ kind: 'color' }, value, 'Colour')} resources={NO_RESOURCES} onChange={follow(changes)} onPreview={follow(previews)}/>;
+      };
+
+      render(<Following/>);
+      return { previews, changes };
+    };
+
+    it('shows each colour as it is picked, and hands on the colour the picker closes on', () =>
+    {
+      // Arrange.
+      const { previews, changes } = renderFollowing('#ffbb73');
+
+      // Act: the picker passes through two colours, then closes on the second.
+      fireEvent.input(pickerOf('Colour'), { target: { value: '#112233' } });
+      fireEvent.input(pickerOf('Colour'), { target: { value: '#445566' } });
+      fireEvent.change(pickerOf('Colour'), { target: { value: '#445566' } });
+
+      // Assert.
+      expect([ previews, changes ])
+        .toStrictEqual([ [ '#112233', '#445566' ], [ '#445566' ] ]);
+    });
+
+    it('hands on the colour picked when the picker is left without closing on it', () =>
+    {
+      // Arrange.
+      const { changes } = renderFollowing('#ffbb73');
+
+      // Act.
+      fireEvent.input(pickerOf('Colour'), { target: { value: '#112233' } });
+      fireEvent.blur(pickerOf('Colour'));
+
+      // Assert.
+      expect(changes)
+        .toStrictEqual([ '#112233' ]);
+    });
+
+    it('hands on nothing for a picker left or closed untouched', () =>
+    {
+      // Arrange.
+      const { changes } = renderFollowing('#ffbb73');
+
+      // Act.
+      fireEvent.blur(pickerOf('Colour'));
+      fireEvent.change(pickerOf('Colour'), { target: { value: '#ffbb73' } });
+
+      // Assert.
+      expect(changes)
+        .toStrictEqual([]);
+    });
+
+    it('shows the colour\'s digits, and hands on a swatch\'s colour at once', () =>
+    {
+      // Arrange.
+      const { onChange } = renderControl(fieldOf({ kind: 'color' }, '#ffbb73', 'Colour'), { swatches: [ '#ffbb73', '#bcd9ff' ] });
+      const digits = screen.getByText('#ffbb73').textContent;
+
+      // Act.
+      fireEvent.click(screen.getByRole('button', { name: '#bcd9ff' }));
+
+      // Assert.
+      expect([ digits, pickerOf('Colour').value, onChange.mock.calls ])
+        .toStrictEqual([ '#ffbb73', '#ffbb73', [ [ '#bcd9ff' ] ] ]);
+    });
+
+    it('reads mixed colours as mixed, starting the picker at grey, with the hint under it', () =>
+    {
+      // Arrange.
+      const field = { ...fieldOf({ kind: 'color' }, null, 'Colour'), hint: 'The project\'s default.' };
+
+      // Act.
+      renderControl(field);
+
+      // Assert.
+      expect([ screen.getByText('Mixed').textContent, pickerOf('Colour').value, screen.getByText('The project\'s default.').textContent ])
+        .toStrictEqual([ 'Mixed', '#808080', 'The project\'s default.' ]);
+    });
   });
 });
