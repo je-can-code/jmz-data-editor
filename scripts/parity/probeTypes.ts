@@ -4,12 +4,14 @@
  */
 
 /**
- * One map the probe draws: where the display sits for each view, and which A1 animation steps to draw.
+ * One map the probe draws: where the display sits for each view, which A1 animation steps to draw, and whether to draw
+ * it dark too, with J-Lighting's light mask over its tiles.
  */
 type ProbeMap = {
   mapId: number;
   views: { x: number; y: number }[];
   steps: number[];
+  dark: boolean;
 };
 
 /**
@@ -27,14 +29,15 @@ type ProbeConfig = {
 };
 
 /**
- * One picture the probe drew.
+ * One picture the probe drew: the events as the game shows them, the tiles alone, or the tiles alone with the light
+ * mask multiplied over them.
  */
 type ProbeCapture = {
   mapId: number;
   file: string;
   display: { x: number; y: number };
   step: number;
-  pass: 'events' | 'tiles';
+  pass: 'events' | 'tiles' | 'dark';
 };
 
 /**

@@ -21,9 +21,10 @@ import { chromium } from 'playwright-core';
 import type { Browser, Page } from 'playwright-core';
 
 /**
- * Which renderer to launch: the real GPU, or SwiftShader for comparison.
+ * Which renderer to launch: the real GPU; SwiftShader named outright, for comparison; or SwiftShader reached the way the
+ * game's own NW.js reaches it, for pictures held against the game's.
  */
-type RenderMode = 'gpu' | 'swiftshader';
+type RenderMode = 'gpu' | 'swiftshader' | 'swiftshader-as-game';
 
 /**
  * How to launch the browser.
@@ -93,10 +94,18 @@ const DESKTOP_VIEWPORT = { width: 2560, height: 1440, deviceScaleFactor: 1.5 };
 /**
  * The flags per renderer. SwiftShader is named explicitly so the comparison cannot drift onto the GPU. Every launch is
  * muted: a headless browser has no window, but it can still play sound through the machine's speakers.
+ *
+ * The game's NW.js, run for the parity check, is not told which renderer to use: it reaches SwiftShader through
+ * ANGLE's default backend. WebGL lands on the same SwiftShader either way, but naming it outright changes how a 2D
+ * canvas is rasterised, and the game paints every light's picture on a canvas: a light's gradient painted under the
+ * two launches differs by one in about a sixth of its channel values, while under the same launch the game's and the
+ * editor's are byte for byte the same (measured 2026-10-06, NW.js 147 against Chromium 149). So the comparison against
+ * the game launches the way the game does, and still refuses anything but SwiftShader.
  */
 const MODE_ARGS: Record<RenderMode, string[]> = {
-  gpu: [ '--use-angle=vulkan', '--mute-audio', '--disable-audio-output' ],
-  swiftshader: [ '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--mute-audio', '--disable-audio-output' ],
+  'gpu': [ '--use-angle=vulkan', '--mute-audio', '--disable-audio-output' ],
+  'swiftshader': [ '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--mute-audio', '--disable-audio-output' ],
+  'swiftshader-as-game': [ '--enable-unsafe-swiftshader', '--mute-audio', '--disable-audio-output' ],
 };
 
 /**

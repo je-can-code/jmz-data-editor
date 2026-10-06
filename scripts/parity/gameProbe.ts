@@ -1,7 +1,8 @@
 /**
  * The probe the parity check injects into the real game: it walks the game to each fixture map, holds everything
  * still, and draws the map's base layer (parallax, tiles and characters, with no screen tone, lighting, weather or
- * interface above it) into a picture per view, animation step and pass.
+ * interface above it) into a picture per view, animation step and pass. A dark map is drawn once more with J-Lighting's
+ * light mask multiplied over its tiles, as the game composites it over the map.
  *
  * It is serialized with toString() and run inside NW.js ahead of the game's own scripts, so it must stay one
  * self-contained function in plain JavaScript: nothing from this module's scope survives the trip, and the engine's
@@ -108,7 +109,7 @@ const parityProbe = (config: ProbeConfig): void =>
     hooksInstalled = true;
   };
 
-  const capture = (map: ProbeMap, view: { x: number; y: number }, step: number, pass: 'events' | 'tiles'): void =>
+  const capture = (map: ProbeMap, view: { x: number; y: number }, step: number, pass: 'events' | 'tiles' | 'dark'): void =>
   {
     const scene = engine.SceneManager._scene;
     const spriteset = scene._spriteset;
@@ -116,11 +117,15 @@ const parityProbe = (config: ProbeConfig): void =>
     engine.$gameMap.setDisplayPos(view.x, view.y);
     const display = { x: engine.$gameMap.displayX(), y: engine.$gameMap.displayY() };
 
+    // J-Base puts the sprites of characters far from the screen to sleep, undrawn, and wakes them once a frame; the
+    // view moved within this tick, so they are woken for it now, as the game's next frame would.
+    spriteset.updateCharacterSleep?.();
+
     // the player, followers and vehicles never draw; events draw only in the events pass.
     spriteset._characterSprites.forEach((sprite: any) =>
     {
       const isEvent = sprite._character instanceof engine.Game_Event;
-      if (isEvent === false || pass === 'tiles')
+      if (isEvent === false || pass !== 'events')
       {
         sprite.hide();
       }
@@ -145,6 +150,21 @@ const parityProbe = (config: ProbeConfig): void =>
     const { renderer } = engine.Graphics.app;
     const texture = engine.PIXI.RenderTexture.create({ width: engine.Graphics.width, height: engine.Graphics.height });
     renderer.render(base, texture);
+
+    // the dark pass multiplies J-Lighting's light mask over the base, as the game does above the weather, its lights
+    // placed afresh for this view first: the mask's own update composes the lights and draws them into its texture.
+    // The mask's texture is kept too, a tile wider than the screen on every side, so a difference can be traced to the
+    // mask itself or to its multiplying.
+    if (pass === 'dark')
+    {
+      const mask = spriteset.lightMask();
+      mask.update();
+      renderer.render(mask, texture, false);
+      const maskUrl: string = renderer.extract.base64(mask.renderTexture());
+      const maskFile = `${config.outDir}/mask-${map.mapId}-${display.x}-${display.y}-s${step}.png`;
+      fs.writeFileSync(maskFile, NodeBuffer.from(maskUrl.split(',')[1], 'base64'));
+    }
+
     const url: string = renderer.extract.base64(texture);
     setAside.forEach((child: any) =>
     {
@@ -256,16 +276,32 @@ const parityProbe = (config: ProbeConfig): void =>
       });
   };
 
+  // names what J-Lighting composed for a dark map: how dark, in what colour, and the lights cut through it.
+  const describeDark = (map: ProbeMap): void =>
+  {
+    const composition = engine.ScreenLightingComposer.compose();
+    const lights = composition.lights().map((light: any) => `${light.sourceKey()} r${light.radius()} ${light.color()} i${light.intensity()} ${light.effect()}`);
+    report.log.push(`map ${map.mapId} dark: darkness ${composition.darkness()} colour ${JSON.stringify(composition.ambientColor())}`
+      + ` tone ${JSON.stringify(composition.tone())}, ${lights.length} lights: ${lights.join('; ')}`);
+  };
+
   const captureMap = (map: ProbeMap): void =>
   {
     describeScene();
     recordEvents(map);
-    // events first, as the game shows them; then the tiles alone, with every event hidden.
-    [ 'events', 'tiles' ].forEach(pass =>
+    if (map.dark)
+    {
+      describeDark(map);
+    }
+
+    // events first, as the game shows them; then the tiles alone, with every event hidden; then, for a dark map, the
+    // tiles alone again under the light mask.
+    const passes: ('events' | 'tiles' | 'dark')[] = map.dark ? [ 'events', 'tiles', 'dark' ] : [ 'events', 'tiles' ];
+    passes.forEach(pass =>
     {
       map.views.forEach(view =>
       {
-        map.steps.forEach(step => capture(map, view, step, pass as 'events' | 'tiles'));
+        map.steps.forEach(step => capture(map, view, step, pass));
       });
     });
     report.log.push(`map ${map.mapId}: ${map.views.length} views, steps ${map.steps.join(',')}`);

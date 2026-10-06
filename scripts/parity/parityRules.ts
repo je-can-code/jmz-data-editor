@@ -1,8 +1,12 @@
 /**
  * The parity check's rules, apart from the browser and the game so they can be tested: which views cover a map,
- * which maps are worth comparing at every animation step, what explains a difference in the events pass, and which
- * differences the engine predicts against snapshot.js.
+ * which maps are worth comparing at every animation step and which dark, what explains a difference in the events pass
+ * and in the dark pass, how the game copy's lights are held steady, and which differences the engine predicts against
+ * snapshot.js.
  */
+import type { RmmzMapEvent } from '../../app/src/mapEditor/core/model/rmmzTypes.ts';
+import { ambientPayloadOf } from '../../app/src/mapEditor/modules/lighting/ambientTags.ts';
+import { firstLitPage, lightsOf, PLUGIN_DEFAULTS } from '../../app/src/mapEditor/modules/lighting/lightTags.ts';
 import type { ProbeEvent, ProbeMap } from './probeTypes.ts';
 
 /**
@@ -17,7 +21,7 @@ type DifferingCell = {
  * One compared view, as far as the verdict reads it: which pass it belongs to, and the differing cells nothing explains.
  */
 type JudgedView = {
-  readonly pass: 'events' | 'tiles';
+  readonly pass: 'events' | 'tiles' | 'dark';
   readonly unexplained: readonly DifferingCell[];
 };
 
@@ -29,6 +33,31 @@ type MapFile = {
   height: number;
   tilesetId: number;
   data: number[];
+  note: string;
+  events: (RmmzMapEvent | null)[];
+};
+
+/**
+ * One event's light as the editor draws it, for explaining the dark pass: the event, the page the editor reads its
+ * lights from (the first that gives any), where it stands, at its tile's foot, and the furthest any of its pages reaches,
+ * in pixels.
+ */
+type DarkLight = {
+  readonly eventId: number;
+  readonly pageIndex: number;
+  readonly x: number;
+  readonly y: number;
+  readonly reach: number;
+};
+
+/**
+ * J-Lighting's config as the game copy holds it, as far as holding its lights steady goes: every effect's tuning, and
+ * everything else kept as it is.
+ */
+type LightingConfigFile = {
+  readonly light: {
+    readonly effects: Readonly<Record<string, Readonly<Record<string, number>>>>;
+  };
 };
 
 /**
@@ -87,7 +116,8 @@ const coverAxis = (size: number, screen: number): number[] =>
 };
 
 /**
- * Builds what the probe draws for one map: views covering all of it, at every animation step when it animates.
+ * Builds what the probe draws for one map: views covering all of it, at every animation step when it animates, and dark
+ * as well when its note declares darkness, as J-Lighting reads a note.
  * @param {number} mapId The map.
  * @param {MapFile} map Its file.
  * @param {{ width: number, height: number }} screen The game's screen, in pixels.
@@ -98,7 +128,97 @@ const probeMapFor = (mapId: number, map: MapFile, screen: { width: number; heigh
   const xs = coverAxis(map.width, screen.width / TILE);
   const ys = coverAxis(map.height, screen.height / TILE);
   const views = xs.flatMap(x => ys.map(y => ({ x, y })));
-  return { mapId, views, steps: animates(map) ? [ 0, 1, 2, 3 ] : [ 0 ] };
+  return { mapId, views, steps: animates(map) ? [ 0, 1, 2, 3 ] : [ 0 ], dark: ambientPayloadOf(map.note) !== null };
+};
+
+/**
+ * Lists the lights the editor cuts through a map's dark, one entry per lit event: the page it reads them from, which is
+ * the first giving any, where the event stands, and the furthest any of its pages' lights reaches, since the game may
+ * show another of its pages.
+ * @param {MapFile} map The map.
+ * @returns {DarkLight[]} The lit events, in id order.
+ */
+const darkLightsOf = (map: MapFile): DarkLight[] =>
+{
+  return map.events.flatMap(event =>
+  {
+    if (event === null)
+    {
+      return [];
+    }
+
+    const lit = firstLitPage(event, PLUGIN_DEFAULTS);
+    if (lit === null)
+    {
+      return [];
+    }
+
+    const radii = event.pages.flatMap(page => lightsOf(page, PLUGIN_DEFAULTS).map(light => light.radius));
+    return [ {
+      eventId: event.id,
+      pageIndex: lit.pageIndex,
+      x: event.x * TILE + TILE / 2,
+      y: event.y * TILE + TILE,
+      reach: Math.max(...radii) * TILE,
+    } ];
+  });
+};
+
+/**
+ * Reports whether a light's pool may reach a cell: the square its furthest reach spans about the event's foot, widened
+ * by a cell on every side for where the game stands a character a few pixels up.
+ * @param {DarkLight} light The light.
+ * @param {DifferingCell} cell The cell.
+ * @returns {boolean} True when the pool may reach it.
+ */
+const lightReaches = (light: DarkLight, cell: DifferingCell): boolean =>
+{
+  const left = Math.floor((light.x - light.reach) / TILE) - 1;
+  const right = Math.floor((light.x + light.reach - 1) / TILE) + 1;
+  const top = Math.floor((light.y - light.reach) / TILE) - 1;
+  const bottom = Math.floor((light.y + light.reach - 1) / TILE) + 1;
+  return cell.x >= left && cell.x <= right && cell.y >= top && cell.y <= bottom;
+};
+
+/**
+ * Explains a differing cell of the dark pass by a light the game shows from another page than the editor does: the
+ * editor reads an event's lights from its first page giving any, as its rings do, while the game reads them from
+ * whichever page's conditions hold, which may be another page or none. A cell no such light reaches stays unexplained,
+ * since a difference there would be the editor's own.
+ * @param {DifferingCell} cell The cell.
+ * @param {readonly DarkLight[]} lights The editor's lit events.
+ * @param {readonly ProbeEvent[]} events The game's events on the map.
+ * @returns {string | null} Why it differs, or null when nothing explains it.
+ */
+const explainDarkCell = (cell: DifferingCell, lights: readonly DarkLight[], events: readonly ProbeEvent[]): string | null =>
+{
+  const pageShown = (light: DarkLight): number => events.find(event => event.id === light.eventId)?.page ?? -1;
+  const departing = lights.find(light => pageShown(light) !== light.pageIndex && lightReaches(light, cell));
+  if (departing === undefined)
+  {
+    return null;
+  }
+
+  const shown = pageShown(departing);
+  return shown < 0
+    ? `event ${departing.eventId} shows no page in the game, so gives no light`
+    : `event ${departing.eventId} shows page ${shown + 1} in the game, not its lit page ${departing.pageIndex + 1}`;
+};
+
+/**
+ * Holds every light in J-Lighting's config steady, for a game copy whose frames must match one another: every effect's
+ * depth goes to 0, so flicker, pulse and glitch take no brightness away and every light burns at full strength, as the
+ * editor draws them; everything else is kept as it is.
+ * @param {T} config The config file's content.
+ * @returns {T} A copy with every effect's depth at 0.
+ */
+const steadyLighting = <T extends LightingConfigFile>(config: T): T =>
+{
+  const effects = Object.fromEntries(Object.entries(config.light.effects).map(([ name, tuning ]) =>
+  {
+    return [ name, { ...tuning, depth: 0 } ];
+  }));
+  return { ...config, light: { ...config.light, effects } };
 };
 
 /**
@@ -193,5 +313,18 @@ const snapshotPredictions = (map: MapFile, flags: readonly number[]): Map<string
   return predicted;
 };
 
-export { animates, coverAxis, explainCell, gameParityHolds, probeMapFor, snapshotPredictions, spriteCovers, TILE };
-export type { JudgedView, MapFile };
+export {
+  animates,
+  coverAxis,
+  darkLightsOf,
+  explainCell,
+  explainDarkCell,
+  gameParityHolds,
+  lightReaches,
+  probeMapFor,
+  snapshotPredictions,
+  spriteCovers,
+  steadyLighting,
+  TILE,
+};
+export type { DarkLight, JudgedView, LightingConfigFile, MapFile };

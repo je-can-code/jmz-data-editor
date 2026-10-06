@@ -3,37 +3,64 @@ import type { ProbeEvent } from '../../../../scripts/parity/probeTypes.ts';
 import {
   animates,
   coverAxis,
+  darkLightsOf,
   explainCell,
+  explainDarkCell,
   gameParityHolds,
+  lightReaches,
   probeMapFor,
   snapshotPredictions,
   spriteCovers,
+  steadyLighting,
+  type DarkLight,
   type MapFile,
 } from '../../../../scripts/parity/parityRules.ts';
+import type { RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { command, event, page } from '../../mapEditor/support/eventKindFixtures.ts';
 
 /*
  * The parity check's verdict rests on these rules. The views must cover every cell of a map as the engine would
- * allow the display to sit; maps with moving water must be compared at every animation step; a difference in the
- * events pass counts as explained only by an event the game draws differently from its first page, and never under
- * a plainly drawn event, however much its neighbours move; snapshot.js differences count as predicted only on
- * star-order and table cells; and any cell left unexplained, in either pass, fails the check.
+ * allow the display to sit; maps with moving water must be compared at every animation step, and maps whose note
+ * declares darkness dark as well; a difference in the events pass counts as explained only by an event the game draws
+ * differently from its first page, and never under a plainly drawn event, however much its neighbours move; a
+ * difference in the dark pass counts as explained only within the reach of a light the game shows from another page
+ * than the first one giving light, which is the editor's; snapshot.js differences count as predicted only on star-order
+ * and table cells; and any cell left unexplained, in any pass, fails the check.
+ *
+ * The game copy the check runs holds every light steady, each effect's depth at 0 and the rest of its config as it was,
+ * so every frame of the game shows every light at full strength, as the editor draws them.
  */
 
 /**
- * Builds a map file with the given tiles on layer 1, by cell index.
+ * Builds a map file with the given tiles on layer 1, by cell index, and the given note and events.
  * @param {number} width The width.
  * @param {number} height The height.
  * @param {Record<number, number>} tiles Tile ids by (z * height + y) * width + x.
+ * @param {string} note The note.
+ * @param {(RmmzMapEvent | null)[]} events The events, slot 0 empty.
  * @returns {MapFile} The map.
  */
-const mapFile = (width: number, height: number, tiles: Record<number, number> = {}): MapFile =>
+const mapFile = (width: number, height: number, tiles: Record<number, number> = {}, note = '', events: (RmmzMapEvent | null)[] = []): MapFile =>
 {
   const data = new Array<number>(width * height * 6).fill(0);
   Object.entries(tiles).forEach(([ index, id ]) =>
   {
     data[Number(index)] = id;
   });
-  return { width, height, tilesetId: 1, data };
+  return { width, height, tilesetId: 1, data, note, events };
+};
+
+/**
+ * Builds a light event standing at a cell, with the given pages' comments, one list of lines per page.
+ * @param {number} id The event id.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {string[][]} pages Each page's comment lines.
+ * @returns {RmmzMapEvent} The event.
+ */
+const lightEvent = (id: number, x: number, y: number, pages: string[][]): RmmzMapEvent =>
+{
+  return { ...event(id, pages.map(lines => page(lines.map(line => command(108, [ line ]))))), x, y };
 };
 
 /**
@@ -84,9 +111,23 @@ describe('parityRules', () =>
       // Assert.
       expect(orders)
         .toStrictEqual([
-          { mapId: 7, views: [ { x: 0, y: 0 }, { x: 0, y: 7.5 }, { x: 10, y: 0 }, { x: 10, y: 7.5 } ], steps: [ 0, 1, 2, 3 ] },
-          { mapId: 8, views: [ { x: 0, y: 0 }, { x: 0, y: 7.5 }, { x: 10, y: 0 }, { x: 10, y: 7.5 } ], steps: [ 0 ] },
+          { mapId: 7, views: [ { x: 0, y: 0 }, { x: 0, y: 7.5 }, { x: 10, y: 0 }, { x: 10, y: 7.5 } ], steps: [ 0, 1, 2, 3 ], dark: false },
+          { mapId: 8, views: [ { x: 0, y: 0 }, { x: 0, y: 7.5 }, { x: 10, y: 0 }, { x: 10, y: 7.5 } ], steps: [ 0 ], dark: false },
         ]);
+    });
+
+    it('asks for a map dark as well when its note declares darkness, as J-Lighting reads a note', () =>
+    {
+      // Arrange: a cave, and a map whose note holds only something shaped like the tag.
+      const cave = mapFile(40, 23, {}, '<noToneChange>\n<ambient:[85]>');
+      const nearMiss = mapFile(40, 23, {}, '<ambient:85>');
+
+      // Act.
+      const dark = [ probeMapFor(4, cave, { width: 1920, height: 1080 }).dark, probeMapFor(5, nearMiss, { width: 1920, height: 1080 }).dark ];
+
+      // Assert.
+      expect(dark)
+        .toStrictEqual([ true, false ]);
     });
 
     it('counts water only on the four tile layers', () =>
@@ -192,19 +233,160 @@ describe('parityRules', () =>
 
   describe('gameParityHolds', () =>
   {
-    it('holds only when no view of either pass leaves a differing cell unexplained', () =>
+    it('holds only when no view of any pass leaves a differing cell unexplained', () =>
     {
-      // Arrange: every view clean; one unexplained cell in an events pass; one in a tiles pass.
-      const clean = [ { pass: 'tiles', unexplained: [] }, { pass: 'events', unexplained: [] } ] as const;
+      // Arrange: every view clean; one unexplained cell in an events pass; one in a tiles pass; one in a dark pass.
+      const clean = [ { pass: 'tiles', unexplained: [] }, { pass: 'events', unexplained: [] }, { pass: 'dark', unexplained: [] } ] as const;
       const eventsDiffer = [ { pass: 'tiles', unexplained: [] }, { pass: 'events', unexplained: [ { x: 4, y: 2 } ] } ] as const;
       const tilesDiffer = [ { pass: 'tiles', unexplained: [ { x: 0, y: 0 } ] }, { pass: 'events', unexplained: [] } ] as const;
+      const darkDiffers = [ { pass: 'tiles', unexplained: [] }, { pass: 'dark', unexplained: [ { x: 9, y: 9 } ] } ] as const;
 
       // Act.
-      const verdicts = [ clean, eventsDiffer, tilesDiffer ].map(views => gameParityHolds(views));
+      const verdicts = [ clean, eventsDiffer, tilesDiffer, darkDiffers ].map(views => gameParityHolds(views));
 
       // Assert.
       expect(verdicts)
-        .toStrictEqual([ true, false, false ]);
+        .toStrictEqual([ true, false, false, false ]);
+    });
+  });
+
+  describe('darkLightsOf', () =>
+  {
+    it('lists every lit event once, from the first page giving light, reaching as far as any of its pages', () =>
+    {
+      // Arrange: a torch; a lamp lit small on page 2 and larger on page 3; a battler giving no light; an empty slot.
+      const map = mapFile(10, 10, {}, '<ambient:[85]>', [
+        null,
+        lightEvent(1, 2, 3, [ [ '<light:[4, #ffbb73, 40]>' ] ]),
+        lightEvent(2, 6, 1, [ [ '<enemyId:3>' ], [ '<light:[1.5]>' ], [ '<light:[3.5]>' ] ]),
+        lightEvent(3, 8, 8, [ [ '<enemyId:3>' ] ]),
+        null,
+      ]);
+
+      // Act.
+      const lights = darkLightsOf(map);
+
+      // Assert.
+      expect(lights)
+        .toStrictEqual([
+          { eventId: 1, pageIndex: 0, x: 120, y: 192, reach: 192 },
+          { eventId: 2, pageIndex: 1, x: 312, y: 96, reach: 168 },
+        ]);
+    });
+  });
+
+  describe('lightReaches', () =>
+  {
+    it('reaches the cells within the light\'s square, and a cell beyond each side', () =>
+    {
+      // Arrange: a light reaching one tile from the foot of cell 5, 5: the square spans columns 4 to 6 and rows 5 to 6,
+      // widened to columns 3 to 7 and rows 4 to 7.
+      const light: DarkLight = { eventId: 1, pageIndex: 0, x: 264, y: 288, reach: 48 };
+      const cells = [ [ 3, 4 ], [ 7, 7 ], [ 2, 5 ], [ 8, 5 ], [ 5, 3 ], [ 5, 8 ] ];
+
+      // Act.
+      const reached = cells.map(([ x, y ]) => lightReaches(light, { x, y }));
+
+      // Assert.
+      expect(reached)
+        .toStrictEqual([ true, true, false, false, false, false ]);
+    });
+  });
+
+  describe('explainDarkCell', () =>
+  {
+    const lamp: DarkLight = { eventId: 2, pageIndex: 1, x: 312, y: 96, reach: 168 };
+    const cell = { x: 6, y: 2 };
+
+    it('explains a cell within the reach of a light the game shows from another page', () =>
+    {
+      // Arrange: the game shows the lamp's third page.
+      const events = [ probeEvent({ id: 2, page: 2 }) ];
+
+      // Act.
+      const reason = explainDarkCell(cell, [ lamp ], events);
+
+      // Assert.
+      expect(reason)
+        .toBe('event 2 shows page 3 in the game, not its lit page 2');
+    });
+
+    it('explains a cell within the reach of a light whose event shows no page in the game, or is not there at all', () =>
+    {
+      // Arrange: the lamp with no page whose conditions hold; and a game reporting no such event.
+      const unlit = [ probeEvent({ id: 2, page: -1 }) ];
+      const missing = [ probeEvent({ id: 9, page: 1 }) ];
+
+      // Act.
+      const reasons = [ explainDarkCell(cell, [ lamp ], unlit), explainDarkCell(cell, [ lamp ], missing) ];
+
+      // Assert.
+      expect(reasons)
+        .toStrictEqual([ 'event 2 shows no page in the game, so gives no light', 'event 2 shows no page in the game, so gives no light' ]);
+    });
+
+    it('leaves a cell unexplained where the game shows the light from the editor\'s own page', () =>
+    {
+      // Arrange: the game shows the lamp's second page, as the editor does.
+      const events = [ probeEvent({ id: 2, page: 1 }) ];
+
+      // Act.
+      const reason = explainDarkCell(cell, [ lamp ], events);
+
+      // Assert.
+      expect(reason)
+        .toBeNull();
+    });
+
+    it('leaves a cell unexplained beyond the reach of a light the game shows differently', () =>
+    {
+      // Arrange: the game shows the lamp's third page, and the cell lies far across the map.
+      const events = [ probeEvent({ id: 2, page: 2 }) ];
+
+      // Act.
+      const reason = explainDarkCell({ x: 30, y: 20 }, [ lamp ], events);
+
+      // Assert.
+      expect(reason)
+        .toBeNull();
+    });
+  });
+
+  describe('steadyLighting', () =>
+  {
+    it('takes every effect\'s depth to 0, keeping the rest of the config as it was', () =>
+    {
+      // Arrange: the config the game ships.
+      const shipped = {
+        light: {
+          radius: 5,
+          color: '#FFFFFF',
+          intensity: 0,
+          effects: {
+            flicker: { depth: 0.2, period: 40, chance: 0, variance: 0.18 },
+            pulse: { depth: 0.45, period: 165, chance: 0, variance: 0.22 },
+          },
+        },
+        ambient: { color: '#000000' },
+      };
+
+      // Act.
+      const steady = steadyLighting(shipped);
+
+      // Assert.
+      expect(steady)
+        .toStrictEqual({
+          light: {
+            radius: 5,
+            color: '#FFFFFF',
+            intensity: 0,
+            effects: {
+              flicker: { depth: 0, period: 40, chance: 0, variance: 0.18 },
+              pulse: { depth: 0, period: 165, chance: 0, variance: 0.22 },
+            },
+          },
+          ambient: { color: '#000000' },
+        });
     });
   });
 });

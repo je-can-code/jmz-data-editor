@@ -10,21 +10,26 @@
  * Each invocation works in a folder of its own inside the base folder (the system's temporary folder unless --scratch
  * names another), builds the editor afresh there, and leaves its pictures and report there; it prints where.
  *
- * Two passes per view. The tiles pass hides every character on both sides, so what remains is the parallax and the
- * tiles: it must match, within 2 per channel for compositing rounding. The events pass draws events as each side draws
- * them; the editor shows every event's first page, as MZ's own editor does, while the game shows whichever page's
- * conditions hold, so every differing cell there is either explained by an event the game shows differently (another
- * page, or hidden) or listed as unexplained. Any cell left unexplained, in either pass, fails the check.
+ * Two passes per view, and a third on a dark map. The tiles pass hides every character on both sides, so what remains
+ * is the parallax and the tiles: it must match, within 2 per channel for compositing rounding. The events pass draws
+ * events as each side draws them; the editor shows every event's first page, as MZ's own editor does, while the game
+ * shows whichever page's conditions hold, so every differing cell there is either explained by an event the game shows
+ * differently (another page, or hidden) or listed as unexplained. The dark pass, on a map whose note declares darkness,
+ * draws the tiles alone again under J-Lighting's light mask on both sides, the editor showing only what the game shows
+ * of its lighting: a differing cell there is explained only by a light the game shows from another page than the
+ * editor's, which reads every event's lights from its first page giving any. Any cell left unexplained, in any pass,
+ * fails the check.
  *
  * Maps with water or waterfalls are compared at all four animation steps. The game draws on SwiftShader, which is
  * fine for pictures and meaningless for timing. The game runs from a copy in the run's folder, muted, on a virtual
- * display; nothing here writes to the game's own folder.
+ * display, its lights held steady in the copy's config so that every frame of it is the same frame; nothing here
+ * writes to the game's own folder.
  *
  * The snapshot mode is the cheaper day-to-day comparator: ca/tools/mapgen/snapshot.js draws each map whole, and the
  * editor draws it whole too; the differences the engine predicts against snapshot.js (star tiles drawn last, table
  * legs and edges) are counted apart from the rest.
  */
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { Page } from 'playwright-core';
 import { startEditorStack } from '../speed/editorStack.ts';
@@ -33,7 +38,18 @@ import { createRunFolder } from '../speed/runFolder.ts';
 import { comparePictures, decodePng, differencePicture, writePng, type CellDifference, type Comparison } from './compareImages.ts';
 import type { ProbeCapture, ProbeReport } from './probeTypes.ts';
 import { runHeadlessGame } from './headlessGame.ts';
-import { explainCell, gameParityHolds, probeMapFor, snapshotPredictions, TILE, type MapFile } from './parityRules.ts';
+import {
+  darkLightsOf,
+  explainCell,
+  explainDarkCell,
+  gameParityHolds,
+  probeMapFor,
+  snapshotPredictions,
+  steadyLighting,
+  TILE,
+  type LightingConfigFile,
+  type MapFile,
+} from './parityRules.ts';
 
 /**
  * The script's settings.
@@ -67,7 +83,7 @@ type HookWindow = {
   __jmzMapView?: {
     ready: () => boolean;
     info: () => { stats: { loadingImages: number } };
-    prepareParity: (options: { events: boolean; step: number; frames: number }) => void;
+    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean }) => void;
     extract: (rect: { x: number; y: number; width: number; height: number }) => Promise<string>;
   };
 };
@@ -80,6 +96,27 @@ const FIXTURES: Record<number, string> = {
   31: 'table tiles, which spike S6 saw differ from snapshot.js, under a looping, scrolling parallax',
   94: 'the most waterfalls, 110, beside water, under a still parallax',
   316: 'the most star tiles, 1,123, under a still parallax',
+  4: 'dark: a cave at 85%, seven torches alike, kept from the clock by <noToneChange>',
+  6: 'dark: a cave at 85%, torches and ghosts of three looks, one of them lit only behind a switch',
+};
+
+/**
+ * Holds the game copy's lights steady for the run: every effect's depth in its config.lighting.json goes to 0, so each
+ * frame of the game shows every light at full strength, as the editor draws them while effects do not animate. The copy
+ * gets a fresh file of its own, so not even a link could lead the write back to the game's.
+ * @param {string} copy The game copy.
+ */
+const holdLightsSteady = (copy: string): void =>
+{
+  const file = `${copy}/data/config.lighting.json`;
+  if (existsSync(file) === false)
+  {
+    return;
+  }
+
+  const steady = steadyLighting(JSON.parse(readFileSync(file, 'utf8')) as LightingConfigFile);
+  rmSync(file);
+  writeFileSync(file, JSON.stringify(steady, null, 2));
 };
 
 /**
@@ -164,7 +201,7 @@ const drawInEditor = async (page: Page, capture: ProbeCapture, screen: { width: 
   const url = await page.evaluate(async ({ pass, step, rect }) =>
   {
     const hooks = (window as unknown as HookWindow).__jmzMapView;
-    hooks?.prepareParity({ events: pass === 'events', step, frames: 0 });
+    hooks?.prepareParity({ events: pass === 'events', step, frames: 0, lighting: pass === 'dark' });
     return hooks?.extract(rect) ?? '';
   }, { pass: capture.pass, step: capture.step, rect: { x: capture.display.x * TILE, y: capture.display.y * TILE, ...screen } });
   await saveDataUrl(url, file);
@@ -191,12 +228,25 @@ const compareCapture = async (capture: ProbeCapture, map: MapFile, report: Probe
   }
 
   const events = report.events[capture.mapId] ?? [];
+  const lights = darkLightsOf(map);
   const explained: CellDifference[] = [];
   const unexplained: CellDifference[] = [];
   const reasons = new Set<string>();
+  const explain = (cell: CellDifference): string | null =>
+  {
+    switch (capture.pass)
+    {
+      case 'events':
+        return explainCell(cell, events);
+      case 'dark':
+        return explainDarkCell(cell, lights, events);
+      case 'tiles':
+        return null;
+    }
+  };
   comparison.cells.forEach(cell =>
   {
-    const reason = capture.pass === 'events' ? explainCell(cell, events) : null;
+    const reason = explain(cell);
     if (reason === null)
     {
       unexplained.push(cell);
@@ -228,15 +278,23 @@ const runGameParity = async (options: Options): Promise<boolean> =>
 
   const probeMaps = options.maps.map(mapId => probeMapFor(mapId, maps.get(mapId) as MapFile, screen));
   const report = await runHeadlessGame(
-    { projectRoot: options.project, scratch: options.scratch, display: options.display, nwBinary: options.nw, timeoutMs: 10 * 60_000 },
+    {
+      projectRoot: options.project,
+      scratch: options.scratch,
+      display: options.display,
+      nwBinary: options.nw,
+      timeoutMs: 10 * 60_000,
+      prepare: holdLightsSteady,
+    },
     { outDir: folder, maps: probeMaps, tickLimit: 6000 });
   if (report.phase !== 'done')
   {
     throw new Error(`the game's probe ended in "${report.phase}": ${report.errors.join('; ')}`);
   }
 
+  // the editor draws on SwiftShader reached as the game reaches it, so its light pictures rasterise as the game's do.
   const stack = await startEditorStack({ projectRoot: options.project, scratch: `${options.scratch}/editor`, uiPort: options.uiPort, apiPort: options.apiPort });
-  const { browser } = await openSpeedBrowser({ mode: 'swiftshader' });
+  const { browser } = await openSpeedBrowser({ mode: 'swiftshader-as-game' });
   try
   {
     const page = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
@@ -266,19 +324,24 @@ const runGameParity = async (options: Options): Promise<boolean> =>
 };
 
 /**
- * Prints the game comparison, per map and pass.
+ * Prints the game comparison, per map and pass; a map that is not dark has no dark pass to print.
  * @param {number[]} maps The maps.
  * @param {ViewResult[]} results Every view.
- * @returns {boolean} True when no view of either pass left a difference unexplained.
+ * @returns {boolean} True when no view of any pass left a difference unexplained.
  */
 const printGameParity = (maps: number[], results: ViewResult[]): boolean =>
 {
   maps.forEach(mapId =>
   {
     console.log(`Map${String(mapId).padStart(3, '0')}: ${FIXTURES[mapId] ?? 'fixture'}`);
-    [ 'tiles', 'events' ].forEach(pass =>
+    [ 'tiles', 'events', 'dark' ].forEach(pass =>
     {
       const mine = results.filter(result => result.capture.mapId === mapId && result.capture.pass === pass);
+      if (mine.length === 0)
+      {
+        return;
+      }
+
       const pixels = mine.reduce((sum, result) => sum + result.comparison.comparedPixels, 0);
       const differing = mine.reduce((sum, result) => sum + result.comparison.differingPixels, 0);
       const maxDelta = Math.max(0, ...mine.map(result => result.comparison.maxDelta));
