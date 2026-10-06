@@ -207,8 +207,10 @@ const scheduleOnTimers = (callback: () => void, delayMs: number): (() => void) =
  * torn-out map keeps drawing.
  *
  * The game look is the default: water animates, the parallax scrolls, lights run their effects, events stand where the
- * engine stands them and auto-shadows stay off, since the game never draws them. The camera is its own: the wheel zooms
- * about the pointer, the right button held pans, and a right click that does not move raises a context-menu event.
+ * engine stands them and auto-shadows stay off, since the game never draws them. The lighting draws at the hour of the
+ * window's clock, and a tone it casts, such as the sky's colour at that hour, colours what the game tones, through the
+ * engine's own colour arithmetic, and none of the editor's overlays. The camera is its own: the wheel zooms about the
+ * pointer, the right button held pans, and a right click that does not move raises a context-menu event.
  *
  * Its WebGL context is held only while the view is on screen, through a {@link ContextKeeper}: a view behind another
  * tab lets it go and asks for it back when shown, keeping its map, its camera and everything else, and a context the
