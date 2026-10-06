@@ -11,6 +11,12 @@ import { skyFollowsClock, withSkyFollowingClock } from './skyTag.ts';
 const LIGHTING_TIME_PLUGIN = 'J-Lighting-Time';
 
 /**
+ * J-Weather's file name, as js/plugins.js lists it: the plugin that reads the same sky setting to keep the sky's weather
+ * off a map without a sky (MapWeatherResolver#declarationFor).
+ */
+const WEATHER_PLUGIN = 'J-Weather';
+
+/**
  * The id of the section J-Lighting's module adds to Map Properties.
  */
 const MAP_LIGHTING_ID = 'lighting.map';
@@ -36,9 +42,25 @@ const DARKNESS_CONTROL: SliderControl = {
 const PLAIN_BLACK_HINT = 'Plain black, since this map names no colour for its dark.';
 
 /**
- * What the sky setting says under it.
+ * What the sky setting is called while J-Weather is off.
+ */
+const SKY_LABEL = 'Sky follows the clock';
+
+/**
+ * What the sky setting says under it while J-Weather is off.
  */
 const SKY_HINT = 'The hour tints and darkens this map. Untick it for interiors and caves, which have no sky.';
+
+/**
+ * What the sky setting is called while J-Weather is on, which reads the same setting to know a map is under a roof.
+ */
+const SKY_AND_WEATHER_LABEL = 'Sky follows the clock and the weather';
+
+/**
+ * What the sky setting says under it while J-Weather is on: a map without a sky gets none of the sky's weather.
+ */
+const SKY_AND_WEATHER_HINT = 'The hour tints and darkens this map, and the sky\'s weather reaches it. Untick it for interiors '
+  + 'and caves, which have no sky.';
 
 /**
  * What the section says when the game finds the map's darkness but cannot read it, which leaves the map as dark as the
@@ -87,14 +109,22 @@ const colorHint = (darkness: MapDarkness): { hint?: string } =>
 
 /**
  * Builds the settings of a map's lighting: how dark it is; the colour of its dark, once it is dark; and, while
- * J-Lighting-Time is on, whether its sky follows the clock. Each is read from the note as the game reads it, and each
- * change writes the note in place, so every other tag and every other word of it stays as written.
+ * J-Lighting-Time is on, whether its sky follows the clock, which while J-Weather is on says it decides the weather too,
+ * since J-Weather reads the same tag to know a map is under a roof. Each is read from the note as the game reads it, and
+ * each change writes the note in place, so every other tag and every other word of it stays as written.
  * @param {string} defaultColor The project's colour of the dark, for a colour the game cannot use.
  * @param {boolean} sky Whether J-Lighting-Time is on, which is what gives a map a sky.
+ * @param {boolean} weather Whether J-Weather is on, which keeps the sky's weather off a map without a sky; left out, it
+ * is taken as off.
  * @returns {MapPropertiesSource} The section's settings, for each map.
  */
-const mapLightingSource = (defaultColor: string, sky: boolean): MapPropertiesSource =>
+const mapLightingSource = (defaultColor: string, sky: boolean, weather = false): MapPropertiesSource =>
 {
+  // the sky setting names the weather too while J-Weather reads it, so unticking it never takes the weather by surprise.
+  const skyWords = weather
+    ? { label: SKY_AND_WEATHER_LABEL, hint: SKY_AND_WEATHER_HINT }
+    : { label: SKY_LABEL, hint: SKY_HINT };
+
   return (map: MapDocument): MapPropertiesModel =>
   {
     const note = map.property('note');
@@ -128,11 +158,11 @@ const mapLightingSource = (defaultColor: string, sky: boolean): MapPropertiesSou
     {
       fields.push({
         key: 'lighting.sky',
-        label: 'Sky follows the clock',
+        label: skyWords.label,
         control: { kind: 'check' },
         value: skyFollowsClock(note),
         step: 'Change sky',
-        hint: SKY_HINT,
+        hint: skyWords.hint,
         write: value => ({ note: withSkyFollowingClock(note, value as boolean) }),
       });
     }
@@ -141,4 +171,4 @@ const mapLightingSource = (defaultColor: string, sky: boolean): MapPropertiesSou
   };
 };
 
-export { DARKNESS_CONTROL, LIGHTING_TIME_PLUGIN, MAP_LIGHTING_ID, mapLightingSource, PLAIN_BLACK_HINT, SKY_HINT };
+export { DARKNESS_CONTROL, LIGHTING_TIME_PLUGIN, MAP_LIGHTING_ID, mapLightingSource, PLAIN_BLACK_HINT, SKY_HINT, WEATHER_PLUGIN };

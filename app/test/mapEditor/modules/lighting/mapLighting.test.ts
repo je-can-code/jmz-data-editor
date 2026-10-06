@@ -8,7 +8,8 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * A map's lighting settings, as Map Properties shows them while J-Lighting is on: how dark the map is, always; the
  * colour of its dark, only once it is dark, since the colour belongs to the dark; and whether its sky follows the clock,
  * only while J-Lighting-Time is on, since that is what gives a map a sky. Each shows what the game reads from the note,
- * and each writes the note in place.
+ * and each writes the note in place. J-Weather reads the same sky setting to keep the sky's weather off a map under a
+ * roof, so while it is on the setting says so in its name and under it, and still writes the same tag.
  *
  * The colour shows the colour the map names; plain black, and says so, when it names none; and the project's default,
  * saying why, for one the game cannot use. A colour the map names can be taken off again, back to plain black. Above the
@@ -119,6 +120,28 @@ describe('mapLighting', () =>
       // Assert.
       expect([ color.value, color.hint, color.control ])
         .toStrictEqual([ '#102030', 'teal is not a colour, so the project\'s default shows.', { kind: 'color', clear: 'Plain black' } ]);
+    });
+
+    it('says the sky decides the weather too while J-Weather is on, writing the same tag', () =>
+    {
+      // Arrange: a cave with no sky, its settings with J-Weather off and on.
+      const cave = mapNoted('<noToneChange>\n<ambient:[85]>');
+      const sources = [ mapLightingSource(DEFAULT, true), mapLightingSource(DEFAULT, true, true) ];
+
+      // Act.
+      const skies = sources.map(source => source(cave).fields.find(field => field.key === 'lighting.sky') as MapPropertyField);
+
+      // Assert: the cave given its sky back loses the same tag whichever way the setting is worded.
+      expect(skies.map(sky => [ sky.label, sky.hint, sky.value, sky.write(true) ]))
+        .toStrictEqual([
+          [ 'Sky follows the clock', SKY_HINT, false, { note: '<ambient:[85]>' } ],
+          [
+            'Sky follows the clock and the weather',
+            'The hour tints and darkens this map, and the sky\'s weather reaches it. Untick it for interiors and caves, which have no sky.',
+            false,
+            { note: '<ambient:[85]>' },
+          ],
+        ]);
     });
 
     it('offers no sky while J-Lighting-Time is off', () =>
