@@ -22,6 +22,10 @@ import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../s
  * keeps the core's kinds alone. It reads the modules' configs again whenever one of them changes on disk, and when the
  * stream comes back after dropping, so a config fixed by hand shows at once. A started window's painting tools paint with what the palette and the layer strip
  * pick, and any other window the page draws into, a torn-out map's, paints with a paint of its own.
+ *
+ * A window has one clock. It starts where the game does once a module offering it switches on, follows the game's
+ * starting time while the author leaves it be, and keeps the hour the author picks however often the modules switch on
+ * afresh.
  */
 describe('MapEditorServices', () =>
 {
@@ -287,6 +291,54 @@ describe('MapEditorServices', () =>
     });
     expect(readsAfterMap)
       .toBe(readsBefore);
+    services.stop();
+  });
+
+  it('starts the window\'s clock where the game does once the lighting module offers one, keeping the author\'s hour after', async () =>
+  {
+    // Arrange: a project enabling J-Lighting, J-Lighting-Time and J-TIME, whose game starts at the hour the test says.
+    let startingHour = '14';
+    const { fetch } = stubFetch(request =>
+    {
+      if (request.url.endsWith('/api/plugin-metadata'))
+      {
+        const time = `{"name":"j/time/J-TIME","status":true,"description":"","parameters":{"useRealTime":"false","startingHour":"${startingHour}","startingMinute":"0"}}`;
+        return new Response(`var $plugins = [\n{"name":"j/lighting/J-Lighting","status":true,"description":"","parameters":{}},\n`
+          + `{"name":"j/lighting/ext/J-Lighting-Time","status":true,"description":"","parameters":{}},\n${time}\n];`);
+      }
+
+      // the server serves every effect, and the curve, as its models declare.
+      const tuning = { depth: 0.2, period: 40, chance: 0, variance: 0.18 };
+      const night = { tone: [ -34, -14, 40, 95 ], darkness: 0.55 };
+      return request.url.endsWith('/api/config/lighting')
+        ? envelope({ light: { radius: 5, color: '#ffffff', intensity: 0, effects: { flicker: tuning, pulse: tuning, glitch: tuning } }, ambient: { color: '#000000' } })
+        : envelope({ phases: { Night: night }, sequence: [ 'Night', 'Night', 'Night', 'Night', 'Night', 'Night', 'Night' ] });
+    });
+    const { environment, sources } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    const before = services.clock.time();
+
+    // Act: started; then the game made to start at 9:00, after the author moved the clock to 22:00.
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.clockOffer())
+        .not.toBeNull();
+    });
+    const started = services.clock.time();
+    services.clock.set(1320);
+    startingHour = '9';
+    sources[0].emitChange({ path: 'js/plugins.js', kind: 'write', client: '' });
+    sources[0].emitChange({ path: 'data/config.lighting-time.json', kind: 'write', client: '' });
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.clockOffer()?.startsAt)
+        .toBe(540);
+    });
+
+    // Assert: midnight before the modules switched on, the game's 14:00 once they did, and the author's 22:00 kept.
+    expect([ before, started, services.clock.time() ])
+      .toStrictEqual([ 0, 840, 1320 ]);
     services.stop();
   });
 

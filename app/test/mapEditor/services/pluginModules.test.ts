@@ -107,6 +107,33 @@ describe('pluginModules', () =>
         ]);
     });
 
+    it('reads an extension\'s config only while every plugin the extension needs is enabled too', async () =>
+    {
+      // Arrange: J-Lighting's module, reading J-Lighting-Time's curve only with J-Lighting-Time and J-TIME on, over a
+      // project with both on and one with J-TIME off.
+      const lighting: PluginModule = {
+        ...moduleNaming('lighting', 'J-Lighting', [ 'lighting' ]),
+        extensionConfigs: [ { name: 'lighting-time', plugins: [ 'J-Lighting-Time', 'J-TIME' ] } ],
+      };
+      const projects = [
+        [ plugin('j/lighting/J-Lighting', true), plugin('j/lighting/ext/J-Lighting-Time', true), plugin('j/time/J-TIME', true) ],
+        [ plugin('j/lighting/J-Lighting', true), plugin('j/lighting/ext/J-Lighting-Time', true), plugin('j/time/J-TIME', false) ],
+      ];
+      const asked: string[][] = [];
+
+      // Act.
+      for (const plugins of projects)
+      {
+        const server = serverWith('');
+        await readModuleConfigs(server.api, [ lighting ], plugins);
+        asked.push(server.asked);
+      }
+
+      // Assert.
+      expect(asked)
+        .toStrictEqual([ [ 'lighting', 'lighting-time' ], [ 'lighting' ] ]);
+    });
+
     /**
      * Reads the lighting config from a server that refuses it with the given error.
      * @param {Error} error What the read fails with.
@@ -433,6 +460,19 @@ describe('pluginModules', () =>
       // Assert.
       expect(known)
         .toStrictEqual([ true, false ]);
+    });
+
+    it('knows an extension\'s config a module reads, whatever is enabled, as the shipped lighting module reads the curve', () =>
+    {
+      // Arrange: the curve's file, and a module reading an extension's config beside its own.
+      const modules = [ { ...moduleNaming('crafting', 'J-Crafting', [ 'crafting' ]), extensionConfigs: [ { name: 'refinement', plugins: [ 'J-Refine' ] } ] } ];
+
+      // Act.
+      const known = [ isModuleConfigFile('data/config.lighting-time.json'), isModuleConfigFile('data/config.refinement.json', modules) ];
+
+      // Assert.
+      expect(known)
+        .toStrictEqual([ true, true ]);
     });
   });
 });

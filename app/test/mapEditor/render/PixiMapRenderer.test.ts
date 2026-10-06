@@ -4,11 +4,37 @@
 import type { Container } from 'pixi.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
-import type { LightingLayerDefinition, LightingStage } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
+import type { LightingLayerDefinition, LightingStage, ScreenTone } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { GAME_LOOK } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { PixiMapRenderer } from '../../../src/mapEditor/render/PixiMapRenderer.ts';
 import { LightingLayers } from '../../../src/mapEditor/render/scene/LightingLayers.ts';
 import { buildMapJson } from '../support/fixtures.ts';
+
+// the tone filter compiles a shader, which needs a GPU; a stand-in keeps the tone it is given and whether it was let go.
+vi.mock('../../../src/mapEditor/render/scene/ToneFilter.ts', () =>
+{
+  /**
+   * Stands in for the tone filter.
+   */
+  class ToneFilter
+  {
+    tone: ScreenTone;
+
+    destroyed = false;
+
+    constructor(tone: ScreenTone)
+    {
+      this.tone = tone;
+    }
+
+    destroy(): void
+    {
+      this.destroyed = true;
+    }
+  }
+
+  return { ToneFilter };
+});
 
 /*
  * Some of the pixi renderer's promises can be kept without a GPU. The selection draws over the pointer's marks, so an
@@ -26,6 +52,12 @@ import { buildMapJson } from '../support/fixtures.ts';
  * its own, made once and let go with the renderer; the whole layer shows only while the layer visibility's lighting is
  * on, which is what the view's Lighting switch flips. Every change to the map is passed on to the lighting, tile edits
  * included, so the lighting itself decides which of them make its drawings draw again.
+ *
+ * Everything the game draws beneath its lighting (the black behind the map, the parallax, the tiles and the events) is
+ * held in one container, as the engine's base sprite holds it, and a tone the lighting casts, such as the sky's colour
+ * at the clock's hour, is cast over that container alone, never over the lighting or the editor's own overlays. It shows
+ * only while the lighting does, and a tone of zeroes casts none, so a map in plain daylight is filtered by nothing. The
+ * filter is made once, the first time a tone shows, takes each tone cast after, and goes with the renderer.
  */
 describe('PixiMapRenderer', () =>
 {
@@ -155,6 +187,160 @@ describe('PixiMapRenderer', () =>
     // Assert.
     expect(heard)
       .toStrictEqual([ { kind: 'event', id: 1 }, { kind: 'tiles', indices: [ 0 ] } ]);
+  });
+
+  it('holds what the game draws in one container beneath the lighting, and nothing of the editor\'s in it', () =>
+  {
+    // Arrange.
+    const renderer = new PixiMapRenderer();
+    built.push(renderer);
+    const { slots } = renderer;
+    const world = slots.game.parent as Container;
+
+    // Act: the game's container's first three layers and how many it holds, and the world's first three.
+    const game = [ slots.game.children.slice(0, 3), slots.game.children.length ];
+    const bottom = world.children.slice(0, 3);
+
+    // Assert: the black, the parallax and the lower tiles first, then the three event groups around the upper tiles.
+    expect([ game, bottom, slots.game.children.includes(slots.markers), slots.game.children.includes(slots.upperTiles) ])
+      .toStrictEqual([ [ [ slots.backdrop, slots.parallax, slots.lowerTiles ], 7 ], [ slots.game, slots.lighting, slots.markers ], false, true ]);
+  });
+
+  describe('tone', () =>
+  {
+    /**
+     * Night halfway to Moontide, and the evening's warm cast.
+     */
+    const NIGHT: ScreenTone = [ -32, -16, 37, 133 ];
+    const EVENING: ScreenTone = [ 26, 0, -34, 22 ];
+
+    /**
+     * A renderer whose lighting holds one drawing casting nothing of its own accord, and that drawing's stage.
+     * @returns {{ renderer: PixiMapRenderer, stage: LightingStage }} The renderer and the stage tones are cast through.
+     */
+    const rendererWithSky = () =>
+    {
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      const stages: LightingStage[] = [];
+      renderer.setLightingLayers([ {
+        id: 'lighting.sky',
+        title: 'Sky',
+        create: stage =>
+        {
+          stages.push(stage);
+          return { draw: () => undefined, tick: () => false, destroy: () => stage.castTone(null) };
+        },
+      } ]);
+      const [ stage ] = stages;
+      return { renderer, stage };
+    };
+
+    /**
+     * Reads the tones of the filters on what the game tones.
+     * @param {PixiMapRenderer} renderer The renderer.
+     * @returns {ScreenTone[]} Each filter's tone.
+     */
+    const tonesOn = (renderer: PixiMapRenderer): ScreenTone[] =>
+    {
+      const filters = (renderer.slots.game.filters ?? []) as unknown as { tone: ScreenTone }[];
+      return filters.map(filter => filter.tone);
+    };
+
+    it('casts the lighting\'s tone over what the game tones while the lighting shows', () =>
+    {
+      // Arrange.
+      const { renderer, stage } = rendererWithSky();
+
+      // Act.
+      stage.castTone(NIGHT);
+
+      // Assert.
+      expect([ tonesOn(renderer), renderer.tone, renderer.lightingLayer.filters ?? [] ])
+        .toStrictEqual([ [ NIGHT ], NIGHT, [] ]);
+    });
+
+    it('casts nothing for a tone of zeroes, or for none', () =>
+    {
+      // Arrange: the night cast, so a filter was made.
+      const { renderer, stage } = rendererWithSky();
+      stage.castTone(NIGHT);
+      const seen: ScreenTone[][] = [];
+
+      // Act.
+      stage.castTone([ 0, 0, 0, 0 ]);
+      seen.push(tonesOn(renderer));
+      stage.castTone(NIGHT);
+      stage.castTone(null);
+      seen.push(tonesOn(renderer));
+
+      // Assert.
+      expect(seen)
+        .toStrictEqual([ [], [] ]);
+    });
+
+    it('takes the tone off with the Lighting switch, and casts it again, with the same filter, once it is back on', () =>
+    {
+      // Arrange: the night cast.
+      const { renderer, stage } = rendererWithSky();
+      stage.castTone(NIGHT);
+      const [ filter ] = renderer.slots.game.filters;
+
+      // Act.
+      renderer.setLayerVisibility({ ...GAME_LOOK, layers: { ...GAME_LOOK.layers, lighting: false } });
+      const off = tonesOn(renderer);
+      renderer.setLayerVisibility(GAME_LOOK);
+
+      // Assert.
+      expect([ off, tonesOn(renderer), renderer.slots.game.filters[0] === filter ])
+        .toStrictEqual([ [], [ NIGHT ], true ]);
+    });
+
+    it('waits for the Lighting switch before casting a tone cast while it was off', () =>
+    {
+      // Arrange: the Lighting switch off.
+      const { renderer, stage } = rendererWithSky();
+      renderer.setLayerVisibility({ ...GAME_LOOK, layers: { ...GAME_LOOK.layers, lighting: false } });
+
+      // Act.
+      stage.castTone(EVENING);
+      const off = tonesOn(renderer);
+      renderer.setLayerVisibility(GAME_LOOK);
+
+      // Assert.
+      expect([ off, tonesOn(renderer) ])
+        .toStrictEqual([ [], [ EVENING ] ]);
+    });
+
+    it('gives the one filter each new tone cast, rather than making another', () =>
+    {
+      // Arrange: the evening cast.
+      const { renderer, stage } = rendererWithSky();
+      stage.castTone(EVENING);
+      const [ filter ] = renderer.slots.game.filters;
+
+      // Act.
+      stage.castTone(NIGHT);
+
+      // Assert.
+      expect([ tonesOn(renderer), renderer.slots.game.filters.length, renderer.slots.game.filters[0] === filter ])
+        .toStrictEqual([ [ NIGHT ], 1, true ]);
+    });
+
+    it('lets the filter go with the renderer', () =>
+    {
+      // Arrange: the night cast.
+      const { renderer, stage } = rendererWithSky();
+      stage.castTone(NIGHT);
+      const [ filter ] = renderer.slots.game.filters as unknown as { destroyed: boolean }[];
+
+      // Act.
+      renderer.destroy();
+
+      // Assert.
+      expect(filter.destroyed)
+        .toBe(true);
+    });
   });
 
   it('zooms about the pointer\'s own spot when the wheel reports a whole-pixel spot beside it', () =>

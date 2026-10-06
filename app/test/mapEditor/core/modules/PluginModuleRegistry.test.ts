@@ -4,7 +4,7 @@ import { pluginCommandEntry } from '../../../../src/mapEditor/core/commands/plug
 import { createMapEvent, pageCommentText } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { EventKindDefinition, ModuleContext, PluginModule } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
-import { enabledPlugins, PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import { configNamesOf, enabledPlugins, PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
 
@@ -19,7 +19,11 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * announced, since modules switch on after the views that show kinds have drawn.
  *
  * A module naming project config files gets each one as it was read before switching on, and null for one that was
- * not, with why it could not be read, and never another module's.
+ * not, with why it could not be read, and never another module's. An extension's config, which a module reads only while
+ * the plugins the extension needs are enabled too, is handed over only then, after the module's own.
+ *
+ * A module may offer the map views a clock; the first one offered among the active modules is the window's, and none is
+ * offered once the modules offering it switch off.
  */
 describe('PluginModuleRegistry', () =>
 {
@@ -343,5 +347,116 @@ describe('PluginModuleRegistry', () =>
       .toThrow('a core kind\'s id starts with "core.", not chest');
     expect(attempts[1])
       .toThrow('core.decor is already registered');
+  });
+
+  describe('clockOffer', () =>
+  {
+    /**
+     * A module offering a clock starting at a time, once its plugin is on.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @param {number} startsAt Where its clock starts.
+     * @returns {PluginModule} The module.
+     */
+    const clockModule = (id: string, pluginName: string, startsAt: number): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: contributions => contributions.clock({ startsAt, partOfDay: () => id }),
+    });
+
+    it('offers the clock of the first module offering one, and none while no module does', () =>
+    {
+      // Arrange: two modules offering clocks, the first starting at 14:00, and a registry where neither is on.
+      const lighting = clockModule('lighting', 'J-Lighting', 840);
+      const time = clockModule('time', 'J-TIME', 540);
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      both.activate([ lighting, time ], [ plugin('j/lighting/J-Lighting', true), plugin('j/time/J-TIME', true) ]);
+      neither.activate([ lighting, time ], [ plugin('j/lighting/J-Lighting', false) ]);
+
+      // Assert.
+      expect([ both.clockOffer()?.startsAt, both.clockOffer()?.partOfDay(0), neither.clockOffer() ])
+        .toStrictEqual([ 840, 'lighting', null ]);
+    });
+
+    it('takes the clock back once the module offering it switches off', () =>
+    {
+      // Arrange: the module on.
+      const lighting = clockModule('lighting', 'J-Lighting', 840);
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', true) ]);
+
+      // Act.
+      registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', false) ]);
+
+      // Assert.
+      expect(registry.clockOffer())
+        .toBeNull();
+    });
+  });
+
+  describe('extension configs', () =>
+  {
+    /**
+     * A lighting module reading its own config always, and its time extension's only with J-Lighting-Time and J-TIME on.
+     * @param {(context: ModuleContext) => void} register What it does with what it is handed.
+     * @returns {PluginModule} The module.
+     */
+    const lightingWithTime = (register: (context: ModuleContext) => void): PluginModule => ({
+      id: 'lighting',
+      title: 'Lighting',
+      plugins: [ 'J-Lighting' ],
+      configs: [ 'lighting' ],
+      extensionConfigs: [ { name: 'lighting-time', plugins: [ 'J-Lighting-Time', 'J-TIME' ] } ],
+      register: (_contributions, context) => register(context),
+    });
+
+    it('hands a module an extension\'s config only while every plugin the extension needs is enabled', () =>
+    {
+      // Arrange: both configs read, and the extension with J-TIME on and with it off.
+      const read = new Map<string, JsonValue | null>([ [ 'lighting', {} ], [ 'lighting-time', { sequence: [] } ] ]);
+      const handed: string[][] = [];
+      const lighting = lightingWithTime(context => handed.push([ ...context.configs.keys() ]));
+      const extension = plugin('j/lighting/ext/J-Lighting-Time', true);
+
+      // Act.
+      new PluginModuleRegistry(new CommandCatalog()).activate([ lighting ], [ plugin('j/lighting/J-Lighting', true), extension, plugin('j/time/J-TIME', true) ], read);
+      new PluginModuleRegistry(new CommandCatalog()).activate([ lighting ], [ plugin('j/lighting/J-Lighting', true), extension, plugin('j/time/J-TIME', false) ], read);
+
+      // Assert.
+      expect(handed)
+        .toStrictEqual([ [ 'lighting', 'lighting-time' ], [ 'lighting' ] ]);
+    });
+
+    it('names a module\'s own configs first, then each extension\'s whose plugins are on', () =>
+    {
+      // Arrange: J-Lighting-Time and J-TIME both on, and then the extension off.
+      const lighting = lightingWithTime(() => undefined);
+      const on = enabledPlugins([ plugin('j/lighting/ext/J-Lighting-Time', true), plugin('j/time/J-TIME', true) ]);
+      const off = enabledPlugins([ plugin('j/lighting/ext/J-Lighting-Time', false), plugin('j/time/J-TIME', true) ]);
+
+      // Act.
+      const names = [ configNamesOf(lighting, on), configNamesOf(lighting, off) ];
+
+      // Assert.
+      expect(names)
+        .toStrictEqual([ [ 'lighting', 'lighting-time' ], [ 'lighting' ] ]);
+    });
+
+    it('names no config for a module naming none', () =>
+    {
+      // Arrange.
+      const plain: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register: () => undefined };
+
+      // Act.
+      const names = configNamesOf(plain, enabledPlugins([ plugin('j/abs/J-ABS', true) ]));
+
+      // Assert.
+      expect(names)
+        .toStrictEqual([]);
+    });
   });
 });
