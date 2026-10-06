@@ -123,9 +123,10 @@ const registerSky = (contributions: ModuleContributions, context: ModuleContext)
  * or an interior, gets neither. The Lighting switch shows and hides the sky with the rest. A curve the module cannot use
  * is said over every map view, and the sky then stays as it is at every hour.
  *
- * Map Properties gains a Lighting section setting the map's own darkness and its colour, and, while J-Lighting-Time is
- * on, whether the map's sky follows the clock, each written into the map's note in place. J-Weather reads the same sky
- * tag to keep the sky's weather off a map with no sky, so while it is on too the sky setting says so.
+ * Map Properties gains a Lighting section setting the map's own darkness and its colour, and, while J-Lighting-Time or
+ * J-Weather is on, whether the map has a sky, which J-Lighting-Time reads to tint and darken it by the hour and J-Weather
+ * reads to keep the sky's weather off it, so the setting names whichever of them is on. Each is written into the map's
+ * note in place.
  */
 const lightingModule: PluginModule = {
   id: 'lighting',
@@ -175,14 +176,14 @@ const lightingModule: PluginModule = {
       create: stage => new LightRings(stage, defaults, choosePage),
     });
 
-    // a map's own darkness, and its sky once J-Lighting-Time gives maps one, are set in Map Properties, the sky worded
-    // for the weather too while J-Weather reads the same tag.
-    const sky = context.plugins.has(LIGHTING_TIME_PLUGIN);
+    // a map's own darkness is set in Map Properties, and so is whether it has a sky while either plugin reading that from
+    // its note is on, the setting worded for whichever is.
+    const clock = context.plugins.has(LIGHTING_TIME_PLUGIN);
     const weather = context.plugins.has(WEATHER_PLUGIN);
     contributions.mapProperties({
       id: MAP_LIGHTING_ID,
       title: 'Lighting',
-      source: mapLightingSource(ambientColorFrom(config), sky, weather),
+      source: mapLightingSource(ambientColorFrom(config), clock, weather),
     });
   },
 };

@@ -8,8 +8,8 @@ import {
 } from '../../core/properties/noteText.ts';
 
 /**
- * The name J-Lighting-Time reads from a map's metadata to learn the map has no sky: {@code $dataMap.meta['noToneChange']},
- * matched exactly, case and all.
+ * The name J-Lighting-Time and J-Weather each read from a map's metadata to learn the map has no sky:
+ * {@code $dataMap.meta['noToneChange']}, matched exactly, case and all.
  */
 const NO_SKY_KEY = 'noToneChange';
 
@@ -24,7 +24,7 @@ const NO_SKY_KEY = 'noToneChange';
  *  <noToneChange>
  *
  * Translation:
- *  An interior or a cave: the clock never tints it, nor darkens it.
+ *  An interior or a cave: the clock never tints it, nor darkens it, and the sky's weather never reaches it.
  * </pre>
  */
 const NO_SKY_TAG = '<noToneChange>';
@@ -38,9 +38,11 @@ const SKY_MISREAD = 'the game would not read this map\'s sky back as written';
 /**
  * Reports whether a map's sky follows the clock, as J-Lighting-Time decides on arrival
  * ({@code TimeLightingCoordinator.refreshMapSuppression}): it does unless the map's metadata holds a value under
- * {@code noToneChange} that is truthy. A bare tag holds true and any written value holds its text, so only a tag written
- * with nothing after its colon leaves the sky following the clock. Everything that asks whether a map has a sky asks it
- * here: the sky the map views cast at the clock's hour, the sky setting in Map Properties, and the parity check.
+ * {@code noToneChange} that is truthy. J-Weather reads the tag the very same way to decide whether the sky's weather
+ * reaches the map ({@code MapWeatherResolver.declarationFor}). A bare tag holds true and any written value holds its
+ * text, so only a tag written with nothing after its colon leaves the sky following the clock. Everything that asks
+ * whether a map has a sky asks it here: the sky the map views cast at the clock's hour, the sky setting in Map
+ * Properties, and the parity check.
  * @param {string} note The map's note.
  * @returns {boolean} True when the sky follows the clock.
  */
