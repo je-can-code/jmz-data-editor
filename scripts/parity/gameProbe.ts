@@ -347,7 +347,10 @@ const parityProbe = (config: ProbeConfig): void =>
 
   // a map drawn at a time of day is arrived at with the game's clock already there, set straight into its fields so no
   // hour is announced on the way, and stopped, so no minute ticks by and turns the hour while it is drawn: arriving is
-  // what makes J-Lighting-Time cast the sky at once, rather than spend five seconds travelling toward it.
+  // what makes J-Lighting-Time cast the sky at once, rather than spend five seconds travelling toward it. Every map is
+  // set up afresh on arrival, even the one the player is already on, as for a map drawn at a second hour: a transfer
+  // within a map keeps its events, each on the page the last hour gave it, where setting the map up again has each
+  // judge its page at the clock as it reads now.
   const transferNext = (): void =>
   {
     const next = config.maps[mapIndex];
@@ -358,6 +361,7 @@ const parityProbe = (config: ProbeConfig): void =>
       engine.$gameTime.setMinutes(next.time % 60);
     }
 
+    engine.$gamePlayer.requestMapReload();
     engine.$gamePlayer.reserveTransfer(next.mapId, 0, 0, 2, 2);
     phase = 'transferring';
     settle = 0;
