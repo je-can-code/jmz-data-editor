@@ -41,18 +41,22 @@ const PLAIN_BLACK_HINT = 'Plain black, since this map names no colour for its da
 const SKY_HINT = 'The hour tints and darkens this map. Untick it for interiors and caves, which have no sky.';
 
 /**
+ * What the section says when the game finds the map's darkness but cannot read it, which leaves the map as dark as the
+ * one the player came from.
+ */
+const UNREADABLE_NOTE = 'The game cannot read this map\'s darkness as written, so the map stays as dark as the one before it. '
+  + 'Set a darkness here to mend it.';
+
+/**
  * Says what the section says above its settings, when there is anything to say: that the game cannot read the map's
- * darkness, which leaves the map as dark as the one the player came from, and that the note sets a darkness more than
- * once, of which the game reads only the last.
+ * darkness, and that the note sets a darkness more than once, of which the game reads only the last.
  * @param {MapDarkness} darkness The map's darkness.
  * @returns {string | null} The line, or null when there is nothing to say.
  */
 const darknessNote = (darkness: MapDarkness): string | null =>
 {
   const lines = [
-    ...(darkness.readable
-      ? []
-      : [ 'The game cannot read this map\'s darkness as written, so the map stays as dark as the one before it. Set a darkness here to mend it.' ]),
+    ...(darkness.readable ? [] : [ UNREADABLE_NOTE ]),
     ...(darkness.tags > 1
       ? [ `This note sets a darkness ${darkness.tags} times; the game reads only the last line's, which is the one shown here.` ]
       : []),
