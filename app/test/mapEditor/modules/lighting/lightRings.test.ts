@@ -232,7 +232,11 @@ describe('lightRings', () =>
     {
       // Arrange: a torch whose first page gives light, and a choice that picks its second page instead.
       const torch = { ...event(3, [ page([ command(108, [ '<light:[4]>' ]) ]), page([ command(108, [ '<light:[1]>' ]) ]) ]), x: 0, y: 0 };
-      const second: LightPageChoice = (shown, defaults) => ({ page: shown.pages[1], lights: [ { radius: 1, color: '#ff0000', intensity: defaults.intensity, effect: 'steady' } ] });
+      const second: LightPageChoice = (shown, defaults) => ({
+        page: shown.pages[1],
+        pageIndex: 1,
+        lights: [ { radius: 1, color: '#ff0000', intensity: defaults.intensity, effect: 'steady' } ],
+      });
 
       // Act.
       const rings = lightRingsOf([ torch ], DEFAULTS, 48, second);

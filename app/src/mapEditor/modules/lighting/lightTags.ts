@@ -25,11 +25,23 @@ type LightDefaults = {
 };
 
 /**
- * A page that gives light, with the lights it gives, in the order they are written.
+ * A page that gives light, where it sits among its event's pages (counted from 0), and the lights it gives, in the
+ * order they are written.
  */
 type LitPage = {
   readonly page: RmmzEventPage;
+  readonly pageIndex: number;
   readonly lights: readonly LightDeclaration[];
+};
+
+/**
+ * One comment line that gives a light: where it sits in its page's command list, the line exactly as written, and the
+ * light it gives.
+ */
+type LightLine = {
+  readonly listIndex: number;
+  readonly text: string;
+  readonly light: LightDeclaration;
 };
 
 /**
@@ -108,6 +120,21 @@ const isHexColor = (text: string): boolean =>
 };
 
 /**
+ * Writes a colour the one way a colour picker writes it, six lowercase digits after the hash, so #FB7 and #ffbb77 read
+ * as the one colour they are. Shorthand doubles each digit, as LightingColor#toRgb expands it.
+ * @param {string} hex A colour that passed the hex check.
+ * @returns {string} The colour, such as #ffbb77.
+ */
+const normalizeHex = (hex: string): string =>
+{
+  const digits = hex.slice(1).toLowerCase();
+  const expanded = digits.length === 3
+    ? digits.split('').map(digit => `${digit}${digit}`).join('')
+    : digits;
+  return `#${expanded}`;
+};
+
+/**
  * Reports whether a tag value is a finite number, as J-Lighting's {@code Number.isFinite} asks.
  * @param {TagValue} value The value.
  * @returns {boolean} True for a finite number.
@@ -126,6 +153,17 @@ const isFiniteNumber = (value: TagValue): value is number =>
 const isEffect = (value: TagValue): value is LightEffect =>
 {
   return typeof value === 'string' && AUTHORABLE_EFFECTS.includes(value);
+};
+
+/**
+ * Reports whether a tag value is put forward as a colour: a word led by a hash, which J-Lighting takes for the light's
+ * colour whether or not the digits after it make one.
+ * @param {TagValue} value The value.
+ * @returns {boolean} True for a word starting with a hash.
+ */
+const isColorCandidate = (value: TagValue): value is string =>
+{
+  return typeof value === 'string' && value.startsWith('#');
 };
 
 /**
@@ -174,7 +212,7 @@ const readPayload = (payload: string): TagValue[] =>
  */
 const colorOf = (values: readonly TagValue[], fallback: string): string =>
 {
-  const [ candidate ] = values.filter((value): value is string => typeof value === 'string' && value.startsWith('#'));
+  const [ candidate ] = values.filter(isColorCandidate);
   if (candidate === undefined)
   {
     return fallback;
@@ -247,14 +285,38 @@ const parseLight = (payload: string, defaults: LightDefaults): LightDeclaration 
 };
 
 /**
- * Lists the comment lines on a page that J-Base offers its plugins, in order (Game_Event#getValidCommentCommands): the
- * first line and each further line of every comment, wherever it sits, that is one tag filling the line.
- * @param {RmmzEventPage} page The page.
- * @returns {string[]} The lines.
+ * Reads the light one comment line gives, as J-Base and J-Lighting read it: nothing unless the line is one tag filling
+ * the whole line (Game_Event#getValidCommentCommands offers no other), that tag is a light tag, and its list gives a
+ * light.
+ * @param {string} text The line.
+ * @param {LightDefaults} defaults What the light falls back to.
+ * @returns {LightDeclaration | null} The light, or null when the line gives none.
  */
-const parsableComments = (page: RmmzEventPage): string[] =>
+const readLightLine = (text: string, defaults: LightDefaults): LightDeclaration | null =>
 {
-  return page.list.flatMap(command =>
+  const match = PARSABLE_COMMENT.test(text)
+    ? LIGHT_TAG.exec(text)
+    : null;
+  if (match === null)
+  {
+    return null;
+  }
+
+  const [ , payload ] = match;
+  return parseLight(payload, defaults);
+};
+
+/**
+ * Finds every line on a page that gives a light, as J-Lighting reads the lights of an event's active page: the first
+ * line and each further line of every comment, wherever it sits, so a page can give several, all from the same spot.
+ * Each comes with where it sits, so whatever changes a light can change that line and nothing else.
+ * @param {RmmzEventPage} page The page.
+ * @param {LightDefaults} defaults What the lights fall back to.
+ * @returns {LightLine[]} The lines, in the order written.
+ */
+const lightLines = (page: RmmzEventPage, defaults: LightDefaults): LightLine[] =>
+{
+  return page.list.flatMap((command, listIndex) =>
   {
     const [ text ] = command.parameters;
     if (COMMENT_CODES.includes(command.code) === false || typeof text !== 'string')
@@ -262,35 +324,22 @@ const parsableComments = (page: RmmzEventPage): string[] =>
       return [];
     }
 
-    return PARSABLE_COMMENT.test(text)
-      ? [ text ]
-      : [];
+    const light = readLightLine(text, defaults);
+    return light === null
+      ? []
+      : [ { listIndex, text, light } ];
   });
 };
 
 /**
- * Reads every light a page gives, as J-Lighting reads the lights of an event's active page: one per comment line
- * holding a light tag that gives a light, so a page can give several, all from the same spot.
+ * Reads every light a page gives, by the lines {@link lightLines} finds, so the two can never disagree.
  * @param {RmmzEventPage} page The page.
  * @param {LightDefaults} defaults What the lights fall back to.
  * @returns {LightDeclaration[]} The lights, in the order written.
  */
 const lightsOf = (page: RmmzEventPage, defaults: LightDefaults): LightDeclaration[] =>
 {
-  return parsableComments(page).flatMap(comment =>
-  {
-    const match = LIGHT_TAG.exec(comment);
-    if (match === null)
-    {
-      return [];
-    }
-
-    const [ , payload ] = match;
-    const light = parseLight(payload, defaults);
-    return light === null
-      ? []
-      : [ light ];
-  });
+  return lightLines(page, defaults).map(line => line.light);
 };
 
 /**
@@ -298,16 +347,16 @@ const lightsOf = (page: RmmzEventPage, defaults: LightDefaults): LightDeclaratio
  * page and a lit page behind a switch or a self switch, and the lit page is the one worth showing.
  * @param {RmmzMapEvent} event The event.
  * @param {LightDefaults} defaults What the lights fall back to.
- * @returns {LitPage | null} The page and its lights, or null when no page gives light.
+ * @returns {LitPage | null} The page, where it sits, and its lights, or null when no page gives light.
  */
 const firstLitPage: LightPageChoice = (event: RmmzMapEvent, defaults: LightDefaults): LitPage | null =>
 {
-  for (const page of event.pages)
+  for (const [ pageIndex, page ] of event.pages.entries())
   {
     const lights = lightsOf(page, defaults);
     if (lights.length > 0)
     {
-      return { page, lights };
+      return { page, pageIndex, lights };
     }
   }
 
@@ -325,5 +374,23 @@ const isLight = (event: RmmzMapEvent): boolean =>
   return firstLitPage(event, PLUGIN_DEFAULTS) !== null;
 };
 
-export { firstLitPage, isHexColor, isLight, LIGHT_TAG, lightsOf, parseLight, PLUGIN_DEFAULTS };
-export type { LightDeclaration, LightDefaults, LightEffect, LightPageChoice, LitPage };
+export {
+  AUTHORABLE_EFFECTS,
+  firstLitPage,
+  isColorCandidate,
+  isEffect,
+  isFiniteNumber,
+  isHexColor,
+  isLight,
+  LIGHT_PARAMETER_LIMIT,
+  LIGHT_TAG,
+  lightLines,
+  lightsOf,
+  MAX_INTENSITY_PERCENT,
+  normalizeHex,
+  parseLight,
+  PLUGIN_DEFAULTS,
+  readLightLine,
+  readValue,
+};
+export type { LightDeclaration, LightDefaults, LightEffect, LightLine, LightPageChoice, LitPage, TagValue };

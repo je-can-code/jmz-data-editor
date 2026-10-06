@@ -2,7 +2,7 @@ import { Graphics } from 'pixi.js';
 import type { RmmzEventPage, RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
 import type { LightingDrawing, LightingFrame, LightingStage } from '../../core/renderer/lightingLayer.ts';
 import { eventPlacement } from '../../render/engine/characterFrames.ts';
-import { firstLitPage, type LightDefaults, type LightPageChoice } from './lightTags.ts';
+import { firstLitPage, normalizeHex, type LightDefaults, type LightPageChoice } from './lightTags.ts';
 
 /**
  * One light's ring: where the light sits and how far it reaches, in world pixels, and its colour as {@code 0xRRGGBB}.
@@ -36,13 +36,8 @@ const RING_STYLE = {
  */
 const colorNumber = (hex: string): number =>
 {
-  const digits = hex.slice(1);
-
   // shorthand doubles each digit, so #fb7 means #ffbb77.
-  const expanded = digits.length === 3
-    ? digits.split('').map(digit => `${digit}${digit}`).join('')
-    : digits;
-  return Number.parseInt(expanded, 16);
+  return Number.parseInt(normalizeHex(hex).slice(1), 16);
 };
 
 /**

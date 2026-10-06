@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { firstLitPage, isLight, lightsOf, parseLight, type LightDefaults } from '../../../../src/mapEditor/modules/lighting/lightTags.ts';
+import {
+  firstLitPage,
+  isLight,
+  lightLines,
+  lightsOf,
+  normalizeHex,
+  parseLight,
+  readLightLine,
+  type LightDefaults,
+} from '../../../../src/mapEditor/modules/lighting/lightTags.ts';
 import { command, event, page, text } from '../../support/eventKindFixtures.ts';
 
 /*
@@ -14,9 +23,11 @@ import { command, event, page, text } from '../../support/eventKindFixtures.ts';
  * is a boolean.
  *
  * Only comment lines J-Base offers its plugins are read: a first line or a continuation line that is one tag filling
- * the line. Every such line holding a light gives one, so a page can give several. The page whose lights an event shows
- * is the first that gives any, so a torch lit behind a switch shows its lit page; and an event is a light exactly when
- * some page gives light, read by the same parser, so "is a light" and "shows a ring" never disagree.
+ * the line. Every such line holding a light gives one, so a page can give several, and each is found with where it sits
+ * in the page's list and exactly what it says, so a change to a light can rewrite that line and nothing else. The page
+ * whose lights an event shows is the first that gives any, named with where it sits among the event's pages, so a torch
+ * lit behind a switch shows its lit page; and an event is a light exactly when some page gives light, read by the same
+ * parser, so "is a light" and "shows a ring" never disagree. Colours compare as six lowercase digits.
  */
 
 /**
@@ -290,6 +301,104 @@ describe('lightTags', () =>
     });
   });
 
+  describe('readLightLine', () =>
+  {
+    it('reads the light a line gives when the line is the light tag alone', () =>
+    {
+      // Arrange.
+      const line = '<light:[3, #ffbb73, flicker]>';
+
+      // Act.
+      const light = readLightLine(line, DEFAULTS);
+
+      // Assert.
+      expect(light)
+        .toStrictEqual({ radius: 3, color: '#ffbb73', intensity: 0.25, effect: 'flicker' });
+    });
+
+    it('reads nothing from a line J-Base would not offer, holding more than the one tag', () =>
+    {
+      // Arrange: a word after the tag.
+      const line = '<light:[3]> lamp';
+
+      // Act.
+      const light = readLightLine(line, DEFAULTS);
+
+      // Assert.
+      expect(light)
+        .toBeNull();
+    });
+
+    it('reads nothing from a line offered whole that holds some other tag', () =>
+    {
+      // Arrange: a battler's tag, offered to every plugin, read by none here.
+      const line = '<enemyId:3>';
+
+      // Act.
+      const light = readLightLine(line, DEFAULTS);
+
+      // Assert.
+      expect(light)
+        .toBeNull();
+    });
+  });
+
+  describe('lightLines', () =>
+  {
+    it('finds each line giving a light with where it sits and what it says, past the near misses around it', () =>
+    {
+      // Arrange: a namesake tag, a light on a continuation line, a battler's tag, a tag giving no light, a light with a
+      // word after it, and a light in capitals.
+      const shrine = page([
+        command(108, [ '<lights:[5]>' ]),
+        command(408, [ '<light:[4, #ffbb73]>' ]),
+        command(108, [ '<enemyId:3>' ]),
+        command(108, [ '<light:[0]>' ]),
+        command(108, [ '<light:[2]> lamp' ]),
+        command(408, [ '<LIGHT: [3,pulse]>' ]),
+      ]);
+
+      // Act.
+      const lines = lightLines(shrine, DEFAULTS);
+
+      // Assert.
+      expect(lines)
+        .toStrictEqual([
+          { listIndex: 1, text: '<light:[4, #ffbb73]>', light: { radius: 4, color: '#ffbb73', intensity: 0.25, effect: 'steady' } },
+          { listIndex: 5, text: '<LIGHT: [3,pulse]>', light: { radius: 3, color: '#123456', intensity: 0.25, effect: 'pulse' } },
+        ]);
+    });
+  });
+
+  describe('normalizeHex', () =>
+  {
+    it('doubles each digit of a shorthand colour, in lowercase', () =>
+    {
+      // Arrange.
+      const hex = '#FB7';
+
+      // Act.
+      const normalized = normalizeHex(hex);
+
+      // Assert.
+      expect(normalized)
+        .toBe('#ffbb77');
+    });
+
+    it('lowers the case of a colour of six digits and keeps them', () =>
+    {
+      // Arrange.
+      const hex = '#FFBB73';
+
+      // Act.
+      const normalized = normalizeHex(hex);
+
+      // Assert.
+      expect(normalized)
+        .toBe('#ffbb73');
+    });
+  });
+
   describe('firstLitPage', () =>
   {
     it('picks the first page that gives light, past a cold first page', () =>
@@ -303,8 +412,8 @@ describe('lightTags', () =>
       const chosen = firstLitPage(torch, DEFAULTS);
 
       // Assert.
-      expect([ chosen?.page === lit, chosen?.lights ])
-        .toStrictEqual([ true, [ { radius: 4, color: '#ffbb73', intensity: 0.25, effect: 'flicker' } ] ]);
+      expect([ chosen?.page === lit, chosen?.pageIndex, chosen?.lights ])
+        .toStrictEqual([ true, 1, [ { radius: 4, color: '#ffbb73', intensity: 0.25, effect: 'flicker' } ] ]);
     });
 
     it('passes over a page whose only light tag gives no light', () =>
