@@ -80,6 +80,19 @@ describe('HttpMapEditorApi', () =>
         ]);
     });
 
+    it('reads what a new game starts with from its route', async () =>
+    {
+      // Arrange: a new game seating Jerald and Rupert.
+      const { api, requests } = buildApi(() => envelope({ party: [ 1, 2 ] }));
+
+      // Act.
+      const newGame = await api.loadNewGame();
+
+      // Assert.
+      expect([ newGame, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ { party: [ 1, 2 ] }, [ `GET ${BASE}/api/new-game` ] ]);
+    });
+
     it('reads the transfers landing on a map from its route, unwrapped from the answer about that map', async () =>
     {
       // Arrange.

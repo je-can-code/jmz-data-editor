@@ -12,6 +12,7 @@ import type { LocationPicks } from '../core/locations/LocationPicks.ts';
 import type { DocumentKey } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
+import { WindowPageRule } from '../core/pageRule/WindowPageRule.ts';
 import { WindowClock } from '../core/time/WindowClock.ts';
 import { WindowPaints } from '../core/tools/WindowPaint.ts';
 import { FileChangeFeed, openEventSource, type EventSourceFactory } from '../core/sync/FileChangeFeed.ts';
@@ -101,6 +102,13 @@ type MapEditorServices = {
   readonly clock: WindowClock;
 
   /**
+   * The rule every map view in the window picks each event's page by: the game's own, on a fresh save, at the window's
+   * clock, with the conditions the plugin modules add. The party a new game seats is read once the window starts, and
+   * again whenever the project's System.json or Actors.json changes on disk.
+   */
+  readonly pages: WindowPageRule;
+
+  /**
    * Reads what command editing needs from the server, once per window however often it is asked: the plugin
    * headers, whose commands join the catalog, and the database names the editors' pickers offer. A window that
    * never shows a command list never asks. Never rejects.
@@ -130,8 +138,8 @@ type MapEditorServices = {
   /**
    * Starts syncing, watching for changes, guarding against closing with unsaved edits, and switching on the plugin
    * modules once js/plugins.js is read, and afresh whenever a config file one of them reads changes on disk, with the
-   * window's clock following the starting time a module offers. When the page goes, it stops, which tells the other
-   * windows at once that this one no longer holds anything.
+   * window's clock following the starting time a module offers, and the page rule reading what a new game starts with.
+   * When the page goes, it stops, which tells the other windows at once that this one no longer holds anything.
    */
   start(): void;
 
@@ -192,6 +200,11 @@ type MapEditorEnvironment = {
 };
 
 /**
+ * The files a new game's party is read from, as the change stream names them: a change to either reads it again.
+ */
+const NEW_GAME_FILES: ReadonlySet<string> = new Set([ 'data/System.json', 'data/Actors.json' ]);
+
+/**
  * Builds the page's own environment: the real channels, stream, locks, shell and window.
  * @param {string | null} apiBase The Go server's origin.
  * @returns {MapEditorEnvironment} The environment.
@@ -249,6 +262,18 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   // the window the close guard listens on is the page's own, the one whose paint the page starts with.
   const paints = new WindowPaints(environment.closeTarget);
   const clock = new WindowClock();
+  const pages = new WindowPageRule(modules);
+
+  /**
+   * Reads what a new game starts with for the page rule. A read that fails leaves the rule as it was, seating nobody
+   * before the first read lands, and is left for the next change rather than thrown.
+   */
+  const readNewGame = (): void =>
+  {
+    api?.loadNewGame()
+      .then(save => pages.setSave(save))
+      .catch(() => undefined);
+  };
 
   // the change stream is shared by every window, and only exists with a server to stream from.
   const feed = api === null
@@ -283,6 +308,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     modules,
     paints,
     clock,
+    pages,
     loadCommandResources: commandEditing.load,
     openDocument: async (key: DocumentKey) =>
     {
@@ -358,8 +384,10 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
         }
       }));
 
-      // the plugin modules switch on once js/plugins.js says which plugins are enabled.
+      // the plugin modules switch on once js/plugins.js says which plugins are enabled, and the page rule reads the party
+      // a new game seats.
       activation?.refresh();
+      readNewGame();
 
       // a page going for good says goodbye, so no window counts it as holding anything a moment longer.
       const onPageHide = () => stop();
@@ -371,7 +399,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
         // only the window reading the stream reads what changed, and hands it to the others; each change settles on
         // its own, and a read that fails is left for the next change rather than thrown at the stream. A config a
         // module reads is read again by every window, so tuning it shows everywhere at once, and so is every config
-        // when the stream comes back, since a change made while it was down was never announced.
+        // when the stream comes back, since a change made while it was down was never announced; the new game too.
         const router = new FileChangeRouter(hub, sync, () => feed.isLeader);
         stops.push(
           feed.onChange(change =>
@@ -381,11 +409,17 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
             {
               activation?.refresh();
             }
+
+            if (NEW_GAME_FILES.has(change.path))
+            {
+              readNewGame();
+            }
           }),
           feed.onReconnect(() =>
           {
             router.recheck().catch(() => undefined);
             activation?.refresh();
+            readNewGame();
           }),
         );
         feed.start();

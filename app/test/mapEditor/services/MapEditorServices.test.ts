@@ -343,6 +343,58 @@ describe('MapEditorServices', () =>
     services.stop();
   });
 
+  it('reads the party a new game seats once started, again when System.json or Actors.json changes, and when the stream comes back', async () =>
+  {
+    // Arrange: a project whose new game seats whoever the test says, counting its reads.
+    let party = [ 1, 2 ];
+    let reads = 0;
+    const { fetch } = stubFetch(request =>
+    {
+      if (request.url.endsWith('/api/new-game'))
+      {
+        reads += 1;
+        return envelope({ party });
+      }
+
+      return request.url.endsWith('/api/plugin-metadata') ? new Response('var $plugins = [];') : envelope({});
+    });
+    const { environment, sources } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    const before = services.pages.save;
+
+    // Act: started; then System.json changes seating Rupert alone, a map changes, Actors.json changes, and the stream
+    // drops and comes back.
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(services.pages.save)
+        .toStrictEqual({ party: [ 1, 2 ] });
+    });
+    party = [ 2 ];
+    sources[0].emitChange({ path: 'data/System.json', kind: 'write', client: '' });
+    await vi.waitFor(() =>
+    {
+      expect(services.pages.save)
+        .toStrictEqual({ party: [ 2 ] });
+    });
+    sources[0].emitChange({ path: 'data/Map001.json', kind: 'write', client: '' });
+    sources[0].emitChange({ path: 'data/Actors.json', kind: 'write', client: '' });
+    sources[0].emit('error');
+    sources[0].emit('open');
+
+    // Assert: nobody before starting; one read to start, one as the window takes the stream (whatever changed while
+    // nobody watched it went unannounced), one per new-game file changed and none for the map, and one for the stream
+    // coming back.
+    await vi.waitFor(() =>
+    {
+      expect(reads)
+        .toBe(5);
+    });
+    expect(before)
+      .toStrictEqual({ party: [] });
+    services.stop();
+  });
+
   it('keeps the core\'s kinds alone when js/plugins.js cannot be read', async () =>
   {
     // Arrange: a server that answers the plugin list with an error.

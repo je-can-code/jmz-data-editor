@@ -222,6 +222,9 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	mux.HandleFunc("GET /api/editor-data/{key}", api.LoadEditorData)
 	mux.HandleFunc("PUT /api/editor-data/{key}", api.SaveEditorData(changes))
 
+	// the party a new game seats, for showing each event's page as a fresh save would.
+	mux.HandleFunc("GET /api/new-game", api.LoadNewGame)
+
 	mux.HandleFunc("GET /api/file-changes", api.StreamFileChanges(changes, api.DefaultStreamTiming))
 	//endregion map editor endpoints
 

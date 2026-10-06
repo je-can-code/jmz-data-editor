@@ -3,6 +3,7 @@ import type { DatabaseNamesJson } from '../commandList/databaseNames.ts';
 import { isEditorDataName } from '../model/documentKeys.ts';
 import { isJsonObject, type JsonValue } from '../model/json.ts';
 import type { RmmzCommonEvent, RmmzMap, RmmzMapInfo, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { FreshSave } from '../pageRule/freshSave.ts';
 import type { MapArrival } from '../properties/arrivals.ts';
 
 /**
@@ -213,6 +214,14 @@ interface MapEditorApi
    * @returns {Promise<DatabaseNamesJson>} The names, each list indexed by id.
    */
   loadDatabaseNames(): Promise<DatabaseNamesJson>;
+
+  /**
+   * Reads what a new game starts with, which is the party it seats: the map views show each event's page as a fresh
+   * save would, and a page can wait for an actor in the party. Optional, so a client that cannot read it still serves
+   * everything else; the page rule then seats nobody.
+   * @returns {Promise<FreshSave>} The new game's party.
+   */
+  loadNewGame?(): Promise<FreshSave>;
 }
 
 /**
@@ -540,6 +549,11 @@ class HttpMapEditorApi implements MapEditorApi
   async loadDatabaseNames(): Promise<DatabaseNamesJson>
   {
     return this.#getJson<DatabaseNamesJson>('/api/database-names');
+  }
+
+  async loadNewGame(): Promise<FreshSave>
+  {
+    return this.#getJson<FreshSave>('/api/new-game');
   }
 
   /**
