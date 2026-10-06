@@ -3,9 +3,10 @@
  * still, and draws the map's base layer (parallax, tiles and characters, with no screen tone, lighting, weather or
  * interface above it) into a picture per view, animation step and pass. A dark map is drawn once more with J-Lighting's
  * light mask multiplied over its tiles, as the game composites it over the map. A map given a time of day is walked to
- * with the game's clock set to that time and stopped, so J-Lighting-Time's sky is already there when the player
- * arrives, and is drawn under it: its tiles with the screen's tone over them, as the base layer's colour filter casts
- * it, and the light mask multiplied over that whenever the hour or the map darkens it.
+ * with the game's clock set to that time and stopped, so every event arrives on the page that hour gives it and
+ * J-Lighting-Time's sky is already there when the player does. Its events are drawn as the game shows them then, and
+ * its tiles under the sky: with the screen's tone over them, as the base layer's colour filter casts it, and the light
+ * mask multiplied over that whenever the hour or the map darkens it.
  *
  * It is serialized with toString() and run inside NW.js ahead of the game's own scripts, so it must stay one
  * self-contained function in plain JavaScript: nothing from this module's scope survives the trip, and the engine's
@@ -25,7 +26,7 @@ const parityProbe = (config: ProbeConfig): void =>
   const fs = nodeRequire('fs');
   const { Buffer: NodeBuffer } = nodeRequire('buffer');
   const engine = window as unknown as Record<string, any>;
-  const report: ProbeReport = { phase: 'boot', screen: { width: 0, height: 0 }, captures: [], events: {}, errors: [], log: [] };
+  const report: ProbeReport = { phase: 'boot', screen: { width: 0, height: 0 }, captures: [], events: {}, clocks: {}, errors: [], log: [] };
 
   // the game must never make a sound: every audio context it makes stays suspended, and media elements stay muted.
   // The launch also carries --mute-audio; this holds even if a launch ever forgets it.
@@ -227,7 +228,8 @@ const parityProbe = (config: ProbeConfig): void =>
       });
   };
 
-  // lists how the game's sprite for an event departs from a plain drawing of its first page.
+  // lists how the game's sprite for an event departs from a plain drawing of the page it shows; an event showing no page
+  // draws nothing, and has nothing to depart from.
   const departuresOf = (sprite: any): string[] =>
   {
     const character = sprite._character;
@@ -237,16 +239,21 @@ const parityProbe = (config: ProbeConfig): void =>
       return [ 'is not in the map file' ];
     }
 
-    const first = data.pages[0].image;
+    const shown = data.pages[character._pageIndex];
+    if (shown === undefined)
+    {
+      return [];
+    }
+
+    const { image } = shown;
     const departures: string[] = [];
     const tone = sprite.getColorTone();
     const blend = sprite.getBlendColor();
     const checks: [ boolean, string ][] = [
-      [ character._pageIndex !== 0, `shows page ${character._pageIndex + 1}` ],
-      [ character.characterName() !== first.characterName || character.characterIndex() !== first.characterIndex || character.tileId() !== first.tileId,
+      [ character.characterName() !== image.characterName || character.characterIndex() !== image.characterIndex || character.tileId() !== image.tileId,
         `draws "${character.characterName()}" ${character.characterIndex()} instead of its page image` ],
-      [ character.direction() !== first.direction, `faces ${character.direction()} instead of ${first.direction}` ],
-      [ character.pattern() !== first.pattern, `shows pattern ${character.pattern()} instead of ${first.pattern}` ],
+      [ character.direction() !== image.direction, `faces ${character.direction()} instead of ${image.direction}` ],
+      [ character.pattern() !== image.pattern, `shows pattern ${character.pattern()} instead of ${image.pattern}` ],
       [ tone.some((value: number) => value !== 0), `tinted ${JSON.stringify(tone)}` ],
       [ blend[3] !== 0, `blended ${JSON.stringify(blend)}` ],
       [ sprite.opacity !== 255, `opacity ${sprite.opacity}` ],
@@ -263,12 +270,15 @@ const parityProbe = (config: ProbeConfig): void =>
     return departures;
   };
 
-  // records each event's active page, whether the game draws it and how, before any pass hides anything; under its
-  // own key for a map drawn at a time of day, since an event's page can depend on the hour.
+  // records each event's active page, whether the game draws it and how, before any pass hides anything, with the hour
+  // the game's clock reads; under its own key for a map drawn at a time of day, since an event's page can depend on the
+  // hour.
   const recordEvents = (map: ProbeMap): void =>
   {
     const spriteset = engine.SceneManager._scene._spriteset;
     const key = map.time === undefined ? String(map.mapId) : `${map.mapId}@${map.time}`;
+    const time = engine.$gameTime;
+    report.clocks[key] = time === undefined || time === null ? -1 : (time.hours() * 60) + time.minutes();
     report.events[key] = spriteset._characterSprites
       .filter((sprite: any) => sprite._character instanceof engine.Game_Event)
       .map((sprite: any) =>
@@ -303,13 +313,13 @@ const parityProbe = (config: ProbeConfig): void =>
   };
 
   // which pictures a map gets: events as the game shows them, then the tiles alone, with every event hidden, then, for
-  // a dark map, the tiles alone again under the light mask; or, for a map drawn at a time of day, the tiles alone under
-  // its sky and nothing else.
+  // a dark map, the tiles alone again under the light mask; or, for a map drawn at a time of day, its events as the game
+  // shows them at that hour, then the tiles alone under its sky.
   const passesFor = (map: ProbeMap): ('events' | 'tiles' | 'dark' | 'sky')[] =>
   {
     if (map.time !== undefined)
     {
-      return [ 'sky' ];
+      return [ 'events', 'sky' ];
     }
 
     return map.dark ? [ 'events', 'tiles', 'dark' ] : [ 'events', 'tiles' ];

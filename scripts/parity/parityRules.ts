@@ -1,13 +1,19 @@
 /**
  * The parity check's rules, apart from the browser and the game so they can be tested: which views cover a map,
- * which maps are worth comparing at every animation step, which dark and which under their sky at a time of day, what
- * explains a difference in the events pass and in the dark and sky passes, how the game copy's lights are held steady,
- * and which differences the engine predicts against snapshot.js.
+ * which maps are worth comparing at every animation step, which dark and which under their sky at a time of day, which
+ * page the editor shows each event at the hour the game's clock read, what explains a difference in the events pass and
+ * in the dark and sky passes, how the game copy's lights are held steady, and which differences the engine predicts
+ * against snapshot.js.
  */
+import { CommandCatalog } from '../../app/src/mapEditor/core/commands/CommandCatalog.ts';
 import type { RmmzMapEvent } from '../../app/src/mapEditor/core/model/rmmzTypes.ts';
+import { PluginModuleRegistry } from '../../app/src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import { activePageOf, readEvent, type PageRule } from '../../app/src/mapEditor/core/pageRule/pageRule.ts';
 import { ambientPayloadOf } from '../../app/src/mapEditor/modules/lighting/ambientTags.ts';
-import { firstLitPage, lightsOf, PLUGIN_DEFAULTS } from '../../app/src/mapEditor/modules/lighting/lightTags.ts';
+import { lightsOf, PLUGIN_DEFAULTS } from '../../app/src/mapEditor/modules/lighting/lightTags.ts';
 import { NO_SKY_TAG, skyFollowsClock } from '../../app/src/mapEditor/modules/lighting/skyTag.ts';
+import { timeModule } from '../../app/src/mapEditor/modules/time/timeModule.ts';
+import type { PluginsJsEntry } from '../../app/src/services/plugins/PluginsJsReader.ts';
 import type { ProbeEvent, ProbeMap } from './probeTypes.ts';
 
 /**
@@ -39,16 +45,32 @@ type MapFile = {
 };
 
 /**
- * One event's light as the editor draws it, for explaining the dark pass: the event, the page the editor reads its
- * lights from (the first that gives any), where it stands, at its tile's foot, and the furthest any of its pages reaches,
- * in pixels.
+ * One lit event as the editor draws it, for explaining the dark and sky passes: the event, the page the editor shows,
+ * whose lights it draws (-1 for none), which of its pages give any light, where it stands, at its tile's foot, and the
+ * furthest any of its pages reaches, in pixels, since the game may show another of its pages.
  */
 type DarkLight = {
   readonly eventId: number;
   readonly pageIndex: number;
+  readonly litPages: readonly number[];
   readonly x: number;
   readonly y: number;
   readonly reach: number;
+};
+
+/**
+ * The page the editor shows each event at one hour, by the event's id: the page a fresh save would show, or -1 for
+ * none.
+ */
+type EditorPages = ReadonlyMap<number, number>;
+
+/**
+ * One event that shows another page in the game than in the editor, either one -1 for none.
+ */
+type PageDifference = {
+  readonly id: number;
+  readonly game: number;
+  readonly editor: number;
 };
 
 /**
@@ -146,6 +168,110 @@ const eventsKeyOf = (capture: { readonly mapId: number; readonly time?: number }
 };
 
 /**
+ * The time of day the editor draws a capture at, so both sides judge every event's page, and cast any sky, at one hour:
+ * the hour the game's clock read when the probe arrived on the capture's map, as the probe reports it under the
+ * capture's key, which for a map drawn at a time of day is that time, set and stopped; or, from a game with no clock,
+ * the time asked for, if any.
+ * @param {{ mapId: number, time?: number }} capture The capture.
+ * @param {Readonly<Record<string, number>>} clocks The game's clock on each map, in minutes past midnight, -1 for none.
+ * @returns {number | null} The time of day, in minutes past midnight; null when neither the game nor the capture names
+ * one, as for any pass in a game with no clock, whose pages no hour decides.
+ */
+const timeOfCapture = (capture: { readonly mapId: number; readonly time?: number }, clocks: Readonly<Record<string, number>>): number | null =>
+{
+  const clock = clocks[eventsKeyOf(capture)];
+  if (clock >= 0)
+  {
+    return clock;
+  }
+
+  return capture.time ?? null;
+};
+
+/**
+ * The party a fresh save starts with, as the editor's server reads it: the system's starting members, keeping only
+ * those with a row in the actors' file, as the engine's own new game does.
+ * @param {readonly number[]} partyMembers The system's starting members.
+ * @param {readonly (object | null)[]} actors The actors' file.
+ * @returns {number[]} The starting party's actor ids, in order.
+ */
+const startingPartyOf = (partyMembers: readonly number[], actors: readonly (object | null)[]): number[] =>
+{
+  return partyMembers.filter(actorId => actors[actorId] !== null && actors[actorId] !== undefined);
+};
+
+/**
+ * Builds the page rule the editor shows a game by: the engine's conditions on a fresh save with the starting party, and
+ * J-TIME's page tags as its module judges them over the game's own plugins, so a game without J-TIME has none.
+ * @param {readonly PluginsJsEntry[]} plugins The game's plugins, as js/plugins.js lists them.
+ * @param {readonly number[]} party The starting party's actor ids.
+ * @returns {PageRule} The rule.
+ */
+const parityPageRule = (plugins: readonly PluginsJsEntry[], party: readonly number[]): PageRule =>
+{
+  const registry = new PluginModuleRegistry(new CommandCatalog());
+  registry.activate([ timeModule ], plugins);
+  return { save: { party }, conditions: registry.pageConditions() };
+};
+
+/**
+ * Names the page the editor shows each of a map's events at a time of day.
+ * @param {MapFile} map The map.
+ * @param {PageRule} rule The rule the editor shows the game by.
+ * @param {number} timeOfDay The time of day, in minutes past midnight.
+ * @returns {EditorPages} Each event's page, -1 for none, by its id.
+ */
+const editorPagesOf = (map: MapFile, rule: PageRule, timeOfDay: number): EditorPages =>
+{
+  const pages = new Map<number, number>();
+  map.events.forEach(event =>
+  {
+    if (event !== null)
+    {
+      pages.set(event.id, activePageOf(readEvent(event, rule), { timeOfDay }));
+    }
+  });
+  return pages;
+};
+
+/**
+ * Lists the events the game shows another page than the editor does, which is the page rule's own measure: an event
+ * the editor has no page for at all, as one a plugin put on the map, counts as showing none there.
+ * @param {readonly ProbeEvent[]} events The game's events on the map.
+ * @param {EditorPages} editorPages The editor's page for each event.
+ * @returns {PageDifference[]} The events that differ, in the game's order.
+ */
+const pageDifferencesOf = (events: readonly ProbeEvent[], editorPages: EditorPages): PageDifference[] =>
+{
+  return events.flatMap(event =>
+  {
+    const editor = editorPages.get(event.id) ?? -1;
+    return editor === event.page ? [] : [ { id: event.id, game: event.page, editor } ];
+  });
+};
+
+/**
+ * Words a page as a reason names it.
+ * @param {number} pageIndex The page's index, -1 for none.
+ * @returns {string} The words, such as "page 2" or "no page".
+ */
+const pageNameOf = (pageIndex: number): string =>
+{
+  return pageIndex < 0 ? 'no page' : `page ${pageIndex + 1}`;
+};
+
+/**
+ * Words the pages an event shows on each side, for a reason.
+ * @param {number} game The page the game shows, -1 for none.
+ * @param {number} editor The page the editor shows, -1 for none.
+ * @returns {string} The words, such as "shows page 2 in the game, page 1 in the editor".
+ */
+const pagesWords = (game: number, editor: number): string =>
+{
+  return `shows ${pageNameOf(game)} in the game, ${pageNameOf(editor)} in the editor`;
+};
+
+/**
  * Builds what the probe draws for one map under its sky at a time of day: the same views and steps as any pass over the
  * map, drawn at that time. A map with no sky, read from its note as the editor's sky reads it, has nothing the clock
  * changes, so it is refused, rather than compared at an hour it ignores and reported as though the sky matched.
@@ -167,13 +293,14 @@ const skyProbeMapFor = (mapId: number, map: MapFile, screen: { width: number; he
 };
 
 /**
- * Lists the lights the editor cuts through a map's dark, one entry per lit event: the page it reads them from, which is
- * the first giving any, where the event stands, and the furthest any of its pages' lights reaches, since the game may
- * show another of its pages.
+ * Lists every event with a page giving light, one entry each: the page the editor shows, whose lights it cuts through
+ * the dark, the pages giving any, where the event stands, and the furthest any of its pages' lights reaches, since the
+ * game may show another of its pages.
  * @param {MapFile} map The map.
+ * @param {EditorPages} editorPages The editor's page for each of the map's events, as editorPagesOf names them.
  * @returns {DarkLight[]} The lit events, in id order.
  */
-const darkLightsOf = (map: MapFile): DarkLight[] =>
+const darkLightsOf = (map: MapFile, editorPages: EditorPages): DarkLight[] =>
 {
   return map.events.flatMap(event =>
   {
@@ -182,19 +309,20 @@ const darkLightsOf = (map: MapFile): DarkLight[] =>
       return [];
     }
 
-    const lit = firstLitPage(event, PLUGIN_DEFAULTS);
-    if (lit === null)
+    const radii = event.pages.map(page => lightsOf(page, PLUGIN_DEFAULTS).map(light => light.radius));
+    const litPages = radii.flatMap((pageRadii, pageIndex) => (pageRadii.length === 0 ? [] : [ pageIndex ]));
+    if (litPages.length === 0)
     {
       return [];
     }
 
-    const radii = event.pages.flatMap(page => lightsOf(page, PLUGIN_DEFAULTS).map(light => light.radius));
     return [ {
       eventId: event.id,
-      pageIndex: lit.pageIndex,
+      pageIndex: editorPages.get(event.id) as number,
+      litPages,
       x: event.x * TILE + TILE / 2,
       y: event.y * TILE + TILE,
-      reach: Math.max(...radii) * TILE,
+      reach: Math.max(...radii.flat()) * TILE,
     } ];
   });
 };
@@ -216,28 +344,31 @@ const lightReaches = (light: DarkLight, cell: DifferingCell): boolean =>
 };
 
 /**
- * Explains a differing cell of the dark pass by a light the game shows from another page than the editor does: the
- * editor reads an event's lights from its first page giving any, as its rings do, while the game reads them from
- * whichever page's conditions hold, which may be another page or none. A cell no such light reaches stays unexplained,
- * since a difference there would be the editor's own.
+ * Explains a differing cell of the dark or sky pass by a light the game shows from another page than the editor does:
+ * the editor draws an event's lights from the page a fresh save shows at the hour, while the game draws them from the
+ * page its own state shows, which may be another page or none, and one of the two gives light. A cell no such light
+ * reaches stays unexplained, since a difference there would be the editor's own; so does one reached only by lights
+ * both sides draw from the same page, or by two pages neither of which gives any.
  * @param {DifferingCell} cell The cell.
- * @param {readonly DarkLight[]} lights The editor's lit events.
+ * @param {readonly DarkLight[]} lights The map's lit events.
  * @param {readonly ProbeEvent[]} events The game's events on the map.
  * @returns {string | null} Why it differs, or null when nothing explains it.
  */
 const explainDarkCell = (cell: DifferingCell, lights: readonly DarkLight[], events: readonly ProbeEvent[]): string | null =>
 {
   const pageShown = (light: DarkLight): number => events.find(event => event.id === light.eventId)?.page ?? -1;
-  const departing = lights.find(light => pageShown(light) !== light.pageIndex && lightReaches(light, cell));
+  const departs = (light: DarkLight): boolean =>
+  {
+    const shown = pageShown(light);
+    return shown !== light.pageIndex && (light.litPages.includes(shown) || light.litPages.includes(light.pageIndex));
+  };
+  const departing = lights.find(light => departs(light) && lightReaches(light, cell));
   if (departing === undefined)
   {
     return null;
   }
 
-  const shown = pageShown(departing);
-  return shown < 0
-    ? `event ${departing.eventId} shows no page in the game, so gives no light`
-    : `event ${departing.eventId} shows page ${shown + 1} in the game, not its lit page ${departing.pageIndex + 1}`;
+  return `event ${departing.eventId} ${pagesWords(pageShown(departing), departing.pageIndex)}`;
 };
 
 /**
@@ -275,16 +406,33 @@ const spriteCovers = (event: ProbeEvent, cell: { x: number; y: number }, margin:
 };
 
 /**
- * Explains a differing cell of the events pass by an event around it that the game draws differently from a plain
- * drawing of its first page, which is what the editor draws. A cell under a plainly drawn event stays unexplained
- * however much its neighbours move: a difference there would be the editor's own.
+ * Lists every way the game's drawing of an event departs from the editor's: another page than the editor shows, and
+ * then the game hiding it, or drawing it otherwise than a plain drawing of the page it shows. An event the editor has
+ * no page for, as one a plugin put on the map, counts as showing none there.
+ * @param {ProbeEvent} event The game's event.
+ * @param {EditorPages} editorPages The editor's page for each event.
+ * @returns {string[]} The departures, in words; empty when both sides draw the same page plainly.
+ */
+const departuresFromEditor = (event: ProbeEvent, editorPages: EditorPages): string[] =>
+{
+  const editor = editorPages.get(event.id) ?? -1;
+  const pages = editor === event.page ? [] : [ pagesWords(event.page, editor) ];
+  return [ ...pages, ...(event.visible ? event.departures : [ 'is hidden in the game' ]) ];
+};
+
+/**
+ * Explains a differing cell of the events pass by an event around it that the game draws differently from the editor:
+ * one showing another page than the page a fresh save shows at the hour, which is the editor's, or one the game hides
+ * or draws otherwise than its page. A cell under an event both sides draw alike stays unexplained however much its
+ * neighbours move: a difference there would be the editor's own.
  * @param {DifferingCell} cell The cell.
  * @param {readonly ProbeEvent[]} events The game's events on the map.
+ * @param {EditorPages} editorPages The editor's page for each event.
  * @returns {string | null} Why it differs, or null when nothing explains it.
  */
-const explainCell = (cell: DifferingCell, events: readonly ProbeEvent[]): string | null =>
+const explainCell = (cell: DifferingCell, events: readonly ProbeEvent[], editorPages: EditorPages): string | null =>
 {
-  const departs = (event: ProbeEvent): boolean => event.visible === false || event.departures.length > 0;
+  const departs = (event: ProbeEvent): boolean => departuresFromEditor(event, editorPages).length > 0;
   if (events.some(event => departs(event) === false && spriteCovers(event, cell, 0)))
   {
     return null;
@@ -297,9 +445,7 @@ const explainCell = (cell: DifferingCell, events: readonly ProbeEvent[]): string
     return null;
   }
 
-  return departing.visible
-    ? `event ${departing.id} ${departing.departures.join(', ')}`
-    : `event ${departing.id} is hidden in the game`;
+  return `event ${departing.id} ${departuresFromEditor(departing, editorPages).join(', ')}`;
 };
 
 /**
@@ -352,16 +498,22 @@ export {
   animates,
   coverAxis,
   darkLightsOf,
+  editorPagesOf,
   eventsKeyOf,
   explainCell,
   explainDarkCell,
   gameParityHolds,
   lightReaches,
+  pageDifferencesOf,
+  pagesWords,
+  parityPageRule,
   probeMapFor,
   skyProbeMapFor,
   snapshotPredictions,
   spriteCovers,
+  startingPartyOf,
   steadyLighting,
   TILE,
+  timeOfCapture,
 };
-export type { DarkLight, JudgedView, LightingConfigFile, MapFile };
+export type { DarkLight, EditorPages, JudgedView, LightingConfigFile, MapFile, PageDifference };

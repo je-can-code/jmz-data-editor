@@ -4,30 +4,43 @@ import {
   animates,
   coverAxis,
   darkLightsOf,
+  editorPagesOf,
   eventsKeyOf,
   explainCell,
   explainDarkCell,
   gameParityHolds,
   lightReaches,
+  pageDifferencesOf,
+  parityPageRule,
   probeMapFor,
   skyProbeMapFor,
   snapshotPredictions,
   spriteCovers,
+  startingPartyOf,
   steadyLighting,
+  timeOfCapture,
   type DarkLight,
   type MapFile,
 } from '../../../../scripts/parity/parityRules.ts';
-import type { RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { RmmzEventConditions, RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { PluginsJsEntry } from '../../../src/services/plugins/PluginsJsReader.ts';
 import { command, event, page } from '../../mapEditor/support/eventKindFixtures.ts';
 
 /*
  * The parity check's verdict rests on these rules. The views must cover every cell of a map as the engine would
  * allow the display to sit; maps with moving water must be compared at every animation step, and maps whose note
- * declares darkness dark as well; a difference in the events pass counts as explained only by an event the game draws
- * differently from its first page, and never under a plainly drawn event, however much its neighbours move; a
- * difference in the dark pass counts as explained only within the reach of a light the game shows from another page
- * than the first one giving light, which is the editor's; snapshot.js differences count as predicted only on star-order
- * and table cells; and any cell left unexplained, in any pass, fails the check.
+ * declares darkness dark as well; snapshot.js differences count as predicted only on star-order and table cells; and
+ * any cell left unexplained, in any pass, fails the check.
+ *
+ * Both sides judge every event's page at one hour: the one the game's clock read on arriving at the map, which for a
+ * map drawn at a time of day is that time, or for a game with no clock the time asked for, if any. The editor shows
+ * the page a fresh save would show then, under the engine's conditions with the starting party (the members with a row
+ * in the actors' file) and J-TIME's page tags whenever the game lists J-TIME enabled; the events the game shows on
+ * another page are listed, an event the editor has no page for showing none there. A difference in the events pass
+ * counts as explained only by an event the game shows on another page than the editor's, hides, or draws otherwise
+ * than its page, and never under an event both sides draw alike, however much its neighbours move; a difference in the
+ * dark or sky pass only within the reach of a light the game shows from another page than the editor's, where one of
+ * the two pages gives light.
  *
  * A map is drawn under its sky only when it has one: a map tagged <noToneChange> is refused rather than compared at an
  * hour it ignores. Its views and steps are any pass's, at the time of day asked for, and the events that explain its
@@ -87,6 +100,34 @@ const probeEvent = (overrides: Partial<ProbeEvent> = {}): ProbeEvent => ({
   departures: [],
   ...overrides,
 });
+
+/**
+ * J-TIME as Chef Adventure's js/plugins.js lists it: a new game at 14:00:00 on 16 December 2026.
+ * @param {boolean} status Whether it is enabled.
+ * @returns {PluginsJsEntry} The entry.
+ */
+const jTime = (status: boolean): PluginsJsEntry => ({
+  name: 'j/time/J-TIME',
+  status,
+  description: '',
+  parameters: { useRealTime: 'false', startingSecond: '0', startingMinute: '0', startingHour: '14', startingDay: '16', startingMonth: '12', startingYear: '2026' },
+});
+
+/**
+ * Builds an event whose pages each hold the given comment lines, under the given conditions.
+ * @param {number} id The event id.
+ * @param {string[][]} pages Each page's comment lines.
+ * @param {Partial<RmmzEventConditions>[]} conditions Each page's conditions, by page; none by default.
+ * @returns {RmmzMapEvent} The event.
+ */
+const taggedEvent = (id: number, pages: string[][], conditions: Partial<RmmzEventConditions>[] = []): RmmzMapEvent =>
+{
+  return event(id, pages.map((lines, index) =>
+  {
+    const shown = page(lines.map(line => command(108, [ line ])));
+    return { ...shown, conditions: { ...shown.conditions, ...conditions[index] } };
+  }));
+};
 
 describe('parityRules', () =>
 {
@@ -197,28 +238,63 @@ describe('parityRules', () =>
   {
     const cell = { x: 5, y: 5, pixels: 10, maxDelta: 40 };
 
-    it('explains a cell by an event the game draws its own way, or hides', () =>
+    // the editor shows event 1 its first page, and its neighbours 2 and 3 their second.
+    const editorPages = new Map([ [ 1, 0 ], [ 2, 1 ], [ 3, 1 ] ]);
+
+    it('explains a cell by an event the game shows on the editor\'s page but draws its own way, or hides', () =>
     {
       // Arrange.
       const swaying = probeEvent({ departures: [ 'scaled 1.02x0.98' ] });
       const hidden = probeEvent({ visible: false });
 
       // Act.
-      const reasons = [ explainCell(cell, [ swaying ]), explainCell(cell, [ hidden ]) ];
+      const reasons = [ explainCell(cell, [ swaying ], editorPages), explainCell(cell, [ hidden ], editorPages) ];
 
       // Assert.
       expect(reasons)
         .toStrictEqual([ 'event 1 scaled 1.02x0.98', 'event 1 is hidden in the game' ]);
     });
 
-    it('leaves a cell unexplained under a plainly drawn event, however much a neighbour moves', () =>
+    it('explains a cell by an event the game shows on another page than the editor, naming both before anything else', () =>
     {
-      // Arrange: a plain chest on the cell, a swaying battler beside it.
-      const chest = probeEvent({ id: 2 });
-      const battler = probeEvent({ id: 3, x: 6, departures: [ 'scaled 1.02x0.98' ] });
+      // Arrange: event 1 on its second page in the game, drawn plainly; then on its second page, turned; then on none.
+      const turned = probeEvent({ page: 1 });
+      const turnedAndFacing = probeEvent({ page: 1, departures: [ 'faces 4 instead of 2' ] });
+      const gone = probeEvent({ page: -1, width: 0, height: 0 });
 
       // Act.
-      const reason = explainCell(cell, [ chest, battler ]);
+      const reasons = [ turned, turnedAndFacing, gone ].map(shown => explainCell(cell, [ shown ], editorPages));
+
+      // Assert.
+      expect(reasons)
+        .toStrictEqual([
+          'event 1 shows page 2 in the game, page 1 in the editor',
+          'event 1 shows page 2 in the game, page 1 in the editor, faces 4 instead of 2',
+          'event 1 shows no page in the game, page 1 in the editor',
+        ]);
+    });
+
+    it('explains a cell by an event the editor has no page for, as showing none there', () =>
+    {
+      // Arrange: event 9, which a plugin put on the map, shown plainly on its first page in the game.
+      const spawned = probeEvent({ id: 9 });
+
+      // Act.
+      const reason = explainCell(cell, [ spawned ], editorPages);
+
+      // Assert.
+      expect(reason)
+        .toBe('event 9 shows page 1 in the game, no page in the editor');
+    });
+
+    it('leaves a cell unexplained under an event both sides draw alike, however much a neighbour moves', () =>
+    {
+      // Arrange: a plain chest on the cell, on the editor's page; a swaying battler beside it.
+      const chest = probeEvent({ id: 2, page: 1 });
+      const battler = probeEvent({ id: 3, x: 6, page: 1, departures: [ 'scaled 1.02x0.98' ] });
+
+      // Act.
+      const reason = explainCell(cell, [ chest, battler ], editorPages);
 
       // Assert.
       expect(reason)
@@ -227,11 +303,11 @@ describe('parityRules', () =>
 
     it('leaves a cell unexplained with no event near it', () =>
     {
-      // Arrange: a departing event far away.
-      const far = probeEvent({ x: 20, y: 20, departures: [ 'opacity 128' ] });
+      // Arrange: an event far away, both departing and on another page.
+      const far = probeEvent({ x: 20, y: 20, page: 1, departures: [ 'opacity 128' ] });
 
       // Act.
-      const reason = explainCell(cell, [ far ]);
+      const reason = explainCell(cell, [ far ], editorPages);
 
       // Assert.
       expect(reason)
@@ -302,9 +378,10 @@ describe('parityRules', () =>
 
   describe('darkLightsOf', () =>
   {
-    it('lists every lit event once, from the first page giving light, reaching as far as any of its pages', () =>
+    it('lists every lit event once, with the page the editor shows, the pages giving light, and the furthest any reaches', () =>
     {
-      // Arrange: a torch; a lamp lit small on page 2 and larger on page 3; a battler giving no light; an empty slot.
+      // Arrange: a torch the editor shows no page of, as a lamp by day; a lamp lit small on page 2 and larger on page 3,
+      // which the editor shows; a battler giving no light; empty slots.
       const map = mapFile(10, 10, {}, '<ambient:[85]>', [
         null,
         lightEvent(1, 2, 3, [ [ '<light:[4, #ffbb73, 40]>' ] ]),
@@ -312,15 +389,16 @@ describe('parityRules', () =>
         lightEvent(3, 8, 8, [ [ '<enemyId:3>' ] ]),
         null,
       ]);
+      const editorPages = new Map([ [ 1, -1 ], [ 2, 2 ], [ 3, 0 ] ]);
 
       // Act.
-      const lights = darkLightsOf(map);
+      const lights = darkLightsOf(map, editorPages);
 
       // Assert.
       expect(lights)
         .toStrictEqual([
-          { eventId: 1, pageIndex: 0, x: 120, y: 192, reach: 192 },
-          { eventId: 2, pageIndex: 1, x: 312, y: 96, reach: 168 },
+          { eventId: 1, pageIndex: -1, litPages: [ 0 ], x: 120, y: 192, reach: 192 },
+          { eventId: 2, pageIndex: 2, litPages: [ 1, 2 ], x: 312, y: 96, reach: 168 },
         ]);
     });
   });
@@ -331,7 +409,7 @@ describe('parityRules', () =>
     {
       // Arrange: a light reaching one tile from the foot of cell 5, 5: the square spans columns 4 to 6 and rows 5 to 6,
       // widened to columns 3 to 7 and rows 4 to 7.
-      const light: DarkLight = { eventId: 1, pageIndex: 0, x: 264, y: 288, reach: 48 };
+      const light: DarkLight = { eventId: 1, pageIndex: 0, litPages: [ 0 ], x: 264, y: 288, reach: 48 };
       const cells = [ [ 3, 4 ], [ 7, 7 ], [ 2, 5 ], [ 8, 5 ], [ 5, 3 ], [ 5, 8 ] ];
 
       // Act.
@@ -345,23 +423,24 @@ describe('parityRules', () =>
 
   describe('explainDarkCell', () =>
   {
-    const lamp: DarkLight = { eventId: 2, pageIndex: 1, x: 312, y: 96, reach: 168 };
+    // a lamp unlit on its first page, lit on its second and third, shown on its second by the editor.
+    const lamp: DarkLight = { eventId: 2, pageIndex: 1, litPages: [ 1, 2 ], x: 312, y: 96, reach: 168 };
     const cell = { x: 6, y: 2 };
 
-    it('explains a cell within the reach of a light the game shows from another page', () =>
+    it('explains a cell within the reach of a light the game shows from another lit page', () =>
     {
-      // Arrange: the game shows the lamp's third page.
-      const events = [ probeEvent({ id: 2, page: 2 }) ];
+      // Arrange: the game shows the lamp's third page; another event sits on the editor's page.
+      const events = [ probeEvent({ id: 1, page: 1 }), probeEvent({ id: 2, page: 2 }) ];
 
       // Act.
       const reason = explainDarkCell(cell, [ lamp ], events);
 
       // Assert.
       expect(reason)
-        .toBe('event 2 shows page 3 in the game, not its lit page 2');
+        .toBe('event 2 shows page 3 in the game, page 2 in the editor');
     });
 
-    it('explains a cell within the reach of a light whose event shows no page in the game, or is not there at all', () =>
+    it('explains a cell within the reach of a light the editor shows whose event shows no page in the game, or is not there at all', () =>
     {
       // Arrange: the lamp with no page whose conditions hold; and a game reporting no such event.
       const unlit = [ probeEvent({ id: 2, page: -1 }) ];
@@ -372,7 +451,7 @@ describe('parityRules', () =>
 
       // Assert.
       expect(reasons)
-        .toStrictEqual([ 'event 2 shows no page in the game, so gives no light', 'event 2 shows no page in the game, so gives no light' ]);
+        .toStrictEqual([ 'event 2 shows no page in the game, page 2 in the editor', 'event 2 shows no page in the game, page 2 in the editor' ]);
     });
 
     it('leaves a cell unexplained where the game shows the light from the editor\'s own page', () =>
@@ -382,6 +461,20 @@ describe('parityRules', () =>
 
       // Act.
       const reason = explainDarkCell(cell, [ lamp ], events);
+
+      // Assert.
+      expect(reason)
+        .toBeNull();
+    });
+
+    it('leaves a cell unexplained where the two sides show different pages, neither of them giving light', () =>
+    {
+      // Arrange: the editor shows the lamp no page, as a lamp by day, and the game its unlit first page.
+      const dayLamp: DarkLight = { ...lamp, pageIndex: -1 };
+      const events = [ probeEvent({ id: 2, page: 0 }) ];
+
+      // Act.
+      const reason = explainDarkCell(cell, [ dayLamp ], events);
 
       // Assert.
       expect(reason)
@@ -399,6 +492,125 @@ describe('parityRules', () =>
       // Assert.
       expect(reason)
         .toBeNull();
+    });
+  });
+
+  describe('timeOfCapture', () =>
+  {
+    it('takes the hour the game\'s clock read on arriving at the capture\'s map, for a sky as for any other pass', () =>
+    {
+      // Arrange: map 4 arrived at 14:03; map 337 arrived at with its clock set to 14:00, and to 22:00 though it read a
+      // minute past, which the editor follows.
+      const clocks = { 4: 843, '337@1320': 1321, '337@840': 840 };
+
+      // Act.
+      const times = [ { mapId: 4 }, { mapId: 337, time: 1320 }, { mapId: 337, time: 840 } ].map(capture => timeOfCapture(capture, clocks));
+
+      // Assert.
+      expect(times)
+        .toStrictEqual([ 843, 1321, 840 ]);
+    });
+
+    it('takes the hour asked for, or none, from a game with no clock', () =>
+    {
+      // Arrange: a game without J-TIME, its clock read as -1 on every map.
+      const clocks = { 4: -1, '337@1320': -1 };
+
+      // Act.
+      const times = [ { mapId: 4 }, { mapId: 337, time: 1320 } ].map(capture => timeOfCapture(capture, clocks));
+
+      // Assert.
+      expect(times)
+        .toStrictEqual([ null, 1320 ]);
+    });
+  });
+
+  describe('startingPartyOf', () =>
+  {
+    it('keeps the starting members with a row in the actors\' file, in the system\'s order', () =>
+    {
+      // Arrange: members 3, 1 and 2, each with a row.
+      const actors = [ null, { id: 1 }, { id: 2 }, { id: 3 } ];
+
+      // Act.
+      const party = startingPartyOf([ 3, 1, 2 ], actors);
+
+      // Assert.
+      expect(party)
+        .toStrictEqual([ 3, 1, 2 ]);
+    });
+
+    it('drops a member whose row is empty or past the end of the file', () =>
+    {
+      // Arrange: member 2's row is empty, member 9 has none; member 1 has one.
+      const actors = [ null, { id: 1 }, null, { id: 3 } ];
+
+      // Act.
+      const party = startingPartyOf([ 2, 1, 9 ], actors);
+
+      // Assert.
+      expect(party)
+        .toStrictEqual([ 1 ]);
+    });
+  });
+
+  describe('parityPageRule and editorPagesOf', () =>
+  {
+    // a lamp cold on its first page and lit from 18:00 to 05:00 on its second; a creature out from 16:00 to 04:00 on
+    // its only page; a door whose second page waits on switch 4; an empty slot.
+    const map = mapFile(10, 10, {}, '', [
+      null,
+      taggedEvent(1, [ [ '<light:[3]>' ], [ '<hourRangePage:18-5>' ] ]),
+      taggedEvent(2, [ [ '<timeRangePage:16:00-4:00>' ] ]),
+      taggedEvent(3, [ [], [] ], [ {}, { switch1Valid: true, switch1Id: 4 } ]),
+    ]);
+
+    it('judges J-TIME\'s page tags at the hour while the game lists J-TIME enabled, carrying the starting party', () =>
+    {
+      // Arrange.
+      const rule = parityPageRule([ jTime(true) ], [ 1, 2 ]);
+
+      // Act.
+      const pages = [ 1320, 840 ].map(timeOfDay => [ ...editorPagesOf(map, rule, timeOfDay) ]);
+
+      // Assert: the lamp lit and the creature out by night, and neither by day; the door on its first page throughout.
+      expect([ rule.save.party, rule.conditions.map(condition => condition.id), pages ])
+        .toStrictEqual([
+          [ 1, 2 ],
+          [ 'time.pages' ],
+          [ [ [ 1, 1 ], [ 2, 0 ], [ 3, 0 ] ], [ [ 1, 0 ], [ 2, -1 ], [ 3, 0 ] ] ],
+        ]);
+    });
+
+    it('judges no page by the hour while J-TIME is not enabled', () =>
+    {
+      // Arrange.
+      const rule = parityPageRule([ jTime(false) ], [ 1 ]);
+
+      // Act.
+      const pages = [ 1320, 840 ].map(timeOfDay => [ ...editorPagesOf(map, rule, timeOfDay) ]);
+
+      // Assert: the lamp's last page and the creature's only page hold at every hour.
+      expect([ rule.conditions, pages ])
+        .toStrictEqual([ [], [ [ [ 1, 1 ], [ 2, 0 ], [ 3, 0 ] ], [ [ 1, 1 ], [ 2, 0 ], [ 3, 0 ] ] ] ]);
+    });
+  });
+
+  describe('pageDifferencesOf', () =>
+  {
+    it('lists the events the game shows on another page, an event the editor has no page for showing none there', () =>
+    {
+      // Arrange: event 1 on the editor's page; 2 shown by the game but not the editor; 3 the reverse; 9 put on the map by
+      // a plugin.
+      const editorPages = new Map([ [ 1, 1 ], [ 2, -1 ], [ 3, 0 ] ]);
+      const events = [ probeEvent({ id: 1, page: 1 }), probeEvent({ id: 2, page: 0 }), probeEvent({ id: 3, page: -1 }), probeEvent({ id: 9, page: 0 }) ];
+
+      // Act.
+      const differences = pageDifferencesOf(events, editorPages);
+
+      // Assert.
+      expect(differences)
+        .toStrictEqual([ { id: 2, game: 0, editor: -1 }, { id: 3, game: -1, editor: 0 }, { id: 9, game: 0, editor: -1 } ]);
     });
   });
 

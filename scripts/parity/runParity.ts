@@ -13,19 +13,21 @@
  *
  * Two passes per view, and a third on a dark map. The tiles pass hides every character on both sides, so what remains
  * is the parallax and the tiles: it must match, within 2 per channel for compositing rounding. The events pass draws
- * events as each side draws them; the editor shows every event's first page, as MZ's own editor does, while the game
- * shows whichever page's conditions hold, so every differing cell there is either explained by an event the game shows
- * differently (another page, or hidden) or listed as unexplained. The dark pass, on a map whose note declares darkness,
- * draws the tiles alone again under J-Lighting's light mask on both sides, the editor showing only what the game shows
- * of its lighting: a differing cell there is explained only by a light the game shows from another page than the
- * editor's, which reads every event's lights from its first page giving any. Any cell left unexplained, in any pass,
- * fails the check.
+ * events as each side draws them, at the hour the game's clock read when it arrived on the map: the editor shows each
+ * event's page as a fresh save would at that hour, while the game, started new straight onto the map, shows whichever
+ * page its own state gives, so every differing cell there is either explained by an event the game shows differently
+ * (another page, hidden, or drawn otherwise than its page) or listed as unexplained. The events whose pages differ are
+ * counted too, the page rule's own measure. The dark pass, on a map whose note declares darkness, draws the tiles alone
+ * again under J-Lighting's light mask on both sides, the editor showing only what the game shows of its lighting: a
+ * differing cell there is explained only by a light the game shows from another page than the editor's. Any cell left
+ * unexplained, in any pass, fails the check.
  *
- * The sky pass draws an outdoor map under J-Lighting-Time's sky at a time of day (--sky; Map337 at 22:00 and at 14:00
- * unless told otherwise): the game's clock is set to that time and stopped before the player arrives, so the sky is
- * already there, and its tiles are drawn with the screen's tone over them and the light mask multiplied over that; the
- * editor draws the same view at the same hour, its sky's tone and its dark the only lighting it shows. A differing cell
- * is explained as in the dark pass, by a light the game shows from another page at that hour.
+ * A map drawn at a time of day (--sky; Map337 at 22:00 and at 14:00 unless told otherwise) is arrived at with the game's
+ * clock set to that time and stopped, so every event shows the page that hour gives it and the sky is already there. Its
+ * events pass is drawn at that hour, and its sky pass draws its tiles with the screen's tone over them and the light
+ * mask multiplied over that; the editor draws the same views at the same hour, its sky's tone and its dark the only
+ * lighting it shows. A differing cell is explained as in the dark pass, by a light the game shows from another page at
+ * that hour.
  *
  * Maps with water or waterfalls are compared at all four animation steps. The game draws on SwiftShader, which is
  * fine for pictures and meaningless for timing. The game runs from a copy in the run's folder, muted, on a virtual
@@ -39,6 +41,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { Page } from 'playwright-core';
+import type { PageRule } from '../../app/src/mapEditor/core/pageRule/pageRule.ts';
+import { readPluginEntries } from '../../app/src/services/plugins/PluginsJsReader.ts';
 import { startEditorStack } from '../speed/editorStack.ts';
 import { openSpeedBrowser } from '../speed/gpuChromium.ts';
 import { createRunFolder } from '../speed/runFolder.ts';
@@ -47,17 +51,25 @@ import type { ProbeCapture, ProbeReport } from './probeTypes.ts';
 import { runHeadlessGame } from './headlessGame.ts';
 import {
   darkLightsOf,
+  editorPagesOf,
   eventsKeyOf,
   explainCell,
   explainDarkCell,
   gameParityHolds,
+  pageDifferencesOf,
+  pagesWords,
+  parityPageRule,
   probeMapFor,
   skyProbeMapFor,
   snapshotPredictions,
+  startingPartyOf,
   steadyLighting,
   TILE,
+  timeOfCapture,
+  type EditorPages,
   type LightingConfigFile,
   type MapFile,
+  type PageDifference,
 } from './parityRules.ts';
 
 /**
@@ -95,6 +107,15 @@ type ViewResult = {
 };
 
 /**
+ * How the pages of one map's events compared at one hour: how many events the game had on the map, and those it showed
+ * on another page than the editor.
+ */
+type PageComparison = {
+  events: number;
+  differ: PageDifference[];
+};
+
+/**
  * The page's hooks, as far as the check calls them.
  */
 type HookWindow = {
@@ -116,7 +137,8 @@ const FIXTURES: Record<number, string> = {
   316: 'the most star tiles, 1,123, under a still parallax',
   4: 'dark: a cave at 85%, seven torches alike, kept from the clock by <noToneChange>',
   6: 'dark: a cave at 85%, torches and ghosts of three looks, one of them lit only behind a switch',
-  337: 'under the sky: an outdoor map with no darkness of its own and dozens of lights, lit only by night',
+  337: 'under the sky: an outdoor map with no darkness of its own, 36 lamps lit only from 18:00 to 05:00 by <hourRangePage>,'
+    + ' and 16 creatures out only by day or only by night',
 };
 
 /**
@@ -226,6 +248,34 @@ const readMap = async (project: string, mapId: number): Promise<MapFile> =>
 };
 
 /**
+ * Reads the page rule the editor shows the game by, from the game's own files: its plugins, for J-TIME's page tags,
+ * and its starting party.
+ * @param {string} project The game.
+ * @returns {Promise<PageRule>} The rule.
+ */
+const readPageRule = async (project: string): Promise<PageRule> =>
+{
+  const plugins = readPluginEntries(await Bun.file(`${project}/js/plugins.js`).text());
+  const system = await Bun.file(`${project}/data/System.json`).json() as { partyMembers: number[] };
+  const actors = await Bun.file(`${project}/data/Actors.json`).json() as (object | null)[];
+  return parityPageRule(plugins, startingPartyOf(system.partyMembers, actors));
+};
+
+/**
+ * Names the page the editor shows each of a capture's map's events, at the hour the capture is drawn at; a game with no
+ * clock has no hour to give, and then its rule holds no tag that reads one, so any hour answers alike.
+ * @param {ProbeCapture} capture The capture.
+ * @param {MapFile} map The map.
+ * @param {ProbeReport} report The probe's report.
+ * @param {PageRule} rule The rule the editor shows the game by.
+ * @returns {EditorPages} Each event's page, -1 for none.
+ */
+const editorPagesFor = (capture: ProbeCapture, map: MapFile, report: ProbeReport, rule: PageRule): EditorPages =>
+{
+  return editorPagesOf(map, rule, timeOfCapture(capture, report.clocks) ?? 0);
+};
+
+/**
  * Writes a data URL's PNG to a file.
  * @param {string} url The data URL.
  * @param {string} file Where.
@@ -251,20 +301,20 @@ const openEditorMap = async (page: Page, uiBase: string, mapId: number): Promise
 };
 
 /**
- * Draws one of the game's captures in the editor.
+ * Draws one of the game's captures in the editor, at the hour the capture was drawn at in the game.
  * @param {Page} page The page, on the capture's map.
  * @param {ProbeCapture} capture The game's capture.
- * @param {{ width: number, height: number }} screen The screen size.
+ * @param {ProbeReport} report The probe's report.
  * @param {string} file Where to write the editor's picture.
  */
-const drawInEditor = async (page: Page, capture: ProbeCapture, screen: { width: number; height: number }, file: string): Promise<void> =>
+const drawInEditor = async (page: Page, capture: ProbeCapture, report: ProbeReport, file: string): Promise<void> =>
 {
   const url = await page.evaluate(async ({ pass, step, time, rect }) =>
   {
     const hooks = (window as unknown as HookWindow).__jmzMapView;
     hooks?.prepareParity({ events: pass === 'events', step, frames: 0, lighting: pass === 'dark' || pass === 'sky', time: time ?? undefined });
     return hooks?.extract(rect) ?? '';
-  }, { pass: capture.pass, step: capture.step, time: capture.time ?? null, rect: { x: capture.display.x * TILE, y: capture.display.y * TILE, ...screen } });
+  }, { pass: capture.pass, step: capture.step, time: timeOfCapture(capture, report.clocks), rect: { x: capture.display.x * TILE, y: capture.display.y * TILE, ...report.screen } });
   await saveDataUrl(url, file);
 };
 
@@ -273,10 +323,11 @@ const drawInEditor = async (page: Page, capture: ProbeCapture, screen: { width: 
  * @param {ProbeCapture} capture The capture.
  * @param {MapFile} map The map.
  * @param {ProbeReport} report The probe's report.
+ * @param {PageRule} rule The rule the editor shows the game by.
  * @param {string} folder Where the pictures are.
  * @returns {Promise<ViewResult>} What it came to.
  */
-const compareCapture = async (capture: ProbeCapture, map: MapFile, report: ProbeReport, folder: string): Promise<ViewResult> =>
+const compareCapture = async (capture: ProbeCapture, map: MapFile, report: ProbeReport, rule: PageRule, folder: string): Promise<ViewResult> =>
 {
   const game = await decodePng(`${folder}/${capture.file}`);
   const editor = await decodePng(`${folder}/${capture.file.replace(/^game-/u, 'editor-')}`);
@@ -289,7 +340,8 @@ const compareCapture = async (capture: ProbeCapture, map: MapFile, report: Probe
   }
 
   const events = report.events[eventsKeyOf(capture)] ?? [];
-  const lights = darkLightsOf(map);
+  const editorPages = editorPagesFor(capture, map, report, rule);
+  const lights = darkLightsOf(map, editorPages);
   const explained: CellDifference[] = [];
   const unexplained: CellDifference[] = [];
   const reasons = new Set<string>();
@@ -298,7 +350,7 @@ const compareCapture = async (capture: ProbeCapture, map: MapFile, report: Probe
     switch (capture.pass)
     {
       case 'events':
-        return explainCell(cell, events);
+        return explainCell(cell, events, editorPages);
       case 'dark':
       case 'sky':
         return explainDarkCell(cell, lights, events);
@@ -370,7 +422,7 @@ const runGameParity = async (options: Options): Promise<boolean> =>
       await openEditorMap(page, stack.uiBase, mapId);
       for (const capture of report.captures.filter(each => each.mapId === mapId))
       {
-        await drawInEditor(page, capture, report.screen, `${folder}/${capture.file.replace(/^game-/u, 'editor-')}`);
+        await drawInEditor(page, capture, report, `${folder}/${capture.file.replace(/^game-/u, 'editor-')}`);
       }
     }
   }
@@ -380,31 +432,65 @@ const runGameParity = async (options: Options): Promise<boolean> =>
     await stack.stop();
   }
 
+  const rule = await readPageRule(options.project);
   const results: ViewResult[] = [];
+  const pages = new Map<string, PageComparison>();
   for (const capture of report.captures)
   {
-    results.push(await compareCapture(capture, maps.get(capture.mapId) as MapFile, report, folder));
+    const map = maps.get(capture.mapId) as MapFile;
+    results.push(await compareCapture(capture, map, report, rule, folder));
+
+    // the pages are compared once for each map and hour, whichever capture comes to them first.
+    const key = eventsKeyOf(capture);
+    if (pages.has(key) === false)
+    {
+      const events = report.events[key];
+      pages.set(key, { events: events.length, differ: pageDifferencesOf(events, editorPagesFor(capture, map, report, rule)) });
+    }
   }
 
-  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results }, null, 2));
-  return printGameParity(mapIds, results);
+  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results, pages: Object.fromEntries(pages) }, null, 2));
+  return printGameParity(mapIds, results, pages);
 };
 
 /**
- * Prints the game comparison, per map and pass; a map that is not dark has no dark pass to print.
+ * The order the passes of one map and hour print in.
+ */
+const PASS_ORDER: readonly ProbeCapture['pass'][] = [ 'tiles', 'events', 'dark', 'sky' ];
+
+/**
+ * Prints how the pages of one map's events compared at one hour, beneath its events pass.
+ * @param {PageComparison} comparison The comparison.
+ */
+const printPages = (comparison: PageComparison): void =>
+{
+  const { events, differ } = comparison;
+  console.log(`           pages: ${events - differ.length} of ${events} events on the editor's page, ${differ.length} on another`);
+  differ.slice(0, 8).forEach(({ id, game, editor }) => console.log(`             event ${id} ${pagesWords(game, editor)}`));
+  if (differ.length > 8)
+  {
+    console.log(`             and ${differ.length - 8} more`);
+  }
+};
+
+/**
+ * Prints the game comparison, per map, hour and pass: the passes drawn at the game's own hour first, then each time of
+ * day the map was drawn at, in the order asked for; a map that is not dark has no dark pass to print. Beneath each
+ * events pass go the events whose pages differ.
  * @param {number[]} maps The maps.
  * @param {ViewResult[]} results Every view.
+ * @param {Map<string, PageComparison>} pages The pages compared, by map and hour, as the probe keys its events.
  * @returns {boolean} True when no view of any pass left a difference unexplained.
  */
-const printGameParity = (maps: number[], results: ViewResult[]): boolean =>
+const printGameParity = (maps: number[], results: ViewResult[], pages: Map<string, PageComparison>): boolean =>
 {
   maps.forEach(mapId =>
   {
     console.log(`Map${String(mapId).padStart(3, '0')}: ${FIXTURES[mapId] ?? 'fixture'}`);
 
-    // each pass as it comes, a sky once for every time of day it was drawn at.
-    const times = [ ...new Set(results.flatMap(result => (result.capture.mapId === mapId && result.capture.time !== undefined ? [ result.capture.time ] : []))) ];
-    const passes = [ ...[ 'tiles', 'events', 'dark' ].map(pass => ({ pass, time: undefined as number | undefined })), ...times.map(time => ({ pass: 'sky', time })) ];
+    // each pass as it comes, once for every time of day it was drawn at.
+    const times = [ undefined, ...new Set(results.flatMap(result => (result.capture.mapId === mapId && result.capture.time !== undefined ? [ result.capture.time ] : []))) ];
+    const passes = times.flatMap(time => PASS_ORDER.map(pass => ({ pass, time })));
     passes.forEach(({ pass, time }) =>
     {
       const mine = results.filter(result => result.capture.mapId === mapId && result.capture.pass === pass && result.capture.time === time);
@@ -423,12 +509,17 @@ const printGameParity = (maps: number[], results: ViewResult[]): boolean =>
       const steps = new Set(mine.map(result => result.capture.step)).size;
       const verdict = unexplained.length === 0 ? 'MATCH' : `DIFFER at ${unexplained.length} cells: ${unexplained.slice(0, 12).join(' ')}`;
       const label = time === undefined ? pass : `${pass} ${clockOf(time)}`;
-      console.log(`  ${label.padEnd(6)} ${views} views x ${steps} steps, ${pixels} pixels compared, ${differing} beyond ${TOLERANCE}`
+      console.log(`  ${label.padEnd(12)} ${views} views x ${steps} steps, ${pixels} pixels compared, ${differing} beyond ${TOLERANCE}`
         + ` (max delta ${maxDelta}), ${explained} cells explained  ${verdict}`);
       reasons.slice(0, 8).forEach(reason => console.log(`           ${reason}`));
       if (reasons.length > 8)
       {
         console.log(`           and ${reasons.length - 8} more events shown differently`);
+      }
+
+      if (pass === 'events')
+      {
+        printPages(pages.get(eventsKeyOf({ mapId, time })) as PageComparison);
       }
     });
   });

@@ -5,10 +5,10 @@
 
 /**
  * One map the probe draws: where the display sits for each view, which A1 animation steps to draw, and whether to draw
- * it dark too, with J-Lighting's light mask over its tiles. A map given a time of day is drawn under its sky instead:
- * the game's clock is set to that time and stopped before the player arrives, so the sky is already there on arrival,
- * and the map's tiles are drawn with the screen's tone over them and the light mask, if the hour or the map darkens it,
- * multiplied over that.
+ * it dark too, with J-Lighting's light mask over its tiles. A map given a time of day is drawn at that time instead: the
+ * game's clock is set to it and stopped before the player arrives, so the sky is already there on arrival and every
+ * event shows the page that hour gives it; its events are drawn as the game shows them then, and its tiles with the
+ * screen's tone over them and the light mask, if the hour or the map darkens it, multiplied over that.
  */
 type ProbeMap = {
   mapId: number;
@@ -55,7 +55,8 @@ type ProbeCapture = {
 
 /**
  * One event as the game shows it on arrival: which page is active, and whether its sprite draws at all. The editor
- * draws every event's first page, so these are what explain a difference in the events pass.
+ * draws each event's page as a fresh save would at the game's clock, so a page the game shows that the editor does not,
+ * or a sprite drawn otherwise than its page, is what explains a difference in the events pass.
  */
 type ProbeEvent = {
   id: number;
@@ -73,22 +74,25 @@ type ProbeEvent = {
   height: number;
 
   /**
-   * Every way the game's sprite departs from a plain drawing of the event's first page, as the editor draws it:
-   * another page, another image, facing or pattern, a tone, a blend colour, an opacity or a scale, or sprites a plugin
-   * hung on it. Empty when the game draws exactly the first page.
+   * Every way the game's sprite departs from a plain drawing of the page it shows: another image, facing or pattern
+   * than the page's, a tone, a blend colour, an opacity or a scale, or sprites a plugin hung on it. Empty when the game
+   * draws exactly the page it shows, or shows no page and so draws nothing.
    */
   departures: string[];
 };
 
 /**
  * What the probe reports when it finishes. The events are kept by map, under the map's id, or under the id and the time
- * of day for a map drawn under its sky ({@code 337@1320}), since which page an event shows can depend on the hour.
+ * of day for a map drawn under its sky ({@code 337@1320}), since which page an event shows can depend on the hour; and
+ * under the same keys, the time of day the game's clock read as they were recorded, in minutes past midnight, or -1 for
+ * a game with no clock.
  */
 type ProbeReport = {
   phase: string;
   screen: { width: number; height: number };
   captures: ProbeCapture[];
   events: Record<string, ProbeEvent[]>;
+  clocks: Record<string, number>;
   errors: string[];
   log: string[];
 };
