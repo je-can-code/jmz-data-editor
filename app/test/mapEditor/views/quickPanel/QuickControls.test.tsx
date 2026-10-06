@@ -54,7 +54,8 @@ vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerDialog.tsx
  * only the value chosen, once: the slider's when it stops moving, never for a press that moved nothing; the picker's
  * when it closes on a new colour or is left, never when left untouched. A swatch is a choice at once. The slider's box
  * takes fractions to its places and refuses anything else, and a value past the track's end shows in the box with the
- * thumb held at the end.
+ * thumb held at the end. A colour that may be unset, such as a dark's, has a button handing on an empty value at once.
+ * A tick box hands on its new state at a click, half ticked while the events hold it differently.
  */
 describe('QuickControl', () =>
 {
@@ -625,6 +626,65 @@ describe('QuickControl', () =>
       // Assert.
       expect([ screen.getByText('Mixed').textContent, pickerOf('Colour').value, screen.getByText('The project\'s default.').textContent ])
         .toStrictEqual([ 'Mixed', '#808080', 'The project\'s default.' ]);
+    });
+
+    it('unsets a colour that may be unset at a click of its button, handing on an empty value', () =>
+    {
+      // Arrange: the colour of a dark, which plain black unsets.
+      const { onChange } = renderControl(fieldOf({ kind: 'color', clear: 'Plain black' }, '#0a2a2a', 'Colour of the dark'));
+
+      // Act.
+      fireEvent.click(screen.getByRole('button', { name: 'Plain black' }));
+
+      // Assert.
+      expect(onChange.mock.calls)
+        .toStrictEqual([ [ '' ] ]);
+    });
+
+    it('offers no button to unset a colour that may not be', () =>
+    {
+      // Arrange: a light's colour, which is always set.
+
+      // Act.
+      renderControl(fieldOf({ kind: 'color' }, '#ffbb73', 'Colour'));
+
+      // Assert: the picker is the only control.
+      expect(screen.queryAllByRole('button'))
+        .toStrictEqual([]);
+    });
+  });
+
+  describe('check', () =>
+  {
+    it('ticks or unticks at a click, handing on the new state, with the hint under it', () =>
+    {
+      // Arrange.
+      const field = { ...fieldOf({ kind: 'check' }, true, 'Sky follows the clock'), hint: 'Untick it for caves.' };
+      const { onChange } = renderControl(field);
+      const box = screen.getByRole('checkbox', { name: 'Sky follows the clock' }) as HTMLInputElement;
+      const ticked = box.checked;
+
+      // Act.
+      fireEvent.click(box);
+
+      // Assert.
+      expect([ ticked, onChange.mock.calls, screen.getByText('Untick it for caves.').textContent ])
+        .toStrictEqual([ true, [ [ false ] ], 'Untick it for caves.' ]);
+    });
+
+    it('shows a setting held differently half ticked, and a click ticks it for all', () =>
+    {
+      // Arrange.
+      const { onChange } = renderControl(fieldOf({ kind: 'check' }, null, 'Sky follows the clock'));
+      const box = screen.getByRole('checkbox', { name: 'Sky follows the clock' }) as HTMLInputElement;
+      const half = box.getAttribute('data-indeterminate');
+
+      // Act.
+      fireEvent.click(box);
+
+      // Assert.
+      expect([ half, onChange.mock.calls ])
+        .toStrictEqual([ 'true', [ [ true ] ] ]);
     });
   });
 });

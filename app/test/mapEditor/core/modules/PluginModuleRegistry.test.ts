@@ -12,8 +12,8 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * The core editor works on any MZ project; each plugin's awareness is its own module, switched on only when that
  * plugin is enabled in js/plugins.js. The registry owes the editor exactly that: a module whose plugin is off (or
  * missing, or only a near namesake like J-ABS-Metrics) contributes nothing, a module that is on contributes its
- * kinds, palette entries, passability rules, overlays, lighting layers, command entries and notices, a module can never
- * claim a core kind, and the core's own kinds are on in every project. When several kinds recognise one event, the
+ * kinds, palette entries, passability rules, overlays, lighting layers, command entries, notices and Map Properties
+ * sections, a module can never claim a core kind, and the core's own kinds are on in every project. When several kinds recognise one event, the
  * higher priority wins, since a battler is also a comment-only event. A map an active module copies its events from,
  * such as J-ABS's action map, holds the plugin's patterns, so no kind claims an event there. Every activation is
  * announced, since modules switch on after the views that show kinds have drawn.
@@ -76,6 +76,7 @@ describe('PluginModuleRegistry', () =>
       contributions.lightingLayer({ id: 'jabs.glow', title: 'Glow', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) });
       contributions.catalogEntry(pluginCommandEntry({ plugin: 'J-ABS', command: 'spawn', args: [] }));
       contributions.notice({ id: 'jabs.config', title: 'Battlers fight as their database says.', detail: 'Their config was not read.' });
+      contributions.mapProperties({ id: 'jabs.map', title: 'Battles', source: () => ({ note: null, fields: [] }) });
     },
   });
 
@@ -101,6 +102,7 @@ describe('PluginModuleRegistry', () =>
       registry.lightingLayers().map(layer => layer.id),
       catalog.entry('plugin:J-ABS:spawn')?.name,
       registry.notices().map(notice => notice.id),
+      registry.mapPropertiesSections().map(section => section.id),
     ])
       .toStrictEqual([
         { active: [ 'jabs' ], inactive: [] },
@@ -113,6 +115,7 @@ describe('PluginModuleRegistry', () =>
         [ 'jabs.glow' ],
         'Plugin: spawn',
         [ 'jabs.config' ],
+        [ 'jabs.map' ],
       ]);
   });
 
@@ -160,8 +163,9 @@ describe('PluginModuleRegistry', () =>
       registry.lightingLayers(),
       catalog.entry('plugin:J-ABS:spawn'),
       registry.notices(),
+      registry.mapPropertiesSections(),
     ])
-      .toStrictEqual([ false, [ 'core.decor' ], [], [], null, [] ]);
+      .toStrictEqual([ false, [ 'core.decor' ], [], [], null, [], [] ]);
   });
 
   it('hands a module each config it names as it was read, null for one that was not, and no other module\'s', () =>
@@ -297,6 +301,7 @@ describe('PluginModuleRegistry', () =>
         register: add => add.lightingLayer({ id: 'core.x', title: 'x', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) }),
       },
       { id: 'f', title: 'F', plugins: [], register: add => add.notice({ id: 'core.x', title: 'x', detail: 'x' }) },
+      { id: 'g', title: 'G', plugins: [], register: add => add.mapProperties({ id: 'core.x', title: 'x', source: () => ({ note: null, fields: [] }) }) },
     ];
 
     // Act.
@@ -315,6 +320,8 @@ describe('PluginModuleRegistry', () =>
       .toThrow('e can only add lighting layers whose id starts with "e.", not core.x');
     expect(failures[5])
       .toThrow('f can only add notices whose id starts with "f.", not core.x');
+    expect(failures[6])
+      .toThrow('g can only add map properties sections whose id starts with "g.", not core.x');
   });
 
   describe('enabledPlugins', () =>

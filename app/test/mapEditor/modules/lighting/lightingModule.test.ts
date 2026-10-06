@@ -83,6 +83,10 @@ vi.mock('pixi.js', async importOriginal =>
  * its darkness joining the map's own in the dark, so a field darkens at night and a dark map compounds both; a map tagged
  * <noToneChange> gets neither. Without either plugin there is no clock and no sky, and a project without J-Lighting-Time
  * is never asked for its curve. A curve that cannot be read is said over the map, the clock still offered, the sky still.
+ *
+ * It adds a Lighting section to Map Properties too (its own tests hold what each setting reads and writes), which offers
+ * whether the map's sky follows the clock only while J-Lighting-Time is enabled as well, and shows a colour of the dark
+ * the note names but the game cannot use as the project's.
  */
 describe('lightingModule', () =>
 {
@@ -364,6 +368,51 @@ describe('lightingModule', () =>
       // Assert.
       expect(registry.notices())
         .toStrictEqual([]);
+    });
+
+    it('adds a Lighting section to Map Properties, offering the sky only while J-Lighting-Time is enabled too', () =>
+    {
+      // Arrange: a cave at 85%, and J-Lighting-Time as js/plugins.js lists it, on and off.
+      const cave = MapDocument.fromJson('map:1', { ...buildMapJson(), note: '<noToneChange>\n<ambient:[85]>' });
+      const lightingTime = (status: boolean): PluginsJsEntry => ({ name: 'j/lighting/ext/J-Lighting-Time', status, description: '', parameters: {} });
+      const registries = [ lightingTime(true), lightingTime(false) ].map(extension =>
+      {
+        const registry = new PluginModuleRegistry(new CommandCatalog());
+        registry.activate([ lightingModule ], [ lighting(true), extension ]);
+        return registry;
+      });
+
+      // Act.
+      const sections = registries.map(registry => registry.mapPropertiesSections().map(section => [
+        section.id,
+        section.title,
+        section.source(cave).fields.map(field => field.key),
+      ]));
+
+      // Assert.
+      expect([ sections, registryWith(lighting(false)).mapPropertiesSections() ])
+        .toStrictEqual([
+          [
+            [ [ 'lighting.map', 'Lighting', [ 'lighting.darkness', 'lighting.darkColor', 'lighting.sky' ] ] ],
+            [ [ 'lighting.map', 'Lighting', [ 'lighting.darkness', 'lighting.darkColor' ] ] ],
+          ],
+          [],
+        ]);
+    });
+
+    it('shows a colour of the dark the note names but the game cannot use as the project\'s', () =>
+    {
+      // Arrange: a project whose dark falls back to slate, and a cave naming a colour with a typo.
+      const registry = registryWith(lighting(true), new Map([ [ 'lighting', served('#ffffff', '#102030') ] ]));
+      const cave = MapDocument.fromJson('map:1', { ...buildMapJson(), note: '<ambient:[85, #10203g]>' });
+      const [ section ] = registry.mapPropertiesSections();
+
+      // Act.
+      const [ , color ] = section.source(cave).fields;
+
+      // Assert.
+      expect([ color.value, color.hint ])
+        .toStrictEqual([ '#102030', '#10203g is not a colour, so the project\'s default shows.' ]);
     });
   });
 
