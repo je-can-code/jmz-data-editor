@@ -37,7 +37,11 @@ const lightingModule: PluginModule = {
 
     // the registry hands over every config the module names, null for one the project lacks.
     const defaults = lightDefaultsFrom(context.configs.get(LIGHTING_CONFIG) as JsonValue | null);
-    contributions.lightingLayer({ id: LIGHT_RINGS_ID, title: 'Light rings', create: stage => new LightRings(stage, defaults) });
+    contributions.lightingLayer({
+      id: LIGHT_RINGS_ID,
+      title: 'Light rings',
+      create: stage => new LightRings(stage, defaults),
+    });
   },
 };
 

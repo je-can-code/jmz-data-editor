@@ -42,7 +42,15 @@ type Contributions = {
  * Starts an empty set of contributions.
  * @returns {Contributions} The empty set.
  */
-const noContributions = (): Contributions => ({ kinds: [], palette: [], rules: [], overlays: [], lighting: [], catalogIds: [], templateMaps: [] });
+const noContributions = (): Contributions => ({
+  kinds: [],
+  palette: [],
+  rules: [],
+  overlays: [],
+  lighting: [],
+  catalogIds: [],
+  templateMaps: [],
+});
 
 /**
  * Reads which plugins js/plugins.js enables, by file name: {@code J-ABS} for {@code j/abs/J-ABS}.

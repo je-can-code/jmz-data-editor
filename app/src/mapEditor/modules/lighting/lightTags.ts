@@ -155,8 +155,8 @@ const readValue = (token: string): TagValue =>
 };
 
 /**
- * Reads a tag's bracketed list as JsonMapper#parseArrayFromString does: the brackets come off, and the values split on a
- * comma with or without one space after it.
+ * Reads a tag's bracketed list as JsonMapper#parseArrayFromString does: the brackets come off, and the values split on
+ * a comma with or without one space after it.
  * @param {string} payload The list, brackets included, such as {@code [5, #ffbb73, flicker]}.
  * @returns {TagValue[]} The values, in order.
  */
@@ -186,8 +186,8 @@ const colorOf = (values: readonly TagValue[], fallback: string): string =>
 };
 
 /**
- * Settles a light's intensity: the first number after the reach, held to 0 to 100 and read as a fraction, or the default
- * when there is none.
+ * Settles a light's intensity: the first number after the reach, held to 0 to 100 and read as a fraction, or the
+ * default when there is none.
  * @param {readonly TagValue[]} values The values after the reach.
  * @param {number} fallback The default intensity, already a fraction.
  * @returns {number} The intensity, 0 to 1.
@@ -215,10 +215,10 @@ const effectOf = (values: readonly TagValue[]): LightEffect =>
 };
 
 /**
- * Reads one light tag's list as LightingTagParser#parseLightPayload does. Only the reach has a place, first; the colour,
- * the intensity and the effect are told apart by what they look like, so they come in any order and any may be left
- * out. A list of more than four values, or a reach that is no positive number, is no light at all; a value that is
- * none of the three is passed over.
+ * Reads one light tag's list as LightingTagParser#parseLightPayload does. Only the reach has a place, first; the
+ * colour, the intensity and the effect are told apart by what they look like, so they come in any order and any may be
+ * left out. A list of more than four values, or a reach that is no positive number, is no light at all; a value that
+ * is none of the three is passed over.
  * @param {string} payload The list, brackets included.
  * @param {LightDefaults} defaults What the light falls back to.
  * @returns {LightDeclaration | null} The light, or null when the tag gives none.

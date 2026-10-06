@@ -132,7 +132,8 @@ const paintRings = (graphics: Graphics, rings: readonly LightRing[]): void =>
   });
   rings.forEach(ring =>
   {
-    graphics.circle(ring.x, ring.y, ring.radius).stroke({ color: ring.color, alpha: edgeAlpha, width: 1, pixelLine: true });
+    graphics.circle(ring.x, ring.y, ring.radius)
+      .stroke({ color: ring.color, alpha: edgeAlpha, width: 1, pixelLine: true });
   });
   rings.forEach(ring =>
   {
@@ -165,7 +166,7 @@ class LightRings implements LightingDrawing
   /**
    * @param {LightingStage} stage Where the rings draw.
    * @param {LightDefaults} defaults What the lights fall back to.
-   * @param {LightPageChoice} choosePage Picks the page whose lights an event shows; the first page giving any by default.
+   * @param {LightPageChoice} choosePage Picks the page whose lights an event shows; by default, the first giving any.
    */
   constructor(stage: LightingStage, defaults: LightDefaults, choosePage: LightPageChoice = firstLitPage)
   {

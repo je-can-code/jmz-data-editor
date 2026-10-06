@@ -88,11 +88,11 @@ type RendererStats = {
 
 /**
  * The world's layers, bottom to top: the engine's black behind the map, the parallax, the tiles below characters,
- * the events in their three priorities around the tiles above characters, the lighting P9 draws, then the editor's
- * own: the markers of events that draw no picture, which neither the tiles above characters nor the dark of a lit map
- * may hide, the dimming and highlighted layer, and the overlays, the ghosts and the pointer's own marks, then the
- * selection over them all, so an event shows as selected while the pointer still rests on it after the click that
- * picked it.
+ * the events in their three priorities around the tiles above characters, the lighting the plugin modules draw, then
+ * the editor's own: the markers of events that draw no picture, which neither the tiles above characters nor the dark
+ * of a lit map may hide, the dimming and highlighted layer, and the overlays, the ghosts and the pointer's own marks,
+ * then the selection over them all, so an event shows as selected while the pointer still rests on it after the click
+ * that picked it.
  */
 type Slots = {
   readonly backdrop: Graphics;
