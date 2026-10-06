@@ -101,7 +101,7 @@ describe('darkScene', () =>
 
     it('fills a dark map\'s mask from its darkness, with every light on it cutting through', () =>
     {
-      // Arrange: a cave at 85% holding a torch, a lamp-less statue and an empty slot.
+      // Arrange: a cave at 85% holding a torch, a battler giving no light, and an empty slot.
       const cave = mapWith('<ambient:[85]>', [ null, lightAt(1, 2, 3, [ '<light:[4, #ffbb73, 40, flicker]>' ]), lightAt(2, 5, 5, [ '<enemyId:3>' ]), null ]);
 
       // Act.
