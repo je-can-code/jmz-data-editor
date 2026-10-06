@@ -26,6 +26,7 @@ func TestChefAdventurePluginConfigsJSON(t *testing.T) {
 		{"jabs", "config.jabs.json", new(JabsConfiguration)},
 		{"weather", "config.weather.json", new(WeatherConfiguration)},
 		{"lighting", "config.lighting.json", new(LightingConfiguration)},
+		{"lighting-time", "config.lighting-time.json", new(LightingTimeConfiguration)},
 	}
 
 	for _, c := range cases {

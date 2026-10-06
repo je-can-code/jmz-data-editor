@@ -194,6 +194,9 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 
 	// the map editor draws lights with these defaults; no board edits them, so there is nothing to save.
 	mux.HandleFunc("GET /api/config/lighting", api.Load[plugins.LightingConfiguration]("data/config.lighting.json"))
+
+	// the map editor draws the sky at its clock's hour with this curve; it is edited by hand, so it is only read.
+	mux.HandleFunc("GET /api/config/lighting-time", api.Load[plugins.LightingTimeConfiguration]("data/config.lighting-time.json"))
 	//endregion plugin config endpoints
 
 	//region map editor endpoints
