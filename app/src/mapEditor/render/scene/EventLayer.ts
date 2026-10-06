@@ -3,6 +3,7 @@ import { markerSymbolFor, type EventMarkerSymbol } from '../../core/eventKinds/e
 import { createEventPage } from '../../core/model/eventModel.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
 import type { RmmzEventImage, RmmzEventPage, RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
+import type { PageShown, ShownPageReader } from '../../core/pageRule/ShownPages.ts';
 import type { GhostEvent, MarkerClassifier, TextureSource as ImageSource } from '../../core/renderer/MapRenderer.ts';
 import { GHOST_ALPHA } from './GhostTiles.ts';
 import { MARKER_WORLD_SIZE, markerFrame, markerScale, markerSpriteScale } from './markerAtlas.ts';
@@ -18,8 +19,9 @@ import { readSourceAlpha, textureSourceFor } from '../textureImages.ts';
 
 /**
  * One event's sprite: the tile the event stands on, the container placed at its feet, and what it draws with: the
- * frame cut from the sheet, or null while there is nothing to draw, and the sheet itself; and, for an event that draws
- * no picture, the marker that shows it instead.
+ * frame cut from the sheet, or null while there is nothing to draw, and the sheet itself; for an event that draws no
+ * picture, the marker that shows it instead; and whether it shows faded, because no page holds for it at the clock's
+ * time.
  */
 type EventSprite = {
   readonly id: number;
@@ -29,6 +31,17 @@ type EventSprite = {
   readonly frame: SpriteFrame | null;
   readonly source: TextureSource | null;
   readonly marker: Sprite | null;
+  readonly faded: boolean;
+};
+
+/**
+ * How a ghost draws: the picture, the priority it stands by, and, for a ghost of an event on the map, the page that
+ * event shows, which names its marker's symbol; nothing for any other ghost, which shows no marker.
+ */
+type GhostLook = {
+  readonly image: RmmzEventImage;
+  readonly priorityType: number;
+  readonly page: RmmzEventPage | undefined;
 };
 
 /**
@@ -48,7 +61,8 @@ type AlphaReader = (source: TextureSource, x: number, y: number) => number | nul
 
 /**
  * What the layer draws from. The marker atlas is handed over by whoever draws it, the first time a marker needs it;
- * left out, events that draw no picture show nothing.
+ * left out, events that draw no picture show nothing. The pages are the window's page rule at the clock's time; left
+ * out, every event draws its first page, as MZ's own editor draws it.
  */
 type EventLayerContext = {
   readonly document: MapDocument;
@@ -57,6 +71,7 @@ type EventLayerContext = {
   readonly images: ImageSource | null;
   readonly tileSize: number;
   readonly markerAtlas?: () => TextureSource;
+  readonly pages?: ShownPageReader;
 };
 
 /**
@@ -79,24 +94,27 @@ const SMALL_ON_SCREEN = 32;
 const FRESH_PAGE = createEventPage();
 
 /**
- * Picks a marker's symbol from the event's trigger alone, until the window's kinds are handed over.
- * @param {RmmzMapEvent} event The event.
- * @returns {EventMarkerSymbol} The symbol.
+ * How opaque an event draws while no page holds for it at the clock's time, its picture or its marker alike: the game
+ * shows nothing there, and the editor keeps it in sight, plainly not as the game shows it, so it can still be found,
+ * selected and edited. Fainter than a ghost, which is something about to be placed.
  */
-const triggerOnly: MarkerClassifier = (event: RmmzMapEvent): EventMarkerSymbol =>
-{
-  return markerSymbolFor(event, null);
-};
+const FADED_ALPHA = 0.4;
 
 /**
- * The page an event shows in the editor: its first, as MZ's own editor shows it. The game shows whichever page's
- * conditions hold, which the editor cannot know.
- * @param {RmmzMapEvent} event The event.
- * @returns {RmmzEventPage | null} The page, or null for an event with no pages.
+ * The page every event draws without a page rule: its first, never faded, as MZ's own editor draws it.
  */
-const shownPage = (event: RmmzMapEvent): RmmzEventPage | null =>
+const FIRST_PAGE: PageShown = { index: 0, faded: false };
+
+/**
+ * Picks a marker's symbol from the trigger of the page an event shows alone, until the window's kinds are handed over.
+ * @param {RmmzMapEvent} event The event.
+ * @param {number} _mapId The map it is on, which only kinds read.
+ * @param {RmmzEventPage | undefined} page The page it shows.
+ * @returns {EventMarkerSymbol} The symbol.
+ */
+const triggerOnly: MarkerClassifier = (event: RmmzMapEvent, _mapId: number, page?: RmmzEventPage): EventMarkerSymbol =>
 {
-  return event.pages[0] ?? null;
+  return markerSymbolFor(event, null, page);
 };
 
 /**
@@ -105,12 +123,17 @@ const shownPage = (event: RmmzMapEvent): RmmzEventPage | null =>
  * tiles above characters draw between them. Within a group, sprites draw in the engine's order: lower on screen on
  * top, then by id.
  *
+ * Each event draws the page the window's page rule picks at the clock's time, the page a fresh save would show then; an
+ * event no page holds for, which the game shows as nothing at all, draws its first page faded instead, so it is never
+ * lost, until faded events are hidden, as a map showing only what the game draws hides them. Without a page rule,
+ * every event draws its first page, as MZ's own editor draws it.
+ *
  * An event whose page draws no picture, such as a story sequence on autorun, a parallel process or a spawner, would be
  * invisible, so it draws a marker instead: a square a little smaller than its tile, in a group of its own over every
- * sprite, holding the symbol its kind or its trigger shows. Zoomed far out, markers keep a size that can be read and
- * spill past their tiles; a click on the part that spills over picks the marker's event wherever no event stands on the
- * tile clicked. An event whose sheet is still loading shows nothing until it loads, and one whose sheet is missing
- * shows its marker.
+ * sprite, holding the symbol its kind or its page's trigger shows. Zoomed far out, markers keep a size that can be read
+ * and spill past their tiles; a click on the part that spills over picks the marker's event wherever no event stands on
+ * the tile clicked. An event whose sheet is still loading shows nothing until it loads, and one whose sheet is missing
+ * shows its marker. A ghost of an event on the map, such as one being dragged, draws as that event draws.
  */
 class EventLayer
 {
@@ -179,6 +202,11 @@ class EventLayer
 
   #markerTextures = new Map<EventMarkerSymbol, Texture>();
 
+  /**
+   * Whether the events no page holds for show, faded, or are hidden, as the game hides them.
+   */
+  #fadedShown = true;
+
   #destroyed = false;
 
   /**
@@ -217,6 +245,38 @@ class EventLayer
   get markerCount(): number
   {
     return this.markers.children.length;
+  }
+
+  /**
+   * How many events show faded, because no page holds for them at the clock's time, whether or not faded events show.
+   * @returns {number} The count.
+   */
+  get fadedCount(): number
+  {
+    return [ ...this.#sprites.values() ].filter(sprite => sprite.faded).length;
+  }
+
+  /**
+   * Shows the events no page holds for, faded, or hides them as the game does, so a map shows only what the game draws.
+   * A hidden one draws nothing and no click finds it.
+   * @param {boolean} shown True to show them.
+   */
+  setFadedShown(shown: boolean): void
+  {
+    if (shown === this.#fadedShown)
+    {
+      return;
+    }
+
+    this.#fadedShown = shown;
+    this.#sprites.forEach(sprite =>
+    {
+      if (sprite.faded)
+      {
+        this.#showFaded(sprite);
+      }
+    });
+    this.#onChange();
   }
 
   /**
@@ -443,7 +503,9 @@ class EventLayer
    */
   #moveGhosts(): void
   {
-    const tileSize = this.#context?.tileSize ?? 0;
+    // ghosts on show were built from a context, and a layer once handed one always has one.
+    const context = this.#context as EventLayerContext;
+    const { tileSize } = context;
     this.#ghostEvents.forEach((ghost, index) =>
     {
       const drawing = this.#ghostRoots[index];
@@ -458,7 +520,8 @@ class EventLayer
         return;
       }
 
-      const placement = eventPlacement(ghost.x, ghost.y, ghost.image, ghost.priorityType, false, tileSize);
+      const look = this.#ghostLook(ghost, context);
+      const placement = eventPlacement(ghost.x, ghost.y, look.image, look.priorityType, false, tileSize);
       drawing.root.position.set(placement.x, placement.y);
     });
   }
@@ -487,13 +550,13 @@ class EventLayer
    */
   #buildGhost(ghost: GhostEvent, context: EventLayerContext): GhostDrawing | null
   {
-    const page = { image: ghost.image } as RmmzEventPage;
-    const texture = this.#sourceFor(page);
+    const look = this.#ghostLook(ghost, context);
+    const texture = this.#sourceFor({ image: look.image } as RmmzEventPage);
     const size = texture === null ? null : { width: texture.width, height: texture.height };
-    const frame = eventFrame(ghost.image, size, context.tileSize);
+    const frame = eventFrame(look.image, size, context.tileSize);
     if (frame !== null && texture !== null)
     {
-      const placement = eventPlacement(ghost.x, ghost.y, ghost.image, ghost.priorityType, false, context.tileSize);
+      const placement = eventPlacement(ghost.x, ghost.y, look.image, look.priorityType, false, context.tileSize);
       const root = new Container();
       root.position.set(placement.x, placement.y);
       root.alpha = GHOST_ALPHA;
@@ -504,9 +567,9 @@ class EventLayer
 
     // a ghost of an event that draws no picture shows that event's marker, once a sheet still loading is known missing.
     const event = ghost.eventId === undefined ? null : context.document.event(ghost.eventId);
-    const marker = event === null || this.#awaitsSheet(ghost.image)
+    const marker = event === null || this.#awaitsSheet(look.image)
       ? null
-      : this.#markerSprite(event, ghost.x, ghost.y, context);
+      : this.#markerSprite(event, ghost.x, ghost.y, context, look.page);
     if (marker === null)
     {
       return null;
@@ -515,6 +578,65 @@ class EventLayer
     marker.alpha = GHOST_ALPHA;
     this.ghosts.addChild(marker);
     return { root: marker, marker: true };
+  }
+
+  /**
+   * Works out how a ghost draws: a ghost of an event on the map as that event draws, the page it shows giving the
+   * picture and the priority, so a lamp dragged at night drags its lit page; any other ghost as it was handed over.
+   * @param {GhostEvent} ghost The ghost.
+   * @param {EventLayerContext} context What the layer draws from.
+   * @returns {GhostLook} How it draws.
+   */
+  #ghostLook(ghost: GhostEvent, context: EventLayerContext): GhostLook
+  {
+    const event = ghost.eventId === undefined ? null : context.document.event(ghost.eventId);
+    if (event === null)
+    {
+      return { image: ghost.image, priorityType: ghost.priorityType, page: undefined };
+    }
+
+    const { page } = this.#shownPageOf(event, context);
+    return { image: page.image, priorityType: page.priorityType, page };
+  }
+
+  /**
+   * Finds the page an event draws, and whether faded: the page the window's page rule picks, its first while none
+   * holds, or its first without a rule; a fresh page for an event with no pages at all.
+   * @param {RmmzMapEvent} event The event.
+   * @param {EventLayerContext} context What the layer draws from.
+   * @returns {{ page: RmmzEventPage, faded: boolean }} The page, and whether it draws faded.
+   */
+  #shownPageOf(event: RmmzMapEvent, context: EventLayerContext): { page: RmmzEventPage; faded: boolean }
+  {
+    const shown = context.pages === undefined ? FIRST_PAGE : context.pages.shownPage(event);
+    return { page: event.pages[shown.index] ?? FRESH_PAGE, faded: shown.faded };
+  }
+
+  /**
+   * Reports whether a click can find an event: anything showing, and an event no page holds for only while faded events
+   * show.
+   * @param {EventSprite} sprite The event's sprite.
+   * @returns {boolean} True when it can be found.
+   */
+  #findable(sprite: EventSprite): boolean
+  {
+    return sprite.faded === false || this.#fadedShown;
+  }
+
+  /**
+   * Draws an event no page holds for faded, its picture and its marker alike, or hides both while faded events are
+   * hidden.
+   * @param {EventSprite} sprite The event's sprite.
+   */
+  #showFaded(sprite: EventSprite): void
+  {
+    sprite.root.alpha = FADED_ALPHA;
+    sprite.root.visible = this.#fadedShown;
+    if (sprite.marker !== null)
+    {
+      sprite.marker.alpha = FADED_ALPHA;
+      sprite.marker.visible = this.#fadedShown;
+    }
   }
 
   /**
@@ -553,8 +675,9 @@ class EventLayer
   }
 
   /**
-   * Lists every event's sprite in the order a click meets them, the top of the draw order first: the markers, then the
-   * sprites above characters, with them, then below them, and within each group the one drawn last first.
+   * Lists every event's sprite a click can find, in the order a click meets them, the top of the draw order first: the
+   * markers, then the sprites above characters, with them, then below them, and within each group the one drawn last
+   * first. An event no page holds for is left out while faded events are hidden.
    * @returns {EventSprite[]} The sprites.
    */
   #topFirst(): EventSprite[]
@@ -564,7 +687,7 @@ class EventLayer
     for (let index = this.markers.children.length - 1; index >= 0; index--)
     {
       const marked = recordOf(this.markers.children[index]);
-      if (marked !== undefined)
+      if (marked !== undefined && this.#findable(marked))
       {
         sprites.push(marked);
       }
@@ -576,7 +699,7 @@ class EventLayer
       for (let index = group.children.length - 1; index >= 0; index--)
       {
         const sprite = recordOf(group.children[index]);
-        if (sprite !== undefined && sprite.marker === null)
+        if (sprite !== undefined && sprite.marker === null && this.#findable(sprite))
         {
           sprites.push(sprite);
         }
@@ -619,8 +742,8 @@ class EventLayer
   }
 
   /**
-   * Builds one event's sprite, loading its sheet first when it is a character not seen yet, or its marker when it draws
-   * no picture.
+   * Builds one event's sprite from the page it shows, loading its sheet first when it is a character not seen yet, or
+   * its marker when it draws no picture; faded, or hidden, when no page holds for it.
    * @param {number} id The event id.
    */
   #build(id: number): void
@@ -632,7 +755,7 @@ class EventLayer
       return;
     }
 
-    const page = shownPage(event) ?? FRESH_PAGE;
+    const { page, faded } = this.#shownPageOf(event, context);
     const { image } = page;
     const { document, flags, tileSize } = context;
     const onBush = isBushCell(document.cells, document.width, document.height, flags, event.x, event.y);
@@ -652,14 +775,19 @@ class EventLayer
     // an event with no picture to draw shows its marker, unless its sheet is still on its way.
     const marker = pictured || this.#awaitsSheet(image)
       ? null
-      : this.#markerSprite(event, event.x, event.y, context);
+      : this.#markerSprite(event, event.x, event.y, context, page);
     if (marker !== null)
     {
       this.markers.addChild(marker);
     }
 
     this.#groupFor(placement.z).addChild(root);
-    this.#sprites.set(id, { id, cell: { x: event.x, y: event.y }, root, placement, frame: texture === null ? null : frame, source: texture, marker });
+    const sprite: EventSprite = { id, cell: { x: event.x, y: event.y }, root, placement, frame: texture === null ? null : frame, source: texture, marker, faded };
+    this.#sprites.set(id, sprite);
+    if (faded)
+    {
+      this.#showFaded(sprite);
+    }
   }
 
   /**
@@ -669,11 +797,12 @@ class EventLayer
    * @param {number} x The tile's column.
    * @param {number} y The tile's row.
    * @param {EventLayerContext} context What the layer draws from.
+   * @param {RmmzEventPage | undefined} page The page it shows, whose trigger names the symbol when no kind does.
    * @returns {Sprite | null} The marker, not yet added anywhere, or null when no marker atlas was handed over.
    */
-  #markerSprite(event: RmmzMapEvent, x: number, y: number, context: EventLayerContext): Sprite | null
+  #markerSprite(event: RmmzMapEvent, x: number, y: number, context: EventLayerContext, page: RmmzEventPage | undefined): Sprite | null
   {
-    const texture = this.#markerTexture(this.#classify(event, context.document.mapId), context);
+    const texture = this.#markerTexture(this.#classify(event, context.document.mapId, page), context);
     if (texture === null)
     {
       return null;
@@ -850,10 +979,11 @@ class EventLayer
       return;
     }
 
+    const drawsWith = (image: RmmzEventImage) => image.tileId === 0 && image.characterName === name;
     const users = context.document.eventIds().filter(id =>
     {
-      const page = shownPage(context.document.event(id) as RmmzMapEvent);
-      return page !== null && page.image.tileId === 0 && page.image.characterName === name;
+      const { page } = this.#shownPageOf(context.document.event(id) as RmmzMapEvent, context);
+      return drawsWith(page.image);
     });
     users.forEach(id =>
     {
@@ -863,7 +993,7 @@ class EventLayer
     this.#sort();
 
     // a ghost waiting on the same sheet can draw now too.
-    if (this.#ghostEvents.some(ghost => ghost.image.tileId === 0 && ghost.image.characterName === name))
+    if (this.#ghostEvents.some(ghost => drawsWith(this.#ghostLook(ghost, context).image)))
     {
       this.#buildGhosts();
     }
@@ -943,5 +1073,5 @@ class EventLayer
   }
 }
 
-export { EventLayer, shownPage };
+export { EventLayer, FADED_ALPHA };
 export type { AlphaReader, EventLayerContext };

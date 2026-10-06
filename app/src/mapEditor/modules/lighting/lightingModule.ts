@@ -105,10 +105,11 @@ const registerSky = (contributions: ModuleContributions, context: ModuleContext)
  * and the rings draw in the lighting layer, so the view's Lighting switch shows and hides them together. A light ranks
  * below the transfers and chests that sometimes carry one too, since a door that glows is still a door, and above
  * dialogue and decor, which a comment-tagged event never is anyway; its ring and its pool show whatever kind it is. The
- * dark, the rings and the panel fall back to the project's own config for what a tag leaves out, and all three read a
- * light from the page one choice picks, so the panel always changes the light the ring and the pool show. A config that
- * fails them, so that lights fall back to white and burn steady, is said over every map view rather than left to look
- * like the game's own colours.
+ * dark, the rings and the panel fall back to the project's own config for what a tag leaves out. The ring and the pool
+ * come from the page the game shows at the clock's time, so a lamp lit by its hours glows only then and a ghost lit
+ * behind a switch stays dark on a fresh save; the panel edits the first page with a light, so an unlit lamp can still
+ * be clicked and changed at noon, and says when that page shows. A config that fails them, so that lights fall back to
+ * white and burn steady, is said over every map view rather than left to look like the game's own colours.
  *
  * While its extension J-Lighting-Time is on too, with J-TIME keeping the hour, the sky follows the clock J-TIME's module
  * offers the map views, as the extension casts it, from the project's day and night curve: its colour over the map, the
@@ -139,6 +140,8 @@ const lightingModule: PluginModule = {
       contributions.notice(notice);
     }
 
+    // the panel edits the first page with a light, which a lamp lit only by night still has at noon, and says when it
+    // shows; the map shows the light of the page the game shows at the clock's time.
     const choosePage: LightPageChoice = firstLitPage;
     contributions.eventKind({
       id: LIGHT_KIND_ID,
@@ -146,7 +149,7 @@ const lightingModule: PluginModule = {
       priority: 25,
       detect: isLight,
       marker: 'light',
-      quickPanel: quickPanelFor(lightQuickModel(defaults, choosePage), LIGHT_KIND_ID, lightPanelOptions(defaults, choosePage)),
+      quickPanel: quickPanelFor(lightQuickModel(defaults, choosePage), LIGHT_KIND_ID, lightPanelOptions(defaults, choosePage, context.pageWords)),
     });
 
     // the dark goes in first, so the rings draw over it and stay in sight on the darkest map; the sky's darkness joins
@@ -162,12 +165,12 @@ const lightingModule: PluginModule = {
       id: LIGHT_MASK_ID,
       title: 'Darkness',
       shownInGame: true,
-      create: stage => new LightMask(stage, { sources, defaults, choosePage, strengthOf }),
+      create: stage => new LightMask(stage, { sources, defaults, strengthOf }),
     });
     contributions.lightingLayer({
       id: LIGHT_RINGS_ID,
       title: 'Light rings',
-      create: stage => new LightRings(stage, defaults, choosePage),
+      create: stage => new LightRings(stage, defaults),
     });
 
     // a map's own darkness is set in Map Properties, and so is whether it has a sky while either plugin reading that from

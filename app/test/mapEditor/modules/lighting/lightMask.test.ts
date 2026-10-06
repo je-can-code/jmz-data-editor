@@ -7,10 +7,11 @@ import { mapAmbient, type AmbientSource } from '../../../../src/mapEditor/module
 import type { LightStrength } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
 import { pictureKey } from '../../../../src/mapEditor/modules/lighting/lightFalloff.ts';
 import { LightMask } from '../../../../src/mapEditor/modules/lighting/lightMask.ts';
+import type { ActivePages } from '../../../../src/mapEditor/core/pageRule/ShownPages.ts';
 import type { LightPictures } from '../../../../src/mapEditor/modules/lighting/lightPictures.ts';
-import { firstLitPage } from '../../../../src/mapEditor/modules/lighting/lightTags.ts';
 import { command, event, page } from '../../support/eventKindFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
+import { ENGINE_PAGES } from '../../support/pageFixtures.ts';
 
 /**
  * Every stand-in render texture made, in order, and how many stand-in sprites were made.
@@ -347,11 +348,11 @@ const maskOnStage = (strengthOf: LightStrength = steady, sky: AmbientSource[] = 
     return strengthOf(light, clock);
   };
   const sources = [ mapAmbient('#000000'), ...sky ];
-  const setup = { sources, defaults: { color: '#ffffff', intensity: 0 }, choosePage: firstLitPage, strengthOf: counted };
+  const setup = { sources, defaults: { color: '#ffffff', intensity: 0 }, strengthOf: counted };
   const mask = new LightMask({ layer, tileSize: 48, castTone: () => undefined }, setup, named.pictures, 256);
   const { renderer, passes, containers } = recordingRenderer();
-  const draw = (document: MapDocument, context = 1, clock = at(0)) => mask.draw({ document, renderer, context, clock });
-  const tick = (document: MapDocument, clock: LightingClock) => mask.tick({ document, renderer, context: 1, clock });
+  const draw = (document: MapDocument, context = 1, clock = at(0), pages: ActivePages = ENGINE_PAGES) => mask.draw({ document, renderer, context, clock, pages });
+  const tick = (document: MapDocument, clock: LightingClock) => mask.tick({ document, renderer, context: 1, clock, pages: ENGINE_PAGES });
   const [ root ] = layer.children as Container[];
   const sprites = () => root.children as unknown as DrawnSprite[];
   return { mask, layer, root, sprites, passes, containers, asked, draw, tick, ...named };
@@ -519,6 +520,29 @@ describe('LightMask', () =>
       .toStrictEqual([ 3, true, [ [ 104, 90 ] ] ]);
     expect([ lastTexture.destroyed, (last.texture as { white?: boolean }).white, last.tint, last.width ])
       .toStrictEqual([ true, true, 0x262626, 256 ]);
+  });
+
+  it('cuts a lamp through the dark only while the page it shows gives light, drawing again only the piece it lights', () =>
+  {
+    // Arrange: a cave with a lamp at 1, 1, cold on its first page and lit on its second, and a steady torch in the last
+    // piece; drawn while the lamp shows its cold page.
+    const { draw, sprites, passes } = maskOnStage();
+    const lamp: RmmzMapEvent = { ...event(1, [ page([]), page([ command(108, [ '<light:[1, #ffbb73, 40]>' ]) ]) ]), x: 1, y: 1 };
+    const cave = mapOf(16, '<ambient:[85]>', [ null, lamp, torchAt(2, 12, 12) ]);
+    const showing = (lampPage: number): ActivePages => ({ activePage: shown => (shown.id === 1 ? lampPage : 0) });
+    draw(cave, 1, at(0), showing(0));
+    const cold = passes.length;
+
+    // Act: the lamp turns to its lit page, then back.
+    draw(cave, 1, at(0), showing(1));
+    const lit = passes.map(pass => pass.added.map(added => [ added.x, added.y ]));
+    draw(cave, 1, at(0), showing(0));
+
+    // Assert: the torch's piece alone at first; then the lamp cut into the first piece, and nothing else drawn; then the
+    // first piece a plain fill again, its texture let go.
+    const [ first ] = sprites();
+    expect([ cold, lit, passes.length, (first.texture as { white?: boolean }).white, stand.textures[1].destroyed ])
+      .toStrictEqual([ 1, [ [ [ 88, 106 ] ], [ [ 72, 90 ] ] ], 2, true, true ]);
   });
 
   it('draws every lit piece again, in the texture it has, on a context the graphics card gave back', () =>

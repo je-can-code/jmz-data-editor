@@ -2,6 +2,8 @@ import { Container, Graphics, Rectangle, Text, WebGLRenderer, type TextureSource
 import type { DocumentChange } from '../core/model/EditorDocument.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { PassabilityRule } from '../core/modules/PluginModule.ts';
+import type { PageRule } from '../core/pageRule/pageRule.ts';
+import { ShownPages } from '../core/pageRule/ShownPages.ts';
 import { cellAtPoint, panBy, screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../core/renderer/camera.ts';
 import { FrameTimeRecorder, type FrameTimings } from '../core/renderer/FrameTimeRecorder.ts';
 import type { LightingLayerDefinition, ScreenTone } from '../core/renderer/lightingLayer.ts';
@@ -81,6 +83,16 @@ type RendererStats = {
   readonly chunks: number;
   readonly eventSprites: number;
   readonly eventMarkers: number;
+
+  /**
+   * Events no page holds for at the clock's time, drawn faded.
+   */
+  readonly fadedEvents: number;
+
+  /**
+   * Events whose page can turn as the clock moves, the only ones judged again when it does.
+   */
+  readonly eventsFollowingClock: number;
 
   /**
    * Pictures still loading: character sheets, and the parallax.
@@ -209,7 +221,9 @@ const scheduleOnTimers = (callback: () => void, delayMs: number): (() => void) =
  * The game look is the default: water animates, the parallax scrolls, lights run their effects, events stand where the
  * engine stands them and auto-shadows stay off, since the game never draws them. The lighting draws at the hour of the
  * window's clock, and a tone it casts, such as the sky's colour at that hour, colours what the game tones, through the
- * engine's own colour arithmetic, and none of the editor's overlays. The camera is its own: the wheel zooms about the
+ * engine's own colour arithmetic, and none of the editor's overlays. Each event draws the page the page rule handed over
+ * picks at that hour, the page a fresh save would show, and its light comes from that page too; moving the clock judges
+ * again only the events whose pages ask something of it, and draws again only those it turned. The camera is its own: the wheel zooms about the
  * pointer, the right button held pans, and a right click that does not move raises a context-menu event.
  *
  * Its WebGL context is held only while the view is on screen, through a {@link ContextKeeper}: a view behind another
@@ -273,6 +287,11 @@ class PixiMapRenderer implements MapRenderer
    * The time of day the window's clock shows, in minutes past midnight, which the lighting reads its sky at.
    */
   #timeOfDay = 0;
+
+  /**
+   * The page each event shows at the clock's time, by the page rule handed over; every event's first until one is.
+   */
+  #pages = new ShownPages();
 
   /**
    * How many times drawing has started on a live context: once for the first, and once more each time the graphics
@@ -475,14 +494,39 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Sets the time of day the window's clock shows, which the lighting reads the sky at. Nothing draws for it at once:
-   * the lighting is handed the new time in the next frame, and only what the hour changed is drawn again, which within
-   * one hour may be nothing at all.
+   * Sets the time of day the window's clock shows, which the lighting reads the sky at and the page rule picks each
+   * event's page at. Nothing draws for it at once: the events whose pages ask something of the clock are judged again,
+   * and those now showing another page are drawn again in the next frame, with the lighting asked to draw, since their
+   * lights may have come or gone; the lighting is handed the new time in that frame too, and only what the hour changed
+   * is drawn again, which within one hour may be nothing at all.
    * @param {number} minutes The time of day, in minutes past midnight.
    */
   setTimeOfDay(minutes: number): void
   {
     this.#timeOfDay = minutes;
+    const turned = this.#pages.setTime(minutes);
+    if (turned.length === 0)
+    {
+      return;
+    }
+
+    turned.forEach(id => this.#events.markChanged(id));
+    this.#eventsDirty = true;
+    this.#lighting.markStale();
+  }
+
+  /**
+   * Picks each event's page by a page rule, the game's own on a fresh save with the plugin modules' conditions, at the
+   * clock's time: every event is judged afresh and drawn again in the next frame, and the lighting asked to draw.
+   * @param {PageRule | null} rule The rule, or null to show every event's first page, as MZ's own editor does.
+   */
+  setPageRule(rule: PageRule | null): void
+  {
+    this.#pages.setRule(rule);
+    this.#events.markChanged(null);
+    this.#eventsDirty = true;
+    this.#selectionDirty = true;
+    this.#lighting.markStale();
   }
 
   /**
@@ -542,6 +586,8 @@ class PixiMapRenderer implements MapRenderer
       chunks: scene === null ? 0 : scene.grid.columns * scene.grid.rows,
       eventSprites: this.#events.spriteCount,
       eventMarkers: this.#events.markerCount,
+      fadedEvents: this.#events.fadedCount,
+      eventsFollowingClock: this.#pages.followingClock,
       loadingImages: this.#events.pendingLoads + (this.#parallax.loading ? 1 : 0),
       moduleOverlays: this.#modules.count,
     };
@@ -1346,6 +1392,9 @@ class PixiMapRenderer implements MapRenderer
     this.#mountScene(scene);
     this.#drawMapBound(source.width, source.height);
     this.#tileEvents = tileEventsByCell(document);
+
+    // a map opened or swapped is read afresh, every event at the clock's time.
+    this.#pages.forget(null);
     this.#events.setContext({
       document,
       flags: source.flags,
@@ -1353,6 +1402,7 @@ class PixiMapRenderer implements MapRenderer
       images: this.#images,
       tileSize: TILE_SIZE,
       markerAtlas: () => this.#markerAtlasSource(),
+      pages: this.#pages,
     });
     this.#parallax.setMap({
       name: document.property('parallaxName'),
@@ -1505,8 +1555,10 @@ class PixiMapRenderer implements MapRenderer
       group.visible = layers.events;
     });
 
-    // the markers show the events no picture shows, so they go with the events, and with nothing of the editor's.
+    // the markers show the events no picture shows, so they go with the events, and with nothing of the editor's; the
+    // events no page holds for go with them, so with the markers off a map shows only what the game draws.
     this.#events.markers.visible = layers.events && this.#isOn('markers');
+    this.#events.setFadedShown(this.#isOn('markers'));
     const scene = this.#scene;
     if (scene !== null)
     {
@@ -1607,9 +1659,12 @@ class PixiMapRenderer implements MapRenderer
         this.#markTiles(effect.indices);
         break;
       case 'event':
+        // a changed event is judged again, since its pages, or whether it follows the clock, may have changed.
+        this.#pages.forget(effect.id);
         this.#eventsChanged(effect.id);
         break;
       case 'events':
+        this.#pages.forget(null);
         this.#eventsChanged(null);
         break;
       case 'overlays':
@@ -1811,7 +1866,7 @@ class PixiMapRenderer implements MapRenderer
     if (document !== null)
     {
       const clock = lightingClockAt(now, this.#fixedAnimation, this.#visibility.animate, this.#timeOfDay);
-      changed = this.#lighting.draw({ document, renderer: pixi, context: this.#contexts, clock }) || changed;
+      changed = this.#lighting.draw({ document, renderer: pixi, context: this.#contexts, clock, pages: this.#pages }) || changed;
     }
 
     return { changed, rebuiltChunks };

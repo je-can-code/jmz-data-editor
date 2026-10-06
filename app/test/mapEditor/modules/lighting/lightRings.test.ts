@@ -11,9 +11,10 @@ import {
   sameRings,
   type LightRing,
 } from '../../../../src/mapEditor/modules/lighting/lightRings.ts';
-import type { LightDefaults, LightPageChoice } from '../../../../src/mapEditor/modules/lighting/lightTags.ts';
+import type { LightDefaults } from '../../../../src/mapEditor/modules/lighting/lightTags.ts';
 import { command, event, page, text } from '../../support/eventKindFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
+import { ENGINE_PAGES } from '../../support/pageFixtures.ts';
 
 /**
  * Every stand-in drawing made, each with the calls it was given, written out so a test reads them at a glance.
@@ -82,8 +83,9 @@ vi.mock('pixi.js', () =>
  * Every light on the map shows how far it reaches as a ring about the spot the game centres its light on: the event's
  * sprite's feet (Game_CharacterBase#screenX and #screenY), centred across its tile and at the tile's foot, six pixels
  * higher for a character that is not an object. Its radius is the tag's reach in tiles, and it is drawn in the light's
- * colour, from the page the event shows its lights from: the first that gives any, unless another choice is handed
- * over. An event giving several lights shows several rings about one spot.
+ * colour, from the page the event shows at the clock's time, as the frame's pages say: a lamp lit only by night shows no
+ * ring by day, and an event no page holds for none at all. An event giving several lights shows several rings about one
+ * spot.
  *
  * The rings read over a bright map without drowning it: washes, then dark bands, then one-pixel edges in the light's
  * colour, then a dot at each light, in that order so no ring's band covers another's edge. They draw again only when a
@@ -145,7 +147,7 @@ const buildRings = () =>
  */
 const drawOn = (rings: LightRings, document: MapDocument): void =>
 {
-  rings.draw({ document, renderer: {} as Renderer, context: 1, clock: { frames: 0, animating: true, timeOfDay: 0 } });
+  rings.draw({ document, renderer: {} as Renderer, context: 1, clock: { frames: 0, animating: true, timeOfDay: 0 }, pages: ENGINE_PAGES });
 };
 
 describe('lightRings', () =>
@@ -217,7 +219,7 @@ describe('lightRings', () =>
       const ghost = lightAt(4, 0, 2, [ '<light:[2.5]>', '<light:[1, #fff]>' ]);
 
       // Act.
-      const rings = lightRingsOf([ null, sign, torch, ghost ], DEFAULTS, 48);
+      const rings = lightRingsOf([ null, sign, torch, ghost ], DEFAULTS, 48, ENGINE_PAGES);
 
       // Assert.
       expect(rings)
@@ -228,18 +230,17 @@ describe('lightRings', () =>
         ]);
     });
 
-    it('lists the rings of the page the choice handed over picks', () =>
+    it('lists the rings of the page each event shows, whichever that is, and none while it shows an unlit page or none', () =>
     {
-      // Arrange: a torch whose first page gives light, and a choice that picks its second page instead.
-      const torch = { ...event(3, [ page([ command(108, [ '<light:[4]>' ]) ]), page([ command(108, [ '<light:[1]>' ]) ]) ]), x: 0, y: 0 };
-      const second: LightPageChoice = (shown, defaults) => ({
-        page: shown.pages[1],
-        pageIndex: 1,
-        lights: [ { radius: 1, color: '#ff0000', intensity: defaults.intensity, effect: 'steady' } ],
-      });
+      // Arrange: a torch lit on both pages, red on its second; a lamp cold on its second page; and the pages answered as
+      // the second for the first two and none for a third, lit, event.
+      const torch = { ...event(3, [ page([ command(108, [ '<light:[4]>' ]) ]), page([ command(108, [ '<light:[1, #ff0000]>' ]) ]) ]), x: 0, y: 0 };
+      const lamp = { ...event(4, [ page([ command(108, [ '<light:[4]>' ]) ]), page([]) ]), x: 2, y: 0 };
+      const gone = lightAt(5, 4, 0, [ '<light:[4]>' ]);
+      const pages = { activePage: (shown: RmmzMapEvent) => (shown.id === 5 ? -1 : 1) };
 
       // Act.
-      const rings = lightRingsOf([ torch ], DEFAULTS, 48, second);
+      const rings = lightRingsOf([ torch, lamp, gone ], DEFAULTS, 48, pages);
 
       // Assert.
       expect(rings)
@@ -353,7 +354,7 @@ describe('lightRings', () =>
         .toStrictEqual([ true, drawn ]);
     });
 
-    it('draws again when a light moves, its tag changes, or another of its pages gives light first', () =>
+    it('draws again when a light moves, its tag changes, or the page it shows changes, and not for a page it does not show', () =>
     {
       // Arrange: a torch lit on its second page, drawn once.
       const torch = { ...event(1, [ page([]), page([ command(108, [ '<light:[2]>' ]) ]) ]), x: 0, y: 0 };
@@ -376,14 +377,16 @@ describe('lightRings', () =>
       };
       const litFirstPage = [ command(108, [ '<light:[1]>' ]), command(0) ] as unknown as JsonValue;
 
-      // Act: moved across, given a longer reach, then given a smaller light on its first page.
+      // Act: moved across, given a longer reach, given a smaller light on its first page, which it does not show, then its
+      // second page put behind switch 4, which a new game has off, so it shows its first.
       const moved = redrawAfter([ 'events', 1, 'x' ], 2);
       const retagged = redrawAfter([ 'events', 1, 'pages', 1, 'list', 0, 'parameters', 0 ], '<light:[3]>');
-      const repaged = redrawAfter([ 'events', 1, 'pages', 0, 'list' ], litFirstPage);
+      const unshown = redrawAfter([ 'events', 1, 'pages', 0, 'list' ], litFirstPage);
+      const repaged = redrawAfter([ 'events', 1, 'pages', 1, 'conditions', 'switch1Valid' ], true);
 
       // Assert.
-      expect([ moved, retagged, repaged ])
-        .toStrictEqual([ 'circle 120,42 r96', 'circle 120,42 r144', 'circle 120,42 r48' ]);
+      expect([ moved, retagged, unshown, repaged ])
+        .toStrictEqual([ 'circle 120,42 r96', 'circle 120,42 r144', undefined, 'circle 120,42 r48' ]);
     });
 
     it('draws nothing as the clock moves, however its lights gutter', () =>

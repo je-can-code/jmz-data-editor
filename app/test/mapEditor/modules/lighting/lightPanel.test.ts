@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { editQuickField, type QuickField, type QuickModel } from '../../../../src/mapEditor/core/eventKinds/quickFields.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import { cloneJson } from '../../../../src/mapEditor/core/model/json.ts';
-import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { RmmzEventPage, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import {
   lightPageNote,
   lightPanelOptions,
@@ -26,7 +26,9 @@ import { applyEdits, command, event, eventIn, hubWith, page, text } from '../../
  * never change a map by itself.
  *
  * The panel says which page it changes when that is not page 1, for one light, several on one page, or several on
- * different pages, and offers as swatches the colours the map's lights already use, most used first.
+ * different pages, and when that page shows, in the words it is handed for a page ("Lit from 18:00 to 05:00."), for
+ * every selected light only when their pages all show alike; and offers as swatches the colours the map's lights
+ * already use, most used first.
  */
 
 /**
@@ -348,6 +350,64 @@ describe('lightPanel', () =>
       // Assert.
       expect(note)
         .toBe('Changes page 2, the first page with a light.');
+    });
+
+    /**
+     * Words for a page as J-TIME's module gives them: each hour range on the page, as its tag reads.
+     * @param {RmmzEventPage} shown The page.
+     * @returns {string[]} The words.
+     */
+    const hourWords = (shown: RmmzEventPage): string[] => shown.list.flatMap(each =>
+    {
+      const match = /<hourRangePage:(\d+)-(\d+)>/u.exec(String(each.parameters[0] ?? ''));
+      return match === null ? [] : [ `from ${match[1].padStart(2, '0')}:00 to ${match[2].padStart(2, '0')}:00` ];
+    });
+
+    it('says when the page it changes shows, after which page that is, for a lamp lit only at its hours', () =>
+    {
+      // Arrange: a time-torch, cold on page 1 and lit on page 2 from 18:00 to 05:00; and a lamp lit on page 1 by night.
+      const torch = event(54, [ page([]), page([ command(108, [ '<light:[4]>' ]), command(108, [ '<hourRangePage:18-5>' ]) ]) ]);
+      const lamp = event(55, [ page([ command(108, [ '<light:[3]>' ]), command(108, [ '<hourRangePage:20-4>' ]) ]) ]);
+      const options = lightPanelOptions(DEFAULTS, firstLitPage, hourWords);
+
+      // Act.
+      const notes = [ options.note?.([ torch ]), options.note?.([ lamp ]) ];
+
+      // Assert.
+      expect(notes)
+        .toStrictEqual([ 'Changes page 2, the first page with a light. Lit from 18:00 to 05:00.', 'Lit from 20:00 to 04:00.' ]);
+    });
+
+    it('says when the pages of several lights show only when they all show alike', () =>
+    {
+      // Arrange: two lamps lit from 18:00 to 05:00, one lit from 20:00 to 04:00, and one lit always, all on page 1.
+      const lampAt = (id: number, hours: string[]) => event(id, [ page([ command(108, [ '<light:[3]>' ]), ...hours.map(tag => command(108, [ tag ])) ]) ]);
+      const evening = [ lampAt(1, [ '<hourRangePage:18-5>' ]), lampAt(2, [ '<hourRangePage:18-5>' ]) ];
+      const options = lightPanelOptions(DEFAULTS, firstLitPage, hourWords);
+
+      // Act.
+      const notes = [
+        options.note?.(evening),
+        options.note?.([ ...evening, lampAt(3, [ '<hourRangePage:20-4>' ]) ]),
+        options.note?.([ ...evening, lampAt(4, []) ]),
+      ];
+
+      // Assert.
+      expect(notes)
+        .toStrictEqual([ 'Lit from 18:00 to 05:00.', null, null ]);
+    });
+
+    it('says nothing of when a page shows without words for it', () =>
+    {
+      // Arrange: a lamp lit only at its hours, for a panel that cannot say when a page shows.
+      const lamp = event(55, [ page([ command(108, [ '<light:[3]>' ]), command(108, [ '<hourRangePage:20-4>' ]) ]) ]);
+
+      // Act.
+      const note = lightPanelOptions(DEFAULTS, firstLitPage).note?.([ lamp ]);
+
+      // Assert.
+      expect(note)
+        .toBeNull();
     });
 
     it('offers the colours the map\'s lights use as swatches', () =>

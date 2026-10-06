@@ -4,9 +4,9 @@ import type { RmmzEventPage, RmmzMapEvent } from '../../../../src/mapEditor/core
 import type { LightingClock } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { mapAmbient, type AmbientSource } from '../../../../src/mapEditor/modules/lighting/ambientTags.ts';
 import { darkOf, darkSceneOf, lightIdOf, maskLightsOf, type DarkSetup, type LightStrength } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
-import { firstLitPage, type LightPageChoice } from '../../../../src/mapEditor/modules/lighting/lightTags.ts';
 import { command, event, page } from '../../support/eventKindFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
+import { ENGINE_PAGES } from '../../support/pageFixtures.ts';
 
 /*
  * The dark over a map is worked out as J-Lighting composes it: every source's darkness compounded and the colour of the
@@ -14,12 +14,12 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * from the two. A map nobody calls dark, or calls dark at 0, has no dark at all, however many lights it holds, since the
  * game never masks a map for its lights alone.
  *
- * Every light cuts through it from the page its event shows its lights from, the first page giving any unless another
- * choice is handed over, centred where the game centres it and where its ring is drawn (the tile's middle, at its foot,
- * six pixels up for a character that is not an object), its reach in pixels, its colour and intensity as its tag gives
- * them or the project's when it gives none, and its name as J-Lighting gives it: its event's source and its place among
- * that page's lights. Each burns at the strength handed over for it at the view's clock, asked after by its map, its name
- * and its effect.
+ * Every light cuts through it from the page its event shows at the clock's time, when that page gives any, as the game
+ * reads an event's lights from its active page; an event no page holds for gives none. Each is centred where the game
+ * centres it and where its ring is drawn (the tile's middle, at its foot, six pixels up for a character that is not an
+ * object), its reach in pixels, its colour and intensity as its tag gives them or the project's when it gives none, and
+ * its name as J-Lighting gives it: its event's source and its place among that page's lights. Each burns at the strength
+ * handed over for it at the view's clock, asked after by its map, its name and its effect.
  */
 
 /**
@@ -66,13 +66,12 @@ const mapWith = (note: string, events: (RmmzMapEvent | null)[]): MapDocument =>
 /**
  * What the dark is worked out from: the map's own darkness in black, and any further sources.
  * @param {AmbientSource[]} extra Sources joining the map's.
- * @param {LightPageChoice} choosePage The page choice.
  * @param {LightStrength} strengthOf How brightly each light burns.
  * @returns {DarkSetup} The setup.
  */
-const setupWith = (extra: AmbientSource[] = [], choosePage: LightPageChoice = firstLitPage, strengthOf: LightStrength = steady): DarkSetup =>
+const setupWith = (extra: AmbientSource[] = [], strengthOf: LightStrength = steady): DarkSetup =>
 {
-  return { sources: [ mapAmbient('#000000'), ...extra ], defaults: DEFAULTS, tileSize: 48, choosePage, strengthOf };
+  return { sources: [ mapAmbient('#000000'), ...extra ], defaults: DEFAULTS, tileSize: 48, strengthOf };
 };
 
 describe('darkScene', () =>
@@ -85,7 +84,7 @@ describe('darkScene', () =>
       const field = mapWith('<noToneChange>', [ null, lightAt(1, 2, 2, [ '<light:[4]>' ]) ]);
 
       // Act.
-      const scene = darkSceneOf(field, setupWith(), CLOCK);
+      const scene = darkSceneOf(field, setupWith(), CLOCK, ENGINE_PAGES);
 
       // Assert.
       expect(scene)
@@ -98,7 +97,7 @@ describe('darkScene', () =>
       const dusk = mapWith('<ambient:[0]>', [ null, lightAt(1, 2, 2, [ '<light:[4]>' ]) ]);
 
       // Act.
-      const scene = darkSceneOf(dusk, setupWith(), CLOCK);
+      const scene = darkSceneOf(dusk, setupWith(), CLOCK, ENGINE_PAGES);
 
       // Assert.
       expect(scene)
@@ -111,7 +110,7 @@ describe('darkScene', () =>
       const cave = mapWith('<ambient:[85]>', [ null, lightAt(1, 2, 3, [ '<light:[4, #ffbb73, 40, flicker]>' ]), lightAt(2, 5, 5, [ '<enemyId:3>' ]), null ]);
 
       // Act.
-      const scene = darkSceneOf(cave, setupWith(), CLOCK);
+      const scene = darkSceneOf(cave, setupWith(), CLOCK, ENGINE_PAGES);
 
       // Assert.
       expect(scene)
@@ -129,7 +128,7 @@ describe('darkScene', () =>
       const clock: AmbientSource = () => ({ darkness: 0.4, color: [ 0, 0, 0 ], declaresColor: false, source: 'time' });
 
       // Act.
-      const scene = darkSceneOf(cave, setupWith([ clock ]), CLOCK);
+      const scene = darkSceneOf(cave, setupWith([ clock ]), CLOCK, ENGINE_PAGES);
 
       // Assert.
       expect([ scene?.darkness, scene?.tint ])
@@ -162,15 +161,16 @@ describe('darkScene', () =>
 
   describe('maskLightsOf', () =>
   {
-    it('cuts one pool per light on the page each event shows its lights from, by event and then in page order', () =>
+    it('cuts one pool per light on the page each event shows, by event and then in page order', () =>
     {
-      // Arrange: an empty slot; a brazier giving two lights; a lamp lit only on its second page; an event giving none.
+      // Arrange: an empty slot; a brazier giving two lights; a lamp lit only on its second page, which it shows; an
+      // event giving none.
       const brazier = lightAt(1, 0, 0, [ '<light:[2]>', '<light:[3, #88ffcc, 70, pulse]>' ]);
       const lamp: RmmzMapEvent = { ...event(2, [ page([]), page([ command(108, [ '<light:[1.5, #fff]>' ]) ]) ]), x: 4, y: 1 };
       const crate = lightAt(3, 6, 6, [ '<light:5>' ]);
 
       // Act.
-      const lights = maskLightsOf(mapWith('', [ null, brazier, lamp, crate ]), setupWith(), CLOCK);
+      const lights = maskLightsOf(mapWith('', [ null, brazier, lamp, crate ]), setupWith(), CLOCK, ENGINE_PAGES);
 
       // Assert.
       expect(lights)
@@ -187,7 +187,7 @@ describe('darkScene', () =>
       const torch = lightAt(1, 2, 3, [ '<light:[4]>' ], { image: { tileId: 0, characterName: '!Other2', direction: 2, pattern: 0, characterIndex: 7 } });
 
       // Act.
-      const [ light ] = maskLightsOf(mapWith('', [ null, torch ]), setupWith(), CLOCK);
+      const [ light ] = maskLightsOf(mapWith('', [ null, torch ]), setupWith(), CLOCK, ENGINE_PAGES);
 
       // Assert.
       expect([ light.x, light.y ])
@@ -196,31 +196,36 @@ describe('darkScene', () =>
 
     it('centres a pool where the page giving the light stands its picture, whatever the first page shows', () =>
     {
-      // Arrange: a lamp whose unlit first page is an object, standing at its tile's very foot, and whose lit second page
-      // is a character, standing six pixels up.
+      // Arrange: a lamp whose unlit first page is an object, standing at its tile's very foot, and whose lit second page,
+      // the one it shows, is a character, standing six pixels up.
       const object = { tileId: 0, characterName: '!Other2', direction: 2, pattern: 0, characterIndex: 7 };
       const lamp: RmmzMapEvent = { ...event(1, [ page([], { image: object }), page([ command(108, [ '<light:[4]>' ]) ]) ]), x: 2, y: 3 };
 
       // Act.
-      const [ light ] = maskLightsOf(mapWith('', [ null, lamp ]), setupWith(), CLOCK);
+      const [ light ] = maskLightsOf(mapWith('', [ null, lamp ]), setupWith(), CLOCK, ENGINE_PAGES);
 
       // Assert.
       expect([ light.x, light.y ])
         .toStrictEqual([ 120, 186 ]);
     });
 
-    it('reads lights from the page the choice handed over picks', () =>
+    it('reads each event\'s lights from the page it shows, and none from an event no page holds for', () =>
     {
-      // Arrange: a lamp lit on both pages, and a choice picking its second.
+      // Arrange: a lamp lit on both pages, showing its second; and a ghost lit only behind switch 4, which a new game has
+      // off; and the same lamp read where it shows its first.
       const lamp: RmmzMapEvent = { ...event(1, [ page([ command(108, [ '<light:[2]>' ]) ]), page([ command(108, [ '<light:[5]>' ]) ]) ]), x: 0, y: 0 };
-      const second: LightPageChoice = (chosen, defaults) => ({ page: chosen.pages[1], pageIndex: 1, lights: [ { radius: 5, color: defaults.color, intensity: 0, effect: 'steady' } ] });
+      const ghost = lightAt(2, 4, 4, [ '<light:[3]>' ], { conditions: { ...page([]).conditions, switch1Valid: true, switch1Id: 4 } });
+      const firstPages = { activePage: () => 0 };
 
       // Act.
-      const lights = maskLightsOf(mapWith('', [ null, lamp ]), setupWith([], second), CLOCK);
+      const radii = [
+        maskLightsOf(mapWith('', [ null, lamp, ghost ]), setupWith(), CLOCK, ENGINE_PAGES).map(light => light.radius),
+        maskLightsOf(mapWith('', [ null, lamp ]), setupWith(), CLOCK, firstPages).map(light => light.radius),
+      ];
 
       // Assert.
-      expect(lights.map(light => light.radius))
-        .toStrictEqual([ 240 ]);
+      expect(radii)
+        .toStrictEqual([ [ 240 ], [ 96 ] ]);
     });
 
     it('burns each light at the strength handed over for it, asked by its map, its name and its effect, at the clock', () =>
@@ -236,7 +241,7 @@ describe('darkScene', () =>
       };
 
       // Act.
-      const lights = maskLightsOf(mapWith('', [ null, torch, lamp ]), setupWith([], firstLitPage, strengthOf), CLOCK);
+      const lights = maskLightsOf(mapWith('', [ null, torch, lamp ]), setupWith([], strengthOf), CLOCK, ENGINE_PAGES);
 
       // Assert.
       expect([ lights.map(light => light.strength), asked ])

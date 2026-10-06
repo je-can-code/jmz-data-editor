@@ -1,9 +1,10 @@
 import type { MapDocument } from '../../core/model/MapDocument.ts';
+import type { ActivePages } from '../../core/pageRule/ShownPages.ts';
 import type { LightingClock } from '../../core/renderer/lightingLayer.ts';
 import type { AmbientSource } from './ambientTags.ts';
 import { composeAmbientColor, composeDarkness, hasMask, maskTintFor } from './lightingComposition.ts';
 import { lightCentre } from './lightRings.ts';
-import type { LightDefaults, LightEffect, LightPageChoice } from './lightTags.ts';
+import { shownLitPage, type LightDefaults, type LightEffect } from './lightTags.ts';
 
 /**
  * A light as its strength is asked after: the map it burns on, its name as J-Lighting gives it, and its effect.
@@ -58,14 +59,13 @@ type DarkScene = MapDark & {
 };
 
 /**
- * What the dark is worked out from: everything that darkens the map, what a light falls back to, the tile size, the
- * page an event shows its lights from, and how brightly each light burns.
+ * What the dark is worked out from: everything that darkens the map, what a light falls back to, the tile size, and how
+ * brightly each light burns.
  */
 type DarkSetup = {
   readonly sources: readonly AmbientSource[];
   readonly defaults: LightDefaults;
   readonly tileSize: number;
-  readonly choosePage: LightPageChoice;
   readonly strengthOf: LightStrength;
 };
 
@@ -81,17 +81,19 @@ const lightIdOf = (eventId: number, ordinal: number): string =>
 };
 
 /**
- * Lists the lights a map's events cut through its dark: one per light on the page each event shows its lights from,
- * centred where the game centres the event's light and where its ring is drawn, so a light's pool and its ring always
- * agree, each burning at its strength at the clock's moment.
+ * Lists the lights a map's events cut through its dark: one per light on the page each event shows at the clock's time,
+ * when that page gives any, as the game reads an event's lights from its active page; centred where the game centres
+ * the event's light and where its ring is drawn, so a light's pool and its ring always agree, each burning at its
+ * strength at the clock's moment. A lamp lit only by night cuts nothing by day, and an event no page holds for none.
  * @param {MapDocument} document The map.
- * @param {DarkSetup} setup The defaults, the tile size, the page choice and the strength.
+ * @param {DarkSetup} setup The defaults, the tile size and the strength.
  * @param {LightingClock} clock The view's clock.
+ * @param {ActivePages} pages The page each event shows.
  * @returns {MaskLight[]} The lights, by event, then in the order the page writes them.
  */
-const maskLightsOf = (document: MapDocument, setup: DarkSetup, clock: LightingClock): MaskLight[] =>
+const maskLightsOf = (document: MapDocument, setup: DarkSetup, clock: LightingClock, pages: ActivePages): MaskLight[] =>
 {
-  const { defaults, tileSize, choosePage, strengthOf } = setup;
+  const { defaults, tileSize, strengthOf } = setup;
   const { mapId } = document;
   return document.events.flatMap(event =>
   {
@@ -100,7 +102,7 @@ const maskLightsOf = (document: MapDocument, setup: DarkSetup, clock: LightingCl
       return [];
     }
 
-    const lit = choosePage(event, defaults);
+    const lit = shownLitPage(event, defaults, pages.activePage(event));
     if (lit === null)
     {
       return [];
@@ -152,14 +154,16 @@ const darkOf = (document: MapDocument, sources: readonly AmbientSource[], clock:
 };
 
 /**
- * Works out the dark over a map as J-Lighting composes it ({@link darkOf}), with every light on the map, burning as it
- * does at the clock's moment. A map nobody calls dark has no dark at all, however many lights it holds.
+ * Works out the dark over a map as J-Lighting composes it ({@link darkOf}), with every light the map shows at the
+ * clock's time, burning as it does at the clock's moment. A map nobody calls dark has no dark at all, however many
+ * lights it holds.
  * @param {MapDocument} document The map.
  * @param {DarkSetup} setup What the dark is worked out from.
  * @param {LightingClock} clock The view's clock.
+ * @param {ActivePages} pages The page each event shows.
  * @returns {DarkScene | null} The dark, or null when the map is not dark.
  */
-const darkSceneOf = (document: MapDocument, setup: DarkSetup, clock: LightingClock): DarkScene | null =>
+const darkSceneOf = (document: MapDocument, setup: DarkSetup, clock: LightingClock, pages: ActivePages): DarkScene | null =>
 {
   const dark = darkOf(document, setup.sources, clock);
   if (dark === null)
@@ -167,7 +171,7 @@ const darkSceneOf = (document: MapDocument, setup: DarkSetup, clock: LightingClo
     return null;
   }
 
-  return { ...dark, lights: maskLightsOf(document, setup, clock) };
+  return { ...dark, lights: maskLightsOf(document, setup, clock, pages) };
 };
 
 export { darkOf, darkSceneOf, lightIdOf, maskLightsOf };

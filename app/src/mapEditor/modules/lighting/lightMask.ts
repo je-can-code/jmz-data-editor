@@ -8,7 +8,7 @@ import { chunkSignature, lightsByChunk, MASK_CHUNK_SIZE, maskChunksFor, sameStre
 
 /**
  * What the mask is worked out from, beyond the tile size its stage gives: everything that darkens the map, what a light
- * falls back to, the page an event shows its lights from, and how brightly each light burns.
+ * falls back to, and how brightly each light burns. The page each event gives its lights from comes with every frame.
  */
 type MaskSetup = Omit<DarkSetup, 'tileSize'>;
 
@@ -53,9 +53,11 @@ type DrawnChunk = {
  *
  * The time of day can darken a map too, the sky at night being one of the sources, so a tick that finds the window's
  * clock moved works out how dark the map is at the new hour. The lights stand where they stood, since only an edit moves
- * them, and an edit asks the mask to draw: so the same dark costs nothing more, a deeper or lighter one only fills the
- * plain pieces afresh and draws the lit ones again as they stand, and a map the hour darkens for the first time, a field
- * at nightfall, gets its mask then, its lights cut through it as on any dark map.
+ * them, and only the clock turning an event to another page lights or puts one out, and either asks the mask to draw:
+ * so the same dark costs nothing more, a deeper or lighter one only fills the plain pieces afresh and draws the lit ones
+ * again as they stand, and a map the hour darkens for the first time, a field at nightfall, gets its mask then, its
+ * lights cut through it as on any dark map. A lamp lit only by night is cut through the dark only once its lit page is
+ * the one the game shows.
  */
 class LightMask implements LightingDrawing
 {
@@ -132,7 +134,7 @@ class LightMask implements LightingDrawing
       return;
     }
 
-    const lights = maskLightsOf(document, this.#setup, clock);
+    const lights = maskLightsOf(document, this.#setup, clock, frame.pages);
     this.#lights = lights;
     this.#show(frame, dark, lights);
   }
@@ -220,7 +222,7 @@ class LightMask implements LightingDrawing
     }
 
     // lights worked out at an earlier frame burn now as the clock has them.
-    this.#lights ??= maskLightsOf(frame.document, this.#setup, frame.clock);
+    this.#lights ??= maskLightsOf(frame.document, this.#setup, frame.clock, frame.pages);
     this.#show(frame, dark, this.#burningNow(this.#lights, frame));
     return true;
   }

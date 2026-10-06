@@ -36,7 +36,7 @@ const clockWords = (minutes: number, partOfDay: (minutes: number) => string): st
 /**
  * The window's clock in a map view's bar: a chip naming the time and the part of the day, which opens a slider across
  * the whole day, a minute at a time, or an hour with Shift held. Moving it moves the clock for every map in the window,
- * so every map shows the sky at the same hour.
+ * so every map shows the sky, and each event's page, at the same hour.
  * @param {ClockChipProps} props The clock, and what each part of the day is called.
  * @returns {React.JSX.Element} The chip, with its slider while it is open.
  */
@@ -81,7 +81,7 @@ const ClockChip = (props: ClockChipProps) =>
             valueLabelFormat={clockLabel}
           />
           <Typography variant={'caption'} color={'text.secondary'}>
-            Every map shows the sky at this hour.
+            Every map shows this hour, each event as a new game would show it.
           </Typography>
         </Box>
       </Popover>

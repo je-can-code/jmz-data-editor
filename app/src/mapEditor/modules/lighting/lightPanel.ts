@@ -8,7 +8,7 @@ import type {
   SliderControl,
 } from '../../core/eventKinds/quickFields.ts';
 import type { PatchPath } from '../../core/model/patches.ts';
-import type { RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
+import type { RmmzEventPage, RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
 import {
   isHexColor,
   lightLines,
@@ -18,6 +18,7 @@ import {
   type LightEffect,
   type LightLine,
   type LightPageChoice,
+  type LitPage,
 } from './lightTags.ts';
 import { intensityPercent, lightTagParts, withColor, withEffect, withIntensity, withRadius } from './lightTagWriter.ts';
 
@@ -85,6 +86,16 @@ const DEFAULT_HINT = 'The project\'s default; this light sets none.';
  * The most swatches the colour setting offers.
  */
 const SWATCH_LIMIT = 8;
+
+/**
+ * Words when a page shows, one entry for each thing it waits for, such as "from 18:00 to 05:00".
+ */
+type PageWords = (page: RmmzEventPage) => readonly string[];
+
+/**
+ * No words for any page, for a panel that cannot say when a page shows.
+ */
+const NO_WORDS: PageWords = () => [];
 
 /**
  * Says what a colour setting shows when the light names none of its own: the project's default, because the tag names
@@ -237,6 +248,26 @@ const lightPageNote = (pageIndexes: readonly number[]): string | null =>
 };
 
 /**
+ * Says when the page the settings change shows, as one line: "Lit from 18:00 to 05:00." It speaks for every selected
+ * light only when all their pages show alike, and says nothing for pages waiting for nothing, which always show.
+ * @param {readonly LitPage[]} litPages The page each selected light's settings change.
+ * @param {PageWords} pageWords Words when a page shows.
+ * @returns {string | null} The line, or null to say nothing.
+ */
+const litTimesNote = (litPages: readonly LitPage[], pageWords: PageWords): string | null =>
+{
+  const lines = new Set(litPages.map(lit =>
+  {
+    const words = pageWords(lit.page);
+    return words.length === 0 ? '' : `Lit ${words.join(', ')}.`;
+  }));
+  const [ line ] = [ ...lines ];
+  return lines.size === 1 && line !== ''
+    ? line
+    : null;
+};
+
+/**
  * Lists the colours a map's lights use, most used first, ties in the order of their digits: the colour every light on
  * every page shows, the default for one naming none, as six lowercase digits.
  * @param {readonly (RmmzMapEvent | null)[]} events The map's events, with empty slots.
@@ -264,19 +295,27 @@ const lightSwatches = (events: readonly (RmmzMapEvent | null)[], defaults: Light
 
 /**
  * Builds what a light's panel shows besides each light's settings: which page they change when it is not page 1, and
- * the colours the map's lights already use, as swatches.
+ * when that page shows, such as "Lit from 18:00 to 05:00.", so a lamp clicked at noon says why the map shows it cold;
+ * and the colours the map's lights already use, as swatches.
  * @param {LightDefaults} defaults What the lights fall back to.
  * @param {LightPageChoice} choosePage Picks the page whose lights an event shows.
+ * @param {PageWords} pageWords Words when a page shows; left out, the panel says nothing of it.
  * @returns {QuickPanelOptions} The panel's note and swatches.
  */
-const lightPanelOptions = (defaults: LightDefaults, choosePage: LightPageChoice): QuickPanelOptions =>
+const lightPanelOptions = (defaults: LightDefaults, choosePage: LightPageChoice, pageWords: PageWords = NO_WORDS): QuickPanelOptions =>
 {
   return {
-    note: events => lightPageNote(events.flatMap(event =>
+    note: events =>
     {
-      const lit = choosePage(event, defaults);
-      return lit === null ? [] : [ lit.pageIndex ];
-    })),
+      const litPages = events.flatMap(event =>
+      {
+        const lit = choosePage(event, defaults);
+        return lit === null ? [] : [ lit ];
+      });
+      const lines = [ lightPageNote(litPages.map(lit => lit.pageIndex)), litTimesNote(litPages, pageWords) ];
+      const said = lines.filter((line): line is string => line !== null);
+      return said.length === 0 ? null : said.join(' ');
+    },
     swatches: events => lightSwatches(events, defaults),
   };
 };

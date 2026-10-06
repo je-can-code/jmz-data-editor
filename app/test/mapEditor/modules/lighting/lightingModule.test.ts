@@ -5,19 +5,44 @@ import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { LightingClock, LightingLayerDefinition, LightingStage } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
+import type { RmmzEventPage } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { isLight, LIGHT_MASK_ID, LIGHT_RINGS_ID, lightingModule, SKY_TONE_ID } from '../../../../src/mapEditor/modules/lighting/lightingModule.ts';
 import { LightPictures } from '../../../../src/mapEditor/modules/lighting/lightPictures.ts';
+import { timeModule } from '../../../../src/mapEditor/modules/time/timeModule.ts';
 import { registerCoreEventKinds } from '../../../../src/mapEditor/services/coreEventKinds.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
 import { command, event, page, text, transferPage } from '../../support/eventKindFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
+import { ENGINE_PAGES } from '../../support/pageFixtures.ts';
 
 /**
- * The colour of every solid fill the stand-in drawings were given, in order: one dot at each light.
+ * The colour of every solid fill the stand-in drawings were given, in order: one dot at each light; and the words for a
+ * page each light panel was handed, in the order the panels were made.
  */
 const stand = vi.hoisted(() => ({
   dots: [] as number[],
+  pageWords: [] as ((page: RmmzEventPage) => readonly string[])[],
 }));
+
+// the light panel's options are built as the module switches on; a wrapper writes down the words for a page each is
+// handed, and builds them as they are.
+vi.mock('../../../../src/mapEditor/modules/lighting/lightPanel.ts', async importOriginal =>
+{
+  const original = await importOriginal<typeof import('../../../../src/mapEditor/modules/lighting/lightPanel.ts')>();
+  return {
+    ...original,
+    lightPanelOptions: (...args: Parameters<typeof original.lightPanelOptions>) =>
+    {
+      const [ , , pageWords ] = args;
+      if (pageWords !== undefined)
+      {
+        stand.pageWords.push(pageWords);
+      }
+
+      return original.lightPanelOptions(...args);
+    },
+  };
+});
 
 // the rings draw through pixi's Graphics; a stand-in writes down the colour of each solid fill, which is the dot drawn
 // at each light in the light's own colour, and leaves the rest of pixi as it is.
@@ -68,7 +93,8 @@ vi.mock('pixi.js', async importOriginal =>
  * an intensity and an effect, on any page (a torch that can be lit carries the tag on its lit page alone), any case.
  * The same words anywhere but a comment, a reach left out, or a map's ambient darkness make no light. The kind switches
  * on only while J-Lighting is enabled, ranks below the transfer a glowing door still is, shows the light's symbol, and
- * gives a light the quick panel a single click shows (its own tests, and the quick panel host's, hold what it does).
+ * gives a light the quick panel a single click shows (its own tests, and the quick panel host's, hold what it does),
+ * handed the words for when a page shows, J-TIME's hours among them while J-TIME's module is on.
  *
  * While J-Lighting is enabled the module also draws into the lighting layer a dark map's darkness, first, as what the
  * game itself shows (its own tests hold how), and each light's ring over it, as an aid. It reads the project's
@@ -157,7 +183,7 @@ describe('lightingModule', () =>
     json.events = [ null, { ...event(1, [ page([ command(108, [ '<light:[2]>' ]) ]) ]), x: 0, y: 0 } ];
     const rings = registry.lightingLayers().find(layer => layer.id === LIGHT_RINGS_ID) as LightingLayerDefinition;
     const drawing = rings.create(stageOn({ addChild: () => undefined } as unknown as Container));
-    drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1, clock: START });
+    drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1, clock: START, pages: ENGINE_PAGES });
     return stand.dots;
   };
 
@@ -238,7 +264,7 @@ describe('lightingModule', () =>
       const json = { ...buildMapJson(), note: '<ambient:[85, #10203g]>' };
 
       // Act.
-      drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1, clock: START });
+      drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1, clock: START, pages: ENGINE_PAGES });
 
       // Assert: one piece, a plain fill of 85% slate.
       const [ root ] = layer.children;
@@ -259,11 +285,11 @@ describe('lightingModule', () =>
       const document = MapDocument.fromJson('map:6', json);
       const added: number[][] = [];
       const renderer = { render: (options: { container: Container }) => added.push(options.container.children.map(sprite => sprite.alpha)) } as unknown as Renderer;
-      drawing.draw({ document, renderer, context: 1, clock: { ...START, frames: 100 } });
+      drawing.draw({ document, renderer, context: 1, clock: { ...START, frames: 100 }, pages: ENGINE_PAGES });
 
       // Act: the next frame, then the same frame with Animate off.
-      const moved = [ drawing.tick({ document, renderer, context: 1, clock: { ...START, frames: 101 } }) ];
-      moved.push(drawing.tick({ document, renderer, context: 1, clock: { ...START, frames: 101, animating: false } }));
+      const moved = [ drawing.tick({ document, renderer, context: 1, clock: { ...START, frames: 101 }, pages: ENGINE_PAGES }) ];
+      moved.push(drawing.tick({ document, renderer, context: 1, clock: { ...START, frames: 101, animating: false }, pages: ENGINE_PAGES }));
       drawing.destroy();
       pictureFor.mockRestore();
 
@@ -285,7 +311,7 @@ describe('lightingModule', () =>
       const document = MapDocument.fromJson('map:6', json);
       const added: number[][] = [];
       const renderer = { render: (options: { container: Container }) => added.push(options.container.children.map(sprite => sprite.alpha)) } as unknown as Renderer;
-      const atFrame100 = { document, renderer, context: 1, clock: { ...START, frames: 100 } };
+      const atFrame100 = { document, renderer, context: 1, clock: { ...START, frames: 100 }, pages: ENGINE_PAGES };
       drawing.draw(atFrame100);
       document.apply(document.setPatch([ 'events', 1, 'pages', 0, 'list', 0, 'parameters', 0 ], '<light:[5, #ffbb73, 40, flicker]>'));
       document.apply(document.setPatch([ 'events', 1, 'x' ], 2));
@@ -301,6 +327,24 @@ describe('lightingModule', () =>
       // Assert: the torch added in at the strength it had before, after the edits and in the new view alike.
       expect(added)
         .toStrictEqual([ [ 0.9115909902530034 ], [ 0.9115909902530034 ], [ 0.9115909902530034 ] ]);
+    });
+
+    it('hands the light panel the words for when a page shows, J-TIME\'s hours among them while its module is on', () =>
+    {
+      // Arrange: J-Lighting's module and J-TIME's switched on together, and a time-torch's lit page, lit from 18:00 to
+      // 05:00 while switch 4 is on.
+      const time: PluginsJsEntry = { name: 'j/time/J-TIME', status: true, description: '', parameters: {} };
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ lightingModule, timeModule ], [ lighting(true), time ]);
+      const litPage = page([ command(108, [ '<light:[4]>' ]), command(108, [ '<hourRangePage:18-5>' ]) ]);
+      litPage.conditions = { ...litPage.conditions, switch1Valid: true, switch1Id: 4 };
+
+      // Act.
+      const words = stand.pageWords.at(-1)?.(litPage);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'while switch 4 is on', 'from 18:00 to 05:00' ]);
     });
 
     it('names the project\'s lighting config as the one config it reads', () =>
@@ -563,7 +607,7 @@ describe('lightingModule', () =>
         const passes: number[] = [];
         const renderer = { render: (options: { clearColor: number }) => passes.push(options.clearColor) } as unknown as Renderer;
         const drawing = dark.create(stageOn(new Container()));
-        drawing.draw({ document, renderer, context: 1, clock: { ...START, timeOfDay: 1320 } });
+        drawing.draw({ document, renderer, context: 1, clock: { ...START, timeOfDay: 1320 }, pages: ENGINE_PAGES });
         drawing.destroy();
         cleared.push(passes);
       });
@@ -585,7 +629,7 @@ describe('lightingModule', () =>
       {
         const tones: (readonly number[] | null)[] = [];
         const drawing = sky.create({ layer: new Container(), tileSize: 48, castTone: tone => tones.push(tone) });
-        drawing.draw({ document, renderer: {} as Renderer, context: 1, clock: { ...START, timeOfDay: 1320 } });
+        drawing.draw({ document, renderer: {} as Renderer, context: 1, clock: { ...START, timeOfDay: 1320 }, pages: ENGINE_PAGES });
         cast.push(tones);
       });
 

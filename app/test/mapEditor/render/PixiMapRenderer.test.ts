@@ -3,10 +3,13 @@
  */
 import type { Container } from 'pixi.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
+import { ShownPages } from '../../../src/mapEditor/core/pageRule/ShownPages.ts';
 import type { LightingLayerDefinition, LightingStage, ScreenTone } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { GAME_LOOK } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { PixiMapRenderer } from '../../../src/mapEditor/render/PixiMapRenderer.ts';
+import { EventLayer } from '../../../src/mapEditor/render/scene/EventLayer.ts';
 import { LightingLayers } from '../../../src/mapEditor/render/scene/LightingLayers.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 
@@ -219,6 +222,110 @@ describe('PixiMapRenderer', () =>
     // Assert.
     expect([ before, renderer.timeOfDay ])
       .toStrictEqual([ 0, 1320 ]);
+  });
+
+  describe('pages', () =>
+  {
+    /*
+     * Each event shows the page the page rule handed over picks at the clock's time. Moving the clock judges again the
+     * events whose pages ask something of it, and only those it turned to another page are drawn again, the lighting
+     * asked to draw with them; when it turns none, nothing is asked of anything. A new rule draws every event and the
+     * lighting again. An event that changes, or the list itself, is judged afresh. Events no page holds for show, faded,
+     * only while the markers overlay is on, so a map drawn as the game draws it shows nothing of them.
+     */
+    afterEach(() =>
+    {
+      vi.restoreAllMocks();
+    });
+
+    it('draws again only the events the clock turned to another page, asking the lighting to draw, and nothing when it turned none', () =>
+    {
+      // Arrange: a clock move turning events 4 and 9, then one turning none.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      vi.spyOn(ShownPages.prototype, 'setTime').mockReturnValueOnce([ 4, 9 ])
+        .mockReturnValueOnce([]);
+      const marked = vi.spyOn(EventLayer.prototype, 'markChanged');
+      const stale = vi.spyOn(LightingLayers.prototype, 'markStale');
+
+      // Act: 18:00, then 19:00.
+      renderer.setTimeOfDay(1080);
+      const turning = [ marked.mock.calls.map(([ id ]) => id), stale.mock.calls.length ];
+      renderer.setTimeOfDay(1140);
+
+      // Assert.
+      expect([ turning, marked.mock.calls.length, stale.mock.calls.length, renderer.timeOfDay ])
+        .toStrictEqual([ [ [ 4, 9 ], 1 ], 2, 1, 1140 ]);
+    });
+
+    it('picks every event\'s page afresh by a new page rule, drawing every event and the lighting again', () =>
+    {
+      // Arrange: the rule a fresh save with nobody in the party gives, with no plugin's conditions.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      const rule = { save: { party: [] }, conditions: [] };
+      const ruled = vi.spyOn(ShownPages.prototype, 'setRule');
+      const marked = vi.spyOn(EventLayer.prototype, 'markChanged');
+      const stale = vi.spyOn(LightingLayers.prototype, 'markStale');
+
+      // Act.
+      renderer.setPageRule(rule);
+
+      // Assert.
+      expect([ ruled.mock.calls, marked.mock.calls, stale.mock.calls.length ])
+        .toStrictEqual([ [ [ rule ] ], [ [ null ] ], 1 ]);
+    });
+
+    it('judges an event afresh once it changes, and every event once the list itself changes', () =>
+    {
+      // Arrange: a renderer holding a map, watching what it forgets.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      const map = MapDocument.fromJson('map:1', buildMapJson());
+      renderer.setDocument(map);
+      const forgot = vi.spyOn(ShownPages.prototype, 'forget');
+
+      // Act: the door's first page given a condition, then the list grown by an event, then a tile painted.
+      map.apply(map.setPatch([ 'events', 1, 'pages', 0, 'conditions', 'switch1Valid' ], true));
+      map.apply(map.placeEventPatch({ ...createMapEvent(9, 1, 1) }));
+      map.apply(map.tilesPatch([ [ 0, 99 ] ]));
+
+      // Assert.
+      expect(forgot.mock.calls)
+        .toStrictEqual([ [ 1 ], [ null ] ]);
+    });
+
+    it('shows events no page holds for only while the markers overlay is on', () =>
+    {
+      // Arrange.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      const shown = vi.spyOn(EventLayer.prototype, 'setFadedShown');
+
+      // Act: the markers on, then off, as a map drawn as the game draws it has them.
+      renderer.setOverlays({ enabled: new Set([ 'markers' ]), definitions: [] });
+      renderer.setOverlays({ enabled: new Set(), definitions: [] });
+
+      // Assert.
+      expect(shown.mock.calls)
+        .toStrictEqual([ [ true ], [ false ] ]);
+    });
+
+    it('counts the events drawn faded and the events following the clock', () =>
+    {
+      // Arrange: three events drawn faded, and two whose pages ask something of the clock.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      vi.spyOn(EventLayer.prototype, 'fadedCount', 'get').mockReturnValue(3);
+      vi.spyOn(ShownPages.prototype, 'followingClock', 'get').mockReturnValue(2);
+
+      // Act.
+      const { fadedEvents, eventsFollowingClock } = renderer.stats();
+
+      // Assert.
+      expect([ fadedEvents, eventsFollowingClock ])
+        .toStrictEqual([ 3, 2 ]);
+    });
   });
 
   describe('tone', () =>

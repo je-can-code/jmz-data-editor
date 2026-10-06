@@ -4,7 +4,7 @@ import { markerSymbolFor } from '../core/eventKinds/eventMarkers.ts';
 import { EVENT_CLIPBOARD_MARKER } from '../core/events/eventClipboard.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
-import type { RmmzMapEvent } from '../core/model/rmmzTypes.ts';
+import type { RmmzEventPage, RmmzMapEvent } from '../core/model/rmmzTypes.ts';
 import type { ModuleNotice } from '../core/modules/PluginModule.ts';
 import type { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import type { Camera, MapCell } from '../core/renderer/camera.ts';
@@ -126,13 +126,13 @@ const STARTING_OVERLAYS: readonly OverlayId[] = [ 'selection', 'hover', 'ghost',
 
 /**
  * Builds how a view's markers pick their symbol: by the kind the window's registry makes of each event on its map, a
- * kind's own symbol, or the event's trigger when no kind claims it or the kind names none.
+ * kind's own symbol, or the trigger of the page the event shows when no kind claims it or the kind names none.
  * @param {PluginModuleRegistry} modules The window's kinds.
  * @returns {MarkerClassifier} The classifier.
  */
 const markerClassifierFor = (modules: PluginModuleRegistry): MarkerClassifier =>
 {
-  return (event: RmmzMapEvent, mapId: number) => markerSymbolFor(event, modules.kindOf(event, mapId));
+  return (event: RmmzMapEvent, mapId: number, page?: RmmzEventPage) => markerSymbolFor(event, modules.kindOf(event, mapId), page);
 };
 
 /**
@@ -231,9 +231,10 @@ const DrawNotice = (props: { state: DrawState; notices?: readonly ModuleNotice[]
 /**
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
  * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look
- * (Lighting among them while a plugin module lights the map, and the window's clock while one offers a time of day,
- * the sky drawn at its hour), the painting tools, and a status line naming the zoom, the tile under the pointer, how
- * many events are selected and the GPU drawing it.
+ * (Lighting among them while a plugin module lights the map, and the window's one clock while a module offers a time of
+ * day, the sky drawn and each event's page shown at its hour), the painting tools, and a status line naming the zoom,
+ * the tile under the pointer, how many events are selected and the GPU drawing it. Each event shows the page a fresh
+ * save would show at the clock's time, by the window's page rule.
  *
  * The view paints with its window's paint: the page's own for a map docked in the main window, and a torn-out window's
  * own for a map torn out, so each window's palette, layer strip and tools go together and no further.
@@ -314,9 +315,12 @@ const MapView = (props: MapViewProps) =>
     stops.push(services.modules.subscribe(() => renderer.setEventMarkers(classify)));
 
     // the lighting layer holds what the plugin modules draw there, which changes as they switch on and off, and draws the
-    // sky at the hour the window's clock shows, which every view in the window follows as it moves.
+    // sky at the hour the window's clock shows, which every view in the window follows as it moves; each event shows the
+    // page the window's page rule picks at that hour, the rule changing as the modules switch on and the new game is read.
     renderer.setLightingLayers(services.modules.lightingLayers());
     stops.push(services.modules.subscribe(() => renderer.setLightingLayers(services.modules.lightingLayers())));
+    renderer.setPageRule(services.pages.rule());
+    stops.push(services.pages.subscribe(() => renderer.setPageRule(services.pages.rule())));
     renderer.setTimeOfDay(services.clock.time());
     stops.push(services.clock.subscribe(() => renderer.setTimeOfDay(services.clock.time())));
     stops.push(renderer.onCameraChange((camera: Camera) =>

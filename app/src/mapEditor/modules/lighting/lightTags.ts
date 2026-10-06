@@ -343,8 +343,9 @@ const lightsOf = (page: RmmzEventPage, defaults: LightDefaults): LightDeclaratio
 };
 
 /**
- * Picks the page whose lights an event shows: the first page that gives any. A torch that can be lit is a cold first
- * page and a lit page behind a switch or a self switch, and the lit page is the one worth showing.
+ * Picks the page whose lights a light's panel edits: the first page that gives any, whatever the clock shows. A torch
+ * that can be lit is a cold first page and a lit page behind a switch, a self switch or its hours, and the lit page is
+ * the one worth editing, even at noon while the map shows it cold.
  * @param {RmmzMapEvent} event The event.
  * @param {LightDefaults} defaults What the lights fall back to.
  * @returns {LitPage | null} The page, where it sits, and its lights, or null when no page gives light.
@@ -364,8 +365,31 @@ const firstLitPage: LightPageChoice = (event: RmmzMapEvent, defaults: LightDefau
 };
 
 /**
+ * Picks the page whose lights an event gives off on the map: the page the game shows it at, when that page gives any. A
+ * torch lit only by night gives none by day, and an event no page holds for gives none at all, however many of its
+ * pages could.
+ * @param {RmmzMapEvent} event The event.
+ * @param {LightDefaults} defaults What the lights fall back to.
+ * @param {number} active The page the game shows, or -1 when it shows none.
+ * @returns {LitPage | null} The page, where it sits, and its lights, or null when it gives no light.
+ */
+const shownLitPage = (event: RmmzMapEvent, defaults: LightDefaults, active: number): LitPage | null =>
+{
+  const page = event.pages[active];
+  if (page === undefined)
+  {
+    return null;
+  }
+
+  const lights = lightsOf(page, defaults);
+  return lights.length === 0
+    ? null
+    : { page, pageIndex: active, lights };
+};
+
+/**
  * Recognises a light: an event with a page that gives light, read by the same parser and the same page choice that
- * draw its ring, so the two can never disagree about which events are lights.
+ * the light's panel edits, so the two can never disagree about which events are lights.
  * @param {RmmzMapEvent} event The event.
  * @returns {boolean} True for a light.
  */
@@ -393,5 +417,6 @@ export {
   readLightLine,
   readPayload,
   readValue,
+  shownLitPage,
 };
 export type { LightDeclaration, LightDefaults, LightEffect, LightLine, LightPageChoice, LitPage, TagValue };

@@ -1,8 +1,9 @@
 import { Graphics } from 'pixi.js';
 import type { RmmzEventPage, RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
+import type { ActivePages } from '../../core/pageRule/ShownPages.ts';
 import type { LightingDrawing, LightingFrame, LightingStage } from '../../core/renderer/lightingLayer.ts';
 import { eventPlacement } from '../../render/engine/characterFrames.ts';
-import { firstLitPage, normalizeHex, type LightDefaults, type LightPageChoice } from './lightTags.ts';
+import { normalizeHex, shownLitPage, type LightDefaults } from './lightTags.ts';
 
 /**
  * One light's ring: where the light sits and how far it reaches, in world pixels, and its colour as {@code 0xRRGGBB}.
@@ -56,19 +57,20 @@ const lightCentre = (event: RmmzMapEvent, page: RmmzEventPage, tileSize: number)
 };
 
 /**
- * Lists the rings a map's lights show: one per light on the page each event shows its lights from, the first page that
- * gives any unless another choice is handed over, so an event giving several lights shows several rings about one spot.
+ * Lists the rings a map's lights show: one per light on the page each event shows at the clock's time, when that page
+ * gives any, so a lamp lit only by night shows no ring by day, and an event giving several lights shows several rings
+ * about one spot.
  * @param {readonly (RmmzMapEvent | null)[]} events The map's events, with empty slots.
  * @param {LightDefaults} defaults What the lights fall back to.
  * @param {number} tileSize The tile size.
- * @param {LightPageChoice} choosePage Picks the page whose lights an event shows.
+ * @param {ActivePages} pages The page each event shows.
  * @returns {LightRing[]} The rings, by event, then in the order the page writes its lights.
  */
 const lightRingsOf = (
   events: readonly (RmmzMapEvent | null)[],
   defaults: LightDefaults,
   tileSize: number,
-  choosePage: LightPageChoice = firstLitPage): LightRing[] =>
+  pages: ActivePages): LightRing[] =>
 {
   return events.flatMap(event =>
   {
@@ -77,7 +79,7 @@ const lightRingsOf = (
       return [];
     }
 
-    const lit = choosePage(event, defaults);
+    const lit = shownLitPage(event, defaults, pages.activePage(event));
     if (lit === null)
     {
       return [];
@@ -139,13 +141,13 @@ const paintRings = (graphics: Graphics, rings: readonly LightRing[]): void =>
 };
 
 /**
- * J-Lighting's light rings in one map view: every light on the map shows how far it reaches, as a ring about the spot
- * the game centres it on, its radius the tag's reach in tiles, in the light's colour.
+ * J-Lighting's light rings in one map view: every light the map shows at the clock's time shows how far it reaches, as
+ * a ring about the spot the game centres it on, its radius the tag's reach in tiles, in the light's colour.
  *
- * Asked to draw whenever anything on the map but its tiles changed, it works the rings out again, which is cheap, and
- * redraws them only when one moved, grew, changed colour, came or went, so an edit elsewhere on the map costs it a
- * comparison and a brush stroke costs it nothing at all. Nothing about a ring moves with time, so the clock moving
- * costs it nothing either.
+ * Asked to draw whenever anything on the map but its tiles changed, or the clock turned an event to another page, it
+ * works the rings out again, which is cheap, and redraws them only when one moved, grew, changed colour, came or went,
+ * so an edit elsewhere on the map costs it a comparison and a brush stroke costs it nothing at all. Between draws no
+ * page turns, and nothing about a ring moves with time, so a tick costs it nothing either.
  */
 class LightRings implements LightingDrawing
 {
@@ -155,26 +157,22 @@ class LightRings implements LightingDrawing
 
   #tileSize: number;
 
-  #choosePage: LightPageChoice;
-
   #drawn: readonly LightRing[] = [];
 
   /**
    * @param {LightingStage} stage Where the rings draw.
    * @param {LightDefaults} defaults What the lights fall back to.
-   * @param {LightPageChoice} choosePage Picks the page whose lights an event shows; by default, the first giving any.
    */
-  constructor(stage: LightingStage, defaults: LightDefaults, choosePage: LightPageChoice = firstLitPage)
+  constructor(stage: LightingStage, defaults: LightDefaults)
   {
     this.#defaults = defaults;
     this.#tileSize = stage.tileSize;
-    this.#choosePage = choosePage;
     stage.layer.addChild(this.#graphics);
   }
 
   draw(frame: LightingFrame): void
   {
-    const rings = lightRingsOf(frame.document.events, this.#defaults, this.#tileSize, this.#choosePage);
+    const rings = lightRingsOf(frame.document.events, this.#defaults, this.#tileSize, frame.pages);
     if (sameRings(rings, this.#drawn))
     {
       return;

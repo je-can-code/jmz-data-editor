@@ -1,7 +1,7 @@
 import type { ImageFolder } from '../api/MapEditorApi.ts';
 import type { EventMarkerSymbol } from '../eventKinds/eventMarkers.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
-import type { RmmzEventImage, RmmzMapEvent, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { RmmzEventImage, RmmzEventPage, RmmzMapEvent, RmmzTileset } from '../model/rmmzTypes.ts';
 import type { PassabilityRule } from '../modules/PluginModule.ts';
 import type { Camera, MapCell, ScreenPoint } from './camera.ts';
 import type { FrameTimings } from './FrameTimeRecorder.ts';
@@ -82,15 +82,17 @@ const GAME_LOOK: LayerVisibility = {
 /**
  * The overlays the core draws: the grid, regions, passability, the highlight of the chosen layer, the selection,
  * the hover, the ghost preview of what a click would place, and the markers that show events whose page draws no
- * picture, which draw only while the events do. Plugin modules add their own, named {@code module.overlay} (J-ABS's
- * sight rings would be {@code jabs.sight}).
+ * picture, which draw only while the events do, together with the events no page holds for at the clock's time, which
+ * the game shows as nothing and the editor shows faded; with the markers off, a map shows only what the game draws.
+ * Plugin modules add their own, named {@code module.overlay} (J-ABS's sight rings would be {@code jabs.sight}).
  */
 type CoreOverlayId = 'grid' | 'regions' | 'passability' | 'layer-highlight' | 'selection' | 'hover' | 'ghost' | 'markers';
 
 /**
- * Picks the symbol an event's marker shows, for an event on a map: what the window's kinds make of it.
+ * Picks the symbol an event's marker shows, for an event on a map: what the window's kinds make of it, and the trigger of
+ * the page it shows, when that is given, for an event no kind names a symbol for.
  */
-type MarkerClassifier = (event: RmmzMapEvent, mapId: number) => EventMarkerSymbol;
+type MarkerClassifier = (event: RmmzMapEvent, mapId: number, page?: RmmzEventPage) => EventMarkerSymbol;
 
 /**
  * Names one overlay.

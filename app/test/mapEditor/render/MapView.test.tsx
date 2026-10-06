@@ -17,10 +17,16 @@ import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { marksOf, TILESET_MARKS_DOCUMENT } from '../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
+import { CommandCatalog } from '../../../src/mapEditor/core/commands/CommandCatalog.ts';
+import { PluginModuleRegistry } from '../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import type { PageRule } from '../../../src/mapEditor/core/pageRule/pageRule.ts';
+import { WindowPageRule } from '../../../src/mapEditor/core/pageRule/WindowPageRule.ts';
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { LightingLayerDefinition } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import type { LayerVisibility, MarkerClassifier, OverlaySet, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { WindowClock } from '../../../src/mapEditor/core/time/WindowClock.ts';
+import { SHIPPED_MODULES } from '../../../src/mapEditor/services/pluginModules.ts';
+import type { PluginsJsEntry } from '../../../src/services/plugins/PluginsJsReader.ts';
 import { WindowPaints } from '../../../src/mapEditor/core/tools/WindowPaint.ts';
 import { MapEditorApp } from '../../../src/mapEditor/MapEditorApp.tsx';
 import { MapView, mapIdFromQuery } from '../../../src/mapEditor/render/MapView.tsx';
@@ -30,9 +36,9 @@ import { buildMapJson } from '../support/fixtures.ts';
 
 /**
  * What the stand-in renderers and controllers record and answer: every renderer made, what each was asked to show
- * and where to look, the overlay switches, layer visibilities, lighting layers and marker classifiers it was handed,
- * what it was told of the view being on screen (with "mount" where it was mounted), ways to change its draw state and
- * its zoom, and the maps an open lands on.
+ * and where to look, the overlay switches, layer visibilities, lighting layers, marker classifiers and page rules it was
+ * handed, what it was told of the view being on screen (with "mount" where it was mounted), ways to change its draw
+ * state and its zoom, and the maps an open lands on.
  */
 const stand = vi.hoisted(() => ({
   renderers: [] as {
@@ -42,6 +48,7 @@ const stand = vi.hoisted(() => ({
     visibilities: LayerVisibility[];
     lighting: (readonly LightingLayerDefinition[])[];
     classifiers: MarkerClassifier[];
+    pageRules: PageRule[];
     shown: (boolean | 'mount')[];
     times: number[];
     announce: (state: string) => void;
@@ -66,6 +73,7 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       visibilities: [] as LayerVisibility[],
       lighting: [] as (readonly LightingLayerDefinition[])[],
       classifiers: [] as MarkerClassifier[],
+      pageRules: [] as PageRule[],
       shown: [] as (boolean | 'mount')[],
       times: [] as number[],
       announce: (state: string) =>
@@ -161,6 +169,11 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       this.record.times.push(minutes);
     }
 
+    setPageRule(rule: PageRule): void
+    {
+      this.record.pageRules.push(rule);
+    }
+
     setOverlays(overlays: OverlaySet): void
     {
       this.record.overlaySets.push(overlays);
@@ -250,7 +263,11 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  *
  * The bar shows the window's clock only while a module offers one, naming the time and the part of the day as the
  * module names it, and the renderer is handed the clock's time from the start and every time it moves, wherever it was
- * moved from, so every view of the window draws the sky at the same hour.
+ * moved from, so every view of the window draws the sky at the same hour. With every module the editor ships on, the one
+ * clock is J-TIME's, J-Lighting-Time casting its sky by it, and the bar shows one chip.
+ *
+ * The renderer is handed the window's page rule from the start, and again whenever it changes, as the modules switch
+ * on or the new game is read, so every event shows the page a fresh save would show at the clock's time.
  */
 describe('MapView', () =>
 {
@@ -278,6 +295,7 @@ describe('MapView', () =>
     lightingLayers: () => [],
     notices: () => [],
     clockOffer: () => null,
+    pageConditions: () => [],
   };
 
   /**
@@ -293,7 +311,8 @@ describe('MapView', () =>
     const paints = new WindowPaints(window);
     const locationPicks = new LocationPicks();
     const clock = new WindowClock(840);
-    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES, clock };
+    const pages = new WindowPageRule(NO_MODULES);
+    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES, clock, pages };
     return { ...services, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
   };
 
@@ -665,10 +684,30 @@ describe('MapView', () =>
     // Act: the modules switch on once the renderer holds the first classifier.
     activations.forEach(listener => listener());
 
-    // Assert: handed over twice, and both read the claimed event by its kind and the others by their triggers.
+    // Assert: handed over twice, and both read the claimed event by its kind and the others by their triggers; one handed
+    // the page an event shows reads that page's trigger, a parallel page here, unless a kind claims the event.
     const [ { classifiers } ] = stand.renderers;
-    expect([ classifiers.length, classifiers.map(classify => events.map(event => classify(event, 5))) ])
-      .toStrictEqual([ 2, [ [ 'chest', 'autorun', 'player-touch' ], [ 'chest', 'autorun', 'player-touch' ] ] ]);
+    const parallelPage = { ...createEventPage(), trigger: 4 };
+    expect([ classifiers.length, classifiers.map(classify => events.map(event => classify(event, 5))), events.map(event => classifiers[1](event, 5, parallelPage)) ])
+      .toStrictEqual([ 2, [ [ 'chest', 'autorun', 'player-touch' ], [ 'chest', 'autorun', 'player-touch' ] ], [ 'chest', 'parallel', 'parallel' ] ]);
+  });
+
+  it('hands the renderer the window\'s page rule from the start, and again whenever it changes', () =>
+  {
+    // Arrange: a view over a project, whose new game is not read yet.
+    const services = served();
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: the new game is read, seating Jerald and Rupert.
+    act(() => services.pages.setSave({ party: [ 1, 2 ] }));
+
+    // Assert: seating nobody from the start, then the party read.
+    expect(stand.renderers[0].pageRules.map(rule => [ rule.save.party, rule.conditions ]))
+      .toStrictEqual([ [ [], [] ], [ [ 1, 2 ], [] ] ]);
   });
 
   it('holds the tiles that go on top from the start, seeded from the maps when the project never saved any', async () =>
@@ -790,6 +829,31 @@ describe('MapView', () =>
     // Assert.
     expect([ before, shown, screen.getByTestId('map-clock').textContent ])
       .toStrictEqual([ null, '14:00 Afternoon', '22:00 Night' ]);
+  });
+
+  it('shows one clock, J-TIME\'s, with J-Lighting and J-Lighting-Time on beside it, its pages joining the page rule', () =>
+  {
+    // Arrange: the modules the editor ships, switched on over J-Lighting, J-Lighting-Time and J-TIME, the game starting
+    // at 14:00.
+    const plugin = (name: string, parameters: Record<string, string> = {}): PluginsJsEntry => ({ name, status: true, description: '', parameters });
+    const modules = new PluginModuleRegistry(new CommandCatalog());
+    modules.activate(SHIPPED_MODULES, [
+      plugin('j/lighting/J-Lighting'),
+      plugin('j/lighting/ext/J-Lighting-Time'),
+      plugin('j/time/J-TIME', { useRealTime: 'false', startingHour: '14', startingMinute: '0' }),
+    ]);
+    const services = { ...served(), modules, pages: new WindowPageRule(modules) } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert.
+    expect([ screen.getAllByTestId('map-clock').map(chip => chip.textContent), stand.renderers[0].pageRules[0].conditions.map(condition => condition.id) ])
+      .toStrictEqual([ [ '14:00 Afternoon' ], [ 'time.pages' ] ]);
   });
 
   it('hands the renderer the clock\'s time from the start and each time it moves, wherever it was moved from', () =>

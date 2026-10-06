@@ -1,5 +1,6 @@
 import type { Container, Renderer } from 'pixi.js';
 import type { MapDocument } from '../model/MapDocument.ts';
+import type { ActivePages } from '../pageRule/ShownPages.ts';
 
 /**
  * A colour cast over everything the game tones, as the engine takes a screen tone (Game_Screen#tone, which the colour
@@ -56,7 +57,7 @@ type LightingClock = {
 /**
  * What a lighting drawing is handed each time it is asked to draw or to move on: the map as it now stands, the view's
  * pixi renderer, for anything drawn into a render texture first, such as a map's darkness with light cut out of it,
- * which GPU context the view draws on, and the view's clock.
+ * which GPU context the view draws on, the view's clock, and the page each event shows at the clock's time.
  */
 type LightingFrame = {
   readonly document: MapDocument;
@@ -72,15 +73,23 @@ type LightingFrame = {
    * The view's clock as this frame reads it.
    */
   readonly clock: LightingClock;
+
+  /**
+   * The page each event shows at the clock's time, as the game picks it on a fresh save: the page whatever an event
+   * gives off is read from, so a lamp lit only by night gives no light at noon, and an event no page holds for gives
+   * none at all. Whenever the clock's moving turns any event to another page, the view asks every drawing to draw, as
+   * after an edit, so between draws the pages stand still.
+   */
+  readonly pages: ActivePages;
 };
 
 /**
  * One module's lighting in one map view, made of plain pixi display objects it adds to its stage's container.
  *
  * The view asks it to draw in the frame after the map opened, after anything on the map but its tiles changed (an
- * edit, a move, an undo, a copy from another window, a change to the file on disk), and after the graphics card gave
- * the view's context back, which takes any render texture's pixels with it, as the frame's context says; however many
- * changes arrive before that frame, it draws once. A brush stroke changes only tiles, so it never asks. While the
+ * edit, a move, an undo, a copy from another window, a change to the file on disk), after the clock's moving turned an
+ * event to another page, and after the graphics card gave the view's context back, which takes any render texture's
+ * pixels with it, as the frame's context says; however many changes arrive before that frame, it draws once. A brush stroke changes only tiles, so it never asks. While the
  * Lighting switch is off it is not asked at all, and draws once the switch is back on. What it does with each ask is
  * its own business: it may well find nothing it draws has changed, and keep what it has.
  *

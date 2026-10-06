@@ -1,10 +1,11 @@
 import { TextureSource, type Container, type Sprite } from 'pixi.js';
 import { describe, expect, it } from 'vitest';
-import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
+import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { PageShown, ShownPageReader } from '../../../../src/mapEditor/core/pageRule/ShownPages.ts';
 import type { TextureImage } from '../../../../src/mapEditor/core/renderer/MapRenderer.ts';
-import { EventLayer, type AlphaReader } from '../../../../src/mapEditor/render/scene/EventLayer.ts';
+import { EventLayer, FADED_ALPHA, type AlphaReader } from '../../../../src/mapEditor/render/scene/EventLayer.ts';
 import { GHOST_ALPHA } from '../../../../src/mapEditor/render/scene/GhostTiles.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
@@ -581,6 +582,182 @@ describe('EventLayer', () =>
       const [ ghost ] = layer.ghosts.children;
       expect([ layer.ghosts.children.length, ghost === built, [ ghost.x, ghost.y ], [ (ghost as Sprite).texture.frame.x, (ghost as Sprite).texture.frame.y ], ghost.alpha ])
         .toStrictEqual([ 1, true, [ 120, 72 ], [ 128, 256 ], GHOST_ALPHA ]);
+    });
+  });
+
+  describe('pages', () =>
+  {
+    /*
+     * Each event draws the page the page rule shows at the clock's time: its picture, its priority and, for a page
+     * drawing no picture, the marker of that page's trigger. An event no page holds for draws its first page faded,
+     * picture and marker alike, and a click still finds it, until faded events are hidden, when it draws nothing and no
+     * click finds it. A ghost of an event on the map draws as that event draws, and a sheet that loads redraws every
+     * event and ghost drawing with it on the page it shows.
+     */
+    const ATLAS = new TextureSource({ width: 512, height: 512 });
+
+    /**
+     * Reads pages as given by id: a page to draw, faded or not; events not named draw their first page.
+     * @param {Record<number, PageShown>} byId The page each event shows.
+     * @returns {ShownPageReader} The reader.
+     */
+    const pagesOf = (byId: Record<number, PageShown>): ShownPageReader => ({ shownPage: shown => byId[shown.id] ?? { index: 0, faded: false } });
+
+    /**
+     * Draws events on an empty 4x4 map whose tileset has a B sheet, with a marker atlas, the pages given, and character
+     * sheets loaded by a loader when one is given.
+     * @param {RmmzMapEvent[]} events The events, ids 1 up in order.
+     * @param {ShownPageReader} pages The page each event shows.
+     * @param {(folder: string, name: string) => Promise<TextureImage | null>} image Loads character sheets; left out,
+     * none can load.
+     * @returns {EventLayer} The layer, built.
+     */
+    const drawPaged = (events: RmmzMapEvent[], pages: ShownPageReader, image?: (folder: string, name: string) => Promise<TextureImage | null>): EventLayer =>
+    {
+      const json = buildMapJson();
+      json.width = 4;
+      json.height = 4;
+      json.data = new Array<number>(4 * 4 * 6).fill(0);
+      json.events = [ null, ...events ];
+      const layer = new EventLayer(() => undefined, () => 255);
+      const sheets = [ null, null, null, null, null, new TextureSource({ width: 768, height: 768 }), null, null, null ];
+      const images = image === undefined ? null : { image };
+      layer.setContext({ document: MapDocument.fromJson('map:1', json), flags: [], sheets, images, tileSize: 48, markerAtlas: () => ATLAS, pages });
+      return layer;
+    };
+
+    /**
+     * An event whose first page draws no picture on the action button, and whose second draws B tile 2 above characters.
+     * @param {number} id The event id.
+     * @param {number} x The column.
+     * @param {number} y The row.
+     * @returns {RmmzMapEvent} The event.
+     */
+    const lampAt = (id: number, x: number, y: number): RmmzMapEvent =>
+    {
+      const lamp = createMapEvent(id, x, y);
+      const lit = { ...createEventPage(), priorityType: 2, image: { ...createEventPage().image, tileId: 2 } };
+      return { ...lamp, pages: [ lamp.pages[0], lit ] };
+    };
+
+    it('draws each event\'s picture and priority from the page it shows, and its first page without a page rule', () =>
+    {
+      // Arrange: a lamp at 1, 1 showing its lit second page, and one at 2, 2 drawn with no page rule.
+      const shown = drawPaged([ lampAt(1, 1, 1) ], pagesOf({ 1: { index: 1, faded: false } }));
+      const plain = drawEvents([ lampAt(1, 2, 2) ]);
+
+      // Act.
+      const drawn = [ [ idsOf(shown.above), shown.markerCount, shown.spriteCount ], [ idsOf(plain.above), plain.markerCount, plain.spriteCount ] ];
+
+      // Assert: the lit lamp a tile above characters; the plain one its first page, a marker drawn nowhere without an
+      // atlas.
+      expect(drawn)
+        .toStrictEqual([ [ [ 1 ], 0, 1 ], [ [], 0, 0 ] ]);
+    });
+
+    it('marks an event drawing no picture by the trigger of the page it shows', () =>
+    {
+      // Arrange: an event on the action button on its first page, and on autorun on its second, which it shows.
+      const story = createMapEvent(1, 0, 0);
+      const autorun = { ...createEventPage(), trigger: 3 };
+      const layer = drawPaged([ { ...story, pages: [ story.pages[0], autorun ] } ], pagesOf({ 1: { index: 1, faded: false } }));
+
+      // Act.
+      const [ marker ] = layer.markers.children as Sprite[];
+
+      // Assert: autorun's frame of the atlas.
+      expect([ marker.texture.frame.x, marker.texture.frame.y ])
+        .toStrictEqual([ 128, 256 ]);
+    });
+
+    it('draws an event no page holds for faded, picture and marker alike, where a click still finds it', () =>
+    {
+      // Arrange: a lamp at 1, 1 and an event drawing no picture at 3, 3, neither held for by any page.
+      const faded = { index: 0, faded: true };
+      const layer = drawPaged([ lampAt(1, 1, 1), createMapEvent(2, 3, 3) ], pagesOf({ 1: { index: 1, faded: false }, 2: faded }));
+      const [ marker ] = layer.markers.children;
+
+      // Act.
+      const found = [ layer.eventAt(72, 72, 1), layer.eventAt(168, 168, 1) ];
+
+      // Assert: the lamp drawn plainly, the other faded, both found.
+      expect([ layer.above.children[0].alpha, marker.alpha, marker.visible, layer.fadedCount, found ])
+        .toStrictEqual([ 1, FADED_ALPHA, true, 1, [ 1, 2 ] ]);
+    });
+
+    it('hides an event no page holds for while faded events are hidden, where no click finds it, and shows it again', () =>
+    {
+      // Arrange: a lamp held for by no page, drawing its first page's tile; and a lamp at 2, 2 showing its lit page.
+      const tileFirst = { ...lampAt(1, 1, 1), pages: [ { ...createEventPage(), image: { ...createEventPage().image, tileId: 1 } } ] };
+      const layer = drawPaged([ tileFirst, lampAt(2, 2, 2) ], pagesOf({ 1: { index: 0, faded: true }, 2: { index: 1, faded: false } }));
+      const [ fadedRoot ] = layer.below.children;
+
+      // Act: hidden, asked twice, then shown again.
+      layer.setFadedShown(false);
+      layer.setFadedShown(false);
+      const hidden = [ fadedRoot.visible, layer.eventAt(72, 72, 1), layer.eventAt(120, 120, 1) ];
+      layer.setFadedShown(true);
+
+      // Assert: hidden and found by nothing, the lit lamp still found; then drawn faded again.
+      expect([ hidden, fadedRoot.visible, fadedRoot.alpha, layer.eventAt(72, 72, 1) ])
+        .toStrictEqual([ [ false, null, 2 ], true, FADED_ALPHA, 1 ]);
+    });
+
+    it('builds an event no page holds for hidden while faded events are hidden', () =>
+    {
+      // Arrange: faded events hidden before an event no page holds for is drawn.
+      const layer = drawPaged([], pagesOf({}));
+      layer.setFadedShown(false);
+      const json = buildMapJson();
+      json.width = 4;
+      json.height = 4;
+      json.data = new Array<number>(4 * 4 * 6).fill(0);
+      json.events = [ null, createMapEvent(1, 0, 0) ];
+      const sheets = [ null, null, null, null, null, new TextureSource({ width: 768, height: 768 }), null, null, null ];
+
+      // Act.
+      layer.setContext({ document: MapDocument.fromJson('map:1', json), flags: [], sheets, images: null, tileSize: 48, markerAtlas: () => ATLAS, pages: pagesOf({ 1: { index: 0, faded: true } }) });
+
+      // Assert.
+      expect([ layer.markers.children[0].visible, layer.eventAt(24, 24, 1) ])
+        .toStrictEqual([ false, null ]);
+    });
+
+    it('drags a ghost of an event as the page it shows draws, and any other ghost as handed over', () =>
+    {
+      // Arrange: a lamp at 0, 0 showing its lit tile page, dragged with its first page's blank picture as the drag hands
+      // it over; and a ghost of no event with that blank picture.
+      const layer = drawPaged([ lampAt(1, 0, 0) ], pagesOf({ 1: { index: 1, faded: false } }));
+      const blank = createEventPage().image;
+
+      // Act: dragged to 1, 1, then a tile further.
+      layer.setGhosts([ { x: 1, y: 1, image: blank, priorityType: 0, eventId: 1 }, { x: 3, y: 3, image: blank, priorityType: 0 } ]);
+      layer.setGhosts([ { x: 2, y: 1, image: blank, priorityType: 0, eventId: 1 }, { x: 3, y: 3, image: blank, priorityType: 0 } ]);
+
+      // Assert: one ghost, a picture rather than a marker, standing at the tile's foot.
+      const [ ghost ] = layer.ghosts.children;
+      expect([ layer.ghosts.children.length, ghost.children.length, [ ghost.x, ghost.y ] ])
+        .toStrictEqual([ 1, 1, [ 120, 96 ] ]);
+    });
+
+    it('draws an event and its ghost from the page it shows once that page\'s sheet loads', async () =>
+    {
+      // Arrange: an event blank on its first page and an orc on its second, which it shows, dragged as its blank page.
+      const orc = createMapEvent(1, 1, 1);
+      const orcPage = { ...createEventPage(), priorityType: 1, image: { ...createEventPage().image, characterName: 'orc' } };
+      const layer = drawPaged([ { ...orc, pages: [ orc.pages[0], orcPage ] } ], pagesOf({ 1: { index: 1, faded: false } }), async () => ({ width: 576, height: 384 }) as unknown as TextureImage);
+      layer.setGhosts([ { x: 2, y: 2, image: createEventPage().image, priorityType: 0, eventId: 1 } ]);
+      const loading = [ layer.spriteCount, layer.ghosts.children.length ];
+
+      // Act.
+      await new Promise(resolve =>
+      {
+        setTimeout(resolve, 0);
+      });
+
+      // Assert: nothing while the sheet loads; then the orc and its ghost drawn from it.
+      expect([ loading, layer.spriteCount, layer.ghosts.children.length, layer.markerCount ])
+        .toStrictEqual([ [ 0, 0 ], 1, 1, 0 ]);
     });
   });
 });

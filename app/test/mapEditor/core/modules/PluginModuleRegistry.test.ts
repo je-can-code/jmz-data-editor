@@ -482,7 +482,7 @@ describe('PluginModuleRegistry', () =>
       };
       const registry = new PluginModuleRegistry(new CommandCatalog());
       registry.activate([ lighting, gatingModule('time', 'J-TIME') ], [ plugin('j/lighting/J-Lighting', true), plugin('j/time/J-TIME', true) ]);
-      const page = commentedEvent('<hourRangePage:18-5>').pages[0];
+      const [ page ] = commentedEvent('<hourRangePage:18-5>').pages;
       page.conditions = { ...page.conditions, switch1Valid: true, switch1Id: 4 };
 
       // Act.
