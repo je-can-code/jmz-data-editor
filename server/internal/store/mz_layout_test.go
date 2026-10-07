@@ -16,8 +16,10 @@ import (
 // SaveInMzLayout owes its callers MZ's file, exactly: a new map in MZ's own key order, and an
 // existing one in whatever order its file already used, so that only real changes show up in the
 // game's history. CreateInMzLayout owes the same bytes for a new file, and never writes over one that
-// exists. These use a small made-up map, so they run whether or not the game is checked out;
-// the sweep over every real file lives in mz_round_trip_test.go.
+// exists. UpdateInFileLayout owes a change made to the file as it stands on disk, in the layout it
+// already has, and never one made over a file it cannot read. These use small made-up documents, so
+// they run whether or not the game is checked out; the sweep over every real file lives in
+// mz_round_trip_test.go.
 
 // replacedMap is a one-event map whose event image lists its keys alphabetically, one of the three
 // orders the real maps use, rather than in the model's field order.
@@ -176,6 +178,84 @@ func TestCreateInMzLayoutRefusesAFileThatExists(t *testing.T) {
 		t.Error("a refused create was still announced")
 	}
 	assertFileHolds(t, path, replacedMap)
+}
+
+// TestUpdateInFileLayoutChangesTheFileAsItStands covers an update made from the file as it is on disk
+// at that moment: what the update leaves alone is written back as the file holds it, its neighbour on
+// the same line included, in the file's own layout, and the exact bytes are announced before they land.
+func TestUpdateInFileLayoutChangesTheFileAsItStands(t *testing.T) {
+	// Arrange- a tileset indented the way the data editor leaves files, renamed by hand since the caller read it.
+	path := filepath.Join(t.TempDir(), "Tileset.json")
+	const onDisk = "{\n  \"id\": 3,\n  \"flags\": [\n    16,\n    0\n  ],\n  \"mode\": 1,\n  \"name\": \"Castle (renamed by hand)\",\n  \"note\": \"\",\n  \"tilesetNames\": [\n    \"Castle_A1\"\n  ]\n}"
+	if err := os.WriteFile(path, []byte(onDisk), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act- the mode changed, and nothing else.
+	announced := []byte{}
+	err := UpdateInFileLayout(path, func(current *db.RpgTileset) *db.RpgTileset {
+		current.Mode = 0
+		return current
+	}, func(content []byte) { announced = content })
+
+	// Assert.
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := "{\n  \"id\": 3,\n  \"flags\": [\n    16,\n    0\n  ],\n  \"mode\": 0,\n  \"name\": \"Castle (renamed by hand)\",\n  \"note\": \"\",\n  \"tilesetNames\": [\n    \"Castle_A1\"\n  ]\n}"
+	assertFileHolds(t, path, expected)
+	if string(announced) != expected {
+		t.Errorf("announced %q before writing", announced)
+	}
+}
+
+// TestUpdateInFileLayoutNeverWritesOverWhatItCannotRead covers the two files an update cannot start
+// from: one that is not there, and one holding a key the model cannot account for, which it would
+// drop. Each is refused with nothing announced, and the unreadable one is left byte for byte.
+func TestUpdateInFileLayoutNeverWritesOverWhatItCannotRead(t *testing.T) {
+	cases := []struct {
+		name    string
+		exists  bool
+		content string
+	}{
+		{name: "no file", exists: false},
+		{name: "a key the model lacks", exists: true, content: `{"id":3,"flags":[],"mode":1,"name":"Castle","note":"","sparkle":true,"tilesetNames":[]}`},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange.
+			path := filepath.Join(t.TempDir(), "Tileset.json")
+			if testCase.exists {
+				if err := os.WriteFile(path, []byte(testCase.content), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act.
+			updated := false
+			announced := false
+			err := UpdateInFileLayout(path, func(current *db.RpgTileset) *db.RpgTileset {
+				updated = true
+				return current
+			}, func([]byte) { announced = true })
+
+			// Assert- refused before the update ran, nothing announced, and the file as it was.
+			if err == nil {
+				t.Fatal("expected the update to be refused")
+			}
+			if updated || announced {
+				t.Errorf("a refused update still ran (%v) or announced (%v)", updated, announced)
+			}
+			if testCase.exists == false {
+				if _, statErr := os.Stat(path); os.IsNotExist(statErr) == false {
+					t.Errorf("expected no file to be written, stat said %v", statErr)
+				}
+				return
+			}
+			assertFileHolds(t, path, testCase.content)
+		})
+	}
 }
 
 // replaceOnce swaps one exact occurrence of old for new, failing when old is absent so the expected

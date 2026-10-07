@@ -40,21 +40,30 @@ func SaveInMzLayout[T any](data T, path string, layout mzjson.Layout, beforeWrit
 	return renderInMzLayout(data, path, template, layout, beforeWrite)
 }
 
-// SaveInFileLayout writes data to path as SaveInMzLayout does, in the key order of the file it replaces, but laid out
-// the way that file already is (see mzjson.LayoutLike) rather than in one fixed layout: a file MZ keeps on one line
-// stays on one line, and one the data editor keeps indented stays indented, so a save by either app never rewrites the
-// whole file. A new file is written on one line, as MZ writes one. The write is atomic.
-func SaveInFileLayout[T any](data T, path string, beforeWrite func(content []byte)) error {
+// UpdateInFileLayout changes the document in the file at path, as one step under the lock every write in MZ's layout
+// takes: the file is read and decoded strictly into T, update makes the document to write from it, and that is
+// written back atomically in the file's own key order, laid out the way the file already is (see mzjson.LayoutLike)
+// rather than in one fixed layout. So whatever update carries over from the file is written back exactly as the file
+// held it at that very moment, however old the caller's own copy of it is, and a file MZ keeps on one line stays on one
+// line while one the data editor keeps indented stays indented: a save by either app never rewrites the whole file.
+//
+// A file that is not there, or that does not decode strictly, is an error, and nothing is written: what cannot be read
+// cannot be carried over. beforeWrite is handed the exact bytes just before the write, as SaveInMzLayout hands them.
+func UpdateInFileLayout[T any](path string, update func(current T) T, beforeWrite func(content []byte)) error {
 	mzWriteLock.Lock()
 	defer mzWriteLock.Unlock()
 
-	// the file being replaced lends its layout as well as its key order; a new file has neither to lend.
+	// the file lends what update carries over, its layout and its key order.
 	template, err := os.ReadFile(path)
-	if err != nil && errors.Is(err, fs.ErrNotExist) == false {
+	if err != nil {
+		return err
+	}
+	current, err := decodeStrictly[T](template, path)
+	if err != nil {
 		return err
 	}
 
-	return renderInMzLayout(data, path, template, mzjson.LayoutLike(template), beforeWrite)
+	return renderInMzLayout(update(current), path, template, mzjson.LayoutLike(template), beforeWrite)
 }
 
 // CreateInMzLayout writes data to path in MZ's layout, as SaveInMzLayout writes a new file, but only where no file

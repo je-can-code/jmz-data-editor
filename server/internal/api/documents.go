@@ -69,10 +69,17 @@ func SaveCommonEvents(announcer WriteAnnouncer) http.HandlerFunc {
 	}
 }
 
-// SaveSystem serves PUT /api/system: the body is the whole of System.json. It is the map editor's
-// save, where the switch and variable names are renamed, and it is held to the same rules as its
-// maps: strict, written atomically in the key order of the file it replaces, and announced on the
-// change stream with the saving window's id. It answers 204.
+// SaveSystem serves PUT /api/system: the body is the whole of System.json, as the map editor holds
+// it. It is the map editor's save, where the switch and variable names are renamed and their lists
+// lengthened or shortened, and it is held to the same rules as its maps: strict, written atomically
+// in the key order of the file it replaces, and announced on the change stream with the saving
+// window's id. It answers 204.
+//
+// The names are all the map editor ever changes in System.json, so they are all this save takes from
+// the body: the switch and variable lists go into the file as it stands on disk at that moment, and
+// every other setting stays exactly as the file holds it. A copy of the settings older than the file,
+// kept by a window that went on renaming while MZ or the data editor saved the file, so never puts
+// back what they changed. A file that cannot be read strictly is never written over.
 //
 // Two apps save System.json: MZ keeps it on one line, the way JSON.stringify writes it, and the data
 // editor's POST route writes it indented, which reads far better when editing it by hand. So this
@@ -97,7 +104,13 @@ func SaveSystem(announcer WriteAnnouncer) http.HandlerFunc {
 		announce := func(content []byte) {
 			withdraw = announcer.Expect(relativePath, httpRequest.Header.Get(ClientHeader), content)
 		}
-		writeErr := store.SaveInFileLayout(system, filepath.Join(projectPath, filepath.FromSlash(relativePath)), announce)
+		// the names come from the body, and every other setting from the file as it stands.
+		namesOnly := func(current *db.RpgSystem) *db.RpgSystem {
+			current.Switches = system.Switches
+			current.Variables = system.Variables
+			return current
+		}
+		writeErr := store.UpdateInFileLayout(filepath.Join(projectPath, filepath.FromSlash(relativePath)), namesOnly, announce)
 		if writeErr != nil {
 			withdraw()
 			var res RestResponse[*db.RpgSystem]

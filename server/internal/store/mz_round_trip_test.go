@@ -78,7 +78,7 @@ func TestSaveInMzLayoutReproducesEveryFile(t *testing.T) {
 	})
 }
 
-// TestSaveInFileLayoutKeepsSystemJsonAsEitherAppLeftIt is the promise the switch and variable
+// TestUpdateInFileLayoutKeepsSystemJsonAsEitherAppLeftIt is the promise the switch and variable
 // window rests on, held against the game's real System.json, read and never written, in both layouts
 // it lives in: on one line, as MZ keeps it, and indented, as the data editor's own save leaves it,
 // which is made here from the real file, into a temporary folder, by that very save. In each, a save
@@ -91,7 +91,7 @@ func TestSaveInMzLayoutReproducesEveryFile(t *testing.T) {
 // spell differently: the saved line must spell them as the rest of its own file does. The body each
 // save is made from has every object's keys sorted, as a client keeping no order would send them, so
 // the file's key order comes from the file being replaced, as on a real save.
-func TestSaveInFileLayoutKeepsSystemJsonAsEitherAppLeftIt(t *testing.T) {
+func TestUpdateInFileLayoutKeepsSystemJsonAsEitherAppLeftIt(t *testing.T) {
 	path := filepath.Join(gametest.DataDir(t), "System.json")
 	original, err := os.ReadFile(path)
 	if err != nil {
@@ -175,8 +175,10 @@ func TestSaveInFileLayoutKeepsSystemJsonAsEitherAppLeftIt(t *testing.T) {
 	}
 }
 
-// saveFromClient saves settings as PUT /api/system does: as a client's body, with every object's keys
-// sorted the way a client keeping no order would send them, decoded strictly, then written over path.
+// saveFromClient saves settings the way PUT /api/system does: as a client's body, with every object's
+// keys sorted the way a client keeping no order would send them, decoded strictly, then written over
+// the file at path in its own layout. The body is written whole; which of it the route carries over
+// is the route's to test, and here the body differs from the file in the renamed switch alone.
 func saveFromClient(t *testing.T, system *db.RpgSystem, path string) {
 	t.Helper()
 
@@ -186,7 +188,7 @@ func saveFromClient(t *testing.T, system *db.RpgSystem, path string) {
 	if err := decoder.Decode(&decoded); err != nil {
 		t.Fatalf("the body did not decode: %v", err)
 	}
-	if err := SaveInFileLayout(decoded, path, nil); err != nil {
+	if err := UpdateInFileLayout(path, func(*db.RpgSystem) *db.RpgSystem { return decoded }, nil); err != nil {
 		t.Fatalf("the save failed: %v", err)
 	}
 }

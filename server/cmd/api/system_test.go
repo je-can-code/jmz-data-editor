@@ -11,11 +11,13 @@ import (
 // System.json holds the game's settings, its switch and variable names among them, and the map
 // editor renames those names. So the route owes the editor what every other map editor save owes it:
 // GET hands the file out, PUT takes the whole of it back and writes it in the key order of the file it
-// replaces, and a rename changes that name and no other byte. Two apps write the file in two layouts,
-// MZ on one line and the data editor indented, so PUT writes whichever the file already has, its
-// strings spelled the way that file spells them. Whatever the model cannot account for, or leaves
-// out, is refused with a 400 naming it, before anything touches the disk, and the save reaches the
-// change stream carrying the saving window's id.
+// replaces, and a rename changes that name and no other byte. The names are all PUT takes from the
+// body: they go into the file as it stands, so a window's older copy of the other settings never puts
+// back what MZ or the data editor saved since, and a file nothing can carry over is never written.
+// Two apps write the file in two layouts, MZ on one line and the data editor indented, so PUT writes
+// whichever the file already has, its strings spelled the way that file spells them. Whatever the
+// model cannot account for, or leaves out, is refused with a 400 naming it, before anything touches
+// the disk, and the save reaches the change stream carrying the saving window's id.
 
 // systemFixture is a small System.json in MZ's own layout. It carries what a careless writer would
 // change: a `<`, an `&` and quotes in the title, which Go escapes and MZ does not; message keys out of
@@ -145,6 +147,54 @@ func TestPutSystemKeepsTheDataEditorsIndent(t *testing.T) {
 	expected := strings.Replace(indented, "    \"after the vampire\",\n", "    \"after the \\u003cvampire\\u003e \\u0026 co\",\n", 1)
 	if written := current.read(t, "data/System.json"); written != expected {
 		t.Errorf("the rename wrote:\n%s\nexpected:\n%s", written, expected)
+	}
+}
+
+// TestPutSystemWritesOnlyTheNames covers a window whose copy of the settings is older than the file:
+// it read System.json, then MZ saved the file with another title and a switch renamed, and then the
+// window saved a rename of its own. The window's names go into the file as MZ left it; the title MZ
+// gave stays, and nothing else the window's older copy holds is put back. The names are taken as the
+// window holds them, its own list whole, so MZ's rename of a switch is the window's to have kept.
+func TestPutSystemWritesOnlyTheNames(t *testing.T) {
+	// Arrange- the body read before MZ's save, with variable 2 renamed in it; then MZ's save.
+	current := newSystemProject(t)
+	body := string(readEnvelope(t, current.call(t, http.MethodGet, "/api/system", "")).Data)
+	body = strings.Replace(body, `"Parries"`, `"Parries (all kinds)"`, 1)
+	savedByMz := strings.Replace(systemFixture, `"gameTitle":"<Chef> & \"Co\""`, `"gameTitle":"Chef Adventure"`, 1)
+	savedByMz = strings.Replace(savedByMz, `"Door open"`, `"Door ajar"`, 1)
+	writeProjectFile(t, current, "data/System.json", savedByMz)
+
+	// Act.
+	response := current.call(t, http.MethodPut, "/api/system", body)
+
+	// Assert- MZ's file, with the window's names in place of its own.
+	assertStatus(t, response, http.StatusNoContent)
+	expected := strings.Replace(savedByMz, `"variables":["","Gold found","Parries"]`, `"variables":["","Gold found","Parries (all kinds)"]`, 1)
+	expected = strings.Replace(expected, `"Door ajar"`, `"Door open"`, 1)
+	if written := current.read(t, "data/System.json"); written != expected {
+		t.Errorf("the save wrote:\n%s\nexpected:\n%s", written, expected)
+	}
+}
+
+// TestPutSystemNeverWritesOverAFileItCannotRead covers a System.json holding a setting the model does
+// not know, as a newer MZ might write: the names cannot go into a file nothing can carry over, so the
+// save is refused with the reason, and the file stays byte for byte.
+func TestPutSystemNeverWritesOverAFileItCannotRead(t *testing.T) {
+	// Arrange- the body as GET answered, then the file given a setting the model lacks.
+	current := newSystemProject(t)
+	body := string(readEnvelope(t, current.call(t, http.MethodGet, "/api/system", "")).Data)
+	unreadable := strings.Replace(systemFixture, `"windowTone"`, `"optNewFeature":true,"windowTone"`, 1)
+	writeProjectFile(t, current, "data/System.json", unreadable)
+
+	// Act.
+	response := current.call(t, http.MethodPut, "/api/system", strings.Replace(body, `"Door open"`, `"Door shut"`, 1))
+
+	// Assert.
+	assertStatus(t, response, http.StatusInternalServerError)
+	assertBodyContains(t, response, `unknown field`)
+	assertBodyContains(t, response, `optNewFeature`)
+	if current.read(t, "data/System.json") != unreadable {
+		t.Error("a refused save still changed System.json")
 	}
 }
 
