@@ -338,7 +338,7 @@ describe('SwitchesVariablesView', () =>
 
     // Assert.
     expect([ turnedOn, preview.preview().isFresh, (screen.getByLabelText('Show switch 3 on') as HTMLInputElement).checked ])
-      .toStrictEqual([ [ [ 3 ], 'Maps show: 1 switch', true ], true, false ]);
+      .toStrictEqual([ [ [ 3 ], 'Maps show: 1 switch on', true ], true, false ]);
   });
 
   it('sets a variable for every map as soon as its box holds a whole number, and goes back to it on leaving', () =>
@@ -357,7 +357,7 @@ describe('SwitchesVariablesView', () =>
 
     // Assert.
     expect([ typing, box.value, screen.getByTestId('preview-words').textContent, screen.getByText('1 set') instanceof HTMLElement ])
-      .toStrictEqual([ [ '-', 99 ], '99', 'Maps show: 1 variable', true ]);
+      .toStrictEqual([ [ '-', 99 ], '99', 'Maps show: 1 variable set', true ]);
   });
 
   it('follows a preview changed in another window in a box nobody is typing in', () =>

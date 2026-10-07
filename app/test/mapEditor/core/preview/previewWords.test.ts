@@ -4,9 +4,9 @@ import { CORE_NOUNS, previewWords, type PreviewNouns } from '../../../../src/map
 
 /*
  * The chip beside a map's clock says what the preview sets, so a preview is never on without the author seeing it: "Fresh
- * save" while it sets nothing, and otherwise how many of each kind it sets, switches first, then variables, then each
- * kind a module adds and names, one and several worded apart. A kind nobody named still counts, as more, so nothing set
- * ever goes unsaid.
+ * save" while it sets nothing, and otherwise how many of each kind it sets and what they are set to, switches first,
+ * then variables, then each kind a module adds and names, one and several worded apart: "2 switches on, 1 variable
+ * set". A kind nobody named still counts, as more, so nothing set ever goes unsaid.
  */
 describe('previewWords', () =>
 {
@@ -34,7 +34,7 @@ describe('previewWords', () =>
 
     // Assert.
     expect(words)
-      .toStrictEqual([ '2 switches, 1 variable', '1 switch', '2 variables' ]);
+      .toStrictEqual([ '2 switches on, 1 variable set', '1 switch on', '2 variables set' ]);
   });
 
   it('counts a kind a module names after the core\'s, and one nobody named as more', () =>
@@ -46,13 +46,13 @@ describe('previewWords', () =>
       .with('mystery.kind', 'x', 1)
       .with('mystery.kind', 'y', 2)
       .with('mystery.kind', 'z', 3);
-    const nouns = new Map<string, PreviewNouns>([ ...CORE_NOUNS, [ 'quest.states', { one: 'quest', many: 'quests' } ] ]);
+    const nouns = new Map<string, PreviewNouns>([ ...CORE_NOUNS, [ 'quest.states', { one: 'quest', many: 'quests', state: 'moved on' } ] ]);
 
     // Act.
     const words = previewWords(preview, nouns);
 
     // Assert.
     expect(words)
-      .toBe('1 switch, 2 quests, 3 more');
+      .toBe('1 switch on, 2 quests moved on, 3 more set');
   });
 });

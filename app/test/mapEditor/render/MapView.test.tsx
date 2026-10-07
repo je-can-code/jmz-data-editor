@@ -928,7 +928,7 @@ describe('MapView', () =>
 
     // Assert.
     expect([ fresh, screen.getByTestId('map-preview').textContent ])
-      .toStrictEqual([ 'Fresh save', '2 switches, 1 variable' ]);
+      .toStrictEqual([ 'Fresh save', '2 switches on, 1 variable set' ]);
   });
 
   it('opens the Switches & Variables window from the preview chip, and says so when the window was blocked', () =>

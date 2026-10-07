@@ -13,9 +13,9 @@ type PreviewChipProps = {
 };
 
 /**
- * The window's preview in a map view's bar, beside the clock, so a preview is never on unnoticed: "Fresh save" while every
- * map shows a new game, and otherwise what it sets, such as "2 switches, 1 variable", standing out until it is cleared.
- * A click opens the Switches & Variables window, where it is changed.
+ * The window's preview in a map view's bar, beside the clock, so a preview is never on unnoticed: "Fresh save" while
+ * every map shows a new game, and otherwise what it sets, such as "2 switches on, 1 variable set", standing out until it
+ * is cleared. A click opens the Switches & Variables window, where it is changed.
  * @param {PreviewChipProps} props The preview, and what opening it does.
  * @returns {React.JSX.Element} The chip.
  */
