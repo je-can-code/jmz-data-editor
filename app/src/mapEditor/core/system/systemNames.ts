@@ -25,11 +25,27 @@ const LEAST_MAXIMUM = 1;
 const GREATEST_MAXIMUM = 5000;
 
 /**
+ * What changing a maximum came to: the step it recorded (null when there were that many already), or why it was
+ * refused, in words for the author. A refused change changes nothing.
+ */
+type MaximumOutcome =
+  | { readonly ok: true; readonly step: HistoryStep | null }
+  | { readonly ok: false; readonly message: string };
+
+/**
  * What one switch or variable is called in a step's name, by its list.
  */
 const LIST_NOUNS: Readonly<Record<RmmzNameList, string>> = {
   switches: 'switch',
   variables: 'variable',
+};
+
+/**
+ * What one switch or variable is called at the start of a sentence, by its list.
+ */
+const LIST_TITLES: Readonly<Record<RmmzNameList, string>> = {
+  switches: 'Switch',
+  variables: 'Variable',
 };
 
 /**
@@ -50,6 +66,25 @@ const systemDocumentOf = (hub: DocumentHub): SystemDocument =>
 const maximumOf = (names: readonly string[]): number =>
 {
   return Math.max(names.length - 1, 0);
+};
+
+/**
+ * Finds the last switch or variable a list names: the lowest its maximum can go without a name being lost.
+ * @param {readonly string[]} names The list's names, by id.
+ * @returns {number} Its id, or 0 when the list names none.
+ */
+const lastNamedId = (names: readonly string[]): number =>
+{
+  // the empty first slot is no id, so the search stops short of it.
+  for (let id = names.length - 1; id >= 1; id--)
+  {
+    if (names[id] !== '')
+    {
+      return id;
+    }
+  }
+
+  return 0;
 };
 
 /**
@@ -104,19 +139,34 @@ const renameEntry = (hub: DocumentHub, list: RmmzNameList, id: number, name: str
 
 /**
  * Changes how many switches or variables the game has, as MZ's own list does, as one step in the history of the switch
- * and variable names: raising it adds unnamed ones at the end, and lowering it takes the last ones away, names and all,
- * which undo brings back. The maximum is kept within what the list allows.
+ * and variable names: raising it adds unnamed ones at the end, and lowering it takes the last ones away. The maximum is
+ * kept within what the list allows.
+ *
+ * Lowering it never takes a name with it. Once saved, a name taken away is gone from the game for good, while the
+ * events reading that switch or variable go on reading it by number, so a maximum below the last one named is refused,
+ * naming it: the names above the new maximum are cleared first, each a rename of its own, and then nothing is lost
+ * unseen.
  * @param {DocumentHub} hub The window's documents; it must hold the system document.
  * @param {RmmzNameList} list Which list.
  * @param {number} maximum How many there should be.
- * @returns {HistoryStep | null} The step, or null when there were that many already.
+ * @returns {MaximumOutcome} The step (null when there were that many already), or why the maximum cannot go so low.
  */
-const setMaximum = (hub: DocumentHub, list: RmmzNameList, maximum: number): HistoryStep | null =>
+const setMaximum = (hub: DocumentHub, list: RmmzNameList, maximum: number): MaximumOutcome =>
 {
   const names = systemDocumentOf(hub).names(list);
   const current = maximumOf(names);
   const next = clampMaximum(maximum);
-  return hub.edit(`Change the ${LIST_NOUNS[list]} maximum to ${next}`, [ SYSTEM_HISTORY_KEY ], transaction =>
+
+  // a name past the new maximum would go with it.
+  const named = lastNamedId(names);
+  if (next < named)
+  {
+    const message = `${LIST_TITLES[list]} ${named} is still named "${names[named]}", so the ${list} cannot go below ${named}. `
+      + 'Clear the names above the new maximum first.';
+    return { ok: false, message };
+  }
+
+  const step = hub.edit(`Change the ${LIST_NOUNS[list]} maximum to ${next}`, [ SYSTEM_HISTORY_KEY ], transaction =>
   {
     // the list keeps its empty first slot, so the last id sits at the maximum.
     if (next > current)
@@ -128,7 +178,18 @@ const setMaximum = (hub: DocumentHub, list: RmmzNameList, maximum: number): Hist
       transaction.splice(SYSTEM_KEY, [ list ], next + 1, current - next, []);
     }
   });
+  return { ok: true, step };
 };
 
-export { clampMaximum, GREATEST_MAXIMUM, LEAST_MAXIMUM, maximumOf, nameRows, renameEntry, setMaximum, systemDocumentOf };
-export type { NameRow };
+export {
+  clampMaximum,
+  GREATEST_MAXIMUM,
+  lastNamedId,
+  LEAST_MAXIMUM,
+  maximumOf,
+  nameRows,
+  renameEntry,
+  setMaximum,
+  systemDocumentOf,
+};
+export type { MaximumOutcome, NameRow };

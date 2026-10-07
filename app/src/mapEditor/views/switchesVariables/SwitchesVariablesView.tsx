@@ -232,10 +232,20 @@ const NameListPanel = (props: { readonly list: RmmzNameList; readonly names: rea
             onCommit={text =>
             {
               const maximum = readWholeNumber(text);
-              if (maximum !== null)
+              if (maximum === null)
               {
-                attempt(() => setMaximum(services.hub, list, maximum));
+                return;
               }
+
+              // a maximum that would take a name with it is refused, and the field goes back to the one there is.
+              attempt(() =>
+              {
+                const outcome = setMaximum(services.hub, list, maximum);
+                if (outcome.ok === false)
+                {
+                  onProblem(outcome.message);
+                }
+              });
             }}
             size={'small'}
             slotProps={{ htmlInput: { inputMode: 'numeric' } }}

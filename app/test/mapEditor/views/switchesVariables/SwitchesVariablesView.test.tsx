@@ -372,7 +372,27 @@ describe('SwitchesVariablesView', () =>
       .toStrictEqual([ 4, [ '', 'partner-visible', '', 'after the vampire', '', '' ], true ]);
   });
 
+  it('refuses a maximum that would take a name with it, saying why, and puts the field back', () =>
+  {
+    // Arrange: switch 3 named last.
+    const { hub } = renderView();
+    const [ switchMaximum ] = screen.getAllByLabelText('Maximum');
+
+    // Act: down to 2.
+    fireEvent.change(switchMaximum, { target: { value: '2' } });
+    fireEvent.blur(switchMaximum);
+
+    // Assert.
+    expect([ screen.getByRole('alert').textContent, namesIn(hub, 'switches'), (switchMaximum as HTMLInputElement).value ])
+      .toStrictEqual([
+        'Switch 3 is still named "after the vampire", so the switches cannot go below 3. Clear the names above the new maximum first.',
+        [ '', 'partner-visible', '', 'after the vampire' ],
+        '3',
+      ]);
+  });
+
   it('opens the names when the window does not hold them yet, waiting with a spinner', async () =>
+
   {
     // Arrange: a window holding nothing, its open answering when the test says.
     let finish: () => void = () => undefined;

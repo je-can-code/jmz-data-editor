@@ -7,6 +7,7 @@ import type { JsonObject, JsonValue } from '../../../../src/mapEditor/core/model
 import type { SystemDocument } from '../../../../src/mapEditor/core/model/JsonDocument.ts';
 import {
   clampMaximum,
+  lastNamedId,
   maximumOf,
   nameRows,
   renameEntry,
@@ -19,8 +20,9 @@ import { locateGameProject } from '../../../support/gameProject.ts';
  * every id from 1 up to its maximum, named or not, and a search finds an id by its number and a name by any text it
  * holds. A rename is one named step in the history of the switch and variable names, so undo takes it back and redo
  * makes it again, and nothing is recorded when the name was already that. Changing the maximum adds unnamed ones at the
- * end or takes the last ones away, names and all, as one step undo brings back; it stays within what MZ's own list
- * allows.
+ * end or takes the last ones away, as one step undo brings back, and stays within what MZ's own list allows; but it
+ * never takes a name away with it, since a name saved away is gone for good while events still read its switch, so a
+ * maximum below the last named one is refused, naming that one, and nothing changes.
  *
  * Only the name renamed may change in System.json: everything else must come back exactly as it was. That is held
  * against the game's real System.json, read and never written, through a save whose writing is caught: written as
@@ -212,6 +214,22 @@ describe('systemNames', () =>
     });
   });
 
+  describe('lastNamedId', () =>
+  {
+    it('finds the last id a list names, past unnamed ones, and none in a list naming nothing', () =>
+    {
+      // Arrange: switch 3 named with two unnamed after it; a list naming nothing; an empty list.
+      const lists = [ [ '', 'a', '', 'mayor wolf defeated.', '', '' ], [ '', '', '' ], [] ];
+
+      // Act.
+      const last = lists.map(lastNamedId);
+
+      // Assert.
+      expect(last)
+        .toStrictEqual([ 3, 0, 0 ]);
+    });
+  });
+
   describe('setMaximum', () =>
   {
     it('adds unnamed switches at the end as one step when the maximum rises', () =>
@@ -220,26 +238,67 @@ describe('systemNames', () =>
       const { hub } = hubHolding(buildSystem());
 
       // Act.
-      const step = setMaximum(hub, 'switches', 5);
+      const outcome = setMaximum(hub, 'switches', 5);
 
       // Assert.
-      expect([ step?.label, namesIn(hub, 'switches') ])
+      expect([ outcome.ok && outcome.step?.label, namesIn(hub, 'switches') ])
         .toStrictEqual([ 'Change the switch maximum to 5', [ '', 'partner-visible', '', 'mayor wolf defeated.', '', '' ] ]);
     });
 
-    it('takes the last variables away when the maximum falls, and brings them back, names and all, on undo', () =>
+    it('takes unnamed variables away at the end when the maximum falls as far as the last named one, and undo brings them back', () =>
     {
-      // Arrange.
-      const { hub } = hubHolding(buildSystem());
+      // Arrange: variables 3 and 4 unnamed after the last named one, variable 2.
+      const { hub } = hubHolding({ ...buildSystem(), variables: [ '', 'Enemies Defeated', 'Parries (all kinds)', '', '' ] });
 
-      // Act: down to 1, then undone.
-      const step = setMaximum(hub, 'variables', 1);
+      // Act: down to 2, then undone.
+      const outcome = setMaximum(hub, 'variables', 2);
       const lowered = [ ...namesIn(hub, 'variables') ];
       hub.undo(SYSTEM_HISTORY_KEY);
 
       // Assert.
-      expect([ step?.label, lowered, namesIn(hub, 'variables') ])
-        .toStrictEqual([ 'Change the variable maximum to 1', [ '', 'Enemies Defeated' ], [ '', 'Enemies Defeated', 'Parries (all kinds)' ] ]);
+      expect([ outcome.ok && outcome.step?.label, lowered, namesIn(hub, 'variables') ])
+        .toStrictEqual([
+          'Change the variable maximum to 2',
+          [ '', 'Enemies Defeated', 'Parries (all kinds)' ],
+          [ '', 'Enemies Defeated', 'Parries (all kinds)', '', '' ],
+        ]);
+    });
+
+    it('refuses a maximum below the last named switch, naming it, and changes nothing', () =>
+    {
+      // Arrange: switch 3 named, switch 4 and 5 not.
+      const { hub } = hubHolding({ ...buildSystem(), switches: [ '', 'partner-visible', '', 'mayor wolf defeated.', '', '' ] });
+
+      // Act: down to 2, one below switch 3.
+      const outcome = setMaximum(hub, 'switches', 2);
+
+      // Assert.
+      expect([ outcome, namesIn(hub, 'switches'), hub.history(SYSTEM_HISTORY_KEY).rows.length, hub.isDirty(SYSTEM_KEY) ])
+        .toStrictEqual([
+          {
+            ok: false,
+            message: 'Switch 3 is still named "mayor wolf defeated.", so the switches cannot go below 3. Clear the names above the new maximum first.',
+          },
+          [ '', 'partner-visible', '', 'mayor wolf defeated.', '', '' ],
+          0,
+          false,
+        ]);
+    });
+
+    it('refuses a maximum below the last named variable even when it is asked as none at all', () =>
+    {
+      // Arrange: variable 2 named last.
+      const { hub } = hubHolding(buildSystem());
+
+      // Act: none asked for, which the list keeps at one, still below variable 2.
+      const outcome = setMaximum(hub, 'variables', 0);
+
+      // Assert.
+      expect([ outcome.ok === false && outcome.message, namesIn(hub, 'variables') ])
+        .toStrictEqual([
+          'Variable 2 is still named "Parries (all kinds)", so the variables cannot go below 2. Clear the names above the new maximum first.',
+          [ '', 'Enemies Defeated', 'Parries (all kinds)' ],
+        ]);
     });
 
     it('records nothing when there are that many already, and keeps a maximum asked past the limits within them', () =>
@@ -247,13 +306,13 @@ describe('systemNames', () =>
       // Arrange.
       const { hub } = hubHolding(buildSystem());
 
-      // Act: three switches asked for, which there are; then none, which keeps one.
+      // Act: three switches asked for, which there are; then far more than the list allows.
       const same = setMaximum(hub, 'switches', 3);
-      const least = setMaximum(hub, 'switches', 0);
+      const most = setMaximum(hub, 'switches', 99999);
 
       // Assert.
-      expect([ same, least?.label, namesIn(hub, 'switches') ])
-        .toStrictEqual([ null, 'Change the switch maximum to 1', [ '', 'partner-visible' ] ]);
+      expect([ same, most.ok && most.step?.label, namesIn(hub, 'switches').length ])
+        .toStrictEqual([ { ok: true, step: null }, 'Change the switch maximum to 5000', 5001 ]);
     });
   });
 
