@@ -7,6 +7,7 @@ import {
   homeDocumentOf,
   mapHistoryKey,
   outsideChangeHistories,
+  SYSTEM_HISTORY_KEY,
   TREE_HISTORY_KEY,
 } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { Patch } from '../../../../src/mapEditor/core/model/patches.ts';
@@ -69,6 +70,19 @@ describe('historyKeys', () =>
     // Assert.
     expect([ keys, homes ])
       .toStrictEqual([ [ 'common-event:3', 'common-event:31', 'common-events' ], [ 'common-events', 'common-events', 'common-events' ] ]);
+  });
+
+  it('keeps one history for the switch and variable names, homed on the system document, where outside changes go too', () =>
+  {
+    // Arrange: a switch renamed on disk, as MZ would.
+    const change = [ { kind: 'set', path: [ 'switches', 74 ], before: 'suspicious castle', after: 'castle' } as const ];
+
+    // Act.
+    const read = [ SYSTEM_HISTORY_KEY, homeDocumentOf(SYSTEM_HISTORY_KEY), outsideChangeHistories('system', change) ];
+
+    // Assert.
+    expect(read)
+      .toStrictEqual([ 'system', 'system', [ 'system' ] ]);
   });
 
   it('refuses a common event id no common event can have', () =>

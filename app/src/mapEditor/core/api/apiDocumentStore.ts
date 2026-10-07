@@ -2,7 +2,7 @@ import { editorDataDefinition, emptyEditorData, requireReadable } from '../edito
 import type { DocumentStore } from '../history/DocumentHub.ts';
 import { parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
-import type { RmmzCommonEvent, RmmzMap, RmmzMapInfo, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { RmmzCommonEvent, RmmzMap, RmmzMapInfo, RmmzSystem, RmmzTileset } from '../model/rmmzTypes.ts';
 import type { MapEditorApi } from './MapEditorApi.ts';
 
 /**
@@ -43,6 +43,8 @@ const apiDocumentStore = (api: MapEditorApi): DocumentStore =>
           return await api.loadTilesets() as unknown as JsonValue;
         case 'common-events':
           return await api.loadCommonEvents() as unknown as JsonValue;
+        case 'system':
+          return await api.loadSystem() as unknown as JsonValue;
         case 'editor-data':
         {
           const definition = requireDefinition(parsed.name);
@@ -67,6 +69,8 @@ const apiDocumentStore = (api: MapEditorApi): DocumentStore =>
           return api.saveTilesets(content as unknown as (RmmzTileset | null)[]);
         case 'common-events':
           return api.saveCommonEvents(content as unknown as (RmmzCommonEvent | null)[]);
+        case 'system':
+          return api.saveSystem(content as unknown as RmmzSystem);
         case 'editor-data':
           requireDefinition(parsed.name);
           return api.saveEditorData(parsed.name, content);

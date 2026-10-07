@@ -80,6 +80,33 @@ describe('HttpMapEditorApi', () =>
         ]);
     });
 
+    it('reads the game\'s settings from the database route the data editor uses', async () =>
+    {
+      // Arrange: settings naming one switch and one variable.
+      const { api, requests } = buildApi(() => envelope({ gameTitle: 'Chef', switches: [ '', 'Door' ], variables: [ '', 'Gold' ] }));
+
+      // Act.
+      const system = await api.loadSystem();
+
+      // Assert.
+      expect([ system, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ { gameTitle: 'Chef', switches: [ '', 'Door' ], variables: [ '', 'Gold' ] }, [ `GET ${BASE}/api/system` ] ]);
+    });
+
+    it('reads where the project lives from the health route, and nothing for a server started without one', async () =>
+    {
+      // Arrange: a server serving Chef Adventure, and one serving no project, which leaves the root out.
+      const served = buildApi(() => envelope({ ok: true, projectRoot: '/games/chef-adventure', projectRootOk: true }));
+      const unserved = buildApi(() => envelope({ ok: true, projectRootOk: false }));
+
+      // Act.
+      const roots = [ await served.api.loadProjectRoot(), await unserved.api.loadProjectRoot() ];
+
+      // Assert.
+      expect([ roots, served.requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ [ '/games/chef-adventure', '' ], [ `GET ${BASE}/api/health` ] ]);
+    });
+
     it('reads what a new game starts with from its route', async () =>
     {
       // Arrange: a new game seating Jerald and Rupert.
@@ -310,6 +337,21 @@ describe('HttpMapEditorApi', () =>
       const [ request ] = requests;
       expect([ request.method, request.url, request.headers['x-jmz-client'], request.headers['content-type'], JSON.parse(request.body as string) ])
         .toStrictEqual([ 'PUT', `${BASE}/api/common-events`, 'window-7', 'application/json', rows ]);
+    });
+
+    it('puts the game\'s settings whole, with this window\'s id, so a rename comes back as its own', async () =>
+    {
+      // Arrange: settings with switch 1 renamed.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+      const system = { gameTitle: 'Chef', switches: [ '', 'Door shut' ], variables: [ '' ] };
+
+      // Act.
+      await api.saveSystem(system);
+
+      // Assert.
+      const [ request ] = requests;
+      expect([ request.method, request.url, request.headers['x-jmz-client'], request.headers['content-type'], JSON.parse(request.body as string) ])
+        .toStrictEqual([ 'PUT', `${BASE}/api/system`, 'window-7', 'application/json', system ]);
     });
 
     it('raises a refused common events save, naming the route', async () =>

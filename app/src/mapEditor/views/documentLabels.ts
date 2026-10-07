@@ -28,6 +28,8 @@ const documentLabel = (key: DocumentKey): string =>
       return 'The tilesets';
     case 'common-events':
       return 'The common events';
+    case 'system':
+      return 'The switch and variable names';
     case 'editor-data':
       return EDITOR_DATA_LABELS[parsed.name] ?? parsed.name;
   }

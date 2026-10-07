@@ -4,6 +4,7 @@ import {
   MAP_INFOS_KEY,
   mapDocumentKey,
   parseDocumentKey,
+  SYSTEM_KEY,
   type DocumentKey,
 } from '../model/documentKeys.ts';
 import type { Patch } from '../model/patches.ts';
@@ -93,6 +94,12 @@ const documentHistoryKey = (key: DocumentKey): HistoryKey =>
 {
   return key;
 };
+
+/**
+ * The history of the switch and variable names: every rename, and every change to how many switches or variables the
+ * game has. It is the system document's own, since the names are all the map editor changes there.
+ */
+const SYSTEM_HISTORY_KEY: HistoryKey = documentHistoryKey(SYSTEM_KEY);
 
 /**
  * Finds the document a history lives on.
@@ -194,6 +201,7 @@ export {
   homeDocumentOf,
   mapHistoryKey,
   outsideChangeHistories,
+  SYSTEM_HISTORY_KEY,
   TREE_HISTORY_KEY,
 };
 export type { HistoryKey };

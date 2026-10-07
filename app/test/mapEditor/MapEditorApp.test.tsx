@@ -207,12 +207,12 @@ describe('MapEditorApp', () =>
     // Arrange: one key of each kind, and an editor-data key it does not know.
 
     // Act.
-    const labels = [ 'map:12', 'mapinfos', 'tilesets', 'common-events', 'editor-data:blueprints', 'editor-data:tileset-marks', 'editor-data:layouts', 'editor-data:other' ]
+    const labels = [ 'map:12', 'mapinfos', 'tilesets', 'common-events', 'system', 'editor-data:blueprints', 'editor-data:tileset-marks', 'editor-data:layouts', 'editor-data:other' ]
       .map(key => documentLabel(key as never));
 
     // Assert.
     expect(labels)
-      .toStrictEqual([ 'Map 12', 'The map tree', 'The tilesets', 'The common events', 'Blueprints', 'Tileset marks', 'Saved layouts', 'other' ]);
+      .toStrictEqual([ 'Map 12', 'The map tree', 'The tilesets', 'The common events', 'The switch and variable names', 'Blueprints', 'Tileset marks', 'Saved layouts', 'other' ]);
   });
 
   it('refuses to hand out services outside their provider', () =>

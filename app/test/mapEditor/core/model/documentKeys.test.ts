@@ -84,6 +84,7 @@ describe('documentKeys', () =>
         parseDocumentKey('mapinfos'),
         parseDocumentKey('tilesets'),
         parseDocumentKey('common-events'),
+        parseDocumentKey('system'),
         parseDocumentKey('editor-data:blueprints'),
       ];
 
@@ -94,6 +95,7 @@ describe('documentKeys', () =>
           { kind: 'mapinfos' },
           { kind: 'tilesets' },
           { kind: 'common-events' },
+          { kind: 'system' },
           { kind: 'editor-data', name: 'blueprints' },
         ]);
     });
@@ -112,6 +114,7 @@ describe('documentKeys', () =>
         projectPathForDocument('mapinfos'),
         projectPathForDocument('tilesets'),
         projectPathForDocument('common-events'),
+        projectPathForDocument('system'),
         projectPathForDocument('editor-data:blueprints'),
       ];
 
@@ -123,6 +126,7 @@ describe('documentKeys', () =>
           'data/MapInfos.json',
           'data/Tilesets.json',
           'data/CommonEvents.json',
+          'data/System.json',
           'jmz-editor/blueprints.json',
         ]);
     });
@@ -141,12 +145,13 @@ describe('documentKeys', () =>
         documentKeyForProjectPath('data/MapInfos.json'),
         documentKeyForProjectPath('data/Tilesets.json'),
         documentKeyForProjectPath('data/CommonEvents.json'),
+        documentKeyForProjectPath('data/System.json'),
         documentKeyForProjectPath('jmz-editor/tileset-marks.json'),
       ];
 
       // Assert.
       expect(keys)
-        .toStrictEqual([ 'map:12', 'map:1000', 'mapinfos', 'tilesets', 'common-events', 'editor-data:tileset-marks' ]);
+        .toStrictEqual([ 'map:12', 'map:1000', 'mapinfos', 'tilesets', 'common-events', 'system', 'editor-data:tileset-marks' ]);
     });
 
     it('maps near misses to nothing', () =>
@@ -173,7 +178,7 @@ describe('documentKeys', () =>
     it('maps every document to a path that maps back to it', () =>
     {
       // Arrange: one key of each kind.
-      const keys = [ 'map:7', 'map:1000', 'mapinfos', 'tilesets', 'common-events', 'editor-data:layouts' ] as const;
+      const keys = [ 'map:7', 'map:1000', 'mapinfos', 'tilesets', 'common-events', 'system', 'editor-data:layouts' ] as const;
 
       // Act.
       const roundTripped = keys.map(key => documentKeyForProjectPath(projectPathForDocument(key)));

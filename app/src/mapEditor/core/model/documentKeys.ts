@@ -12,7 +12,7 @@ type EditorDataDocumentKey = `editor-data:${string}`;
  * Names one document: a unit of project data that loads, saves and syncs as a whole. Every window that holds
  * the same key holds the same live copy.
  */
-type DocumentKey = MapDocumentKey | 'mapinfos' | 'tilesets' | 'common-events' | EditorDataDocumentKey;
+type DocumentKey = MapDocumentKey | 'mapinfos' | 'tilesets' | 'common-events' | 'system' | EditorDataDocumentKey;
 
 /**
  * What a document key names, taken apart.
@@ -22,6 +22,7 @@ type ParsedDocumentKey =
   | { kind: 'mapinfos' }
   | { kind: 'tilesets' }
   | { kind: 'common-events' }
+  | { kind: 'system' }
   | { kind: 'editor-data'; name: string };
 
 /**
@@ -38,6 +39,12 @@ const TILESETS_KEY = 'tilesets';
  * The key of the common events document, {@code data/CommonEvents.json}.
  */
 const COMMON_EVENTS_KEY = 'common-events';
+
+/**
+ * The key of the system document, {@code data/System.json}: the game's settings, which the map editor holds for the
+ * names of its switches and variables.
+ */
+const SYSTEM_KEY = 'system';
 
 /**
  * The shape every editor-data key must have; the server refuses anything else.
@@ -106,7 +113,7 @@ const editorDataDocumentKey = (name: string): EditorDataDocumentKey =>
  */
 const parseDocumentKey = (key: DocumentKey): ParsedDocumentKey =>
 {
-  if (key === MAP_INFOS_KEY || key === TILESETS_KEY || key === COMMON_EVENTS_KEY)
+  if (key === MAP_INFOS_KEY || key === TILESETS_KEY || key === COMMON_EVENTS_KEY || key === SYSTEM_KEY)
   {
     return { kind: key };
   }
@@ -138,6 +145,8 @@ const projectPathForDocument = (key: DocumentKey): string =>
       return 'data/Tilesets.json';
     case 'common-events':
       return 'data/CommonEvents.json';
+    case 'system':
+      return 'data/System.json';
     case 'editor-data':
       return `${EDITOR_DATA_FOLDER}/${parsed.name}.json`;
   }
@@ -163,6 +172,11 @@ const documentKeyForProjectPath = (path: string): DocumentKey | null =>
   if (path === 'data/CommonEvents.json')
   {
     return COMMON_EVENTS_KEY;
+  }
+
+  if (path === 'data/System.json')
+  {
+    return SYSTEM_KEY;
   }
 
   const editorData = EDITOR_DATA_FILE_PATTERN.exec(path);
@@ -194,6 +208,7 @@ export {
   mapDocumentKey,
   parseDocumentKey,
   projectPathForDocument,
+  SYSTEM_KEY,
   TILESETS_KEY,
 };
 export type { DocumentKey, EditorDataDocumentKey, MapDocumentKey, ParsedDocumentKey };

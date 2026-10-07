@@ -1,7 +1,7 @@
 import { parseDocumentKey, type DocumentKey, type MapDocumentKey } from './documentKeys.ts';
 import type { EditorDocument } from './EditorDocument.ts';
 import type { JsonValue } from './json.ts';
-import { JsonDocument, MapInfosDocument, TilesetsDocument } from './JsonDocument.ts';
+import { JsonDocument, MapInfosDocument, SystemDocument, TilesetsDocument } from './JsonDocument.ts';
 import { MapDocument } from './MapDocument.ts';
 import type { RmmzMap } from './rmmzTypes.ts';
 
@@ -23,6 +23,8 @@ const createDocument = (key: DocumentKey, content: JsonValue): EditorDocument =>
       return new MapInfosDocument(key, content);
     case 'tilesets':
       return new TilesetsDocument(key, content);
+    case 'system':
+      return new SystemDocument(key, content);
     case 'common-events':
     case 'editor-data':
       return new JsonDocument(key, content);

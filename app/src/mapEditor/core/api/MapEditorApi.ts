@@ -2,7 +2,7 @@ import type { CommandUsageCounts } from '../commandList/commandUsage.ts';
 import type { DatabaseNamesJson } from '../commandList/databaseNames.ts';
 import { isEditorDataName } from '../model/documentKeys.ts';
 import { isJsonObject, type JsonValue } from '../model/json.ts';
-import type { RmmzCommonEvent, RmmzMap, RmmzMapInfo, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { RmmzCommonEvent, RmmzMap, RmmzMapInfo, RmmzSystem, RmmzTileset } from '../model/rmmzTypes.ts';
 import type { FreshSave } from '../pageRule/freshSave.ts';
 import type { MapArrival } from '../properties/arrivals.ts';
 
@@ -202,6 +202,29 @@ interface MapEditorApi
    * @returns {Promise<void>} Settles once written.
    */
   saveCommonEvents(commonEvents: readonly (RmmzCommonEvent | null)[]): Promise<void>;
+
+  /**
+   * Reads the game's settings, {@code data/System.json}, through the database route the data editor uses: the map editor
+   * holds them for the names of the switches and variables.
+   * @returns {Promise<RmmzSystem>} The settings.
+   */
+  loadSystem(): Promise<RmmzSystem>;
+
+  /**
+   * Writes the game's settings the way every map editor save is written: in MZ's own layout, so a renamed switch changes
+   * that name in the file and nothing else, and announced on the change stream as this window's.
+   * @param {RmmzSystem} system The whole of the settings.
+   * @returns {Promise<void>} Settles once written.
+   */
+  saveSystem(system: RmmzSystem): Promise<void>;
+
+  /**
+   * Reads where the project the server serves lives on this machine, which names it: what the editor remembers between
+   * sessions for one project is kept apart from another's by it. Optional, so a client that cannot say still serves
+   * everything else; nothing is then remembered.
+   * @returns {Promise<string>} The project's root folder, or an empty string when the server has none.
+   */
+  loadProjectRoot?(): Promise<string>;
 
   /**
    * Reads how many of the project's events use each command, which the command search ranks by.
@@ -539,6 +562,23 @@ class HttpMapEditorApi implements MapEditorApi
   async saveCommonEvents(commonEvents: readonly (RmmzCommonEvent | null)[]): Promise<void>
   {
     return this.#put('/api/common-events', commonEvents);
+  }
+
+  async loadSystem(): Promise<RmmzSystem>
+  {
+    return this.#getJson<RmmzSystem>('/api/system');
+  }
+
+  async saveSystem(system: RmmzSystem): Promise<void>
+  {
+    return this.#put('/api/system', system);
+  }
+
+  async loadProjectRoot(): Promise<string>
+  {
+    // the health route says where the project is; a server started without one leaves it out.
+    const health = await this.#getJson<{ projectRoot?: string }>('/api/health');
+    return health.projectRoot ?? '';
   }
 
   async loadCommandUsage(): Promise<CommandUsageCounts>
