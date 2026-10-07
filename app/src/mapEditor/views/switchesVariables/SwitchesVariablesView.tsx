@@ -33,6 +33,7 @@ import {
 import { useMapEditorServices } from '../../services/MapEditorServicesContext.tsx';
 import { CommitTextField } from '../commandList/CommitTextField.tsx';
 import { useDocumentRevision, useHubChanges } from '../commandList/useCommandListState.ts';
+import { commitTyping } from '../commitTyping.ts';
 import { useEventWindowKeys } from '../eventWindow/useEventWindowKeys.ts';
 
 /**
@@ -310,10 +311,11 @@ const SwitchesVariablesWorkspace = () =>
 
   /**
    * Writes the names to System.json, as the editor's every save does, unless they wait for a choice about changes made
-   * elsewhere, which is said instead.
+   * elsewhere, which is said instead. A name still being typed is part of the save, as Ctrl+S in its box expects.
    */
   const save = () =>
   {
+    commitTyping();
     setSaving(true);
     setProblem(null);
     saveNames(hub)

@@ -171,6 +171,30 @@ describe('SwitchesVariablesView', () =>
       .toStrictEqual([ 'Parries', 'Parries (all kinds)', 1 ]);
   });
 
+  it('saves a name still being typed with Ctrl+S in its box, leaving the box focused', async () =>
+  {
+    // Arrange: switch 2's name typed, the box never left.
+    const { hub, store } = renderView();
+    const field = screen.getByLabelText('Name of switch 2');
+    field.focus();
+    fireEvent.change(field, { target: { value: 'mayor wolf defeated.' } });
+
+    // Act.
+    await act(async () =>
+    {
+      fireEvent.keyDown(field, { key: 's', ctrlKey: true });
+      await Promise.resolve();
+    });
+
+    // Assert.
+    expect([
+      vi.mocked(store.save).mock.calls.map(([ , content ]) => (content as { switches: string[] }).switches[2]),
+      hub.isDirty(SYSTEM_KEY),
+      document.activeElement === field,
+    ])
+      .toStrictEqual([ [ 'mayor wolf defeated.' ], false, true ]);
+  });
+
   it('steps through the names\' history with Ctrl+Z and Ctrl+Y outside a text box', () =>
   {
     // Arrange: switch 1 renamed.

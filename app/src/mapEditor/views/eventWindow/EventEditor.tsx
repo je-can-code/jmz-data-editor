@@ -21,12 +21,12 @@ import { setPageImage, setPageMovement, setPageOption, setPagePriority, setPageT
 import { loadTilesetRow } from '../../core/eventWindow/tilesetRow.ts';
 import type { RmmzEventImage, RmmzTileset } from '../../core/model/rmmzTypes.ts';
 import { HistoryRouter, type HistoryOutcome } from '../../core/workspace/HistoryRouter.ts';
-import { isTextEntry } from '../../core/workspace/shortcuts.ts';
 import { useMapEditorServices } from '../../services/MapEditorServicesContext.tsx';
 import { EditorEnvironmentProvider, type HandBuiltEditorEnvironment } from '../commandEditors/editorEnvironment.tsx';
 import { CommandList } from '../commandList/CommandList.tsx';
 import { useCommandListResources } from '../commandList/commandListResources.ts';
 import { useDocumentRevision, useHubChanges } from '../commandList/useCommandListState.ts';
+import { commitTyping } from '../commitTyping.ts';
 import { GraphicPicker } from '../eventPage/GraphicPicker.tsx';
 import { MovementSettings } from '../eventPage/MovementSettings.tsx';
 import { eventWindowTitle } from '../mapEditorViews.ts';
@@ -102,20 +102,6 @@ const useTilesetRow = (api: MapEditorApi | null, tilesetId: number): RmmzTileset
   return loaded !== null && loaded.id === tilesetId
     ? loaded.row
     : null;
-};
-
-/**
- * Commits whatever the author is typing before a save, so Ctrl+S in the middle of a name or a line of dialogue saves
- * what they typed: the field hands its value over as it loses focus, and gets focus straight back.
- */
-const commitTyping = (): void =>
-{
-  const active = document.activeElement;
-  if (active instanceof HTMLElement && isTextEntry(active))
-  {
-    active.blur();
-    active.focus();
-  }
 };
 
 /**
