@@ -5,12 +5,13 @@ import type { PluginModule } from '../core/modules/PluginModule.ts';
 import { configNamesOf, enabledPlugins, type PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import { jabsModule } from '../modules/jabs/jabsModule.ts';
 import { lightingModule } from '../modules/lighting/lightingModule.ts';
+import { questModule } from '../modules/quest/questModule.ts';
 import { timeModule } from '../modules/time/timeModule.ts';
 
 /**
  * Every plugin module the editor ships. Each switches on only while its plugins are enabled in js/plugins.js.
  */
-const SHIPPED_MODULES: readonly PluginModule[] = [ jabsModule, lightingModule, timeModule ];
+const SHIPPED_MODULES: readonly PluginModule[] = [ jabsModule, lightingModule, timeModule, questModule ];
 
 /**
  * What the modules' switching on reads from the server: js/plugins.js, and the config files the modules name, where the
