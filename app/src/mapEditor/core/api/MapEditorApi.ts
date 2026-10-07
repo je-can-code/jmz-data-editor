@@ -211,8 +211,9 @@ interface MapEditorApi
   loadSystem(): Promise<RmmzSystem>;
 
   /**
-   * Writes the game's settings the way every map editor save is written: in MZ's own layout, so a renamed switch changes
-   * that name in the file and nothing else, and announced on the change stream as this window's.
+   * Writes the game's settings, announced on the change stream as this window's, in whichever layout the file already
+   * has: on one line as MZ keeps it, or indented as the data editor leaves it, so a renamed switch changes that name in
+   * the file and nothing else.
    * @param {RmmzSystem} system The whole of the settings.
    * @returns {Promise<void>} Settles once written.
    */

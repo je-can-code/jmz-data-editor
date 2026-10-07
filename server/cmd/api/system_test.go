@@ -10,11 +10,12 @@ import (
 
 // System.json holds the game's settings, its switch and variable names among them, and the map
 // editor renames those names. So the route owes the editor what every other map editor save owes it:
-// GET hands the file out, PUT takes the whole of it back and writes it in MZ's own layout (the one
-// line JSON.stringify writes, in the key order of the file it replaces), and a rename changes that
-// name and no other byte. Whatever the model cannot account for, or leaves out, is refused with a 400
-// naming it, before anything touches the disk, and the save reaches the change stream carrying the
-// saving window's id.
+// GET hands the file out, PUT takes the whole of it back and writes it in the key order of the file it
+// replaces, and a rename changes that name and no other byte. Two apps write the file in two layouts,
+// MZ on one line and the data editor indented, so PUT writes whichever the file already has, its
+// strings spelled the way that file spells them. Whatever the model cannot account for, or leaves
+// out, is refused with a 400 naming it, before anything touches the disk, and the save reaches the
+// change stream carrying the saving window's id.
 
 // systemFixture is a small System.json in MZ's own layout. It carries what a careless writer would
 // change: a `<`, an `&` and quotes in the title, which Go escapes and MZ does not; message keys out of
@@ -107,6 +108,43 @@ func TestPutSystemRaisesTheVariableMaximum(t *testing.T) {
 	expected := strings.Replace(systemFixture, `"variables":["","Gold found","Parries"]`, `"variables":["","Gold found","Parries","",""]`, 1)
 	if written := current.read(t, "data/System.json"); written != expected {
 		t.Errorf("the longer list wrote:\n%s\nexpected:\n%s", written, expected)
+	}
+}
+
+// TestPutSystemKeepsTheDataEditorsIndent covers the file as the data editor leaves it: its POST
+// route writes System.json indented, with `<` and `&` spelled as Go escapes them. The map editor's
+// save writes it back indented, so an unchanged save leaves every byte alone, and a rename changes
+// that one line, its new name spelled the way the rest of the file spells its strings.
+func TestPutSystemKeepsTheDataEditorsIndent(t *testing.T) {
+	// Arrange- System.json as the data editor's own save writes it, and the body the map editor holds.
+	current := newSystemProject(t)
+	assertStatus(t, current.call(t, http.MethodPost, "/api/system", systemFixture, "Content-Type", "application/json"), http.StatusOK)
+	indented := current.read(t, "data/System.json")
+	for _, fragment := range []string{
+		"{\n  \"advanced\": {\n    \"gameId\": 7,",
+		"\n  \"gameTitle\": \"\\u003cChef\\u003e \\u0026 \\\"Co\\\"\",\n",
+		"\n  \"switches\": [\n    \"\",\n    \"Door open\",\n    \"after the vampire\",\n    \"\"\n  ],\n",
+	} {
+		if strings.Contains(indented, fragment) == false {
+			t.Fatalf("the data editor no longer writes System.json indented as this test expects; missing %q in:\n%s", fragment, indented)
+		}
+	}
+	body := string(readEnvelope(t, current.call(t, http.MethodGet, "/api/system", "")).Data)
+
+	// Act- saved unchanged, then saved with switch 2 renamed to a name holding `<` and `&`.
+	unchanged := current.call(t, http.MethodPut, "/api/system", body)
+	afterUnchanged := current.read(t, "data/System.json")
+	renamed := current.call(t, http.MethodPut, "/api/system", strings.Replace(body, `"after the vampire"`, `"after the <vampire> & co"`, 1))
+
+	// Assert- the file as the data editor wrote it, and then with that one name changed, in Go's spelling.
+	assertStatus(t, unchanged, http.StatusNoContent)
+	assertStatus(t, renamed, http.StatusNoContent)
+	if afterUnchanged != indented {
+		t.Errorf("an unchanged save reformatted the data editor's System.json:\n%s", afterUnchanged)
+	}
+	expected := strings.Replace(indented, "    \"after the vampire\",\n", "    \"after the \\u003cvampire\\u003e \\u0026 co\",\n", 1)
+	if written := current.read(t, "data/System.json"); written != expected {
+		t.Errorf("the rename wrote:\n%s\nexpected:\n%s", written, expected)
 	}
 }
 

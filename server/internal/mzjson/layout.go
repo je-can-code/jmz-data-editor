@@ -1,6 +1,8 @@
 package mzjson
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 )
 
@@ -84,6 +86,121 @@ func MapLayout(root *Value) ([]byte, error) {
 //	{"advanced":{...},"airship":{...},...,"switches":["","Door open"],...,"windowTone":[0,0,0,0]}
 func CompactLayout(root *Value) ([]byte, error) {
 	return Compact(root), nil
+}
+
+// goEscapes are the six-character escapes Go's encoder writes for `<`, `>`, `&` and the two line
+// separators, U+2028 and U+2029, all of which JSON.stringify writes as themselves. A file holding any
+// of them had its strings written by Go.
+var goEscapes = [][]byte{
+	[]byte("\\u003c"),
+	[]byte("\\u003e"),
+	[]byte("\\u0026"),
+	[]byte("\\u2028"),
+	[]byte("\\u2029"),
+}
+
+// fileStyle is how a file on disk is laid out, as far as writing it again the same way needs.
+type fileStyle struct {
+	// indent is one level of the file's indent; empty for a file on one line.
+	indent string
+
+	// newline ends each line: "\n", or "\r\n" for a file written with Windows line endings.
+	newline string
+
+	// closingNewline is whether the file ends with a newline after its last line.
+	closingNewline bool
+
+	// escapeHTML is whether the file's strings spell `<`, `>`, `&` and the line separators as Go does.
+	escapeHTML bool
+}
+
+// styleOf reads how a file is laid out. A file over several lines is indented by whatever starts its
+// second line, two spaces where nothing does; nil, an empty file, and a file on one line are on one line.
+func styleOf(template []byte) fileStyle {
+	style := fileStyle{newline: "\n"}
+	if bytes.Contains(template, []byte("\r\n")) {
+		style.newline = "\r\n"
+	}
+
+	// the closing newline is set aside first, so a file on one line that ends with one stays on one line.
+	body := bytes.TrimSuffix(template, []byte(style.newline))
+	style.closingNewline = len(body) < len(template)
+
+	for _, escape := range goEscapes {
+		if bytes.Contains(body, escape) {
+			style.escapeHTML = true
+			break
+		}
+	}
+
+	// one level of indent is what the second line starts with, the first being the opening bracket alone.
+	if lineEnd := bytes.IndexByte(body, '\n'); lineEnd >= 0 {
+		secondLine := body[lineEnd+1:]
+		width := len(secondLine) - len(bytes.TrimLeft(secondLine, " \t"))
+		style.indent = string(secondLine[:width])
+		if style.indent == "" {
+			style.indent = "  "
+		}
+	}
+
+	return style
+}
+
+// LayoutLike answers the layout of the file a document is about to be written over, so a save never
+// reformats a file some other tool keeps another way. System.json is the file it serves: MZ writes it
+// on one line, the data editor writes it indented, which reads better by hand, and an app saving it
+// in a layout of its own would turn every rename into a rewrite of the whole file.
+//
+// A file on one line, and a new file, is written on one line exactly as CompactLayout writes it. A
+// file over several lines is written indented the way JSON.stringify(value, null, indent) and Go's
+// MarshalIndent both write it, by the file's own indent, with its own line endings. Either keeps a
+// closing newline only where the file has one, and a file whose strings spell `<`, `>` and `&` the
+// way Go escapes them has every string spelled that way again, as Go's encoder would write it.
+//
+//	{
+//	  "advanced": {
+//	    "gameId": 52400363,
+//	    ...
+//	  },
+//	  "switches": [
+//	    "",
+//	    "Door open"
+//	  ],
+//	  ...
+//	}
+func LayoutLike(template []byte) Layout {
+	style := styleOf(template)
+
+	return func(root *Value) ([]byte, error) {
+		out := Compact(root)
+
+		// Go's escapes are the only difference between its strings and JSON.stringify's.
+		if style.escapeHTML {
+			var escaped bytes.Buffer
+			json.HTMLEscape(&escaped, out)
+			out = escaped.Bytes()
+		}
+
+		// indenting the one line lays it out exactly as Go's MarshalIndent and JSON.stringify do.
+		if style.indent != "" {
+			var indented bytes.Buffer
+			if err := json.Indent(&indented, out, "", style.indent); err != nil {
+				return nil, err
+			}
+			out = indented.Bytes()
+
+			// a newline only ever ends a line here, since the one line escapes every newline in a string.
+			if style.newline != "\n" {
+				out = bytes.ReplaceAll(out, []byte("\n"), []byte(style.newline))
+			}
+		}
+
+		if style.closingNewline {
+			out = append(out, style.newline...)
+		}
+
+		return out, nil
+	}
 }
 
 // appendLines appends an array with each element on its own line, as MZ writes its tables and a

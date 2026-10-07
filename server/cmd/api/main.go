@@ -215,7 +215,7 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	mux.HandleFunc("PUT /api/common-events", api.SaveCommonEvents(changes))
 
 	// System.json reads through the data editor's GET above too; the map editor renames switches and
-	// variables, and saves them here, in MZ's own layout.
+	// variables, and saves them here, in whichever layout the file already has.
 	mux.HandleFunc("PUT /api/system", api.SaveSystem(changes))
 
 	mux.HandleFunc("GET /api/img/{folder}", api.ListImages)
