@@ -278,8 +278,9 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * The renderer is handed the window's page rule from the start, and again whenever it changes, as the modules switch
  * on or the new game is read, so every event shows the page a fresh save would show at the clock's time; and the
  * window's preview from the start and every time it changes, so every view shows the switches and variables set. Beside
- * the clock, a chip says what the preview sets, "Fresh save" while nothing, so a preview is never on unnoticed, and a
- * click on it opens the Switches & Variables window, saying so when the window was blocked.
+ * the clock, a chip says what the preview sets, "Fresh save" while nothing, so a preview is never on unnoticed, naming
+ * each kind a module adds as the module names it once the module is on, and a click on it opens the Switches & Variables
+ * window, saying so when the window was blocked.
  */
 describe('MapView', () =>
 {
@@ -930,6 +931,31 @@ describe('MapView', () =>
     // Assert.
     expect([ fresh, screen.getByTestId('map-preview').textContent ])
       .toStrictEqual([ 'Fresh save', '2 switches on, 1 variable set' ]);
+  });
+
+  it('names in the chip each kind of state the modules let the preview set, once they switch on after the view drew', () =>
+  {
+    // Arrange: a view over a project, a quest set from the start, and J-OMNI-Quests' module not yet on.
+    const modules = new PluginModuleRegistry(new CommandCatalog());
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    services.preview.setValue('quest.states', 'cecil-001', { state: 'completed' });
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const before = screen.getByTestId('map-preview').textContent;
+
+    // Act: the modules the editor ships switch on over J-OMNI-Quests, and a switch is turned on.
+    act(() =>
+    {
+      modules.activate(SHIPPED_MODULES, [ { name: 'j/omni/ext/J-OMNI-Quests', status: true, description: '', parameters: {} } ]);
+    });
+    act(() => services.preview.setSwitch(74, true));
+
+    // Assert.
+    expect([ before, screen.getByTestId('map-preview').textContent ])
+      .toStrictEqual([ '1 more set', '1 switch on, 1 quest set' ]);
   });
 
   it('opens the Switches & Variables window from the preview chip, and says so when the window was blocked', () =>

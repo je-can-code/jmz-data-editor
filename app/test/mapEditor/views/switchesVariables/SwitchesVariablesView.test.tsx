@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { DocumentHub, type DocumentStore, type HistoryCheck } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
@@ -13,6 +13,7 @@ import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { SystemDocument } from '../../../../src/mapEditor/core/model/JsonDocument.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import { WindowPreview } from '../../../../src/mapEditor/core/preview/WindowPreview.ts';
+import { questModule } from '../../../../src/mapEditor/modules/quest/questModule.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { SwitchesVariablesView } from '../../../../src/mapEditor/views/switchesVariables/SwitchesVariablesView.tsx';
@@ -28,6 +29,11 @@ import { SwitchesVariablesView } from '../../../../src/mapEditor/views/switchesV
  * what the preview sets, and "Back to a fresh save" clears all of it. Whatever fails, a save or an undo something else
  * stands in the way of, is said in the window rather than lost; the window opens its names from another window's copy or
  * the file, and says so plainly when they cannot be opened at all.
+ *
+ * Each kind of state an active plugin module lets the preview set gets a list of its own beside the two, once the module
+ * switches on, which can be after the window first drew: with J-OMNI-Quests on, the quests, each opening onto its
+ * objectives. Every pick there changes the window's preview at once, as the module works it out, never the game; the
+ * window counts what it sets, words it with the rest, and clears it with the rest.
  */
 describe('SwitchesVariablesView', () =>
 {
@@ -464,6 +470,110 @@ describe('SwitchesVariablesView', () =>
     // Assert.
     expect([ waiting, openDocument.mock.calls.length, (screen.getByLabelText('Name of switch 1') as HTMLInputElement).value ])
       .toStrictEqual([ true, 1, 'partner-visible' ]);
+  });
+
+  describe('with J-OMNI-Quests', () =>
+  {
+    /**
+     * Cecil's two quests, as the server serves them.
+     */
+    const CONFIG = {
+      quests: [
+        {
+          name: 'Drills',
+          key: 'cecil-001',
+          objectives: [ { id: 0, description: 'The town\'s only guard wants lessons.' }, { id: 1, description: 'It goes badly. Then less badly.' } ],
+        },
+        { name: 'The Patrol Route', key: 'cecil-002', objectives: [ { id: 0, description: 'The full circuit of Raevula, after dark.' } ] },
+      ],
+      tags: [],
+      categories: [],
+    } as unknown as JsonValue;
+
+    /**
+     * Switches J-OMNI-Quests' module on in a window's modules, over Cecil's quests.
+     * @param {PluginModuleRegistry} modules The window's modules.
+     */
+    const switchOn = (modules: PluginModuleRegistry) =>
+    {
+      modules.activate([ questModule ], [ { name: 'j/omni/ext/J-OMNI-Quests', status: true, description: '', parameters: {} } ], new Map([ [ 'quest', CONFIG ] ]));
+    };
+
+    /**
+     * Reads the words of the option a drop-down stands at.
+     * @param {string} label The drop-down's label.
+     * @returns {string} The words.
+     */
+    const shownIn = (label: string): string => ((screen.getByLabelText(label) as HTMLSelectElement).selectedOptions[0].textContent as string);
+
+    it('lists the quests beside the switches and variables once J-OMNI-Quests switches on, by name and key', () =>
+    {
+      // Arrange: a window drawn before its modules switched on.
+      const { modules } = renderView();
+      const before = screen.queryByRole('region', { name: 'Quests' });
+
+      // Act.
+      act(() => switchOn(modules));
+
+      // Assert: the quests in the config's order, each named and keyed, Drills where its objectives put it.
+      const region = screen.getByRole('region', { name: 'Quests' });
+      expect([
+        before,
+        within(region).getAllByTestId(/^preview-entry-/u).map(entry => entry.dataset['testid']),
+        [ 'Drills', 'cecil-001', 'The Patrol Route', 'cecil-002' ].map(words => within(region).getByText(words) instanceof HTMLElement),
+        shownIn('Show quest cecil-001 as'),
+      ])
+        .toStrictEqual([ null, [ 'preview-entry-cecil-001', 'preview-entry-cecil-002' ], [ true, true, true, true ], 'Inactive (from objectives)' ]);
+    });
+
+    it('sets an objective and the quest\'s own state for every map, counting the quest beside a switch, never in the game', () =>
+    {
+      // Arrange: the quests on, Drills opened, and switch 3 on.
+      const modules = new PluginModuleRegistry(new CommandCatalog());
+      switchOn(modules);
+      const { preview, store } = renderView({ modules });
+      fireEvent.click(screen.getByRole('button', { name: 'Drills' }));
+      fireEvent.click(screen.getByLabelText('Show switch 3 on'));
+
+      // Act: objective 1 under way, then the quest completed of its own.
+      fireEvent.change(screen.getByLabelText('Show objective 1 of quest cecil-001 as'), { target: { value: 'active' } });
+      const underWay = [ preview.preview().value('quest.states', 'cecil-001'), shownIn('Show quest cecil-001 as') ];
+      fireEvent.change(screen.getByLabelText('Show quest cecil-001 as'), { target: { value: 'completed' } });
+
+      // Assert.
+      expect([
+        underWay,
+        preview.preview().value('quest.states', 'cecil-001'),
+        screen.getByTestId('preview-words').textContent,
+        within(screen.getByRole('region', { name: 'Quests' })).getByText('1 set') instanceof HTMLElement,
+        vi.mocked(store.save).mock.calls.length,
+      ])
+        .toStrictEqual([
+          [ { objectives: { 1: 'active' } }, 'Active (from objectives)' ],
+          { state: 'completed', objectives: { 1: 'active' } },
+          'Maps show: 1 switch on, 1 quest set',
+          true,
+          0,
+        ]);
+    });
+
+    it('clears the quests set with everything else on going back to a fresh save', () =>
+    {
+      // Arrange: the second quest's objective under way.
+      const modules = new PluginModuleRegistry(new CommandCatalog());
+      switchOn(modules);
+      const { preview } = renderView({ modules });
+      fireEvent.click(screen.getByRole('button', { name: 'The Patrol Route' }));
+      fireEvent.change(screen.getByLabelText('Show objective 0 of quest cecil-002 as'), { target: { value: 'active' } });
+      const set = preview.preview().count('quest.states');
+
+      // Act.
+      fireEvent.click(screen.getByRole('button', { name: 'Back to a fresh save' }));
+
+      // Assert.
+      expect([ set, preview.preview().isFresh, (screen.getByLabelText('Show objective 0 of quest cecil-002 as') as HTMLSelectElement).value, screen.getByTestId('preview-words').textContent ])
+        .toStrictEqual([ 1, true, 'inactive', 'Maps show: Fresh save' ]);
+    });
   });
 
   it('says plainly when the names cannot be opened', async () =>
