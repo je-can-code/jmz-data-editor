@@ -6,6 +6,7 @@ import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.t
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import type { ViewStore } from '../../../src/mapEditor/core/preview/RememberedView.ts';
+import { renameEntry } from '../../../src/mapEditor/core/system/systemNames.ts';
 import { createMapEditorServices, type MapEditorEnvironment } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { projectNamesOf } from '../../../src/mapEditor/views/commandList/commandListResources.ts';
 import { buildMapJson } from '../support/fixtures.ts';
@@ -825,11 +826,40 @@ describe('MapEditorServices', () =>
      */
     const startWindow = (network: MemoryChannelNetwork, clientId: string, machine: ReturnType<typeof buildMachine>, server: ReturnType<typeof buildServer>) =>
     {
-      const { environment, sources } = buildEnvironment(network, clientId);
+      const { environment, sources, window } = buildEnvironment(network, clientId);
       const services = createMapEditorServices({ ...environment, fetch: server.fetch, rememberedView: machine.open });
       services.start();
-      return { services, sources };
+      return { services, sources, window };
     };
+
+    it('asks before the window renaming switches closes with the names unsaved, and never in a window only following them', async () =>
+    {
+      // Arrange: the Switches & Variables window holding System.json with switch 2 renamed, and an event window following.
+      const network = new MemoryChannelNetwork();
+      const machine = buildMachine();
+      const server = buildServer('/games/chef-adventure');
+      const names = startWindow(network, 'window-names', machine, server);
+      const event = startWindow(network, 'window-event', machine, server);
+      await pump(network, names.services.openDocument('system'));
+      renameEntry(names.services.hub, 'switches', 2, 'after the vampire');
+      network.flush();
+      const followed = projectNamesOf(event.services.api as MapEditorApi);
+      await vi.waitFor(() =>
+      {
+        network.flush();
+        expect(followed.names()?.switches[2])
+          .toBe('after the vampire');
+      });
+
+      // Act: each window asked whether it may close.
+      const asks = [ names.window.fire('beforeunload'), event.window.fire('beforeunload') ];
+
+      // Assert.
+      expect([ asks, event.services.hub.has('system') ])
+        .toStrictEqual([ [ true, false ], false ]);
+      names.services.stop();
+      event.services.stop();
+    });
 
     it('brings back the clock and the preview the project left, and shares every change with every other window', async () =>
     {
