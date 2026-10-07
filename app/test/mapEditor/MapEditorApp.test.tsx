@@ -12,6 +12,7 @@ import { registerBuiltInCommands } from '../../src/mapEditor/core/commands/built
 import { PluginHeaderStore } from '../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { DocumentHub } from '../../src/mapEditor/core/history/DocumentHub.ts';
 import { LocationPicks } from '../../src/mapEditor/core/locations/LocationPicks.ts';
+import { WindowPreview } from '../../src/mapEditor/core/preview/WindowPreview.ts';
 import { MapEditorApp } from '../../src/mapEditor/MapEditorApp.tsx';
 import type { MapEditorServices } from '../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider, useMapEditorServices } from '../../src/mapEditor/services/MapEditorServicesContext.tsx';
@@ -129,6 +130,33 @@ describe('MapEditorApp', () =>
     // Assert.
     expect([ screen.queryByText('Wait 30 frames') !== null, screen.queryByTestId('map-editor-workspace') ])
       .toStrictEqual([ true, null ]);
+  });
+
+  it('shows the switches and variables for a switches and variables view', () =>
+  {
+    // Arrange: a window holding System.json.
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    hub.adopt('system', { switches: [ '', 'after the vampire' ], variables: [ '', 'Parries' ] });
+    const services = {
+      view: { kind: 'switches-variables' },
+      hub,
+      preview: new WindowPreview(),
+      api: null,
+      locationPicks: new LocationPicks(),
+      openDocument: vi.fn(),
+      resolveConflict: vi.fn(),
+    } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapEditorApp/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert.
+    expect([ (screen.getByLabelText('Name of switch 1') as HTMLInputElement).value, screen.queryByTestId('map-editor-workspace') ])
+      .toStrictEqual([ 'after the vampire', null ]);
   });
 
   it('shows the location picker over the view the moment an editor in the window asks for a place on a map', () =>

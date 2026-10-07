@@ -15,7 +15,7 @@ import type { WindowPaint } from '../core/tools/WindowPaint.ts';
 import { EventMenu } from '../events/EventMenu.tsx';
 import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity, type EventToolsRenderer } from '../events/MapEventTools.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
-import { openEventWindow } from '../views/mapEditorViews.ts';
+import { openEventWindow, openSwitchesVariablesWindow } from '../views/mapEditorViews.ts';
 import { ClockChip } from './ClockChip.tsx';
 import type { DrawState } from './ContextKeeper.ts';
 import {
@@ -31,6 +31,7 @@ import { whenMapDrawn } from './openTiming.ts';
 import { OverlayComposer } from './overlayComposer.ts';
 import { usePaletteLinks } from './paletteLinks.ts';
 import { PixiMapRenderer } from './PixiMapRenderer.ts';
+import { PreviewChip } from './PreviewChip.tsx';
 import { projectImagesFor } from './projectImages.ts';
 import { installSpeedHooks, wantsSpeedHooks } from './speedHooks.ts';
 import { followToolInHand } from './tools/leftButton.ts';
@@ -232,9 +233,10 @@ const DrawNotice = (props: { state: DrawState; notices?: readonly ModuleNotice[]
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
  * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look
  * (Lighting among them while a plugin module lights the map, and the window's one clock while a module offers a time of
- * day, the sky drawn and each event's page shown at its hour), the painting tools, and a status line naming the zoom,
- * the tile under the pointer, how many events are selected and the GPU drawing it. Each event shows the page a fresh
- * save would show at the clock's time, by the window's page rule.
+ * day, the sky drawn and each event's page shown at its hour), the window's preview beside it, saying how far along the
+ * story the maps show the game, the painting tools, and a status line naming the zoom, the tile under the pointer, how
+ * many events are selected and the GPU drawing it. Each event shows the page the game would at the clock's time, with
+ * the preview's switches and variables set and a fresh save's everything else, by the window's page rule.
  *
  * The view paints with its window's paint: the page's own for a map docked in the main window, and a torn-out window's
  * own for a map torn out, so each window's palette, layer strip and tools go together and no further.
@@ -323,6 +325,11 @@ const MapView = (props: MapViewProps) =>
     stops.push(services.pages.subscribe(() => renderer.setPageRule(services.pages.rule())));
     renderer.setTimeOfDay(services.clock.time());
     stops.push(services.clock.subscribe(() => renderer.setTimeOfDay(services.clock.time())));
+
+    // the pages are judged at the window's preview too, the switches and variables set in place of a fresh save's, and a
+    // change to it draws again only the events whose pages read what changed.
+    renderer.setPreview(services.preview.preview());
+    stops.push(services.preview.subscribe(() => renderer.setPreview(services.preview.preview())));
     stops.push(renderer.onCameraChange((camera: Camera) =>
     {
       setStatus(current => (current.zoom === camera.zoom ? current : { ...current, zoom: camera.zoom }));
@@ -527,6 +534,17 @@ const MapView = (props: MapViewProps) =>
   // the window's layer strip and passability editor, and the stack view, followed from this view.
   usePaletteLinks({ host: hostRef, renderer: rendererRef, mapId, settings, setSettings, selection: paint.selection, mode: paint.mode });
 
+  /**
+   * Opens the Switches & Variables window, where the preview is changed, saying so when the window was blocked.
+   */
+  const openPreview = () =>
+  {
+    if (openSwitchesVariablesWindow(services.shell) === 'blocked')
+    {
+      notifyRef.current('The Switches & Variables window was blocked; allow pop-ups for the editor to open it.', 'error');
+    }
+  };
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5, px: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
@@ -543,6 +561,7 @@ const MapView = (props: MapViewProps) =>
         {clockOffer !== null && (
           <ClockChip clock={services.clock} partOfDay={clockOffer.partOfDay}/>
         )}
+        <PreviewChip preview={services.preview} onOpen={() => openPreview()}/>
         <Divider flexItem orientation={'vertical'} sx={{ mx: 0.5 }}/>
         <Typography variant={'caption'} color={'text.secondary'}>
           Highlight layer

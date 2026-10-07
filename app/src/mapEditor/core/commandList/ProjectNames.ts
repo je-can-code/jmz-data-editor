@@ -102,7 +102,10 @@ class ProjectNames
   read(): Promise<DatabaseNamesJson | null>
   {
     // a load that throws before it even starts fails the same quiet way as one the server refuses.
-    this.#reading ??= new Promise<DatabaseNamesJson>(resolve => resolve(this.#load()))
+    this.#reading ??= new Promise<DatabaseNamesJson>(resolve =>
+    {
+      resolve(this.#load());
+    })
       .catch(() => null)
       .then(base =>
       {

@@ -6,7 +6,7 @@ import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.t
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import type { ViewStore } from '../../../src/mapEditor/core/preview/RememberedView.ts';
-import { createMapEditorServices, type MapEditorEnvironment, type MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
+import { createMapEditorServices, type MapEditorEnvironment } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { projectNamesOf } from '../../../src/mapEditor/views/commandList/commandListResources.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../support/standIns.ts';

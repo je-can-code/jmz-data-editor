@@ -1,13 +1,15 @@
 import { MAP_EDITOR_PATH, type WindowOpenResult, type WindowShell } from '../../core/infrastructure/shell/WindowShell.ts';
 
 /**
- * What one map editor window shows: the workspace, or the full editor of one event. Both come from
- * {@code map.html}; the query string says which, so every window is a plain URL the shell can open and focus.
+ * What one map editor window shows: the workspace, the full editor of one event, the common events, or the switches and
+ * variables. Each comes from {@code map.html}; the query string says which, so every window is a plain URL the shell can
+ * open and focus.
  */
 type MapEditorView =
   | { readonly kind: 'workspace' }
   | { readonly kind: 'event'; readonly mapId: number; readonly eventId: number }
-  | { readonly kind: 'common-events' };
+  | { readonly kind: 'common-events' }
+  | { readonly kind: 'switches-variables' };
 
 /**
  * The name every map editor window's title ends with.
@@ -45,6 +47,11 @@ const parseMapEditorView = (search: string): MapEditorView =>
     return { kind: 'common-events' };
   }
 
+  if (params.get('view') === 'switches-variables')
+  {
+    return { kind: 'switches-variables' };
+  }
+
   if (params.get('view') !== 'event')
   {
     return { kind: 'workspace' };
@@ -71,6 +78,8 @@ const mapEditorPath = (view: MapEditorView): string =>
       return MAP_EDITOR_PATH;
     case 'common-events':
       return `${MAP_EDITOR_PATH}?view=common-events`;
+    case 'switches-variables':
+      return `${MAP_EDITOR_PATH}?view=switches-variables`;
     case 'event':
       return `${MAP_EDITOR_PATH}?view=event&map=${view.mapId}&event=${view.eventId}`;
   }
@@ -89,6 +98,8 @@ const titleFor = (view: MapEditorView): string =>
       return APP_TITLE;
     case 'common-events':
       return `Common events - ${APP_TITLE}`;
+    case 'switches-variables':
+      return `Switches & Variables - ${APP_TITLE}`;
     case 'event':
       return `Event ${view.eventId} on map ${view.mapId} - ${APP_TITLE}`;
   }
@@ -130,5 +141,25 @@ const openCommonEventsWindow = (shell: WindowShell): WindowOpenResult =>
   return shell.open({ path: mapEditorPath({ kind: 'common-events' }), name: 'jmz-common-events', width: 1280, height: 860 });
 };
 
-export { APP_TITLE, eventWindowTitle, mapEditorPath, openCommonEventsWindow, openEventWindow, parseMapEditorView, titleFor };
+/**
+ * Opens the switches and variables in a window of their own, or brings forward the one already showing them: the
+ * Switches & Variables button's and the map views' preview chip's way there.
+ * @param {WindowShell} shell The page's window shell.
+ * @returns {WindowOpenResult} What became of it.
+ */
+const openSwitchesVariablesWindow = (shell: WindowShell): WindowOpenResult =>
+{
+  return shell.open({ path: mapEditorPath({ kind: 'switches-variables' }), name: 'jmz-switches-variables', width: 1180, height: 860 });
+};
+
+export {
+  APP_TITLE,
+  eventWindowTitle,
+  mapEditorPath,
+  openCommonEventsWindow,
+  openEventWindow,
+  openSwitchesVariablesWindow,
+  parseMapEditorView,
+  titleFor,
+};
 export type { MapEditorView };

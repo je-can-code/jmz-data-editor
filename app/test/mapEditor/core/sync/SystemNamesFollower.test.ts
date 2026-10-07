@@ -235,7 +235,10 @@ describe('SystemNamesFollower', () =>
         {
           throw new Error('nothing held');
         },
-        readFile: () => new Promise<JsonValue>(resolve => answers.push(resolve)),
+        readFile: () => new Promise<JsonValue>(resolve =>
+        {
+          answers.push(resolve);
+        }),
         subscribe: () => () => undefined,
       },
       sync: {

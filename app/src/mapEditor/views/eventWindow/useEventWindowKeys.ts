@@ -13,7 +13,8 @@ type EventWindowKeyHandlers = {
 /**
  * Gives an event window its own keys: Ctrl+S saves the map from anywhere in the window, text boxes included, and Ctrl+Z,
  * Ctrl+Y and Ctrl+Shift+Z undo and redo the event's history anywhere a text box or the command list is not handling
- * them itself. The command list's own keys mark their events handled, so nothing here acts twice.
+ * them itself. The command list's own keys mark their events handled, so nothing here acts twice. Any other window
+ * editing one thing, such as the Switches & Variables window, keys its own save and history the same way.
  * @param {EventWindowKeyHandlers} handlers What each key does; the latest handlers are always the ones called.
  */
 const useEventWindowKeys = (handlers: EventWindowKeyHandlers): void =>

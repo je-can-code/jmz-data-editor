@@ -8,6 +8,7 @@ import { EventWindowView } from './views/EventWindowView.tsx';
 import { LocationPickerHost } from './views/locationPicker/LocationPickerHost.tsx';
 import type { MapEditorView } from './views/mapEditorViews.ts';
 import { MapWithQuickPanel, wantsQuickPanel } from './views/quickPanel/MapWithQuickPanel.tsx';
+import { SwitchesVariablesView } from './views/switchesVariables/SwitchesVariablesView.tsx';
 import { Workspace } from './workspace/Workspace.tsx';
 
 /**
@@ -40,6 +41,8 @@ const WindowContent = (props: { readonly view: MapEditorView }) =>
       return <EventWindowView mapId={view.mapId} eventId={view.eventId}/>;
     case 'common-events':
       return <Box sx={{ height: '100vh' }}><CommonEventsView/></Box>;
+    case 'switches-variables':
+      return <Box sx={{ height: '100vh' }}><SwitchesVariablesView/></Box>;
     case 'workspace':
       return <Workspace/>;
   }

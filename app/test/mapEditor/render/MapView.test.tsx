@@ -21,6 +21,8 @@ import { CommandCatalog } from '../../../src/mapEditor/core/commands/CommandCata
 import { PluginModuleRegistry } from '../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { PageRule } from '../../../src/mapEditor/core/pageRule/pageRule.ts';
 import { WindowPageRule } from '../../../src/mapEditor/core/pageRule/WindowPageRule.ts';
+import { GamePreview } from '../../../src/mapEditor/core/preview/GamePreview.ts';
+import { WindowPreview } from '../../../src/mapEditor/core/preview/WindowPreview.ts';
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { LightingLayerDefinition } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import type { LayerVisibility, MarkerClassifier, OverlaySet, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
@@ -51,6 +53,7 @@ const stand = vi.hoisted(() => ({
     pageRules: PageRule[];
     shown: (boolean | 'mount')[];
     times: number[];
+    previews: GamePreview[];
     announce: (state: string) => void;
     zoomTo: (zoom: number) => void;
   }[],
@@ -76,6 +79,7 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       pageRules: [] as PageRule[],
       shown: [] as (boolean | 'mount')[],
       times: [] as number[],
+      previews: [] as GamePreview[],
       announce: (state: string) =>
       {
         this.drawListeners.forEach(listener => listener(state));
@@ -174,6 +178,11 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       this.record.pageRules.push(rule);
     }
 
+    setPreview(preview: GamePreview): void
+    {
+      this.record.previews.push(preview);
+    }
+
     setOverlays(overlays: OverlaySet): void
     {
       this.record.overlaySets.push(overlays);
@@ -267,7 +276,10 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * clock is J-TIME's, J-Lighting-Time casting its sky by it, and the bar shows one chip.
  *
  * The renderer is handed the window's page rule from the start, and again whenever it changes, as the modules switch
- * on or the new game is read, so every event shows the page a fresh save would show at the clock's time.
+ * on or the new game is read, so every event shows the page a fresh save would show at the clock's time; and the
+ * window's preview from the start and every time it changes, so every view shows the switches and variables set. Beside
+ * the clock, a chip says what the preview sets, "Fresh save" while nothing, so a preview is never on unnoticed, and a
+ * click on it opens the Switches & Variables window, saying so when the window was blocked.
  */
 describe('MapView', () =>
 {
@@ -312,7 +324,8 @@ describe('MapView', () =>
     const locationPicks = new LocationPicks();
     const clock = new WindowClock(840);
     const pages = new WindowPageRule(NO_MODULES);
-    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES, clock, pages };
+    const preview = new WindowPreview();
+    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES, clock, pages, preview };
     return { ...services, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
   };
 
@@ -874,5 +887,73 @@ describe('MapView', () =>
     // Assert.
     expect(stand.renderers.map(renderer => renderer.times))
       .toStrictEqual([ [ 840, 1320, 120 ], [ 840, 1320, 120 ] ]);
+  });
+
+  it('hands every view the window\'s preview from the start and each time it changes, wherever it was changed', () =>
+  {
+    // Arrange: two views of one window.
+    const services = served();
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+        <MapView mapId={6}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: switch 147 on, then variable 74 at 99.
+    act(() => services.preview.setSwitch(147, true));
+    act(() => services.preview.setVariable(74, 99));
+
+    // Assert.
+    expect(stand.renderers.map(renderer => renderer.previews.map(preview => preview.toJson())))
+      .toStrictEqual([
+        [ {}, { switch: { 147: true } }, { switch: { 147: true }, variable: { 74: 99 } } ],
+        [ {}, { switch: { 147: true } }, { switch: { 147: true }, variable: { 74: 99 } } ],
+      ]);
+  });
+
+  it('says a fresh save beside the clock while nothing is set, and what is set once it is', () =>
+  {
+    // Arrange: a view over a project.
+    const services = served();
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const fresh = screen.getByTestId('map-preview').textContent;
+
+    // Act: two switches on and a variable set, from the Switches & Variables window.
+    act(() => services.preview.set(GamePreview.FRESH.withSwitch(24, true).withSwitch(147, true).withVariable(74, 99)));
+
+    // Assert.
+    expect([ fresh, screen.getByTestId('map-preview').textContent ])
+      .toStrictEqual([ 'Fresh save', '2 switches, 1 variable' ]);
+  });
+
+  it('opens the Switches & Variables window from the preview chip, and says so when the window was blocked', () =>
+  {
+    // Arrange: a view whose window's pop-ups are blocked.
+    const services = served();
+    const opened = vi.spyOn(services.shell, 'open').mockReturnValueOnce('opened')
+      .mockReturnValueOnce('blocked');
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: the chip clicked twice, the second time blocked.
+    act(() => screen.getByTestId('map-preview').click());
+    const quiet = screen.queryByText(/was blocked/u);
+    act(() => screen.getByTestId('map-preview').click());
+
+    // Assert.
+    expect([ opened.mock.calls.map(([ request ]) => request.path), quiet, screen.getByText(/was blocked/u).textContent ])
+      .toStrictEqual([
+        [ '/map.html?view=switches-variables', '/map.html?view=switches-variables' ],
+        null,
+        'The Switches & Variables window was blocked; allow pop-ups for the editor to open it.',
+      ]);
   });
 });
