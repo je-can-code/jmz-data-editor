@@ -3,7 +3,7 @@ import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandC
 import { pluginCommandEntry } from '../../../../src/mapEditor/core/commands/pluginCommands.ts';
 import { createMapEvent, pageCommentText } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import type { EventKindDefinition, ModuleContext, PluginModule } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
+import type { EventKindDefinition, ModuleContext, PluginModule, PreviewKindDefinition } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
 import { configNamesOf, enabledPlugins, PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
@@ -28,6 +28,10 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * A module may add conditions to the game's page rule, as J-TIME adds its hours, kept while it is on and taken back
  * when it switches off. Every module is handed words for a page, read from the page's own conditions and from every
  * page condition the active modules add, a module switching on after it included.
+ *
+ * A module may let the preview set a kind of state of its own, as J-OMNI-Quests lets it set where each quest stands,
+ * named under its own id like everything else it adds, so it can never take over the switches, the variables or another
+ * module's kind; listed while it is on, in the order the modules added them, and taken back when it switches off.
  */
 describe('PluginModuleRegistry', () =>
 {
@@ -56,6 +60,21 @@ describe('PluginModuleRegistry', () =>
    * @returns {EventKindDefinition} The kind.
    */
   const decor = (): EventKindDefinition => ({ id: 'core.decor', title: 'Decor', priority: 0, detect: () => true });
+
+  /**
+   * A kind of preview state a module adds under its own id, listing nothing.
+   * @param {string} moduleId The module.
+   * @returns {PreviewKindDefinition} The kind.
+   */
+  const previewKind = (moduleId: string): PreviewKindDefinition => ({
+    id: `${moduleId}.states`,
+    title: moduleId,
+    nouns: { one: moduleId, many: `${moduleId}s`, state: 'set' },
+    searchHint: 'Find one',
+    noMatch: 'None.',
+    entries: () => [],
+    choose: () => undefined,
+  });
 
   /**
    * A J-ABS stand-in module contributing one of everything.
@@ -307,6 +326,7 @@ describe('PluginModuleRegistry', () =>
       { id: 'f', title: 'F', plugins: [], register: add => add.notice({ id: 'core.x', title: 'x', detail: 'x' }) },
       { id: 'g', title: 'G', plugins: [], register: add => add.mapProperties({ id: 'core.x', title: 'x', source: () => ({ note: null, fields: [] }) }) },
       { id: 'h', title: 'H', plugins: [], register: add => add.pageCondition({ id: 'core.x', read: () => null }) },
+      { id: 'i', title: 'I', plugins: [], register: add => add.previewKind({ ...previewKind('quest'), id: 'quest.states' }) },
     ];
 
     // Act.
@@ -329,6 +349,8 @@ describe('PluginModuleRegistry', () =>
       .toThrow('g can only add map properties sections whose id starts with "g.", not core.x');
     expect(failures[7])
       .toThrow('h can only add page conditions whose id starts with "h.", not core.x');
+    expect(failures[8])
+      .toThrow('i can only add preview kinds whose id starts with "i.", not quest.states');
   });
 
   describe('enabledPlugins', () =>
@@ -491,6 +513,54 @@ describe('PluginModuleRegistry', () =>
       // Assert.
       expect(words)
         .toStrictEqual([ 'while switch 4 is on', 'time reads <hourRangePage:18-5>' ]);
+    });
+  });
+
+  describe('previewKinds', () =>
+  {
+    /**
+     * A module letting the preview set a kind of its own, once its plugin is on.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @returns {PluginModule} The module.
+     */
+    const previewing = (id: string, pluginName: string): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: contributions => contributions.previewKind(previewKind(id)),
+    });
+
+    it('lists the preview kinds of the active modules in the order they added them, and none while they are off', () =>
+    {
+      // Arrange: two modules adding kinds, and a registry where neither is on.
+      const modules = [ previewing('quest', 'J-OMNI-Quests'), previewing('weather', 'J-Weather') ];
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      both.activate(modules, [ plugin('j/omni/ext/J-OMNI-Quests', true), plugin('j/weather/J-Weather', true) ]);
+      neither.activate(modules, [ plugin('j/omni/ext/J-OMNI-Quests', false) ]);
+
+      // Assert.
+      expect([ both.previewKinds().map(kind => kind.id), neither.previewKinds() ])
+        .toStrictEqual([ [ 'quest.states', 'weather.states' ], [] ]);
+    });
+
+    it('takes a module\'s preview kind back once it switches off', () =>
+    {
+      // Arrange: the module on.
+      const quest = previewing('quest', 'J-OMNI-Quests');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ quest ], [ plugin('j/omni/ext/J-OMNI-Quests', true) ]);
+      const listed = registry.previewKinds().length;
+
+      // Act.
+      registry.activate([ quest ], [ plugin('j/omni/ext/J-OMNI-Quests', false) ]);
+
+      // Assert.
+      expect([ listed, registry.previewKinds() ])
+        .toStrictEqual([ 1, [] ]);
     });
   });
 

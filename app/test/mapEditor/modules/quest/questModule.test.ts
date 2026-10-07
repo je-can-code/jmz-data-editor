@@ -4,8 +4,9 @@ import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzEventPage } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { PluginModule } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
-import type { PageTest } from '../../../../src/mapEditor/core/pageRule/pageRule.ts';
+import type { PageCondition, PageTest } from '../../../../src/mapEditor/core/pageRule/pageRule.ts';
 import { ShownPages } from '../../../../src/mapEditor/core/pageRule/ShownPages.ts';
+import { GamePreview } from '../../../../src/mapEditor/core/preview/GamePreview.ts';
 import { newGameQuestLog } from '../../../../src/mapEditor/modules/quest/questLog.ts';
 import { QUEST_PAGES_ID, questModule, questPageCondition } from '../../../../src/mapEditor/modules/quest/questModule.ts';
 import { timeModule } from '../../../../src/mapEditor/modules/time/timeModule.ts';
@@ -24,6 +25,11 @@ import { command, event, page } from '../../support/eventKindFixtures.ts';
  *
  * A config that cannot be read is said over every map view, and every page waiting on a quest is held back, as though
  * the game had no quest at all. Without J-OMNI-Quests, no page is held back by a quest.
+ *
+ * While it is enabled the module also lets the preview set where each quest stands, and every quest-gated page is judged
+ * at the window's preview: whatever it sets of a quest, by each shape the tag takes, and a new game's state everywhere
+ * else. A page names the quests it reads, so a change to one quest judges again the events reading that quest and no
+ * other, however alike their keys, and never an event reading no quest at all.
  */
 describe('questModule', () =>
 {
@@ -49,8 +55,12 @@ describe('questModule', () =>
    */
   const CONFIG = {
     quests: [
-      { name: 'Herbalist Delivery', key: 'herbalist_delivery', objectives: [ { id: 0 }, { id: 1 }, { id: 2 } ] },
-      { name: 'Herbalist Delivery II', key: 'herbalist_delivery_2', objectives: [ { id: 7 } ] },
+      {
+        name: 'Herbalist Delivery',
+        key: 'herbalist_delivery',
+        objectives: [ { id: 0, description: 'Pick the herbs.' }, { id: 1, description: 'Carry them to town.' }, { id: 2, description: 'Hand them over.' } ],
+      },
+      { name: 'Herbalist Delivery II', key: 'herbalist_delivery_2', objectives: [ { id: 7, description: 'Rest.' } ] },
     ],
     tags: [],
     categories: [],
@@ -90,6 +100,19 @@ describe('questModule', () =>
     // Assert.
     expect(added)
       .toStrictEqual([ [ true, [ QUEST_PAGES_ID ], [] ], [ false, [], [] ] ]);
+  });
+
+  it('lets the preview set where each quest stands while J-OMNI-Quests is enabled, and not while it is not', () =>
+  {
+    // Arrange.
+    const registries = [ registryOver([ questModule ], [ quests(true) ]), registryOver([ questModule ], [ quests(false) ]) ];
+
+    // Act.
+    const kinds = registries.map(registry => registry.previewKinds().map(kind => [ kind.id, kind.entries(GamePreview.FRESH).map(entry => entry.key) ]));
+
+    // Assert: listing the quests the page condition reads.
+    expect(kinds)
+      .toStrictEqual([ [ [ 'quest.states', [ 'herbalist_delivery', 'herbalist_delivery_2' ] ] ], [] ]);
   });
 
   describe('questPageCondition', () =>
@@ -161,6 +184,96 @@ describe('questModule', () =>
           [ false, [ 'while quest herbalist_delivery_3 is inactive (no such quest)' ] ],
         ]);
     });
+
+    it('names the quests the game tracks that a page reads, each once, and none it does not track', () =>
+    {
+      // Arrange: a page waiting on the delivery twice, on its sequel, and on a quest the game does not track.
+      const condition = questPageCondition(newGameQuestLog(CONFIG));
+      const shown = commented([
+        '<pageQuestCondition:[herbalist_delivery, -1, inactive]>',
+        '<pageQuestCondition:[herbalist_delivery, 1]>',
+        '<pageQuestCondition:[herbalist_delivery_2]>',
+        '<pageQuestCondition:[herbalist_delivery_3]>',
+      ]);
+
+      // Act.
+      const test = condition.read(shown) as PageTest;
+
+      // Assert.
+      expect(test.reads)
+        .toStrictEqual([ 'quest.states:herbalist_delivery', 'quest.states:herbalist_delivery_2' ]);
+    });
+
+    it('holds a page at the preview by each shape of the tag, and none of them on a fresh save', () =>
+    {
+      // Arrange: the four shapes, each asked at a preview setting what one of them waits for: objective 1 under way,
+      // objective 2 under way, objective 2 completed, and the delivery completed of its own.
+      const condition = questPageCondition(newGameQuestLog(CONFIG));
+      const tests = [
+        '<pageQuestCondition:[herbalist_delivery]>',
+        '<pageQuestCondition:[herbalist_delivery, 2]>',
+        '<pageQuestCondition:[herbalist_delivery, 2, completed]>',
+        '<pageQuestCondition:[herbalist_delivery, -1, completed]>',
+      ].map(line => condition.read(commented([ line ])) as PageTest);
+      const previews = [
+        { objectives: { 1: 'active' } },
+        { objectives: { 2: 'active' } },
+        { objectives: { 2: 'completed' } },
+        { state: 'completed' },
+      ].map(value => GamePreview.FRESH.with('quest.states', 'herbalist_delivery', value));
+
+      // Act.
+      const held = tests.map(test => [ ...previews.map(preview => test.holds({ timeOfDay: 840, preview })), test.holds({ timeOfDay: 840 }) ]);
+
+      // Assert: the quest under way, objective 2 under way, objective 2 completed, the quest completed; down, each at the
+      // four previews and then on a fresh save.
+      expect(held)
+        .toStrictEqual([
+          [ true, true, true, false, false ],
+          [ false, true, false, false, false ],
+          [ false, false, true, false, false ],
+          [ false, false, false, true, false ],
+        ]);
+    });
+  });
+
+  it('judges again only the events whose pages read a quest the preview changed, and shows each its new page', () =>
+  {
+    // Arrange: a giver of the delivery, offering it and then waiting on objective 1; a giver of the sequel, whose key
+    // differs only by a suffix, alike; and a lamp reading no quest. Every page's quest test notes its event when asked.
+    const condition = questPageCondition(newGameQuestLog(CONFIG));
+    const owners = new Map<RmmzEventPage, number>();
+    const asked = new Set<number>();
+    const noting: PageCondition = {
+      id: condition.id,
+      read: shown =>
+      {
+        const test = condition.read(shown);
+        return test === null
+          ? null
+          : {
+            ...test,
+            holds: moment =>
+            {
+              asked.add(owners.get(shown) as number);
+              return test.holds(moment);
+            },
+          };
+      },
+    };
+    const giver = (id: number, key: string) => event(id, [ commented([]), commented([ `<pageQuestCondition:[${key}, -1, inactive]>` ]), commented([ `<pageQuestCondition:[${key}, 1]>` ]) ]);
+    const events = [ giver(1, 'herbalist_delivery'), giver(2, 'herbalist_delivery_2'), event(3, [ commented([ '<light:[2]>' ]) ]) ];
+    events.forEach(each => each.pages.forEach(shown => owners.set(shown, each.id)));
+    const pages = new ShownPages({ save: { party: [ 1, 2 ] }, conditions: [ noting ] }, 840);
+    const before = events.map(each => pages.shownPage(each).index);
+    asked.clear();
+
+    // Act: objective 1 of the delivery under way.
+    const turned = pages.setPreview(GamePreview.FRESH.with('quest.states', 'herbalist_delivery', { objectives: { 1: 'active' } }));
+
+    // Assert: only the delivery's giver asked again, and moved on to the objective's page; the sequel's still offering.
+    expect([ before, [ ...asked ], turned, events.map(each => pages.shownPage(each).index) ])
+      .toStrictEqual([ [ 1, 1, 0 ], [ 1 ], [ 1 ], [ 2, 1, 0 ] ]);
   });
 
   it('says over the map when the config cannot be read, and holds back every page waiting on a quest', () =>

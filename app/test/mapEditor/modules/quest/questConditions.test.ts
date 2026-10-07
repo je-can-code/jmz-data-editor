@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { GamePreview } from '../../../../src/mapEditor/core/preview/GamePreview.ts';
 import {
   objectiveOf,
   questOf,
@@ -16,6 +17,11 @@ import type { QuestState, QuestTag } from '../../../../src/mapEditor/modules/que
  * their key exactly, so a key differing by a letter or a suffix names another quest, and a quest the game does not track
  * (the plugin stops the game with an error when it asks after one) holds nothing, as does a key the plugin reads as a
  * number. A page's tags hold only while every one of them does.
+ *
+ * Every tag is judged at the window's preview: a quest the preview sets is judged as it sets it, its objectives in the
+ * states set and the quest in a state of its own or where its objectives put it, and a quest it leaves alone as the log
+ * has it. What is set of one quest never reaches another, however alike their keys, and a quest the game does not track
+ * holds nothing whatever the preview sets of it.
  */
 
 /**
@@ -59,6 +65,14 @@ const tag = (key: string | null, objectiveId: number | null = null, state: Quest
  * Every state, in the plugin's order.
  */
 const STATES: readonly QuestState[] = [ 'inactive', 'active', 'completed', 'failed', 'missed' ];
+
+/**
+ * The same two quests as a new game tracks them: every quest and objective inactive.
+ */
+const NEW_GAME: QuestLog = new Map([ ...LOG ].map(([ key, quest ]) => [
+  key,
+  { ...quest, state: 'inactive' as const, objectives: quest.objectives.map(objective => ({ ...objective, state: 'inactive' as const })) },
+]));
 
 describe('questConditions', () =>
 {
@@ -196,6 +210,50 @@ describe('questConditions', () =>
       expect(held)
         .toStrictEqual([ false, false, false ]);
     });
+
+    it('holds an objective\'s tag at the state the preview sets it, every other objective as a new game has it', () =>
+    {
+      // Arrange: objective 1 of the delivery under way.
+      const preview = GamePreview.FRESH.with('quest.states', 'herbalist_delivery', { objectives: { 1: 'active' } });
+      const tags = [ tag('herbalist_delivery', 1), tag('herbalist_delivery', 1, 'inactive'), tag('herbalist_delivery', 2, 'inactive'), tag('herbalist_delivery', 0) ];
+
+      // Act.
+      const held = tags.map(each => [ questTagHolds(each, NEW_GAME, preview), questTagHolds(each, NEW_GAME) ]);
+
+      // Assert: at the preview, then on a fresh save.
+      expect(held)
+        .toStrictEqual([ [ true, false ], [ false, true ], [ true, true ], [ false, false ] ]);
+    });
+
+    it('holds a tag on the quest itself where its objectives put it, and at a state of its own once the preview gives one', () =>
+    {
+      // Arrange: objective 1 under way; then the same with the quest completed of its own.
+      const underWay = GamePreview.FRESH.with('quest.states', 'herbalist_delivery', { objectives: { 1: 'active' } });
+      const completed = GamePreview.FRESH.with('quest.states', 'herbalist_delivery', { state: 'completed', objectives: { 1: 'active' } });
+      const tags = [ tag('herbalist_delivery'), tag('herbalist_delivery', -1, 'inactive'), tag('herbalist_delivery', -1, 'completed') ];
+
+      // Act.
+      const held = [ underWay, completed ].map(preview => tags.map(each => questTagHolds(each, NEW_GAME, preview)));
+
+      // Assert: active, inactive, completed across; under way, then completed of its own, down.
+      expect(held)
+        .toStrictEqual([ [ true, false, false ], [ false, false, true ] ]);
+    });
+
+    it('wakes nothing on a quest whose key differs by a suffix, nor on a quest the game does not track', () =>
+    {
+      // Arrange: objective 0 of the sequel under way, which the delivery has too; and an untracked quest set active.
+      const preview = GamePreview.FRESH.with('quest.states', 'herbalist_delivery_2', { objectives: { 0: 'active' } })
+        .with('quest.states', 'herbalist', { state: 'active' });
+      const tags = [ tag('herbalist_delivery', 0), tag('herbalist_delivery'), tag('herbalist_delivery_2', 0), tag('herbalist') ];
+
+      // Act.
+      const held = tags.map(each => questTagHolds(each, NEW_GAME, preview));
+
+      // Assert.
+      expect(held)
+        .toStrictEqual([ false, false, true, false ]);
+    });
   });
 
   describe('questTagsHold', () =>
@@ -214,6 +272,20 @@ describe('questConditions', () =>
       // Assert.
       expect(held)
         .toStrictEqual([ true, false ]);
+    });
+
+    it('holds a page at the preview while every one of its tags holds there, each quest as the preview sets it', () =>
+    {
+      // Arrange: a sequel's offer, waiting for the sequel to be inactive and the delivery completed, as quest-givers do.
+      const offer = [ tag('herbalist_delivery_2', -1, 'inactive'), tag('herbalist_delivery', -1, 'completed') ];
+      const done = GamePreview.FRESH.with('quest.states', 'herbalist_delivery', { state: 'completed' });
+
+      // Act.
+      const held = [ questTagsHold(offer, NEW_GAME), questTagsHold(offer, NEW_GAME, done), questTagsHold(offer, NEW_GAME, done.with('quest.states', 'herbalist_delivery_2', { state: 'active' })) ];
+
+      // Assert: not on a fresh save; once the delivery is done; not once the sequel is under way too.
+      expect(held)
+        .toStrictEqual([ false, true, false ]);
     });
   });
 });

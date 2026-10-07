@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GamePreview, switchKey, variableKey } from '../../../../src/mapEditor/core/preview/GamePreview.ts';
+import { GamePreview, previewKey, switchKey, variableKey } from '../../../../src/mapEditor/core/preview/GamePreview.ts';
 
 /*
  * A preview is how far along the story the author asks every map to show the game: switches turned on, variables set,
@@ -27,6 +27,19 @@ describe('GamePreview', () =>
       // Assert.
       expect(keys)
         .toStrictEqual([ 'switch:74', 'variable:74' ]);
+    });
+
+    it('names a module\'s thing by its kind and key, exactly as a change to it is named', () =>
+    {
+      // Arrange: a quest set, beside a fresh save.
+      const changed = GamePreview.FRESH.with('quest.states', 'cecil-001', { state: 'completed' }).changedKeys(GamePreview.FRESH);
+
+      // Act.
+      const key = previewKey('quest.states', 'cecil-001');
+
+      // Assert.
+      expect([ key, changed.has(key) ])
+        .toStrictEqual([ 'quest.states:cecil-001', true ]);
     });
   });
 

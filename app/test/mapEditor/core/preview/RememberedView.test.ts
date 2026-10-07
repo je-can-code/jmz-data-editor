@@ -19,7 +19,8 @@ import { WindowClock } from '../../../../src/mapEditor/core/time/WindowClock.ts'
  * by every window: a window coming up takes what its project left, every change made in one window is written for the
  * next session and for every other window, and every other window takes it at once, without writing it back, so no two
  * windows ever echo one change between them. Only what the author chose is kept: a clock still following the game's
- * starting time keeps no time, so a game whose start moves starts there.
+ * starting time keeps no time, so a game whose start moves starts there. Whatever kind of state a plugin module lets the
+ * preview set, such as where each quest stands, is kept and shared exactly as the module set it, unread.
  *
  * What is kept is read leniently: anything that cannot be used, from text that is no JSON to a clock time no day holds,
  * reads as nothing set and the clock following the game, never as a reason the editor will not start.
@@ -214,6 +215,29 @@ describe('RememberedView', () =>
       // Assert: each change written once, and both windows on one clock and one preview.
       expect([ writes, second.clock.time(), second.preview.preview().switchesOn(), first.preview.preview().variable(74) ])
         .toStrictEqual([ 3, 1140, [ 74 ], 99 ]);
+    });
+
+    it('keeps a module\'s kind for the next session and shares it live with every other window, as the module set it', () =>
+    {
+      // Arrange: two windows of one session.
+      const storage = new MemoryStorage();
+      const first = buildWindow(storage);
+      const second = buildWindow(storage);
+
+      // Act: objective 1 of a quest set in the first window; then the session closed, and the next one's window opened.
+      first.preview.setValue('quest.states', 'cecil-001', { objectives: { 1: 'active' } });
+      const shared = second.preview.preview().value('quest.states', 'cecil-001');
+      first.detach();
+      second.detach();
+      const next = buildWindow(storage);
+
+      // Assert.
+      expect([ storage.text, shared, next.preview.preview().value('quest.states', 'cecil-001') ])
+        .toStrictEqual([
+          '{"version":1,"clock":null,"preview":{"quest.states":{"cecil-001":{"objectives":{"1":"active"}}}}}',
+          { objectives: { 1: 'active' } },
+          { objectives: { 1: 'active' } },
+        ]);
     });
 
     it('takes back a fresh save from another window, and a preview another window cleared', () =>
