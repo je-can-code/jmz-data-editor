@@ -436,6 +436,19 @@ describe('pluginModules', () =>
         .toBe(true);
     });
 
+    it('knows the quest config, which J-OMNI-Quests\' module reads, so a quest changed on disk judges pages again', () =>
+    {
+      // Arrange.
+      const path = 'data/config.quest.json';
+
+      // Act.
+      const known = isModuleConfigFile(path);
+
+      // Assert.
+      expect(known)
+        .toBe(true);
+    });
+
     it('passes over a config no module reads, a map, and paths only shaped like a config', () =>
     {
       // Arrange: the crafting board's config, a map, a config in another folder, and one with a dot in its name.

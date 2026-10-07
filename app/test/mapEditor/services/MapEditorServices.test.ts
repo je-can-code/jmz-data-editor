@@ -294,6 +294,62 @@ describe('MapEditorServices', () =>
     services.stop();
   });
 
+  it('judges quest-gated pages again when the quest config changes on disk, telling the page rule\'s listeners', async () =>
+  {
+    // Arrange: a project enabling J-OMNI-Quests whose delivery has objectives 0 to 2, and a page waiting for objective 2
+    // to be inactive, which on a fresh save it is.
+    let objectives = [ { id: 0 }, { id: 1 }, { id: 2 } ];
+    const { fetch } = stubFetch(request =>
+    {
+      if (request.url.endsWith('/api/plugin-metadata'))
+      {
+        return new Response('var $plugins = [\n{"name":"j/omni/ext/J-OMNI-Quests","status":true,"description":"","parameters":{}}\n];');
+      }
+
+      return request.url.endsWith('/api/config/quest')
+        ? envelope({ quests: [ { name: 'Herbalist Delivery', key: 'herbalist_delivery', objectives } ], tags: [], categories: [] })
+        : envelope({});
+    });
+    const { environment, sources } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    const waiting = { ...createMapEvent(4, 0, 0).pages[0], list: [ { code: 108, indent: 0, parameters: [ '<pageQuestCondition:[herbalist_delivery, 2, inactive]>' ] } ] };
+    const judge = () => services.pages.rule().conditions.flatMap(condition =>
+    {
+      const test = condition.read(waiting);
+      return test === null ? [] : [ test.holds({ timeOfDay: 0 }), ...test.words ];
+    });
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.isActive('quest'))
+        .toBe(true);
+    });
+    const before = judge();
+    let told = 0;
+    const stop = services.pages.subscribe(() =>
+    {
+      told += 1;
+    });
+
+    // Act: objective 2 is taken out of the delivery, and the file's change announced.
+    objectives = [ { id: 0 }, { id: 1 } ];
+    sources[0].emitChange({ path: 'data/config.quest.json', kind: 'write', client: '' });
+    await vi.waitFor(() =>
+    {
+      expect(told)
+        .toBe(1);
+    });
+
+    // Assert: shown before, held back after, and saying why.
+    expect([ before, judge() ])
+      .toStrictEqual([
+        [ true, 'while objective 2 of "Herbalist Delivery" is inactive' ],
+        [ false, 'while objective 2 of "Herbalist Delivery" is inactive (no such objective)' ],
+      ]);
+    stop();
+    services.stop();
+  });
+
   it('starts the window\'s clock where the game does once J-TIME\'s module offers one, keeping the author\'s hour after', async () =>
   {
     // Arrange: a project enabling J-Lighting, J-Lighting-Time and J-TIME, whose game starts at the hour the test says;
