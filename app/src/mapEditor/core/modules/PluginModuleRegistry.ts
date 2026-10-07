@@ -14,6 +14,7 @@ import type {
   PaletteEntry,
   PassabilityRule,
   PluginModule,
+  PreviewKindDefinition,
 } from './PluginModule.ts';
 
 /**
@@ -44,6 +45,7 @@ type Contributions = {
   clocks: ClockOffer[];
   mapProperties: MapPropertiesSection[];
   pageConditions: PageCondition[];
+  previewKinds: PreviewKindDefinition[];
 };
 
 /**
@@ -62,6 +64,7 @@ const noContributions = (): Contributions => ({
   clocks: [],
   mapProperties: [],
   pageConditions: [],
+  previewKinds: [],
 });
 
 /**
@@ -94,8 +97,8 @@ const configNamesOf = (pluginModule: PluginModule, enabled: ReadonlyMap<string, 
 /**
  * Holds the event kinds, palette entries, passability rules, overlays, lighting layers and command entries the editor
  * knows, the maps whose events are a plugin's patterns, what the modules say over every map view, the clock they offer,
- * the sections they add to Map Properties and the conditions they add to the game's page rule: the core's kinds, always,
- * and each plugin module's contributions while its plugins are enabled.
+ * the sections they add to Map Properties, the conditions they add to the game's page rule and the kinds of state they
+ * let the preview set: the core's kinds, always, and each plugin module's contributions while its plugins are enabled.
  */
 class PluginModuleRegistry
 {
@@ -328,6 +331,16 @@ class PluginModuleRegistry
   }
 
   /**
+   * Lists the kinds of state the active modules let the preview set beside the switches and variables, in the order they
+   * added them; empty while none adds one, when the Switches & Variables window lists those two alone.
+   * @returns {readonly PreviewKindDefinition[]} The kinds.
+   */
+  previewKinds(): readonly PreviewKindDefinition[]
+  {
+    return this.#contributions.previewKinds;
+  }
+
+  /**
    * Builds the contribution sink one module registers through, which holds it to its own id prefix.
    * @param {PluginModule} pluginModule The module.
    * @returns {ModuleContributions} The sink.
@@ -396,6 +409,11 @@ class PluginModuleRegistry
       {
         requirePrefix(condition.id, 'page conditions');
         this.#contributions.pageConditions.push(condition);
+      },
+      previewKind: kind =>
+      {
+        requirePrefix(kind.id, 'preview kinds');
+        this.#contributions.previewKinds.push(kind);
       },
     };
   }

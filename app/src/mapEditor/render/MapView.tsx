@@ -7,6 +7,7 @@ import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { RmmzEventPage, RmmzMapEvent } from '../core/model/rmmzTypes.ts';
 import type { ModuleNotice } from '../core/modules/PluginModule.ts';
 import type { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
+import { previewNouns } from '../core/preview/previewWords.ts';
 import type { Camera, MapCell } from '../core/renderer/camera.ts';
 import { GAME_LOOK, type MarkerClassifier, type OverlayId } from '../core/renderer/MapRenderer.ts';
 import { openTilesetMarks } from '../core/palette/tilesetMarkEdits.ts';
@@ -271,10 +272,12 @@ const MapView = (props: MapViewProps) =>
   const selected = useSyncExternalStore(selection.subscribe, selection.get);
 
   // the plugin modules switch on once js/plugins.js is read, which can be after the bar first drew; whether any of them
-  // lights the map decides whether the bar offers its Lighting switch, and whether one offers a clock, its clock.
+  // lights the map decides whether the bar offers its Lighting switch, whether one offers a clock, its clock, and the
+  // kinds of state they let the preview set, what the preview chip calls them.
   useSyncExternalStore(services.modules.subscribe, () => services.modules.revision);
   const switches = shownSwitches(services.modules.lightingLayers().length > 0);
   const clockOffer = services.modules.clockOffer();
+  const nouns = previewNouns(services.modules.previewKinds());
   const [ openMap, setOpenMap ] = useState<MapDocument | null>(null);
   const [ status, setStatus ] = useState<MapViewStatus>({ gpu: '', zoom: 1, cell: null, problem: null, note: '' });
   const [ settings, setSettings ] = useState<MapViewSettings>({ visibility: GAME_LOOK, overlays: new Set(STARTING_OVERLAYS) });
@@ -561,7 +564,7 @@ const MapView = (props: MapViewProps) =>
         {clockOffer !== null && (
           <ClockChip clock={services.clock} partOfDay={clockOffer.partOfDay}/>
         )}
-        <PreviewChip preview={services.preview} onOpen={() => openPreview()}/>
+        <PreviewChip preview={services.preview} nouns={nouns} onOpen={() => openPreview()}/>
         <Divider flexItem orientation={'vertical'} sx={{ mx: 0.5 }}/>
         <Typography variant={'caption'} color={'text.secondary'}>
           Highlight layer

@@ -18,9 +18,10 @@ import { Redo, RestartAlt, Save, Undo } from '@mui/icons-material';
 import { SYSTEM_HISTORY_KEY } from '../../core/history/historyKeys.ts';
 import { SYSTEM_KEY } from '../../core/model/documentKeys.ts';
 import type { RmmzNameList } from '../../core/model/rmmzTypes.ts';
+import type { PreviewKindDefinition } from '../../core/modules/PluginModule.ts';
 import { SWITCH_KIND, VARIABLE_KIND, type GamePreview, type PreviewKind } from '../../core/preview/GamePreview.ts';
 import { readWholeNumber } from '../../core/preview/previewInput.ts';
-import { previewWords } from '../../core/preview/previewWords.ts';
+import { previewNouns, previewWords } from '../../core/preview/previewWords.ts';
 import {
   maximumOf,
   nameRows,
@@ -35,6 +36,7 @@ import { CommitTextField } from '../commandList/CommitTextField.tsx';
 import { useDocumentRevision, useHubChanges } from '../commandList/useCommandListState.ts';
 import { commitTyping } from '../commitTyping.ts';
 import { useEventWindowKeys } from '../eventWindow/useEventWindowKeys.ts';
+import { PreviewKindPanel } from './PreviewKindPanel.tsx';
 
 /**
  * How tall each row of a list is, in pixels.
@@ -295,15 +297,20 @@ const NameListPanel = (props: { readonly list: RmmzNameList; readonly names: rea
 
 /**
  * The switches and variables once loaded: saving and undo along the top with the preview's own line, then the two lists
- * side by side.
+ * side by side, and beside them a list for each kind of state the active plugin modules let the preview set, such as the
+ * quests.
  * @returns {React.JSX.Element} The workspace.
  */
 const SwitchesVariablesWorkspace = () =>
 {
-  const { hub, preview: windowPreview } = useMapEditorServices();
+  const { hub, preview: windowPreview, modules } = useMapEditorServices();
   useDocumentRevision(hub, SYSTEM_KEY);
   useHubChanges(hub);
   const preview = useSyncExternalStore(windowPreview.subscribe, windowPreview.preview);
+
+  // the modules switch on once js/plugins.js is read, which can be after the window first drew.
+  useSyncExternalStore(modules.subscribe, () => modules.revision);
+  const kinds = modules.previewKinds();
   const [ problem, setProblem ] = useState<string | null>(null);
   const [ saving, setSaving ] = useState(false);
   const system = systemDocumentOf(hub);
@@ -343,6 +350,20 @@ const SwitchesVariablesWorkspace = () =>
     }
   };
 
+  /**
+   * Sets one thing of a module's kind as its module works out what a pick means, from the preview as it stands at the
+   * moment of the pick, so a change another window made meanwhile is never set back.
+   * @param {PreviewKindDefinition} kind The kind.
+   * @param {string} key The thing's key within the kind.
+   * @param {string} choice The choice that changed.
+   * @param {string} option The value picked.
+   */
+  const choose = (kind: PreviewKindDefinition, key: string, choice: string, option: string) =>
+  {
+    const value = kind.choose(windowPreview.preview(), key, choice, option);
+    windowPreview.setValue(kind.id, key, value);
+  };
+
   // Ctrl+S saves from anywhere in the window, and Ctrl+Z and Ctrl+Y step through the names' history outside a text box.
   useEventWindowKeys({ save, undo: () => step('undo'), redo: () => step('redo') });
 
@@ -369,7 +390,7 @@ const SwitchesVariablesWorkspace = () =>
         </Tooltip>
         <Box sx={{ flex: 1 }}/>
         <Typography variant={'body2'} color={preview.isFresh ? 'text.secondary' : 'warning.main'} data-testid={'preview-words'}>
-          {`Maps show: ${previewWords(preview)}`}
+          {`Maps show: ${previewWords(preview, previewNouns(kinds))}`}
         </Typography>
         <Button
           size={'small'}
@@ -382,7 +403,7 @@ const SwitchesVariablesWorkspace = () =>
         </Button>
       </Stack>
       <Typography variant={'caption'} color={'text.secondary'} sx={{ px: 1.5, pb: 1 }}>
-        Names save to the game. Switches turned on and values set here only change what every map shows.
+        Names save to the game. Everything else set here only changes what every map shows.
       </Typography>
       {problem !== null && <Alert severity={'error'} onClose={() => setProblem(null)} sx={{ mx: 1.5, mb: 1 }}>{problem}</Alert>}
       <Divider/>
@@ -390,6 +411,12 @@ const SwitchesVariablesWorkspace = () =>
         <NameListPanel list={'switches'} names={system.names('switches')} preview={preview} onProblem={setProblem}/>
         <Divider orientation={'vertical'} flexItem/>
         <NameListPanel list={'variables'} names={system.names('variables')} preview={preview} onProblem={setProblem}/>
+        {kinds.map(kind => (
+          <React.Fragment key={kind.id}>
+            <Divider orientation={'vertical'} flexItem/>
+            <PreviewKindPanel kind={kind} preview={preview} onChoose={(key, choice, option) => choose(kind, key, choice, option)}/>
+          </React.Fragment>
+        ))}
       </Box>
     </Box>
   );
@@ -399,7 +426,9 @@ const SwitchesVariablesWorkspace = () =>
  * The Switches & Variables window: every switch and variable by number and name, each name a real edit to System.json,
  * undoable in the names' own history and saved the way the editor saves everything; and, beside each, a preview that is
  * never written anywhere in the game, a switch turned on or a variable set, which every map in every window judges its
- * events' pages against at once. "Back to a fresh save" clears the whole preview.
+ * events' pages against at once. Each kind of state an active plugin module lets the preview set, such as where each
+ * quest stands, is listed beside them, and is never written to the game either. "Back to a fresh save" clears the whole
+ * preview.
  *
  * The window holds System.json, as the window that renames it must: closing it with names unsaved asks first, and every
  * other window follows its renames without holding a copy of its own.

@@ -1,4 +1,5 @@
-import { GamePreview } from './GamePreview.ts';
+import type { JsonValue } from '../model/json.ts';
+import { GamePreview, type PreviewKind } from './GamePreview.ts';
 
 /**
  * Hears every change to a window's preview.
@@ -14,7 +15,7 @@ type PreviewListener = () => void;
  *   {@code useSyncExternalStore} along with {@link subscribe}.
  * - {@link subscribe} hears every change, and returns the call that stops listening.
  * - {@link set} changes it; {@link setSwitch}, {@link setVariable} and {@link reset} change one switch, one variable, or
- *   everything back to a fresh save.
+ *   everything back to a fresh save, and {@link setValue} one thing of a kind a plugin module adds, such as a quest.
  */
 class WindowPreview
 {
@@ -78,6 +79,18 @@ class WindowPreview
   setVariable(variableId: number, value: number): void
   {
     this.set(this.#preview.withVariable(variableId, value));
+  }
+
+  /**
+   * Sets one thing of any kind, such as a quest of the kind J-OMNI-Quests' module adds, which says for itself what its
+   * values mean; the preview keeps, remembers and shares the value without reading it.
+   * @param {PreviewKind} kind The kind.
+   * @param {string} key The thing's key within the kind.
+   * @param {JsonValue | undefined} value Its value, or undefined to put it back as a fresh save holds it.
+   */
+  setValue(kind: PreviewKind, key: string, value: JsonValue | undefined): void
+  {
+    this.set(this.#preview.with(kind, key, value));
   }
 
   /**

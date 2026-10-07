@@ -5,11 +5,13 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { DocumentHub, type DocumentStore, type HistoryCheck } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { SYSTEM_HISTORY_KEY } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import { SYSTEM_KEY } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { SystemDocument } from '../../../../src/mapEditor/core/model/JsonDocument.ts';
+import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import { WindowPreview } from '../../../../src/mapEditor/core/preview/WindowPreview.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
@@ -40,11 +42,12 @@ describe('SwitchesVariablesView', () =>
   });
 
   /**
-   * Renders the window over a real hub and a window preview.
-   * @param {object} options Whether the hub holds the names already, what opening them does, and the store.
-   * @returns {object} The hub, the store, the preview and the opener.
+   * Renders the window over a real hub, a window preview and a window's plugin modules, none of them switched on unless
+   * the test says.
+   * @param {object} options Whether the hub holds the names already, what opening them does, the store, and the modules.
+   * @returns {object} The hub, the store, the preview, the opener and the modules.
    */
-  const renderView = (options: { held?: boolean; open?: () => Promise<unknown>; store?: DocumentStore } = {}) =>
+  const renderView = (options: { held?: boolean; open?: () => Promise<unknown>; store?: DocumentStore; modules?: PluginModuleRegistry } = {}) =>
   {
     const store = options.store ?? { load: vi.fn(async () => buildSystem()), save: vi.fn(async () => undefined) };
     const hub = new DocumentHub({ clientId: 'window-names', store });
@@ -55,13 +58,14 @@ describe('SwitchesVariablesView', () =>
 
     const preview = new WindowPreview();
     const openDocument = vi.fn(options.open ?? (async () => hub.load(SYSTEM_KEY)));
-    const services = { hub, preview, openDocument } as unknown as MapEditorServices;
+    const modules = options.modules ?? new PluginModuleRegistry(new CommandCatalog());
+    const services = { hub, preview, openDocument, modules } as unknown as MapEditorServices;
     render(
       <MapEditorServicesProvider services={services}>
         <SwitchesVariablesView/>
       </MapEditorServicesProvider>
     );
-    return { hub, store, preview, openDocument };
+    return { hub, store, preview, openDocument, modules };
   };
 
   /**
@@ -316,7 +320,8 @@ describe('SwitchesVariablesView', () =>
     const store: DocumentStore = { load: vi.fn(async () => ({ switches, variables: [ '' ] })), save: vi.fn(async () => undefined) };
     const hub = new DocumentHub({ clientId: 'window-names', store });
     hub.adopt(SYSTEM_KEY, { switches, variables: [ '', 'Gold' ] });
-    const services = { hub, preview: new WindowPreview(), openDocument: vi.fn() } as unknown as MapEditorServices;
+    const modules = new PluginModuleRegistry(new CommandCatalog());
+    const services = { hub, preview: new WindowPreview(), openDocument: vi.fn(), modules } as unknown as MapEditorServices;
 
     // Act.
     const shown = render(

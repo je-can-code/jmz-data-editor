@@ -28,18 +28,18 @@ const LOG: QuestLog = new Map<string, TrackedQuest>([
     name: 'Herbalist Delivery',
     state: 'active',
     objectives: [
-      { id: 0, state: 'completed' },
-      { id: 1, state: 'active' },
-      { id: 2, state: 'inactive' },
-      { id: 3, state: 'failed' },
-      { id: 4, state: 'missed' },
+      { id: 0, state: 'completed', description: 'Pick the herbs.' },
+      { id: 1, state: 'active', description: 'Carry them to town.' },
+      { id: 2, state: 'inactive', description: 'Hand them over.' },
+      { id: 3, state: 'failed', description: 'Keep them fresh.' },
+      { id: 4, state: 'missed', description: 'Find the rare one.' },
     ],
   } ],
   [ 'herbalist_delivery_2', {
     key: 'herbalist_delivery_2',
     name: 'Herbalist Delivery II',
     state: 'completed',
-    objectives: [ { id: 0, state: 'completed' }, { id: 7, state: 'active' } ],
+    objectives: [ { id: 0, state: 'completed', description: 'Pick more herbs.' }, { id: 7, state: 'active', description: 'Rest.' } ],
   } ],
 ]);
 
@@ -119,7 +119,7 @@ describe('questConditions', () =>
 
       // Assert.
       expect(found)
-        .toStrictEqual([ { id: 2, state: 'inactive' }, null ]);
+        .toStrictEqual([ { id: 2, state: 'inactive', description: 'Hand them over.' }, null ]);
     });
   });
 

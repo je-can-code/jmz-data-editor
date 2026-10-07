@@ -29,10 +29,11 @@ const CLEARS_ONCE_FIXED = 'This clears as soon as the file is fixed.';
 const DIVIDER_PREFIXES: readonly string[] = [ '__', '==', '--' ];
 
 /**
- * One objective as the server serves it, as far as the game's tracking reads it.
+ * One objective as the server serves it, as far as the game's tracking and the editor's words read it.
  */
 type ServedObjective = {
   readonly id: number;
+  readonly description: string;
 };
 
 /**
@@ -54,11 +55,13 @@ type QuestConfig = {
 };
 
 /**
- * One objective as the game tracks it (TrackedOmniObjective): its id and its state.
+ * One objective as the game tracks it (TrackedOmniObjective): its id, its state, and the description the config gives
+ * it, which the game reads from the config as the editor does.
  */
 type TrackedObjective = {
   readonly id: number;
   readonly state: QuestState;
+  readonly description: string;
 };
 
 /**
@@ -97,7 +100,7 @@ const trackedOnNewGame = (quest: ServedQuest): TrackedQuest =>
 {
   const objectives = [ ...(quest.objectives ?? []) ]
     .sort((left, right) => left.id - right.id)
-    .map(objective => ({ id: objective.id, state: 'inactive' as const }));
+    .map(objective => ({ id: objective.id, state: 'inactive' as const, description: objective.description }));
   return { key: quest.key, name: quest.name, state: 'inactive', objectives };
 };
 

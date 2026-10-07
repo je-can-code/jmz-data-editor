@@ -16,8 +16,13 @@ import { questTagWords, shownNameOf } from '../../../../src/mapEditor/modules/qu
  * The quests a fresh save tracks: a delivery, its sequel, a quest whose name is coloured, and one with no name.
  */
 const LOG: QuestLog = new Map<string, TrackedQuest>([
-  [ 'herbalist_delivery', { key: 'herbalist_delivery', name: 'Herbalist Delivery', state: 'inactive', objectives: [ { id: 0, state: 'inactive' }, { id: 2, state: 'inactive' } ] } ],
-  [ 'herbalist_delivery_2', { key: 'herbalist_delivery_2', name: 'Herbalist Delivery II', state: 'inactive', objectives: [ { id: 7, state: 'inactive' } ] } ],
+  [ 'herbalist_delivery', {
+    key: 'herbalist_delivery',
+    name: 'Herbalist Delivery',
+    state: 'inactive',
+    objectives: [ { id: 0, state: 'inactive', description: 'Pick the herbs.' }, { id: 2, state: 'inactive', description: 'Hand them over.' } ],
+  } ],
+  [ 'herbalist_delivery_2', { key: 'herbalist_delivery_2', name: 'Herbalist Delivery II', state: 'inactive', objectives: [ { id: 7, state: 'inactive', description: 'Rest.' } ] } ],
   [ 'main-004', { key: 'main-004', name: 'Deal with the \\C[1]Water Entity\\C[0]', state: 'inactive', objectives: [] } ],
   [ 'mittens-001', { key: 'mittens-001', name: ' \\C[2]\\C[0] ', state: 'inactive', objectives: [] } ],
 ]);

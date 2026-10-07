@@ -6,9 +6,9 @@ import { newGameQuestLog, questConfigNotice, type ServedQuest } from '../../../.
  * A new game tracks every quest data/config.quest.json lists, exactly as J-OMNI-Quests works it out: the quests whose
  * name marks them as the editor's dividers (starting __, == or --) are left out, every other quest is tracked by its key,
  * a later quest taking the key of an earlier one, and every quest and every objective starts inactive, the objectives
- * ordered by id. Nothing moves a quest before a new game's first event runs, so this is what a fresh save holds. A
- * config whose quests or a quest's objectives the file leaves out tracks none of them, and a project without the file
- * tracks no quest at all.
+ * ordered by id, each keeping the description the config gives it for the editor to show. Nothing moves a quest before
+ * a new game's first event runs, so this is what a fresh save holds. A config whose quests or a quest's objectives the
+ * file leaves out tracks none of them, and a project without the file tracks no quest at all.
  *
  * That last never passes quietly: a config that could not be read comes with a notice naming the file, saying pages
  * waiting on a quest never show until it is fixed, why in the server's words or that it was not read, and that the
@@ -17,7 +17,7 @@ import { newGameQuestLog, questConfigNotice, type ServedQuest } from '../../../.
  */
 
 /**
- * A quest as the server serves it, every field its model declares.
+ * A quest as the server serves it, every field its model declares, each objective described by its own id.
  * @param {string} key Its key.
  * @param {string} name Its name.
  * @param {number[]} objectiveIds Its objectives' ids, in the order the file lists them.
@@ -28,7 +28,7 @@ const served = (key: string, name: string, objectiveIds: number[]): ServedQuest 
   const objectives = objectiveIds.map(id => ({
     id,
     type: 'Indiscriminate',
-    description: '',
+    description: `Step ${id}.`,
     logs: { inactive: '', active: '', completed: '', failed: '', missed: '' },
     fulfillment: { indiscriminate: { hint: '' }, destination: { mapId: 0, x1: 0, x2: 0, y1: 0, y2: 0 }, fetch: { type: 0, id: 0, amount: 0 }, slay: { id: 0, amount: 0 }, quest: { keys: [] } },
     hiddenByDefault: true,
@@ -51,7 +51,7 @@ describe('questLog', () =>
 {
   describe('newGameQuestLog', () =>
   {
-    it('tracks every quest by its key, each inactive, with every objective inactive and ordered by id', () =>
+    it('tracks every quest by its key, each inactive, with every objective inactive, ordered by id with its description', () =>
     {
       // Arrange: two quests whose keys differ by a letter, one listing its objectives out of order.
       const quests = config([ served('herbalist_delivery', 'Herbalist Delivery', [ 2, 0, 1 ]), served('herbalist_deliver', 'Herbalist Errand', [ 0 ]) ]);
@@ -66,9 +66,13 @@ describe('questLog', () =>
             key: 'herbalist_delivery',
             name: 'Herbalist Delivery',
             state: 'inactive',
-            objectives: [ { id: 0, state: 'inactive' }, { id: 1, state: 'inactive' }, { id: 2, state: 'inactive' } ],
+            objectives: [
+              { id: 0, state: 'inactive', description: 'Step 0.' },
+              { id: 1, state: 'inactive', description: 'Step 1.' },
+              { id: 2, state: 'inactive', description: 'Step 2.' },
+            ],
           } ],
-          [ 'herbalist_deliver', { key: 'herbalist_deliver', name: 'Herbalist Errand', state: 'inactive', objectives: [ { id: 0, state: 'inactive' } ] } ],
+          [ 'herbalist_deliver', { key: 'herbalist_deliver', name: 'Herbalist Errand', state: 'inactive', objectives: [ { id: 0, state: 'inactive', description: 'Step 0.' } ] } ],
         ]);
     });
 

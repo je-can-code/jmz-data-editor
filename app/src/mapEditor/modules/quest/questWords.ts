@@ -4,18 +4,27 @@ import type { QuestLog, TrackedQuest } from './questLog.ts';
 import type { QuestTag } from './questTags.ts';
 
 /**
- * Reads the name a quest shows the player: its name as the config writes it, less the escape codes the game draws as
- * colours and the like rather than as letters, such as the colour around "Water Entity" in "Deal with the \C[1]Water
- * Entity\C[0]".
+ * Reads text from the config as the game shows it to the player: less the escape codes the game draws as colours and the
+ * like rather than as letters, such as the colour around "Water Entity" in "Deal with the \C[1]Water Entity\C[0]".
+ * @param {string} text The text as the config writes it.
+ * @returns {string} The text as shown, or an empty string when it shows nothing.
+ */
+const shownText = (text: string): string =>
+{
+  return tokenizeMessage(text)
+    .flatMap(token => (token.kind === 'text' ? [ token.text ] : []))
+    .join('')
+    .trim();
+};
+
+/**
+ * Reads the name a quest shows the player: its name as the config writes it, less its escape codes.
  * @param {TrackedQuest} quest The quest.
  * @returns {string} The name as shown, or an empty string when the config gives it none.
  */
 const shownNameOf = (quest: TrackedQuest): string =>
 {
-  return tokenizeMessage(quest.name)
-    .flatMap(token => (token.kind === 'text' ? [ token.text ] : []))
-    .join('')
-    .trim();
+  return shownText(quest.name);
 };
 
 /**
@@ -70,4 +79,4 @@ const questTagWords = (tag: QuestTag, log: QuestLog): string =>
   return `while ${subject} is ${tag.state}${missingWords(tag, quest)}`;
 };
 
-export { questTagWords, shownNameOf };
+export { questTagWords, shownNameOf, shownText };

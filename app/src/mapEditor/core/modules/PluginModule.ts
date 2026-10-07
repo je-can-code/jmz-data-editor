@@ -7,6 +7,9 @@ import type { JsonValue } from '../model/json.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { RmmzEventPage, RmmzMapEvent, RmmzTileset } from '../model/rmmzTypes.ts';
 import type { PageCondition } from '../pageRule/pageRule.ts';
+import type { GamePreview } from '../preview/GamePreview.ts';
+import type { PreviewEntry } from '../preview/previewList.ts';
+import type { PreviewNouns } from '../preview/previewWords.ts';
 import type { MapPropertiesSource } from '../properties/moduleProperties.ts';
 import type { LightingLayerDefinition } from '../renderer/lightingLayer.ts';
 import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
@@ -228,6 +231,57 @@ type ModuleNotice = {
 };
 
 /**
+ * A kind of state a module lets the preview set beside the switches and variables, such as where each quest stands: how
+ * far along the story the author asks every map to show it. The window's preview keeps it, remembers it between
+ * sessions, shares it live with every window, counts it in the chip beside the clock and clears it with the rest,
+ * without ever reading it; what it means is the module's alone. The module lists it in the Switches & Variables window,
+ * and its page conditions judge pages against it, naming what they read by {@link previewKey} with this kind's id.
+ */
+type PreviewKindDefinition = {
+  /**
+   * Unique, prefixed like event kinds, which the preview keeps everything of the kind under: {@code quest.states}.
+   */
+  readonly id: `${string}.${string}`;
+
+  /**
+   * The heading its list shows under in the Switches & Variables window, such as "Quests".
+   */
+  readonly title: string;
+
+  /**
+   * What one thing of the kind is called, several, and what one set is, so the chip says "1 quest set".
+   */
+  readonly nouns: PreviewNouns;
+
+  /**
+   * What the list's search box asks for, such as "Find a quest by name or key".
+   */
+  readonly searchHint: string;
+
+  /**
+   * What the list says when its search finds nothing, such as "No quest has that name or key."
+   */
+  readonly noMatch: string;
+
+  /**
+   * Lists every thing of the kind the author can set, each with its choices as the preview stands.
+   * @param {GamePreview} preview The window's preview.
+   * @returns {readonly PreviewEntry[]} The things, in the order the list shows them.
+   */
+  readonly entries: (preview: GamePreview) => readonly PreviewEntry[];
+
+  /**
+   * Works out what one thing is set to once one of its choices changes, from the preview as it stands at that moment.
+   * @param {GamePreview} preview The window's preview.
+   * @param {string} key The thing's key within the kind.
+   * @param {string} choice The choice that changed, by its id.
+   * @param {string} option The value of the option picked.
+   * @returns {JsonValue | undefined} The thing's new value, or undefined once it is back as a fresh save holds it.
+   */
+  readonly choose: (preview: GamePreview, key: string, choice: string, option: string) => JsonValue | undefined;
+};
+
+/**
  * Where a module adds what it knows. Every id it adds must start with its own id and a dot, so a module can
  * never claim or replace one of the core's kinds.
  */
@@ -281,6 +335,13 @@ type ModuleContributions = {
    * @param {PageCondition} condition How the plugin reads a page, and when what the page asks holds.
    */
   pageCondition(condition: PageCondition): void;
+
+  /**
+   * Lets the preview set a kind of state of the module's own, for as long as the module is on: listed in the Switches &
+   * Variables window beside the switches and variables, and named in the chip beside every map's clock.
+   * @param {PreviewKindDefinition} kind The kind.
+   */
+  previewKind(kind: PreviewKindDefinition): void;
 };
 
 /**
@@ -339,5 +400,6 @@ export type {
   PassabilityQuery,
   PassabilityRule,
   PluginModule,
+  PreviewKindDefinition,
   QuickPanelProps,
 };

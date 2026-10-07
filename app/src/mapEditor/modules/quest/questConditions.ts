@@ -1,4 +1,6 @@
+import { GamePreview } from '../../core/preview/GamePreview.ts';
 import type { QuestLog, TrackedObjective, TrackedQuest } from './questLog.ts';
+import { questAt } from './questPreview.ts';
 import type { QuestTag } from './questTags.ts';
 
 /**
@@ -38,22 +40,27 @@ const objectiveOf = (tag: QuestTag, quest: TrackedQuest): TrackedObjective | nul
 };
 
 /**
- * Judges one tag against the quests the game tracks, as Game_Event.questConditionalMet does: an objective it names holds
- * while that objective is in the state the tag waits for, and an objective the quest lacks never does; otherwise the
- * quest itself must be in that state. A quest the game does not track stops the game with an error when it asks, and the
- * editor shows such a page as one that never holds rather than stopping.
+ * Judges one tag against the quests the game tracks, as Game_Event.questConditionalMet does, each quest as the preview
+ * shows it: an objective it names holds while that objective is in the state the tag waits for, and an objective the
+ * quest lacks never does; otherwise the quest itself must be in that state. A quest the game does not track stops the
+ * game with an error when it asks, and the editor shows such a page as one that never holds, whatever the preview sets,
+ * rather than stopping.
  * @param {QuestTag} tag The tag.
  * @param {QuestLog} log The quests the game tracks, each in its state.
+ * @param {GamePreview} preview What the author set to see further along the story; a fresh save's, which sets nothing,
+ * by default.
  * @returns {boolean} True when it holds.
  */
-const questTagHolds = (tag: QuestTag, log: QuestLog): boolean =>
+const questTagHolds = (tag: QuestTag, log: QuestLog, preview: GamePreview = GamePreview.FRESH): boolean =>
 {
-  const quest = questOf(tag, log);
-  if (quest === null)
+  const tracked = questOf(tag, log);
+  if (tracked === null)
   {
     return false;
   }
 
+  // the quest as the preview shows it: in whatever it sets of the quest, and as the log has it everywhere else.
+  const quest = questAt(tracked, preview);
   if (waitsOnObjective(tag) === false)
   {
     return quest.state === tag.state;
@@ -67,11 +74,12 @@ const questTagHolds = (tag: QuestTag, log: QuestLog): boolean =>
  * Judges a page's quest tags, as J-OMNI-Quests' alias of Game_Event#meetsConditions does: every tag must hold.
  * @param {readonly QuestTag[]} tags The page's tags.
  * @param {QuestLog} log The quests the game tracks, each in its state.
+ * @param {GamePreview} preview What the author set to see further along the story; a fresh save's by default.
  * @returns {boolean} True when they all hold.
  */
-const questTagsHold = (tags: readonly QuestTag[], log: QuestLog): boolean =>
+const questTagsHold = (tags: readonly QuestTag[], log: QuestLog, preview: GamePreview = GamePreview.FRESH): boolean =>
 {
-  return tags.every(tag => questTagHolds(tag, log));
+  return tags.every(tag => questTagHolds(tag, log, preview));
 };
 
 export { objectiveOf, questOf, questTagHolds, questTagsHold, waitsOnObjective };

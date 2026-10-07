@@ -30,6 +30,18 @@ const SWITCH_KIND: PreviewKind = 'switch';
 const VARIABLE_KIND: PreviewKind = 'variable';
 
 /**
+ * Names one piece of preview state by its kind and its key within the kind, as {@link GamePreview.changedKeys} names
+ * every piece that changed, so a page condition naming what it reads this way is judged again exactly when that changes.
+ * @param {PreviewKind} kind The kind, such as {@code quest.states}.
+ * @param {string} key The thing's key within the kind, such as a quest's key.
+ * @returns {PreviewKey} The key, such as {@code quest.states:cecil-001}.
+ */
+const previewKey = (kind: PreviewKind, key: string): PreviewKey =>
+{
+  return `${kind}:${key}`;
+};
+
+/**
  * Names a switch as a piece of preview state.
  * @param {number} switchId The switch.
  * @returns {PreviewKey} The key, such as {@code switch:74}.
@@ -298,7 +310,7 @@ class GamePreview
       {
         if (jsonEquals(this.value(kind, key), other.value(kind, key)) === false)
         {
-          changed.add(`${kind}:${key}`);
+          changed.add(previewKey(kind, key));
         }
       });
     });
@@ -332,5 +344,5 @@ class GamePreview
   }
 }
 
-export { GamePreview, SWITCH_KIND, switchKey, VARIABLE_KIND, variableKey };
+export { GamePreview, previewKey, SWITCH_KIND, switchKey, VARIABLE_KIND, variableKey };
 export type { PreviewJson, PreviewKey, PreviewKind };

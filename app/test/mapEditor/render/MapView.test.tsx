@@ -296,7 +296,7 @@ describe('MapView', () =>
 
   /**
    * A window's plugin modules with none switched on: no kind claims any event, nothing draws into the lighting layer,
-   * and nothing ever switches on.
+   * the preview sets nothing beyond switches and variables, and nothing ever switches on.
    */
   const NO_MODULES = {
     overlays: () => [],
@@ -308,6 +308,7 @@ describe('MapView', () =>
     notices: () => [],
     clockOffer: () => null,
     pageConditions: () => [],
+    previewKinds: () => [],
   };
 
   /**

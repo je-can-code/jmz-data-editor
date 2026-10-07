@@ -19,6 +19,25 @@ const CORE_NOUNS: ReadonlyMap<PreviewKind, PreviewNouns> = new Map([
 ]);
 
 /**
+ * A kind of preview state a plugin module adds, as far as its words go: the kind, and what it is called.
+ */
+type NamedKind = {
+  readonly id: PreviewKind;
+  readonly nouns: PreviewNouns;
+};
+
+/**
+ * Gathers what every kind a preview may set is called: the core's switches and variables first, then each kind the
+ * active plugin modules add, in the order they added them, so the chip names each in that order.
+ * @param {readonly NamedKind[]} kinds The kinds the active modules add.
+ * @returns {ReadonlyMap<PreviewKind, PreviewNouns>} What each kind is called.
+ */
+const previewNouns = (kinds: readonly NamedKind[]): ReadonlyMap<PreviewKind, PreviewNouns> =>
+{
+  return new Map([ ...CORE_NOUNS, ...kinds.map(kind => [ kind.id, kind.nouns ] as const) ]);
+};
+
+/**
  * What a preview setting nothing is called: every map shows a fresh save.
  */
 const FRESH_SAVE_WORDS = 'Fresh save';
@@ -60,5 +79,5 @@ const previewWords = (preview: GamePreview, nouns: ReadonlyMap<PreviewKind, Prev
   return [ ...named, ...more ].join(', ');
 };
 
-export { CORE_NOUNS, FRESH_SAVE_WORDS, previewWords };
-export type { PreviewNouns };
+export { CORE_NOUNS, FRESH_SAVE_WORDS, previewNouns, previewWords };
+export type { NamedKind, PreviewNouns };
