@@ -1,9 +1,10 @@
-import { Container, RenderTexture, Sprite, Texture, type Renderer } from 'pixi.js';
+import { Container, Sprite, Texture, type Renderer } from 'pixi.js';
 import type { LightingDrawing, LightingFrame, LightingStage, WorldStretch } from '../../core/renderer/lightingLayer.ts';
 import { darkOf, maskLightsOf, type DarkSetup, type MapDark, type MaskLight } from './darkScene.ts';
 import { isAnimated } from './lightEffects.ts';
 import { pictureKey } from './lightFalloff.ts';
 import { LightPictures } from './lightPictures.ts';
+import { LitPiece } from './litPiece.ts';
 import {
   chunkInView,
   chunkSignature,
@@ -21,17 +22,23 @@ import {
 type MaskSetup = Omit<DarkSetup, 'tileSize'>;
 
 /**
- * One piece of the mask in a view: where it sits, and the sprite multiplying it into the map. While a light reaches it,
- * it holds the texture its lights are cut into and the sprites added into that texture, one per light's picture in the
- * order the game adds them, kept so a light that only burns brighter or dimmer, or a dark that only deepens or lifts, is
- * drawn again without building anything; while none does, it holds neither and the sprite is a plain fill of the dark.
- * It remembers the lights reaching it, what it was built from (null until it is first built), and the dark's fill and
- * the strengths it was last drawn at.
+ * What a lit piece's texture is cleared to before its lights are added in: black, adding nothing, since the dark's fill
+ * is the piece's own setting, added as it shows.
+ */
+const NO_LIGHT = 0x000000;
+
+/**
+ * One piece of the mask in a view: where it sits, and the plain sprite filling it with the dark, multiplied into the
+ * map. While a light reaches it, the plain sprite is hidden behind the lit piece showing its lights, and it holds the
+ * sprites added into that piece's texture, one per light's picture in the order the game adds them, kept so a light
+ * that only burns brighter or dimmer is drawn again without building anything; while none does, it holds neither. It
+ * remembers the lights reaching it, what it was built from (null until it is first built), the dark's fill it shows,
+ * and the strengths it was last drawn at.
  */
 type DrawnChunk = {
   readonly rect: MaskChunk;
-  readonly sprite: Sprite;
-  texture: RenderTexture | null;
+  readonly plain: Sprite;
+  lit: LitPiece | null;
   added: Container | null;
   lights: readonly MaskLight[];
   signature: string | null;
@@ -47,12 +54,13 @@ type DrawnChunk = {
  *
  * The game builds that sheet a screen at a time; the editor shows a whole map at once, so the sheet comes in pieces
  * ({@link MASK_CHUNK_SIZE}). A piece no light reaches is a plain fill and holds no texture; a piece a light reaches has
- * its lights added into a texture of its own, on the GPU. Asked to draw, the mask works the dark out again, which is
- * cheap, and builds again only the pieces whose lights changed, so an edit elsewhere on the map costs a comparison and a
- * moved torch rebuilds the pieces around where it was and where it is; a piece whose lights only burn brighter or dimmer,
- * or whose dark only deepens or lifts, is drawn again as it stands. A context the graphics card gave back holds none of
- * the textures' pixels, so every lit piece is drawn again on it. A map nobody calls dark has no mask, as in the game,
- * and the mask lets go of everything it held.
+ * its lights added into a texture of its own, on the GPU, and shows it with the dark's fill added as it shows
+ * ({@link LitPiece}). Asked to draw, the mask works the dark out again, which is cheap, and builds again only the pieces
+ * whose lights changed, so an edit elsewhere on the map costs a comparison and a moved torch rebuilds the pieces around
+ * where it was and where it is; a piece whose lights only burn brighter or dimmer is drawn again as it stands, and a
+ * dark that only deepens or lifts, as a slider in Map Properties drags it, repaints every piece and draws none of them
+ * again. A context the graphics card gave back holds none of the textures' pixels, so every lit piece is drawn again on
+ * it. A map nobody calls dark has no mask, as in the game, and the mask lets go of everything it held.
  *
  * Lights whose effect runs move with the view's clock between draws. Each tick works out how brightly every light in the
  * pieces such a light reaches and the view shows burns now, and draws again only the pieces where one burns differently
@@ -64,10 +72,9 @@ type DrawnChunk = {
  * The time of day can darken a map too, the sky at night being one of the sources, so a tick that finds the window's
  * clock moved works out how dark the map is at the new hour. The lights stand where they stood, since only an edit moves
  * them, and only the clock turning an event to another page lights or puts one out, and either asks the mask to draw:
- * so the same dark costs nothing more, a deeper or lighter one only fills the plain pieces afresh and draws the lit ones
- * again as they stand, and a map the hour darkens for the first time, a field at nightfall, gets its mask then, its
- * lights cut through it as on any dark map. A lamp lit only by night is cut through the dark only once its lit page is
- * the one the game shows.
+ * so the same dark costs nothing more, a deeper or lighter one only repaints the pieces, and a map the hour darkens for
+ * the first time, a field at nightfall, gets its mask then, its lights cut through it as on any dark map. A lamp lit
+ * only by night is cut through the dark only once its lit page is the one the game shows.
  */
 class LightMask implements LightingDrawing
 {
@@ -119,7 +126,7 @@ class LightMask implements LightingDrawing
    */
   get litChunks(): number
   {
-    return this.#chunks.filter(chunk => chunk.texture !== null).length;
+    return this.#chunks.filter(chunk => chunk.lit !== null).length;
   }
 
   /**
@@ -175,7 +182,7 @@ class LightMask implements LightingDrawing
    * @param {LightingFrame} frame The map, the renderer, the clock and the view.
    * @param {MapDark} dark How dark the map is.
    * @param {readonly MaskLight[]} lights Every light on the map, burning as it does at the frame's clock.
-   * @returns {boolean} True when any piece was drawn again.
+   * @returns {boolean} True when any piece shows anything otherwise than it did.
    */
   #show(frame: LightingFrame, dark: MapDark, lights: readonly MaskLight[]): boolean
   {
@@ -299,25 +306,26 @@ class LightMask implements LightingDrawing
     this.#covered = { width, height };
     this.#chunks = maskChunksFor(width, height, this.#chunkSize).map(rect =>
     {
-      const sprite = new Sprite(Texture.WHITE);
-      sprite.position.set(rect.x, rect.y);
-      sprite.blendMode = 'multiply';
-      this.#root.addChild(sprite);
-      return { rect, sprite, texture: null, added: null, lights: [], signature: null, tint: -1, strengths: [] };
+      const plain = new Sprite(Texture.WHITE);
+      plain.position.set(rect.x, rect.y);
+      plain.setSize(rect.width, rect.height);
+      plain.blendMode = 'multiply';
+      this.#root.addChild(plain);
+      return { rect, plain, lit: null, added: null, lights: [], signature: null, tint: -1, strengths: [] };
     });
   }
 
   /**
    * Brings one piece up to date with the lights reaching it: built again when its lights' places or pictures changed, or
-   * its texture lost its pixels with a context given back; drawn again as it stands when only the dark's fill or how
-   * brightly its lights burn changed, unless nothing but how brightly they burn changed and the view does not show it,
-   * when it is left for the tick that brings it into view; and left alone otherwise.
+   * its texture lost its pixels with a context given back; repainted when the dark's fill changed; drawn again as it
+   * stands when how brightly its lights burn changed, unless the view does not show it, when it is left for the tick that
+   * brings it into view; and left alone otherwise.
    * @param {DrawnChunk} chunk The piece.
    * @param {readonly MaskLight[]} lights The lights reaching it, in the order the game adds them.
    * @param {boolean} fresh Whether the context is new since the mask last drew.
    * @param {Renderer} renderer The view's renderer.
    * @param {WorldStretch} view The part of the map the view shows.
-   * @returns {boolean} True when the piece was drawn again.
+   * @returns {boolean} True when the piece shows anything otherwise than it did.
    */
   #settle(chunk: DrawnChunk, lights: readonly MaskLight[], fresh: boolean, renderer: Renderer, view: WorldStretch): boolean
   {
@@ -326,7 +334,7 @@ class LightMask implements LightingDrawing
     chunk.lights = lights;
 
     // a piece holding a texture made on a context since given back holds no pixels, however little changed.
-    const emptied = fresh && chunk.texture !== null;
+    const emptied = fresh && chunk.lit !== null;
     if (signature !== chunk.signature || emptied)
     {
       chunk.signature = signature;
@@ -340,24 +348,19 @@ class LightMask implements LightingDrawing
       return true;
     }
 
-    // the same pictures in the same places, so at most the dark's fill and how brightly they burn have moved.
-    if (chunk.tint === this.#tint && sameStrengths(chunk.strengths, strengths))
+    // the same pictures in the same places. The dark's fill is the piece's own setting rather than part of its texture,
+    // so a deeper or lighter dark only repaints it.
+    const repainted = chunk.tint !== this.#tint;
+    if (repainted)
     {
-      return false;
+      this.#repaint(chunk);
     }
 
-    if (chunk.texture === null)
+    // nothing is drawn into a plain piece, nor into one whose lights burn as they were drawn; and only a light whose
+    // effect runs burns otherwise, so a piece out of view is one the ticks draw, the one bringing it into view first.
+    if (chunk.lit === null || sameStrengths(chunk.strengths, strengths) || chunkInView(chunk.rect, view) === false)
     {
-      chunk.sprite.tint = this.#tint;
-      chunk.tint = this.#tint;
-      return true;
-    }
-
-    // only a light whose effect runs burns otherwise, so a piece out of view with its dark as drawn is one the ticks
-    // draw, the one bringing it into view first.
-    if (chunk.tint === this.#tint && chunkInView(chunk.rect, view) === false)
-    {
-      return false;
+      return repainted;
     }
 
     this.#burn(chunk, strengths, renderer);
@@ -365,28 +368,39 @@ class LightMask implements LightingDrawing
   }
 
   /**
-   * Makes a piece no light reaches a plain fill of the dark, letting go of the texture and the sprites it held.
+   * Repaints a piece with the dark's fill: the plain sprite's tint, or the lit piece's own fill, drawing nothing.
+   * @param {DrawnChunk} chunk The piece.
+   */
+  #repaint(chunk: DrawnChunk): void
+  {
+    chunk.tint = this.#tint;
+    if (chunk.lit === null)
+    {
+      chunk.plain.tint = this.#tint;
+      return;
+    }
+
+    chunk.lit.fill = this.#tint;
+  }
+
+  /**
+   * Makes a piece no light reaches a plain fill of the dark, letting go of the lit piece and the sprites it held.
    * @param {DrawnChunk} chunk The piece.
    */
   #fill(chunk: DrawnChunk): void
   {
-    // the sprite lets go of the texture before the texture goes.
-    const { texture, added } = chunk;
-    chunk.sprite.texture = Texture.WHITE;
-    chunk.sprite.setSize(chunk.rect.width, chunk.rect.height);
-    chunk.sprite.tint = this.#tint;
-    chunk.tint = this.#tint;
-    chunk.texture = null;
-    chunk.added = null;
+    this.#unlight(chunk);
     chunk.strengths = [];
-    texture?.destroy(true);
-    added?.destroy({ children: true });
+    chunk.plain.visible = true;
+    chunk.plain.tint = this.#tint;
+    chunk.tint = this.#tint;
   }
 
   /**
    * Builds a piece a light reaches as LightingRenderLayer builds its sheet: a sprite of each light's picture, centred on
-   * it and added in, in the order the game adds them, in a container the piece keeps, and the texture they are drawn into
-   * shown untinted; then draws it.
+   * it and added in, in the order the game adds them, in a container the piece keeps; and the lit piece their texture
+   * shows through, made the first time a light reaches the piece and kept while one does, in place of the plain fill.
+   * Then draws it.
    * @param {DrawnChunk} chunk The piece, holding the lights reaching it.
    * @param {readonly number[]} strengths How brightly each burns.
    * @param {Renderer} renderer The view's renderer.
@@ -405,47 +419,64 @@ class LightMask implements LightingDrawing
       added.addChild(sprite);
     });
 
-    const texture = chunk.texture ?? RenderTexture.create({ width: rect.width, height: rect.height });
     chunk.added = added;
-    chunk.texture = texture;
-    chunk.sprite.texture = texture;
-    chunk.sprite.setSize(rect.width, rect.height);
-    chunk.sprite.tint = 0xffffff;
+    if (chunk.lit === null)
+    {
+      chunk.lit = new LitPiece(rect, this.#tint);
+      this.#root.addChild(chunk.lit.mesh);
+      chunk.plain.visible = false;
+    }
+
+    this.#repaint(chunk);
     this.#burn(chunk, strengths, renderer);
   }
 
   /**
-   * Draws a built piece as LightingRenderLayer draws its sheet every frame: its texture filled with the dark's colour,
-   * then each light's picture added in at how brightly it burns.
+   * Draws a built piece's lights as LightingRenderLayer adds them to its sheet every frame: each light's picture added
+   * into the texture at how brightly it burns, over black, since the dark's fill is added as the piece shows.
    * @param {DrawnChunk} chunk The piece, built.
    * @param {readonly number[]} strengths How brightly each of its lights burns, in their order.
    * @param {Renderer} renderer The view's renderer.
    */
   #burn(chunk: DrawnChunk, strengths: readonly number[], renderer: Renderer): void
   {
-    // a piece is drawn only once its lights are cut into it, so it holds both their sprites and their texture.
+    // a piece is drawn only once its lights are cut into it, so it holds both their sprites and its lit piece.
     const added = chunk.added as Container;
+    const lit = chunk.lit as LitPiece;
     added.children.forEach((sprite, index) =>
     {
       sprite.alpha = strengths[index];
     });
     chunk.strengths = strengths;
-    chunk.tint = this.#tint;
-
-    // filling by clearing to the dark's colour leaves every pixel exactly what the game's tinted white sheet leaves.
-    renderer.render({ container: added, target: chunk.texture as RenderTexture, clear: true, clearColor: this.#tint });
+    renderer.render({ container: added, target: lit.texture, clear: true, clearColor: NO_LIGHT });
   }
 
   /**
-   * Lets go of every piece and the textures and sprites they held.
+   * Lets go of a piece's lit piece and the sprites drawn into it, if it has them.
+   * @param {DrawnChunk} chunk The piece.
+   */
+  #unlight(chunk: DrawnChunk): void
+  {
+    const { lit, added } = chunk;
+    chunk.lit = null;
+    chunk.added = null;
+    added?.destroy({ children: true });
+    if (lit !== null)
+    {
+      this.#root.removeChild(lit.mesh);
+      lit.destroy();
+    }
+  }
+
+  /**
+   * Lets go of every piece, and the lit pieces and sprites they held.
    */
   #letGo(): void
   {
     this.#chunks.forEach(chunk =>
     {
-      chunk.sprite.destroy();
-      chunk.texture?.destroy(true);
-      chunk.added?.destroy({ children: true });
+      this.#unlight(chunk);
+      chunk.plain.destroy();
     });
     this.#chunks = [];
     this.#moving = [];

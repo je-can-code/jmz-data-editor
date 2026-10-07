@@ -18,7 +18,7 @@ import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
  * Every stand-in render texture made, in order, and how many stand-in sprites were made.
  */
 const stand = vi.hoisted(() => ({
-  textures: [] as { width: number; height: number; destroyed: boolean }[],
+  textures: [] as { width: number; height: number; destroyed: boolean; source: object }[],
   sprites: 0,
 }));
 
@@ -38,6 +38,12 @@ vi.mock('pixi.js', () =>
     addChild<T>(child: T): T
     {
       this.children.push(child);
+      return child;
+    }
+
+    removeChild<T>(child: T): T
+    {
+      this.children = this.children.filter(each => each !== child);
       return child;
     }
 
@@ -86,6 +92,8 @@ vi.mock('pixi.js', () =>
 
     height = 0;
 
+    visible = true;
+
     destroyed = false;
 
     constructor(texture: unknown)
@@ -115,7 +123,7 @@ vi.mock('pixi.js', () =>
   }
 
   /**
-   * Stands in for pixi's render textures, written down as they are made.
+   * Stands in for pixi's render textures, written down as they are made, each with a source of its own.
    */
   class RenderTexture
   {
@@ -124,6 +132,8 @@ vi.mock('pixi.js', () =>
     height = 0;
 
     destroyed = false;
+
+    source = {};
 
     static create(options: { width: number; height: number }): RenderTexture
     {
@@ -141,6 +151,71 @@ vi.mock('pixi.js', () =>
   }
 
   /**
+   * Stands in for pixi's GL programs: the sources it is made from.
+   */
+  class GlProgram
+  {
+    static from(options: unknown): unknown
+    {
+      return options;
+    }
+  }
+
+  /**
+   * Stands in for pixi's uniform groups: the uniforms, as given.
+   */
+  class UniformGroup
+  {
+    uniforms: Record<string, unknown>;
+
+    constructor(structures: Record<string, { value: unknown }>)
+    {
+      this.uniforms = Object.fromEntries(Object.entries(structures).map(([ name, structure ]) => [ name, structure.value ]));
+    }
+  }
+
+  /**
+   * Stands in for what a lit piece's quad is built from, a shader and a geometry: what each is made with, and whether
+   * it was let go.
+   */
+  class Built
+  {
+    options: unknown;
+
+    destroyed = false;
+
+    constructor(options: unknown)
+    {
+      this.options = options;
+    }
+
+    destroy(): void
+    {
+      this.destroyed = true;
+    }
+  }
+
+  /**
+   * Stands in for pixi's meshes, the quads lit pieces show through: what each is made with, and what the mask sets.
+   */
+  class Mesh extends Built
+  {
+    quad = true;
+
+    blendMode = 'normal';
+
+    position = {
+      x: 0,
+      y: 0,
+      set(x: number, y: number)
+      {
+        this.x = x;
+        this.y = y;
+      },
+    };
+  }
+
+  /**
    * Stands in for the pixi classes the rest of the lighting module names, which the mask never makes.
    */
   class Graphics
@@ -154,36 +229,49 @@ vi.mock('pixi.js', () =>
   {
   }
 
-  return { Container: StandInContainer, Graphics, ImageSource, RenderTexture, Sprite, Texture };
+  return {
+    Container: StandInContainer,
+    GlProgram,
+    Graphics,
+    ImageSource,
+    Mesh,
+    MeshGeometry: Built,
+    RenderTexture,
+    Shader: Built,
+    Sprite,
+    Texture,
+    UniformGroup,
+  };
 });
 
 /*
  * A dark map's darkness is drawn as J-Lighting draws its light mask: a sheet in the dark's fill with every light's
  * picture added into it, multiplied into the map beneath. The editor draws a whole map, so the sheet comes in pieces: a
  * piece no light reaches is a plain sprite of the fill, multiplied in, holding no texture; a piece a light reaches gets
- * a render texture of its own, cleared to the fill (which leaves every pixel what the game's tinted sheet leaves) with
- * each light reaching it added in, its picture centred on it at its strength at the view's clock, in the order the game
- * adds them; the sprite then shows that texture untinted. A map nobody calls dark has no mask, and holds nothing for one.
+ * a render texture of its own, cleared to black, with each light reaching it added in, its picture centred on it at its
+ * strength at the view's clock, in the order the game adds them, and shows it through a quad over the piece that adds the
+ * dark's fill as it shows, multiplied in, its plain sprite hidden. A map nobody calls dark has no mask, and holds nothing
+ * for one.
  *
  * Asked to draw again, the mask builds again only the pieces whose lights changed: nothing at all when nothing did, and
- * the pieces a moved light left and entered when one moves; a piece whose lights only burn at another strength, or whose
- * dark only deepened or lifted, is drawn again with the sprites it has, and a plain piece is only tinted afresh. A piece
- * the last light leaves goes back to a plain fill and lets its texture go. A context the graphics card gave back holds no
- * texture's pixels, so every lit piece is drawn again on it, in the texture it already has. A map of another size gets
- * pieces of its own, and the old ones go. Pictures no light draws any more are let go after each draw, and destroying
- * the mask lets go of everything.
+ * the pieces a moved light left and entered when one moves; a piece whose lights only burn at another strength is drawn
+ * again with the sprites it has, and a dark that only deepened or lifted repaints every piece, the plain ones' tint and
+ * the lit ones' fill, drawing none of them again. A piece the last light leaves goes back to a plain fill and lets its
+ * quad and texture go. A context the graphics card gave back holds no texture's pixels, so every lit piece is drawn again
+ * on it, in the texture it already has. A map of another size gets pieces of its own, and the old ones go. Pictures no
+ * light draws any more are let go after each draw, and destroying the mask lets go of everything.
  *
  * Between draws the clock moves on. Only the pieces a light whose effect runs reaches have anything to do: each works
  * out how brightly its lights burn now and is drawn again, as it stands, only when one burns otherwise than it was drawn.
  * A piece reached by steady lights alone is never touched, and a map with no dark, or no light whose effect runs, costs
  * a tick nothing, its strength never even asked. Nor is a piece the view does not show: it is left as it was drawn, and
- * the tick that brings it into view draws it as its lights burn then. A draw leaves it so too when nothing but how
- * brightly its lights burn changed; a change to the dark, which is drawn into every lit piece, draws them all.
+ * the tick that brings it into view draws it as its lights burn then. A draw leaves it so too, repainting it all the same
+ * when the dark changed.
  *
  * The window's clock moves too, and the sky at its hour is one of the sources darkening a map. A tick finding the clock
- * moved works out the dark at the new hour: the same dark draws nothing; a deeper or lighter one draws the lit pieces
- * again as they stand and tints the plain ones; a map the hour darkens for the first time gets its mask, every light cut
- * through it at its strength now; and an hour lifting the dark takes the mask away.
+ * moved works out the dark at the new hour: the same dark draws nothing; a deeper or lighter one repaints every piece; a
+ * map the hour darkens for the first time gets its mask, every light cut through it at its strength now; and an hour
+ * lifting the dark takes the mask away.
  */
 
 /**
@@ -198,7 +286,7 @@ type Pass = {
 };
 
 /**
- * A sprite the mask made, as the stand-in keeps it.
+ * A plain sprite the mask made, as the stand-in keeps it.
  */
 type DrawnSprite = {
   texture: unknown;
@@ -207,7 +295,30 @@ type DrawnSprite = {
   tint: number;
   width: number;
   height: number;
+  visible: boolean;
   destroyed: boolean;
+};
+
+/**
+ * A lit piece's quad, as the stand-in keeps it: what its shader shows, and the fill it adds, as shares of full.
+ */
+type DrawnQuad = {
+  quad: true;
+  options: { shader: { options: { resources: { uTexture: unknown; fillUniforms: { uniforms: { uFill: Float32Array } } } } } };
+  position: { x: number; y: number };
+  blendMode: string;
+  destroyed: boolean;
+};
+
+/**
+ * Reads the fill a lit piece's quad adds, back as the colour it was given.
+ * @param {DrawnQuad} quad The quad.
+ * @returns {number} The fill, as {@code 0xRRGGBB}.
+ */
+const fillOf = (quad: DrawnQuad): number =>
+{
+  const [ red, green, blue ] = [ ...quad.options.shader.options.resources.fillUniforms.uniforms.uFill ].map(share => Math.round(share * 255));
+  return (red << 16) + (green << 8) + blue;
 };
 
 /**
@@ -359,8 +470,10 @@ const maskOnStage = (strengthOf: LightStrength = steady, sky: AmbientSource[] = 
   const tick = (document: MapDocument, clock: LightingClock, view: WorldStretch = WHOLE_VIEW) =>
     mask.tick({ document, renderer, context: 1, clock, pages: ENGINE_PAGES, view });
   const [ root ] = layer.children as Container[];
-  const sprites = () => root.children as unknown as DrawnSprite[];
-  return { mask, layer, root, sprites, passes, containers, asked, draw, tick, ...named };
+  const children = () => root.children as unknown as (DrawnSprite | DrawnQuad)[];
+  const sprites = () => children().filter((child): child is DrawnSprite => 'quad' in child === false);
+  const quads = () => children().filter((child): child is DrawnQuad => 'quad' in child);
+  return { mask, layer, root, sprites, quads, passes, containers, asked, draw, tick, ...named };
 };
 
 /**
@@ -432,26 +545,30 @@ describe('LightMask', () =>
       .toStrictEqual([ true, 0, 0 ]);
   });
 
-  it('cuts a light into the piece it reaches: cleared to the dark, its picture added in at its spot, shown untinted', () =>
+  it('cuts a light into the piece it reaches: its picture added in at its spot over black, shown with the dark\'s fill', () =>
   {
     // Arrange: a cave holding a torch at cell 1, 1, whose picture spans 24 to 120 across and 42 to 138 down.
-    const { draw, sprites, passes, mask } = maskOnStage();
+    const { draw, sprites, quads, passes, mask } = maskOnStage();
 
     // Act.
     draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1) ]));
 
-    // Assert: the first piece drawn into a texture of its own, the rest plain.
+    // Assert: the first piece drawn into a texture of its own, over black, and shown through a quad at its corner with
+    // the dark's fill, multiplied in, its plain fill hidden; the rest plain.
     const [ texture ] = stand.textures;
     expect(passes)
       .toStrictEqual([ {
         target: texture,
         clear: true,
-        clearColor: 0x262626,
+        clearColor: 0x000000,
         added: [ { picture: TORCH, x: 72, y: 90, blendMode: 'add', anchor: 0.5, alpha: 1 } ],
       } ]);
     const [ first, second ] = sprites();
-    expect([ texture.width, texture.height, first.texture === texture, first.tint, first.width, first.height, second.tint, mask.litChunks ])
-      .toStrictEqual([ 256, 256, true, 0xffffff, 256, 256, 0x262626, 1 ]);
+    const [ quad ] = quads();
+    expect([ texture.width, texture.height, quad.options.shader.options.resources.uTexture === texture.source, fillOf(quad) ])
+      .toStrictEqual([ 256, 256, true, 0x262626 ]);
+    expect([ quad.position.x, quad.position.y, quad.blendMode, first.visible, second.visible, second.tint, mask.litChunks ])
+      .toStrictEqual([ 0, 0, 'multiply', false, true, 0x262626, 1 ]);
   });
 
   it('adds every light reaching a piece into it in one pass, in the order the game adds them', () =>
@@ -514,23 +631,24 @@ describe('LightMask', () =>
       .toStrictEqual([ 1, 1 ]);
   });
 
-  it('redraws only the pieces a moved light left and entered, letting go of the texture it left', () =>
+  it('redraws only the pieces a moved light left and entered, letting go of the quad and the texture it left', () =>
   {
     // Arrange: a torch in the first piece, and one in the last.
-    const { draw, sprites, passes } = maskOnStage();
+    const { draw, sprites, quads, passes } = maskOnStage();
     draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1), torchAt(2, 12, 12) ]));
     const [ , lastTexture ] = stand.textures;
+    const [ , lastQuad ] = quads();
 
     // Act: the second torch moves into the second piece.
     draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1), torchAt(2, 7, 1) ]));
 
     // Assert: one new pass, into the second piece, the torch placed from that piece's corner at 256; the last piece
-    // plain again, its texture gone.
+    // plain again and shown, its quad and texture gone.
     const { 8: last } = sprites();
     expect([ passes.length, passes[2].target === stand.textures[2], passes[2].added.map(added => [ added.x, added.y ]) ])
       .toStrictEqual([ 3, true, [ [ 104, 90 ] ] ]);
-    expect([ lastTexture.destroyed, (last.texture as { white?: boolean }).white, last.tint, last.width ])
-      .toStrictEqual([ true, true, 0x262626, 256 ]);
+    expect([ lastTexture.destroyed, lastQuad.destroyed, quads().map(quad => quad.position.x), last.visible, last.tint, last.width ])
+      .toStrictEqual([ true, true, [ 0, 256 ], true, 0x262626, 256 ]);
   });
 
   it('cuts a lamp through the dark only while the page it shows gives light, drawing again only the piece it lights', () =>
@@ -550,10 +668,10 @@ describe('LightMask', () =>
     draw(cave, 1, at(0), showing(0));
 
     // Assert: the torch's piece alone at first; then the lamp cut into the first piece, and nothing else drawn; then the
-    // first piece a plain fill again, its texture let go.
+    // first piece a plain fill again, shown, its texture let go.
     const [ first ] = sprites();
-    expect([ cold, lit, passes.length, (first.texture as { white?: boolean }).white, stand.textures[1].destroyed ])
-      .toStrictEqual([ 1, [ [ [ 88, 106 ] ], [ [ 72, 90 ] ] ], 2, true, true ]);
+    expect([ cold, lit, passes.length, first.visible, first.tint, stand.textures[1].destroyed ])
+      .toStrictEqual([ 1, [ [ [ 88, 106 ] ], [ [ 72, 90 ] ] ], 2, true, 0x262626, true ]);
   });
 
   it('draws every lit piece again, in the texture it has, on a context the graphics card gave back', () =>
@@ -571,22 +689,21 @@ describe('LightMask', () =>
       .toStrictEqual([ 4, true, true, 2 ]);
   });
 
-  it('fills every piece afresh when the darkness changes, drawing the lit one again with the sprites it has', () =>
+  it('repaints every piece when the darkness changes, drawing nothing into the lit one again', () =>
   {
     // Arrange: a cave at 85% with a torch.
-    const { draw, sprites, passes, containers } = maskOnStage();
+    const { draw, sprites, quads, passes } = maskOnStage();
     draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1) ]));
     const made = stand.sprites;
 
     // Act: the note now says 93%.
     draw(mapOf(16, '<ambient:[93]>', [ null, torchAt(1, 1, 1) ]));
 
-    // Assert: the lit piece cleared to the new fill with the same sprites into the same texture, nothing made, and every
-    // plain one tinted with it.
-    expect([ passes.map(pass => pass.clearColor), sprites().slice(1).every(sprite => sprite.tint === 0x121212) ])
-      .toStrictEqual([ [ 0x262626, 0x121212 ], true ]);
-    expect([ containers[1] === containers[0], passes[1].target === passes[0].target, stand.sprites - made, stand.textures.length ])
-      .toStrictEqual([ true, true, 0, 1 ]);
+    // Assert: the lit piece's fill and every plain one's tint the new dark, with no pass drawn again and nothing made.
+    expect([ fillOf(quads()[0]), sprites().slice(1).every(sprite => sprite.tint === 0x121212) ])
+      .toStrictEqual([ 0x121212, true ]);
+    expect([ passes.length, stand.sprites - made, stand.textures.length ])
+      .toStrictEqual([ 1, 0, 1 ]);
   });
 
   it('covers a map of another size with pieces of its own, letting go of the old ones and their textures', () =>
@@ -607,15 +724,16 @@ describe('LightMask', () =>
   it('lets go of everything once the map is no longer dark', () =>
   {
     // Arrange: a lit cave drawn.
-    const { draw, sprites, mask, kept } = maskOnStage();
+    const { draw, sprites, quads, mask, kept } = maskOnStage();
     draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1) ]));
+    const [ quad ] = quads();
 
     // Act: the note no longer says it is dark.
     draw(mapOf(16, '', [ null, torchAt(1, 1, 1) ]));
 
     // Assert.
-    expect([ sprites().every(sprite => sprite.destroyed), stand.textures[0].destroyed, mask.litChunks, kept[kept.length - 1] ])
-      .toStrictEqual([ true, true, 0, [] ]);
+    expect([ sprites().every(sprite => sprite.destroyed), quad.destroyed, quads().length, stand.textures[0].destroyed, mask.litChunks, kept[kept.length - 1] ])
+      .toStrictEqual([ true, true, 0, true, 0, [] ]);
   });
 
   it('keeps only the pictures the map\'s lights draw after each draw', () =>
@@ -635,17 +753,21 @@ describe('LightMask', () =>
   it('lets go of everything, pictures and its container included, when destroyed', () =>
   {
     // Arrange: a lit cave drawn.
-    const { draw, sprites, root, mask, destroyed, containers } = maskOnStage();
+    const { draw, sprites, quads, root, mask, destroyed, containers } = maskOnStage();
     draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1) ]));
     const drawn = [ ...sprites() ];
+    const [ quad ] = quads();
 
     // Act.
     mask.destroy();
 
-    // Assert: the pieces, the lit piece's texture and the sprites added into it, the pictures, and the mask's container.
+    // Assert: the pieces, the lit piece's quad and texture and the sprites added into it, the pictures, and the mask's
+    // container.
     const [ added ] = containers as unknown as { destroyed: boolean }[];
-    expect([ drawn.every(sprite => sprite.destroyed), stand.textures[0].destroyed, added.destroyed, destroyed(), (root as unknown as { destroyed: boolean }).destroyed ])
-      .toStrictEqual([ true, true, true, true, true ]);
+    expect([ drawn.every(sprite => sprite.destroyed), quad.destroyed, stand.textures[0].destroyed, added.destroyed ])
+      .toStrictEqual([ true, true, true, true ]);
+    expect([ destroyed(), (root as unknown as { destroyed: boolean }).destroyed ])
+      .toStrictEqual([ true, true ]);
   });
 
   describe('tick', () =>
@@ -772,18 +894,18 @@ describe('LightMask', () =>
         .toStrictEqual([ 3, [ 0.8, 0.8 ], true ]);
     });
 
-    it('draws a lit piece out of view again when the dark changes, since its fill is drawn into it', () =>
+    it('repaints a lit piece out of view when the dark changes, as it does one in view, drawing nothing into either', () =>
     {
       // Arrange: steady torches in the first piece and in the last, drawn at 85% with the whole map in view.
-      const { draw, passes } = maskOnStage();
+      const { draw, quads, passes } = maskOnStage();
       draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1), torchAt(2, 12, 12) ]));
 
       // Act: the note now says 93%, drawn with the view on the first piece alone.
       draw(mapOf(16, '<ambient:[93]>', [ null, torchAt(1, 1, 1), torchAt(2, 12, 12) ]), 1, at(0), ENGINE_PAGES, FIRST_PIECE);
 
-      // Assert: both lit pieces cleared to the new fill.
-      expect(passes.map(pass => pass.clearColor))
-        .toStrictEqual([ 0x262626, 0x262626, 0x121212, 0x121212 ]);
+      // Assert: both lit pieces repainted with the new fill, and no pass drawn again.
+      expect([ quads().map(fillOf), passes.length ])
+        .toStrictEqual([ [ 0x121212, 0x121212 ], 2 ]);
     });
   });
 
@@ -792,16 +914,16 @@ describe('LightMask', () =>
     it('gives a map its mask once the clock reaches an hour that darkens it, every light cut through at its strength now', () =>
     {
       // Arrange: a field with a flickering torch, no darkness of its own, drawn at 14:00 under a sky dark after 20:00.
-      const { draw, tick, sprites, passes, mask } = maskOnStage(dimming, [ NIGHTFALL ]);
+      const { draw, tick, sprites, quads, passes, mask } = maskOnStage(dimming, [ NIGHTFALL ]);
       const field = mapOf(16, '', [ null, torchAt(1, 1, 1, 'flicker') ]);
       draw(field, 1, at(0));
 
       // Act: 20:00, ten frames on.
       const moved = tick(field, at(10, 1200));
 
-      // Assert: half dark, the torch cut into the first piece at 0.9, the rest plain.
-      expect([ moved, passes.map(pass => [ pass.clearColor, pass.added.map(added => added.alpha) ]), mask.litChunks ])
-        .toStrictEqual([ true, [ [ 0x808080, [ 0.9 ] ] ], 1 ]);
+      // Assert: half dark, the torch cut into the first piece at 0.9 and shown with that fill, the rest plain.
+      expect([ moved, passes.map(pass => [ pass.clearColor, pass.added.map(added => added.alpha) ]), quads().map(fillOf), mask.litChunks ])
+        .toStrictEqual([ true, [ [ 0x000000, [ 0.9 ] ] ], [ 0x808080 ], 1 ]);
       expect(sprites().slice(1).every(sprite => sprite.tint === 0x808080))
         .toBe(true);
     });
@@ -821,10 +943,10 @@ describe('LightMask', () =>
         .toStrictEqual([ false, 1 ]);
     });
 
-    it('draws the lit pieces again as they stand and tints the plain ones when the hour deepens the dark', () =>
+    it('repaints every piece when the hour deepens the dark, drawing none of them again', () =>
     {
       // Arrange: the field drawn at 20:00, half dark.
-      const { draw, tick, sprites, passes, containers } = maskOnStage(steady, [ NIGHTFALL ]);
+      const { draw, tick, sprites, quads, passes } = maskOnStage(steady, [ NIGHTFALL ]);
       const field = mapOf(16, '', [ null, torchAt(1, 1, 1) ]);
       draw(field, 1, at(0, 1200));
       const made = stand.sprites;
@@ -832,9 +954,9 @@ describe('LightMask', () =>
       // Act: 22:00, three quarters dark.
       const moved = tick(field, at(0, 1320));
 
-      // Assert: the lit piece cleared to the deeper fill with the sprites it has, and the plain ones tinted with it.
-      expect([ moved, passes.map(pass => pass.clearColor), containers[1] === containers[0], stand.sprites - made ])
-        .toStrictEqual([ true, [ 0x808080, 0x404040 ], true, 0 ]);
+      // Assert: the lit piece's fill and the plain ones' tint the deeper dark, with no pass drawn again and nothing made.
+      expect([ moved, quads().map(fillOf), passes.length, stand.sprites - made ])
+        .toStrictEqual([ true, [ 0x404040 ], 1, 0 ]);
       expect(sprites().slice(1).every(sprite => sprite.tint === 0x404040))
         .toBe(true);
     });
@@ -873,7 +995,7 @@ describe('LightMask', () =>
     it('cuts the lights it worked out before the hour lifted the dark through it again when the dark returns', () =>
     {
       // Arrange: a flickering torch in the field drawn at 22:00, then the clock moved to 14:00, lifting the dark.
-      const { draw, tick, passes, asked } = maskOnStage(dimming, [ NIGHTFALL ]);
+      const { draw, tick, quads, passes, asked } = maskOnStage(dimming, [ NIGHTFALL ]);
       const field = mapOf(16, '', [ null, torchAt(1, 1, 1, 'flicker') ]);
       draw(field, 1, at(0, 1320));
       tick(field, at(0, 840));
@@ -882,9 +1004,10 @@ describe('LightMask', () =>
       // Act: back to 20:00, twenty frames on.
       const moved = tick(field, at(20, 1200));
 
-      // Assert: the torch cut through again at its strength twenty frames on, asked after once for that.
-      expect([ moved, passes.map(pass => [ pass.clearColor, pass.added.map(added => added.alpha) ]), asked ])
-        .toStrictEqual([ true, [ [ 0x404040, [ 1 ] ], [ 0x808080, [ 0.8 ] ] ], [ 'page:1#0 at 20' ] ]);
+      // Assert: the torch cut through again at its strength twenty frames on, asked after once for that, and shown with
+      // the half dark's fill.
+      expect([ moved, passes.map(pass => pass.added.map(added => added.alpha)), quads().map(fillOf), asked ])
+        .toStrictEqual([ true, [ [ 1 ], [ 0.8 ] ], [ 0x808080 ], [ 'page:1#0 at 20' ] ]);
     });
   });
 

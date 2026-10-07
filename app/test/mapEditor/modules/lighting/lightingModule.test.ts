@@ -23,7 +23,42 @@ import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
 const stand = vi.hoisted(() => ({
   dots: [] as number[],
   pageWords: [] as ((page: RmmzEventPage) => readonly string[])[],
+  fills: [] as { fill: number }[],
 }));
+
+// a lit piece of the dark shows through a shader, which needs a GPU to compile; a stand-in shows nothing, keeps the
+// dark's fill it is shown with, and is written down as it is made, holding a real texture for its lights.
+vi.mock('../../../../src/mapEditor/modules/lighting/litPiece.ts', async () =>
+{
+  const pixi = await import('pixi.js');
+
+  /**
+   * Stands in for a lit piece: a container for a quad, a texture of the piece's size, and the fill it shows with.
+   */
+  class LitPiece
+  {
+    readonly mesh = new pixi.Container();
+
+    readonly texture: InstanceType<typeof pixi.RenderTexture>;
+
+    fill: number;
+
+    constructor(rect: { width: number; height: number }, tint: number)
+    {
+      this.texture = pixi.RenderTexture.create({ width: rect.width, height: rect.height });
+      this.fill = tint;
+      stand.fills.push(this);
+    }
+
+    destroy(): void
+    {
+      this.mesh.destroy();
+      this.texture.destroy(true);
+    }
+  }
+
+  return { LitPiece };
+});
 
 // the light panel's options are built as the module switches on; a wrapper writes down the words for a page each is
 // handed, and builds them as they are.
@@ -600,23 +635,26 @@ describe('lightingModule', () =>
       const pictureFor = vi.spyOn(LightPictures.prototype, 'pictureFor').mockReturnValue(Texture.WHITE);
       const dark = registryOver(SKY()).lightingLayers().find(layer => layer.id === LIGHT_MASK_ID) as LightingLayerDefinition;
       const maps = [ litMap(''), litMap('<ambient:[85]>'), litMap('<noToneChange>\n<ambient:[85]>') ];
-      const cleared: number[][] = [];
+      const shown: number[][] = [];
 
-      // Act: each drawn at 22:00 by a renderer writing down what each lit piece is cleared to.
+      // Act: each drawn at 22:00, writing down the fill each lit piece made for it shows with, and what its lights are
+      // drawn over.
       maps.forEach(document =>
       {
-        const passes: number[] = [];
-        const renderer = { render: (options: { clearColor: number }) => passes.push(options.clearColor) } as unknown as Renderer;
+        const cleared: number[] = [];
+        const renderer = { render: (options: { clearColor: number }) => cleared.push(options.clearColor) } as unknown as Renderer;
         const drawing = dark.create(stageOn(new Container()));
+        stand.fills.splice(0);
         drawing.draw({ document, renderer, context: 1, clock: { ...START, timeOfDay: 1320 }, pages: ENGINE_PAGES, view: WHOLE_VIEW });
+        shown.push([ ...stand.fills.map(piece => piece.fill), ...cleared ]);
         drawing.destroy();
-        cleared.push(passes);
       });
       pictureFor.mockRestore();
 
-      // Assert: 63.5% dark over the field, 94.5% over the cave, and the tagged cave's own 85%.
-      expect(cleared)
-        .toStrictEqual([ [ 0x5d5d5d ], [ 0x0e0e0e ], [ 0x262626 ] ]);
+      // Assert: 63.5% dark over the field, 94.5% over the cave, and the tagged cave's own 85%, the torch's light drawn
+      // over black each time.
+      expect(shown)
+        .toStrictEqual([ [ 0x5d5d5d, 0x000000 ], [ 0x0e0e0e, 0x000000 ], [ 0x262626, 0x000000 ] ]);
     });
 
     it('casts the curve\'s tone at the clock\'s hour over a map with a sky, and none over a map tagged to have none', () =>
