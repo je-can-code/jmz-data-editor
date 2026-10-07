@@ -18,7 +18,7 @@ import { Redo, RestartAlt, Save, Undo } from '@mui/icons-material';
 import { SYSTEM_HISTORY_KEY } from '../../core/history/historyKeys.ts';
 import { SYSTEM_KEY } from '../../core/model/documentKeys.ts';
 import type { RmmzNameList } from '../../core/model/rmmzTypes.ts';
-import type { GamePreview } from '../../core/preview/GamePreview.ts';
+import { SWITCH_KIND, VARIABLE_KIND, type GamePreview, type PreviewKind } from '../../core/preview/GamePreview.ts';
 import { readWholeNumber } from '../../core/preview/previewInput.ts';
 import { previewWords } from '../../core/preview/previewWords.ts';
 import { maximumOf, nameRows, renameEntry, setMaximum, systemDocumentOf, type NameRow } from '../../core/system/systemNames.ts';
@@ -38,11 +38,11 @@ const ROW_HEIGHT = 44;
 const FALLBACK_LIST_HEIGHT = 480;
 
 /**
- * What each list is called, one entry and the list as a whole.
+ * What each list is called, one entry and the list as a whole, and the kind of preview state its entries are set under.
  */
-const LIST_WORDS: Readonly<Record<RmmzNameList, { readonly one: string; readonly title: string }>> = {
-  switches: { one: 'switch', title: 'Switches' },
-  variables: { one: 'variable', title: 'Variables' },
+const LIST_WORDS: Readonly<Record<RmmzNameList, { readonly one: string; readonly title: string; readonly kind: PreviewKind }>> = {
+  switches: { one: 'switch', title: 'Switches', kind: SWITCH_KIND },
+  variables: { one: 'variable', title: 'Variables', kind: VARIABLE_KIND },
 };
 
 /**
@@ -188,7 +188,7 @@ const NameListPanel = (props: { readonly list: RmmzNameList; readonly names: rea
   const height = useElementHeight(listRef);
   const rows = nameRows(names, search);
   const words = LIST_WORDS[list];
-  const set = list === 'switches' ? preview.count('switch') : preview.count('variable');
+  const set = preview.count(words.kind);
 
   /**
    * Runs a change, telling any failure rather than losing it.
