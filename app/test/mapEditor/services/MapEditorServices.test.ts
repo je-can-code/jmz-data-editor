@@ -4,7 +4,10 @@ import type { CloseTarget } from '../../../src/mapEditor/core/closeGuard.ts';
 import { BUILT_IN_ENTRIES } from '../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
-import { createMapEditorServices, type MapEditorEnvironment } from '../../../src/mapEditor/services/MapEditorServices.ts';
+import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
+import type { ViewStore } from '../../../src/mapEditor/core/preview/RememberedView.ts';
+import { createMapEditorServices, type MapEditorEnvironment, type MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
+import { projectNamesOf } from '../../../src/mapEditor/views/commandList/commandListResources.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../support/standIns.ts';
 
@@ -740,6 +743,173 @@ describe('MapEditorServices', () =>
     // Assert.
     expect([ whileStarted, painting.settings.strip ])
       .toStrictEqual([ 2, 2 ]);
+  });
+
+  describe('the preview, the clock and the names', () =>
+  {
+    /**
+     * One machine's storage, by project, shared by every window on it: each window's store hears every other's writes to
+     * its project, never its own.
+     * @returns {{ open: (projectRoot: string) => ViewStore, texts: Map<string, string | null> }} The opener every window
+     * is handed, and what each project keeps.
+     */
+    const buildMachine = () =>
+    {
+      const texts = new Map<string, string | null>();
+      const listeners = new Map<ViewStore, { projectRoot: string; listener: (text: string | null) => void }>();
+      const open = (projectRoot: string): ViewStore =>
+      {
+        const store: ViewStore = {
+          read: () => texts.get(projectRoot) ?? null,
+          write: text =>
+          {
+            texts.set(projectRoot, text);
+            [ ...listeners ]
+              .filter(([ other, heard ]) => other !== store && heard.projectRoot === projectRoot)
+              .forEach(([ , heard ]) => heard.listener(text));
+          },
+          subscribe: listener =>
+          {
+            listeners.set(store, { projectRoot, listener });
+            return () => listeners.delete(store);
+          },
+        };
+        return store;
+      };
+
+      return { open, texts };
+    };
+
+    /**
+     * A server serving one project, its System.json naming what the test says, counting its reads of System.json.
+     * @param {string} projectRoot Where the project lives, as the health route says; empty for none.
+     * @returns {{ fetch: typeof fetch, systemReads: () => number, rename: (name: string) => void }} The server.
+     */
+    const buildServer = (projectRoot: string) =>
+    {
+      let systemReads = 0;
+      let castle = 'suspicious castle';
+      const { fetch } = stubFetch(request =>
+      {
+        if (request.url.endsWith('/api/health'))
+        {
+          return envelope({ ok: true, projectRoot, projectRootOk: projectRoot !== '' });
+        }
+
+        if (request.url.endsWith('/api/system'))
+        {
+          systemReads += 1;
+          return envelope({ switches: [ '', 'partner-visible', castle ], variables: [ '' ] });
+        }
+
+        return request.url.endsWith('/api/plugin-metadata') ? new Response('var $plugins = [];') : envelope({});
+      });
+      const rename = (name: string) =>
+      {
+        castle = name;
+      };
+
+      return { fetch, systemReads: () => systemReads, rename };
+    };
+
+    /**
+     * A started window on a machine, serving a project.
+     * @param {MemoryChannelNetwork} network The channel network.
+     * @param {string} clientId The window's id.
+     * @param {ReturnType<typeof buildMachine>} machine The machine.
+     * @param {ReturnType<typeof buildServer>} server The server.
+     * @returns {{ services: MapEditorServices, sources: FakeEventSource[] }} The window.
+     */
+    const startWindow = (network: MemoryChannelNetwork, clientId: string, machine: ReturnType<typeof buildMachine>, server: ReturnType<typeof buildServer>) =>
+    {
+      const { environment, sources } = buildEnvironment(network, clientId);
+      const services = createMapEditorServices({ ...environment, fetch: server.fetch, rememberedView: machine.open });
+      services.start();
+      return { services, sources };
+    };
+
+    it('brings back the clock and the preview the project left, and shares every change with every other window', async () =>
+    {
+      // Arrange: a window turning switch 147 on and moving the clock to 22:00, on a machine serving Chef Adventure.
+      const network = new MemoryChannelNetwork();
+      const machine = buildMachine();
+      const server = buildServer('/games/chef-adventure');
+      const first = startWindow(network, 'window-a', machine, server);
+      first.services.preview.setSwitch(147, true);
+      first.services.clock.set(1320);
+      await vi.waitFor(() =>
+      {
+        expect(machine.texts.get('/games/chef-adventure'))
+          .toBe('{"version":1,"clock":1320,"preview":{"switch":{"147":true}}}');
+      });
+
+      // Act: a second window opens, then goes back to a fresh save.
+      const second = startWindow(network, 'window-b', machine, server);
+      await vi.waitFor(() =>
+      {
+        expect(second.services.preview.preview().switchesOn())
+          .toStrictEqual([ 147 ]);
+      });
+      const opened = [ second.services.clock.time(), second.services.clock.moved ];
+      second.services.preview.reset();
+
+      // Assert.
+      expect([ opened, first.services.preview.preview().isFresh, machine.texts.get('/games/chef-adventure') ])
+        .toStrictEqual([ [ 1320, true ], true, '{"version":1,"clock":1320,"preview":{}}' ]);
+      first.services.stop();
+      second.services.stop();
+    });
+
+    it('remembers nothing for a server serving no project, or for a window gone before the server says which', async () =>
+    {
+      // Arrange: a window on a server with no project, and one on a project's server stopped at once.
+      const network = new MemoryChannelNetwork();
+      const machine = buildMachine();
+      const lost = startWindow(network, 'window-a', machine, buildServer(''));
+      const gone = startWindow(network, 'window-b', machine, buildServer('/games/chef-adventure'));
+      gone.services.stop();
+      await settle();
+      await settle();
+
+      // Act: a switch turned on in each.
+      lost.services.preview.setSwitch(9, true);
+      gone.services.preview.setSwitch(9, true);
+
+      // Assert.
+      expect([ ...machine.texts.keys() ])
+        .toStrictEqual([]);
+      lost.services.stop();
+    });
+
+    it('reads the switch and variable names afresh when System.json changes on disk, and when the stream comes back', async () =>
+    {
+      // Arrange: a window following the names, nobody holding System.json, its file renamed on disk.
+      const network = new MemoryChannelNetwork();
+      const server = buildServer('/games/chef-adventure');
+      const window = startWindow(network, 'window-a', buildMachine(), server);
+      const names = projectNamesOf(window.services.api as MapEditorApi);
+      await settle();
+      const before = server.systemReads();
+      server.rename('castle, renamed on disk');
+
+      // Act: the file's change heard; then the stream drops and comes back.
+      window.sources[0].emitChange({ path: 'data/System.json', kind: 'write', client: '' });
+      await vi.waitFor(() =>
+      {
+        expect(names.names()?.switches[2])
+          .toBe('castle, renamed on disk');
+      });
+      window.sources[0].emit('error');
+      window.sources[0].emit('open');
+
+      // Assert: nothing read until the file changed, then once for it and once for the stream coming back.
+      await vi.waitFor(() =>
+      {
+        expect([ before, server.systemReads() ])
+          .toStrictEqual([ 0, 2 ]);
+      });
+      window.services.stop();
+    });
   });
 
   it('paints in the page\'s own window with the paint it started, and in any other window with one of that window\'s own', () =>

@@ -9,16 +9,20 @@ import { CommandEditorRegistry } from '../core/commands/CommandEditorRegistry.ts
 import type { PluginHeaderStore } from '../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { DocumentHub } from '../core/history/DocumentHub.ts';
 import type { LocationPicks } from '../core/locations/LocationPicks.ts';
-import type { DocumentKey } from '../core/model/documentKeys.ts';
+import { projectPathForDocument, SYSTEM_KEY, type DocumentKey } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import { WindowPageRule } from '../core/pageRule/WindowPageRule.ts';
+import { localViewStore, RememberedView, rememberedViewKey, type ViewStore } from '../core/preview/RememberedView.ts';
+import { WindowPreview } from '../core/preview/WindowPreview.ts';
 import { WindowClock } from '../core/time/WindowClock.ts';
 import { WindowPaints } from '../core/tools/WindowPaint.ts';
 import { FileChangeFeed, openEventSource, type EventSourceFactory } from '../core/sync/FileChangeFeed.ts';
 import { FileChangeRouter } from '../core/sync/fileChangeRouting.ts';
 import { SharedFileChangeFeed, type LockManagerLike } from '../core/sync/SharedFileChangeFeed.ts';
 import { SyncPeer } from '../core/sync/SyncPeer.ts';
+import { SystemNamesFollower } from '../core/sync/SystemNamesFollower.ts';
+import { projectNamesOf } from '../views/commandList/commandListResources.ts';
 import { parseMapEditorView, type MapEditorView } from '../views/mapEditorViews.ts';
 import { wireCommandEditing } from './commandEditing.ts';
 import { registerCoreEventKinds } from './coreEventKinds.ts';
@@ -103,10 +107,18 @@ type MapEditorServices = {
 
   /**
    * The rule every map view in the window picks each event's page by: the game's own, on a fresh save, at the window's
-   * clock, with the conditions the plugin modules add. The party a new game seats is read once the window starts, and
-   * again whenever the project's System.json or Actors.json changes on disk.
+   * clock and preview, with the conditions the plugin modules add. The party a new game seats is read once the window
+   * starts, and again whenever the project's System.json or Actors.json changes on disk.
    */
   readonly pages: WindowPageRule;
+
+  /**
+   * How far along the story the author asks every map in the window to show the game: the switches turned on and the
+   * variables set, which the page rule judges every event's pages against in place of a fresh save's. It is never
+   * written into the game's data. Like the clock, it is remembered between sessions for this project on this machine,
+   * and shared live by every window.
+   */
+  readonly preview: WindowPreview;
 
   /**
    * Reads what command editing needs from the server, once per window however often it is asked: the plugin
@@ -139,7 +151,9 @@ type MapEditorServices = {
    * Starts syncing, watching for changes, guarding against closing with unsaved edits, and switching on the plugin
    * modules once js/plugins.js is read, and afresh whenever a config file one of them reads changes on disk, with the
    * window's clock following the starting time a module offers, and the page rule reading what a new game starts with.
-   * When the page goes, it stops, which tells the other windows at once that this one no longer holds anything.
+   * The switch and variable names follow System.json as it stands in whichever window renames them, and the clock and
+   * the preview come back as this project last left them, kept in step with every other window from then on. When the
+   * page goes, it stops, which tells the other windows at once that this one no longer holds anything.
    */
   start(): void;
 
@@ -197,12 +211,23 @@ type MapEditorEnvironment = {
    * The fetch the API client uses.
    */
   readonly fetch?: typeof fetch;
+
+  /**
+   * Opens where a project's clock and preview are remembered between sessions, by the project's root folder. Left out,
+   * nothing is remembered, and the clock and preview are this window's alone.
+   */
+  readonly rememberedView?: (projectRoot: string) => ViewStore;
 };
+
+/**
+ * The file the switch and variable names live in, as the change stream names it.
+ */
+const SYSTEM_FILE = projectPathForDocument(SYSTEM_KEY);
 
 /**
  * The files a new game's party is read from, as the change stream names them: a change to either reads it again.
  */
-const NEW_GAME_FILES: ReadonlySet<string> = new Set([ 'data/System.json', 'data/Actors.json' ]);
+const NEW_GAME_FILES: ReadonlySet<string> = new Set([ SYSTEM_FILE, 'data/Actors.json' ]);
 
 /**
  * Builds the page's own environment: the real channels, stream, locks, shell and window.
@@ -231,6 +256,7 @@ const browserEnvironment = (apiBase: string | null): MapEditorEnvironment =>
       : navigator.locks as unknown as LockManagerLike,
     shell: pageWindowShell(),
     closeTarget: window,
+    rememberedView: projectRoot => localViewStore(window, rememberedViewKey(projectRoot)),
   };
 };
 
@@ -263,6 +289,13 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   const paints = new WindowPaints(environment.closeTarget);
   const clock = new WindowClock();
   const pages = new WindowPageRule(modules);
+  const preview = new WindowPreview();
+  const remembered = new RememberedView(clock, preview);
+
+  // the switch and variable names every list and picker shows follow System.json wherever it is being renamed.
+  const names = api === null
+    ? null
+    : new SystemNamesFollower({ hub, sync }, projectNamesOf(api));
 
   /**
    * Reads what a new game starts with for the page rule. A read that fails leaves the rule as it was, seating nobody
@@ -294,6 +327,38 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     stops.splice(0).reverse().forEach(each => each());
   };
 
+  /**
+   * Brings the clock and the preview back as this project last left them on this machine, and keeps them in step with
+   * every other window from then on, once the server says which project it serves. Without a server, a project, or a
+   * place to remember them, they are this window's alone.
+   */
+  const rememberView = (): void =>
+  {
+    const { rememberedView } = environment;
+    if (api === null || api.loadProjectRoot === undefined || rememberedView === undefined)
+    {
+      return;
+    }
+
+    // the answer may land after the page has gone, when there is nothing left to keep in step.
+    let stopped = false;
+    let detach: (() => void) | null = null;
+    stops.push(() =>
+    {
+      stopped = true;
+      detach?.();
+    });
+    api.loadProjectRoot()
+      .then(projectRoot =>
+      {
+        if (stopped === false && projectRoot !== '')
+        {
+          detach = remembered.attach(rememberedView(projectRoot));
+        }
+      })
+      .catch(() => undefined);
+  };
+
   return {
     clientId,
     view: parseMapEditorView(environment.search),
@@ -309,6 +374,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     paints,
     clock,
     pages,
+    preview,
     loadCommandResources: commandEditing.load,
     openDocument: async (key: DocumentKey) =>
     {
@@ -389,6 +455,14 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
       activation?.refresh();
       readNewGame();
 
+      // the names follow System.json from now on, and the clock and the preview come back as the project left them.
+      if (names !== null)
+      {
+        stops.push(names.start());
+      }
+
+      rememberView();
+
       // a page going for good says goodbye, so no window counts it as holding anything a moment longer.
       const onPageHide = () => stop();
       environment.closeTarget.addEventListener('pagehide', onPageHide);
@@ -414,12 +488,19 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
             {
               readNewGame();
             }
+
+            // a window holding no copy of System.json reads its names afresh, renamed in MZ or by a script, say.
+            if (change.path === SYSTEM_FILE)
+            {
+              names?.refresh();
+            }
           }),
           feed.onReconnect(() =>
           {
             router.recheck().catch(() => undefined);
             activation?.refresh();
             readNewGame();
+            names?.refresh();
           }),
         );
         feed.start();

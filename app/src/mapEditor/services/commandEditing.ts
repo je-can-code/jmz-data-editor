@@ -4,11 +4,11 @@ import type { CommandEditorRegistry } from '../core/commands/CommandEditorRegist
 import { loadPluginHeaders, type PluginHeaders } from '../core/commands/pluginHeaders/loadPluginHeaders.ts';
 import { pluginHeaderEntries } from '../core/commands/pluginHeaders/pluginHeaderEntries.ts';
 import { PluginHeaderStore } from '../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
-import { namedRows, type DatabaseNamesJson } from '../core/commandList/databaseNames.ts';
+import { namedRows } from '../core/commandList/databaseNames.ts';
 import { LocationPicks } from '../core/locations/LocationPicks.ts';
 import type { HandBuiltEditorEnvironment } from '../views/commandEditors/editorEnvironment.tsx';
 import { registerHandBuiltEditors } from '../views/commandEditors/registerHandBuiltEditors.tsx';
-import { commandListResourcesOf } from '../views/commandList/commandListResources.ts';
+import { commandListResourcesOf, projectNamesOf } from '../views/commandList/commandListResources.ts';
 
 /**
  * Command editing as one window wires it: the plugin headers every editor and the catalog share, and how to read
@@ -61,11 +61,14 @@ const wireCommandEditing = (api: MapEditorApi | null, catalog: CommandCatalog, r
 {
   const headers = new PluginHeaderStore();
   const locationPicks = new LocationPicks();
-  let databaseNames: DatabaseNamesJson | null = null;
+
+  // the pickers read the window's names as they stand when they draw, so a switch renamed anywhere is offered by its
+  // new name at once.
+  const names = api === null ? null : projectNamesOf(api);
   const environment: HandBuiltEditorEnvironment = {
     api,
     headers,
-    names: kind => namedRows(databaseNames, kind),
+    names: kind => namedRows(names?.names() ?? null, kind),
     pickLocation: api === null ? undefined : locationPicks.pick,
   };
   registerHandBuiltEditors(registry, environment);
@@ -78,11 +81,10 @@ const wireCommandEditing = (api: MapEditorApi | null, catalog: CommandCatalog, r
   const read = async (server: MapEditorApi): Promise<void> =>
   {
     // a project whose headers cannot be read still edits every command, plugin commands as their raw parameters.
-    const [ { headers: loadedHeaders, entries }, names ] = await Promise.all([
+    const [ { headers: loadedHeaders, entries } ] = await Promise.all([
       loadPluginHeaders(server).catch((): PluginHeaders => ({ headers: [], entries: [] })),
       commandListResourcesOf(server).names,
     ]);
-    databaseNames = names;
 
     // an entry some module already registered for the same command keeps its place.
     pluginHeaderEntries(loadedHeaders)

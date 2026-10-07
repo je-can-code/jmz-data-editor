@@ -152,6 +152,8 @@ class SyncPeer
 
   #holderWaits = new Set<HolderWait>();
 
+  #holdingListeners = new Set<(key: DocumentKey) => void>();
+
   #requestCounter = 0;
 
   #heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -303,6 +305,23 @@ class SyncPeer
     return this.#livePeers()
       .filter(([ , peer ]) => peer.holding.has(key))
       .map(([ clientId ]) => clientId);
+  }
+
+  /**
+   * Listens for what the other windows hold changing, as each window's presence says it: a window taking a document up,
+   * letting it go, or moving it on to another head, as an edit, an undo or a redo there does, and a window going, which
+   * lets go of everything it held. A window that only does not hold a document can follow it this way, looking at it
+   * afresh whenever its holder moves it on, without ever holding it.
+   * @param {(key: DocumentKey) => void} listener Called once for each document whose holding changed.
+   * @returns {() => void} Stops listening.
+   */
+  onHoldingChange(listener: (key: DocumentKey) => void): () => void
+  {
+    this.#holdingListeners.add(listener);
+    return () =>
+    {
+      this.#holdingListeners.delete(listener);
+    };
   }
 
   /**
@@ -539,7 +558,7 @@ class SyncPeer
         this.#notePeer(message.from, message.holding);
         break;
       case 'goodbye':
-        this.#peers.delete(message.from);
+        this.#forgetPeer(message.from);
         break;
       case 'snapshot-request':
         this.#answerSnapshotRequest(message);
@@ -566,12 +585,44 @@ class SyncPeer
    */
   #notePeer(from: string, holding: readonly HeldDocument[]): void
   {
-    this.#peers.set(from, { holding: new Map(holding.map(({ document, head }) => [ document, head ])), lastSeen: this.#now() });
+    const before = this.#peers.get(from)?.holding ?? new Map<DocumentKey, string>();
+    const after = new Map(holding.map(({ document, head }) => [ document, head ]));
+    this.#peers.set(from, { holding: after, lastSeen: this.#now() });
 
     // whoever was waiting to hear from a window holding one of these documents has now.
     [ ...this.#holderWaits ]
       .filter(wait => holding.some(({ document }) => document === wait.key))
       .forEach(wait => this.#settleWait(wait));
+    this.#announceHoldingChanges(before, after);
+  }
+
+  /**
+   * Forgets a window that said goodbye, and everything it held with it.
+   * @param {string} from The window.
+   */
+  #forgetPeer(from: string): void
+  {
+    const before = this.#peers.get(from)?.holding ?? new Map<DocumentKey, string>();
+    this.#peers.delete(from);
+    this.#announceHoldingChanges(before, new Map());
+  }
+
+  /**
+   * Tells whoever listens which documents one window holds otherwise than before: taken up, let go of, or at another
+   * head. A heartbeat repeating what it held says nothing.
+   * @param {ReadonlyMap<DocumentKey, string>} before What it held, at which heads.
+   * @param {ReadonlyMap<DocumentKey, string>} after What it holds now.
+   */
+  #announceHoldingChanges(before: ReadonlyMap<DocumentKey, string>, after: ReadonlyMap<DocumentKey, string>): void
+  {
+    const keys = new Set([ ...before.keys(), ...after.keys() ]);
+    keys.forEach(key =>
+    {
+      if (before.get(key) !== after.get(key))
+      {
+        [ ...this.#holdingListeners ].forEach(listener => listener(key));
+      }
+    });
   }
 
   /**

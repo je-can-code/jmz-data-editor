@@ -695,6 +695,52 @@ describe('SyncPeer', () =>
         .toStrictEqual([ true, false, [], false ]);
     });
 
+    it('tells a window that holds nothing whenever another takes a document up, moves it on, or lets it go', async () =>
+    {
+      // Arrange: a window holding nothing, listening, and another window that will hold the map.
+      const network = new MemoryChannelNetwork();
+      const server = buildServer();
+      const watcher = buildWindow(network, 'window-A', server.store);
+      const heard: DocumentKey[] = [];
+      const stop = watcher.peer.onHoldingChange(key => heard.push(key));
+      const holder = buildWindow(network, 'window-B', server.store);
+      network.flush();
+
+      // Act: the map taken up, renamed, its presence repeated unchanged, the window gone; then the map heard of again
+      // after the listener stopped.
+      await holder.hub.load(MAP);
+      network.flush();
+      holder.hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP, [ 'displayName' ], 'Harbor'));
+      network.flush();
+      network.flush();
+      holder.peer.stop();
+      network.flush();
+      stop();
+      const later = buildWindow(network, 'window-C', server.store);
+      await later.hub.load(MAP);
+      network.flush();
+
+      // Assert: once taken up, once moved on, once gone, and nothing for the hello of a window holding nothing.
+      expect(heard)
+        .toStrictEqual([ MAP, MAP, MAP ]);
+    });
+
+    it('says nothing when a window repeats what it holds', async () =>
+    {
+      // Arrange: two windows holding the map at one head, the first listening.
+      const { network, first, second } = await buildPair();
+      const heard: DocumentKey[] = [];
+      first.peer.onHoldingChange(key => heard.push(key));
+
+      // Act: the second window answers a hello from a newcomer, repeating what it holds.
+      buildWindow(network, 'window-C', buildServer().store);
+      network.flush();
+
+      // Assert.
+      expect([ heard, first.peer.holders(MAP) ])
+        .toStrictEqual([ [], [ second.hub.clientId ] ]);
+    });
+
     it('stops counting a window it has not heard from within the liveness window', () =>
     {
       // Arrange.

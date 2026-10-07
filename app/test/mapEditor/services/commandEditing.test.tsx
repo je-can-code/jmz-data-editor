@@ -18,7 +18,7 @@ import { wireCommandEditing } from '../../../src/mapEditor/services/commandEditi
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { CommandList } from '../../../src/mapEditor/views/commandList/CommandList.tsx';
-import { SoundPlayerContext } from '../../../src/mapEditor/views/commandList/commandListResources.ts';
+import { projectNamesOf, SoundPlayerContext } from '../../../src/mapEditor/views/commandList/commandListResources.ts';
 import { cmd } from '../support/commandFixtures.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 
@@ -207,6 +207,23 @@ describe('wireCommandEditing', () =>
     // Assert.
     expect([ told.mock.calls.length, editing.headers.library().headers(), catalog.entries().length, editing.environment.names?.('map') ])
       .toStrictEqual([ 1, [], buildParts().catalog.entries().length, [ { id: 1, name: 'Town' } ] ]);
+  });
+
+  it('offers the editors a switch by its name as it stands now, renamed in another window after the names were read', async () =>
+  {
+    // Arrange: the names read, then switch 1 renamed where System.json is being edited.
+    const { api } = buildApi();
+    const { catalog, registry } = buildParts();
+    const editing = wireCommandEditing(api, catalog, registry);
+    await editing.load();
+    const before = editing.environment.names?.('switch');
+
+    // Act.
+    projectNamesOf(api).followSystem({ switches: [ '', 'Door Shut' ], variables: [ '' ] });
+
+    // Assert.
+    expect([ before, editing.environment.names?.('switch') ])
+      .toStrictEqual([ [ { id: 1, name: 'Door Open' } ], [ { id: 1, name: 'Door Shut' } ] ]);
   });
 
   it('settles at once without a server, with nothing to read', async () =>

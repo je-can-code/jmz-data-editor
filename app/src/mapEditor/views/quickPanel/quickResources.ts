@@ -5,7 +5,7 @@ import type { DocumentHub } from '../../core/history/DocumentHub.ts';
 import { MAP_INFOS_KEY } from '../../core/model/documentKeys.ts';
 import type { EditorDocument } from '../../core/model/EditorDocument.ts';
 import type { RmmzMapInfo } from '../../core/model/rmmzTypes.ts';
-import { commandListResourcesOf } from '../commandList/commandListResources.ts';
+import { useProjectNames } from '../commandList/commandListResources.ts';
 
 /**
  * What the quick panel's controls read besides the fields: the server (for pictures), the project's names (for
@@ -70,15 +70,14 @@ const settleWhileCurrent = <T,>(pending: Promise<T> | undefined, settle: (value:
 };
 
 /**
- * Reads the project's names, asked for once per window and shared with every command list.
+ * Reads the project's names, asked for once per window and shared with every command list, the switch and variable
+ * names kept as they stand in System.json right now.
  * @param {MapEditorApi | null} api The server, or null without one.
  * @returns {DatabaseNamesJson | null} The names, or null until they arrive.
  */
 const useDatabaseNames = (api: MapEditorApi | null): DatabaseNamesJson | null =>
 {
-  const [ names, setNames ] = useState<DatabaseNamesJson | null>(null);
-  useEffect(() => settleWhileCurrent(api === null ? undefined : commandListResourcesOf(api).names, setNames), [ api ]);
-  return names;
+  return useProjectNames(api);
 };
 
 /**

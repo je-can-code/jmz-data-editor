@@ -44,6 +44,16 @@ class WindowClock
   };
 
   /**
+   * Whether the author has moved the clock, here or in another window, so it no longer follows the time the game starts
+   * at: only an hour the author chose is worth remembering.
+   * @returns {boolean} True once moved.
+   */
+  get moved(): boolean
+  {
+    return this.#moved;
+  }
+
+  /**
    * Listens for every move of the clock.
    * @param {ClockListener} listener Called after each move.
    * @returns {() => void} Stops listening.
