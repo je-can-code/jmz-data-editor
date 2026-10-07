@@ -378,6 +378,11 @@ const parityProbe = (config: ProbeConfig): void =>
       engine.$gameTime.deactivate();
       engine.$gameTime.setHours(Math.floor(next.time / 60));
       engine.$gameTime.setMinutes(next.time % 60);
+
+      // the second too, back to the one a new game starts on, as the editor reads a fresh save at that minute: a clock
+      // that ticked on the way here sits half a minute past it, and a page opening on the minute, as 18-5 does at 18:00,
+      // would show in the game and not in the editor.
+      engine.$gameTime.setSeconds(engine.J.TIME.Metadata.StartingSecond);
     }
 
     engine.$gamePlayer.requestMapReload();
