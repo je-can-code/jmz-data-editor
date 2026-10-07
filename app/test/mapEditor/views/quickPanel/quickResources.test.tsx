@@ -84,6 +84,55 @@ describe('quickResources', () =>
       .toStrictEqual([ JSON.stringify([ null, [ 'World', 'Town', 'Inn', 'Cave', 'Test' ], null ]), 0 ]);
   });
 
+  it('leaves the sheets as nothing when the server cannot list them', async () =>
+  {
+    // Arrange: a server whose folder listing fails.
+    const api = {
+      loadDatabaseNames: async () => ({ items: [ '', 'Potion' ] }),
+      loadCommandUsage: async () => ({}),
+      loadMapInfos: async () => buildTreeRows(),
+      listImages: async () => Promise.reject(new Error('no folder')),
+    } as unknown as MapEditorApi;
+
+    // Act.
+    render(<Readout hub={new DocumentHub({ clientId: 'window-a' })} api={api}/>);
+    await act(async () =>
+    {
+      await Promise.resolve();
+    });
+
+    // Assert.
+    expect(screen.getByTestId('readout').textContent)
+      .toBe(JSON.stringify([ [ '', 'Potion' ], [ 'World', 'Town', 'Inn', 'Cave', 'Test' ], null ]));
+  });
+
+  it('drops a tree that lands after the panel has gone', async () =>
+  {
+    // Arrange: a tree the server answers only when the test says, the panel gone before then.
+    let answer: (rows: unknown) => void = () => undefined;
+    const api = {
+      loadDatabaseNames: async () => ({ items: [] }),
+      loadCommandUsage: async () => ({}),
+      loadMapInfos: () => new Promise(resolve =>
+      {
+        answer = resolve;
+      }),
+    } as unknown as MapEditorApi;
+    const shown = render(<Readout hub={new DocumentHub({ clientId: 'window-a' })} api={api}/>);
+    shown.unmount();
+
+    // Act.
+    await act(async () =>
+    {
+      answer(buildTreeRows());
+      await Promise.resolve();
+    });
+
+    // Assert: nothing to see but the absence of a warning about updating a panel that has gone.
+    expect(shown.container.textContent)
+      .toBe('');
+  });
+
   it('reads nothing at all without a server', () =>
   {
     // Arrange: an empty window.

@@ -782,10 +782,11 @@ describe('MapEditorServices', () =>
 
     /**
      * A server serving one project, its System.json naming what the test says, counting its reads of System.json.
-     * @param {string} projectRoot Where the project lives, as the health route says; empty for none.
+     * @param {string | null} projectRoot Where the project lives, as the health route says; empty for none, and null for
+     * a health route that fails.
      * @returns {{ fetch: typeof fetch, systemReads: () => number, rename: (name: string) => void }} The server.
      */
-    const buildServer = (projectRoot: string) =>
+    const buildServer = (projectRoot: string | null) =>
     {
       let systemReads = 0;
       let castle = 'suspicious castle';
@@ -793,7 +794,9 @@ describe('MapEditorServices', () =>
       {
         if (request.url.endsWith('/api/health'))
         {
-          return envelope({ ok: true, projectRoot, projectRootOk: projectRoot !== '' });
+          return projectRoot === null
+            ? new Response('down', { status: 500 })
+            : envelope({ ok: true, projectRoot, projectRootOk: projectRoot !== '' });
         }
 
         if (request.url.endsWith('/api/system'))
@@ -860,25 +863,27 @@ describe('MapEditorServices', () =>
       second.services.stop();
     });
 
-    it('remembers nothing for a server serving no project, or for a window gone before the server says which', async () =>
+    it('remembers nothing for a server serving no project, one that cannot say, or a window gone before it says', async () =>
     {
-      // Arrange: a window on a server with no project, and one on a project's server stopped at once.
+      // Arrange: a window on a server with no project, one on a server whose health route fails, and one on a project's
+      // server stopped at once.
       const network = new MemoryChannelNetwork();
       const machine = buildMachine();
       const lost = startWindow(network, 'window-a', machine, buildServer(''));
+      const unsure = startWindow(network, 'window-c', machine, buildServer(null));
       const gone = startWindow(network, 'window-b', machine, buildServer('/games/chef-adventure'));
       gone.services.stop();
       await settle();
       await settle();
 
       // Act: a switch turned on in each.
-      lost.services.preview.setSwitch(9, true);
-      gone.services.preview.setSwitch(9, true);
+      [ lost, unsure, gone ].forEach(window => window.services.preview.setSwitch(9, true));
 
       // Assert.
       expect([ ...machine.texts.keys() ])
         .toStrictEqual([]);
       lost.services.stop();
+      unsure.services.stop();
     });
 
     it('reads the switch and variable names afresh when System.json changes on disk, and when the stream comes back', async () =>

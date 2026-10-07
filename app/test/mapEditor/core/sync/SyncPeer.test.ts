@@ -725,6 +725,24 @@ describe('SyncPeer', () =>
         .toStrictEqual([ MAP, MAP, MAP ]);
     });
 
+    it('says nothing for the goodbye of a window it never heard holding anything', () =>
+    {
+      // Arrange: a window listening, and a stranger's goodbye on the channel.
+      const network = new MemoryChannelNetwork();
+      const watcher = buildWindow(network, 'window-A', buildServer().store);
+      const heard: DocumentKey[] = [];
+      watcher.peer.onHoldingChange(key => heard.push(key));
+      const stranger = network.open('jmz-sync');
+
+      // Act.
+      stranger.postMessage({ type: 'goodbye', from: 'window-Z' });
+      network.flush();
+
+      // Assert.
+      expect([ heard, watcher.peer.knowsClient('window-Z') ])
+        .toStrictEqual([ [], true ]);
+    });
+
     it('says nothing when a window repeats what it holds', async () =>
     {
       // Arrange: two windows holding the map at one head, the first listening.

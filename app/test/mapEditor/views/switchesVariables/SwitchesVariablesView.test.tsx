@@ -225,6 +225,71 @@ describe('SwitchesVariablesView', () =>
       .toStrictEqual([ 'The names were not saved: disk full', true ]);
   });
 
+  it('puts a problem away once it is dismissed', async () =>
+  {
+    // Arrange: a save that failed.
+    const store: DocumentStore = { load: vi.fn(async () => buildSystem()), save: vi.fn(async () => Promise.reject(new Error('disk full'))) };
+    renderView({ store });
+    typeAndLeave('Name of switch 1', 'partner');
+    await act(async () =>
+    {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await Promise.resolve();
+    });
+    const shown = screen.queryByRole('alert') !== null;
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    // Assert.
+    expect([ shown, screen.queryByRole('alert') ])
+      .toStrictEqual([ true, null ]);
+  });
+
+  it('fills the height its window gives each list, drawing only the rows in sight', () =>
+  {
+    // Arrange: thirty named switches, and lists that measure 88 pixels, two rows' worth.
+    const disconnected: string[] = [];
+    vi.stubGlobal('ResizeObserver', class
+    {
+      #callback: (entries: { contentRect: { height: number } }[]) => void;
+
+      constructor(callback: (entries: { contentRect: { height: number } }[]) => void)
+      {
+        this.#callback = callback;
+      }
+
+      observe(): void
+      {
+        this.#callback([ { contentRect: { height: 88 } } ]);
+      }
+
+      disconnect(): void
+      {
+        disconnected.push('list');
+      }
+    });
+    const switches = [ '', ...Array.from({ length: 30 }, (_, index) => `switch ${index + 1}`) ];
+    const store: DocumentStore = { load: vi.fn(async () => ({ switches, variables: [ '' ] })), save: vi.fn(async () => undefined) };
+    const hub = new DocumentHub({ clientId: 'window-names', store });
+    hub.adopt(SYSTEM_KEY, { switches, variables: [ '', 'Gold' ] });
+    const services = { hub, preview: new WindowPreview(), openDocument: vi.fn() } as unknown as MapEditorServices;
+
+    // Act.
+    const shown = render(
+      <MapEditorServicesProvider services={services}>
+        <SwitchesVariablesView/>
+      </MapEditorServicesProvider>
+    );
+    const rows = screen.getAllByTestId(/^switch-row-/u).length;
+    shown.unmount();
+    vi.unstubAllGlobals();
+
+    // Assert: the two rows in sight and eight beyond them, then each list let go of its measuring.
+    expect([ rows, disconnected ])
+      .toStrictEqual([ 10, [ 'list', 'list' ] ]);
+  });
+
   it('says why a rename failed rather than losing it', () =>
   {
     // Arrange: a hub refusing every edit.
