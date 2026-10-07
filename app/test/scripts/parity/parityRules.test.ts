@@ -5,23 +5,30 @@ import {
   coverAxis,
   darkLightsOf,
   editorPagesOf,
+  editorVerdictsOf,
   eventsKeyOf,
   explainCell,
   explainDarkCell,
   gameParityHolds,
   lightReaches,
   pageDifferencesOf,
+  pagesProbeMapFor,
   parityPageRule,
   probeMapFor,
+  questGatedPagesOf,
   skyProbeMapFor,
   snapshotPredictions,
   spriteCovers,
   startingPartyOf,
   steadyLighting,
+  tallyPages,
   timeOfCapture,
+  verdictDifferencesOf,
+  verdictWords,
   type DarkLight,
   type MapFile,
 } from '../../../../scripts/parity/parityRules.ts';
+import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import type { RmmzEventConditions, RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { PluginsJsEntry } from '../../../src/services/plugins/PluginsJsReader.ts';
 import { command, event, page } from '../../mapEditor/support/eventKindFixtures.ts';
@@ -45,6 +52,14 @@ import { command, event, page } from '../../mapEditor/support/eventKindFixtures.
  * A map is drawn under its sky only when it has one: a map tagged <noToneChange> is refused rather than compared at an
  * hour it ignores. Its views and steps are any pass's, at the time of day asked for, and the events that explain its
  * differences are the ones the game showed at that hour, kept apart from the same map's other passes.
+ *
+ * Whenever the game lists J-OMNI-Quests enabled, the editor's rule judges its page tags too, against the quests a new
+ * game starts with, from the game's own config, holding back every quest-gated page when there is none. A map holding
+ * quest-gated events is visited and drawn nowhere, and every page of every event there is judged on both sides, the
+ * game's judgement of a page compared with the editor's one by one: a page whose judging threw in the game, or that the
+ * game has no judgement of, differs; an event a plugin put on the map has nothing to compare. The tally counts the
+ * events on the editor's page and the pages judged alike, the quest-gated apart, and lists the quest-gated pages judged
+ * differently, each worded with how both sides judged it.
  *
  * The game copy the check runs holds every light steady, each effect's depth at 0 and the rest of its config as it was,
  * so every frame of the game shows every light at full strength, as the editor draws them.
@@ -84,7 +99,8 @@ const lightEvent = (id: number, x: number, y: number, pages: string[][]): RmmzMa
 
 /**
  * Builds an event as the probe reports it.
- * @param {Partial<ProbeEvent>} overrides What differs from a plainly drawn 48x48 character at (5, 5).
+ * @param {Partial<ProbeEvent>} overrides What differs from a plainly drawn 48x48 character at (5, 5), with no pages of
+ * its own judged.
  * @returns {ProbeEvent} The event.
  */
 const probeEvent = (overrides: Partial<ProbeEvent> = {}): ProbeEvent => ({
@@ -98,6 +114,7 @@ const probeEvent = (overrides: Partial<ProbeEvent> = {}): ProbeEvent => ({
   width: 48,
   height: 48,
   departures: [],
+  meets: [],
   ...overrides,
 });
 
@@ -112,6 +129,22 @@ const jTime = (status: boolean): PluginsJsEntry => ({
   description: '',
   parameters: { useRealTime: 'false', startingSecond: '0', startingMinute: '0', startingHour: '14', startingDay: '16', startingMonth: '12', startingYear: '2026' },
 });
+
+/**
+ * J-OMNI-Quests as Chef Adventure's js/plugins.js lists it.
+ * @param {boolean} status Whether it is enabled.
+ * @returns {PluginsJsEntry} The entry.
+ */
+const jQuests = (status: boolean): PluginsJsEntry => ({ name: 'j/omni/ext/J-OMNI-Quests', status, description: '', parameters: {} });
+
+/**
+ * The game's quest config, as the game holds it: a delivery with objectives 0 and 1.
+ */
+const QUESTS = {
+  quests: [ { name: 'Herbalist Delivery', key: 'herbalist_delivery', objectives: [ { id: 0 }, { id: 1 } ] } ],
+  tags: [],
+  categories: [],
+} as unknown as JsonValue;
 
 /**
  * Builds an event whose pages each hold the given comment lines, under the given conditions.
@@ -593,6 +626,249 @@ describe('parityRules', () =>
       // Assert: the lamp's last page and the creature's only page hold at every hour.
       expect([ rule.conditions, pages ])
         .toStrictEqual([ [], [ [ [ 1, 1 ], [ 2, 0 ], [ 3, 0 ] ], [ [ 1, 1 ], [ 2, 0 ], [ 3, 0 ] ] ] ]);
+    });
+  });
+
+  describe('parityPageRule over J-OMNI-Quests', () =>
+  {
+    // a quest-giver: a blank first page, its offer while the delivery is inactive, and its errand while objective 1 is
+    // active; and a door whose second page waits on switch 4.
+    const map = mapFile(10, 10, {}, '', [
+      null,
+      taggedEvent(1, [ [], [ '<pageQuestCondition:[herbalist_delivery, -1, inactive]>' ], [ '<pageQuestCondition:[herbalist_delivery, 1]>' ] ]),
+      taggedEvent(2, [ [], [] ], [ {}, { switch1Valid: true, switch1Id: 4 } ]),
+    ]);
+
+    it('judges J-OMNI-Quests\' page tags against a new game\'s quests while the game lists it enabled', () =>
+    {
+      // Arrange.
+      const rule = parityPageRule([ jQuests(true) ], [ 1 ], new Map([ [ 'quest', QUESTS ] ]));
+
+      // Act.
+      const pages = [ ...editorPagesOf(map, rule, 840) ];
+
+      // Assert: the giver offers the delivery, its errand held back; the door on its first page.
+      expect([ rule.conditions.map(condition => condition.id), pages ])
+        .toStrictEqual([ [ 'quest.pages' ], [ [ 1, 1 ], [ 2, 0 ] ] ]);
+    });
+
+    it('holds back every quest-gated page while the game lists J-OMNI-Quests enabled but has no quest config', () =>
+    {
+      // Arrange: nothing handed over for the config.
+      const rule = parityPageRule([ jQuests(true) ], [ 1 ]);
+
+      // Act.
+      const pages = [ ...editorPagesOf(map, rule, 840) ];
+
+      // Assert.
+      expect(pages)
+        .toStrictEqual([ [ 1, 0 ], [ 2, 0 ] ]);
+    });
+
+    it('judges no page by a quest while J-OMNI-Quests is not enabled', () =>
+    {
+      // Arrange.
+      const rule = parityPageRule([ jQuests(false) ], [ 1 ], new Map([ [ 'quest', QUESTS ] ]));
+
+      // Act.
+      const pages = [ ...editorPagesOf(map, rule, 840) ];
+
+      // Assert: the giver's last page, which no condition of its own holds back.
+      expect([ rule.conditions, pages ])
+        .toStrictEqual([ [], [ [ 1, 2 ], [ 2, 0 ] ] ]);
+    });
+  });
+
+  describe('pagesProbeMapFor', () =>
+  {
+    it('visits a map to record its events and draws nothing there', () =>
+    {
+      // Arrange: a map holding quest-gated events.
+      const mapId = 20;
+
+      // Act.
+      const probed = pagesProbeMapFor(mapId);
+
+      // Assert.
+      expect(probed)
+        .toStrictEqual({ mapId: 20, views: [], steps: [ 0 ], dark: false });
+    });
+  });
+
+  describe('questGatedPagesOf', () =>
+  {
+    it('lists each event\'s pages carrying a quest tag, passing over a choice\'s tag and events with none', () =>
+    {
+      // Arrange: a giver gated on its second and third pages; an event whose tag gates a choice; a plain sign.
+      const map = mapFile(10, 10, {}, '', [
+        null,
+        taggedEvent(1, [ [], [ '<pageQuestCondition:[herbalist_delivery, -1, inactive]>' ], [ '<pageQuestCondition:[herbalist_delivery, 1]>' ] ]),
+        taggedEvent(2, [ [ '<choiceQuestCondition:[herbalist_delivery]>' ] ]),
+        taggedEvent(3, [ [ 'a sign' ] ]),
+      ]);
+
+      // Act.
+      const gated = [ ...questGatedPagesOf(map) ];
+
+      // Assert.
+      expect(gated)
+        .toStrictEqual([ [ 1, [ 1, 2 ] ] ]);
+    });
+  });
+
+  describe('editorVerdictsOf', () =>
+  {
+    it('judges every page of every event as the editor does at the hour, whichever page each event shows', () =>
+    {
+      // Arrange: a giver over a new game's quests; a door whose second page waits on switch 4; a lamp lit by night.
+      const map = mapFile(10, 10, {}, '', [
+        null,
+        taggedEvent(1, [ [], [ '<pageQuestCondition:[herbalist_delivery, -1, inactive]>' ], [ '<pageQuestCondition:[herbalist_delivery, 1]>' ] ]),
+        taggedEvent(2, [ [], [] ], [ {}, { switch1Valid: true, switch1Id: 4 } ]),
+        taggedEvent(3, [ [ '<light:[3]>' ], [ '<hourRangePage:18-5>' ] ]),
+      ]);
+      const rule = parityPageRule([ jQuests(true), jTime(true) ], [ 1 ], new Map([ [ 'quest', QUESTS ] ]));
+
+      // Act: at 14:00, then 22:00.
+      const verdicts = [ 840, 1320 ].map(timeOfDay => [ ...editorVerdictsOf(map, rule, timeOfDay) ]);
+
+      // Assert.
+      expect(verdicts)
+        .toStrictEqual([
+          [ [ 1, [ true, true, false ] ], [ 2, [ true, false ] ], [ 3, [ true, false ] ] ],
+          [ [ 1, [ true, true, false ] ], [ 2, [ true, false ] ], [ 3, [ true, true ] ] ],
+        ]);
+    });
+  });
+
+  describe('verdictDifferencesOf', () =>
+  {
+    // the editor's judgement: a giver offering its quest but not its errand, and a door on its first page only.
+    const verdicts = new Map([ [ 1, [ true, true, false ] ], [ 2, [ true, false ] ] ]);
+
+    it('lists nothing while the game judges every page as the editor does', () =>
+    {
+      // Arrange.
+      const events = [ probeEvent({ id: 1, page: 1, meets: [ true, true, false ] }), probeEvent({ id: 2, meets: [ true, false ] }) ];
+
+      // Act.
+      const differences = verdictDifferencesOf(events, verdicts);
+
+      // Assert.
+      expect(differences)
+        .toStrictEqual([]);
+    });
+
+    it('lists a page held on one side only, one whose judging threw in the game, and one the game has no judgement of', () =>
+    {
+      // Arrange: the giver's offer threw in the game and its errand held there; the game judged only the door's first
+      // page.
+      const events = [ probeEvent({ id: 1, page: 2, meets: [ true, null, true ] }), probeEvent({ id: 2, meets: [ true ] }) ];
+
+      // Act.
+      const differences = verdictDifferencesOf(events, verdicts);
+
+      // Assert.
+      expect(differences)
+        .toStrictEqual([
+          { id: 1, page: 1, game: null, editor: true },
+          { id: 1, page: 2, game: true, editor: false },
+          { id: 2, page: 1, game: null, editor: false },
+        ]);
+    });
+
+    it('passes over an event the editor has no pages for, as one a plugin put on the map', () =>
+    {
+      // Arrange.
+      const events = [ probeEvent({ id: 9, meets: [ false ] }) ];
+
+      // Act.
+      const differences = verdictDifferencesOf(events, verdicts);
+
+      // Assert.
+      expect(differences)
+        .toStrictEqual([]);
+    });
+  });
+
+  describe('tallyPages', () =>
+  {
+    // the giver and the door, over a new game's quests.
+    const map = mapFile(10, 10, {}, '', [
+      null,
+      taggedEvent(1, [ [], [ '<pageQuestCondition:[herbalist_delivery, -1, inactive]>' ], [ '<pageQuestCondition:[herbalist_delivery, 1]>' ] ]),
+      taggedEvent(2, [ [], [] ], [ {}, { switch1Valid: true, switch1Id: 4 } ]),
+    ]);
+    const rule = parityPageRule([ jQuests(true) ], [ 1 ], new Map([ [ 'quest', QUESTS ] ]));
+
+    it('counts every event on the editor\'s page and every page judged alike, the quest-gated apart', () =>
+    {
+      // Arrange: the game shows the giver's offer and the door's first page, judging every page as the editor does.
+      const events = [ probeEvent({ id: 1, page: 1, meets: [ true, true, false ] }), probeEvent({ id: 2, page: 0, meets: [ true, false ] }) ];
+
+      // Act.
+      const tally = tallyPages(map, events, rule, 840);
+
+      // Assert.
+      expect(tally)
+        .toStrictEqual({
+          events: 2,
+          eventsAlike: 2,
+          gatedEvents: 1,
+          gatedEventsAlike: 1,
+          pages: 5,
+          pagesAlike: 5,
+          gatedPages: 2,
+          gatedPagesAlike: 2,
+          gatedDiffer: [],
+        });
+    });
+
+    it('counts apart what the game shows and judges otherwise, listing the quest-gated pages judged differently', () =>
+    {
+      // Arrange: the game holds back the giver's offer, shows the door's second page, and has an event a plugin put on
+      // the map.
+      const events = [
+        probeEvent({ id: 1, page: 0, meets: [ true, false, false ] }),
+        probeEvent({ id: 2, page: 1, meets: [ true, true ] }),
+        probeEvent({ id: 9, page: 0, meets: [ true ] }),
+      ];
+
+      // Act.
+      const tally = tallyPages(map, events, rule, 840);
+
+      // Assert.
+      expect(tally)
+        .toStrictEqual({
+          events: 3,
+          eventsAlike: 0,
+          gatedEvents: 1,
+          gatedEventsAlike: 0,
+          pages: 5,
+          pagesAlike: 3,
+          gatedPages: 2,
+          gatedPagesAlike: 1,
+          gatedDiffer: [ { id: 1, page: 1, game: false, editor: true } ],
+        });
+    });
+  });
+
+  describe('verdictWords', () =>
+  {
+    it('words how each side judged a page, and a page whose judging stopped the game', () =>
+    {
+      // Arrange.
+      const differences = [ { id: 52, page: 2, game: true, editor: false }, { id: 53, page: 0, game: null, editor: true } ];
+
+      // Act.
+      const words = differences.map(verdictWords);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([
+          'event 52 page 3 holds in the game, does not hold in the editor',
+          'event 53 page 1 stops the game when judged, holds in the editor',
+        ]);
     });
   });
 

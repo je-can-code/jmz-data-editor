@@ -1,17 +1,20 @@
 /**
  * The parity check's rules, apart from the browser and the game so they can be tested: which views cover a map,
  * which maps are worth comparing at every animation step, which dark and which under their sky at a time of day, which
- * page the editor shows each event at the hour the game's clock read, what explains a difference in the events pass and
- * in the dark and sky passes, how the game copy's lights are held steady, and which differences the engine predicts
- * against snapshot.js.
+ * page the editor shows each event at the hour the game's clock read, how the game and the editor judge each page of
+ * the maps holding quest-gated events, what explains a difference in the events pass and in the dark and sky passes, how
+ * the game copy's lights are held steady, and which differences the engine predicts against snapshot.js.
  */
 import { CommandCatalog } from '../../app/src/mapEditor/core/commands/CommandCatalog.ts';
+import type { JsonValue } from '../../app/src/mapEditor/core/model/json.ts';
 import type { RmmzMapEvent } from '../../app/src/mapEditor/core/model/rmmzTypes.ts';
 import { PluginModuleRegistry } from '../../app/src/mapEditor/core/modules/PluginModuleRegistry.ts';
-import { activePageOf, readEvent, type PageRule } from '../../app/src/mapEditor/core/pageRule/pageRule.ts';
+import { activePageOf, pageHolds, readEvent, type PageRule } from '../../app/src/mapEditor/core/pageRule/pageRule.ts';
 import { ambientPayloadOf } from '../../app/src/mapEditor/modules/lighting/ambientTags.ts';
 import { lightsOf, PLUGIN_DEFAULTS } from '../../app/src/mapEditor/modules/lighting/lightTags.ts';
 import { NO_SKY_TAG, skyFollowsClock } from '../../app/src/mapEditor/modules/lighting/skyTag.ts';
+import { questModule } from '../../app/src/mapEditor/modules/quest/questModule.ts';
+import { readQuestTags } from '../../app/src/mapEditor/modules/quest/questTags.ts';
 import { timeModule } from '../../app/src/mapEditor/modules/time/timeModule.ts';
 import type { PluginsJsEntry } from '../../app/src/services/plugins/PluginsJsReader.ts';
 import type { ProbeEvent, ProbeMap } from './probeTypes.ts';
@@ -71,6 +74,35 @@ type PageDifference = {
   readonly id: number;
   readonly game: number;
   readonly editor: number;
+};
+
+/**
+ * One page the game and the editor judge differently: the event, the page's index, whether it holds in the game, null
+ * where judging it threw there, and whether it holds in the editor.
+ */
+type VerdictDifference = {
+  readonly id: number;
+  readonly page: number;
+  readonly game: boolean | null;
+  readonly editor: boolean;
+};
+
+/**
+ * How the game and the editor judged one map's events at one hour, counting the quest-gated apart: the events the game
+ * has there, and those on the editor's page; the events with a page carrying a quest tag, and those on the editor's
+ * page; every page of the events both sides have, and those both judge alike; the quest-gated pages, and those both
+ * judge alike; and the quest-gated pages judged differently.
+ */
+type PagesTally = {
+  readonly events: number;
+  readonly eventsAlike: number;
+  readonly gatedEvents: number;
+  readonly gatedEventsAlike: number;
+  readonly pages: number;
+  readonly pagesAlike: number;
+  readonly gatedPages: number;
+  readonly gatedPagesAlike: number;
+  readonly gatedDiffer: readonly VerdictDifference[];
 };
 
 /**
@@ -201,16 +233,19 @@ const startingPartyOf = (partyMembers: readonly number[], actors: readonly (obje
 };
 
 /**
- * Builds the page rule the editor shows a game by: the engine's conditions on a fresh save with the starting party, and
- * J-TIME's page tags as its module judges them over the game's own plugins, so a game without J-TIME has none.
+ * Builds the page rule the editor shows a game by: the engine's conditions on a fresh save with the starting party,
+ * J-TIME's page tags as its module judges them, and J-OMNI-Quests' as its module judges them against the quests a new
+ * game starts with, each over the game's own plugins, so a game without either plugin has none of its tags.
  * @param {readonly PluginsJsEntry[]} plugins The game's plugins, as js/plugins.js lists them.
  * @param {readonly number[]} party The starting party's actor ids.
+ * @param {ReadonlyMap<string, JsonValue | null>} configs The game's config files the modules read, by the name the
+ * server serves each under ({@code quest} for config.quest.json); left out, none were read.
  * @returns {PageRule} The rule.
  */
-const parityPageRule = (plugins: readonly PluginsJsEntry[], party: readonly number[]): PageRule =>
+const parityPageRule = (plugins: readonly PluginsJsEntry[], party: readonly number[], configs: ReadonlyMap<string, JsonValue | null> = new Map()): PageRule =>
 {
   const registry = new PluginModuleRegistry(new CommandCatalog());
-  registry.activate([ timeModule ], plugins);
+  registry.activate([ timeModule, questModule ], plugins, configs);
   return { save: { party }, conditions: registry.pageConditions() };
 };
 
@@ -248,6 +283,125 @@ const pageDifferencesOf = (events: readonly ProbeEvent[], editorPages: EditorPag
     const editor = editorPages.get(event.id) ?? -1;
     return editor === event.page ? [] : [ { id: event.id, game: event.page, editor } ];
   });
+};
+
+/**
+ * Builds what the probe does on a map whose pages alone are compared, as on each map holding quest-gated events: it
+ * arrives there, records how the game shows each event and judges each of its pages, and draws nothing.
+ * @param {number} mapId The map.
+ * @returns {ProbeMap} The probe's orders.
+ */
+const pagesProbeMapFor = (mapId: number): ProbeMap =>
+{
+  return { mapId, views: [], steps: [ 0 ], dark: false };
+};
+
+/**
+ * Lists the pages of a map's events carrying any of J-OMNI-Quests' page tags, as its module reads them.
+ * @param {MapFile} map The map.
+ * @returns {Map<number, number[]>} Each quest-gated event's quest-gated pages, by index, by the event's id; an event with
+ * none has no entry.
+ */
+const questGatedPagesOf = (map: MapFile): Map<number, number[]> =>
+{
+  const gated = new Map<number, number[]>();
+  map.events.forEach(event =>
+  {
+    const pages = event === null ? [] : event.pages.flatMap((page, index) => (readQuestTags(page).length > 0 ? [ index ] : []));
+    if (event !== null && pages.length > 0)
+    {
+      gated.set(event.id, pages);
+    }
+  });
+  return gated;
+};
+
+/**
+ * Judges every page of a map's events as the editor does at a time of day: whether each holds, as the page rule asks of
+ * each page when it picks one.
+ * @param {MapFile} map The map.
+ * @param {PageRule} rule The rule the editor shows the game by.
+ * @param {number} timeOfDay The time of day, in minutes past midnight.
+ * @returns {Map<number, boolean[]>} Whether each page holds, by index, by the event's id.
+ */
+const editorVerdictsOf = (map: MapFile, rule: PageRule, timeOfDay: number): Map<number, boolean[]> =>
+{
+  const verdicts = new Map<number, boolean[]>();
+  map.events.forEach(event =>
+  {
+    if (event !== null)
+    {
+      verdicts.set(event.id, readEvent(event, rule).pages.map(page => pageHolds(page, { timeOfDay })));
+    }
+  });
+  return verdicts;
+};
+
+/**
+ * Lists the pages the game judges otherwise than the editor, the editor's pages compared one by one with how the game
+ * judged the same page; a page whose judging threw in the game differs whatever the editor says. An event the editor has
+ * no pages for, as one a plugin put on the map, has nothing to compare and is passed over.
+ * @param {readonly ProbeEvent[]} events The game's events on the map.
+ * @param {ReadonlyMap<number, readonly boolean[]>} verdicts The editor's judgement of each page, by the event's id.
+ * @returns {VerdictDifference[]} The pages judged differently, in the game's order of events, then by page.
+ */
+const verdictDifferencesOf = (events: readonly ProbeEvent[], verdicts: ReadonlyMap<number, readonly boolean[]>): VerdictDifference[] =>
+{
+  return events.flatMap(event =>
+  {
+    const editor = verdicts.get(event.id) ?? [];
+    return editor.flatMap((held, page) =>
+    {
+      const game = event.meets[page] ?? null;
+      return game === held ? [] : [ { id: event.id, page, game, editor: held } ];
+    });
+  });
+};
+
+/**
+ * Tallies how the game and the editor judged one map's events at one hour, the quest-gated apart: which events each
+ * shows on the same page, and which pages each judges alike.
+ * @param {MapFile} map The map.
+ * @param {readonly ProbeEvent[]} events The game's events on the map, as the probe recorded them.
+ * @param {PageRule} rule The rule the editor shows the game by.
+ * @param {number} timeOfDay The time of day the game's clock read, in minutes past midnight.
+ * @returns {PagesTally} The tally.
+ */
+const tallyPages = (map: MapFile, events: readonly ProbeEvent[], rule: PageRule, timeOfDay: number): PagesTally =>
+{
+  const shownElsewhere = new Set(pageDifferencesOf(events, editorPagesOf(map, rule, timeOfDay)).map(difference => difference.id));
+  const gated = questGatedPagesOf(map);
+  const gatedEvents = events.filter(event => gated.has(event.id));
+  const verdicts = editorVerdictsOf(map, rule, timeOfDay);
+  const differ = verdictDifferencesOf(events, verdicts);
+  const gatedDiffer = differ.filter(difference => (gated.get(difference.id) ?? []).includes(difference.page));
+  const pages = events.reduce((sum, event) => sum + (verdicts.get(event.id) ?? []).length, 0);
+  const gatedPages = gatedEvents.reduce((sum, event) => sum + (gated.get(event.id) ?? []).length, 0);
+  return {
+    events: events.length,
+    eventsAlike: events.filter(event => shownElsewhere.has(event.id) === false).length,
+    gatedEvents: gatedEvents.length,
+    gatedEventsAlike: gatedEvents.filter(event => shownElsewhere.has(event.id) === false).length,
+    pages,
+    pagesAlike: pages - differ.length,
+    gatedPages,
+    gatedPagesAlike: gatedPages - gatedDiffer.length,
+    gatedDiffer,
+  };
+};
+
+/**
+ * Words how a page is judged on each side, for a page judged differently.
+ * @param {VerdictDifference} difference The page.
+ * @returns {string} The words, such as "event 52 page 3 holds in the game, does not hold in the editor".
+ */
+const verdictWords = (difference: VerdictDifference): string =>
+{
+  const held = (holds: boolean): string => (holds ? 'holds' : 'does not hold');
+  const game = difference.game === null
+    ? 'stops the game when judged'
+    : `${held(difference.game)} in the game`;
+  return `event ${difference.id} page ${difference.page + 1} ${game}, ${held(difference.editor)} in the editor`;
 };
 
 /**
@@ -499,21 +653,27 @@ export {
   coverAxis,
   darkLightsOf,
   editorPagesOf,
+  editorVerdictsOf,
   eventsKeyOf,
   explainCell,
   explainDarkCell,
   gameParityHolds,
   lightReaches,
   pageDifferencesOf,
+  pagesProbeMapFor,
   pagesWords,
   parityPageRule,
   probeMapFor,
+  questGatedPagesOf,
   skyProbeMapFor,
   snapshotPredictions,
   spriteCovers,
   startingPartyOf,
   steadyLighting,
+  tallyPages,
   TILE,
   timeOfCapture,
+  verdictDifferencesOf,
+  verdictWords,
 };
-export type { DarkLight, EditorPages, JudgedView, LightingConfigFile, MapFile, PageDifference };
+export type { DarkLight, EditorPages, JudgedView, LightingConfigFile, MapFile, PageDifference, PagesTally, VerdictDifference };

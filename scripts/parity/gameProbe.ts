@@ -270,9 +270,27 @@ const parityProbe = (config: ProbeConfig): void =>
     return departures;
   };
 
-  // records each event's active page, whether the game draws it and how, before any pass hides anything, with the hour
-  // the game's clock reads; under its own key for a map drawn at a time of day, since an event's page can depend on the
-  // hour.
+  // judges each of an event's pages as the game does when it picks one, every plugin's condition included; a page whose
+  // judging throws, as one waiting on a quest the game does not track does, is noted as neither held nor not.
+  const meetsOf = (character: any): (boolean | null)[] =>
+  {
+    const pages: any[] = character.event()?.pages ?? [];
+    return pages.map(page =>
+    {
+      try
+      {
+        return character.meetsConditions(page) === true;
+      }
+      catch
+      {
+        return null;
+      }
+    });
+  };
+
+  // records each event's active page, whether the game draws it and how, and how the game judges each of its pages,
+  // before any pass hides anything, with the hour the game's clock reads; under its own key for a map drawn at a time of
+  // day, since an event's page can depend on the hour.
   const recordEvents = (map: ProbeMap): void =>
   {
     const spriteset = engine.SceneManager._scene._spriteset;
@@ -295,6 +313,7 @@ const parityProbe = (config: ProbeConfig): void =>
           width: Math.abs(sprite._frame.width * sprite.scale.x),
           height: Math.abs(sprite._frame.height * sprite.scale.y),
           departures: departuresOf(sprite),
+          meets: meetsOf(character),
         };
       });
   };

@@ -79,6 +79,13 @@ type ProbeEvent = {
    * draws exactly the page it shows, or shows no page and so draws nothing.
    */
   departures: string[];
+
+  /**
+   * Whether each of the event's pages holds as the game judges it on arrival, by page: Game_Event#meetsConditions, every
+   * plugin's condition included, as Game_Event#findProperPageIndex asks it of each page. Null for a page whose judging
+   * threw, as a page waiting on a quest the game does not track makes it; empty for an event with no pages of its own.
+   */
+  meets: (boolean | null)[];
 };
 
 /**

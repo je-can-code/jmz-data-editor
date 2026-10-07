@@ -4,7 +4,7 @@
  * draws each fixture map view by view, and the editor draws the same views; the two are compared pixel by pixel inside
  * the map.
  *
- *   bun run parity [--maps 102,31,94,316] [--sky 337@22:00,337@14:00] [--mode game|snapshot|both]
+ *   bun run parity [--maps 102,31,94,316] [--sky 337@22:00,337@14:00] [--pages 20,21] [--mode game|snapshot|both]
  *                  [--scratch <base folder>] [--project <game>] [--ui-port 18200] [--api-port 18201] [--display :90]
  *                  [--nw <binary>]
  *
@@ -29,6 +29,13 @@
  * lighting it shows. A differing cell is explained as in the dark pass, by a light the game shows from another page at
  * that hour.
  *
+ * Every map holding an event with a quest-gated page (or the maps --pages names instead, none for an empty list) is
+ * visited too, after the drawn maps and before the skies, and compared by its pages alone, nothing drawn: on arrival
+ * the game records how it judges each page of each event, every plugin's condition included, and the editor judges the
+ * same pages by its own rule at the hour the game's clock read, J-OMNI-Quests' tags against the quests a new game starts
+ * with. Each such map prints how many events both show on the same page and how many pages both judge alike, the
+ * quest-gated ones counted apart, and a quest-gated page judged differently fails the check.
+ *
  * Maps with water or waterfalls are compared at all four animation steps. The game draws on SwiftShader, which is
  * fine for pictures and meaningless for timing. The game runs from a copy in the run's folder, muted, on a virtual
  * display, its lights held steady in the copy's config so that every frame of it is the same frame; nothing here
@@ -38,9 +45,10 @@
  * editor draws it whole too; the differences the engine predicts against snapshot.js (star tiles drawn last, table
  * legs and edges) are counted apart from the rest.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { Page } from 'playwright-core';
+import type { JsonValue } from '../../app/src/mapEditor/core/model/json.ts';
 import type { PageRule } from '../../app/src/mapEditor/core/pageRule/pageRule.ts';
 import { readPluginEntries } from '../../app/src/services/plugins/PluginsJsReader.ts';
 import { startEditorStack } from '../speed/editorStack.ts';
@@ -57,19 +65,24 @@ import {
   explainDarkCell,
   gameParityHolds,
   pageDifferencesOf,
+  pagesProbeMapFor,
   pagesWords,
   parityPageRule,
   probeMapFor,
+  questGatedPagesOf,
   skyProbeMapFor,
   snapshotPredictions,
   startingPartyOf,
   steadyLighting,
+  tallyPages,
   TILE,
   timeOfCapture,
+  verdictWords,
   type EditorPages,
   type LightingConfigFile,
   type MapFile,
   type PageDifference,
+  type PagesTally,
 } from './parityRules.ts';
 
 /**
@@ -81,11 +94,13 @@ type SkyFixture = {
 };
 
 /**
- * The script's settings.
+ * The script's settings. The maps compared by their pages alone are null until worked out from the game, which is then
+ * every map holding a quest-gated event.
  */
 type Options = {
   maps: number[];
   sky: SkyFixture[];
+  pages: number[] | null;
   mode: 'game' | 'snapshot' | 'both';
   scratch: string;
   project: string;
@@ -113,6 +128,15 @@ type ViewResult = {
 type PageComparison = {
   events: number;
   differ: PageDifference[];
+};
+
+/**
+ * How the game and the editor judged the pages of one map holding quest-gated events, at the hour the game's clock read
+ * on arrival, under the key the probe keeps its events by.
+ */
+type QuestPages = {
+  key: string;
+  tally: PagesTally;
 };
 
 /**
@@ -207,6 +231,22 @@ const holdLightsSteady = (copy: string): void =>
 const TOLERANCE = 2;
 
 /**
+ * Reads --pages's list of maps compared by their pages alone.
+ * @param {string | undefined} list The list, such as {@code 20,21}; empty for none; left out, to be worked out from the
+ * game.
+ * @returns {number[] | null} The maps, in the order given, or null to work them out.
+ */
+const parsePageMaps = (list: string | undefined): number[] | null =>
+{
+  if (list === undefined)
+  {
+    return null;
+  }
+
+  return list === '' ? [] : list.split(',').map(Number);
+};
+
+/**
  * Reads the settings from the command line.
  * @param {string[]} argv The arguments after the script's name.
  * @returns {Options} The settings.
@@ -226,6 +266,7 @@ const parseOptions = (argv: string[]): Options =>
   return {
     maps: (flags.get('maps') ?? '102,31,94,316,4,6').split(',').map(Number),
     sky: parseSkyFixtures(flags.get('sky') ?? SKY_FIXTURES),
+    pages: parsePageMaps(flags.get('pages')),
     mode: (flags.get('mode') ?? 'both') as Options['mode'],
     scratch: flags.get('scratch') ?? tmpdir(),
     project: flags.get('project') ?? process.env['JMZ_PROJECT_ROOT'] ?? '',
@@ -248,8 +289,9 @@ const readMap = async (project: string, mapId: number): Promise<MapFile> =>
 };
 
 /**
- * Reads the page rule the editor shows the game by, from the game's own files: its plugins, for J-TIME's page tags,
- * and its starting party.
+ * Reads the page rule the editor shows the game by, from the game's own files: its plugins, for J-TIME's and
+ * J-OMNI-Quests' page tags; its quest config, for the quests a new game starts with, when it has one; and its starting
+ * party.
  * @param {string} project The game.
  * @returns {Promise<PageRule>} The rule.
  */
@@ -258,7 +300,30 @@ const readPageRule = async (project: string): Promise<PageRule> =>
   const plugins = readPluginEntries(await Bun.file(`${project}/js/plugins.js`).text());
   const system = await Bun.file(`${project}/data/System.json`).json() as { partyMembers: number[] };
   const actors = await Bun.file(`${project}/data/Actors.json`).json() as (object | null)[];
-  return parityPageRule(plugins, startingPartyOf(system.partyMembers, actors));
+  const questFile = `${project}/data/config.quest.json`;
+  const configs = new Map<string, JsonValue | null>(existsSync(questFile) ? [ [ 'quest', await Bun.file(questFile).json() as JsonValue ] ] : []);
+  return parityPageRule(plugins, startingPartyOf(system.partyMembers, actors), configs);
+};
+
+/**
+ * Finds every map of the game holding an event with a quest-gated page.
+ * @param {string} project The game.
+ * @returns {Promise<number[]>} The maps' ids, in order.
+ */
+const questGatedMapIds = async (project: string): Promise<number[]> =>
+{
+  const files = readdirSync(`${project}/data`).filter(name => /^Map\d{3,}\.json$/u.test(name)).sort();
+  const mapIds: number[] = [];
+  for (const file of files)
+  {
+    const map = await Bun.file(`${project}/data/${file}`).json() as MapFile;
+    if (questGatedPagesOf(map).size > 0)
+    {
+      mapIds.push(Number.parseInt(file.slice('Map'.length), 10));
+    }
+  }
+
+  return mapIds;
 };
 
 /**
@@ -386,14 +451,20 @@ const runGameParity = async (options: Options): Promise<boolean> =>
   const screen = { width: 1920, height: 1080 };
   const maps = new Map<number, MapFile>();
   const mapIds = [ ...new Set([ ...options.maps, ...options.sky.map(fixture => fixture.mapId) ]) ];
-  for (const mapId of mapIds)
+
+  // the maps compared by their pages alone: those holding quest-gated events, unless the run names others, leaving out
+  // any already drawn, whose pages are judged with the rest of what is drawn there.
+  const pageMapIds = (options.pages ?? await questGatedMapIds(options.project)).filter(mapId => mapIds.includes(mapId) === false);
+  for (const mapId of [ ...mapIds, ...pageMapIds ])
   {
     maps.set(mapId, await readMap(options.project, mapId));
   }
 
-  // the skies come last, so the game has always arrived somewhere before its clock is set for one.
+  // the skies come last, so the game has always arrived somewhere before its clock is set for one; the maps compared by
+  // their pages alone come before them, so their pages are judged at the game's own hour.
   const probeMaps = [
     ...options.maps.map(mapId => probeMapFor(mapId, maps.get(mapId) as MapFile, screen)),
+    ...pageMapIds.map(pagesProbeMapFor),
     ...options.sky.map(fixture => skyProbeMapFor(fixture.mapId, maps.get(fixture.mapId) as MapFile, screen, fixture.time)),
   ];
   const report = await runHeadlessGame(
@@ -449,8 +520,81 @@ const runGameParity = async (options: Options): Promise<boolean> =>
     }
   }
 
-  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results, pages: Object.fromEntries(pages) }, null, 2));
-  return printGameParity(mapIds, results, pages);
+  const quests = questPagesOf(report, maps, pageMapIds, rule);
+  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results, pages: Object.fromEntries(pages), quests }, null, 2));
+  const drawn = printGameParity(mapIds, results, pages);
+  return printQuestPages(quests) && drawn;
+};
+
+/**
+ * Tallies the pages of every map the probe recorded that holds quest-gated events, or that the run compares by its
+ * pages alone, at the hour the game's clock read there on arrival, or midnight in a game with no clock.
+ * @param {ProbeReport} report The probe's report.
+ * @param {ReadonlyMap<number, MapFile>} maps Every map the probe visited, by id.
+ * @param {readonly number[]} pageMapIds The maps compared by their pages alone.
+ * @param {PageRule} rule The rule the editor shows the game by.
+ * @returns {QuestPages[]} The tallies, by the key the probe keeps each map's events under.
+ */
+const questPagesOf = (report: ProbeReport, maps: ReadonlyMap<number, MapFile>, pageMapIds: readonly number[], rule: PageRule): QuestPages[] =>
+{
+  return Object.entries(report.events).flatMap(([ key, events ]) =>
+  {
+    const mapId = Number.parseInt(key, 10);
+    const map = maps.get(mapId) as MapFile;
+    if (pageMapIds.includes(mapId) === false && questGatedPagesOf(map).size === 0)
+    {
+      return [];
+    }
+
+    const clock = report.clocks[key];
+    return [ { key, tally: tallyPages(map, events, rule, clock >= 0 ? clock : 0) } ];
+  });
+};
+
+/**
+ * Words the map, and the hour when there is one, that the probe keeps a map's events under.
+ * @param {string} key The key, such as {@code 20} or {@code 337@1320}.
+ * @returns {string} The words, such as Map020 or Map337 at 22:00.
+ */
+const keyWords = (key: string): string =>
+{
+  const [ mapId, time ] = key.split('@');
+  const map = `Map${mapId.padStart(3, '0')}`;
+  return time === undefined ? map : `${map} at ${clockOf(Number(time))}`;
+};
+
+/**
+ * Prints how the game and the editor judged the pages of each map holding quest-gated events, then in all: the
+ * quest-gated events both show on the same page, and the quest-gated pages both judge alike, with those judged
+ * differently; then the same for every event and page on those maps.
+ * @param {readonly QuestPages[]} quests The tallies.
+ * @returns {boolean} True when every quest-gated page was judged alike.
+ */
+const printQuestPages = (quests: readonly QuestPages[]): boolean =>
+{
+  if (quests.length === 0)
+  {
+    return true;
+  }
+
+  console.log('Quest-gated events, as a fresh save shows them at the hour the game\'s clock read on arrival:');
+  quests.forEach(({ key, tally }) =>
+  {
+    console.log(`  ${keyWords(key).padEnd(8)} ${tally.gatedEventsAlike} of ${tally.gatedEvents} quest-gated events on the editor's page,`
+      + ` ${tally.gatedPagesAlike} of ${tally.gatedPages} quest-gated pages judged alike;`
+      + ` all ${tally.events} events: ${tally.eventsAlike} on the editor's page, ${tally.pagesAlike} of ${tally.pages} pages judged alike`);
+    tally.gatedDiffer.slice(0, 8).forEach(difference => console.log(`           ${verdictWords(difference)}`));
+    if (tally.gatedDiffer.length > 8)
+    {
+      console.log(`           and ${tally.gatedDiffer.length - 8} more`);
+    }
+  });
+
+  const total = (pick: (tally: PagesTally) => number): number => quests.reduce((sum, { tally }) => sum + pick(tally), 0);
+  console.log(`  in all: ${total(tally => tally.gatedEventsAlike)} of ${total(tally => tally.gatedEvents)} quest-gated events on the editor's page,`
+    + ` ${total(tally => tally.gatedPagesAlike)} of ${total(tally => tally.gatedPages)} quest-gated pages judged alike;`
+    + ` ${total(tally => tally.pagesAlike)} of ${total(tally => tally.pages)} pages on these maps judged alike`);
+  return quests.every(({ tally }) => tally.gatedDiffer.length === 0);
 };
 
 /**
@@ -623,7 +767,9 @@ const main = async (): Promise<void> =>
     pass = await runSnapshotParity(options) && pass;
   }
 
-  console.log(pass ? 'PARITY: every difference from the game was explained, and every snapshot.js difference was predicted' : 'PARITY: differences need a look');
+  console.log(pass
+    ? 'PARITY: every difference from the game was explained, every quest-gated page was judged alike, and every snapshot.js difference was predicted'
+    : 'PARITY: differences need a look');
   process.exit(pass ? 0 : 1);
 };
 

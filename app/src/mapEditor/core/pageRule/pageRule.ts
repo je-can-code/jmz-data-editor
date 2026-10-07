@@ -109,10 +109,21 @@ const readEvent = (event: RmmzMapEvent, rule: PageRule): EventReading =>
 };
 
 /**
+ * Reports whether one page holds at a moment, as Game_Event#meetsConditions answers with every plugin's alias of it: its
+ * own conditions hold on a fresh save, and every plugin condition holds then. A page whose own conditions fail is asked
+ * nothing more, as the plugins' aliases return at once when the engine's own answer is no.
+ * @param {PageReading} page The page, as the rule read it.
+ * @param {PageMoment} moment The moment.
+ * @returns {boolean} True when it holds.
+ */
+const pageHolds = (page: PageReading, moment: PageMoment): boolean =>
+{
+  return page.meets && page.tests.every(test => test.holds(moment));
+};
+
+/**
  * Finds the page an event shows at a moment, as Game_Event#findProperPageIndex picks it: from the last page down, the
- * first whose own conditions hold on a fresh save and whose every plugin condition holds then. A page whose own
- * conditions fail is asked nothing more, as the plugins' aliases of Game_Event#meetsConditions return at once when the
- * engine's own answer is no.
+ * first that holds then ({@link pageHolds}).
  * @param {EventReading} reading The event, as the rule read it.
  * @param {PageMoment} moment The moment.
  * @returns {number} The page's index, or -1 when no page holds, which the game shows as nothing at all.
@@ -121,8 +132,7 @@ const activePageOf = (reading: EventReading, moment: PageMoment): number =>
 {
   for (let index = reading.pages.length - 1; index >= 0; index--)
   {
-    const page = reading.pages[index];
-    if (page.meets && page.tests.every(test => test.holds(moment)))
+    if (pageHolds(reading.pages[index], moment))
     {
       return index;
     }
@@ -148,5 +158,5 @@ const pageWordsOf = (page: RmmzEventPage, conditions: readonly PageCondition[]):
   return [ ...conditionWords(page.conditions), ...added ];
 };
 
-export { activePageOf, pageWordsOf, readEvent };
+export { activePageOf, pageHolds, pageWordsOf, readEvent };
 export type { EventReading, PageCondition, PageMoment, PageReading, PageRule, PageTest };

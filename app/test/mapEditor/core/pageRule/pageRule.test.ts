@@ -3,6 +3,7 @@ import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel
 import type { RmmzEventPage } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import {
   activePageOf,
+  pageHolds,
   pageWordsOf,
   readEvent,
   type PageCondition,
@@ -101,6 +102,29 @@ describe('pageRule', () =>
       // Assert.
       expect(follows)
         .toStrictEqual([ true, false, false ]);
+    });
+  });
+
+  describe('pageHolds', () =>
+  {
+    it('holds a page whose own conditions and every plugin condition hold, page by page, whichever the game shows', () =>
+    {
+      // Arrange: a page waiting for nothing; one open at noon; one open at noon but sealed; one open at noon that also
+      // waits for switch 4; one open only by night.
+      const reading = readEvent(event(1, [
+        commented([]),
+        commented([ '<open:600-800>' ]),
+        commented([ '<open:600-800>', '<sealed>' ]),
+        commented([ '<open:600-800>' ], { switch1Valid: true, switch1Id: 4 }),
+        commented([ '<open:1080-1440>' ]),
+      ]), RULE);
+
+      // Act.
+      const held = reading.pages.map(each => pageHolds(each, NOON));
+
+      // Assert.
+      expect(held)
+        .toStrictEqual([ true, true, false, false, false ]);
     });
   });
 
