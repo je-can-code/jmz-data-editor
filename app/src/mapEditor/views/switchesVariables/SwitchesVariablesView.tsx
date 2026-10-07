@@ -21,7 +21,15 @@ import type { RmmzNameList } from '../../core/model/rmmzTypes.ts';
 import { SWITCH_KIND, VARIABLE_KIND, type GamePreview, type PreviewKind } from '../../core/preview/GamePreview.ts';
 import { readWholeNumber } from '../../core/preview/previewInput.ts';
 import { previewWords } from '../../core/preview/previewWords.ts';
-import { maximumOf, nameRows, renameEntry, setMaximum, systemDocumentOf, type NameRow } from '../../core/system/systemNames.ts';
+import {
+  maximumOf,
+  nameRows,
+  renameEntry,
+  saveNames,
+  setMaximum,
+  systemDocumentOf,
+  type NameRow,
+} from '../../core/system/systemNames.ts';
 import { useMapEditorServices } from '../../services/MapEditorServicesContext.tsx';
 import { CommitTextField } from '../commandList/CommitTextField.tsx';
 import { useDocumentRevision, useHubChanges } from '../commandList/useCommandListState.ts';
@@ -301,13 +309,21 @@ const SwitchesVariablesWorkspace = () =>
   const dirty = hub.isDirty(SYSTEM_KEY);
 
   /**
-   * Writes the names to System.json, as the editor's every save does.
+   * Writes the names to System.json, as the editor's every save does, unless they wait for a choice about changes made
+   * elsewhere, which is said instead.
    */
   const save = () =>
   {
     setSaving(true);
     setProblem(null);
-    hub.save(SYSTEM_KEY)
+    saveNames(hub)
+      .then(outcome =>
+      {
+        if (outcome.ok === false)
+        {
+          setProblem(outcome.message);
+        }
+      })
       .catch((error: unknown) => setProblem(`The names were not saved: ${(error as Error).message}`))
       .finally(() => setSaving(false));
   };

@@ -11,6 +11,7 @@ import {
   maximumOf,
   nameRows,
   renameEntry,
+  saveNames,
   setMaximum,
 } from '../../../../src/mapEditor/core/system/systemNames.ts';
 import { locateGameProject } from '../../../support/gameProject.ts';
@@ -22,7 +23,9 @@ import { locateGameProject } from '../../../support/gameProject.ts';
  * makes it again, and nothing is recorded when the name was already that. Changing the maximum adds unnamed ones at the
  * end or takes the last ones away, as one step undo brings back, and stays within what MZ's own list allows; but it
  * never takes a name away with it, since a name saved away is gone for good while events still read its switch, so a
- * maximum below the last named one is refused, naming that one, and nothing changes.
+ * maximum below the last named one is refused, naming that one, and nothing changes. Saving writes only names that are
+ * unsaved, and holds back names waiting for the author to choose between them and changes made elsewhere, as every
+ * other save in the editor holds back a map.
  *
  * Only the name renamed may change in System.json: everything else must come back exactly as it was. That is held
  * against the game's real System.json, read and never written, through a save whose writing is caught: written as
@@ -313,6 +316,51 @@ describe('systemNames', () =>
       // Assert.
       expect([ same, most.ok && most.step?.label, namesIn(hub, 'switches').length ])
         .toStrictEqual([ { ok: true, step: null }, 'Change the switch maximum to 5000', 5001 ]);
+    });
+  });
+
+  describe('saveNames', () =>
+  {
+    it('writes unsaved names, and the names read as saved after', async () =>
+    {
+      // Arrange: switch 2 named.
+      const { hub, saved } = hubHolding(buildSystem());
+      renameEntry(hub, 'switches', 2, 'after the vampire');
+
+      // Act.
+      const outcome = await saveNames(hub);
+
+      // Assert.
+      expect([ outcome, (saved() as { switches: string[] } | null)?.switches[2], hub.isDirty(SYSTEM_KEY) ])
+        .toStrictEqual([ { ok: true, saved: true }, 'after the vampire', false ]);
+    });
+
+    it('writes nothing when no name is unsaved', async () =>
+    {
+      // Arrange: names just as the file holds them.
+      const { hub, saved } = hubHolding(buildSystem());
+
+      // Act.
+      const outcome = await saveNames(hub);
+
+      // Assert.
+      expect([ outcome, saved() ])
+        .toStrictEqual([ { ok: true, saved: false }, null ]);
+    });
+
+    it('holds back names waiting for a choice about changes made elsewhere, writing nothing and keeping them unsaved', async () =>
+    {
+      // Arrange: switch 2 named, while System.json changed on disk with another name for it.
+      const { hub, saved } = hubHolding(buildSystem());
+      renameEntry(hub, 'switches', 2, 'after the vampire');
+      hub.flagConflict(SYSTEM_KEY, { kind: 'disk', content: { ...buildSystem(), switches: [ '', 'partner-visible', 'castle', 'mayor wolf defeated.' ] } });
+
+      // Act.
+      const outcome = await saveNames(hub);
+
+      // Assert.
+      expect([ outcome, saved(), hub.isDirty(SYSTEM_KEY) ])
+        .toStrictEqual([ { ok: false, message: 'The names were not saved: they are waiting for a choice about changes made elsewhere.' }, null, true ]);
     });
   });
 

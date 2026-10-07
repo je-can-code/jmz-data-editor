@@ -33,6 +33,20 @@ type MaximumOutcome =
   | { readonly ok: false; readonly message: string };
 
 /**
+ * What saving the names came to: written, or nothing to write (saved is false), or held back, with the reason in words
+ * for the author.
+ */
+type NamesSaveOutcome =
+  | { readonly ok: true; readonly saved: boolean }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * What the author reads when the names wait for them to choose between this window's renames and changes made
+ * elsewhere: the same wait the workspace's Save all and an event window's save report for a map.
+ */
+const NAMES_CONFLICT_MESSAGE = 'The names were not saved: they are waiting for a choice about changes made elsewhere.';
+
+/**
  * What one switch or variable is called in a step's name, by its list.
  */
 const LIST_NOUNS: Readonly<Record<RmmzNameList, string>> = {
@@ -181,15 +195,42 @@ const setMaximum = (hub: DocumentHub, list: RmmzNameList, maximum: number): Maxi
   return { ok: true, step };
 };
 
+/**
+ * Saves the switch and variable names. Names with nothing unsaved are left alone. Names flagged in conflict (System.json
+ * changed on disk, or another window's copy went another way, while they held unsaved renames) are held back exactly as
+ * the workspace's Save all holds a map back: writing them would put this copy's names over the other one's before the
+ * author has chosen between them, and once written they would read as saved, so nothing would be left to warn them.
+ * @param {DocumentHub} hub The window's documents; it must hold the system document.
+ * @returns {Promise<NamesSaveOutcome>} Settles once the file is written, or at once when there is nothing to write or
+ * the save is held back; rejects when the write itself fails.
+ */
+const saveNames = async (hub: DocumentHub): Promise<NamesSaveOutcome> =>
+{
+  if (hub.isDirty(SYSTEM_KEY) === false)
+  {
+    return { ok: true, saved: false };
+  }
+
+  if (hub.isConflicted(SYSTEM_KEY))
+  {
+    return { ok: false, message: NAMES_CONFLICT_MESSAGE };
+  }
+
+  await hub.save(SYSTEM_KEY);
+  return { ok: true, saved: true };
+};
+
 export {
   clampMaximum,
   GREATEST_MAXIMUM,
   lastNamedId,
   LEAST_MAXIMUM,
   maximumOf,
+  NAMES_CONFLICT_MESSAGE,
   nameRows,
   renameEntry,
+  saveNames,
   setMaximum,
   systemDocumentOf,
 };
-export type { MaximumOutcome, NameRow };
+export type { MaximumOutcome, NameRow, NamesSaveOutcome };

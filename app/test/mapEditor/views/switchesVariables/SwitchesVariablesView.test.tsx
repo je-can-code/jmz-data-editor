@@ -225,6 +225,25 @@ describe('SwitchesVariablesView', () =>
       .toStrictEqual([ 'The names were not saved: disk full', true ]);
   });
 
+  it('holds back a save while the names wait for a choice about changes made elsewhere, saying so', async () =>
+  {
+    // Arrange: switch 1 renamed while System.json changed on disk.
+    const { hub, store } = renderView();
+    typeAndLeave('Name of switch 1', 'partner');
+    act(() => hub.flagConflict(SYSTEM_KEY, { kind: 'disk', content: buildSystem() }));
+
+    // Act.
+    await act(async () =>
+    {
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await Promise.resolve();
+    });
+
+    // Assert.
+    expect([ screen.getByRole('alert').textContent, vi.mocked(store.save).mock.calls.length, hub.isDirty(SYSTEM_KEY) ])
+      .toStrictEqual([ 'The names were not saved: they are waiting for a choice about changes made elsewhere.', 0, true ]);
+  });
+
   it('puts a problem away once it is dismissed', async () =>
   {
     // Arrange: a save that failed.

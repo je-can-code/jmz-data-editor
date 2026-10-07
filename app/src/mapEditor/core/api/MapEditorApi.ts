@@ -211,10 +211,11 @@ interface MapEditorApi
   loadSystem(): Promise<RmmzSystem>;
 
   /**
-   * Writes the game's settings, announced on the change stream as this window's, in whichever layout the file already
-   * has: on one line as MZ keeps it, or indented as the data editor leaves it, so a renamed switch changes that name in
-   * the file and nothing else.
-   * @param {RmmzSystem} system The whole of the settings.
+   * Writes the game's switch and variable names, announced on the change stream as this window's: they go into
+   * System.json as it stands on disk, every other setting staying as the file holds it, in whichever layout the file
+   * already has, on one line as MZ keeps it or indented as the data editor leaves it. So a renamed switch changes that
+   * name in the file and nothing else, however old this window's copy of the other settings is.
+   * @param {RmmzSystem} system The whole of the settings, of which the server takes the two lists of names.
    * @returns {Promise<void>} Settles once written.
    */
   saveSystem(system: RmmzSystem): Promise<void>;
