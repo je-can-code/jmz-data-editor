@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type { QuickControl, SliderControl } from '../../../src/mapEditor/core/eventKinds/quickFields.ts';
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
+import type { MapPropertiesSection } from '../../../src/mapEditor/core/modules/PluginModule.ts';
+import type { MapPropertyField } from '../../../src/mapEditor/core/properties/moduleProperties.ts';
 import { screenToWorld } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { LightingLayerDefinition } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { GAME_LOOK, type OverlayPainter } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
@@ -9,9 +12,11 @@ import { fitZoom } from '../../../src/mapEditor/render/cameraControls.ts';
 import {
   cameraOnPath,
   clockOnPath,
+  firstSlider,
   parityLightingLayers,
   parityLook,
   ringsOverlay,
+  sliderOnPath,
   timeFromQuery,
   unusedGroundKind,
   wantsSpeedHooks,
@@ -21,8 +26,10 @@ import { buildMapJson } from '../support/fixtures.ts';
 /*
  * The speed script drives the page through hooks that exist only when the page was opened for measuring, and its
  * camera paths decide what the budgets are measured on: a pan at zoom 1, a zoom sweep between 2x and the whole map,
- * the whole map held on screen, and the whole map held still while the window's clock sweeps the day, every hour of it
- * passing. If a path never reached the whole map, the budget for it would pass untested. A page can be opened at an
+ * the whole map held on screen, the whole map held still while the window's clock sweeps the day, every hour of it
+ * passing, and the whole map held still while the first slider a module adds to Map Properties is dragged up and down
+ * the upper reaches of its track, a step a frame, as an author drags a map's darkness. If a path never reached the whole
+ * map, the budget for it would pass untested. A page can be opened at an
  * hour of the day, written in the address as a 24-hour clock writes it, so a map is measured at night from its first
  * frame; anything no clock shows asks for nothing.
  *
@@ -110,6 +117,104 @@ describe('speedHooks', () =>
       // Assert.
       expect([ cameras[1], centre.x, centre.y, cameras[0].zoom ])
         .toStrictEqual([ cameras[0], 1800, 1800, whole ]);
+    });
+
+    it('holds the whole map still, centred, while a slider sweeps', () =>
+    {
+      // Arrange.
+      const whole = fitZoom(view, map, 48);
+
+      // Act.
+      const cameras = [ cameraOnPath('slider', 0, map, view), cameraOnPath('slider', 1.5, map, view) ];
+      const centre = screenToWorld(cameras[0], { x: view.width / 2, y: view.height / 2 });
+
+      // Assert.
+      expect([ cameras[1], centre.x, centre.y, cameras[0].zoom ])
+        .toStrictEqual([ cameras[0], 1800, 1800, whole ]);
+    });
+  });
+
+  describe('sliderOnPath', () =>
+  {
+    it('drags a slider from the top of its track down to 30 along it and back up, a step a frame, round and round', () =>
+    {
+      // Arrange: a darkness slider from 0 to 100 in whole steps, at the start, a frame in, the turn at 70 frames, the way
+      // back, and a whole sweep of 140 frames and one more on; each moment halfway through its frame.
+      const control: SliderControl = { kind: 'slider', min: 0, max: 100, places: 2, track: [ 0, 100 ], step: 1, unit: '%' };
+      const frames = [ 0, 1, 70, 71, 139, 141 ];
+
+      // Act.
+      const values = frames.map(frame => sliderOnPath((frame + 0.5) / 60, control));
+
+      // Assert.
+      expect(values)
+        .toStrictEqual([ 100, 99, 30, 31, 99, 99 ]);
+    });
+
+    it('moves a slider of coarser steps a whole step a frame, never off its steps', () =>
+    {
+      // Arrange: a reach in tiles from 1 to 21, a half tile a step, so its sweep spans 28 steps, down to 7.
+      const control: SliderControl = { kind: 'slider', min: 1, max: 21, places: 1, track: [ 1, 21 ], step: 0.5, unit: 'tiles' };
+
+      // Act.
+      const values = [ 0, 1, 28, 29 ].map(frame => sliderOnPath((frame + 0.5) / 60, control));
+
+      // Assert.
+      expect(values)
+        .toStrictEqual([ 21, 20.5, 7, 7.5 ]);
+    });
+  });
+
+  describe('firstSlider', () =>
+  {
+    /**
+     * A section offering the fields given, whatever the map.
+     * @param {string} id The section's id.
+     * @param {MapPropertyField[]} fields The fields.
+     * @returns {MapPropertiesSection} The section.
+     */
+    const sectionOf = (id: string, fields: MapPropertyField[]): MapPropertiesSection =>
+      ({ id, title: id, source: () => ({ note: null, fields }) });
+
+    /**
+     * A field showing a control.
+     * @param {string} key The setting.
+     * @param {QuickControl} control The control.
+     * @returns {MapPropertyField} The field.
+     */
+    const fieldOf = (key: string, control: QuickControl): MapPropertyField =>
+      ({ key, label: key, control, value: 0, step: key, write: () => ({}) });
+
+    const darkness: SliderControl = { kind: 'slider', min: 0, max: 100, places: 2, track: [ 0, 100 ], step: 1, unit: '%' };
+    const map = MapDocument.fromJson('map:1', buildMapJson());
+
+    it('finds the first slider of the first section offering one, past a section and a field that offer none', () =>
+    {
+      // Arrange: a section with a tick box alone; then one with a colour, the darkness slider and a second slider.
+      const sections = [
+        sectionOf('weather.map', [ fieldOf('weather.sky', { kind: 'check' }) ]),
+        sectionOf('lighting.map', [ fieldOf('lighting.color', { kind: 'color' }), fieldOf('lighting.darkness', darkness), fieldOf('lighting.other', darkness) ]),
+      ];
+
+      // Act.
+      const slider = firstSlider(sections, map);
+
+      // Assert.
+      expect([ slider?.key, slider?.control, slider?.source === sections[1].source ])
+        .toStrictEqual([ 'lighting.darkness', darkness, true ]);
+    });
+
+    it('finds nothing when no section offers a slider', () =>
+    {
+      // Arrange: a section with a tick box alone.
+      const sections = [ sectionOf('weather.map', [ fieldOf('weather.sky', { kind: 'check' }) ]) ];
+
+      // Act.
+      const slider = firstSlider(sections, map);
+
+      // Assert.
+      expect(slider)
+        .toBeNull();
     });
   });
 

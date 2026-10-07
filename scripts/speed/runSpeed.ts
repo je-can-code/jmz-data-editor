@@ -14,10 +14,11 @@
  * the window's clock, from its first frame, so a map whose lights show only at night is measured with them on show;
  * left out, the clock stands where the game starts. Per map it measures, with the game look and every overlay on:
  *   - the cold open: navigation start to the first frame that showed the map complete, sprites and parallax loaded;
- *   - four paths driven from the page's own frame clock: a pan at zoom 1, a zoom sweep from 2x out to the whole map
- *     and back, the whole map held on screen and drifting, and the whole map held still while the window's clock
- *     sweeps the whole day every eight seconds, so the sky is drawn again at every hour it passes, the clock put back
- *     once it stops;
+ *   - five paths driven from the page's own frame clock: a pan at zoom 1, a zoom sweep from 2x out to the whole map
+ *     and back, the whole map held on screen and drifting, the whole map held still while the window's clock sweeps
+ *     the whole day every eight seconds, so the sky is drawn again at every hour it passes, the clock put back once it
+ *     stops, and the whole map held still while the first slider a plugin module adds to Map Properties (a map's
+ *     darkness, with J-Lighting on) is dragged up and down its track a step a frame, the drag let go once it stops;
  *   - a brush stroke: real pointer moves with the left button held, one cell apart, each painting a fresh 3x3 patch
  *     of ground with the map view's own pen, through the layering engine and the autotile refresh, matched to the
  *     frames that drew them; and the same again with a stand-in for a plugin module's overlay (two rings around every
@@ -179,9 +180,9 @@ type PageHooks = {
 };
 
 /**
- * The paths, in the order they are recorded: the camera's three, then the clock's sweep.
+ * The paths, in the order they are recorded: the camera's three, then the clock's sweep and a slider's.
  */
-const PATHS = [ 'pan', 'zoom', 'zoomedout', 'clock' ];
+const PATHS = [ 'pan', 'zoom', 'zoomedout', 'clock', 'slider' ];
 
 /**
  * A time of day as --time takes it: hours and minutes on a 24-hour clock.

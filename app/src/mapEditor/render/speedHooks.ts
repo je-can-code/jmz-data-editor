@@ -1,9 +1,12 @@
+import type { SliderControl } from '../core/eventKinds/quickFields.ts';
 import { deleteEvents } from '../core/events/eventEdits.ts';
 import type { EventSelection } from '../core/events/EventSelection.ts';
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../core/history/historyKeys.ts';
 import { mapDocumentKey } from '../core/model/documentKeys.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
+import type { MapPropertiesSection } from '../core/modules/PluginModule.ts';
+import { ModulePropertyDrag, type MapPropertiesSource } from '../core/properties/moduleProperties.ts';
 import type { MapEventTools } from '../events/MapEventTools.ts';
 import { TILE_SIZE, type Camera } from '../core/renderer/camera.ts';
 import type { LightingLayerDefinition } from '../core/renderer/lightingLayer.ts';
@@ -30,16 +33,40 @@ import type { PaintController } from './tools/PaintController.ts';
 /**
  * The camera paths the speed script records, each driven from the renderer's own frame clock so every run draws the
  * same frames: a pan at zoom 1, a zoom sweep from 2x out to the whole map and back, the whole map held on screen and
- * drifting, so every frame is a real redraw, and the whole map held still while the window's clock sweeps the day
- * ({@link clockOnPath}), so the sky is drawn again at every hour it passes.
+ * drifting, so every frame is a real redraw, the whole map held still while the window's clock sweeps the day
+ * ({@link clockOnPath}), so the sky is drawn again at every hour it passes, and the whole map held still while a slider
+ * in Map Properties is dragged up and down its track ({@link sliderOnPath}), as an author drags a map's darkness.
  */
-type CameraPath = 'pan' | 'zoom' | 'zoomedout' | 'clock';
+type CameraPath = 'pan' | 'zoom' | 'zoomedout' | 'clock' | 'slider';
 
 /**
  * How many minutes of the day a clock sweep passes in each second: a whole day every eight seconds, three minutes a
  * frame, so the hour turns every twentieth frame and every phase of the day goes by.
  */
 const CLOCK_SWEEP_MINUTES_PER_SECOND = 180;
+
+/**
+ * How many of a slider's steps a slider sweep passes in each second: one a frame, as a hand dragging the thumb across
+ * the track moves it.
+ */
+const SLIDER_SWEEP_STEPS_PER_SECOND = 60;
+
+/**
+ * How far down its track a slider sweep reaches, as a share of the track from its low end: it stays in the upper
+ * reaches, so a map's darkness sweeps between deep and pitch black and never lets the map go undark, which would take
+ * its mask away and build it afresh, a different cost from the one a drag through the darkness has.
+ */
+const SLIDER_SWEEP_LOW = 0.3;
+
+/**
+ * The first slider a module adds to Map Properties for a map, which a slider sweep drags: the section offering it, the
+ * setting's key and its control.
+ */
+type SweptSlider = {
+  readonly source: MapPropertiesSource;
+  readonly key: string;
+  readonly control: SliderControl;
+};
 
 /**
  * What the speed script's stroke paints with: a square brush of one tile, painted by the real pen through automatic
@@ -150,8 +177,8 @@ type OpenTimings = Record<string, number>;
 
 /**
  * What the hooks need from the map view: its renderer, the window's hub, its painting tools and their settings, its
- * event tools and selection, the map on show, a way to open another, the page's open timings, and what the plugin
- * modules draw into the lighting layer.
+ * event tools and selection, the map on show, a way to open another, the page's open timings, what the plugin modules
+ * draw into the lighting layer, and the sections they add to Map Properties.
  */
 type SpeedHooksContext = {
   readonly renderer: PixiMapRenderer;
@@ -164,6 +191,7 @@ type SpeedHooksContext = {
   readonly openMap: (mapId: number) => Promise<void>;
   readonly timings: OpenTimings;
   readonly lightingLayers: () => readonly LightingLayerDefinition[];
+  readonly mapProperties: () => readonly MapPropertiesSection[];
 
   /**
    * The window's clock, which the page is set to, and which a clock sweep moves.
@@ -242,8 +270,8 @@ const cameraOnPath = (
     return centerCamera(width / 2 + swingX * 0.2, height / 2 + swingY * 0.2, zoom, view);
   }
 
-  // the clock's sweep holds the whole map still, so the sky is all that moves.
-  if (path === 'clock')
+  // the clock's sweep and a slider's hold the whole map still, so the sky, or the setting, is all that moves.
+  if (path === 'clock' || path === 'slider')
   {
     return centerCamera(width / 2, height / 2, whole, view);
   }
@@ -259,6 +287,44 @@ const cameraOnPath = (
 const clockOnPath = (seconds: number): number =>
 {
   return onTheClock(Math.floor(seconds * CLOCK_SWEEP_MINUTES_PER_SECOND));
+};
+
+/**
+ * Picks the value a slider sweep shows a slider at a moment: from the top of its track down to {@link SLIDER_SWEEP_LOW}
+ * of the way along it and back up, a step a frame, round and round.
+ * @param {number} seconds Seconds since the sweep started.
+ * @param {SliderControl} control The slider.
+ * @returns {number} The value.
+ */
+const sliderOnPath = (seconds: number, control: SliderControl): number =>
+{
+  const [ low, high ] = control.track;
+  const span = Math.round(((high - low) * (1 - SLIDER_SWEEP_LOW)) / control.step);
+
+  // a step a frame down the span and back up it, so the turn at either end is a single frame.
+  const stepsIn = Math.floor(seconds * SLIDER_SWEEP_STEPS_PER_SECOND) % (span * 2);
+  const stepsDown = stepsIn <= span ? stepsIn : (span * 2) - stepsIn;
+  return high - (stepsDown * control.step);
+};
+
+/**
+ * Finds the first slider the plugin modules add to Map Properties for a map, in the order they add their sections.
+ * @param {readonly MapPropertiesSection[]} sections The sections the modules add.
+ * @param {MapDocument} map The map.
+ * @returns {SweptSlider | null} The slider, or null when no section offers one for the map.
+ */
+const firstSlider = (sections: readonly MapPropertiesSection[], map: MapDocument): SweptSlider | null =>
+{
+  for (const section of sections)
+  {
+    const field = section.source(map).fields.find(each => each.control.kind === 'slider');
+    if (field !== undefined)
+    {
+      return { source: section.source, key: field.key, control: field.control as SliderControl };
+    }
+  }
+
+  return null;
 };
 
 /**
@@ -302,6 +368,9 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
   let overlayState: OverlayState = NO_OVERLAY_STATE;
   let hoverFollows = false;
 
+  // the slider a slider sweep drags, and the drag showing each value it passes, let go once the sweep stops.
+  let swept: { slider: SweptSlider; drag: ModulePropertyDrag } | null = null;
+
   // a page asked for an hour shows it from its first frame, as an author's chosen hour holds, whatever the game's start.
   const asked = timeFromQuery(target.location.search);
   if (asked !== null)
@@ -311,7 +380,7 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
 
   // camera paths move the camera at the start of each frame, so the frame that draws the move is the one timed; with
   // every overlay on, the hover follows the view's centre, as it follows a pointer held still while the map moves. A
-  // clock sweep moves the window's clock there too.
+  // clock sweep moves the window's clock there too, and a slider sweep the slider.
   stops.push(renderer.onBeforeFrame(time =>
   {
     const map = context.map();
@@ -324,6 +393,11 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     if (path === 'clock')
     {
       clock.set(clockOnPath(seconds));
+    }
+
+    if (swept !== null)
+    {
+      swept.drag.move(sliderOnPath(seconds, swept.slider.control));
     }
 
     const camera = cameraOnPath(path, seconds, map, renderer.viewSize);
@@ -384,12 +458,25 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       return { x: (x * TILE_SIZE + TILE_SIZE / 2 - cameraX) * zoom, y: (y * TILE_SIZE + TILE_SIZE / 2 - cameraY) * zoom };
     },
     // a clock sweep puts the clock back where it found it once it stops, so what is measured after it is measured at
-    // the hour the run asked for.
+    // the hour the run asked for; a slider sweep lets its drag go, so the map is left as it found it, with nothing in
+    // its history. A slider sweep on a map no module offers a slider for only holds the map still.
     startPath: (kind: CameraPath) =>
     {
       path = kind;
       pathStart = performance.now();
       timeBeforeSweep = clock.time();
+      swept = null;
+      const map = context.map();
+      if (kind !== 'slider' || map === null)
+      {
+        return;
+      }
+
+      const slider = firstSlider(context.mapProperties(), map);
+      if (slider !== null)
+      {
+        swept = { slider, drag: new ModulePropertyDrag(hub, map.mapId, slider.source, slider.key) };
+      }
     },
     stopPath: () =>
     {
@@ -398,6 +485,8 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
         clock.set(timeBeforeSweep);
       }
 
+      swept?.drag.cancel();
+      swept = null;
       path = null;
     },
     time: () => clock.time(),
@@ -542,6 +631,8 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
   (target as unknown as Record<string, unknown>)[HOOKS_GLOBAL] = hooks;
   return () =>
   {
+    // a slider sweep still running lets its drag go, so the map is not left holding the value it last showed.
+    swept?.drag.cancel();
     hooks.disablePaint();
     stops.forEach(stop => stop());
     delete (target as unknown as Record<string, unknown>)[HOOKS_GLOBAL];
@@ -562,13 +653,17 @@ export {
   cameraOnPath,
   CLOCK_SWEEP_MINUTES_PER_SECOND,
   clockOnPath,
+  firstSlider,
   HOOKS_GLOBAL,
   installSpeedHooks,
   parityLightingLayers,
   parityLook,
   ringsOverlay,
+  SLIDER_SWEEP_LOW,
+  SLIDER_SWEEP_STEPS_PER_SECOND,
+  sliderOnPath,
   timeFromQuery,
   unusedGroundKind,
   wantsSpeedHooks,
 };
-export type { CameraPath, SpeedHooksContext, StrokeSettings };
+export type { CameraPath, SpeedHooksContext, StrokeSettings, SweptSlider };
