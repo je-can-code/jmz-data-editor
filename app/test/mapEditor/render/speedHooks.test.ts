@@ -27,9 +27,9 @@ import { buildMapJson } from '../support/fixtures.ts';
  * The speed script drives the page through hooks that exist only when the page was opened for measuring, and its
  * camera paths decide what the budgets are measured on: a pan at zoom 1, a zoom sweep between 2x and the whole map,
  * the whole map held on screen, the whole map held still while the window's clock sweeps the day, every hour of it
- * passing, and the whole map held still while the first slider a module adds to Map Properties is dragged up and down
- * the upper reaches of its track, a step a frame, as an author drags a map's darkness. If a path never reached the whole
- * map, the budget for it would pass untested. A page can be opened at an
+ * passing, and the map held still at the game's scale while the first slider a module adds to Map Properties is dragged
+ * up and down the upper reaches of its track, a step a frame, as an author drags a map's darkness. If a path never
+ * reached the whole map, the budget for it would pass untested. A page can be opened at an
  * hour of the day, written in the address as a 24-hour clock writes it, so a map is measured at night from its first
  * frame; anything no clock shows asks for nothing.
  *
@@ -119,18 +119,18 @@ describe('speedHooks', () =>
         .toStrictEqual([ cameras[0], 1800, 1800, whole ]);
     });
 
-    it('holds the whole map still, centred, while a slider sweeps', () =>
+    it('holds the map still at the game\'s scale, about its middle, while a slider sweeps', () =>
     {
-      // Arrange.
-      const whole = fitZoom(view, map, 48);
+      // Arrange: the moment the sweep starts, and a second and a half on.
+      const moments = [ 0, 1.5 ];
 
       // Act.
-      const cameras = [ cameraOnPath('slider', 0, map, view), cameraOnPath('slider', 1.5, map, view) ];
+      const cameras = moments.map(seconds => cameraOnPath('slider', seconds, map, view));
       const centre = screenToWorld(cameras[0], { x: view.width / 2, y: view.height / 2 });
 
       // Assert.
       expect([ cameras[1], centre.x, centre.y, cameras[0].zoom ])
-        .toStrictEqual([ cameras[0], 1800, 1800, whole ]);
+        .toStrictEqual([ cameras[0], 1800, 1800, 1 ]);
     });
   });
 

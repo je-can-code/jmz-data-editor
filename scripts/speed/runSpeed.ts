@@ -17,8 +17,9 @@
  *   - five paths driven from the page's own frame clock: a pan at zoom 1, a zoom sweep from 2x out to the whole map
  *     and back, the whole map held on screen and drifting, the whole map held still while the window's clock sweeps
  *     the whole day every eight seconds, so the sky is drawn again at every hour it passes, the clock put back once it
- *     stops, and the whole map held still while the first slider a plugin module adds to Map Properties (a map's
- *     darkness, with J-Lighting on) is dragged up and down its track a step a frame, the drag let go once it stops;
+ *     stops, and the map held still at the game's scale while the first slider a plugin module adds to Map Properties
+ *     (a map's darkness, with J-Lighting on) is dragged up and down its track a step a frame, the drag let go once it
+ *     stops;
  *   - a brush stroke: real pointer moves with the left button held, one cell apart, each painting a fresh 3x3 patch
  *     of ground with the map view's own pen, through the layering engine and the autotile refresh, matched to the
  *     frames that drew them; and the same again with a stand-in for a plugin module's overlay (two rings around every

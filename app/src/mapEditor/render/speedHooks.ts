@@ -34,8 +34,9 @@ import type { PaintController } from './tools/PaintController.ts';
  * The camera paths the speed script records, each driven from the renderer's own frame clock so every run draws the
  * same frames: a pan at zoom 1, a zoom sweep from 2x out to the whole map and back, the whole map held on screen and
  * drifting, so every frame is a real redraw, the whole map held still while the window's clock sweeps the day
- * ({@link clockOnPath}), so the sky is drawn again at every hour it passes, and the whole map held still while a slider
- * in Map Properties is dragged up and down its track ({@link sliderOnPath}), as an author drags a map's darkness.
+ * ({@link clockOnPath}), so the sky is drawn again at every hour it passes, and the map held still at the game's scale
+ * while a slider in Map Properties is dragged up and down its track ({@link sliderOnPath}), as an author drags a map's
+ * darkness.
  */
 type CameraPath = 'pan' | 'zoom' | 'zoomedout' | 'clock' | 'slider';
 
@@ -270,10 +271,16 @@ const cameraOnPath = (
     return centerCamera(width / 2 + swingX * 0.2, height / 2 + swingY * 0.2, zoom, view);
   }
 
-  // the clock's sweep and a slider's hold the whole map still, so the sky, or the setting, is all that moves.
-  if (path === 'clock' || path === 'slider')
+  // the clock's sweep holds the whole map still, so the sky is all that moves.
+  if (path === 'clock')
   {
     return centerCamera(width / 2, height / 2, whole, view);
+  }
+
+  // a slider's holds the map still at the game's scale, about its middle, as an author working on a map looks at it.
+  if (path === 'slider')
+  {
+    return centerCamera(width / 2, height / 2, 1, view);
   }
 
   return centerCamera(width / 2 + Math.sin(seconds * 2) * 96, height / 2 + Math.cos(seconds * 2) * 96, whole, view);
