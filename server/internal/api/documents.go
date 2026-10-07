@@ -69,6 +69,18 @@ func SaveCommonEvents(announcer WriteAnnouncer) http.HandlerFunc {
 	}
 }
 
+// SaveSystem serves PUT /api/system: the body is the whole of System.json. It is the map editor's
+// save, where the switch and variable names are renamed, and it is held to the same rules as its
+// maps: strict, written atomically in MZ's own layout (the one line JSON.stringify writes, in the key
+// order of the file it replaces), and announced on the change stream with the saving window's id. So
+// a rename changes that name in the file and nothing else. The data editor keeps its POST route to
+// the same file.
+func SaveSystem(announcer WriteAnnouncer) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+		saveDocument[*db.RpgSystem](responseWriter, httpRequest, announcer, "data/System.json", mzjson.CompactLayout, wholeObject[*db.RpgSystem])
+	}
+}
+
 // SaveMap serves PUT /api/maps/{mapId}: the body is a complete map, written to data/Map###.json and
 // creating the file when the map is new. Sent with If-None-Match: *, it only ever creates: a map whose file exists
 // is refused with a 412 and nothing is written, which is how the editor brings a new map into being without ever

@@ -77,6 +77,15 @@ func MapLayout(root *Value) ([]byte, error) {
 	return append(out, "\n}"...), nil
 }
 
+// CompactLayout arranges a document all on one line, exactly as JSON.stringify(value) writes it,
+// with no newline after it: the way MZ writes System.json, a single object holding the game's
+// settings, its switch and variable names among them.
+//
+//	{"advanced":{...},"airship":{...},...,"switches":["","Door open"],...,"windowTone":[0,0,0,0]}
+func CompactLayout(root *Value) ([]byte, error) {
+	return Compact(root), nil
+}
+
 // appendLines appends an array with each element on its own line, as MZ writes its tables and a
 // map's events.
 func appendLines(out []byte, items []*Value) []byte {

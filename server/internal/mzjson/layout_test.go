@@ -3,8 +3,8 @@ package mzjson
 import "testing"
 
 // Each layout owes its callers one file shape exactly: MZ's table shape for MapInfos.json and
-// Tilesets.json, MZ's map shape for Map###.json, and JSON.stringify's two-space indentation for the
-// editor's own documents. The shapes are fixed by what is already on disk, so every expected value
+// Tilesets.json, MZ's map shape for Map###.json, MZ's single line for System.json, and
+// JSON.stringify's two-space indentation for the editor's own documents. The shapes are fixed by what is already on disk, so every expected value
 // here is a literal copy of that shape rather than something derived from the code under test.
 
 // TestTableLayoutPutsEachRowOnItsOwnLine covers the database-table shape.
@@ -128,6 +128,42 @@ func TestMapLayoutRefusesMapsTheEngineCannotEnter(t *testing.T) {
 			// Assert.
 			if err == nil {
 				t.Errorf("expected %s to be refused", document)
+			}
+		})
+	}
+}
+
+// TestCompactLayoutWritesTheWholeDocumentOnOneLine covers System.json's shape: JSON.stringify's own
+// one line, with nothing after it, and a `<` and an `&` written as MZ writes them rather than as Go
+// escapes them.
+func TestCompactLayoutWritesTheWholeDocumentOnOneLine(t *testing.T) {
+	cases := []struct {
+		name     string
+		document string
+		expected string
+	}{
+		{
+			name:     "an object over several lines",
+			document: "{\n  \"gameTitle\": \"<Chef> & Co\",\n  \"switches\": [\"\", \"Door open\"],\n  \"windowTone\": [0, 0, 0, 0]\n}\n",
+			expected: `{"gameTitle":"<Chef> & Co","switches":["","Door open"],"windowTone":[0,0,0,0]}`,
+		},
+		{name: "an empty object", document: `{}`, expected: `{}`},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange.
+			value := mustParse(t, testCase.document)
+
+			// Act.
+			actual, err := CompactLayout(value)
+
+			// Assert.
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(actual) != testCase.expected {
+				t.Errorf("wrote %q, expected %q", actual, testCase.expected)
 			}
 		})
 	}

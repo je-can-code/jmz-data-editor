@@ -46,6 +46,13 @@ func TestSaveInMzLayoutReproducesEveryFile(t *testing.T) {
 		assertSaveReproduces[[]*db.RpgCommonEvent](t, filepath.Join(folder, "CommonEvents.json"), mzjson.TableLayout, tableOf[*db.RpgCommonEvent])
 	})
 
+	t.Run("System.json", func(t *testing.T) {
+		// Arrange, Act and Assert all live in the helper; this names the file and its model.
+		if assertSaveReproduces[*db.RpgSystem](t, filepath.Join(folder, "System.json"), mzjson.CompactLayout, objectOf[*db.RpgSystem]) {
+			t.Error("System.json is MZ's own one line, so a save must reproduce it byte for byte")
+		}
+	})
+
 	t.Run("every map", func(t *testing.T) {
 		// Arrange- every map file in the folder, because they differ: `meta` sits on two maps, three
 		// orders of event image keys run through one file, and a few maps were written by tools.
@@ -76,6 +83,82 @@ func TestSaveInMzLayoutReproducesEveryFile(t *testing.T) {
 			t.Logf("%d of %d maps are not in MZ's layout and would be rewritten in it: %v", len(rewritten), checked, rewritten)
 		}
 	})
+}
+
+// TestSaveInMzLayoutRenamesOneSwitchAndNothingElse is the promise the switch and variable window
+// rests on, held against the game's real System.json, read and never written: renaming a switch
+// changes that one name in the file, and every other byte of it stays as MZ wrote it.
+//
+// The switch renamed is the first whose name the file holds exactly once, so the file with that name
+// replaced in place is exactly the file a rename must write, whatever else the game has renamed
+// since. The new name carries a `<`, an `&`, quotes and a character beyond ASCII, which Go escapes and
+// MZ does not; the saved line must spell them as MZ does.
+func TestSaveInMzLayoutRenamesOneSwitchAndNothingElse(t *testing.T) {
+	// Arrange- the file, loaded strictly the way GET loads it, and copied where a save may write.
+	path := filepath.Join(gametest.DataDir(t), "System.json")
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system, err := Load[*db.RpgSystem](path)
+	if err != nil {
+		t.Fatalf("System.json did not load: %v", err)
+	}
+	target := filepath.Join(t.TempDir(), "System.json")
+	if err := os.WriteFile(target, original, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// the first named switch whose name, quoted, appears nowhere else in the file.
+	switchId := 0
+	for id, name := range system.Switches {
+		if name != "" && bytes.Count(original, quoted(t, name)) == 1 {
+			switchId = id
+			break
+		}
+	}
+	if switchId == 0 {
+		t.Fatal("System.json names no switch a rename could be told apart by")
+	}
+	before := system.Switches[switchId]
+	system.Switches[switchId] = "Vampire's <gone> & \"dusted\" — ✓"
+
+	// Act- the client's body, keys sorted as a client that kept no order would send them.
+	body := sortedKeys(t, system)
+	var decoded *db.RpgSystem
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		t.Fatalf("the body did not decode: %v", err)
+	}
+	if err := SaveInMzLayout(decoded, target, mzjson.CompactLayout, nil); err != nil {
+		t.Fatalf("the rename did not save: %v", err)
+	}
+	written, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert- the file with that one name replaced, spelled as JSON.stringify spells it.
+	expected := bytes.Replace(original, quoted(t, before), []byte(`"Vampire's <gone> & \"dusted\" — ✓"`), 1)
+	if bytes.Equal(written, expected) == false {
+		offset := firstDifference(written, expected)
+		t.Errorf("renaming switch %d changed more than its name, at byte %d:\n  expected: %s\n  saved:    %s",
+			switchId, offset, excerpt(expected, offset), excerpt(written, offset))
+	}
+}
+
+// quoted spells a name as JSON.stringify writes a string: in quotes, with only quotes, backslashes and
+// control characters escaped, as mzjson writes it.
+func quoted(t *testing.T, name string) []byte {
+	t.Helper()
+
+	value, err := mzjson.Parse(sortedKeys(t, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return mzjson.Compact(value)
 }
 
 // assertSaveReproduces saves one real file through the same steps a PUT takes and checks the result,
