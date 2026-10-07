@@ -215,12 +215,13 @@ describe('questModule', () =>
         '<pageQuestCondition:[herbalist_delivery, 2, completed]>',
         '<pageQuestCondition:[herbalist_delivery, -1, completed]>',
       ].map(line => condition.read(commented([ line ])) as PageTest);
-      const previews = [
+      const settings: JsonValue[] = [
         { objectives: { 1: 'active' } },
         { objectives: { 2: 'active' } },
         { objectives: { 2: 'completed' } },
         { state: 'completed' },
-      ].map(value => GamePreview.FRESH.with('quest.states', 'herbalist_delivery', value));
+      ];
+      const previews = settings.map(value => GamePreview.FRESH.with('quest.states', 'herbalist_delivery', value));
 
       // Act.
       const held = tests.map(test => [ ...previews.map(preview => test.holds({ timeOfDay: 840, preview })), test.holds({ timeOfDay: 840 }) ]);

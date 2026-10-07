@@ -12,6 +12,7 @@ import { registerBuiltInCommands } from '../../src/mapEditor/core/commands/built
 import { PluginHeaderStore } from '../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { DocumentHub } from '../../src/mapEditor/core/history/DocumentHub.ts';
 import { LocationPicks } from '../../src/mapEditor/core/locations/LocationPicks.ts';
+import { PluginModuleRegistry } from '../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import { WindowPreview } from '../../src/mapEditor/core/preview/WindowPreview.ts';
 import { MapEditorApp } from '../../src/mapEditor/MapEditorApp.tsx';
 import type { MapEditorServices } from '../../src/mapEditor/services/MapEditorServices.ts';
@@ -141,6 +142,7 @@ describe('MapEditorApp', () =>
       view: { kind: 'switches-variables' },
       hub,
       preview: new WindowPreview(),
+      modules: new PluginModuleRegistry(new CommandCatalog()),
       api: null,
       locationPicks: new LocationPicks(),
       openDocument: vi.fn(),

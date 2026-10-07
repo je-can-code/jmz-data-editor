@@ -4,7 +4,10 @@ import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandC
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzEventPage, RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
-import { activePageOf, readEvent, type PageCondition, type PageRule } from '../../../../src/mapEditor/core/pageRule/pageRule.ts';
+import { activePageOf, pageHolds, readEvent, type PageCondition, type PageRule } from '../../../../src/mapEditor/core/pageRule/pageRule.ts';
+import { GamePreview } from '../../../../src/mapEditor/core/preview/GamePreview.ts';
+import { objectiveOf, questOf, waitsOnObjective } from '../../../../src/mapEditor/modules/quest/questConditions.ts';
+import { newGameQuestLog, type QuestLog } from '../../../../src/mapEditor/modules/quest/questLog.ts';
 import { questModule } from '../../../../src/mapEditor/modules/quest/questModule.ts';
 import { readQuestTags } from '../../../../src/mapEditor/modules/quest/questTags.ts';
 import { timeModule } from '../../../../src/mapEditor/modules/time/timeModule.ts';
@@ -22,6 +25,9 @@ import { listMapFiles, locateGameProject, readDataFile } from '../../../support/
  * The shape the game ships most answers as the game does. A quest-giver keeps a blank first page and offers its first
  * quest on its second, waiting for that quest to be inactive, which every quest is on a fresh save: so it shows the
  * offer, or its blank first page while the offer waits on a switch too, which no fresh save has on.
+ *
+ * And every page can be seen further along the story: each page waiting on quests and objectives the game has, whose
+ * own conditions a preview can meet, holds once the preview sets what it waits for, whichever shape its tags take.
  *
  * It runs against the project JMZ_PROJECT_ROOT names, or the sibling checkout, and skips when neither is there.
  */
@@ -96,6 +102,70 @@ const waitsOnSwitch = (page: RmmzEventPage): boolean =>
   return page.conditions.switch1Valid || page.conditions.switch2Valid;
 };
 
+/**
+ * Reports whether a preview can bring a page to show: its own conditions wait for nothing a preview never sets (a self
+ * switch, an item, an actor outside the starting party), and its tags name only quests and objectives the game has.
+ * @param {RmmzEventPage} page The page.
+ * @param {QuestLog} log The quests a new game tracks.
+ * @param {readonly number[]} party The starting party.
+ * @returns {boolean} True when a preview can.
+ */
+const canBeShown = (page: RmmzEventPage, log: QuestLog, party: readonly number[]): boolean =>
+{
+  const { conditions } = page;
+  const settled = conditions.selfSwitchValid === false
+    && conditions.itemValid === false
+    && (conditions.actorValid === false || party.includes(conditions.actorId));
+  return settled && readQuestTags(page).every(tag =>
+  {
+    const quest = questOf(tag, log);
+    return quest !== null && (waitsOnObjective(tag) === false || objectiveOf(tag, quest) !== null);
+  });
+};
+
+/**
+ * Builds the preview setting what a page's own conditions wait for: its switches on and its variable at the page's value.
+ * @param {RmmzEventPage} page The page.
+ * @returns {GamePreview} The preview.
+ */
+const ownConditionsMet = (page: RmmzEventPage): GamePreview =>
+{
+  const { conditions } = page;
+  const switches = [ conditions.switch1Valid ? [ conditions.switch1Id ] : [], conditions.switch2Valid ? [ conditions.switch2Id ] : [] ].flat();
+  const withSwitches = switches.reduce((preview, switchId) => preview.withSwitch(switchId, true), GamePreview.FRESH);
+  return conditions.variableValid
+    ? withSwitches.withVariable(conditions.variableId, conditions.variableValue)
+    : withSwitches;
+};
+
+/**
+ * Sets in a preview each quest or objective a page's tags name, in the state each tag waits for: an objective's state
+ * for a tag naming one, and the quest's own state for a tag naming none.
+ * @param {RmmzEventPage} page The page.
+ * @param {GamePreview} preview The preview to set them in.
+ * @returns {GamePreview} The preview with them set.
+ */
+const questsMet = (page: RmmzEventPage, preview: GamePreview): GamePreview =>
+{
+  // each quest's setting gathers every tag naming it.
+  const settings = new Map<string, { state?: string; objectives: Record<string, string> }>();
+  readQuestTags(page).forEach(tag =>
+  {
+    const setting = settings.get(tag.written) ?? { objectives: {} };
+    if (waitsOnObjective(tag))
+    {
+      setting.objectives[String(tag.objectiveId)] = tag.state;
+    }
+    else
+    {
+      setting.state = tag.state;
+    }
+
+    settings.set(tag.written, setting);
+  });
+  return [ ...settings ].reduce((each, [ key, setting ]) => each.with('quest.states', key, setting as JsonValue), preview);
+};
+
 const shipped: ShippedEvent[] = project === null ? [] : readQuestGatedEvents(project);
 
 const rule: PageRule | null = project === null ? null : gameRule(project);
@@ -139,5 +209,34 @@ describe.skipIf(project === null)('J-OMNI-Quests\' page condition over every shi
     // Assert: well over a dozen givers, every one of them alike.
     expect([ givers.length > 15, [ ...shown ].sort() ])
       .toStrictEqual([ true, [ 'false:1', 'true:0' ] ]);
+  });
+
+  it('shows every quest-gated page a preview can bring about once it sets what the page waits for', () =>
+  {
+    // Arrange: J-OMNI-Quests' condition alone, so no hour stands in the way; the quests a new game tracks; and every
+    // shipped page a preview can bring to show.
+    const pageRule = rule as PageRule;
+    const condition = pageRule.conditions.find(each => each.id === 'quest.pages') as PageCondition;
+    const questsOnly: PageRule = { save: pageRule.save, conditions: [ condition ] };
+    const log = newGameQuestLog(readDataFile(project as string, 'config.quest.json') as JsonValue);
+    const pages = shipped.flatMap(({ where, event }) => event.pages
+      .map((page, index) => ({ where: `${where} page ${index + 1}`, event, index, page }))
+      .filter(({ page }) => readQuestTags(page).length > 0 && canBeShown(page, log, pageRule.save.party)));
+
+    // Act: each page judged with its own conditions met and every quest as a new game has it, then with its quests set
+    // as its tags wait for them too.
+    const answers = pages.map(({ where, event, index, page }) =>
+    {
+      const reading = readEvent(event, questsOnly).pages[index];
+      const own = ownConditionsMet(page);
+      return { where, before: pageHolds(reading, { timeOfDay: 840, preview: own }), after: pageHolds(reading, { timeOfDay: 840, preview: questsMet(page, own) }) };
+    });
+
+    // Assert: over two hundred pages (207 on 2026-10-07), every one shown once its quests are set, and most of them (188)
+    // shown only then, the rest being offers a fresh save already shows.
+    const strays = answers.filter(answer => answer.after === false).map(answer => answer.where);
+    const broughtOn = answers.filter(answer => answer.before === false && answer.after).length;
+    expect([ pages.length > 200, strays, broughtOn > 150 ])
+      .toStrictEqual([ true, [], true ]);
   });
 });
