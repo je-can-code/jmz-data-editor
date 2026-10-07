@@ -3,24 +3,56 @@ import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel
 import type { RmmzEventPage, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { PageCondition, PageMoment, PageRule } from '../../../../src/mapEditor/core/pageRule/pageRule.ts';
 import { ShownPages } from '../../../../src/mapEditor/core/pageRule/ShownPages.ts';
+import { GamePreview } from '../../../../src/mapEditor/core/preview/GamePreview.ts';
 import { command, event, page } from '../../support/eventKindFixtures.ts';
 
 /*
- * The page each event on a map shows at the window's clock. With a rule, it is the game's own page on a fresh save at
- * the clock's time, and an event no page holds for draws its first page faded; without one, every event shows its first
- * page, as MZ's own editor shows it, and nothing is faded.
+ * The page each event on a map shows at the window's clock and preview. With a rule, it is the game's own page at the
+ * clock's time, judged against the switches and variables the preview sets and a fresh save everywhere else, and an
+ * event no page holds for draws its first page faded; without one, every event shows its first page, as MZ's own editor
+ * shows it, and nothing is faded.
  *
  * Every event is read once and remembered: until whoever draws it says it changed, or it is put back in its slot as
  * another object, or the rule changes. Moving the clock judges again only the events read so far whose pages ask
- * something the clock can change, answering those now showing another page; an event the clock cannot change is never
- * read again for it, and the clock standing still judges nothing at all.
+ * something the clock can change; changing the preview, only those whose pages read a switch, a variable or a piece of
+ * state it changed. Each answers the events now showing another page; an event neither can change is never read again
+ * for it, and a clock standing still or a preview changing nothing judges nothing at all.
  */
 describe('ShownPages', () =>
 {
   /**
-   * How often the stand-in hours have read a page, and judged one at a moment, so a test can tell what was done again.
+   * How often the stand-ins have read a page, and judged one at a moment, so a test can tell what was done again.
    */
   const reads = { count: 0, judged: 0 };
+
+  /**
+   * How often the stand-in flags have judged a page, by flag, so a test can tell which events the preview judged again.
+   */
+  const flagsJudged = new Map<string, number>();
+
+  /**
+   * A stand-in for a module's own kind of preview state: a comment {@code <flag:KEY>} keeps a page to the moments whose
+   * preview raises that flag under the kind {@code test.flags}.
+   */
+  const FLAGS: PageCondition = {
+    id: 'test.flags',
+    read: shown =>
+    {
+      const line = shown.list.map(each => String(each.parameters[0] ?? '')).find(text => text.startsWith('<flag:'));
+      if (line === undefined)
+      {
+        return null;
+      }
+
+      const key = line.slice('<flag:'.length, -1);
+      const holds = (moment: PageMoment) =>
+      {
+        flagsJudged.set(key, (flagsJudged.get(key) ?? 0) + 1);
+        return moment.preview?.value('test.flags', key) === true;
+      };
+      return { followsClock: false, reads: [ `test.flags:${key}` ], holds, words: [] };
+    },
+  };
 
   /**
    * A stand-in for a plugin's hours: a comment {@code <open:FROM-TO>} keeps a page to the minutes from FROM up to but
@@ -48,9 +80,9 @@ describe('ShownPages', () =>
   };
 
   /**
-   * A rule over Chef Adventure's starting party, with the stand-in hours.
+   * A rule over Chef Adventure's starting party, with the stand-in hours and flags.
    */
-  const RULE: PageRule = { save: { party: [ 1, 2 ] }, conditions: [ OPEN_HOURS ] };
+  const RULE: PageRule = { save: { party: [ 1, 2 ] }, conditions: [ OPEN_HOURS, FLAGS ] };
 
   /**
    * A page with comments, waiting for nothing of its own unless told otherwise.
@@ -213,6 +245,133 @@ describe('ShownPages', () =>
       // Assert.
       expect([ before, active ])
         .toStrictEqual([ null, 0 ]);
+    });
+  });
+
+  describe('with a preview', () =>
+  {
+    /**
+     * A villager, and the page waiting for a switch that takes his place later in the story.
+     * @param {number} id The event id.
+     * @param {number} switchId The switch his later page waits for.
+     * @returns {RmmzMapEvent} The villager.
+     */
+    const villager = (id: number, switchId: number): RmmzMapEvent => event(id, [ commented([]), commented([], { switch1Valid: true, switch1Id: switchId }) ]);
+
+    /**
+     * A named enemy who appears only once a variable reaches a value, and shows nothing before.
+     * @param {number} id The event id.
+     * @param {number} variableId The variable.
+     * @param {number} atLeast What it must reach.
+     * @returns {RmmzMapEvent} The enemy.
+     */
+    const spawn = (id: number, variableId: number, atLeast: number): RmmzMapEvent => event(id, [ commented([], { variableValid: true, variableId, variableValue: atLeast }) ]);
+
+    it('shows the page waiting for a switch once the preview turns it on, and leaves an event waiting on a neighbour of it', () =>
+    {
+      // Arrange: at noon on a fresh save, a villager waiting on switch 74 and one waiting on switch 47, read.
+      const pages = new ShownPages(RULE, 720);
+      const events = [ villager(1, 74), villager(2, 47) ];
+      events.forEach(each => pages.shownPage(each));
+
+      // Act: switch 74 turned on.
+      const turned = pages.setPreview(GamePreview.FRESH.withSwitch(74, true));
+
+      // Assert.
+      expect([ turned, events.map(each => pages.shownPage(each)) ])
+        .toStrictEqual([ [ 1 ], [ { index: 1, faded: false }, { index: 0, faded: false } ] ]);
+    });
+
+    it('shows an event waiting for a variable once the preview sets it at the value or above, and fades it below', () =>
+    {
+      // Arrange: a named enemy waiting for variable 74 to reach 99, read on a fresh save.
+      const pages = new ShownPages(RULE, 720);
+      const enemy = spawn(1, 74, 99);
+      const before = pages.shownPage(enemy);
+
+      // Act: variable 74 at 99, at 100, then at 98.
+      const turned = [ 99, 100, 98 ].map(value => [ pages.setPreview(GamePreview.FRESH.withVariable(74, value)), pages.shownPage(enemy) ]);
+
+      // Assert.
+      expect([ before, turned ])
+        .toStrictEqual([
+          { index: 0, faded: true },
+          [ [ [ 1 ], { index: 0, faded: false } ], [ [], { index: 0, faded: false } ], [ [ 1 ], { index: 0, faded: true } ] ],
+        ]);
+    });
+
+    it('judges again only the events whose pages read what the preview changed', () =>
+    {
+      // Arrange: one event waiting on flag A, another on flag B, read on a fresh save, their judgements counted from then.
+      const pages = new ShownPages(RULE, 720);
+      [ event(1, [ commented([ '<flag:A>' ]) ]), event(2, [ commented([ '<flag:B>' ]) ]) ].forEach(each => pages.shownPage(each));
+      flagsJudged.clear();
+
+      // Act: flag A raised.
+      const turned = pages.setPreview(GamePreview.FRESH.with('test.flags', 'A', true));
+
+      // Assert: the event on flag A judged once, and the one on flag B never.
+      expect([ turned, [ ...flagsJudged.entries() ] ])
+        .toStrictEqual([ [ 1 ], [ [ 'A', 1 ] ] ]);
+    });
+
+    it('judges nothing when the preview sets everything as it was', () =>
+    {
+      // Arrange: an event on flag A read with flag A raised, its judgements counted from then.
+      const raised = GamePreview.FRESH.with('test.flags', 'A', true);
+      const pages = new ShownPages(RULE, 720, raised);
+      pages.shownPage(event(1, [ commented([ '<flag:A>' ]) ]));
+      flagsJudged.clear();
+
+      // Act: the same flag raised again, in another preview.
+      const turned = pages.setPreview(GamePreview.FRESH.with('test.flags', 'A', true));
+
+      // Assert.
+      expect([ turned, flagsJudged.size, pages.preview === raised ])
+        .toStrictEqual([ [], 0, false ]);
+    });
+
+    it('answers no event for a change no page it read reads, while still judging events read later at the new preview', () =>
+    {
+      // Arrange: a villager waiting on switch 74, read on a fresh save.
+      const pages = new ShownPages(RULE, 720);
+      pages.shownPage(villager(1, 74));
+
+      // Act: switch 147 turned on, then a villager waiting on it read for the first time.
+      const turned = pages.setPreview(GamePreview.FRESH.withSwitch(147, true));
+      const later = pages.shownPage(villager(2, 147));
+
+      // Assert.
+      expect([ turned, later ])
+        .toStrictEqual([ [], { index: 1, faded: false } ]);
+    });
+
+    it('judges the clock\'s events at the preview as it stands', () =>
+    {
+      // Arrange: a lamp lit from 18:00 only while switch 9 is on, read at noon with switch 9 on.
+      const pages = new ShownPages(RULE, 720, GamePreview.FRESH.withSwitch(9, true));
+      const shownLamp = event(1, [ commented([]), commented([ '<open:1080-1440>' ], { switch1Valid: true, switch1Id: 9 }) ]);
+      pages.shownPage(shownLamp);
+
+      // Act: 22:00.
+      const turned = pages.setTime(1320);
+
+      // Assert.
+      expect([ turned, pages.activePage(shownLamp) ])
+        .toStrictEqual([ [ 1 ], 1 ]);
+    });
+
+    it('starts at a fresh save unless told otherwise', () =>
+    {
+      // Arrange: the table as a renderer makes it.
+      const pages = new ShownPages();
+
+      // Act.
+      const { preview } = pages;
+
+      // Assert.
+      expect(preview)
+        .toBe(GamePreview.FRESH);
     });
   });
 

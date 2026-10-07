@@ -4,6 +4,7 @@ import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { PassabilityRule } from '../core/modules/PluginModule.ts';
 import type { PageRule } from '../core/pageRule/pageRule.ts';
 import { ShownPages } from '../core/pageRule/ShownPages.ts';
+import type { GamePreview } from '../core/preview/GamePreview.ts';
 import { cellAtPoint, panBy, screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../core/renderer/camera.ts';
 import { FrameTimeRecorder, type FrameTimings } from '../core/renderer/FrameTimeRecorder.ts';
 import type { LightingLayerDefinition, ScreenTone } from '../core/renderer/lightingLayer.ts';
@@ -516,8 +517,38 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Picks each event's page by a page rule, the game's own on a fresh save with the plugin modules' conditions, at the
-   * clock's time: every event is judged afresh and drawn again in the next frame, and the lighting asked to draw.
+   * Sets the preview every event's pages are judged against: the switches, variables and the rest the author set to see
+   * the game further along than a fresh save. Nothing draws for it at once: the events whose pages read something the
+   * preview changed are judged again, and those now showing another page are drawn again in the next frame, with the
+   * lighting asked to draw, since their lights may have come or gone. A preview changing nothing any event reads draws
+   * nothing at all.
+   * @param {GamePreview} preview The preview.
+   */
+  setPreview(preview: GamePreview): void
+  {
+    const turned = this.#pages.setPreview(preview);
+    if (turned.length === 0)
+    {
+      return;
+    }
+
+    turned.forEach(id => this.#events.markChanged(id));
+    this.#eventsDirty = true;
+    this.#lighting.markStale();
+  }
+
+  /**
+   * The preview every event's pages are judged against, as last set.
+   * @returns {GamePreview} The preview.
+   */
+  get preview(): GamePreview
+  {
+    return this.#pages.preview;
+  }
+
+  /**
+   * Picks each event's page by a page rule, the game's own with the plugin modules' conditions, at the clock's time and
+   * the preview: every event is judged afresh and drawn again in the next frame, and the lighting asked to draw.
    * @param {PageRule | null} rule The rule, or null to show every event's first page, as MZ's own editor does.
    */
   setPageRule(rule: PageRule | null): void

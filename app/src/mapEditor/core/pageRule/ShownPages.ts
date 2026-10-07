@@ -1,5 +1,6 @@
 import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
-import { activePageOf, readEvent, type EventReading, type PageRule } from './pageRule.ts';
+import { GamePreview } from '../preview/GamePreview.ts';
+import { activePageOf, readEvent, type EventReading, type PageMoment, type PageRule } from './pageRule.ts';
 
 /**
  * The page an event draws, and whether it draws faded: an event no page holds for at the clock's time shows its first
@@ -23,7 +24,7 @@ type PageShown = {
 interface ActivePages
 {
   /**
-   * Finds the page the game shows an event at the clock's time on a fresh save.
+   * Finds the page the game shows an event at the clock's time, at the window's preview.
    * @param {RmmzMapEvent} event The event.
    * @returns {number} The page's index, or -1 when no page holds.
    */
@@ -44,7 +45,7 @@ interface ShownPageReader
 }
 
 /**
- * One event as the table last read it: the event read, the rule's reading of it, and the page it shows at the time.
+ * One event as the table last read it: the event read, the rule's reading of it, and the page it shows at the moment.
  */
 type ReadEvent = {
   readonly event: RmmzMapEvent;
@@ -53,20 +54,23 @@ type ReadEvent = {
 };
 
 /**
- * The page every event on one map shows at the window's clock, as a map view draws them: the game's own page rule on a
- * fresh save, with the plugins' conditions added. Without a rule, every event shows its first page, as MZ's own editor
- * shows it, and nothing is faded.
+ * The page every event on one map shows at the window's clock and preview, as a map view draws them: the game's own page
+ * rule, judged against the switches and variables the preview sets and a fresh save everywhere else, with the plugins'
+ * conditions added. Without a rule, every event shows its first page, as MZ's own editor shows it, and nothing is faded.
  *
  * Each event is read once and remembered until it changes: whoever draws it says so ({@link forget}), and an event put
- * back in its slot as a new object is read afresh on its own. Moving the clock judges again only the events read so
- * far whose pages ask something the clock can change, and answers which of those now show another page, so only those
- * are drawn again; every other event keeps its page without being looked at.
+ * back in its slot as a new object is read afresh on its own. Moving the clock judges again only the events read so far
+ * whose pages ask something the clock can change; changing the preview, only those whose pages read a switch, a variable
+ * or another piece of state it changed. Each answers which of those now show another page, so only those are drawn
+ * again; every other event keeps its page without being looked at.
  */
 class ShownPages implements ActivePages, ShownPageReader
 {
   #rule: PageRule | null;
 
   #time: number;
+
+  #preview: GamePreview;
 
   #read = new Map<number, ReadEvent>();
 
@@ -75,11 +79,13 @@ class ShownPages implements ActivePages, ShownPageReader
   /**
    * @param {PageRule | null} rule The rule, or null to show every event's first page.
    * @param {number} time The time of day to start at, in minutes past midnight.
+   * @param {GamePreview} preview The preview to start at; a fresh save's unless another is given.
    */
-  constructor(rule: PageRule | null = null, time = 0)
+  constructor(rule: PageRule | null = null, time = 0, preview: GamePreview = GamePreview.FRESH)
   {
     this.#rule = rule;
     this.#time = time;
+    this.#preview = preview;
   }
 
   /**
@@ -89,6 +95,15 @@ class ShownPages implements ActivePages, ShownPageReader
   get rule(): PageRule | null
   {
     return this.#rule;
+  }
+
+  /**
+   * The preview events are judged at.
+   * @returns {GamePreview} The preview.
+   */
+  get preview(): GamePreview
+  {
+    return this.#preview;
   }
 
   /**
@@ -123,21 +138,29 @@ class ShownPages implements ActivePages, ShownPageReader
     }
 
     this.#time = minutes;
-    const moment = { timeOfDay: minutes };
-    const turned: number[] = [];
-    this.#followingClock.forEach(id =>
-    {
-      // only events read so far are ever in the set, so each has its reading.
-      const entry = this.#read.get(id) as ReadEvent;
-      const active = activePageOf(entry.reading, moment);
-      if (active !== entry.active)
-      {
-        entry.active = active;
-        turned.push(id);
-      }
-    });
 
-    return turned;
+    // only events read so far are ever in the set, so each has its reading.
+    return this.#judgeAgain([ ...this.#followingClock ].map(id => this.#read.get(id) as ReadEvent));
+  }
+
+  /**
+   * Moves to another preview, judging again every event read so far whose pages read a piece of state it sets otherwise
+   * than the preview before: switch 74 turned on judges the events waiting on switch 74, and no event waiting only on
+   * switch 47.
+   * @param {GamePreview} preview The preview.
+   * @returns {number[]} The ids of the events now showing another page; none when the preview changed nothing.
+   */
+  setPreview(preview: GamePreview): number[]
+  {
+    const changed = [ ...preview.changedKeys(this.#preview) ];
+    this.#preview = preview;
+    if (changed.length === 0)
+    {
+      return [];
+    }
+
+    const reading = [ ...this.#read.values() ].filter(entry => changed.some(key => entry.reading.reads.has(key)));
+    return this.#judgeAgain(reading);
   }
 
   /**
@@ -181,6 +204,36 @@ class ShownPages implements ActivePages, ShownPageReader
   }
 
   /**
+   * The moment events are judged at: the time of day and the preview as they stand.
+   * @returns {PageMoment} The moment.
+   */
+  #moment(): PageMoment
+  {
+    return { timeOfDay: this.#time, preview: this.#preview };
+  }
+
+  /**
+   * Judges events again at the moment as it stands, keeping each one's new page.
+   * @param {readonly ReadEvent[]} entries The events, as the table read them.
+   * @returns {number[]} The ids of those now showing another page.
+   */
+  #judgeAgain(entries: readonly ReadEvent[]): number[]
+  {
+    const moment = this.#moment();
+    return entries.flatMap(entry =>
+    {
+      const active = activePageOf(entry.reading, moment);
+      if (active === entry.active)
+      {
+        return [];
+      }
+
+      entry.active = active;
+      return [ entry.event.id ];
+    });
+  }
+
+  /**
    * Finds what the table knows of an event, reading it first when it is new here, or not the object last read.
    * @param {RmmzMapEvent} event The event.
    * @param {PageRule} rule The rule.
@@ -195,7 +248,7 @@ class ShownPages implements ActivePages, ShownPageReader
     }
 
     const reading = readEvent(event, rule);
-    const entry: ReadEvent = { event, reading, active: activePageOf(reading, { timeOfDay: this.#time }) };
+    const entry: ReadEvent = { event, reading, active: activePageOf(reading, this.#moment()) };
     this.#read.set(event.id, entry);
     if (reading.followsClock)
     {

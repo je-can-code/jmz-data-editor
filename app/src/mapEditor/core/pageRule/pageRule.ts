@@ -1,20 +1,28 @@
 import type { RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
-import { conditionWords, meetsOnFreshSave, type FreshSave } from './freshSave.ts';
+import { switchKey, variableKey, type GamePreview, type PreviewKey } from '../preview/GamePreview.ts';
+import { conditionWords, ownWaitsHold, ownWaitsOf, type FreshSave, type OwnWaits } from './freshSave.ts';
 
 /**
- * The moment a page is judged at: the time of day the window's clock shows. The clock moves only the time of day, so
- * everything else a plugin's condition reads, such as the date, is the game's own starting value.
+ * The moment a page is judged at: the time of day the window's clock shows, and how far along the story the author
+ * asks to see the game. The clock moves only the time of day, so everything else a plugin's condition reads, such as
+ * the date, is the game's own starting value.
  */
 type PageMoment = {
   /**
    * The time of day, in minutes past midnight, 0 to 1439.
    */
   readonly timeOfDay: number;
+
+  /**
+   * The switches, variables and whatever else the author set to see the game further along than a fresh save. Left
+   * out, a fresh save's: every switch off and every variable 0.
+   */
+  readonly preview?: GamePreview;
 };
 
 /**
  * What one page asks of a condition a plugin adds, read once from the page as it stands, so judging it again as the
- * clock moves reads nothing twice.
+ * clock moves or the preview changes reads nothing twice.
  */
 type PageTest = {
   /**
@@ -22,6 +30,12 @@ type PageTest = {
    * the clock moves, and no other event ever is.
    */
   readonly followsClock: boolean;
+
+  /**
+   * The pieces of preview state the answer reads, such as where a quest stands. An event with a page asking about one is
+   * judged again whenever the preview changes it, and no other event ever is. Left out, the answer reads none.
+   */
+  readonly reads?: readonly PreviewKey[];
 
   /**
    * Judges the page at a moment.
@@ -55,8 +69,8 @@ type PageCondition = {
 };
 
 /**
- * The rule picking the page each event shows: what a fresh save holds, which the engine's own conditions read, and
- * every condition the active plugin modules add.
+ * The rule picking the page each event shows: what a fresh save holds, which the engine's own conditions read beneath
+ * whatever the moment's preview sets, and every condition the active plugin modules add.
  */
 type PageRule = {
   readonly save: FreshSave;
@@ -64,20 +78,21 @@ type PageRule = {
 };
 
 /**
- * One page as the rule read it: whether its own conditions hold on a fresh save, which no moment changes, and what it
- * asks of each plugin's condition.
+ * One page as the rule read it: what its own conditions wait for, and what it asks of each plugin's condition.
  */
 type PageReading = {
-  readonly meets: boolean;
+  readonly own: OwnWaits;
   readonly tests: readonly PageTest[];
 };
 
 /**
- * One event as the rule read it: each page in order, and whether any of them asks something the clock can change.
+ * One event as the rule read it: each page in order, whether any of them asks something the clock can change, and every
+ * piece of preview state any of them reads.
  */
 type EventReading = {
   readonly pages: readonly PageReading[];
   readonly followsClock: boolean;
+  readonly reads: ReadonlySet<PreviewKey>;
 };
 
 /**
@@ -93,11 +108,31 @@ const readPage = (page: RmmzEventPage, rule: PageRule): PageReading =>
     const test = condition.read(page);
     return test === null ? [] : [ test ];
   });
-  return { meets: meetsOnFreshSave(page.conditions, rule.save), tests };
+  return { own: ownWaitsOf(page.conditions, rule.save), tests };
 };
 
 /**
- * Reads every page of an event under a rule, once, for judging at as many moments as the clock passes through.
+ * Lists the preview state one page's answer reads: each switch it waits for, its variable, and whatever its plugin
+ * conditions read. A page waiting for something no preview sets, such as a self switch, never holds whatever the preview
+ * says, and its plugin conditions are never asked, so it reads nothing.
+ * @param {PageReading} page The page, as the rule read it.
+ * @returns {PreviewKey[]} The keys.
+ */
+const previewReadsOf = (page: PageReading): PreviewKey[] =>
+{
+  const { own, tests } = page;
+  if (own.settled === false)
+  {
+    return [];
+  }
+
+  const variable = own.variable === null ? [] : [ variableKey(own.variable.id) ];
+  return [ ...own.switches.map(switchKey), ...variable, ...tests.flatMap(test => test.reads ?? []) ];
+};
+
+/**
+ * Reads every page of an event under a rule, once, for judging at as many moments as the clock and the preview pass
+ * through.
  * @param {RmmzMapEvent} event The event.
  * @param {PageRule} rule The rule.
  * @returns {EventReading} The reading.
@@ -105,20 +140,25 @@ const readPage = (page: RmmzEventPage, rule: PageRule): PageReading =>
 const readEvent = (event: RmmzMapEvent, rule: PageRule): EventReading =>
 {
   const pages = event.pages.map(page => readPage(page, rule));
-  return { pages, followsClock: pages.some(page => page.tests.some(test => test.followsClock)) };
+  return {
+    pages,
+    followsClock: pages.some(page => page.tests.some(test => test.followsClock)),
+    reads: new Set(pages.flatMap(previewReadsOf)),
+  };
 };
 
 /**
  * Reports whether one page holds at a moment, as Game_Event#meetsConditions answers with every plugin's alias of it: its
- * own conditions hold on a fresh save, and every plugin condition holds then. A page whose own conditions fail is asked
- * nothing more, as the plugins' aliases return at once when the engine's own answer is no.
+ * own conditions hold at the moment's preview, a fresh save wherever it sets nothing, and every plugin condition holds
+ * then. A page whose own conditions fail is asked nothing more, as the plugins' aliases return at once when the engine's
+ * own answer is no.
  * @param {PageReading} page The page, as the rule read it.
  * @param {PageMoment} moment The moment.
  * @returns {boolean} True when it holds.
  */
 const pageHolds = (page: PageReading, moment: PageMoment): boolean =>
 {
-  return page.meets && page.tests.every(test => test.holds(moment));
+  return ownWaitsHold(page.own, moment.preview) && page.tests.every(test => test.holds(moment));
 };
 
 /**

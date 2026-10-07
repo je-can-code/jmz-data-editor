@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import { ShownPages } from '../../../src/mapEditor/core/pageRule/ShownPages.ts';
+import { GamePreview } from '../../../src/mapEditor/core/preview/GamePreview.ts';
 import type { LightingLayerDefinition, LightingStage, ScreenTone } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { GAME_LOOK } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { PixiMapRenderer } from '../../../src/mapEditor/render/PixiMapRenderer.ts';
@@ -227,11 +228,12 @@ describe('PixiMapRenderer', () =>
   describe('pages', () =>
   {
     /*
-     * Each event shows the page the page rule handed over picks at the clock's time. Moving the clock judges again the
-     * events whose pages ask something of it, and only those it turned to another page are drawn again, the lighting
-     * asked to draw with them; when it turns none, nothing is asked of anything. A new rule draws every event and the
-     * lighting again. An event that changes, or the list itself, is judged afresh. Events no page holds for show, faded,
-     * only while the markers overlay is on, so a map drawn as the game draws it shows nothing of them.
+     * Each event shows the page the page rule handed over picks at the clock's time and the preview's switches and
+     * variables. Moving the clock judges again the events whose pages ask something of it, and changing the preview the
+     * events whose pages read what it changed; only those turned to another page are drawn again, the lighting asked to
+     * draw with them, and when none turned, nothing is asked of anything. A new rule draws every event and the lighting
+     * again. An event that changes, or the list itself, is judged afresh. Events no page holds for show, faded, only
+     * while the markers overlay is on, so a map drawn as the game draws it shows nothing of them.
      */
     afterEach(() =>
     {
@@ -256,6 +258,43 @@ describe('PixiMapRenderer', () =>
       // Assert.
       expect([ turning, marked.mock.calls.length, stale.mock.calls.length, renderer.timeOfDay ])
         .toStrictEqual([ [ [ 4, 9 ], 1 ], 2, 1, 1140 ]);
+    });
+
+    it('draws again only the events the preview turned to another page, asking the lighting to draw, and nothing when it turned none', () =>
+    {
+      // Arrange: a preview turning events 3 and 12, then one turning none.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      vi.spyOn(ShownPages.prototype, 'setPreview').mockReturnValueOnce([ 3, 12 ])
+        .mockReturnValueOnce([]);
+      const marked = vi.spyOn(EventLayer.prototype, 'markChanged');
+      const stale = vi.spyOn(LightingLayers.prototype, 'markStale');
+
+      // Act: switch 147 on, then variable 74 at 99 as well.
+      const on = GamePreview.FRESH.withSwitch(147, true);
+      renderer.setPreview(on);
+      const turning = [ marked.mock.calls.map(([ id ]) => id), stale.mock.calls.length ];
+      renderer.setPreview(on.withVariable(74, 99));
+
+      // Assert.
+      expect([ turning, marked.mock.calls.length, stale.mock.calls.length ])
+        .toStrictEqual([ [ [ 3, 12 ], 1 ], 2, 1 ]);
+    });
+
+    it('judges events at the preview it was last handed, a fresh save until then', () =>
+    {
+      // Arrange: a renderer as a map view makes it.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      const before = renderer.preview;
+      const on = GamePreview.FRESH.withSwitch(147, true);
+
+      // Act: switch 147 on.
+      renderer.setPreview(on);
+
+      // Assert.
+      expect([ before, renderer.preview ])
+        .toStrictEqual([ GamePreview.FRESH, on ]);
     });
 
     it('picks every event\'s page afresh by a new page rule, drawing every event and the lighting again', () =>
