@@ -7,10 +7,10 @@ import { buildMapJson } from '../../support/fixtures.ts';
 /*
  * A map's lighting settings, as Map Properties shows them while J-Lighting is on: how dark the map is, always; the
  * colour of its dark, only once it is dark, since the colour belongs to the dark; and whether it has a sky, only while
- * J-Lighting-Time or J-Weather is on, since those are what read it: J-Lighting-Time to tint and darken the map by the
- * hour, and J-Weather to keep the sky's weather off a map under a roof. The sky setting names only those of the two that
- * are on, in its name and under it, and writes the same tag whichever it names. Each setting shows what the game reads
- * from the note, and each writes the note in place.
+ * J-Lighting-Time or J-Weather-Time is on, since those are what a sky changes the map for: J-Lighting-Time tints and
+ * darkens the map by the hour, and J-Weather-Time's weather never reaches a map under a roof. The sky setting names only
+ * those of the two that are on, in its name and under it, and writes the same tag whichever it names. Each setting shows
+ * what the game reads from the note, and each writes the note in place.
  *
  * The colour shows the colour the map names; plain black, and says so, when it names none; and the project's default,
  * saying why, for one the game cannot use. A colour the map names can be taken off again, back to plain black. Above the
@@ -123,9 +123,9 @@ describe('mapLighting', () =>
         .toStrictEqual([ '#102030', 'teal is not a colour, so the project\'s default shows.', { kind: 'color', clear: 'Plain black' } ]);
     });
 
-    it('names only the clock, only the weather, or both, as J-Lighting-Time and J-Weather are on, writing the same tag', () =>
+    it('names only the clock, only the weather, or both, as J-Lighting-Time and J-Weather-Time are on, writing the same tag', () =>
     {
-      // Arrange: a cave with no sky, its settings with J-Lighting-Time alone, J-Weather alone, and both.
+      // Arrange: a cave with no sky, its settings with J-Lighting-Time alone, J-Weather-Time alone, and both.
       const cave = mapNoted('<noToneChange>\n<ambient:[85]>');
       const sources = [ mapLightingSource(DEFAULT, true, false), mapLightingSource(DEFAULT, false, true), mapLightingSource(DEFAULT, true, true) ];
 
@@ -151,7 +151,7 @@ describe('mapLighting', () =>
         ]);
     });
 
-    it('offers no sky while neither J-Lighting-Time nor J-Weather is on', () =>
+    it('offers no sky while neither J-Lighting-Time nor J-Weather-Time is on', () =>
     {
       // Arrange.
       const cave = mapNoted('<noToneChange>\n<ambient:[85]>');

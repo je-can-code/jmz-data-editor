@@ -27,11 +27,12 @@ const LIGHTING_PLUGIN = 'J-Lighting';
 const LIGHTING_TIME_PLUGIN = 'J-Lighting-Time';
 
 /**
- * J-Weather's file name, as js/plugins.js lists it: the plugin bringing the sky's weather to a map, which reads the same
- * tag J-Lighting-Time does to know a map has no sky (MapWeatherResolver.declarationFor), and keeps the sky's weather off
- * such a map.
+ * J-Weather-Time's file name, as js/plugins.js lists it: the extension driving a sky's weather from J-TIME's clock
+ * (ForecastDirector), which J-Weather then brings to a map unless the map has no sky. J-Weather reads that from the same
+ * tag J-Lighting-Time does (MapWeatherResolver.declarationFor), but on its own it drives no sky at all, so a map's sky
+ * changes nothing about its weather until J-Weather-Time is on.
  */
-const WEATHER_PLUGIN = 'J-Weather';
+const WEATHER_TIME_PLUGIN = 'J-Weather-Time';
 
 /**
  * The id J-Lighting's module registers lights under.
@@ -119,9 +120,9 @@ const registerSky = (contributions: ModuleContributions, context: ModuleContext)
  * cannot use is said over every map view, and the sky then stays as it is at every hour.
  *
  * Map Properties gains a Lighting section setting the map's own darkness and its colour, and, while J-Lighting-Time or
- * J-Weather is on, whether the map has a sky, which J-Lighting-Time reads to tint and darken it by the hour and J-Weather
- * reads to keep the sky's weather off it, so the setting names whichever of them is on. Each is written into the map's
- * note in place.
+ * J-Weather-Time is on, whether the map has a sky, which J-Lighting-Time reads to tint and darken it by the hour and
+ * J-Weather-Time's sky reads to keep its weather off it, so the setting names whichever of them is on. J-Weather alone
+ * drives no sky, so it is not offered for J-Weather alone. Each is written into the map's note in place.
  */
 const lightingModule: PluginModule = {
   id: 'lighting',
@@ -173,10 +174,10 @@ const lightingModule: PluginModule = {
       create: stage => new LightRings(stage, defaults),
     });
 
-    // a map's own darkness is set in Map Properties, and so is whether it has a sky while either plugin reading that from
-    // its note is on, the setting worded for whichever is.
+    // a map's own darkness is set in Map Properties, and so is whether it has a sky while either plugin a sky changes the
+    // map for is on, the setting worded for whichever is: J-Lighting-Time's tint, and J-Weather-Time's weather.
     const clock = context.plugins.has(LIGHTING_TIME_PLUGIN);
-    const weather = context.plugins.has(WEATHER_PLUGIN);
+    const weather = context.plugins.has(WEATHER_TIME_PLUGIN);
     contributions.mapProperties({
       id: MAP_LIGHTING_ID,
       title: 'Lighting',

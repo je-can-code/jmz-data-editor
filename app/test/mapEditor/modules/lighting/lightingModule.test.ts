@@ -147,9 +147,10 @@ vi.mock('pixi.js', async importOriginal =>
  * cannot be read is said over the map, the sky still.
  *
  * It adds a Lighting section to Map Properties too (its own tests hold what each setting reads and writes), which offers
- * whether the map has a sky only while J-Lighting-Time or J-Weather, both reading it from the same tag, is enabled as
- * well, each known by its exact name and the setting worded for those that are, and shows a colour of the dark the note
- * names but the game cannot use as the project's.
+ * whether the map has a sky only while J-Lighting-Time or J-Weather-Time, whose sky's weather J-Weather keeps off a map
+ * with none, is enabled as well, each known by its exact name and the setting worded for those that are; J-Weather
+ * alone drives no sky, so it is offered nothing for it. The section shows a colour of the dark the note names but the
+ * game cannot use as the project's.
  */
 describe('lightingModule', () =>
 {
@@ -451,19 +452,21 @@ describe('lightingModule', () =>
         .toStrictEqual([]);
     });
 
-    it('adds a Lighting section to Map Properties, offering the sky while J-Lighting-Time or J-Weather is enabled too, worded for those that are', () =>
+    it('adds a Lighting section to Map Properties, offering the sky while J-Lighting-Time or J-Weather-Time is enabled too, worded for those that are', () =>
     {
       // Arrange: a cave at 85%, and the plugins beside J-Lighting as js/plugins.js lists them: J-Lighting-Time alone;
-      // J-Weather alone; both; and both off, with only J-Weather's time extension on, whose name begins the same.
+      // J-Weather-Time alone, with J-Weather beneath it; both; and both time extensions off, with J-Weather alone on,
+      // which drives no sky of its own.
       const cave = MapDocument.fromJson('map:1', { ...buildMapJson(), note: '<noToneChange>\n<ambient:[85]>' });
       const plugin = (name: string, status: boolean): PluginsJsEntry => ({ name, status, description: '', parameters: {} });
       const lightingTime = plugin('j/lighting/ext/J-Lighting-Time', true);
       const weather = plugin('j/weather/J-Weather', true);
+      const weatherTime = plugin('j/weather/ext/J-Weather-Time', true);
       const projects = [
         [ lightingTime ],
-        [ weather ],
-        [ lightingTime, weather ],
-        [ plugin('j/lighting/ext/J-Lighting-Time', false), plugin('j/weather/J-Weather', false), plugin('j/weather/ext/J-Weather-Time', true) ],
+        [ weather, weatherTime ],
+        [ lightingTime, weather, weatherTime ],
+        [ plugin('j/lighting/ext/J-Lighting-Time', false), weather, plugin('j/weather/ext/J-Weather-Time', false) ],
       ];
       const registries = projects.map(plugins =>
       {

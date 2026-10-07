@@ -39,34 +39,34 @@ const DARKNESS_CONTROL: SliderControl = {
 const PLAIN_BLACK_HINT = 'Plain black, since this map names no colour for its dark.';
 
 /**
- * What the sky setting is called while J-Lighting-Time is on and J-Weather is off.
+ * What the sky setting is called while J-Lighting-Time is on and J-Weather-Time is off.
  */
 const SKY_LABEL = 'Sky follows the clock';
 
 /**
- * What the sky setting says under it while J-Lighting-Time is on and J-Weather is off.
+ * What the sky setting says under it while J-Lighting-Time is on and J-Weather-Time is off.
  */
 const SKY_HINT = 'The hour tints and darkens this map. Untick it for interiors and caves, which have no sky.';
 
 /**
- * What the sky setting is called while J-Weather is on and J-Lighting-Time is off: J-Weather reads the same setting to
- * know a map is under a roof.
+ * What the sky setting is called while J-Weather-Time is on and J-Lighting-Time is off: the sky's weather reaches only
+ * a map with a sky, which J-Weather reads from the same setting.
  */
 const WEATHER_SKY_LABEL = 'Sky follows the weather';
 
 /**
- * What the sky setting says under it while J-Weather is on and J-Lighting-Time is off: a map without a sky gets none of
- * the sky's weather.
+ * What the sky setting says under it while J-Weather-Time is on and J-Lighting-Time is off: a map without a sky gets
+ * none of the sky's weather.
  */
 const WEATHER_SKY_HINT = 'The sky\'s weather reaches this map. Untick it for interiors and caves, which have no sky.';
 
 /**
- * What the sky setting is called while J-Lighting-Time and J-Weather are both on.
+ * What the sky setting is called while J-Lighting-Time and J-Weather-Time are both on.
  */
 const SKY_AND_WEATHER_LABEL = 'Sky follows the clock and the weather';
 
 /**
- * What the sky setting says under it while J-Lighting-Time and J-Weather are both on.
+ * What the sky setting says under it while J-Lighting-Time and J-Weather-Time are both on.
  */
 const SKY_AND_WEATHER_HINT = 'The hour tints and darkens this map, and the sky\'s weather reaches it. Untick it for interiors '
   + 'and caves, which have no sky.';
@@ -117,13 +117,13 @@ const colorHint = (darkness: MapDarkness): { hint?: string } =>
 };
 
 /**
- * Words the sky setting for the plugins reading the sky tag, naming only those that are on, so unticking it never takes
- * either by surprise nor speaks of one the game does not run: the clock while J-Lighting-Time is on, the weather while
- * J-Weather is, and both while both are.
+ * Words the sky setting for the plugins a map's sky changes the map for, naming only those that are on, so unticking it
+ * never takes either by surprise nor speaks of one the game does not run: the clock while J-Lighting-Time is on, the
+ * weather while J-Weather-Time is, and both while both are.
  * @param {boolean} clock Whether J-Lighting-Time is on.
- * @param {boolean} weather Whether J-Weather is on.
- * @returns {SkyWords | null} What the setting is called and says under it, or null while neither is on, when nothing the
- * game runs reads the tag and the setting is not offered.
+ * @param {boolean} weather Whether J-Weather-Time is on.
+ * @returns {SkyWords | null} What the setting is called and says under it, or null while neither is on, when the tag
+ * changes nothing in the game and the setting is not offered.
  */
 const skyWordsFor = (clock: boolean, weather: boolean): SkyWords | null =>
 {
@@ -147,13 +147,13 @@ const skyWordsFor = (clock: boolean, weather: boolean): SkyWords | null =>
 
 /**
  * Builds the settings of a map's lighting: how dark it is; the colour of its dark, once it is dark; and, while
- * J-Lighting-Time or J-Weather is on, whether the map has a sky, which J-Lighting-Time reads to tint and darken the map
- * by the hour and J-Weather reads to know the map is under a roof, so the setting is worded for whichever of them is on.
- * Each is read from the note as the game reads it, and each change writes the note in place, so every other tag and
- * every other word of it stays as written.
+ * J-Lighting-Time or J-Weather-Time is on, whether the map has a sky, which J-Lighting-Time reads to tint and darken the
+ * map by the hour and J-Weather-Time's sky needs to reach it with its weather, so the setting is worded for whichever of
+ * them is on. Each is read from the note as the game reads it, and each change writes the note in place, so every other
+ * tag and every other word of it stays as written.
  * @param {string} defaultColor The project's colour of the dark, for a colour the game cannot use.
  * @param {boolean} clock Whether J-Lighting-Time is on, which tints and darkens a map with a sky by the hour.
- * @param {boolean} weather Whether J-Weather is on, which keeps the sky's weather off a map without a sky.
+ * @param {boolean} weather Whether J-Weather-Time is on, whose sky's weather reaches only a map with a sky.
  * @returns {MapPropertiesSource} The section's settings, for each map.
  */
 const mapLightingSource = (defaultColor: string, clock: boolean, weather: boolean): MapPropertiesSource =>
