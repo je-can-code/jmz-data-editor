@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MaskLight } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
 import {
+  chunkInView,
   chunkSignature,
   lightsByChunk,
   MASK_CHUNK_SIZE,
@@ -21,6 +22,9 @@ import {
  * light burning at another strength, which is all an effect ever changes, many times a second, never builds a piece
  * again, and nor does the dark's fill, which the hour of the window's clock changes; either only draws it again, a
  * strength only when its lights burn otherwise than they were drawn, light by light.
+ *
+ * A piece shows in a view when the two overlap by more than a shared edge, from whichever side; a view that only
+ * touches its edge, or misses it across or down, shows none of it.
  */
 
 /**
@@ -241,6 +245,52 @@ describe('maskChunks', () =>
       // Assert.
       expect(same)
         .toBe(false);
+    });
+  });
+
+  describe('chunkInView', () =>
+  {
+    /**
+     * The second piece of the first row, 512 to 1024 across and 0 to 512 down.
+     */
+    const PIECE = { x: 512, y: 0, width: 512, height: 512 };
+
+    it('shows a piece the view overlaps, by a corner or whole, from any side', () =>
+    {
+      // Arrange: a view over the piece's top-left corner, one over its bottom-right corner, and one holding it whole.
+      const views = [
+        { x: 300, y: -100, width: 213, height: 101 },
+        { x: 1023, y: 511, width: 400, height: 400 },
+        { x: 0, y: 0, width: 2000, height: 2000 },
+      ];
+
+      // Act.
+      const shown = views.map(view => chunkInView(PIECE, view));
+
+      // Assert.
+      expect(shown)
+        .toStrictEqual([ true, true, true ]);
+    });
+
+    it('hides a piece the view only touches along an edge, or misses across or down', () =>
+    {
+      // Arrange: views ending at the piece's left edge, starting at its right edge, ending at its top edge, starting at
+      // its bottom edge; one beside it, level with it down; and one below it, level with it across.
+      const views = [
+        { x: 0, y: 0, width: 512, height: 512 },
+        { x: 1024, y: 0, width: 300, height: 512 },
+        { x: 512, y: -200, width: 512, height: 200 },
+        { x: 512, y: 512, width: 512, height: 300 },
+        { x: 1500, y: 100, width: 100, height: 100 },
+        { x: 600, y: 600, width: 100, height: 100 },
+      ];
+
+      // Act.
+      const shown = views.map(view => chunkInView(PIECE, view));
+
+      // Assert.
+      expect(shown)
+        .toStrictEqual([ false, false, false, false, false, false ]);
     });
   });
 });

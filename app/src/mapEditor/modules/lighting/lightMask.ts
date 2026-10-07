@@ -1,10 +1,18 @@
 import { Container, RenderTexture, Sprite, Texture, type Renderer } from 'pixi.js';
-import type { LightingDrawing, LightingFrame, LightingStage } from '../../core/renderer/lightingLayer.ts';
+import type { LightingDrawing, LightingFrame, LightingStage, WorldStretch } from '../../core/renderer/lightingLayer.ts';
 import { darkOf, maskLightsOf, type DarkSetup, type MapDark, type MaskLight } from './darkScene.ts';
 import { isAnimated } from './lightEffects.ts';
 import { pictureKey } from './lightFalloff.ts';
 import { LightPictures } from './lightPictures.ts';
-import { chunkSignature, lightsByChunk, MASK_CHUNK_SIZE, maskChunksFor, sameStrengths, type MaskChunk } from './maskChunks.ts';
+import {
+  chunkInView,
+  chunkSignature,
+  lightsByChunk,
+  MASK_CHUNK_SIZE,
+  maskChunksFor,
+  sameStrengths,
+  type MaskChunk,
+} from './maskChunks.ts';
 
 /**
  * What the mask is worked out from, beyond the tile size its stage gives: everything that darkens the map, what a light
@@ -47,9 +55,11 @@ type DrawnChunk = {
  * and the mask lets go of everything it held.
  *
  * Lights whose effect runs move with the view's clock between draws. Each tick works out how brightly every light in the
- * pieces such a light reaches burns now, and draws again only the pieces where one burns differently than it was drawn;
- * a piece reached by steady lights alone is never touched, and a map with no moving light, or no dark, costs a tick
- * nothing at all.
+ * pieces such a light reaches and the view shows burns now, and draws again only the pieces where one burns differently
+ * than it was drawn; a piece reached by steady lights alone is never touched, and a map with no moving light, or no
+ * dark, costs a tick nothing at all. A piece out of view is left as it was last drawn, however its lights burn on, and
+ * the tick that brings it into view draws it as they burn then, before the frame shows it; a draw leaves it so too
+ * when nothing but how brightly its lights burn moved, so a map zoomed in on draws only what is on screen.
  *
  * The time of day can darken a map too, the sky at night being one of the sources, so a tick that finds the window's
  * clock moved works out how dark the map is at the new hour. The lights stand where they stood, since only an edit moves
@@ -162,7 +172,7 @@ class LightMask implements LightingDrawing
    * Shows the dark over the map, with its lights cut through it: the pieces cover the map, and each is brought up to date
    * with the lights reaching it; then the pieces a light whose effect runs reaches are noted for the ticks, and pictures
    * no light draws any more are let go.
-   * @param {LightingFrame} frame The map, the renderer and the clock.
+   * @param {LightingFrame} frame The map, the renderer, the clock and the view.
    * @param {MapDark} dark How dark the map is.
    * @param {readonly MaskLight[]} lights Every light on the map, burning as it does at the frame's clock.
    * @returns {boolean} True when any piece was drawn again.
@@ -178,7 +188,7 @@ class LightMask implements LightingDrawing
     this.#showing = true;
     this.#cover(width, height);
     const byChunk = lightsByChunk(lights, width, height, this.#chunkSize);
-    const drawn = this.#chunks.map((chunk, index) => this.#settle(chunk, byChunk[index], fresh, frame.renderer));
+    const drawn = this.#chunks.map((chunk, index) => this.#settle(chunk, byChunk[index], fresh, frame.renderer, frame.view));
 
     // only the pieces a light whose effect runs reaches have anything to do as the clock moves.
     this.#moving = this.#chunks.filter(chunk => chunk.lights.some(light => isAnimated(light.effect)));
@@ -241,9 +251,9 @@ class LightMask implements LightingDrawing
   }
 
   /**
-   * Moves every light whose effect runs on to the frame's clock, drawing again only the pieces where one burns
-   * differently than it was drawn.
-   * @param {LightingFrame} frame The map, the renderer and the clock.
+   * Moves every light whose effect runs on to the frame's clock, drawing again only the pieces the view shows where one
+   * burns differently than it was drawn.
+   * @param {LightingFrame} frame The map, the renderer, the clock and the view.
    * @returns {boolean} True when any piece was drawn again.
    */
   #burnOn(frame: LightingFrame): boolean
@@ -253,6 +263,12 @@ class LightMask implements LightingDrawing
     let redrew = false;
     this.#moving.forEach(chunk =>
     {
+      // a piece out of view stays as it was drawn; the tick that brings it into view finds its lights burning otherwise.
+      if (chunkInView(chunk.rect, frame.view) === false)
+      {
+        return;
+      }
+
       const strengths = chunk.lights.map(light => strengthOf({ mapId, id: light.id, effect: light.effect }, frame.clock));
       if (sameStrengths(chunk.strengths, strengths))
       {
@@ -294,14 +310,16 @@ class LightMask implements LightingDrawing
   /**
    * Brings one piece up to date with the lights reaching it: built again when its lights' places or pictures changed, or
    * its texture lost its pixels with a context given back; drawn again as it stands when only the dark's fill or how
-   * brightly its lights burn changed; and left alone otherwise.
+   * brightly its lights burn changed, unless nothing but how brightly they burn changed and the view does not show it,
+   * when it is left for the tick that brings it into view; and left alone otherwise.
    * @param {DrawnChunk} chunk The piece.
    * @param {readonly MaskLight[]} lights The lights reaching it, in the order the game adds them.
    * @param {boolean} fresh Whether the context is new since the mask last drew.
    * @param {Renderer} renderer The view's renderer.
+   * @param {WorldStretch} view The part of the map the view shows.
    * @returns {boolean} True when the piece was drawn again.
    */
-  #settle(chunk: DrawnChunk, lights: readonly MaskLight[], fresh: boolean, renderer: Renderer): boolean
+  #settle(chunk: DrawnChunk, lights: readonly MaskLight[], fresh: boolean, renderer: Renderer, view: WorldStretch): boolean
   {
     const signature = chunkSignature(lights);
     const strengths = lights.map(light => light.strength);
@@ -333,6 +351,13 @@ class LightMask implements LightingDrawing
       chunk.sprite.tint = this.#tint;
       chunk.tint = this.#tint;
       return true;
+    }
+
+    // only a light whose effect runs burns otherwise, so a piece out of view with its dark as drawn is one the ticks
+    // draw, the one bringing it into view first.
+    if (chunk.tint === this.#tint && chunkInView(chunk.rect, view) === false)
+    {
+      return false;
     }
 
     this.#burn(chunk, strengths, renderer);

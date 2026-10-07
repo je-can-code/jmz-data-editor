@@ -2,7 +2,7 @@ import { Container, type Renderer } from 'pixi.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
-import type { LightingClock } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
+import type { LightingClock, WorldStretch } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { mapAmbient, type AmbientSource } from '../../../../src/mapEditor/modules/lighting/ambientTags.ts';
 import type { LightStrength } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
 import { pictureKey } from '../../../../src/mapEditor/modules/lighting/lightFalloff.ts';
@@ -12,6 +12,7 @@ import type { LightPictures } from '../../../../src/mapEditor/modules/lighting/l
 import { command, event, page } from '../../support/eventKindFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 import { ENGINE_PAGES } from '../../support/pageFixtures.ts';
+import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
 
 /**
  * Every stand-in render texture made, in order, and how many stand-in sprites were made.
@@ -175,7 +176,9 @@ vi.mock('pixi.js', () =>
  * Between draws the clock moves on. Only the pieces a light whose effect runs reaches have anything to do: each works
  * out how brightly its lights burn now and is drawn again, as it stands, only when one burns otherwise than it was drawn.
  * A piece reached by steady lights alone is never touched, and a map with no dark, or no light whose effect runs, costs
- * a tick nothing, its strength never even asked.
+ * a tick nothing, its strength never even asked. Nor is a piece the view does not show: it is left as it was drawn, and
+ * the tick that brings it into view draws it as its lights burn then. A draw leaves it so too when nothing but how
+ * brightly its lights burn changed; a change to the dark, which is drawn into every lit piece, draws them all.
  *
  * The window's clock moves too, and the sky at its hour is one of the sources darkening a map. A tick finding the clock
  * moved works out the dark at the new hour: the same dark draws nothing; a deeper or lighter one draws the lit pieces
@@ -351,8 +354,10 @@ const maskOnStage = (strengthOf: LightStrength = steady, sky: AmbientSource[] = 
   const setup = { sources, defaults: { color: '#ffffff', intensity: 0 }, strengthOf: counted };
   const mask = new LightMask({ layer, tileSize: 48, castTone: () => undefined }, setup, named.pictures, 256);
   const { renderer, passes, containers } = recordingRenderer();
-  const draw = (document: MapDocument, context = 1, clock = at(0), pages: ActivePages = ENGINE_PAGES) => mask.draw({ document, renderer, context, clock, pages });
-  const tick = (document: MapDocument, clock: LightingClock) => mask.tick({ document, renderer, context: 1, clock, pages: ENGINE_PAGES });
+  const draw = (document: MapDocument, context = 1, clock = at(0), pages: ActivePages = ENGINE_PAGES, view: WorldStretch = WHOLE_VIEW) =>
+    mask.draw({ document, renderer, context, clock, pages, view });
+  const tick = (document: MapDocument, clock: LightingClock, view: WorldStretch = WHOLE_VIEW) =>
+    mask.tick({ document, renderer, context: 1, clock, pages: ENGINE_PAGES, view });
   const [ root ] = layer.children as Container[];
   const sprites = () => root.children as unknown as DrawnSprite[];
   return { mask, layer, root, sprites, passes, containers, asked, draw, tick, ...named };
@@ -362,6 +367,12 @@ const maskOnStage = (strengthOf: LightStrength = steady, sky: AmbientSource[] = 
  * The name of a torch's picture: a tile's reach, warm, at 40.
  */
 const TORCH = '48:#ffbb73:0.4';
+
+/**
+ * A view on the first piece of a 16x16 map cut into pieces of 256 pixels, and one on its last.
+ */
+const FIRST_PIECE: WorldStretch = { x: 0, y: 0, width: 256, height: 256 };
+const LAST_PIECE: WorldStretch = { x: 512, y: 512, width: 256, height: 256 };
 
 describe('LightMask', () =>
 {
@@ -720,6 +731,59 @@ describe('LightMask', () =>
       // Assert.
       expect([ moved, passes.length, asked ])
         .toStrictEqual([ false, 1, [] ]);
+    });
+
+    it('draws again only the pieces the view shows, and a piece scrolled into view as its lights burn then', () =>
+    {
+      // Arrange: flickering torches alone in the first piece and in the last, both drawn at frame 0 with the whole map
+      // in view.
+      const { draw, tick, passes, asked } = maskOnStage(dimming);
+      const cave = mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1, 'flicker'), torchAt(2, 12, 12, 'flicker') ]);
+      draw(cave, 1, at(0));
+      asked.splice(0);
+
+      // Act: ten frames on with the view on the first piece alone, then ten more with it moved onto the last.
+      const first = tick(cave, at(10), FIRST_PIECE);
+      const last = tick(cave, at(20), LAST_PIECE);
+
+      // Assert: the first piece at 0.9, then the last at 0.8, the strength it burns at as it comes into view, each light
+      // asked after only while its piece shows.
+      expect([ first, last, passes.length, passes[2].target === passes[0].target, passes[3].target === passes[1].target ])
+        .toStrictEqual([ true, true, 4, true, true ]);
+      expect([ passes[2].added[0].alpha, passes[3].added[0].alpha, asked ])
+        .toStrictEqual([ 0.9, 0.8, [ 'page:1#0 at 10', 'page:2#0 at 20' ] ]);
+    });
+
+    it('leaves a piece out of view as it stands when a draw finds only its lights burning otherwise, for a tick to draw', () =>
+    {
+      // Arrange: the two flickering torches drawn at frame 0 with the whole map in view.
+      const { draw, tick, passes } = maskOnStage(dimming);
+      const cave = mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1, 'flicker'), torchAt(2, 12, 12, 'flicker') ]);
+      draw(cave, 1, at(0));
+
+      // Act: asked to draw again twenty frames on, as an edit elsewhere asks, with the view on the first piece alone;
+      // then a tick in the same frame with the view moved onto the last.
+      draw(cave, 1, at(20), ENGINE_PAGES, FIRST_PIECE);
+      const drawn = passes.length;
+      tick(cave, at(20), LAST_PIECE);
+
+      // Assert: the draw drew the first piece alone, at 0.8; the tick the last, at 0.8 too.
+      expect([ drawn, passes.slice(2).map(pass => pass.added[0].alpha), passes[3].target === passes[1].target ])
+        .toStrictEqual([ 3, [ 0.8, 0.8 ], true ]);
+    });
+
+    it('draws a lit piece out of view again when the dark changes, since its fill is drawn into it', () =>
+    {
+      // Arrange: steady torches in the first piece and in the last, drawn at 85% with the whole map in view.
+      const { draw, passes } = maskOnStage();
+      draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1), torchAt(2, 12, 12) ]));
+
+      // Act: the note now says 93%, drawn with the view on the first piece alone.
+      draw(mapOf(16, '<ambient:[93]>', [ null, torchAt(1, 1, 1), torchAt(2, 12, 12) ]), 1, at(0), ENGINE_PAGES, FIRST_PIECE);
+
+      // Assert: both lit pieces cleared to the new fill.
+      expect(passes.map(pass => pass.clearColor))
+        .toStrictEqual([ 0x262626, 0x262626, 0x121212, 0x121212 ]);
     });
   });
 

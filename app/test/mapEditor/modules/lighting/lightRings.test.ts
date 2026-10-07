@@ -15,6 +15,7 @@ import type { LightDefaults } from '../../../../src/mapEditor/modules/lighting/l
 import { command, event, page, text } from '../../support/eventKindFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 import { ENGINE_PAGES } from '../../support/pageFixtures.ts';
+import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
 
 /**
  * Every stand-in drawing made, each with the calls it was given, written out so a test reads them at a glance.
@@ -147,7 +148,7 @@ const buildRings = () =>
  */
 const drawOn = (rings: LightRings, document: MapDocument): void =>
 {
-  rings.draw({ document, renderer: {} as Renderer, context: 1, clock: { frames: 0, animating: true, timeOfDay: 0 }, pages: ENGINE_PAGES });
+  rings.draw({ document, renderer: {} as Renderer, context: 1, clock: { frames: 0, animating: true, timeOfDay: 0 }, pages: ENGINE_PAGES, view: WHOLE_VIEW });
 };
 
 describe('lightRings', () =>

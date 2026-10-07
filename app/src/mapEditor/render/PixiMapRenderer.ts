@@ -1851,9 +1851,12 @@ class PixiMapRenderer implements MapRenderer
     let changed = this.#tickAnimation(now);
     let rebuiltChunks = 0;
     const scene = this.#scene;
+
+    // the part of the map this frame shows, which the tiles are culled to and the lighting may leave alone outside of.
+    const view = visibleWorld(this.#camera, this.#view);
     if (scene !== null)
     {
-      const range: ChunkRange = chunkRangeFor(scene.grid, visibleWorld(this.#camera, this.#view), TILE_SIZE);
+      const range: ChunkRange = chunkRangeFor(scene.grid, view, TILE_SIZE);
       scene.tiles.cull(range);
       scene.regions?.cull(range);
       scene.passability?.cull(range);
@@ -1866,7 +1869,7 @@ class PixiMapRenderer implements MapRenderer
     if (document !== null)
     {
       const clock = lightingClockAt(now, this.#fixedAnimation, this.#visibility.animate, this.#timeOfDay);
-      changed = this.#lighting.draw({ document, renderer: pixi, context: this.#contexts, clock, pages: this.#pages }) || changed;
+      changed = this.#lighting.draw({ document, renderer: pixi, context: this.#contexts, clock, pages: this.#pages, view }) || changed;
     }
 
     return { changed, rebuiltChunks };

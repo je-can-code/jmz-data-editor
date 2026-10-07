@@ -55,9 +55,20 @@ type LightingClock = {
 };
 
 /**
+ * A stretch of the map in world pixels: its top-left corner, and how wide and tall it is.
+ */
+type WorldStretch = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+/**
  * What a lighting drawing is handed each time it is asked to draw or to move on: the map as it now stands, the view's
  * pixi renderer, for anything drawn into a render texture first, such as a map's darkness with light cut out of it,
- * which GPU context the view draws on, the view's clock, and the page each event shows at the clock's time.
+ * which GPU context the view draws on, the view's clock, the page each event shows at the clock's time, and the part
+ * of the map the view shows.
  */
 type LightingFrame = {
   readonly document: MapDocument;
@@ -81,6 +92,13 @@ type LightingFrame = {
    * after an edit, so between draws the pages stand still.
    */
   readonly pages: ActivePages;
+
+  /**
+   * The part of the map the view shows in this frame, in world pixels. Something wholly outside it does not show, so a
+   * drawing may leave it as it last drew it, so long as it draws it up to date in the frame it comes into view: the
+   * frame a pan or a zoom first shows it is handed a view that reaches it.
+   */
+  readonly view: WorldStretch;
 };
 
 /**
@@ -144,4 +162,4 @@ type LightingLayerDefinition = {
   readonly create: (stage: LightingStage) => LightingDrawing;
 };
 
-export type { LightingClock, LightingDrawing, LightingFrame, LightingLayerDefinition, LightingStage, ScreenTone };
+export type { LightingClock, LightingDrawing, LightingFrame, LightingLayerDefinition, LightingStage, ScreenTone, WorldStretch };

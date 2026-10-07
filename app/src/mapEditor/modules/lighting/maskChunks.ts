@@ -1,3 +1,4 @@
+import type { WorldStretch } from '../../core/renderer/lightingLayer.ts';
 import type { MaskLight } from './darkScene.ts';
 import { pictureKey, pictureSize } from './lightFalloff.ts';
 
@@ -114,5 +115,19 @@ const sameStrengths = (drawn: readonly number[], now: readonly number[]): boolea
   return drawn.length === now.length && now.every((strength, index) => strength === drawn[index]);
 };
 
-export { chunkSignature, lightsByChunk, MASK_CHUNK_SIZE, maskChunksFor, sameStrengths };
+/**
+ * Reports whether a piece of the mask shows in a view: whether the two overlap by more than a shared edge, so a piece
+ * that only touches the view's edge, none of it on screen, does not.
+ * @param {MaskChunk} chunk The piece.
+ * @param {WorldStretch} view The part of the map the view shows.
+ * @returns {boolean} True when any of the piece shows.
+ */
+const chunkInView = (chunk: MaskChunk, view: WorldStretch): boolean =>
+{
+  const across = chunk.x < view.x + view.width && view.x < chunk.x + chunk.width;
+  const down = chunk.y < view.y + view.height && view.y < chunk.y + chunk.height;
+  return across && down;
+};
+
+export { chunkInView, chunkSignature, lightsByChunk, MASK_CHUNK_SIZE, maskChunksFor, sameStrengths };
 export type { MaskChunk };

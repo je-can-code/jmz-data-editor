@@ -14,6 +14,7 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
 import { command, event, page, text, transferPage } from '../../support/eventKindFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 import { ENGINE_PAGES } from '../../support/pageFixtures.ts';
+import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
 
 /**
  * The colour of every solid fill the stand-in drawings were given, in order: one dot at each light; and the words for a
@@ -183,7 +184,7 @@ describe('lightingModule', () =>
     json.events = [ null, { ...event(1, [ page([ command(108, [ '<light:[2]>' ]) ]) ]), x: 0, y: 0 } ];
     const rings = registry.lightingLayers().find(layer => layer.id === LIGHT_RINGS_ID) as LightingLayerDefinition;
     const drawing = rings.create(stageOn({ addChild: () => undefined } as unknown as Container));
-    drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1, clock: START, pages: ENGINE_PAGES });
+    drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1, clock: START, pages: ENGINE_PAGES, view: WHOLE_VIEW });
     return stand.dots;
   };
 
@@ -264,7 +265,7 @@ describe('lightingModule', () =>
       const json = { ...buildMapJson(), note: '<ambient:[85, #10203g]>' };
 
       // Act.
-      drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1, clock: START, pages: ENGINE_PAGES });
+      drawing.draw({ document: MapDocument.fromJson('map:1', json), renderer: {} as Renderer, context: 1, clock: START, pages: ENGINE_PAGES, view: WHOLE_VIEW });
 
       // Assert: one piece, a plain fill of 85% slate.
       const [ root ] = layer.children;
@@ -285,11 +286,11 @@ describe('lightingModule', () =>
       const document = MapDocument.fromJson('map:6', json);
       const added: number[][] = [];
       const renderer = { render: (options: { container: Container }) => added.push(options.container.children.map(sprite => sprite.alpha)) } as unknown as Renderer;
-      drawing.draw({ document, renderer, context: 1, clock: { ...START, frames: 100 }, pages: ENGINE_PAGES });
+      drawing.draw({ document, renderer, context: 1, clock: { ...START, frames: 100 }, pages: ENGINE_PAGES, view: WHOLE_VIEW });
 
       // Act: the next frame, then the same frame with Animate off.
-      const moved = [ drawing.tick({ document, renderer, context: 1, clock: { ...START, frames: 101 }, pages: ENGINE_PAGES }) ];
-      moved.push(drawing.tick({ document, renderer, context: 1, clock: { ...START, frames: 101, animating: false }, pages: ENGINE_PAGES }));
+      const moved = [ drawing.tick({ document, renderer, context: 1, clock: { ...START, frames: 101 }, pages: ENGINE_PAGES, view: WHOLE_VIEW }) ];
+      moved.push(drawing.tick({ document, renderer, context: 1, clock: { ...START, frames: 101, animating: false }, pages: ENGINE_PAGES, view: WHOLE_VIEW }));
       drawing.destroy();
       pictureFor.mockRestore();
 
@@ -311,7 +312,7 @@ describe('lightingModule', () =>
       const document = MapDocument.fromJson('map:6', json);
       const added: number[][] = [];
       const renderer = { render: (options: { container: Container }) => added.push(options.container.children.map(sprite => sprite.alpha)) } as unknown as Renderer;
-      const atFrame100 = { document, renderer, context: 1, clock: { ...START, frames: 100 }, pages: ENGINE_PAGES };
+      const atFrame100 = { document, renderer, context: 1, clock: { ...START, frames: 100 }, pages: ENGINE_PAGES, view: WHOLE_VIEW };
       drawing.draw(atFrame100);
       document.apply(document.setPatch([ 'events', 1, 'pages', 0, 'list', 0, 'parameters', 0 ], '<light:[5, #ffbb73, 40, flicker]>'));
       document.apply(document.setPatch([ 'events', 1, 'x' ], 2));
@@ -607,7 +608,7 @@ describe('lightingModule', () =>
         const passes: number[] = [];
         const renderer = { render: (options: { clearColor: number }) => passes.push(options.clearColor) } as unknown as Renderer;
         const drawing = dark.create(stageOn(new Container()));
-        drawing.draw({ document, renderer, context: 1, clock: { ...START, timeOfDay: 1320 }, pages: ENGINE_PAGES });
+        drawing.draw({ document, renderer, context: 1, clock: { ...START, timeOfDay: 1320 }, pages: ENGINE_PAGES, view: WHOLE_VIEW });
         drawing.destroy();
         cleared.push(passes);
       });
@@ -629,7 +630,7 @@ describe('lightingModule', () =>
       {
         const tones: (readonly number[] | null)[] = [];
         const drawing = sky.create({ layer: new Container(), tileSize: 48, castTone: tone => tones.push(tone) });
-        drawing.draw({ document, renderer: {} as Renderer, context: 1, clock: { ...START, timeOfDay: 1320 }, pages: ENGINE_PAGES });
+        drawing.draw({ document, renderer: {} as Renderer, context: 1, clock: { ...START, timeOfDay: 1320 }, pages: ENGINE_PAGES, view: WHOLE_VIEW });
         cast.push(tones);
       });
 

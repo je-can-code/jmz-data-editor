@@ -6,6 +6,7 @@ import type { ChangeEffect } from '../../../../src/mapEditor/render/documentChan
 import { LightingLayers } from '../../../../src/mapEditor/render/scene/LightingLayers.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 import { ENGINE_PAGES } from '../../support/pageFixtures.ts';
+import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
 
 /*
  * What plugin modules draw into a view's lighting layer: one drawing per lighting layer they contribute, made once and
@@ -62,7 +63,7 @@ const loggedLayer = (id: `${string}.${string}`, log: string[], moves = false) =>
 
 /**
  * What a frame hands the drawings: map 7, a renderer nothing here draws with, the view's first context, the view's
- * clock, and the pages its events show.
+ * clock, the pages its events show, and a view showing the whole map.
  * @param {number} frames The clock's frame.
  * @returns {LightingFrame} The frame.
  */
@@ -72,6 +73,7 @@ const frame = (frames = 0): LightingFrame => ({
   context: 1,
   clock: { frames, animating: true, timeOfDay: 840 },
   pages: ENGINE_PAGES,
+  view: WHOLE_VIEW,
 });
 
 /**

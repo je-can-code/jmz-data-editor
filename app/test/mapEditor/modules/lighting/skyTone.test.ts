@@ -6,6 +6,7 @@ import { SkyTone } from '../../../../src/mapEditor/modules/lighting/skyTone.ts';
 import type { SkyCurve } from '../../../../src/mapEditor/modules/lighting/timeTone.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 import { ENGINE_PAGES } from '../../support/pageFixtures.ts';
+import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
 
 /*
  * The sky's colour in one map view: asked to draw, it works the tone out for the map as it now stands at the clock's
@@ -54,6 +55,7 @@ const frameOn = (note: string, timeOfDay: number): LightingFrame => ({
   context: 1,
   clock: { frames: 0, animating: true, timeOfDay },
   pages: ENGINE_PAGES,
+  view: WHOLE_VIEW,
 });
 
 describe('SkyTone', () =>
