@@ -97,7 +97,7 @@ describe('PluginModuleRegistry', () =>
       contributions.passabilityRule({ id: 'jabs.blocked', title: 'Blocked', deny: () => null });
       contributions.overlay({ id: 'jabs.pursuit', title: `Pursuit (${context.plugins.get('J-ABS')?.parameters['actionMapId']})`, defaultOn: false, draw: () => undefined });
       contributions.lightingLayer({ id: 'jabs.glow', title: 'Glow', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) });
-      contributions.weatherLayer({ id: 'jabs.dust', title: 'Dust', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) });
+      contributions.weatherLayer({ id: 'jabs.dust', title: 'Dust', drawsOn: () => true, create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) });
       contributions.catalogEntry(pluginCommandEntry({ plugin: 'J-ABS', command: 'spawn', args: [] }));
       contributions.notice({ id: 'jabs.config', title: 'Battlers fight as their database says.', detail: 'Their config was not read.' });
       contributions.mapProperties({ id: 'jabs.map', title: 'Battles', source: () => ({ note: null, fields: [] }) });
@@ -335,7 +335,7 @@ describe('PluginModuleRegistry', () =>
         id: 'j',
         title: 'J',
         plugins: [],
-        register: add => add.weatherLayer({ id: 'core.x', title: 'x', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) }),
+        register: add => add.weatherLayer({ id: 'core.x', title: 'x', drawsOn: () => true, create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) }),
       },
     ];
 

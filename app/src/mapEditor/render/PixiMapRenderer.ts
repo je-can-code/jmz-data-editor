@@ -22,6 +22,7 @@ import {
   type RendererInfo,
   type TextureSource as ImageTextureSource,
   type TilesetTextures,
+  type WorldRect,
 } from '../core/renderer/MapRenderer.ts';
 import { precisePoint } from '../core/renderer/precisePoint.ts';
 import { castsTone } from '../core/renderer/screenTone.ts';
@@ -435,7 +436,7 @@ class PixiMapRenderer implements MapRenderer
       lowerTiles: new Container(),
       upperTiles: new Container(),
       weather: this.#weather.layer,
-      weatherClip: new Graphics(),
+      weatherClip: this.#weather.clip,
       lighting: this.#lighting.layer,
       markers: new Container(),
       dim: new Graphics(),
@@ -456,9 +457,10 @@ class PixiMapRenderer implements MapRenderer
     this.#slots.pointerLabel.visible = false;
 
     // the engine's order: lower tiles, events below and with characters, upper tiles, events above characters, then the
-    // weather, all of it in the one container a screen tone colours, as the engine's base sprite holds it. The markers go
-    // over the lighting, so an event no picture shows stays in sight on the darkest map, and the selection goes over the
-    // hover, which would otherwise hide it on the very tile just clicked.
+    // weather, all of it in the one container a screen tone colours, as the engine's base sprite holds it; the weather's
+    // clip rides beside it, so it moves and scales with the world. The markers go over the lighting, so an event no
+    // picture shows stays in sight on the darkest map, and the selection goes over the hover, which would otherwise hide
+    // it on the very tile just clicked.
     const { slots } = this;
     slots.game.addChild(
       slots.backdrop,
@@ -471,9 +473,6 @@ class PixiMapRenderer implements MapRenderer
       slots.weatherClip,
       slots.weather,
     );
-
-    // the clip rides beside the weather, so it moves and scales with the world; as a mask it is never drawn itself.
-    slots.weather.mask = slots.weatherClip;
     this.#world.addChild(
       slots.game,
       slots.lighting,
@@ -536,14 +535,17 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Chooses what the plugin modules draw into the weather layer, making each drawing once and keeping it for as long as
-   * its weather layer is handed over again; one no longer handed over is let go.
+   * Chooses what the plugin modules draw into the weather layer: a drawing is made only on a map its weather layer draws
+   * on, and kept for as long as that weather layer is handed over again; one no longer handed over is let go, and the
+   * view draws again without it.
    * @param {readonly WeatherLayerDefinition[]} definitions The weather layers of the active modules.
    */
   setWeatherLayers(definitions: readonly WeatherLayerDefinition[]): void
   {
-    this.#weather.setDefinitions(definitions);
-    this.#needsRender = true;
+    if (this.#weather.setDefinitions(definitions))
+    {
+      this.#needsRender = true;
+    }
   }
 
   /**
@@ -569,8 +571,9 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Starts the weather over, as on arriving at the map: every weather drawing is made afresh and settles as the game's
-   * does, in the next frame, for the part of the map the view shows then.
+   * Starts the weather over, as on arriving at the map: every weather drawing is let go, and each weather layer drawing
+   * on the map is made afresh and settles as the game's does, in the next frame, for the part of the map the view shows
+   * then.
    */
   resetWeather(): void
   {
@@ -1619,7 +1622,8 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Draws what is sized to the map: the black behind it, the weather's clip, the dimming, and the grid.
+   * Draws what is sized to the map: the black behind it, the dimming, and the grid. The weather's clip is drawn by the
+   * weather itself, and only on a map with weather to clip.
    * @param {number} width The map's width in tiles.
    * @param {number} height The map's height in tiles.
    */
@@ -1627,7 +1631,6 @@ class PixiMapRenderer implements MapRenderer
   {
     const { slots } = this;
     slots.backdrop.clear().rect(0, 0, width * TILE_SIZE, height * TILE_SIZE).fill(MAP_BACKDROP);
-    slots.weatherClip.clear().rect(0, 0, width * TILE_SIZE, height * TILE_SIZE).fill(0xffffff);
     slots.dim.clear().rect(0, 0, width * TILE_SIZE, height * TILE_SIZE).fill({ color: 0x000000, alpha: DIM_ALPHA });
     drawGrid(slots.grid, width, height, TILE_SIZE);
   }
@@ -1951,8 +1954,8 @@ class PixiMapRenderer implements MapRenderer
 
   /**
    * Brings the scene up to date for a frame: rebuilds the map when it went stale, places a new map whole on screen,
-   * moves the animation, culls to the camera, rebuilds dirty chunks and overlays, and lets the lighting draw when it is
-   * due, or move on with the clock when it is not.
+   * moves the animation, culls to the camera, rebuilds dirty chunks and overlays, and lets the lighting and the weather
+   * draw when they are due, or move on with the clock when they are not.
    * @param {number} now The frame's time.
    * @param {WebGLRenderer} pixi The renderer the frame draws with, which the lighting may draw into textures with.
    * @returns {{ changed: boolean, rebuiltChunks: number }} Whether anything changed, and how many tile chunks rebuilt.
@@ -1998,20 +2001,40 @@ class PixiMapRenderer implements MapRenderer
     changed = this.#refreshOverlays() || changed;
     if (document !== null)
     {
-      const clock = lightingClockAt(now, this.#fixedAnimation, this.#visibility.animate, this.#timeOfDay);
-      changed = this.#lighting.draw({ document, renderer: pixi, context: this.#contexts, clock, pages: this.#pages, view }) || changed;
-      changed = this.#weather.draw({
-        document,
-        renderer: pixi,
-        context: this.#contexts,
-        clock: weatherClockAt(now, this.#fixedAnimation, this.#visibility.animate),
-        view,
-        images: this.#images,
-        sky: this.#weatherSky,
-      }) || changed;
+      changed = this.#drawLightAndWeather(document, now, pixi, view) || changed;
     }
 
     return { changed, rebuiltChunks };
+  }
+
+  /**
+   * Lets the lighting draw, or move on with the clock, and the weather likewise. A map without weather costs the frame
+   * nothing: the weather is handed a frame only while it holds a drawing, or is due to ask whether the map has any.
+   * @param {MapDocument} document The map shown.
+   * @param {number} now The frame's time.
+   * @param {WebGLRenderer} pixi The renderer the frame draws with.
+   * @param {WorldRect} view The part of the map the frame shows.
+   * @returns {boolean} True when either changed what it shows.
+   */
+  #drawLightAndWeather(document: MapDocument, now: number, pixi: WebGLRenderer, view: WorldRect): boolean
+  {
+    const clock = lightingClockAt(now, this.#fixedAnimation, this.#visibility.animate, this.#timeOfDay);
+    const lit = this.#lighting.draw({ document, renderer: pixi, context: this.#contexts, clock, pages: this.#pages, view });
+    if (this.#weather.needsFrame === false)
+    {
+      return lit;
+    }
+
+    const fell = this.#weather.draw({
+      document,
+      renderer: pixi,
+      context: this.#contexts,
+      clock: weatherClockAt(now, this.#fixedAnimation, this.#visibility.animate),
+      view,
+      images: this.#images,
+      sky: this.#weatherSky,
+    });
+    return lit || fell;
   }
 
   /**

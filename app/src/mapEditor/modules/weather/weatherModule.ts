@@ -1,7 +1,10 @@
 import type { JsonValue } from '../../core/model/json.ts';
 import type { ModuleNotice, PluginModule } from '../../core/modules/PluginModule.ts';
+import type { WeatherFrame } from '../../core/renderer/weatherLayer.ts';
 import { MapWeather } from './mapWeather.ts';
 import { weatherConfigFrom } from './weatherPresets.ts';
+import { resolveWeather } from './weatherResolver.ts';
+import { weatherDeclarationOf } from './weatherTags.ts';
 
 /**
  * J-Weather's file name, as js/plugins.js lists it.
@@ -65,6 +68,19 @@ const weatherConfigNotice = (config: JsonValue | null, problem: string | undefin
 };
 
 /**
+ * Says whether J-Weather draws anything on a frame's map: a look its note names, or the sky's look on an outdoor map
+ * naming none, read from the note and the sky alone. A look the config does not know counts too, since only the config
+ * can say so, and reading the config is exactly what a map without weather never pays for.
+ * @param {WeatherFrame} frame The map and the sky.
+ * @returns {boolean} True when the map has weather.
+ */
+const drawsWeatherOn = (frame: WeatherFrame): boolean =>
+{
+  const declaration = weatherDeclarationOf(frame.document.property('note'));
+  return resolveWeather(declaration, frame.sky) !== null;
+};
+
+/**
  * What the editor knows of J-Weather: a map's own weather, from the look its note names, drawn into the weather layer as
  * the game draws it, its particles moved exactly as the plugin moves them and drawn with the project's own pictures,
  * sizes, colours, strengths and blends from config.weather.json. It sits where the game draws its weather, coloured by
@@ -91,6 +107,7 @@ const weatherModule: PluginModule = {
     contributions.weatherLayer({
       id: MAP_WEATHER_ID,
       title: 'Weather',
+      drawsOn: drawsWeatherOn,
       create: stage => new MapWeather(stage, config),
     });
   },

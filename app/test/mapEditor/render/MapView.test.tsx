@@ -400,6 +400,7 @@ describe('MapView', () =>
     const rain: WeatherLayerDefinition = {
       id: 'weather.map',
       title: 'Weather',
+      drawsOn: () => true,
       create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }),
     };
     const modules = {

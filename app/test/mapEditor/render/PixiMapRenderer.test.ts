@@ -263,30 +263,34 @@ describe('PixiMapRenderer', () =>
         .toStrictEqual([ true, false, true ]);
     });
 
-    it('makes each module\'s weather on a container of its own inside the weather layer, and lets it go with the renderer', () =>
+    it('hands the modules\' weather layers to its weather, which makes nothing until a frame, and lets it go with the renderer', () =>
     {
-      // Arrange: a weather layer whose drawing notes where it was made and when it is let go.
+      // Arrange: a weather layer that draws on every map, and an ear on what the weather is handed.
       const renderer = new PixiMapRenderer();
-      const log: string[] = [];
-      const stages: Container[] = [];
+      const made: string[] = [];
       const rain: WeatherLayerDefinition = {
         id: 'weather.map',
         title: 'Weather',
-        create: stage =>
+        drawsOn: () => true,
+        create: () =>
         {
-          stages.push(stage.layer);
-          return { draw: () => undefined, tick: () => false, destroy: () => log.push('let go') };
+          made.push('made');
+          return { draw: () => undefined, tick: () => false, destroy: () => undefined };
         },
       };
+      const handed = vi.spyOn(WeatherLayers.prototype, 'setDefinitions');
 
       // Act.
       renderer.setWeatherLayers([ rain ]);
-      const children = [ ...renderer.weatherLayer.children ];
+      const { weatherLayer, slots } = renderer;
+      const children = weatherLayer.children.length;
       renderer.destroy();
+      const calls = handed.mock.calls.map(([ definitions ]) => definitions);
+      handed.mockRestore();
 
-      // Assert.
-      expect([ children, log ])
-        .toStrictEqual([ stages, [ 'let go' ] ]);
+      // Assert: handed over as given, nothing made without a frame, and the layer and its clip let go.
+      expect([ calls, made, children, weatherLayer.destroyed, slots.weatherClip.destroyed ])
+        .toStrictEqual([ [ [ rain ] ], [], 0, true, true ]);
     });
 
     it('passes every change to its map on to the weather, a tile edit as well as a change to the note', () =>
@@ -327,28 +331,21 @@ describe('PixiMapRenderer', () =>
         .toStrictEqual([ null, { preset: 'rain', intensity: 'heavy' }, 1 ]);
     });
 
-    it('starts the weather over when asked, making every drawing afresh', () =>
+    it('starts the weather over when asked, and says what the weather shows, nothing while it holds no drawing', () =>
     {
-      // Arrange: a renderer with one weather layer, whose drawings are counted as they are made and let go.
+      // Arrange: a renderer, and an ear on the weather being started over.
       const renderer = new PixiMapRenderer();
       built.push(renderer);
-      const log: string[] = [];
-      renderer.setWeatherLayers([ {
-        id: 'weather.map',
-        title: 'Weather',
-        create: () =>
-        {
-          log.push('made');
-          return { draw: () => undefined, tick: () => false, destroy: () => log.push('let go'), describe: () => ({ shown: log.length }) };
-        },
-      } ]);
+      const reset = vi.spyOn(WeatherLayers.prototype, 'reset');
 
       // Act.
       renderer.resetWeather();
+      const calls = reset.mock.calls.length;
+      reset.mockRestore();
 
-      // Assert: the first let go and a second made, which says what it shows.
-      expect([ log, renderer.weatherDescriptions() ])
-        .toStrictEqual([ [ 'made', 'let go', 'made' ], [ { shown: 3 } ] ]);
+      // Assert.
+      expect([ calls, renderer.weatherDescriptions() ])
+        .toStrictEqual([ 1, [] ]);
     });
   });
 

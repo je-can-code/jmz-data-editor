@@ -1,11 +1,15 @@
-import { Container } from 'pixi.js';
+import { Container, type Renderer } from 'pixi.js';
 import { describe, expect, it } from 'vitest';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
+import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import type { SkyWeather, WeatherFrame } from '../../../../src/mapEditor/core/renderer/weatherLayer.ts';
 import { MapWeather } from '../../../../src/mapEditor/modules/weather/mapWeather.ts';
 import { MAP_WEATHER_ID, WEATHER_CONFIG_NOTICE_ID, weatherConfigNotice, weatherModule } from '../../../../src/mapEditor/modules/weather/weatherModule.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
+import { buildMapJson } from '../../support/fixtures.ts';
+import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
 
 /*
  * J-Weather's module switches on only while J-Weather is enabled in js/plugins.js, which is what offers every map view
@@ -68,6 +72,36 @@ describe('weatherModule', () =>
     // Assert.
     expect(registries.map(registry => [ registry.isActive('weather'), registry.weatherLayers().length ]))
       .toStrictEqual([ [ false, 0 ], [ false, 0 ] ]);
+  });
+
+  it('draws on a map naming a look, and on an open-sky map under a sky, but not on one opting out, naming none, or roofed', () =>
+  {
+    // Arrange: the module's weather layer, and maps by their notes, each under a sky or none.
+    const [ layer ] = activated([ plugin('j/weather/J-Weather') ]).weatherLayers();
+    const sky: SkyWeather = { preset: 'rain', intensity: 'heavy' };
+    const frameOf = (note: string, given: SkyWeather | null): WeatherFrame => ({
+      document: MapDocument.fromJson('map:1', { ...buildMapJson(), note }),
+      renderer: {} as Renderer,
+      context: 1,
+      clock: { frames: 0, animating: true },
+      view: WHOLE_VIEW,
+      images: null,
+      sky: given,
+    });
+    const cases: [ string, SkyWeather | null ][] = [
+      [ '<weather:snow>', null ],
+      [ '', sky ],
+      [ '<weather:snow>\n<noWeather>', sky ],
+      [ '', null ],
+      [ '<noToneChange>', sky ],
+    ];
+
+    // Act.
+    const draws = cases.map(([ note, given ]) => layer.drawsOn(frameOf(note, given)));
+
+    // Assert.
+    expect(draws)
+      .toStrictEqual([ true, true, false, false, false ]);
   });
 
   it('makes a map\'s weather for each view, from the config it read', () =>

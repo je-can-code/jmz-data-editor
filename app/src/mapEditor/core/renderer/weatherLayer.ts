@@ -81,12 +81,15 @@ type WeatherFrame = {
 };
 
 /**
- * One module's weather in one map view, made of plain pixi display objects it adds to its stage's container.
+ * One module's weather in one map view, made of plain pixi display objects it adds to its stage's container. It is made
+ * only once the view shows a map its weather layer draws on, and let go again once the view shows one it draws nothing
+ * on, so a map without weather costs the view nothing for it.
  *
- * The view asks it to draw in the frame after the map opened, after anything on the map but its tiles changed, after the
- * sky changed, and after the graphics card gave the view's context back; however many changes arrive before that frame,
- * it draws once. While the Weather switch is off it is not asked at all, and draws once the switch is back on. What it
- * does with each ask is its own business: it may well find the weather it shows is still the map's, and keep it as it is.
+ * The view asks it to draw in the frame after it was made, after the map opened, after anything on the map but its tiles
+ * changed, after the sky changed, and after the graphics card gave the view's context back; however many changes arrive
+ * before that frame, it draws once. While the Weather switch is off it is not asked at all, and draws once the switch is
+ * back on. What it does with each ask is its own business: it may well find the weather it shows is still the map's, and
+ * keep it as it is.
  *
  * In every other frame the view shows the weather, it hands the drawing the clock instead, through {@link tick}: that is
  * where the weather falls, drifts and rises. A view behind another tab, a closed one, or one with its Weather switch off
@@ -123,14 +126,25 @@ interface WeatherDrawing
 
 /**
  * Something a plugin module draws into every map view's weather layer, such as J-Weather's look of a map: an id named
- * after its module, what the editor calls it, and how to make its drawing for one view.
+ * after its module, what the editor calls it, whether it draws anything on a map, and how to make its drawing for one
+ * view.
  */
 type WeatherLayerDefinition = {
   readonly id: `${string}.${string}`;
   readonly title: string;
 
   /**
-   * Makes the drawing for one map view, once per view.
+   * Says whether it draws anything on the frame's map under the frame's sky, from the map and the sky alone, without
+   * loading or making anything: a map it draws nothing on gets no drawing, no clip and no work in any frame. The view
+   * asks when the map opens or is swapped, when anything on the map but its tiles changes, and when the sky changes.
+   * @param {WeatherFrame} frame The map, the renderer, the clock and the sky.
+   * @returns {boolean} True when it draws something there.
+   */
+  readonly drawsOn: (frame: WeatherFrame) => boolean;
+
+  /**
+   * Makes the drawing for one map view, the first time the view shows a map it draws on, and again for the first such
+   * map after one it drew nothing on.
    * @param {WeatherStage} stage Where it draws.
    * @returns {WeatherDrawing} The drawing.
    */
