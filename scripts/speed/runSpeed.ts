@@ -3,8 +3,8 @@
  * The map editor's speed script: opens the heavy fixture maps in the real map editor page, in headless chromium on
  * the machine's real GPU (spike S3's recipe), and fails on any speed budget from the plan's D3.
  *
- *   bun run speed [--runs 3] [--seconds 5] [--maps 102,361] [--time 22:00] [--ui-port 18200] [--api-port 18201]
- *                 [--scratch <base folder>] [--project <game>] [--json <file>]
+ *   bun run speed [--runs 3] [--seconds 5] [--maps 102,361] [--time 22:00] [--sky snow:heavy] [--ui-port 18200]
+ *                 [--api-port 18201] [--scratch <base folder>] [--project <game>] [--json <file>]
  *
  * Each invocation builds the editor afresh in a folder of its own inside the base folder (the system's temporary
  * folder unless --scratch names another), so it always times the code as it stands and never shares a build or a
@@ -12,7 +12,11 @@
  *
  * Every map in every run gets a fresh browser, so every open is cold. With --time, every map is opened at that hour of
  * the window's clock, from its first frame, so a map whose lights show only at night is measured with them on show;
- * left out, the clock stands where the game starts. Per map it measures, with the game look and every overlay on:
+ * left out, the clock stands where the game starts. With --sky, the weather is measured under a sky with that look and
+ * strength, as J-Weather-Time hands one to J-Weather: an outdoor map naming no look of its own shows the sky's, and one
+ * naming its own shows it at the sky's strength, so a heavy look can be put on a map that names none; each map's report
+ * says what weather it drew and how many particles that came to at the view it opened with. Per map it measures, with
+ * the game look and every overlay on:
  *   - the cold open: navigation start to the first frame that showed the map complete, sprites and parallax loaded;
  *   - five paths driven from the page's own frame clock: a pan at zoom 1, a zoom sweep from 2x out to the whole map
  *     and back, the whole map held on screen and drifting, the whole map held still while the window's clock sweeps
@@ -63,6 +67,7 @@ type Options = {
   seconds: number;
   maps: number[];
   time: string | undefined;
+  sky: { preset: string; intensity: string } | null;
   uiPort: number;
   apiPort: number;
   scratch: string;
@@ -102,6 +107,11 @@ type MapResult = {
   report: GpuReport;
   pageGpu: string;
   info: unknown;
+
+  /**
+   * The weather the map drew while it was measured, in words, with its particles per layer at the view it opened with.
+   */
+  weather: string;
   coldOpenMs: number;
   timings: Record<string, number>;
   paths: Record<string, PathResult>;
@@ -167,6 +177,10 @@ type PageHooks = {
   enableModuleRings: () => void;
   paintState: () => { steps: number; redrawnFrames: number };
   enableEveryOverlay: () => void;
+  weather: {
+    setSky: (sky: { preset: string; intensity: string } | null) => void;
+    describe: () => ({ weather: { preset: string; intensity: string } | null; layers: { asset: string | null; stats: { count: number } }[] } | null)[];
+  };
   openMap: (mapId: number) => Promise<{ ms: number }>;
   showAgain: () => Promise<{ ms: number; hidden: string; shown: string }>;
   events: {
@@ -189,6 +203,11 @@ const PATHS = [ 'pan', 'zoom', 'zoomedout', 'clock', 'slider' ];
  * A time of day as --time takes it: hours and minutes on a 24-hour clock.
  */
 const TIME_OPTION = /^([01]?\d|2[0-3]):[0-5]\d$/u;
+
+/**
+ * A sky as --sky takes it: a look's name, a colon, and its strength.
+ */
+const SKY_OPTION = /^([a-zA-Z][a-zA-Z0-9_-]*):(light|moderate|heavy)$/u;
 
 /**
  * How many pointer moves a stroke makes, 4 ms apart, as a hand dragging a pen would.
@@ -258,11 +277,19 @@ const parseOptions = (argv: string[]): Options =>
     throw new Error(`--time takes an hour and minutes on a 24-hour clock, such as 22:00, not ${time}`);
   }
 
+  const sky = flags.get('sky');
+  const skyMatch = sky === undefined ? null : SKY_OPTION.exec(sky);
+  if (sky !== undefined && skyMatch === null)
+  {
+    throw new Error(`--sky takes a look and its strength, such as snow:heavy, not ${sky}`);
+  }
+
   return {
     runs: Number(flags.get('runs') ?? 3),
     seconds: Number(flags.get('seconds') ?? 5),
     maps: (flags.get('maps') ?? '102,361').split(',').map(Number),
     time,
+    sky: skyMatch === null ? null : { preset: skyMatch[1], intensity: skyMatch[2] },
     uiPort: Number(flags.get('ui-port') ?? 18200),
     apiPort: Number(flags.get('api-port') ?? 18201),
     scratch: flags.get('scratch') ?? tmpdir(),
@@ -867,7 +894,21 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
     const timings = await page.evaluate(() => ({ ...(window as unknown as HookWindow).__jmzMapView.timings }));
     const coldOpenMs = timings['drawnAt'] ?? -1;
     await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.enableEveryOverlay());
+
+    // the sky asked for, if any, falls on the map before anything is measured, so every path draws it.
+    await page.evaluate(sky => (window as unknown as HookWindow).__jmzMapView.weather.setSky(sky), options.sky);
     await page.waitForTimeout(1000);
+    const weather = await page.evaluate(() =>
+    {
+      const [ drawn ] = (window as unknown as HookWindow).__jmzMapView.weather.describe();
+      if (drawn === undefined || drawn === null || drawn.weather === null)
+      {
+        return 'none';
+      }
+
+      const counts = drawn.layers.map(layer => `${layer.stats.count} ${layer.asset}`);
+      return `${drawn.weather.preset} ${drawn.weather.intensity}: ${counts.join(' + ')} particles`;
+    });
 
     // the hour everything after is measured at, read once the plugin modules have surely switched on.
     const minutes = await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.time());
@@ -929,6 +970,7 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
       report,
       pageGpu,
       info,
+      weather,
       coldOpenMs,
       timings,
       paths,
@@ -975,6 +1017,7 @@ const verdictText = (verdict: Verdict): string =>
 const printMap = (result: MapResult): void =>
 {
   console.log(`Map${result.map} run ${result.run} at ${result.time}: load ${result.loadBefore.toFixed(2)} -> ${result.loadAfter.toFixed(2)}`);
+  console.log(`  weather ${result.weather}`);
   console.log(`  cold open ${cell(result.coldOpenMs, 1)} ms  ${verdictText(result.verdicts['coldOpen'])}`);
   console.log(`  warm open ${cell(result.warmOpenMs, 1)} ms  ${verdictText(result.verdicts['warmOpen'])}`);
   console.log(`  shown again ${cell(result.shownAgainMs, 1)} ms  ${verdictText(result.verdicts['shownAgain'])}`);
