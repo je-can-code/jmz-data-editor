@@ -68,9 +68,11 @@ class WeatherLayers
   {
     this.#tileSize = tileSize;
 
-    // the layer is clipped from the start, and left out of every frame until it holds a drawing.
-    this.layer.mask = this.clip;
+    // the layer is left out of every frame until it holds a drawing, and clipped from its first. The clip is never drawn
+    // or measured as part of the scene, as pixi treats any mask, even before it becomes one.
     this.layer.renderable = false;
+    this.clip.includeInBuild = false;
+    this.clip.measurable = false;
   }
 
   /**
@@ -195,8 +197,8 @@ class WeatherLayers
 
   /**
    * Gives each weather layer that draws on the frame's map a drawing, made now if it had none, in the order the modules
-   * contributed them, and lets go of each drawing whose weather layer draws nothing there; the clip follows the map's
-   * size once there is weather to clip.
+   * contributed them, and lets go of each drawing whose weather layer draws nothing there; once there is weather to
+   * clip, the layer is clipped, and the clip follows the map's size.
    * @param {WeatherFrame} frame The frame.
    */
   #choose(frame: WeatherFrame): void
@@ -242,11 +244,17 @@ class WeatherLayers
   }
 
   /**
-   * Draws the clip as the map's own rectangle, unless it already is one of this size.
+   * Draws the clip as the map's own rectangle, unless it already is one of this size, and clips the layer by it the
+   * first time there is weather to clip; until then no mask is made at all.
    * @param {MapDocument} document The map.
    */
   #clipTo(document: MapDocument): void
   {
+    if (this.layer.mask !== this.clip)
+    {
+      this.layer.mask = this.clip;
+    }
+
     const { width, height } = document;
     if (width === this.#clipped.width && height === this.#clipped.height)
     {

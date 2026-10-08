@@ -416,7 +416,7 @@ describe('WeatherLayers', () =>
     const clears = vi.spyOn(weather.clip, 'clear');
     weather.setDefinitions([ loggedLayer('weather.map', []).definition ]);
     const bigger = MapDocument.fromJson('map:8', { ...buildMapJson(), width: 5, height: 4, data: Array.from({ length: 5 * 4 * 6 }, () => 0) });
-    const emptyBefore = weather.clip.getLocalBounds().width;
+    const before = [ weather.layer.mask === weather.clip, weather.clip.includeInBuild, weather.clip.getLocalBounds().width ];
 
     // Act: a frame, the same map again, then the bigger map, reading the clip's size after the first and the last.
     const sizeOf = () =>
@@ -432,10 +432,10 @@ describe('WeatherLayers', () =>
     weather.draw(frame(0, bigger));
     const big = sizeOf();
 
-    // Assert: nothing to clip before, then the map's rectangle in world pixels, drawn once per size, and the layer
-    // clipped by it all along.
-    expect([ emptyBefore, small, big, clears.mock.calls.length, weather.layer.mask ])
-      .toStrictEqual([ 0, [ 144, 96 ], [ 240, 192 ], 2, weather.clip ]);
+    // Assert: no mask and an empty clip kept out of the scene's drawing before, then the map's rectangle in world pixels,
+    // drawn once per size, the layer clipped by it.
+    expect([ before, small, big, clears.mock.calls.length, weather.layer.mask === weather.clip ])
+      .toStrictEqual([ [ false, false, 0 ], [ 144, 96 ], [ 240, 192 ], 2, true ]);
   });
 
   it('reports a module whose answer throws on its own, makes no drawing for it, and still draws the others', () =>

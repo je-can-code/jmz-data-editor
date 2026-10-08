@@ -239,9 +239,10 @@ describe('PixiMapRenderer', () =>
       const pastUpperTiles = children.indexOf(slots.weatherClip) - children.indexOf(slots.upperTiles);
       const lightingAboveGame = world.children.indexOf(slots.lighting) > world.children.indexOf(slots.game);
 
-      // Assert: the clip rides beside the weather it masks, after the events above characters.
-      expect([ top, pastUpperTiles, lightingAboveGame, slots.weather.mask, renderer.weatherLayer ])
-        .toStrictEqual([ [ slots.weatherClip, slots.weather ], 2, true, slots.weatherClip, slots.weather ]);
+      // Assert: the clip rides beside the weather it masks once there is weather, after the events above characters, and
+      // is never drawn itself.
+      expect([ top, pastUpperTiles, lightingAboveGame, slots.weatherClip.includeInBuild, renderer.weatherLayer ])
+        .toStrictEqual([ [ slots.weatherClip, slots.weather ], 2, true, false, slots.weather ]);
     });
 
     it('shows the weather layer only while the layer visibility\'s weather is on', () =>
