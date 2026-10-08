@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -100,6 +102,51 @@ func TestArrivalsAcrossTheRealMaps(t *testing.T) {
 	}
 }
 
+// TestEventNotesAcrossTheRealMaps asks the game's own project for every event note that holds anything, as the map
+// editor does to count each blueprint's copies, and holds the answer against a plain reading of every map file the
+// game loads: the very same notes, byte for byte, by map and then event, and none missing. It finds the project as
+// the placements sweep does. Chef Adventure's notes are nearly all empty (one held text when this was written: stab
+// 3's on the action map), so the comparison is exact rather than a floor, and the floor is on the maps swept.
+func TestEventNotesAcrossTheRealMaps(t *testing.T) {
+	// Arrange- every map the game loads, read plainly.
+	dataDir := gametest.DataDir(t)
+	root := filepath.Dir(dataDir)
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := []EventNote{}
+	swept := 0
+	rawMaps := map[int][]*rawEvent{}
+	mapIds := []int{}
+	for _, entry := range entries {
+		if mapId, isMap := mapIdOfFile(entry.Name()); isMap {
+			mapIds = append(mapIds, mapId)
+		}
+	}
+	slices.Sort(mapIds)
+	for _, mapId := range mapIds {
+		swept++
+		for _, event := range rawEventsOf(t, dataDir, mapId, rawMaps) {
+			if event != nil && event.Note != "" {
+				expected = append(expected, EventNote{MapId: mapId, EventId: event.Id, Note: event.Note})
+			}
+		}
+	}
+	index, _ := newCountingIndex(t, watch.NewHub("data"))
+
+	// Act.
+	found, err := index.EventNotes(root)
+
+	// Assert.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swept < 300 || reflect.DeepEqual(found, expected) == false {
+		t.Errorf("swept %d maps; answered %+v\nexpected %+v", swept, found, expected)
+	}
+}
+
 // assertLandsFromItsMap checks one arrival against the events of the map it is on, read without the models.
 func assertLandsFromItsMap(t *testing.T, events []*rawEvent, targetMapId int, arrival Arrival) {
 	t.Helper()
@@ -129,6 +176,7 @@ func assertLandsFromItsMap(t *testing.T, events []*rawEvent, targetMapId int, ar
 type rawEvent struct {
 	Id    int    `json:"id"`
 	Name  string `json:"name"`
+	Note  string `json:"note"`
 	X     int    `json:"x"`
 	Y     int    `json:"y"`
 	Pages []struct {

@@ -28,6 +28,38 @@ type MapArrivals struct {
 	Arrivals []placements.Arrival `json:"arrivals"`
 }
 
+// EventNotes is what GET /api/event-notes answers with.
+type EventNotes struct {
+	// Notes are every event note holding anything, on every map, by map id and then event: an empty list,
+	// never null, when there are none.
+	Notes []placements.EventNote `json:"notes"`
+}
+
+// LoadEventNotes serves GET /api/event-notes: the note of every map event, on any map, whose note holds
+// anything, with its map and event ids, inside the usual envelope. The map editor counts the copies of
+// each blueprint from them, since a copy carries its link to the blueprint in its note. The same index
+// as the placements keeps what it read until the change stream says a map changed, so asking again after
+// every save costs one map's reading. A map that cannot be read strictly is a 500 whose envelope names
+// the file.
+func LoadEventNotes(index *placements.Index) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+		var req RestRequest
+		if req.ToRestRequest(responseWriter, httpRequest) != nil {
+			return
+		}
+
+		found, err := index.EventNotes(req.ProjectPath)
+
+		var res RestResponse[*EventNotes]
+		if err != nil {
+			res.ToRestResponse(responseWriter, req.ProjectPath, err.Error(), nil, http.StatusInternalServerError)
+			return
+		}
+
+		res.ToRestResponse(responseWriter, req.ProjectPath, "", &EventNotes{Notes: found}, http.StatusOK)
+	}
+}
+
 // LoadMapArrivals serves GET /api/maps/{mapId}/arrivals: every Transfer Player command, on any map, that
 // names outright a tile of this map as where it lands, with the map it is on, its event and page, and the
 // tile, inside the usual envelope. A resize moving this map's tiles leaves each of them pointing at the old

@@ -62,10 +62,12 @@ type Arrival struct {
 	Y int `json:"y"`
 }
 
-// mapFacts is what the index keeps of one map once read: its battlers, and the transfers on it.
+// mapFacts is what the index keeps of one map once read: its battlers, the transfers on it, and the notes its events
+// hold.
 type mapFacts struct {
 	battlers  []battler
 	transfers []transfer
+	notes     []eventNote
 }
 
 // Subscriber is where an index hears that files changed: the server's change stream, a *watch.Hub.
@@ -73,11 +75,11 @@ type Subscriber interface {
 	Subscribe(root string) (*watch.Subscription, error)
 }
 
-// Index answers where an enemy is placed, and which transfers land on a map, from a scan of every map that it
-// keeps until a map changes.
+// Index answers where an enemy is placed, which transfers land on a map, and what the events' notes hold, from a
+// scan of every map that it keeps until a map changes.
 //
-// Finding either means decoding every map, far too slow to repeat for each answer, so each map's battlers and
-// transfers are kept once found and forgotten when the change stream says that map changed. To hear
+// Finding any of them means decoding every map, far too slow to repeat for each answer, so each map's battlers,
+// transfers and notes are kept once found and forgotten when the change stream says that map changed. To hear
 // every change, the index listens for as long as it lives, and starts before it reads anything, which
 // keeps the stream's watcher running from the first answer on. It applies what it heard at the start
 // of each answer rather than as changes arrive, so no answer given after a change was announced can
@@ -103,7 +105,7 @@ type Index struct {
 	// names are the map tree's names by map id, or nil when MapInfos.json must be read again.
 	names map[int]string
 
-	// scanned holds the battlers and transfers of every map read since it last changed, by map id.
+	// scanned holds the battlers, transfers and notes of every map read since it last changed, by map id.
 	scanned map[int]mapFacts
 }
 
@@ -167,6 +169,30 @@ func (index *Index) Arrivals(root string, targetMapId int) ([]Arrival, error) {
 					Y:         landing.y,
 				})
 			}
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return found, nil
+}
+
+// EventNotes answers every event note in the project at root that holds anything, by map id and then event, each
+// exactly as its map file holds it. Nearly every event's note is empty, and those are left out. The list is empty,
+// never nil, when there are none. The map editor counts the copies of each blueprint from these, since a copy's note
+// is where its link to the blueprint lives.
+//
+// A map that cannot be read strictly fails the whole answer, naming its file, rather than leaving its notes out of a
+// list that would look complete: a blueprint whose copies on that map went uncounted could be deleted from under them.
+func (index *Index) EventNotes(root string) ([]EventNote, error) {
+	index.mu.Lock()
+	defer index.mu.Unlock()
+
+	found := []EventNote{}
+	err := index.eachMap(root, func(mapId int, _ string, facts mapFacts) {
+		for _, held := range facts.notes {
+			found = append(found, EventNote{MapId: mapId, EventId: held.eventId, Note: held.note})
 		}
 	})
 	if err != nil {
@@ -324,7 +350,7 @@ func (index *Index) mapNames() (map[int]string, error) {
 	return names, nil
 }
 
-// scan returns a map's battlers and transfers, reading the map only when they are not already known.
+// scan returns a map's battlers, transfers and notes, reading the map only when they are not already known.
 // Only a clean read is kept, so a map that failed is read afresh next time rather than failing from
 // memory.
 func (index *Index) scan(mapId int) (mapFacts, error) {
@@ -342,8 +368,8 @@ func (index *Index) scan(mapId int) (mapFacts, error) {
 		return mapFacts{}, fmt.Errorf("%s: %w", relativePath, err)
 	}
 
-	// a map the battler scan accepted holds a map, so its transfers can be read from it.
-	facts := mapFacts{battlers: battlers, transfers: transfersOnMap(gameMap)}
+	// a map the battler scan accepted holds a map, so its transfers and notes can be read from it.
+	facts := mapFacts{battlers: battlers, transfers: transfersOnMap(gameMap), notes: notesOnMap(gameMap)}
 	index.scanned[mapId] = facts
 	return facts, nil
 }
