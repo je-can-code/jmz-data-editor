@@ -8,12 +8,18 @@
  * its tiles under the sky: with the screen's tone over them, as the base layer's colour filter casts it, and the light
  * mask multiplied over that whenever the hour or the map darkens it.
  *
+ * A map asked for its weather is read instead of drawn pass by pass: what J-Weather resolved for it, where its plane
+ * sits in the sprite tree against the tone and the dark, and every layer on the plane, its pictures, blend, tint, the
+ * layer as resolved and its population summed up; then the whole spriteset is drawn as the player sees it, weather and
+ * all. Before the first such map the probe holds J-Weather-Time's sky off, noting what it was doing on the fresh save,
+ * so every map's weather resolves as J-Weather alone resolves it: a tagged map at its middle strength.
+ *
  * It is serialized with toString() and run inside NW.js ahead of the game's own scripts, so it must stay one
  * self-contained function in plain JavaScript: nothing from this module's scope survives the trip, and the engine's
  * globals (SceneManager, $gameMap and the rest) are reached through the window. Its whole body runs inside try blocks,
  * because a probe that throws stops ticking and writes nothing, which from outside looks like a game that never booted.
  */
-import type { ProbeConfig, ProbeMap, ProbeReport } from './probeTypes.ts';
+import type { ProbeConfig, ProbeMap, ProbeReport, WeatherLayerProbe } from './probeTypes.ts';
 
 /**
  * The probe itself. Kept free of anything but plain JavaScript, see the module's comment.
@@ -26,7 +32,7 @@ const parityProbe = (config: ProbeConfig): void =>
   const fs = nodeRequire('fs');
   const { Buffer: NodeBuffer } = nodeRequire('buffer');
   const engine = window as unknown as Record<string, any>;
-  const report: ProbeReport = { phase: 'boot', screen: { width: 0, height: 0 }, captures: [], events: {}, clocks: {}, errors: [], log: [] };
+  const report: ProbeReport = { phase: 'boot', screen: { width: 0, height: 0 }, captures: [], events: {}, clocks: {}, weather: {}, errors: [], log: [] };
 
   // the game must never make a sound: every audio context it makes stays suspended, and media elements stay muted.
   // The launch also carries --mute-audio; this holds even if a launch ever forgets it.
@@ -331,11 +337,198 @@ const parityProbe = (config: ProbeConfig): void =>
       + ` base filters [${filters}], ${lights.length} lights: ${lights.join('; ')}`);
   };
 
+  // sums up one number across a population: its least, its greatest and its mean, all three 0 for no one.
+  const spreadOf = (values: number[]): { min: number; max: number; mean: number } =>
+  {
+    if (values.length === 0)
+    {
+      return { min: 0, max: 0, mean: 0 };
+    }
+
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    let sum = 0;
+    values.forEach(value =>
+    {
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+      sum += value;
+    });
+    return { min, max, mean: sum / values.length };
+  };
+
+  // reads one layer of J-Weather's plane: its pictures and their sizes (the engine's empty picture is none), its blend
+  // and tint as its sprites carry them, the layer as resolved, and its population summed up the way the editor sums its
+  // own: first-life particles for speed, size, turn and lifetime, and every particle for how strongly it draws, as its
+  // sprite is drawn with it (nothing while it waits, its glow otherwise).
+  const describeWeatherLayer = (layer: any): WeatherLayerProbe =>
+  {
+    const params = layer.layer();
+    const particles: any[] = layer.particles();
+    const sprites: any[] = layer.children;
+    const width = engine.Graphics.width;
+    const height = engine.Graphics.height;
+    const strengths = particles.map((particle, index) => (particle.stagger > 0 ? 0 : engine.WeatherMotion.glowFor(particle, layer.paramsFor(index))));
+    const first = particles.filter(particle => particle.stage === 0);
+    const firstIndex = particles.findIndex(particle => particle.stage === 0);
+    const stageIndex = particles.findIndex(particle => particle.stage > 0);
+    const sizeOf = (bitmap: any): number[] | null =>
+    {
+      return bitmap === undefined || bitmap === null || bitmap === engine.ImageManager._emptyBitmap || bitmap.isReady() === false
+        ? null
+        : [ bitmap.width, bitmap.height ];
+    };
+    const firstSprite = sprites[firstIndex >= 0 ? firstIndex : 0];
+    const onScreen = particles.filter(particle => particle.x >= 0 && particle.x <= width && particle.y >= 0 && particle.y <= height);
+
+    // a population just settled holds no particle in its second life yet, so the stage's picture is read from where the
+    // layer's sprites take it, the engine's own cache of what has loaded.
+    const stage = params.becomes === null || params.becomes === undefined ? null : params.becomes;
+    const stageBitmap = stageIndex >= 0 ? sprites[stageIndex].bitmap : (stage === null ? null : engine.ImageManager.loadWeather(stage.asset));
+    return {
+      asset: params.asset ?? null,
+      becomesAsset: stage === null ? null : stage.asset ?? null,
+      pictureSize: sizeOf(firstSprite?.bitmap),
+      becomesPictureSize: sizeOf(stageBitmap),
+      blend: firstSprite === undefined ? null : firstSprite.blendMode,
+      tint: firstSprite === undefined ? null : firstSprite.tint,
+      layer: JSON.parse(JSON.stringify(params)),
+      stats: {
+        count: particles.length,
+        firstLife: first.length,
+        secondLife: particles.length - first.length,
+        waiting: particles.filter(particle => particle.stagger > 0).length,
+        onScreen: particles.length === 0 ? 0 : onScreen.length / particles.length,
+        velocityX: spreadOf(first.map(particle => particle.velocityX)),
+        velocityY: spreadOf(first.map(particle => particle.velocityY)),
+        scaleX: spreadOf(first.map(particle => particle.scaleX * Math.cos(particle.flipPhase))),
+        scaleY: spreadOf(first.map(particle => particle.scaleY)),
+        rotation: spreadOf(first.map(particle => particle.rotation)),
+        life: spreadOf(first.map(particle => particle.life)),
+        opacity: spreadOf(strengths),
+      },
+    };
+  };
+
+  // reads a map's weather and draws the whole spriteset at the asked display: where the plane sits against the tone
+  // (the base sprite's colour filter) and the dark (J-Lighting's mask beside the base sprite), every layer on it, and
+  // the picture the player would see there, characters but the events set aside. The weather is settled afresh first,
+  // exactly as on arriving, and read and drawn before a frame moves it, which is the moment the editor reads its own:
+  // a population a few frames on from settling has more of its queued particles in view and faded in.
+  const captureWeather = (map: ProbeMap): void =>
+  {
+    const view = map.weather as { x: number; y: number };
+    const spriteset = engine.SceneManager._scene._spriteset;
+
+    // what the sky does on the fresh save, read once, for the record: the sky held off never wound its forecast on.
+    if (report.freshSky === undefined && engine.ForecastDirector !== undefined)
+    {
+      try
+      {
+        engine.ForecastDirector.advance(engine.$gameTime);
+        report.freshSky = { ...engine.ForecastDirector.skyFor(engine.$gameTime), at: (engine.$gameTime.hours() * 60) + engine.$gameTime.minutes() };
+      }
+      catch (error)
+      {
+        report.freshSky = `unread: ${String(error)}`;
+      }
+    }
+
+    spriteset.refreshWeatherLayers();
+    spriteset.weatherPlane().children.forEach((layer: any) => layer.particles().forEach((_: unknown, index: number) => layer.drawParticle(index)));
+    engine.$gameMap.setDisplayPos(view.x, view.y);
+    const display = { x: engine.$gameMap.displayX(), y: engine.$gameMap.displayY() };
+    spriteset.updateCharacterSleep?.();
+    spriteset._characterSprites.forEach((sprite: any) =>
+    {
+      if ((sprite._character instanceof engine.Game_Event) === false)
+      {
+        sprite.hide();
+      }
+
+      sprite.update();
+    });
+    spriteset.updateTilemap();
+    spriteset.updateParallax();
+    const mask = typeof spriteset.lightMask === 'function' ? spriteset.lightMask() : null;
+    mask?.update();
+
+    const plane = spriteset.weatherPlane();
+    const base = spriteset._baseSprite;
+    const nameOf = (child: any): string =>
+    {
+      if (child === plane)
+      {
+        return 'WeatherPlane';
+      }
+
+      if (child === base)
+      {
+        return 'BaseSprite';
+      }
+
+      return child === mask ? 'LightMask' : child.constructor.name;
+    };
+    const depth = {
+      spriteset: spriteset.children.map(nameOf),
+      baseIndex: spriteset.children.indexOf(base),
+      baseFilters: (base.filters ?? []).map((filter: any) => filter.constructor.name),
+      base: base.children.map(nameOf),
+      planeIndex: base.children.indexOf(plane),
+      maskIndex: mask === null ? -1 : spriteset.children.indexOf(mask),
+      tone: [ ...engine.$gameScreen.tone() ],
+    };
+
+    const { renderer } = engine.Graphics.app;
+    const texture = engine.PIXI.RenderTexture.create({ width: engine.Graphics.width, height: engine.Graphics.height });
+    renderer.render(spriteset, texture);
+    const url: string = renderer.extract.base64(texture);
+    texture.destroy(true);
+    const file = `game-weather-${map.mapId}-${display.x}-${display.y}.png`;
+    fs.writeFileSync(`${config.outDir}/${file}`, NodeBuffer.from(url.split(',')[1], 'base64'));
+
+    const time = engine.$gameTime;
+    (report.weather as Record<string, unknown>)[String(map.mapId)] = {
+      current: engine.WeatherDirector.current(),
+      depth,
+      layers: plane.children.map(describeWeatherLayer),
+      display,
+      clock: time === undefined || time === null ? -1 : (time.hours() * 60) + time.minutes(),
+      file,
+    };
+  };
+
+  // holds J-Weather-Time's sky off, once, so every map's weather resolves as J-Weather alone resolves it, noting first
+  // what the sky was doing on the fresh save. Pushing a sky is J-Weather-Time's only way in, so stilling it and handing
+  // J-Weather none is the whole of it; with no game started yet, there is no sky to hand back and no map to read.
+  let skyHeld = false;
+  const holdSkyOff = (gameStarted: boolean): void =>
+  {
+    if (skyHeld || engine.ForecastDirector === undefined)
+    {
+      return;
+    }
+
+    skyHeld = true;
+    if (gameStarted)
+    {
+      report.freshSky = { ...engine.ForecastDirector.skyFor(engine.$gameTime), at: (engine.$gameTime.hours() * 60) + engine.$gameTime.minutes() };
+      engine.WeatherDirector.setSky(null);
+    }
+
+    engine.ForecastDirector.push = () => undefined;
+  };
+
   // which pictures a map gets: events as the game shows them, then the tiles alone, with every event hidden, then, for
   // a dark map, the tiles alone again under the light mask; or, for a map drawn at a time of day, its events as the game
-  // shows them at that hour, then the tiles alone under its sky.
+  // shows them at that hour, then the tiles alone under its sky. A map read for its weather gets none of them.
   const passesFor = (map: ProbeMap): ('events' | 'tiles' | 'dark' | 'sky')[] =>
   {
+    if (map.weather !== undefined)
+    {
+      return [];
+    }
+
     if (map.time !== undefined)
     {
       return [ 'events', 'sky' ];
@@ -346,6 +539,14 @@ const parityProbe = (config: ProbeConfig): void =>
 
   const captureMap = (map: ProbeMap): void =>
   {
+    // a map read for its weather is read for nothing else, so a map drawn earlier keeps the events recorded for it.
+    if (map.weather !== undefined)
+    {
+      captureWeather(map);
+      report.log.push(`map ${map.mapId}: weather read at ${map.weather.x},${map.weather.y}`);
+      return;
+    }
+
     describeScene();
     recordEvents(map);
     if (map.dark || map.time !== undefined)
@@ -373,6 +574,11 @@ const parityProbe = (config: ProbeConfig): void =>
   const transferNext = (): void =>
   {
     const next = config.maps[mapIndex];
+    if (next.weather !== undefined)
+    {
+      holdSkyOff(true);
+    }
+
     if (next.time !== undefined)
     {
       engine.$gameTime.deactivate();
@@ -405,6 +611,11 @@ const parityProbe = (config: ProbeConfig): void =>
   const startGame = (scene: any): void =>
   {
     installFreeze();
+    if (config.maps[0].weather !== undefined)
+    {
+      holdSkyOff(false);
+    }
+
     report.screen = { width: engine.Graphics.width, height: engine.Graphics.height };
     engine.$dataSystem.startMapId = config.maps[0].mapId;
     engine.$dataSystem.startX = 0;

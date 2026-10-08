@@ -20,6 +20,80 @@ type ProbeMap = {
    * The time of day to draw the map's sky at, in minutes past midnight; left out, the map is drawn without its sky.
    */
   time?: number;
+
+  /**
+   * Where the display sits for the map's weather, which the probe reads and draws instead of every other pass: what
+   * J-Weather put on the screen, layer by layer, and the whole spriteset as the player sees it there. Left out, the
+   * map's weather is set aside, as in every other pass.
+   */
+  weather?: { x: number; y: number };
+};
+
+/**
+ * One number summed up across a population of particles: its least, its greatest and its mean; all three 0 for no one.
+ */
+type ProbeSpread = {
+  min: number;
+  max: number;
+  mean: number;
+};
+
+/**
+ * One layer of a map's weather as one side draws it: the picture and its size, what its particles become and that
+ * picture's size, its blend (the engine's number in the game, pixi's name in the editor), its tint, the layer as J-Weather
+ * resolved it from the config, and its population summed up the same way on both sides.
+ */
+type WeatherLayerProbe = {
+  asset: string | null;
+  becomesAsset: string | null;
+  pictureSize: number[] | null;
+  becomesPictureSize: number[] | null;
+  blend: number | string | null;
+  tint: number | null;
+  layer: Record<string, unknown>;
+  stats: {
+    count: number;
+    firstLife: number;
+    secondLife: number;
+    waiting: number;
+    onScreen: number;
+    velocityX: ProbeSpread;
+    velocityY: ProbeSpread;
+    scaleX: ProbeSpread;
+    scaleY: ProbeSpread;
+    rotation: ProbeSpread;
+    life: ProbeSpread;
+    opacity: ProbeSpread;
+  };
+};
+
+/**
+ * Where the game draws a map's weather in its sprite tree: the spriteset's children by name, the base sprite's index
+ * among them and the filters it carries (its colour filter casts the screen's tone), the base sprite's children by name
+ * and the weather plane's index among them, the light mask's index in the spriteset (-1 without J-Lighting), and the
+ * screen's tone as the weather was read.
+ */
+type WeatherDepthProbe = {
+  spriteset: string[];
+  baseIndex: number;
+  baseFilters: string[];
+  base: string[];
+  planeIndex: number;
+  maskIndex: number;
+  tone: number[];
+};
+
+/**
+ * What the probe read of one map's weather: the weather J-Weather resolved for it, where its plane sits, every layer on
+ * the plane, the display it was drawn at, the hour the game's clock read, and the picture of the whole spriteset.
+ */
+type WeatherProbe = {
+  current: { preset: string; intensity: string } | null;
+  depth: WeatherDepthProbe;
+  layers: WeatherLayerProbe[];
+  display: { x: number; y: number };
+  clock: number;
+  file: string;
 };
 
 /**
@@ -100,8 +174,15 @@ type ProbeReport = {
   captures: ProbeCapture[];
   events: Record<string, ProbeEvent[]>;
   clocks: Record<string, number>;
+
+  /**
+   * The weather read on each map the probe was asked to read it on, by the map's id; and what J-Weather-Time's sky was
+   * doing on the fresh save before the probe held it off, so the weather reads as J-Weather alone resolves it.
+   */
+  weather?: Record<string, WeatherProbe>;
+  freshSky?: unknown;
   errors: string[];
   log: string[];
 };
 
-export type { ProbeCapture, ProbeConfig, ProbeEvent, ProbeMap, ProbeReport };
+export type { ProbeCapture, ProbeConfig, ProbeEvent, ProbeMap, ProbeReport, ProbeSpread, WeatherDepthProbe, WeatherLayerProbe, WeatherProbe };

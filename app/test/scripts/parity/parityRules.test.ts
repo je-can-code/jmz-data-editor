@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { ProbeEvent } from '../../../../scripts/parity/probeTypes.ts';
+import type { ProbeEvent, WeatherLayerProbe } from '../../../../scripts/parity/probeTypes.ts';
 import {
   animates,
+  canonicalJson,
+  compareWeather,
   coverAxis,
+  editorWeatherDepth,
+  gameWeatherDepth,
+  parseWeatherFixtures,
+  sharesAgree,
+  spreadsAgree,
+  weatherProbeMapFor,
   darkLightsOf,
   editorPagesOf,
   editorVerdictsOf,
@@ -63,6 +71,15 @@ import { command, event, page } from '../../mapEditor/support/eventKindFixtures.
  *
  * The game copy the check runs holds every light steady, each effect's depth at 0 and the rest of its config as it was,
  * so every frame of the game shows every light at full strength, as the editor draws them.
+ *
+ * A map's weather is read where the game's whole screen lies on the map, its display in the map's middle, at the time of
+ * day asked for if any, and compared by its numbers, since every particle is rolled at random on both sides: the layer
+ * as J-Weather resolved it, its pictures, count, tint, blend and how many particles wait must match exactly, whatever
+ * order the keys were written in; the spread of each rolled number agrees when the means lie within a fifth of the wider
+ * spread and the ranges reach into each other; and a share of the population, on screen or in a second life, within
+ * three standard errors of what chance alone strays by for populations that size, never tighter than a twentieth. The
+ * engine's blend numbers read as pixi's names. Both sides must draw the weather inside what the screen's tone
+ * colours, after the map and its characters, and beneath the dark.
  */
 
 /**
@@ -925,6 +942,238 @@ describe('parityRules', () =>
           },
           ambient: { color: '#000000' },
         });
+    });
+  });
+
+  describe('parseWeatherFixtures and weatherProbeMapFor', () =>
+  {
+    it('reads maps, each with an optional time of day, and refuses anything else', () =>
+    {
+      // Arrange.
+      const lists = [ '65,102,309@22:00', '' ];
+
+      // Act.
+      const read = lists.map(parseWeatherFixtures);
+
+      // Assert.
+      expect(read)
+        .toStrictEqual([ [ { mapId: 65 }, { mapId: 102 }, { mapId: 309, time: 1320 } ], [] ]);
+      expect(() => parseWeatherFixtures('65@25:00'))
+        .toThrow('--weather takes maps, each with an optional time, such as 65 or 309@22:00, not 65@25:00');
+    });
+
+    it('reads a map\'s weather from the middle of the map, so the game\'s whole screen lies on it, at the time asked for', () =>
+    {
+      // Arrange: a 45 by 55 map under a 40 by 22.5 tile screen, and a map no bigger than the screen.
+      const big = mapFile(45, 55);
+      const small = mapFile(30, 20);
+      const screen = { width: 1920, height: 1080 };
+
+      // Act.
+      const orders = [ weatherProbeMapFor({ mapId: 65 }, big, screen), weatherProbeMapFor({ mapId: 309, time: 1320 }, big, screen), weatherProbeMapFor({ mapId: 7 }, small, screen) ];
+
+      // Assert.
+      expect(orders)
+        .toStrictEqual([
+          { mapId: 65, views: [], steps: [ 0 ], dark: false, weather: { x: 2, y: 16 } },
+          { mapId: 309, views: [], steps: [ 0 ], dark: false, weather: { x: 2, y: 16 }, time: 1320 },
+          { mapId: 7, views: [], steps: [ 0 ], dark: false, weather: { x: 0, y: 0 } },
+        ]);
+    });
+  });
+
+  describe('compareWeather', () =>
+  {
+    /**
+     * One layer of moderate rain as a side reads it, with any part named otherwise.
+     * @param {Partial<WeatherLayerProbe>} parts The parts to change.
+     * @returns {WeatherLayerProbe} The layer.
+     */
+    const rainLayer = (parts: Partial<WeatherLayerProbe> = {}): WeatherLayerProbe => ({
+      asset: 'Rain_01A',
+      becomesAsset: 'Particles',
+      pictureSize: [ 18, 36 ],
+      becomesPictureSize: [ 64, 64 ],
+      blend: 'normal',
+      tint: 0xffffff,
+      layer: { edge: 'top', speedY: 6.8, jitterY: 5.1, becomes: { edge: 'anywhere', growth: 0.011 } },
+      stats: {
+        count: 1833,
+        firstLife: 1500,
+        secondLife: 333,
+        waiting: 0,
+        onScreen: 0.61,
+        velocityX: { min: 0, max: 0, mean: 0 },
+        velocityY: { min: 6.8, max: 11.9, mean: 9.35 },
+        scaleX: { min: 1, max: 1, mean: 1 },
+        scaleY: { min: 1, max: 1, mean: 1 },
+        rotation: { min: 0, max: 0, mean: 0 },
+        life: { min: 31, max: 162, mean: 110 },
+        opacity: { min: 0, max: 255, mean: 206 },
+      },
+      ...parts,
+    });
+
+    it('agrees on a layer resolved alike, keys in any order, the engine\'s blend number read as pixi\'s name', () =>
+    {
+      // Arrange: the game's layer with its keys written in another order and its blend as the engine's 0, and its rolled
+      // numbers a little off the editor's.
+      const game = rainLayer({
+        blend: 0,
+        layer: { becomes: { growth: 0.011, edge: 'anywhere' }, jitterY: 5.1, speedY: 6.8, edge: 'top' },
+        stats: { ...rainLayer().stats, velocityY: { min: 6.81, max: 11.88, mean: 9.4 }, onScreen: 0.6 },
+      });
+
+      // Act.
+      const checks = compareWeather({ current: { preset: 'rain', intensity: 'moderate' }, layers: [ game ] }, { current: { preset: 'rain', intensity: 'moderate' }, layers: [ rainLayer() ] });
+
+      // Assert: every check holds, the speed down worded with both sides' numbers.
+      expect([ checks.length, checks.filter(check => check.holds === false), checks.find(check => check.name === 'layer 1 speed down') ])
+        .toStrictEqual([ 18, [], { name: 'layer 1 speed down', game: '6.810..9.400..11.880', editor: '6.800..9.350..11.900', holds: true } ]);
+    });
+
+    it('differs on a layer resolved otherwise, another picture, count, tint, blend or wait, and on another look', () =>
+    {
+      // Arrange: a game layer differing from the editor's in every exact part, under another strength.
+      const game = rainLayer({
+        layer: { edge: 'top', speedY: 8, jitterY: 6, becomes: { edge: 'anywhere', growth: 0.011 } },
+        pictureSize: [ 18, 37 ],
+        becomesPictureSize: null,
+        tint: 0xfff6d6,
+        blend: 1,
+        stats: { ...rainLayer().stats, count: 1832, waiting: 3 },
+      });
+
+      // Act.
+      const checks = compareWeather({ current: { preset: 'rain', intensity: 'heavy' }, layers: [ game ] }, { current: { preset: 'rain', intensity: 'moderate' }, layers: [ rainLayer() ] });
+
+      // Assert.
+      expect(checks.filter(check => check.holds === false).map(check => check.name))
+        .toStrictEqual([ 'weather', 'layer 1 effect', 'layer 1 picture', 'layer 1 stage picture', 'layer 1 count', 'layer 1 tint', 'layer 1 blend', 'layer 1 waiting' ]);
+    });
+
+    it('differs on a rolled number spread otherwise, a share out by more than chance allows, and a layer missing', () =>
+    {
+      // Arrange: rain falling slower in the game, more of it on screen, more of it landed, and a second layer the
+      // editor lacks.
+      const game = rainLayer({ stats: { ...rainLayer().stats, velocityY: { min: 4, max: 9, mean: 6.5 }, onScreen: 0.75, secondLife: 600 } });
+
+      // Act.
+      const checks = compareWeather({ current: null, layers: [ game, rainLayer() ] }, { current: null, layers: [ rainLayer() ] });
+
+      // Assert.
+      expect(checks.filter(check => check.holds === false).map(check => check.name))
+        .toStrictEqual([ 'layers', 'layer 1 speed down', 'layer 1 on screen', 'layer 1 second life' ]);
+    });
+  });
+
+  describe('sharesAgree', () =>
+  {
+    it('lets a small population stray further by chance than a large one, and never holds a share tighter than a twentieth', () =>
+    {
+      // Arrange: 33 bubbles 0.12 apart (three standard errors is 0.28 there), 2000 flakes 0.06 apart (0.047 there), and
+      // two shares at nothing 0.04 apart.
+      const pairs: [ number, number, number, number ][] = [ [ 0.879, 33, 0.758, 33 ], [ 0.51, 2000, 0.45, 2000 ], [ 0.04, 2000, 0, 2000 ] ];
+
+      // Act.
+      const agreed = pairs.map(([ game, gameCount, editor, editorCount ]) => sharesAgree(game, gameCount, editor, editorCount));
+
+      // Assert.
+      expect(agreed)
+        .toStrictEqual([ true, false, true ]);
+    });
+  });
+
+  describe('spreadsAgree', () =>
+  {
+    it('agrees within a fifth of the wider spread when the ranges reach into each other', () =>
+    {
+      // Arrange: means 1 apart on spreads 5 wide, 1.1 apart on the same, ranges apart, and two spreads of one value.
+      const pairs = [
+        [ { min: 0, max: 5, mean: 2.5 }, { min: 0.5, max: 5, mean: 3.5 } ],
+        [ { min: 0, max: 5, mean: 2.5 }, { min: 0, max: 5, mean: 3.6 } ],
+        [ { min: 0, max: 1, mean: 0.5 }, { min: 2, max: 3, mean: 2.5 } ],
+        [ { min: 1, max: 1, mean: 1 }, { min: 1, max: 1, mean: 1 } ],
+      ];
+
+      // Act.
+      const agreed = pairs.map(([ game, editor ]) => spreadsAgree(game, editor));
+
+      // Assert.
+      expect(agreed)
+        .toStrictEqual([ true, false, false, true ]);
+    });
+  });
+
+  describe('canonicalJson', () =>
+  {
+    it('writes the same values alike whatever order their keys came in, at every depth', () =>
+    {
+      // Arrange.
+      const values = [ { b: 1, a: { d: [ 2, { f: 3, e: 4 } ], c: null } }, { a: { c: null, d: [ 2, { e: 4, f: 3 } ] }, b: 1 } ];
+
+      // Act.
+      const written = values.map(canonicalJson);
+
+      // Assert.
+      expect(written)
+        .toStrictEqual([ '{"a":{"c":null,"d":[2,{"e":4,"f":3}]},"b":1}', '{"a":{"c":null,"d":[2,{"e":4,"f":3}]},"b":1}' ]);
+    });
+  });
+
+  describe('weather depth', () =>
+  {
+    it('finds the game\'s weather in the toned base sprite after the tilemap, under the light mask, and no other way', () =>
+    {
+      // Arrange: Chef Adventure's tree, then the plane before the tilemap, then a base sprite with no colour filter.
+      const depth = {
+        spriteset: [ 'BaseSprite', 'Weather', 'LightMask', 'Sprite' ],
+        baseIndex: 0,
+        baseFilters: [ 'ColorFilter' ],
+        base: [ 'ScreenSprite', 'TilingSprite', 'Tilemap', 'WeatherPlane' ],
+        planeIndex: 3,
+        maskIndex: 2,
+        tone: [ 0, 0, 0, 0 ],
+      };
+      const beneath = { ...depth, base: [ 'ScreenSprite', 'WeatherPlane', 'Tilemap' ], planeIndex: 1 };
+      const untoned = { ...depth, baseFilters: [] };
+
+      // Act.
+      const judged = [ gameWeatherDepth(depth), gameWeatherDepth(beneath), gameWeatherDepth(untoned) ];
+
+      // Assert.
+      expect([ judged.map(each => each.holds), judged[0].words ])
+        .toStrictEqual([
+          [ true, false, false ],
+          'plane is child 4 of 4 in the base sprite [ScreenSprite, TilingSprite, Tilemap, WeatherPlane], filtered by [ColorFilter];'
+            + ' base sprite is spriteset child 1, light mask child 3 of [BaseSprite, Weather, LightMask, Sprite]; tone [0,0,0,0]',
+        ]);
+    });
+
+    it('finds the editor\'s weather in the game container after the upper tiles, under the lighting, and no other way', () =>
+    {
+      // Arrange: the renderer's tree, then the weather before the upper tiles, then the lighting under the game container.
+      const depth = {
+        world: [ 'game', 'lighting', 'markers' ],
+        game: [ 'backdrop', 'parallax', 'lowerTiles', 'events', 'events', 'upperTiles', 'events', 'weatherClip', 'weather' ],
+        gameFilters: 1,
+        weatherIndex: 8,
+        gameIndex: 0,
+        lightingIndex: 1,
+      };
+      const beneath = { ...depth, game: [ 'backdrop', 'weather', 'upperTiles' ], weatherIndex: 1 };
+      const unlit = { ...depth, gameIndex: 1, lightingIndex: 0 };
+
+      // Act.
+      const judged = [ editorWeatherDepth(depth), editorWeatherDepth(beneath), editorWeatherDepth(unlit) ];
+
+      // Assert.
+      expect([ judged.map(each => each.holds), judged[0].words ])
+        .toStrictEqual([
+          [ true, false, false ],
+          'weather is child 9 of 9 in the game container [backdrop, parallax, lowerTiles, events, events, upperTiles, events, weatherClip, weather],'
+            + ' which carries 1 tone filter(s); game container is world child 1, lighting child 2',
+        ]);
     });
   });
 });

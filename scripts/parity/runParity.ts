@@ -4,9 +4,9 @@
  * draws each fixture map view by view, and the editor draws the same views; the two are compared pixel by pixel inside
  * the map.
  *
- *   bun run parity [--maps 102,31,94,316] [--sky 337@22:00,337@14:00] [--pages 20,21] [--mode game|snapshot|both]
- *                  [--scratch <base folder>] [--project <game>] [--ui-port 18200] [--api-port 18201] [--display :90]
- *                  [--nw <binary>]
+ *   bun run parity [--maps 102,31,94,316] [--sky 337@22:00,337@14:00] [--pages 20,21] [--weather 65,102,309@22:00]
+ *                  [--mode game|snapshot|both] [--scratch <base folder>] [--shots <folder>] [--project <game>]
+ *                  [--ui-port 18200] [--api-port 18201] [--display :90] [--nw <binary>]
  *
  * Each invocation works in a folder of its own inside the base folder (the system's temporary folder unless --scratch
  * names another), builds the editor afresh there, and leaves its pictures and report there; it prints where.
@@ -28,6 +28,14 @@
  * mask multiplied over that; the editor draws the same views at the same hour, its sky's tone and its dark the only
  * lighting it shows. A differing cell is explained as in the dark pass, by a light the game shows from another page at
  * that hour.
+ *
+ * A map read for its weather (--weather; one map for each look Chef Adventure uses, and a snowy dark map at night,
+ * unless told otherwise) is compared by its numbers, never its pixels, since every particle is rolled at random on both
+ * sides: the game, with J-Weather-Time's sky held off so a tagged map resolves as J-Weather alone resolves it, reports
+ * the weather it resolved, where its plane sits against the tone and the dark, and every layer on it, the layer as
+ * resolved, its pictures, count, tint, blend and the spread of its particles; the editor, its view lined up with the
+ * game's screen and its weather started over, reports the same of its own; each check prints with both sides' numbers.
+ * Both sides' whole pictures are saved side by side, the game's on the left, for an eye to judge, into --shots.
  *
  * Every map holding an event with a quest-gated page (or the maps --pages names instead, none for an empty list) is
  * visited too, after the drawn maps and before the skies, and compared by its pages alone, nothing drawn: on arrival
@@ -54,20 +62,24 @@ import { readPluginEntries } from '../../app/src/services/plugins/PluginsJsReade
 import { startEditorStack } from '../speed/editorStack.ts';
 import { openSpeedBrowser } from '../speed/gpuChromium.ts';
 import { createRunFolder } from '../speed/runFolder.ts';
-import { comparePictures, decodePng, differencePicture, writePng, type CellDifference, type Comparison } from './compareImages.ts';
-import type { ProbeCapture, ProbeReport } from './probeTypes.ts';
+import { comparePictures, decodePng, differencePicture, sideBySide, writePng, type CellDifference, type Comparison } from './compareImages.ts';
+import type { ProbeCapture, ProbeReport, WeatherLayerProbe, WeatherProbe } from './probeTypes.ts';
 import { runHeadlessGame } from './headlessGame.ts';
 import {
+  compareWeather,
   darkLightsOf,
   editorPagesOf,
+  editorWeatherDepth,
   eventsKeyOf,
   explainCell,
   explainDarkCell,
   gameParityHolds,
+  gameWeatherDepth,
   pageDifferencesOf,
   pagesProbeMapFor,
   pagesWords,
   parityPageRule,
+  parseWeatherFixtures,
   probeMapFor,
   questGatedPagesOf,
   skyProbeMapFor,
@@ -78,11 +90,16 @@ import {
   TILE,
   timeOfCapture,
   verdictWords,
+  WEATHER_FIXTURES,
+  weatherProbeMapFor,
   type EditorPages,
+  type EditorWeatherDepth,
   type LightingConfigFile,
   type MapFile,
   type PageDifference,
   type PagesTally,
+  type WeatherCheck,
+  type WeatherFixture,
 } from './parityRules.ts';
 
 /**
@@ -101,8 +118,10 @@ type Options = {
   maps: number[];
   sky: SkyFixture[];
   pages: number[] | null;
+  weather: WeatherFixture[];
   mode: 'game' | 'snapshot' | 'both';
   scratch: string;
+  shots: string;
   project: string;
   uiPort: number;
   apiPort: number;
@@ -145,10 +164,37 @@ type QuestPages = {
 type HookWindow = {
   __jmzMapView?: {
     ready: () => boolean;
-    info: () => { stats: { loadingImages: number } };
-    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean; time?: number }) => void;
+    info: () => { stats: { loadingImages: number }; view: { width: number; height: number } };
+    setCamera: (x: number, y: number, zoom: number) => void;
+    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean; weather?: boolean; time?: number }) => void;
     extract: (rect: { x: number; y: number; width: number; height: number }) => Promise<string>;
+    weather: {
+      describe: () => (EditorWeather | null)[];
+      reset: () => void;
+      depth: () => EditorWeatherDepth;
+    };
   };
+};
+
+/**
+ * What the editor's weather drawing says it shows, as far as the check reads it.
+ */
+type EditorWeather = {
+  weather: { preset: string; intensity: string } | null;
+  problem: string;
+  layers: (WeatherLayerProbe & { problem: string })[];
+};
+
+/**
+ * One map's weather compared: the fixture, what each side read, every check, and where each side draws it.
+ */
+type WeatherResult = {
+  fixture: WeatherFixture;
+  game: WeatherProbe;
+  editor: EditorWeather;
+  checks: WeatherCheck[];
+  gameDepth: { holds: boolean; words: string };
+  editorDepth: { holds: boolean; words: string };
 };
 
 /**
@@ -264,11 +310,13 @@ const parseOptions = (argv: string[]): Options =>
   });
 
   return {
-    maps: (flags.get('maps') ?? '102,31,94,316,4,6').split(',').map(Number),
+    maps: (flags.get('maps') ?? '102,31,94,316,4,6').split(',').filter(entry => entry !== '').map(Number),
     sky: parseSkyFixtures(flags.get('sky') ?? SKY_FIXTURES),
     pages: parsePageMaps(flags.get('pages')),
+    weather: parseWeatherFixtures(flags.get('weather') ?? WEATHER_FIXTURES),
     mode: (flags.get('mode') ?? 'both') as Options['mode'],
     scratch: flags.get('scratch') ?? tmpdir(),
+    shots: flags.get('shots') ?? '',
     project: flags.get('project') ?? process.env['JMZ_PROJECT_ROOT'] ?? '',
     uiPort: Number(flags.get('ui-port') ?? 18200),
     apiPort: Number(flags.get('api-port') ?? 18201),
@@ -440,6 +488,149 @@ const compareCapture = async (capture: ProbeCapture, map: MapFile, report: Probe
 };
 
 /**
+ * Reads one map's weather in the editor where the game read it: the view grown or shrunk until it is exactly the game's
+ * screen, lined up on the game's display at the game's scale, drawn as the game draws (events, lighting and weather,
+ * held still) at the hour the game's clock read, the weather started over as on arriving, and read once its pictures are
+ * in; then the same stretch is drawn into a picture.
+ * @param {Page} page The page.
+ * @param {string} uiBase The UI's origin.
+ * @param {WeatherProbe} probe What the game read on the map.
+ * @param {number} mapId The map.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ * @param {string} file Where to write the editor's picture.
+ * @returns {Promise<{ weather: EditorWeather, depth: EditorWeatherDepth }>} What the editor read.
+ */
+const readEditorWeather = async (
+  page: Page,
+  uiBase: string,
+  probe: WeatherProbe,
+  mapId: number,
+  screen: { width: number; height: number },
+  file: string): Promise<{ weather: EditorWeather; depth: EditorWeatherDepth }> =>
+{
+  await openEditorMap(page, uiBase, mapId);
+
+  // the page's bars take some of the window, so the window grows by them until the map's view is the game's screen.
+  const view = await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView?.info().view ?? { width: 0, height: 0 });
+  const size = page.viewportSize() ?? screen;
+  await page.setViewportSize({ width: size.width + screen.width - view.width, height: size.height + screen.height - view.height });
+  await page.waitForFunction(wanted =>
+  {
+    const shown = (window as unknown as HookWindow).__jmzMapView?.info().view;
+    return shown?.width === wanted.width && shown.height === wanted.height;
+  }, screen, { timeout: 30_000 });
+
+  const rect = { x: probe.display.x * TILE, y: probe.display.y * TILE, ...screen };
+  await page.evaluate(({ at, time }) =>
+  {
+    const hooks = (window as unknown as HookWindow).__jmzMapView;
+    hooks?.setCamera(at.x, at.y, 1);
+    hooks?.prepareParity({ events: true, step: 0, frames: 0, lighting: true, weather: true, time: time >= 0 ? time : undefined });
+    hooks?.weather.reset();
+  }, { at: rect, time: probe.clock });
+
+  // the weather settles in the next frame, and draws once its pictures have come, or a layer says why they cannot.
+  await page.waitForFunction(() =>
+  {
+    const [ drawn ] = (window as unknown as HookWindow).__jmzMapView?.weather.describe() ?? [];
+    return drawn !== undefined && drawn !== null && drawn.layers.every(layer => layer.pictureSize !== null || layer.problem !== '');
+  }, null, { timeout: 30_000 });
+  const read = await page.evaluate(() =>
+  {
+    const hooks = (window as unknown as HookWindow).__jmzMapView;
+    const [ weather ] = hooks?.weather.describe() ?? [];
+    return { weather: weather as EditorWeather, depth: hooks?.weather.depth() as EditorWeatherDepth };
+  });
+  const url = await page.evaluate(stretch => (window as unknown as HookWindow).__jmzMapView?.extract(stretch) ?? '', rect);
+  await saveDataUrl(url, file);
+  return read;
+};
+
+/**
+ * Reads every weather fixture in the editor, compares each with what the game read, and lays both sides' pictures side
+ * by side for an eye: the game's on the left.
+ * @param {Page} page A page of its own, whose window the reading resizes.
+ * @param {string} uiBase The UI's origin.
+ * @param {Options} options The settings.
+ * @param {ProbeReport} report The probe's report.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ * @param {string} folder Where the pictures are.
+ * @returns {Promise<WeatherResult[]>} Every map's comparison.
+ */
+const compareWeathers = async (
+  page: Page,
+  uiBase: string,
+  options: Options,
+  report: ProbeReport,
+  screen: { width: number; height: number },
+  folder: string): Promise<WeatherResult[]> =>
+{
+  const results: WeatherResult[] = [];
+  for (const fixture of options.weather)
+  {
+    const game = (report.weather ?? {})[String(fixture.mapId)];
+    if (game === undefined)
+    {
+      throw new Error(`the game's probe read no weather on Map${String(fixture.mapId).padStart(3, '0')}`);
+    }
+
+    const editorFile = `${folder}/${game.file.replace(/^game-/u, 'editor-')}`;
+    const { weather, depth } = await readEditorWeather(page, uiBase, game, fixture.mapId, screen, editorFile);
+    const checks = compareWeather(game, { current: weather.weather, layers: weather.layers });
+    results.push({ fixture, game, editor: weather, checks, gameDepth: gameWeatherDepth(game.depth), editorDepth: editorWeatherDepth(depth) });
+
+    // both sides side by side, the game on the left, named by the map and its look, for an eye to judge.
+    const look = game.current === null ? 'none' : `${game.current.preset}-${game.current.intensity}`;
+    const hour = fixture.time === undefined ? '' : `-${clockOf(fixture.time).replace(':', '')}`;
+    const shots = options.shots === '' ? folder : options.shots;
+    mkdirSync(shots, { recursive: true });
+    const together = sideBySide(await decodePng(`${folder}/${game.file}`), await decodePng(editorFile), 16);
+    await writePng(together, `${shots}/weather-Map${String(fixture.mapId).padStart(3, '0')}-${look}${hour}.png`);
+  }
+
+  return results;
+};
+
+/**
+ * Prints every map's weather comparison: the look, each side's count per layer, where each side draws it, and every
+ * check, those that hold summed up in a line per layer and those that do not spelled out with both sides' numbers.
+ * @param {readonly WeatherResult[]} results The comparisons.
+ * @returns {boolean} True when every check held and both sides draw the weather where they should.
+ */
+const printWeather = (results: readonly WeatherResult[]): boolean =>
+{
+  if (results.length === 0)
+  {
+    return true;
+  }
+
+  console.log('Weather, compared by its numbers (game | editor):');
+  results.forEach(({ fixture, game, editor, checks, gameDepth, editorDepth }) =>
+  {
+    const map = `Map${String(fixture.mapId).padStart(3, '0')}`;
+    const at = fixture.time === undefined ? `at ${clockOf(Math.max(game.clock, 0))}` : `at ${clockOf(fixture.time)}`;
+    const look = game.current === null ? 'no weather' : `${game.current.preset} ${game.current.intensity}`;
+    const failed = checks.filter(check => check.holds === false);
+    const verdict = failed.length === 0 && gameDepth.holds && editorDepth.holds ? 'MATCH' : `DIFFER in ${failed.length} checks`;
+    console.log(`  ${map} ${look} ${at}: ${checks.length} checks  ${verdict}`);
+    game.layers.forEach((layer, index) =>
+    {
+      const mine = editor.layers[index];
+      const stats = (side: WeatherLayerProbe | undefined): string => (side === undefined
+        ? 'none'
+        : `${side.stats.count} x ${side.asset}, down ${side.stats.velocityY.mean.toFixed(2)}, across ${side.stats.velocityX.mean.toFixed(2)},`
+          + ` size ${side.stats.scaleX.mean.toFixed(3)}, strength ${side.stats.opacity.mean.toFixed(1)}, on screen ${side.stats.onScreen.toFixed(2)}`);
+      console.log(`    layer ${index + 1}: ${stats(layer)} | ${stats(mine)}`);
+    });
+    failed.forEach(check => console.log(`    ${check.name}: ${check.game} | ${check.editor}`));
+    console.log(`    game depth ${gameDepth.holds ? 'as expected' : 'UNEXPECTED'}: ${gameDepth.words}`);
+    console.log(`    editor depth ${editorDepth.holds ? 'as expected' : 'UNEXPECTED'}: ${editorDepth.words}`);
+  });
+
+  return results.every(result => result.checks.every(check => check.holds) && result.gameDepth.holds && result.editorDepth.holds);
+};
+
+/**
  * Runs the game and the editor over the fixtures and compares every view.
  * @param {Options} options The settings.
  * @returns {Promise<boolean>} True when every tiles pass matched.
@@ -455,17 +646,24 @@ const runGameParity = async (options: Options): Promise<boolean> =>
   // the maps compared by their pages alone: those holding quest-gated events, unless the run names others, leaving out
   // any already drawn, whose pages are judged with the rest of what is drawn there.
   const pageMapIds = (options.pages ?? await questGatedMapIds(options.project)).filter(mapId => mapIds.includes(mapId) === false);
-  for (const mapId of [ ...mapIds, ...pageMapIds ])
+  for (const mapId of [ ...mapIds, ...pageMapIds, ...options.weather.map(fixture => fixture.mapId) ])
   {
     maps.set(mapId, await readMap(options.project, mapId));
   }
 
   // the skies come last, so the game has always arrived somewhere before its clock is set for one; the maps compared by
-  // their pages alone come before them, so their pages are judged at the game's own hour.
+  // their pages alone come before them, so their pages are judged at the game's own hour, and the weather read at the
+  // game's own hour after those, since the probe holds the sky's weather off from there on. A weather read at a time of
+  // day comes last of all, its clock set like a sky's.
+  const weatherAt = (timed: boolean) => options.weather
+    .filter(fixture => (fixture.time !== undefined) === timed)
+    .map(fixture => weatherProbeMapFor(fixture, maps.get(fixture.mapId) as MapFile, screen));
   const probeMaps = [
     ...options.maps.map(mapId => probeMapFor(mapId, maps.get(mapId) as MapFile, screen)),
     ...pageMapIds.map(pagesProbeMapFor),
+    ...weatherAt(false),
     ...options.sky.map(fixture => skyProbeMapFor(fixture.mapId, maps.get(fixture.mapId) as MapFile, screen, fixture.time)),
+    ...weatherAt(true),
   ];
   const report = await runHeadlessGame(
     {
@@ -485,6 +683,7 @@ const runGameParity = async (options: Options): Promise<boolean> =>
   // the editor draws on SwiftShader reached as the game reaches it, so its light pictures rasterise as the game's do.
   const stack = await startEditorStack({ projectRoot: options.project, scratch: `${options.scratch}/editor`, uiPort: options.uiPort, apiPort: options.apiPort });
   const { browser } = await openSpeedBrowser({ mode: 'swiftshader-as-game' });
+  let weathers: WeatherResult[] = [];
   try
   {
     const page = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
@@ -495,6 +694,13 @@ const runGameParity = async (options: Options): Promise<boolean> =>
       {
         await drawInEditor(page, capture, report, `${folder}/${capture.file.replace(/^game-/u, 'editor-')}`);
       }
+    }
+
+    // the weather on a page of its own, since lining its view up with the game's screen resizes the window.
+    if (options.weather.length > 0)
+    {
+      const weatherPage = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
+      weathers = await compareWeathers(weatherPage, stack.uiBase, options, report, screen, folder);
     }
   }
   finally
@@ -521,9 +727,15 @@ const runGameParity = async (options: Options): Promise<boolean> =>
   }
 
   const quests = questPagesOf(report, maps, pageMapIds, rule);
-  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results, pages: Object.fromEntries(pages), quests }, null, 2));
+  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results, pages: Object.fromEntries(pages), quests, weathers }, null, 2));
   const drawn = printGameParity(mapIds, results, pages);
-  return printQuestPages(quests) && drawn;
+  const questsAlike = printQuestPages(quests);
+  if (report.freshSky !== undefined)
+  {
+    console.log(`The sky on the fresh save, held off for the weather: ${JSON.stringify(report.freshSky)}`);
+  }
+
+  return printWeather(weathers) && questsAlike && drawn;
 };
 
 /**
@@ -768,7 +980,8 @@ const main = async (): Promise<void> =>
   }
 
   console.log(pass
-    ? 'PARITY: every difference from the game was explained, every quest-gated page was judged alike, and every snapshot.js difference was predicted'
+    ? 'PARITY: every difference from the game was explained, every quest-gated page was judged alike, every weather check agreed, and every'
+      + ' snapshot.js difference was predicted'
     : 'PARITY: differences need a look');
   process.exit(pass ? 0 : 1);
 };

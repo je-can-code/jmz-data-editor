@@ -3,7 +3,8 @@
  * which maps are worth comparing at every animation step, which dark and which under their sky at a time of day, which
  * page the editor shows each event at the hour the game's clock read, how the game and the editor judge each page of
  * the maps holding quest-gated events, what explains a difference in the events pass and in the dark and sky passes, how
- * the game copy's lights are held steady, and which differences the engine predicts against snapshot.js.
+ * the game copy's lights are held steady, which differences the engine predicts against snapshot.js, and how a map's
+ * weather is read on both sides and compared, by its numbers rather than its pixels, and where each side draws it.
  */
 import { CommandCatalog } from '../../app/src/mapEditor/core/commands/CommandCatalog.ts';
 import type { JsonValue } from '../../app/src/mapEditor/core/model/json.ts';
@@ -17,7 +18,7 @@ import { questModule } from '../../app/src/mapEditor/modules/quest/questModule.t
 import { readQuestTags } from '../../app/src/mapEditor/modules/quest/questTags.ts';
 import { timeModule } from '../../app/src/mapEditor/modules/time/timeModule.ts';
 import type { PluginsJsEntry } from '../../app/src/services/plugins/PluginsJsReader.ts';
-import type { ProbeEvent, ProbeMap } from './probeTypes.ts';
+import type { ProbeEvent, ProbeMap, ProbeSpread, WeatherDepthProbe, WeatherLayerProbe } from './probeTypes.ts';
 
 /**
  * A map cell that differs, as far as the rules read it.
@@ -114,6 +115,84 @@ type LightingConfigFile = {
     readonly effects: Readonly<Record<string, Readonly<Record<string, number>>>>;
   };
 };
+
+/**
+ * One map whose weather is read, and the time of day to read it at, in minutes past midnight; left out, the game's own
+ * hour on arrival.
+ */
+type WeatherFixture = {
+  readonly mapId: number;
+  readonly time?: number;
+};
+
+/**
+ * A map's weather as one side draws it, as far as the comparison reads it: the weather it resolved, and every layer.
+ */
+type WeatherSide = {
+  readonly current: { readonly preset: string; readonly intensity: string } | null;
+  readonly layers: readonly WeatherLayerProbe[];
+};
+
+/**
+ * One check of the weather comparison: what is compared, how each side reads, and whether they agree.
+ */
+type WeatherCheck = {
+  readonly name: string;
+  readonly game: string;
+  readonly editor: string;
+  readonly holds: boolean;
+};
+
+/**
+ * Where the editor draws a map's weather in its own tree: the world's layers by name, the game container's layers by
+ * name, how many filters the game container carries (the tone's, while a tone is cast), the weather's index in the game
+ * container, and the game container's and the lighting's indexes in the world.
+ */
+type EditorWeatherDepth = {
+  readonly world: readonly string[];
+  readonly game: readonly string[];
+  readonly gameFilters: number;
+  readonly weatherIndex: number;
+  readonly gameIndex: number;
+  readonly lightingIndex: number;
+};
+
+/**
+ * How far a mean may stray between the two sides, as a share of the wider of the two spreads: the particles are rolled
+ * at random on both sides, so their numbers agree by their spread, never to the digit.
+ */
+const MEAN_TOLERANCE = 0.2;
+
+/**
+ * How many standard errors a share of a population may stray between the two sides, on screen or in its second life:
+ * each side's share is one draw from the same chance, so a small population strays more by chance alone, 33 bubbles by
+ * about a tenth, where two thousand flakes stray by about a hundredth.
+ */
+const SHARE_ERRORS = 3;
+
+/**
+ * The least a share may stray by however large the population, so a share at nothing or at all of it, whose standard
+ * error is nothing, is not held to the digit.
+ */
+const SHARE_FLOOR = 0.05;
+
+/**
+ * The engine's blend numbers by pixi's names for them: 0 normal, 1 add, 2 multiply.
+ */
+const ENGINE_BLENDS: readonly string[] = [ 'normal', 'add', 'multiply' ];
+
+/**
+ * The maps whose weather the check reads unless told otherwise, one per look Chef Adventure uses, most used first
+ * (fog on 28 maps, motes on 20, embers and snow on 11, rain on 9, leaves on 2, submerged on 1), each read at the
+ * game's own hour; then a snowy map with its own darkness read at night, under the sky's tone and the dark.
+ */
+const WEATHER_FIXTURES = '65,102,245,316,220,16,191,309@22:00';
+
+/**
+ * A map and an optional time of day as --weather takes them: the map's id, then, after an at sign, hours and minutes on
+ * a 24-hour clock.
+ */
+const WEATHER_FIXTURE = /^(\d+)(?:@([01]?\d|2[0-3]):([0-5]\d))?$/u;
 
 /**
  * The tile size.
@@ -648,9 +727,228 @@ const snapshotPredictions = (map: MapFile, flags: readonly number[]): Map<string
   return predicted;
 };
 
+/**
+ * Reads --weather's list of maps, each with an optional time of day.
+ * @param {string} list The list, such as {@code 65,102,309@22:00}; empty for none.
+ * @returns {WeatherFixture[]} The maps and times, in the order given.
+ */
+const parseWeatherFixtures = (list: string): WeatherFixture[] =>
+{
+  return list.split(',').filter(entry => entry !== '').map(entry =>
+  {
+    const match = WEATHER_FIXTURE.exec(entry);
+    if (match === null)
+    {
+      throw new Error(`--weather takes maps, each with an optional time, such as 65 or 309@22:00, not ${entry}`);
+    }
+
+    const [ , mapId, hours, minutes ] = match;
+    return hours === undefined
+      ? { mapId: Number(mapId) }
+      : { mapId: Number(mapId), time: (Number(hours) * 60) + Number(minutes) };
+  });
+};
+
+/**
+ * Builds what the probe does on a map read for its weather: it arrives there, at the time of day asked for if any, and
+ * reads the weather with the display in the middle of the map, so the game's whole screen lies on the map and the
+ * editor's weather falls over the same stretch of it.
+ * @param {WeatherFixture} fixture The map, and the time to read it at.
+ * @param {MapFile} map Its file.
+ * @param {{ width: number, height: number }} screen The game's screen, in pixels.
+ * @returns {ProbeMap} The probe's orders.
+ */
+const weatherProbeMapFor = (fixture: WeatherFixture, map: MapFile, screen: { width: number; height: number }): ProbeMap =>
+{
+  const weather = {
+    x: Math.max(0, Math.floor((map.width - (screen.width / TILE)) / 2)),
+    y: Math.max(0, Math.floor((map.height - (screen.height / TILE)) / 2)),
+  };
+  return fixture.time === undefined
+    ? { mapId: fixture.mapId, views: [], steps: [ 0 ], dark: false, weather }
+    : { mapId: fixture.mapId, views: [], steps: [ 0 ], dark: false, weather, time: fixture.time };
+};
+
+/**
+ * Writes a value with its keys in order, so two objects holding the same values compare alike whatever order their keys
+ * were written in.
+ * @param {unknown} value The value.
+ * @returns {string} The value as JSON, keys sorted at every depth.
+ */
+const canonicalJson = (value: unknown): string =>
+{
+  const sorted = (node: unknown): unknown =>
+  {
+    if (Array.isArray(node))
+    {
+      return node.map(sorted);
+    }
+
+    if (node !== null && typeof node === 'object')
+    {
+      return Object.fromEntries(Object.keys(node).sort().map(key => [ key, sorted((node as Record<string, unknown>)[key]) ]));
+    }
+
+    return node;
+  };
+  return JSON.stringify(sorted(value));
+};
+
+/**
+ * Words a spread for a line of the report.
+ * @param {ProbeSpread} spread The spread.
+ * @returns {string} Its least, mean and greatest, such as "6.80..9.35..11.90".
+ */
+const spreadWords = (spread: ProbeSpread): string =>
+{
+  const at = (value: number): string => (Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(3));
+  return `${at(spread.min)}..${at(spread.mean)}..${at(spread.max)}`;
+};
+
+/**
+ * Reports whether two spreads of a randomly rolled number agree: their means within {@link MEAN_TOLERANCE} of the wider
+ * spread, and each side's range reaching into the other's.
+ * @param {ProbeSpread} game The game's spread.
+ * @param {ProbeSpread} editor The editor's.
+ * @returns {boolean} True when they agree.
+ */
+const spreadsAgree = (game: ProbeSpread, editor: ProbeSpread): boolean =>
+{
+  const width = Math.max(game.max - game.min, editor.max - editor.min);
+  const close = Math.abs(game.mean - editor.mean) <= (MEAN_TOLERANCE * width) + 1e-9;
+  const overlap = game.min <= editor.max + 1e-9 && editor.min <= game.max + 1e-9;
+  return close && overlap;
+};
+
+/**
+ * Reports whether two shares of populations agree: within {@link SHARE_ERRORS} standard errors of the difference
+ * between two draws of their pooled chance, and never held tighter than {@link SHARE_FLOOR}.
+ * @param {number} game The game's share.
+ * @param {number} gameCount How many the game's share is of.
+ * @param {number} editor The editor's share.
+ * @param {number} editorCount How many the editor's share is of.
+ * @returns {boolean} True when they agree.
+ */
+const sharesAgree = (game: number, gameCount: number, editor: number, editorCount: number): boolean =>
+{
+  const pooled = ((game * gameCount) + (editor * editorCount)) / Math.max(gameCount + editorCount, 1);
+  const error = Math.sqrt(pooled * (1 - pooled) * ((1 / Math.max(gameCount, 1)) + (1 / Math.max(editorCount, 1))));
+  return Math.abs(game - editor) <= Math.max(SHARE_ERRORS * error, SHARE_FLOOR);
+};
+
+/**
+ * Compares one layer of a map's weather on both sides: the layer as J-Weather resolved it, which must match to the
+ * digit, since both sides fold the same config the same way; its pictures and their sizes, its particle count, tint and
+ * blend, all exact; how many particles wait, exact; and, since particles are rolled at random on both sides, the spread
+ * of their speeds across and down, their widths and heights, turns, lifetimes and strengths by {@link spreadsAgree}, and
+ * the shares on screen and in a second life by {@link sharesAgree}.
+ * @param {number} index The layer's place in the look, from 0.
+ * @param {WeatherLayerProbe} game The game's layer.
+ * @param {WeatherLayerProbe} editor The editor's.
+ * @returns {WeatherCheck[]} The checks.
+ */
+const compareWeatherLayer = (index: number, game: WeatherLayerProbe, editor: WeatherLayerProbe): WeatherCheck[] =>
+{
+  const name = (what: string): string => `layer ${index + 1} ${what}`;
+  const exact = (what: string, left: unknown, right: unknown): WeatherCheck =>
+    ({ name: name(what), game: JSON.stringify(left), editor: JSON.stringify(right), holds: canonicalJson(left) === canonicalJson(right) });
+  const spread = (what: string, pick: (layer: WeatherLayerProbe) => ProbeSpread): WeatherCheck =>
+    ({ name: name(what), game: spreadWords(pick(game)), editor: spreadWords(pick(editor)), holds: spreadsAgree(pick(game), pick(editor)) });
+  const share = (what: string, pick: (layer: WeatherLayerProbe) => number): WeatherCheck =>
+    ({ name: name(what), game: pick(game).toFixed(3), editor: pick(editor).toFixed(3), holds: sharesAgree(pick(game), game.stats.count, pick(editor), editor.stats.count) });
+  const gameBlend = typeof game.blend === 'number' ? ENGINE_BLENDS[game.blend] ?? String(game.blend) : game.blend;
+  const secondShare = (layer: WeatherLayerProbe): number => (layer.stats.count === 0 ? 0 : layer.stats.secondLife / layer.stats.count);
+  return [
+    exact('effect', game.layer, editor.layer),
+    exact('picture', [ game.asset, game.pictureSize ], [ editor.asset, editor.pictureSize ]),
+    exact('stage picture', [ game.becomesAsset, game.becomesPictureSize ], [ editor.becomesAsset, editor.becomesPictureSize ]),
+    exact('count', game.stats.count, editor.stats.count),
+    exact('tint', game.tint, editor.tint),
+    exact('blend', gameBlend, editor.blend),
+    exact('waiting', game.stats.waiting, editor.stats.waiting),
+    spread('speed across', layer => layer.stats.velocityX),
+    spread('speed down', layer => layer.stats.velocityY),
+    spread('width', layer => layer.stats.scaleX),
+    spread('height', layer => layer.stats.scaleY),
+    spread('turn', layer => layer.stats.rotation),
+    spread('life', layer => layer.stats.life),
+    spread('strength', layer => layer.stats.opacity),
+    share('on screen', layer => layer.stats.onScreen),
+    share('second life', secondShare),
+  ];
+};
+
+/**
+ * Compares a map's weather on both sides: the weather each resolved, how many layers each draws, and every layer by
+ * {@link compareWeatherLayer}.
+ * @param {WeatherSide} game The game's weather.
+ * @param {WeatherSide} editor The editor's.
+ * @returns {WeatherCheck[]} The checks.
+ */
+const compareWeather = (game: WeatherSide, editor: WeatherSide): WeatherCheck[] =>
+{
+  const weather: WeatherCheck = {
+    name: 'weather',
+    game: JSON.stringify(game.current),
+    editor: JSON.stringify(editor.current),
+    holds: canonicalJson(game.current) === canonicalJson(editor.current),
+  };
+  const layers: WeatherCheck = {
+    name: 'layers',
+    game: String(game.layers.length),
+    editor: String(editor.layers.length),
+    holds: game.layers.length === editor.layers.length,
+  };
+  const each = game.layers.flatMap((layer, index) => (editor.layers[index] === undefined ? [] : compareWeatherLayer(index, layer, editor.layers[index])));
+  return [ weather, layers, ...each ];
+};
+
+/**
+ * Judges where the game draws its weather: inside the base sprite, whose colour filter casts the screen's tone, after
+ * the tilemap, so over the map and every character, and beneath J-Lighting's mask, which sits in the spriteset above the
+ * base sprite.
+ * @param {WeatherDepthProbe} depth Where the game's weather plane sits.
+ * @returns {{ holds: boolean, words: string }} Whether it sits there, and where it sits, in words.
+ */
+const gameWeatherDepth = (depth: WeatherDepthProbe): { holds: boolean; words: string } =>
+{
+  const tilemap = depth.base.indexOf('Tilemap');
+  const toned = depth.baseFilters.includes('ColorFilter');
+  const holds = toned && depth.planeIndex > tilemap && tilemap >= 0 && depth.maskIndex > depth.baseIndex;
+  const words = `plane is child ${depth.planeIndex + 1} of ${depth.base.length} in the base sprite [${depth.base.join(', ')}],`
+    + ` filtered by [${depth.baseFilters.join(', ')}]; base sprite is spriteset child ${depth.baseIndex + 1},`
+    + ` light mask child ${depth.maskIndex + 1} of [${depth.spriteset.join(', ')}]; tone ${JSON.stringify(depth.tone)}`;
+  return { holds, words };
+};
+
+/**
+ * Judges where the editor draws its weather: inside the game container, the one a screen tone colours, after the events
+ * above characters, and beneath the lighting, which sits in the world above the game container.
+ * @param {EditorWeatherDepth} depth Where the editor's weather sits.
+ * @returns {{ holds: boolean, words: string }} Whether it sits there, and where it sits, in words.
+ */
+const editorWeatherDepth = (depth: EditorWeatherDepth): { holds: boolean; words: string } =>
+{
+  const upper = depth.game.indexOf('upperTiles');
+  const holds = depth.weatherIndex > upper && upper >= 0 && depth.lightingIndex > depth.gameIndex;
+  const words = `weather is child ${depth.weatherIndex + 1} of ${depth.game.length} in the game container [${depth.game.join(', ')}],`
+    + ` which carries ${depth.gameFilters} tone filter(s); game container is world child ${depth.gameIndex + 1},`
+    + ` lighting child ${depth.lightingIndex + 1}`;
+  return { holds, words };
+};
+
 export {
   animates,
+  canonicalJson,
+  compareWeather,
   coverAxis,
+  editorWeatherDepth,
+  gameWeatherDepth,
+  parseWeatherFixtures,
+  sharesAgree,
+  spreadsAgree,
+  WEATHER_FIXTURES,
+  weatherProbeMapFor,
   darkLightsOf,
   editorPagesOf,
   editorVerdictsOf,
@@ -676,4 +974,17 @@ export {
   verdictDifferencesOf,
   verdictWords,
 };
-export type { DarkLight, EditorPages, JudgedView, LightingConfigFile, MapFile, PageDifference, PagesTally, VerdictDifference };
+export type {
+  DarkLight,
+  EditorPages,
+  EditorWeatherDepth,
+  JudgedView,
+  LightingConfigFile,
+  MapFile,
+  PageDifference,
+  PagesTally,
+  VerdictDifference,
+  WeatherCheck,
+  WeatherFixture,
+  WeatherSide,
+};

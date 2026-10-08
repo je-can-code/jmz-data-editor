@@ -342,6 +342,30 @@ const firstSlider = (sections: readonly MapPropertiesSection[], map: MapDocument
 };
 
 /**
+ * Where a renderer draws its weather, for the parity check to hold against where the game draws its own: the world's
+ * layers and the game container's, each by its slot's name (the event groups, which have none, as events), how many
+ * filters the game container carries, which is the tone's while one is cast, the weather's place in the game container,
+ * and the game container's and the lighting's places in the world.
+ * @param {PixiMapRenderer} renderer The renderer.
+ * @returns {{ world: string[], game: string[], gameFilters: number, weatherIndex: number, gameIndex: number, lightingIndex: number }}
+ * Where the weather sits.
+ */
+const weatherDepthOf = (renderer: PixiMapRenderer) =>
+{
+  const { slots } = renderer;
+  const named = new Map<unknown, string>(Object.entries(slots).map(([ name, slot ]) => [ slot, name ]));
+  const world = slots.game.parent?.children ?? [];
+  return {
+    world: world.map(child => named.get(child) ?? 'events'),
+    game: slots.game.children.map(child => named.get(child) ?? 'events'),
+    gameFilters: slots.game.filters === null || slots.game.filters === undefined ? 0 : [ slots.game.filters ].flat().length,
+    weatherIndex: slots.game.children.indexOf(slots.weather),
+    gameIndex: world.indexOf(slots.game),
+    lightingIndex: world.indexOf(slots.lighting),
+  };
+};
+
+/**
  * The time of day a page is asked to show, as the speed script and the parity check write it in the address: hours and
  * minutes on a 24-hour clock, such as {@code time=22:00}.
  */
@@ -585,6 +609,7 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       sky: () => renderer.weatherSky,
       setSky: (sky: SkyWeather | null) => renderer.setWeatherSky(sky),
       reset: () => renderer.resetWeather(),
+      depth: () => weatherDepthOf(renderer),
     },
     extract: (rect: { x: number; y: number; width: number; height: number }) => renderer.extract(rect),
     paintState: () => ({ steps: painter.paintedInputs, redrawnFrames, painting: painter.session.isActive }),
@@ -692,5 +717,6 @@ export {
   timeFromQuery,
   unusedGroundKind,
   wantsSpeedHooks,
+  weatherDepthOf,
 };
 export type { CameraPath, SpeedHooksContext, StrokeSettings, SweptSlider };
