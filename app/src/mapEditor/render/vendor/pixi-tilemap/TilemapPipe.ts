@@ -9,10 +9,15 @@
  *   which already holds the render group's transform that uWorldTransformMatrix carries, so any render group but an
  *   untransformed root moved and scaled the map twice over. An extract turns its target into a render group, so it
  *   showed there too.
+ * - execute() reads the global uniforms in force, as pixi's own pipes draw with them. 5.0.2 read the last ones bound
+ *   this frame, and pixi never unbinds a set it has finished with: after a filter, those are still the filter's, its
+ *   texture's corner taken off the world transform. So a tilemap drawn after a filtered container, such as a ghost
+ *   or an overlay after the map under a tone, shifted up and left by however far the filtered part began inside the
+ *   screen, which is wherever the view looks past the map's top or left edge.
  */
 import {
     Buffer,
-    BufferUsage, ExtensionType, GlobalUniformGroup,
+    BufferUsage, ExtensionType,
     IndexBufferArray, Instruction, InstructionPipe, InstructionSet, Matrix, NOOP, Renderer,
     RenderPipe, UniformGroup
 } from 'pixi.js';
@@ -60,6 +65,9 @@ export class TilemapPipe implements RenderPipe<Tilemap>, InstructionPipe<Tilemap
 
     /** The tile animation frame */
     public tileAnim = [0, 0];
+
+    /** jmz-map-editor: the world transform a tilemap draws with, worked out afresh for each. */
+    private world = new Matrix();
 
     private ibLen = 0;// index buffer length
 
@@ -181,12 +189,19 @@ export class TilemapPipe implements RenderPipe<Tilemap>, InstructionPipe<Tilemap
         const { pipe_uniforms } = this.adaptor;
 
         const u_proj_trans = pipe_uniforms.uniforms.u_proj_trans;
-        const u_global = ((this.renderer.globalUniforms as any)._activeUniforms.at(-1) as GlobalUniformGroup).uniforms;
         let anim_frame = this.tileAnim;
         const { u_anim_frame } = pipe_uniforms.uniforms;
 
+        // jmz-map-editor: the global uniforms in force, where 5.0.2 read the last ones bound this frame; the world
+        // transform less the offset of the target drawn into, as pixi's global uniform system binds it.
+        const { projectionMatrix, worldTransformMatrix, offset } = this.renderer.globalUniforms.globalUniformData;
+        const world = this.world.copyFrom(worldTransformMatrix);
+
+        world.tx -= offset.x;
+        world.ty -= offset.y;
+
         // jmz-map-editor: groupTransform, where 5.0.2 appended worldTransform.
-        u_global.uProjectionMatrix.copyTo(u_proj_trans).append(u_global.uWorldTransformMatrix)
+        u_proj_trans.copyFrom(projectionMatrix).append(world)
             .append(tilemap.groupTransform);
         if (tilemap.compositeParent)
         {

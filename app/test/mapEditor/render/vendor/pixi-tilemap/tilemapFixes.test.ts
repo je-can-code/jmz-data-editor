@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Container, Matrix, TextureSource, UniformGroup } from 'pixi.js';
+import { Container, GlobalUniformSystem, Matrix, Point, RendererType, TextureSource, UniformGroup } from 'pixi.js';
 import { Tilemap, TilemapPipe } from '../../../../../src/mapEditor/render/vendor/pixi-tilemap/index.ts';
 
 /*
- * The editor vendors @pixi/tilemap 5.0.2 to fix two defects spike S6 found, and these tests hold the fixes.
+ * The editor vendors @pixi/tilemap 5.0.2 to fix the defects spike S6 found and one found since, and these tests hold
+ * the fixes.
  *
  * An edit after the first render must reach the screen: tile(), clear() and setTileset() tell the render group the
  * tilemap changed (5.0.2 set a flag the group never sees, and the flag left standing silenced every later edit), and
@@ -12,6 +13,10 @@ import { Tilemap, TilemapPipe } from '../../../../../src/mapEditor/render/vendor
  *
  * A tilemap inside a moved or zoomed render group must be placed once: execute() appends the tilemap's
  * groupTransform to the group's world transform, where 5.0.2 appended its worldTransform, which already holds it.
+ *
+ * A tilemap must draw with the global uniforms in force: inside a filter, the filter's, its texture's corner taken off
+ * the world transform; after the filter, the group's own again. 5.0.2 read the last set bound in the frame, which pixi
+ * never unbinds, so a tilemap drawn after a filtered container kept the filter's offset and drew shifted.
  *
  * And the chunks lean on one more behaviour: refilling a tilemap after clear() re-uploads its vertices even when the
  * new fill has as many tiles as the old one.
@@ -41,11 +46,12 @@ const builtTilemap = () =>
 const TILE = { u: 0, v: 0, tileWidth: 48, tileHeight: 48 };
 
 /**
- * Builds a tilemap pipe over a stand-in renderer and adaptor, recording what the adaptor is asked to draw.
- * @param {Matrix} projection The projection the global uniforms hold.
- * @param {Matrix} world The render group's world transform the global uniforms hold.
- * @returns {{ pipe: TilemapPipe, uniforms: { u_proj_trans: Matrix }, draws: unknown[] }} The pipe, its uniforms and
- * every tilemap drawn.
+ * Builds a tilemap pipe over a stand-in WebGL renderer and adaptor, recording what the adaptor is asked to draw. The
+ * global uniforms are pixi's own, bound as a frame binds them: the screen's started, then the render group's pushed.
+ * @param {Matrix} projection The screen's projection.
+ * @param {Matrix} world The render group's world transform.
+ * @returns {{ pipe: TilemapPipe, uniforms: { u_proj_trans: Matrix }, draws: unknown[], globalUniforms: GlobalUniformSystem }}
+ * The pipe, its uniforms, every tilemap drawn, and the global uniforms, for a test to push a filter's onto.
  */
 const buildPipe = (projection: Matrix, world: Matrix) =>
 {
@@ -60,9 +66,27 @@ const buildPipe = (projection: Matrix, world: Matrix) =>
     destroy: () => undefined,
     execute: (_pipe: unknown, tilemap: unknown) => draws.push(tilemap),
   };
-  const renderer = { globalUniforms: { _activeUniforms: [ { uniforms: { uProjectionMatrix: projection, uWorldTransformMatrix: world } } ] } };
+  const renderer: { type: RendererType; renderTarget: unknown; renderPipes: object; globalUniforms?: GlobalUniformSystem } = {
+    type: RendererType.WEBGL,
+    renderTarget: { renderTarget: { size: [ 800, 600 ] }, projectionMatrix: projection },
+    renderPipes: {},
+  };
+  const globalUniforms = new GlobalUniformSystem(renderer as never);
+  renderer.globalUniforms = globalUniforms;
+  globalUniforms.start({});
+  globalUniforms.push({ worldTransformMatrix: world });
   const pipe = new TilemapPipe(renderer as never, adaptor as never);
-  return { pipe, uniforms: pipeUniforms.uniforms as { u_proj_trans: Matrix }, draws };
+  return { pipe, uniforms: pipeUniforms.uniforms as { u_proj_trans: Matrix }, draws, globalUniforms };
+};
+
+/**
+ * Reads the parts of a matrix a placement shows in: the scale on each axis and the translation.
+ * @param {Matrix} matrix The matrix.
+ * @returns {number[]} Its a, d, tx and ty.
+ */
+const placementOf = (matrix: Matrix): number[] =>
+{
+  return [ matrix.a, matrix.d, matrix.tx, matrix.ty ];
 };
 
 describe('pixi-tilemap fixes', () =>
@@ -147,6 +171,43 @@ describe('pixi-tilemap fixes', () =>
       const matrix = uniforms.u_proj_trans;
       expect([ [ matrix.a, matrix.d, matrix.tx, matrix.ty ], [ once.a, once.d, once.tx, once.ty ], twice.equals(once), draws.length ])
         .toStrictEqual([ [ once.a, once.d, once.tx, once.ty ], [ 0.0005, -0.001, -0.876, 0.804 ], false, 1 ]);
+    });
+
+    it('takes a filter\'s offset off the world transform while the filter is in force, as pixi draws inside one', () =>
+    {
+      // Arrange: the render group above, zoomed to a half and moved by (100, 50), holding a tilemap at (48, 96), and
+      // a filter whose texture's corner sits at (75, 40) on the screen.
+      const { tilemap } = builtTilemap();
+      tilemap.tile(0, 0, 0, TILE);
+      tilemap.relativeGroupTransform.copyFrom(new Matrix(1, 0, 0, 1, 48, 96));
+      const { pipe, uniforms, globalUniforms } = buildPipe(new Matrix(0.001, 0, 0, -0.002, -1, 1), new Matrix(0.5, 0, 0, 0.5, 100, 50));
+      globalUniforms.push({ offset: new Point(75, 40) });
+
+      // Act.
+      pipe.execute({ renderPipeId: 'tilemap', tilemap } as never);
+
+      // Assert: the group's move less the filter's corner, (25, 10), then the tilemap's own (48, 96) at half scale.
+      expect(placementOf(uniforms.u_proj_trans))
+        .toStrictEqual([ 0.0005, -0.001, -0.951, 0.884 ]);
+    });
+
+    it('draws with the render group\'s uniforms once a filter has ended, not the filter\'s left bound', () =>
+    {
+      // Arrange: the same group and tilemap, and the same filter pushed and popped before the tilemap draws, as the
+      // map's tone filter is before a ghost or an overlay.
+      const { tilemap } = builtTilemap();
+      tilemap.tile(0, 0, 0, TILE);
+      tilemap.relativeGroupTransform.copyFrom(new Matrix(1, 0, 0, 1, 48, 96));
+      const { pipe, uniforms, globalUniforms } = buildPipe(new Matrix(0.001, 0, 0, -0.002, -1, 1), new Matrix(0.5, 0, 0, 0.5, 100, 50));
+      globalUniforms.push({ offset: new Point(75, 40) });
+      globalUniforms.pop();
+
+      // Act.
+      pipe.execute({ renderPipeId: 'tilemap', tilemap } as never);
+
+      // Assert: placed as though no filter had drawn; keeping the filter's offset would put it at -0.951 and 0.884.
+      expect(placementOf(uniforms.u_proj_trans))
+        .toStrictEqual([ 0.0005, -0.001, -0.876, 0.804 ]);
     });
   });
 
