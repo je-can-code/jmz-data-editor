@@ -300,7 +300,7 @@ describe('PluginModuleRegistry', () =>
     // Arrange: a module naming map 2 as its patterns, over the core's catch-all decor.
     const registry = new PluginModuleRegistry(new CommandCatalog());
     registry.registerCoreKind(decor());
-    const patterns: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register: add => add.templateMap(2) };
+    const patterns: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register: add => add.templateMap(2, 'action templates') };
     const lamp = createMapEvent(4, 1, 1);
 
     // Act.
@@ -314,20 +314,20 @@ describe('PluginModuleRegistry', () =>
       .toStrictEqual([ [ null, 'core.decor' ], 'core.decor' ]);
   });
 
-  it('names the plugin whose module says it copies a map\'s events, for that map alone, until the module switches off', () =>
+  it('names the plugin whose module says it copies a map\'s events, and what they are to it, for that map alone, until the module switches off', () =>
   {
-    // Arrange: J-ABS's module naming map 2 as its patterns.
+    // Arrange: J-ABS's module naming map 2 as its action templates.
     const registry = new PluginModuleRegistry(new CommandCatalog());
-    const patterns: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register: add => add.templateMap(2) };
+    const patterns: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register: add => add.templateMap(2, 'action templates') };
 
     // Act.
     registry.activate([ patterns ], [ plugin('j/abs/J-ABS', true) ]);
-    const whileOn = [ registry.templateMapOwner(2), registry.templateMapOwner(3) ];
+    const whileOn = [ registry.templateMapOf(2), registry.templateMapOf(3) ];
     registry.activate([ patterns ], [ plugin('j/abs/J-ABS', false) ]);
 
     // Assert.
-    expect([ whileOn, registry.templateMapOwner(2) ])
-      .toStrictEqual([ [ 'J-ABS', null ], null ]);
+    expect([ whileOn, registry.templateMapOf(2) ])
+      .toStrictEqual([ [ { owner: 'J-ABS', holds: 'action templates' }, null ], null ]);
   });
 
   it('tells whoever listens after each activation, and stops once they stop listening', () =>

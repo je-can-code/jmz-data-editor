@@ -94,10 +94,17 @@ const notesOf = (file: RmmzMap): (string | null)[] =>
 
 describe('linkGateFor', () =>
 {
+  /**
+   * Names map 2 as J-ABS's action map, as J-ABS's module does from the game's plugin list, and no other map.
+   * @param {number} mapId The map asked about.
+   * @returns {{ owner: string, holds: string } | null} What the map holds, for map 2.
+   */
+  const actionMapTwo = (mapId: number) => (mapId === 2 ? { owner: 'J-ABS', holds: 'action templates' } : null);
+
   it('keeps every map from holding a link until the plugin modules have switched on', () =>
   {
     // Arrange: modules not yet switched on, which name no map.
-    const gate = linkGateFor({ revision: 0, listProblem: null, templateMapOwner: () => null });
+    const gate = linkGateFor({ revision: 0, listProblem: null, templateMapOf: () => null });
 
     // Act.
     const reasons = [ gate(2), gate(5) ];
@@ -113,7 +120,7 @@ describe('linkGateFor', () =>
   it('keeps every map from holding a link while the plugin list cannot be read, saying why rather than asking to wait', () =>
   {
     // Arrange: modules never switched on, since the server could not give js/plugins.js.
-    const gate = linkGateFor({ revision: 0, listProblem: 'js/plugins.js does not exist', templateMapOwner: () => null });
+    const gate = linkGateFor({ revision: 0, listProblem: 'js/plugins.js does not exist', templateMapOf: () => null });
 
     // Act.
     const reasons = [ gate(2), gate(5) ];
@@ -129,27 +136,27 @@ describe('linkGateFor', () =>
   it('goes by the modules switched on when a later reading of the plugin list fails, as they still stand', () =>
   {
     // Arrange: J-ABS switched on from the list, which a later reading could not read.
-    const gate = linkGateFor({ revision: 1, listProblem: 'js/plugins.js does not exist', templateMapOwner: mapId => (mapId === 2 ? 'J-ABS' : null) });
+    const gate = linkGateFor({ revision: 1, listProblem: 'js/plugins.js does not exist', templateMapOf: actionMapTwo });
 
     // Act.
     const reasons = [ gate(2), gate(3) ];
 
     // Assert.
     expect(reasons)
-      .toStrictEqual([ 'this map\'s events are patterns J-ABS copies while the game runs', null ]);
+      .toStrictEqual([ 'this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it', null ]);
   });
 
-  it('keeps a map a plugin copies events from from holding a link, naming the plugin, and lets every other hold one', () =>
+  it('keeps a map a plugin copies events from from holding a link, saying what it holds, and lets every other hold one', () =>
   {
     // Arrange: J-ABS copies its actions from map 2.
-    const gate = linkGateFor({ revision: 1, listProblem: null, templateMapOwner: mapId => (mapId === 2 ? 'J-ABS' : null) });
+    const gate = linkGateFor({ revision: 1, listProblem: null, templateMapOf: actionMapTwo });
 
     // Act.
     const reasons = [ gate(2), gate(3) ];
 
     // Assert.
     expect(reasons)
-      .toStrictEqual([ 'this map\'s events are patterns J-ABS copies while the game runs', null ]);
+      .toStrictEqual([ 'this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it', null ]);
   });
 });
 
@@ -217,12 +224,15 @@ describe('placeBlueprint', () =>
     const hub = windowWithCamp();
 
     // Act.
-    const outcome = placeBlueprint(hub, 1, 'k3x9q2mf', at(1, 0, 'this map\'s events are patterns J-ABS copies while the game runs'));
+    const outcome = placeBlueprint(hub, 1, 'k3x9q2mf', at(1, 0, 'this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it'));
 
     // Assert.
     expect([ outcome, mapFileOf(hub, 1), hub.history(mapHistoryKey(1)).rows.length ])
       .toStrictEqual([
-        { ok: false, message: 'Blueprints can\'t be placed here: this map\'s events are patterns J-ABS copies while the game runs.' },
+        {
+          ok: false,
+          message: 'Blueprints can\'t be placed here: this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it.',
+        },
         target(),
         0,
       ]);
@@ -267,8 +277,8 @@ describe('placeBlueprint', () =>
       .toStrictEqual([
         {
           ok: false,
-          message: '"Goblin camp" can\'t be placed: in Captain\'s note, the note would not read back with its link as asked; '
-            + 'look for a stray < in it.',
+          message: '"Goblin camp" can\'t be placed: in Captain\'s note, a stray < in it gets mixed up with the blueprint link; '
+            + 'take that < out, or finish its tag with a >, then try again.',
         },
         target(),
         0,

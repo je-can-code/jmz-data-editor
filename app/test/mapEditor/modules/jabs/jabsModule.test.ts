@@ -8,8 +8,9 @@ import { command, event, page, text, transferPage } from '../../support/eventKin
 
 /*
  * J-ABS copies an action's event off its action map each time the action spawns, so the events there are its
- * patterns, never things placed on a map: while J-ABS is enabled, its module names that map, and no kind claims an
- * event on it. Which map that is comes from J-ABS's Action Map Id parameter, kept as text like every RMMZ parameter;
+ * patterns, never things placed on a map: while J-ABS is enabled, its module names that map as holding its action
+ * templates, the words the author is told, and no kind claims an event on it. Which map that is comes from J-ABS's
+ * Action Map Id parameter, kept as text like every RMMZ parameter;
  * a value that is not a map id names no map, so nothing is taken from any map by mistake.
  *
  * A battler is an event with a page whose comments carry J-ABS's enemy tag, read as J-ABS reads it: on any page, any
@@ -70,6 +71,18 @@ describe('jabsModule', () =>
       // Assert.
       expect([ enabled.isActive('jabs'), enabled.kindOf(swing, 2), enabled.kindOf(swing, 3)?.id, disabled.kindOf(swing, 2)?.id ])
         .toStrictEqual([ true, null, 'core.decor', 'core.decor' ]);
+    });
+
+    it('says the action map holds J-ABS\'s action templates, in the words an author is told', () =>
+    {
+      // Arrange: nothing beyond J-ABS enabled with its action map on map 2.
+
+      // Act.
+      const registry = registryWith(jabs(true, { actionMapId: '2' }));
+
+      // Assert.
+      expect([ registry.templateMapOf(2), registry.templateMapOf(3) ])
+        .toStrictEqual([ { owner: 'J-ABS', holds: 'action templates' }, null ]);
     });
 
     it('takes no map from an action map parameter that names none', () =>

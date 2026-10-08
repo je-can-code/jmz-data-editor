@@ -75,7 +75,7 @@ const jabsModule: PluginModule = {
     const actionMapId = actionMapIdOf(context.plugins.get(JABS_PLUGIN) as PluginsJsEntry);
     if (actionMapId !== null)
     {
-      contributions.templateMap(actionMapId);
+      contributions.templateMap(actionMapId, 'action templates');
     }
   },
 };

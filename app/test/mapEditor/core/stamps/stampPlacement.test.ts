@@ -304,7 +304,7 @@ describe('placeStamp', () =>
     const hub = hubWithMaps({ 1: file, 2: target() });
     const linked = captureEventsStamp(hub.map('map:1'), [ 1 ], 'window-a:1') as Stamp;
     const plain = captureEventsStamp(hub.map('map:1'), [ 2 ], 'window-a:2') as Stamp;
-    const refusal = 'this map\'s events are patterns J-ABS copies while the game runs';
+    const refusal = 'this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it';
 
     // Act.
     const outcomes = [ placeStamp(hub, 2, linked, at(0, 0, { linkRefusal: refusal }), 'Paste'), placeStamp(hub, 2, plain, at(0, 0, { linkRefusal: refusal }), 'Paste') ];
@@ -312,7 +312,11 @@ describe('placeStamp', () =>
     // Assert: the copy refused whole, the other event placed as 2.
     expect([ outcomes[0], outcomes[1].ok && outcomes[1].eventIds, spotsOf(mapFileOf(hub, 2)) ])
       .toStrictEqual([
-        { ok: false, message: 'This stamp holds copies of blueprints, which can\'t go here: this map\'s events are patterns J-ABS copies while the game runs.' },
+        {
+          ok: false,
+          message: 'This stamp holds copies of blueprints, which can\'t go here: this map holds J-ABS\'s action templates, which the game reads, so '
+            + 'blueprints stay off it.',
+        },
         [ 2 ],
         [ null, [ 7, 4 ], [ 0, 0 ] ],
       ]);

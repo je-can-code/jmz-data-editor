@@ -1,5 +1,6 @@
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { mapDocumentKey } from '../model/documentKeys.ts';
+import type { TemplateMap } from '../modules/PluginModuleRegistry.ts';
 import { commitStampPlan, planStamp, type StampOutcome, type StampPlacement } from '../stamps/stampPlacement.ts';
 import { withBlueprintLink } from './blueprintLink.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from './blueprints.ts';
@@ -12,13 +13,13 @@ type LinkGate = (mapId: number) => string | null;
 
 /**
  * What the link gate reads of the window's plugin modules: whether they have switched on yet, why the project's plugin
- * list could not be read when it could not, and which plugin, if any, copies a map's events while the game runs. The
- * plugin module registry is one.
+ * list could not be read when it could not, and which plugin, if any, copies a map's events while the game runs, with
+ * what those events are to it. The plugin module registry is one.
  */
 type TemplateMapSource = {
   readonly revision: number;
   readonly listProblem: string | null;
-  templateMapOwner(mapId: number): string | null;
+  templateMapOf(mapId: number): TemplateMap | null;
 };
 
 /**
@@ -58,10 +59,11 @@ const linkGateFor = (modules: TemplateMapSource): LinkGate =>
         : pluginsUnreadable(modules.listProblem);
     }
 
-    const owner = modules.templateMapOwner(mapId);
-    return owner === null
+    // the author hears what the map holds and that the game reads it, which is all the reason there is.
+    const template = modules.templateMapOf(mapId);
+    return template === null
       ? null
-      : `this map's events are patterns ${owner} copies while the game runs`;
+      : `this map holds ${template.owner}'s ${template.holds}, which the game reads, so blueprints stay off it`;
   };
 };
 

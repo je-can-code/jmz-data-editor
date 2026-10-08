@@ -344,7 +344,7 @@ describe.skipIf(project === null)('blueprints on the shipped maps', () =>
     // Assert: refused there, with nothing changed, and every other map open to links.
     expect([ outcome, textOf(hub, 2) === actionMap, gate(17) ])
       .toStrictEqual([
-        { ok: false, message: 'Blueprints can\'t be placed here: this map\'s events are patterns J-ABS copies while the game runs.' },
+        { ok: false, message: 'Blueprints can\'t be placed here: this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it.' },
         true,
         null,
       ]);

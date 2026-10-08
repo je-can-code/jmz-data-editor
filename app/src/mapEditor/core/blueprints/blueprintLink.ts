@@ -52,11 +52,11 @@ const LINK_VALUE = /^\[([a-z0-9]+), ?([1-9][0-9]*)((?:, ?[^,[\]<>\r\n]+)*)\]$/u;
 const VALUE_SEPARATOR = ', ';
 
 /**
- * Why a link was refused when the note it would write would not read back holding the link asked for: a stray opening
- * bracket earlier in the note swallowing the link's line, say, or one that would still read as a link once every link
- * was taken out.
+ * Why a link was refused when the note it would write would not read back holding the link asked for, in words for the
+ * author: what went wrong and what to do about it. A stray opening bracket earlier in the note swallows the link's line,
+ * say, or would still read as a link once every link was taken out; either way it is that bracket the author fixes.
  */
-const LINK_MISREAD = 'the note would not read back with its link as asked; look for a stray < in it';
+const LINK_MISREAD = 'a stray < in it gets mixed up with the blueprint link; take that < out, or finish its tag with a >, then try again';
 
 /**
  * A copy's link to its blueprint, as the copy's note holds it.

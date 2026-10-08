@@ -28,6 +28,15 @@ import type {
 const CORE_PREFIX = 'core.';
 
 /**
+ * A map whose events a plugin copies while the game runs: the title of the module that named it, and what its events are
+ * to the plugin, in words an author knows, such as J-ABS's "action templates".
+ */
+type TemplateMap = {
+  readonly owner: string;
+  readonly holds: string;
+};
+
+/**
  * Which modules switched on, and why the others did not.
  */
 type ModuleActivation = {
@@ -48,9 +57,10 @@ type Contributions = {
   catalogIds: string[];
 
   /**
-   * The maps whose events a plugin copies while the game runs, each with the title of the module that named it.
+   * The maps whose events a plugin copies while the game runs, each with the title of the module that named it and what
+   * its events are to the plugin.
    */
-  templateMaps: { readonly mapId: number; readonly owner: string }[];
+  templateMaps: ({ readonly mapId: number } & TemplateMap)[];
 
   /**
    * Everything the modules say, in the order they said it: a fixed notice as one that never changes.
@@ -367,7 +377,7 @@ class PluginModuleRegistry
    */
   kindOf(event: RmmzMapEvent, mapId: number): EventKindDefinition | null
   {
-    if (this.templateMapOwner(mapId) !== null)
+    if (this.templateMapOf(mapId) !== null)
     {
       return null;
     }
@@ -380,11 +390,15 @@ class PluginModuleRegistry
    * events on its action map: those events are the plugin's patterns rather than things placed on a map, and the plugin
    * reads their notes, so no copy of a blueprint is ever placed there.
    * @param {number} mapId The map.
-   * @returns {string | null} The title of the active module that named the map, or null when no active module did.
+   * @returns {TemplateMap | null} The title of the active module that named the map and what its events are to the
+   * plugin, or null when no active module named it.
    */
-  templateMapOwner(mapId: number): string | null
+  templateMapOf(mapId: number): TemplateMap | null
   {
-    return this.#contributions.templateMaps.find(entry => entry.mapId === mapId)?.owner ?? null;
+    const entry = this.#contributions.templateMaps.find(each => each.mapId === mapId);
+    return entry === undefined
+      ? null
+      : { owner: entry.owner, holds: entry.holds };
   }
 
   /**
@@ -574,9 +588,9 @@ class PluginModuleRegistry
         this.#catalog.register(entry);
         this.#contributions.catalogIds.push(entry.id);
       },
-      templateMap: mapId =>
+      templateMap: (mapId, holds) =>
       {
-        this.#contributions.templateMaps.push({ mapId, owner: pluginModule.title });
+        this.#contributions.templateMaps.push({ mapId, owner: pluginModule.title, holds });
       },
       notice: notice =>
       {
@@ -662,4 +676,4 @@ class PluginModuleRegistry
 }
 
 export { configNamesOf, enabledPlugins, PluginModuleRegistry };
-export type { ModuleActivation };
+export type { ModuleActivation, TemplateMap };
