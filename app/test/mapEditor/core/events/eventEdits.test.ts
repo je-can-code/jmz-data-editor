@@ -151,7 +151,9 @@ describe('eventEdits', () =>
   /*
    * A duplicate places copies beside the originals at once, as one step: one tile right, or below, left or above when
    * the group does not fit there, never on an original or any other event, with fresh ids past the end of the list.
-   * The copies' commands naming one another name the copies; the originals' own never change.
+   * The copies' commands naming one another name the copies; the originals' own never change. A duplicate of a copy of
+   * a blueprint keeps its link, so on a map that may hold no link, J-ABS's action map, a selection holding one is
+   * refused whole, as every other way of putting a copy there is.
    *
    * Its fixture is a 6x4 map: event 1 at 1, 1 and event 2 at 2, 1, slot 3 empty, and event 4 at 5, 3.
    */
@@ -204,7 +206,7 @@ describe('eventEdits', () =>
       const hub = hubWithMaps({ 1: source() });
 
       // Act.
-      const outcome = duplicateEvents(hub, 1, [ 2 ]);
+      const outcome = duplicateEvents(hub, 1, [ 2 ], null);
 
       // Assert: the copy takes id 5, past the end, leaving the hole at 3 empty; every original stays where it was.
       const { events } = mapFileOf(hub, 1);
@@ -222,7 +224,7 @@ describe('eventEdits', () =>
       const hub = hubWithMaps({ 1: source() });
 
       // Act.
-      const outcome = duplicateEvents(hub, 1, [ 1, 2 ]);
+      const outcome = duplicateEvents(hub, 1, [ 1, 2 ], null);
 
       // Assert.
       const { events } = mapFileOf(hub, 1);
@@ -240,7 +242,7 @@ describe('eventEdits', () =>
       const hub = hubWithMaps({ 1: linkedSource() });
 
       // Act.
-      duplicateEvents(hub, 1, [ 1, 2 ]);
+      duplicateEvents(hub, 1, [ 1, 2 ], null);
 
       // Assert.
       const { events } = mapFileOf(hub, 1);
@@ -254,7 +256,7 @@ describe('eventEdits', () =>
       const hub = hubWithMaps({ 1: source() });
 
       // Act.
-      const outcome = duplicateEvents(hub, 1, [ 4 ]);
+      const outcome = duplicateEvents(hub, 1, [ 4 ], null);
 
       // Assert: the copy stands left of event 4, at 4, 3.
       expect([ outcome.ok && outcome.eventIds, spotsOf(mapFileOf(hub, 1))[5] ])
@@ -268,7 +270,7 @@ describe('eventEdits', () =>
       const hub = hubWithMaps({ 1: file });
 
       // Act.
-      const outcome = duplicateEvents(hub, 1, [ 1 ]);
+      const outcome = duplicateEvents(hub, 1, [ 1 ], null);
 
       // Assert.
       expect([ outcome, mapFileOf(hub, 1) ])
@@ -281,18 +283,53 @@ describe('eventEdits', () =>
       const hub = hubWithMaps({ 1: source() });
 
       // Act.
-      const outcome = duplicateEvents(hub, 1, [ 3 ]);
+      const outcome = duplicateEvents(hub, 1, [ 3 ], null);
 
       // Assert.
       expect(outcome)
         .toStrictEqual({ ok: true, step: null, eventIds: [] });
     });
 
+    it('refuses copies of a blueprint on a map that may hold no link, with its reason, and duplicates an event that is no copy there', () =>
+    {
+      // Arrange: event 1 is a copy of a blueprint, event 2 is not, and the map is J-ABS's action map.
+      const file = source();
+      (file.events[1] as RmmzMapEvent).note = 'Guard\n<blueprint:[k3x9q2mf, 7]>';
+      const hub = hubWithMaps({ 1: file });
+      const refusal = 'this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it';
+
+      // Act.
+      const outcomes = [ duplicateEvents(hub, 1, [ 1, 2 ], refusal), duplicateEvents(hub, 1, [ 2 ], refusal) ];
+
+      // Assert: only event 2's copy went down, as 5.
+      expect([ outcomes[0], outcomes[1].ok && outcomes[1].eventIds, described(mapFileOf(hub, 1).events) ])
+        .toStrictEqual([
+          { ok: false, message: `The selection holds copies of blueprints, which can't go here: ${refusal}.` },
+          [ 5 ],
+          [ null, '1 EV001 (Guard\n<blueprint:[k3x9q2mf, 7]>) at 1,1', '2 EV002 (event 2) at 2,1', null, '4 EV004 (event 4) at 5,3', '5 EV002 (event 2) at 3,1' ],
+        ]);
+    });
+
+    it('duplicates a copy of a blueprint on a map that may hold one, the copy keeping the link', () =>
+    {
+      // Arrange: event 2 is a copy of a blueprint.
+      const file = source();
+      (file.events[2] as RmmzMapEvent).note = '<blueprint:[k3x9q2mf, 7]>';
+      const hub = hubWithMaps({ 1: file });
+
+      // Act.
+      const outcome = duplicateEvents(hub, 1, [ 2 ], null);
+
+      // Assert.
+      expect([ outcome.ok && outcome.eventIds, (mapFileOf(hub, 1).events[5] as RmmzMapEvent).note ])
+        .toStrictEqual([ [ 5 ], '<blueprint:[k3x9q2mf, 7]>' ]);
+    });
+
     it('takes the whole duplicate back with one undo', () =>
     {
       // Arrange.
       const hub = hubWithMaps({ 1: source() });
-      duplicateEvents(hub, 1, [ 1, 2 ]);
+      duplicateEvents(hub, 1, [ 1, 2 ], null);
 
       // Act.
       hub.undo(mapHistoryKey(1));

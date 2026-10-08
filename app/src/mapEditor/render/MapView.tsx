@@ -441,6 +441,7 @@ const MapView = (props: MapViewProps) =>
       },
       notify: (text: string, severity: EventNoticeSeverity) => notifyRef.current(text, severity),
       openMenu: setMenu,
+      linkRefusal,
     });
     toolsRef.current = tools;
 

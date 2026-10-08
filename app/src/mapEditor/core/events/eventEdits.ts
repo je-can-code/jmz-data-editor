@@ -1,3 +1,4 @@
+import { blueprintLinkOf } from '../blueprints/blueprintLink.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { mapHistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
@@ -129,13 +130,17 @@ const planDuplicate = (map: EventMap, events: readonly RmmzMapEvent[], shift: Ma
  * Duplicates events beside themselves as one step in the map's history: the copies keep the group's layout one tile
  * right of the originals, or below, left or above when the group does not fit there, and take fresh ids; the copies'
  * commands naming each other name the copies, while the originals keep theirs. A duplicate is no copy to the clipboard
- * and no stamp: it places the copies at once and leaves the Stamps panel as it was.
+ * and no stamp: it places the copies at once and leaves the Stamps panel as it was. A duplicate of a copy of a blueprint
+ * is a copy too, its note keeping the link, so on a map that may hold no link a selection holding one is refused whole,
+ * as placing a blueprint or a stamp carrying its copies there is.
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map.
  * @param {readonly number[]} eventIds The events.
- * @returns {EventEditOutcome} The step and the copies, which take the selection, or why there was no room.
+ * @param {string | null} linkRefusal Why the map may hold no copy of a blueprint, or null when it may.
+ * @returns {EventEditOutcome} The step and the copies, which take the selection, or why there was no room, or why
+ * copies of a blueprint cannot go there.
  */
-const duplicateEvents = (hub: DocumentHub, mapId: number, eventIds: readonly number[]): EventEditOutcome =>
+const duplicateEvents = (hub: DocumentHub, mapId: number, eventIds: readonly number[], linkRefusal: string | null): EventEditOutcome =>
 {
   const key = mapDocumentKey(mapId);
   const map = hub.map(key);
@@ -145,8 +150,14 @@ const duplicateEvents = (hub: DocumentHub, mapId: number, eventIds: readonly num
     return { ok: true, step: null, eventIds: [] };
   }
 
-  // the first shift the whole group fits, trying the next only once one is refused.
+  // copies of a blueprint stay off a map that may hold no link, however they would get there.
   const originals = held.map(id => map.event(id) as RmmzMapEvent);
+  if (linkRefusal !== null && originals.some(event => blueprintLinkOf(event.note) !== null))
+  {
+    return { ok: false, message: `The selection holds copies of blueprints, which can't go here: ${linkRefusal}.` };
+  }
+
+  // the first shift the whole group fits, trying the next only once one is refused.
   for (const shift of DUPLICATE_SHIFTS)
   {
     const copies = planDuplicate(map, originals, shift);

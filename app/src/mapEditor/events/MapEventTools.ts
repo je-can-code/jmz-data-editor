@@ -62,6 +62,11 @@ type MapEventToolsOptions = {
   readonly openEvent: (mapId: number, eventId: number) => void;
   readonly notify: (text: string, severity: EventNoticeSeverity) => void;
   readonly openMenu: (request: EventMenuRequest) => void;
+
+  /**
+   * Says why a map may hold no copy of a blueprint, or null when it may: a duplicate of copies is refused there.
+   */
+  readonly linkRefusal: (mapId: number) => string | null;
 };
 
 /**
@@ -324,11 +329,12 @@ class MapEventTools
   }
 
   /**
-   * Duplicates the selected events beside themselves, selecting the copies.
+   * Duplicates the selected events beside themselves, selecting the copies; copies of a blueprint among them are refused
+   * on a map that may hold no link, with the map's reason.
    */
   duplicateSelected(): void
   {
-    this.#onSelection(mapId => duplicateEvents(this.#options.hub, mapId, this.#selected));
+    this.#onSelection(mapId => duplicateEvents(this.#options.hub, mapId, this.#selected, this.#options.linkRefusal(mapId)));
   }
 
   //endregion actions

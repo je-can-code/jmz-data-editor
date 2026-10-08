@@ -39,9 +39,10 @@ describe('MapEventTools', () =>
    * Builds the tools over the fixture map, in a view in the page, with a stand-in renderer that finds events by the
    * tile under a point through its camera.
    * @param {Camera} startCamera Where the view looks; left out, at zoom 1 with the map's corner at the view's.
+   * @param {string | null} linkRefusal Why the map may hold no copy of a blueprint; left out, it may.
    * @returns {object} The tools and everything they were handed and said.
    */
-  const setUp = (startCamera: Camera = { x: 0, y: 0, zoom: 1 }) =>
+  const setUp = (startCamera: Camera = { x: 0, y: 0, zoom: 1 }, linkRefusal: string | null = null) =>
   {
     const hub = hubWithMaps({ 1: mapWithEvents(6, 4, [ null, [ 0, 0 ], [ 1, 0 ], [ 4, 2 ] ]) });
     const map = hub.map('map:1');
@@ -98,6 +99,7 @@ describe('MapEventTools', () =>
       openEvent: (mapId, eventId) => opened.push(`${mapId}:${eventId}`),
       notify: text => notices.push(text),
       openMenu: request => menuRequests.push(request),
+      linkRefusal: () => linkRefusal,
     });
     tools.setMap(map);
     built.push(tools);
@@ -452,6 +454,25 @@ describe('MapEventTools', () =>
           [ '1:4' ],
           [ null, null, null, null, null ],
           [],
+        ]);
+    });
+
+    it('refuses Ctrl+D on a map that may hold no copy of a blueprint when the selection holds one, saying why', () =>
+    {
+      // Arrange: the map is J-ABS's action map, and event 3 is a copy of a blueprint.
+      const refusal = 'this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it';
+      const { hub, host, selection, notices } = setUp(undefined, refusal);
+      hub.edit('Link', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'events', 3, 'note' ], '<blueprint:[k3x9q2mf, 7]>'));
+      selection.select(1, [ 3 ]);
+
+      // Act.
+      key(host, 'd', { ctrlKey: true });
+
+      // Assert: nothing was placed.
+      expect([ notices, spotsOf(mapFileOf(hub, 1)) ])
+        .toStrictEqual([
+          [ `The selection holds copies of blueprints, which can't go here: ${refusal}.` ],
+          [ null, [ 0, 0 ], [ 1, 0 ], [ 4, 2 ] ],
         ]);
     });
 
