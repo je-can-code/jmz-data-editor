@@ -8,16 +8,17 @@ import { layerStatsOf, spreadOf } from '../../../../src/mapEditor/modules/weathe
  * The parity check holds a layer's population against the game's own by its numbers, never pixel for pixel, since the
  * particles are random: how many there are and in which life, how many still wait, what share of them is on the screen,
  * and the spread of how fast, which way, how big, how turned and how long-lived the first-life ones are, and how
- * strongly every one draws, a waiting particle drawing at nothing. A spread is the least, the greatest and the mean, all
- * three nothing for no one.
+ * strongly every one draws, a waiting particle drawing at nothing. A spread is the least, the greatest, the mean and how
+ * far a sample of them strays from it, its standard deviation, so the check can tell what chance alone makes of a few
+ * particles; all four nothing for no one, and one alone straying nowhere.
  */
 describe('weatherStats', () =>
 {
   describe('spreadOf', () =>
   {
-    it('sums up the least, the greatest and the mean, and nothing for no one', () =>
+    it('sums up the least, the greatest, the mean and a sample\'s standard deviation, and nothing for no one', () =>
     {
-      // Arrange.
+      // Arrange: four numbers straying 1, 3, 2 and 0 from their mean of 2, so 14 over 3 squared.
       const values = [ 3, -1, 4, 2 ];
 
       // Act.
@@ -25,7 +26,19 @@ describe('weatherStats', () =>
 
       // Assert.
       expect(spreads)
-        .toStrictEqual([ { min: -1, max: 4, mean: 2 }, { min: 0, max: 0, mean: 0 } ]);
+        .toStrictEqual([ { min: -1, max: 4, mean: 2, sd: expect.closeTo(Math.sqrt(14 / 3), 12) }, { min: 0, max: 0, mean: 0, sd: 0 } ]);
+    });
+
+    it('says one number alone strays nowhere', () =>
+    {
+      // Arrange: one number.
+
+      // Act.
+      const spread = spreadOf([ 7 ]);
+
+      // Assert.
+      expect(spread)
+        .toStrictEqual({ min: 7, max: 7, mean: 7, sd: 0 });
     });
   });
 
@@ -61,13 +74,13 @@ describe('weatherStats', () =>
           secondLife: 1,
           waiting: 1,
           onScreen: 0.5,
-          velocityX: { min: -1, max: 1, mean: 0 },
-          velocityY: { min: 6, max: 10, mean: 8 },
-          scaleX: { min: 1, max: 2, mean: 4 / 3 },
-          scaleY: { min: 1, max: 3, mean: 5 / 3 },
-          rotation: { min: 0, max: 0.5, mean: 0.5 / 3 },
-          life: { min: 50, max: 90, mean: 70 },
-          opacity: { min: 0, max: 200, mean: 85 },
+          velocityX: { min: -1, max: 1, mean: 0, sd: 1 },
+          velocityY: { min: 6, max: 10, mean: 8, sd: 2 },
+          scaleX: { min: 1, max: 2, mean: 4 / 3, sd: expect.closeTo(Math.sqrt(1 / 3), 12) },
+          scaleY: { min: 1, max: 3, mean: 5 / 3, sd: expect.closeTo(Math.sqrt(4 / 3), 12) },
+          rotation: { min: 0, max: 0.5, mean: 0.5 / 3, sd: expect.closeTo(Math.sqrt(1 / 12), 12) },
+          life: { min: 50, max: 90, mean: 70, sd: 20 },
+          opacity: { min: 0, max: 200, mean: 85, sd: expect.closeTo(Math.sqrt(22700 / 3), 9) },
         });
     });
   });

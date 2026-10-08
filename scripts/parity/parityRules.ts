@@ -193,6 +193,14 @@ type EditorWeatherDepth = {
 const MEAN_TOLERANCE = 0.2;
 
 /**
+ * How many standard errors a mean may stray between the two sides, when that is more than {@link MEAN_TOLERANCE} allows:
+ * a few particles' mean strays far by chance alone, eight sunbeams' by a good part of their range, where thousands of
+ * raindrops' stray by a hair, so a small population is held to what chance makes of it rather than to a share that
+ * suits a large one.
+ */
+const MEAN_ERRORS = 3;
+
+/**
  * How many standard errors a share of a population may stray between the two sides, on screen or in its second life:
  * each side's share is one draw from the same chance, so a small population strays more by chance alone, 33 bubbles by
  * about a tenth, where two thousand flakes stray by about a hundredth.
@@ -1129,15 +1137,21 @@ const spreadWords = (spread: ProbeSpread): string =>
 
 /**
  * Reports whether two spreads of a randomly rolled number agree: their means within {@link MEAN_TOLERANCE} of the wider
- * spread, and each side's range reaching into the other's.
+ * spread, or, for populations small enough that chance strays further, within {@link MEAN_ERRORS} standard errors of
+ * the difference between the two means, from each side's standard deviation and how many it is of; and each side's
+ * range reaching into the other's. A spread without its deviation, or of an untold number, strays by nothing.
  * @param {ProbeSpread} game The game's spread.
  * @param {ProbeSpread} editor The editor's.
+ * @param {number} gameCount How many the game's spread is of; untold, too many to stray.
+ * @param {number} editorCount How many the editor's spread is of; untold, too many to stray.
  * @returns {boolean} True when they agree.
  */
-const spreadsAgree = (game: ProbeSpread, editor: ProbeSpread): boolean =>
+const spreadsAgree = (game: ProbeSpread, editor: ProbeSpread, gameCount = Number.POSITIVE_INFINITY, editorCount = Number.POSITIVE_INFINITY): boolean =>
 {
   const width = Math.max(game.max - game.min, editor.max - editor.min);
-  const close = Math.abs(game.mean - editor.mean) <= (MEAN_TOLERANCE * width) + 1e-9;
+  const strayOf = (spread: ProbeSpread, count: number): number => ((spread.sd ?? 0) ** 2) / Math.max(count, 1);
+  const chance = MEAN_ERRORS * Math.sqrt(strayOf(game, gameCount) + strayOf(editor, editorCount));
+  const close = Math.abs(game.mean - editor.mean) <= Math.max(MEAN_TOLERANCE * width, chance) + 1e-9;
   const overlap = game.min <= editor.max + 1e-9 && editor.min <= game.max + 1e-9;
   return close && overlap;
 };
@@ -1174,8 +1188,15 @@ const compareWeatherLayer = (index: number, game: WeatherLayerProbe, editor: Wea
   const name = (what: string): string => `layer ${index + 1} ${what}`;
   const exact = (what: string, left: unknown, right: unknown): WeatherCheck =>
     ({ name: name(what), game: JSON.stringify(left), editor: JSON.stringify(right), holds: canonicalJson(left) === canonicalJson(right) });
-  const spread = (what: string, pick: (layer: WeatherLayerProbe) => ProbeSpread): WeatherCheck =>
-    ({ name: name(what), game: spreadWords(pick(game)), editor: spreadWords(pick(editor)), holds: spreadsAgree(pick(game), pick(editor)) });
+
+  // every spread but the strength's is of the first-life particles alone; the strength's is of every particle.
+  const countOf = (layer: WeatherLayerProbe, what: string): number => (what === 'strength' ? layer.stats.count : layer.stats.firstLife);
+  const spread = (what: string, pick: (layer: WeatherLayerProbe) => ProbeSpread): WeatherCheck => ({
+    name: name(what),
+    game: spreadWords(pick(game)),
+    editor: spreadWords(pick(editor)),
+    holds: spreadsAgree(pick(game), pick(editor), countOf(game, what), countOf(editor, what)),
+  });
   const share = (what: string, pick: (layer: WeatherLayerProbe) => number): WeatherCheck =>
     ({ name: name(what), game: pick(game).toFixed(3), editor: pick(editor).toFixed(3), holds: sharesAgree(pick(game), game.stats.count, pick(editor), editor.stats.count) });
   const gameBlend = typeof game.blend === 'number' ? ENGINE_BLENDS[game.blend] ?? String(game.blend) : game.blend;

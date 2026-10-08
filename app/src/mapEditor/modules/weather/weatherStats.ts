@@ -1,12 +1,14 @@
 import type { WeatherField } from './weatherField.ts';
 
 /**
- * The spread of one number across a population: its least, its greatest, and its mean; all three 0 for no one.
+ * The spread of one number across a population: its least, its greatest, its mean, and how far it strays from the mean,
+ * as a sample's standard deviation; all four 0 for no one, and the last 0 for one alone.
  */
 type Spread = {
   readonly min: number;
   readonly max: number;
   readonly mean: number;
+  readonly sd: number;
 };
 
 /**
@@ -30,15 +32,16 @@ type LayerStats = {
 };
 
 /**
- * Sums up the spread of some numbers.
+ * Sums up the spread of some numbers: the standard deviation is a sample's, over one fewer than there are, so the
+ * parity check can tell how far a few particles' mean strays by chance alone.
  * @param {readonly number[]} values The numbers.
- * @returns {Spread} Their least, greatest and mean, or zeroes for none.
+ * @returns {Spread} Their least, greatest, mean and standard deviation, or zeroes for none.
  */
 const spreadOf = (values: readonly number[]): Spread =>
 {
   if (values.length === 0)
   {
-    return { min: 0, max: 0, mean: 0 };
+    return { min: 0, max: 0, mean: 0, sd: 0 };
   }
 
   let min = Number.POSITIVE_INFINITY;
@@ -50,7 +53,10 @@ const spreadOf = (values: readonly number[]): Spread =>
     max = Math.max(max, value);
     sum += value;
   });
-  return { min, max, mean: sum / values.length };
+  const mean = sum / values.length;
+  const squares = values.reduce((total, value) => total + ((value - mean) ** 2), 0);
+  const sd = values.length < 2 ? 0 : Math.sqrt(squares / (values.length - 1));
+  return { min, max, mean, sd };
 };
 
 /**

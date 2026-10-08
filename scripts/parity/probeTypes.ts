@@ -77,12 +77,14 @@ type ProbeVerdicts = {
 };
 
 /**
- * One number summed up across a population of particles: its least, its greatest and its mean; all three 0 for no one.
+ * One number summed up across a population of particles: its least, its greatest, its mean, and a sample's standard
+ * deviation, which a report written before it was kept lacks; all four 0 for no one.
  */
 type ProbeSpread = {
   min: number;
   max: number;
   mean: number;
+  sd?: number;
 };
 
 /**

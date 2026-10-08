@@ -13,9 +13,9 @@
  * layer as resolved and its population summed up; then the whole spriteset is drawn as the player sees it, weather and
  * all. Before the first such map the probe holds J-Weather-Time's sky off, noting what it was doing on the fresh save,
  * so every map's weather resolves as J-Weather alone resolves it: a tagged map at its middle strength. A map asked for
- * its weather under a sky is arrived at on the date and at the hour asked, the clock stopped, and J-Weather-Time made
- * to hold that sky: its forecast set to the condition and strength for that phase, then pushed to J-Weather as the
- * plugin pushes it, so the plugin itself picks the face and J-Weather resolves the map under it.
+ * its weather under a sky is arrived at on the date and at the hour asked, the clock stopped, with J-Weather-Time made
+ * to hold that sky before the player arrives: its forecast set to the condition and strength for that phase, then
+ * pushed to J-Weather as the plugin pushes it, so the plugin itself picks the face, and the map is built under it.
  *
  * A map asked about at moments, such as a season's date at a few hours, is judged instead of drawn: the game's clock is
  * set straight to each moment, date and all, every page of every event there is judged as the game judges it then, and
@@ -104,6 +104,9 @@ const parityProbe = (config: ProbeConfig): void =>
   let settle = 0;
   let phase = 'boot';
   let hooksInstalled = false;
+
+  // whether the first map has yet to be arrived at with the clock set for it, which a new game starting on it cannot do.
+  let clockUnset = true;
 
   const installFreeze = (): void =>
   {
@@ -388,12 +391,13 @@ const parityProbe = (config: ProbeConfig): void =>
       + ` base filters [${filters}], ${lights.length} lights: ${lights.join('; ')}`);
   };
 
-  // sums up one number across a population: its least, its greatest and its mean, all three 0 for no one.
-  const spreadOf = (values: number[]): { min: number; max: number; mean: number } =>
+  // sums up one number across a population: its least, its greatest, its mean and a sample's standard deviation, all
+  // four 0 for no one, the last 0 for one alone, as the editor sums up its own.
+  const spreadOf = (values: number[]): { min: number; max: number; mean: number; sd: number } =>
   {
     if (values.length === 0)
     {
-      return { min: 0, max: 0, mean: 0 };
+      return { min: 0, max: 0, mean: 0, sd: 0 };
     }
 
     let min = Number.POSITIVE_INFINITY;
@@ -405,7 +409,9 @@ const parityProbe = (config: ProbeConfig): void =>
       max = Math.max(max, value);
       sum += value;
     });
-    return { min, max, mean: sum / values.length };
+    const mean = sum / values.length;
+    const squares = values.reduce((total, value) => total + ((value - mean) ** 2), 0);
+    return { min, max, mean, sd: values.length < 2 ? 0 : Math.sqrt(squares / (values.length - 1)) };
   };
 
   // reads one layer of J-Weather's plane: its pictures and their sizes (the engine's empty picture is none), its blend
@@ -471,11 +477,29 @@ const parityProbe = (config: ProbeConfig): void =>
   let pushSky: ((clock: unknown) => void) | null = null;
   let skyPushed = false;
 
-  // makes J-Weather-Time hold a sky over the map: its forecast set to the condition and strength for the phase the
-  // clock reads, that phase marked as the one applied so nothing rolls it again, then pushed to J-Weather as the plugin
-  // pushes it on arrival, so J-Weather-Time picks the face the condition wears at that season and hour. Returns what it
-  // handed J-Weather.
-  const holdSky = (sky: { type: string; intensity: string }): unknown =>
+  // what the sky does on the fresh save, read once, for the record: the sky held off never wound its forecast on.
+  const noteFreshSky = (): void =>
+  {
+    if (report.freshSky !== undefined || engine.ForecastDirector === undefined)
+    {
+      return;
+    }
+
+    try
+    {
+      engine.ForecastDirector.advance(engine.$gameTime);
+      report.freshSky = { ...engine.ForecastDirector.skyFor(engine.$gameTime), at: (engine.$gameTime.hours() * 60) + engine.$gameTime.minutes() };
+    }
+    catch (error)
+    {
+      report.freshSky = `unread: ${String(error)}`;
+    }
+  };
+
+  // makes J-Weather-Time hold a sky: its forecast set to the condition and strength for the phase the clock reads, that
+  // phase marked as the one applied so nothing rolls it again, then pushed to J-Weather as the plugin pushes it, so
+  // J-Weather-Time picks the face the condition wears at that season and hour.
+  const holdSky = (sky: { type: string; intensity: string }): void =>
   {
     const director = engine.ForecastDirector;
     const skyPhase = director.phaseOf(engine.$gameTime);
@@ -483,7 +507,23 @@ const parityProbe = (config: ProbeConfig): void =>
     engine.$gameSystem.setLastAppliedSkyPhase(skyPhase);
     pushSky?.call(director, engine.$gameTime);
     skyPushed = true;
-    return director.skyFor(engine.$gameTime);
+  };
+
+  // before arriving at a map read for its weather, the sky it is read under is held, or the sky held off again after
+  // one was held, so the map arrives under it as a player would: its weather resolved and its pictures loaded on the way.
+  const holdSkyFor = (next: ProbeMap): void =>
+  {
+    if (next.sky !== undefined)
+    {
+      holdSky(next.sky);
+      return;
+    }
+
+    if (next.weather !== undefined && skyPushed)
+    {
+      engine.WeatherDirector.setSky(null);
+      skyPushed = false;
+    }
   };
 
   // reads a map's weather and draws the whole spriteset at the asked display: where the plane sits against the tone
@@ -491,37 +531,13 @@ const parityProbe = (config: ProbeConfig): void =>
   // the picture the player would see there, characters but the events set aside. The weather is settled afresh first,
   // exactly as on arriving, and read and drawn before a frame moves it, which is the moment the editor reads its own:
   // a population a few frames on from settling has more of its queued particles in view and faded in. A map read under
-  // a sky has it held over it first, and the sky held off again for a map read without one after it.
+  // a sky notes what J-Weather-Time hands J-Weather.
   const captureWeather = (map: ProbeMap): void =>
   {
     const view = map.weather as { x: number; y: number };
     const spriteset = engine.SceneManager._scene._spriteset;
-
-    // what the sky does on the fresh save, read once, for the record: the sky held off never wound its forecast on.
-    if (report.freshSky === undefined && engine.ForecastDirector !== undefined)
-    {
-      try
-      {
-        engine.ForecastDirector.advance(engine.$gameTime);
-        report.freshSky = { ...engine.ForecastDirector.skyFor(engine.$gameTime), at: (engine.$gameTime.hours() * 60) + engine.$gameTime.minutes() };
-      }
-      catch (error)
-      {
-        report.freshSky = `unread: ${String(error)}`;
-      }
-    }
-
-    let sky: unknown = null;
-    if (map.sky !== undefined)
-    {
-      sky = holdSky(map.sky);
-    }
-    else if (skyPushed)
-    {
-      engine.WeatherDirector.setSky(null);
-      skyPushed = false;
-    }
-
+    noteFreshSky();
+    const sky = map.sky === undefined ? null : engine.ForecastDirector.skyFor(engine.$gameTime);
     spriteset.refreshWeatherLayers();
     spriteset.weatherPlane().children.forEach((layer: any) => layer.particles().forEach((_: unknown, index: number) => layer.drawParticle(index)));
     engine.$gameMap.setDisplayPos(view.x, view.y);
@@ -679,6 +695,7 @@ const parityProbe = (config: ProbeConfig): void =>
     if (next.weather !== undefined)
     {
       holdSkyOff(true);
+      noteFreshSky();
     }
 
     if (next.time !== undefined)
@@ -702,6 +719,9 @@ const parityProbe = (config: ProbeConfig): void =>
       engine.$gameTime.setDays(next.date.days);
       engine.$gameTime.setSeconds(next.date.seconds);
     }
+
+    // the sky is held once the clock reads the moment it is held at.
+    holdSkyFor(next);
 
     engine.$gamePlayer.requestMapReload();
     engine.$gamePlayer.reserveTransfer(next.mapId, 0, 0, 2, 2);
@@ -774,6 +794,15 @@ const parityProbe = (config: ProbeConfig): void =>
     settle += 1;
     if (settle < 5 || hooksInstalled === false)
     {
+      return;
+    }
+
+    // the new game started straight on the first map, before its clock could be set for it; a first map asking for an
+    // hour or a date is arrived at again with the clock set, as every later map is.
+    if (mapIndex === 0 && clockUnset && (map.time !== undefined || map.date !== undefined))
+    {
+      clockUnset = false;
+      transferNext();
       return;
     }
 

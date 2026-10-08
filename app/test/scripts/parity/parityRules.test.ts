@@ -96,7 +96,8 @@ import { command, event, page } from '../../mapEditor/support/eventKindFixtures.
  * day asked for if any, and compared by its numbers, since every particle is rolled at random on both sides: the layer
  * as J-Weather resolved it, its pictures, count, tint, blend and how many particles wait must match exactly, whatever
  * order the keys were written in; the spread of each rolled number agrees when the means lie within a fifth of the wider
- * spread and the ranges reach into each other; and a share of the population, on screen or in a second life, within
+ * spread, or, for a population so small that chance strays further, within three standard errors of their difference,
+ * and the ranges reach into each other; and a share of the population, on screen or in a second life, within
  * three standard errors of what chance alone strays by for populations that size, never tighter than a twentieth. The
  * engine's blend numbers read as pixi's names. Both sides must draw the weather inside what the screen's tone
  * colours, after the map and its characters, and beneath the dark.
@@ -1412,6 +1413,28 @@ describe('parityRules', () =>
       // Assert.
       expect(agreed)
         .toStrictEqual([ true, false, false, true ]);
+    });
+
+    it('lets a few particles\' means stray as far as three standard errors, past a fifth of the spread, and no further', () =>
+    {
+      // Arrange: eight sunbeams' speeds a side, their means 0.016 apart, past a fifth of the 0.068 wide spread (0.0136)
+      // but inside three standard errors (0.0299); the same spreads of four thousand a side, whose error is a hair; the
+      // same eight with the editor's mean 0.035 apart, past three errors; and the eight with no deviations kept.
+      const game = { min: 0.130, max: 0.198, mean: 0.163, sd: 0.025 };
+      const editor = { min: 0.160, max: 0.197, mean: 0.179, sd: 0.013 };
+      const asks: [ typeof game, typeof editor, number ][] = [
+        [ game, editor, 8 ],
+        [ game, editor, 4000 ],
+        [ game, { ...editor, mean: 0.198, max: 0.21 }, 8 ],
+        [ { min: game.min, max: game.max, mean: game.mean } as typeof game, { min: editor.min, max: editor.max, mean: editor.mean } as typeof editor, 8 ],
+      ];
+
+      // Act.
+      const agreed = asks.map(([ left, right, count ]) => spreadsAgree(left, right, count, count));
+
+      // Assert.
+      expect(agreed)
+        .toStrictEqual([ true, false, false, false ]);
     });
   });
 
