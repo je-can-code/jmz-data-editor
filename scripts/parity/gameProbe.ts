@@ -366,8 +366,7 @@ const parityProbe = (config: ProbeConfig): void =>
     const params = layer.layer();
     const particles: any[] = layer.particles();
     const sprites: any[] = layer.children;
-    const width = engine.Graphics.width;
-    const height = engine.Graphics.height;
+    const { width, height } = engine.Graphics;
     const strengths = particles.map((particle, index) => (particle.stagger > 0 ? 0 : engine.WeatherMotion.glowFor(particle, layer.paramsFor(index))));
     const first = particles.filter(particle => particle.stage === 0);
     const firstIndex = particles.findIndex(particle => particle.stage === 0);
@@ -384,7 +383,12 @@ const parityProbe = (config: ProbeConfig): void =>
     // a population just settled holds no particle in its second life yet, so the stage's picture is read from where the
     // layer's sprites take it, the engine's own cache of what has loaded.
     const stage = params.becomes === null || params.becomes === undefined ? null : params.becomes;
-    const stageBitmap = stageIndex >= 0 ? sprites[stageIndex].bitmap : (stage === null ? null : engine.ImageManager.loadWeather(stage.asset));
+    let stageBitmap = stage === null ? null : engine.ImageManager.loadWeather(stage.asset);
+    if (stageIndex >= 0)
+    {
+      stageBitmap = sprites[stageIndex].bitmap;
+    }
+
     return {
       asset: params.asset ?? null,
       becomesAsset: stage === null ? null : stage.asset ?? null,
