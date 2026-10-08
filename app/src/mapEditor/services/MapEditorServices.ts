@@ -109,8 +109,9 @@ type MapEditorServices = {
 
   /**
    * How many copies of each blueprint stand across the project, counted from the maps' notes: the maps this window holds
-   * as they stand here, and the rest as the server reads them on disk, read again whenever a map's file changes. Nothing
-   * is counted until the Blueprints section first asks.
+   * as they stand here, the maps only other windows hold as they stand there, unsaved copies and all, and the rest as the
+   * server reads them on disk, read again whenever a map's file changes. Nothing is counted until the Blueprints section
+   * first asks, or an undo that would take a blueprint away does.
    */
   readonly blueprintCopies: BlueprintCopyCounter;
 
@@ -309,11 +310,12 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   // every stamp is named after the window that copied it, so another window knows whether it holds it already.
   const stamps = new StampHistory(clientId);
 
-  // a client that cannot read every map's notes leaves the copies uncounted, rather than counted from this window alone.
+  // a client that cannot read every map's notes leaves the copies uncounted, rather than counted from this window alone;
+  // the maps only other windows hold are counted as those windows hold them, unsaved copies and all.
   const readNotes = api === null || api.loadEventNotes === undefined
     ? null
     : api.loadEventNotes.bind(api);
-  const blueprintCopies = new BlueprintCopyCounter({ hub, readNotes });
+  const blueprintCopies = new BlueprintCopyCounter({ hub, readNotes, sync });
   const clock = new WindowClock();
   const pages = new WindowPageRule(modules);
   const preview = new WindowPreview();

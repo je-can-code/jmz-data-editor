@@ -7,9 +7,12 @@ import {
   tallyCopies,
   type BlueprintCopy,
   type BlueprintCopyCounts,
+  type CopySync,
   type EventNote,
 } from '../../../../src/mapEditor/core/blueprints/blueprintCopies.ts';
+import type { DocumentSnapshot } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
@@ -532,6 +535,353 @@ describe('blueprintCopies', () =>
       // Assert.
       expect([ counter.countOf('aa'), counter.countOf('bb') ])
         .toStrictEqual([ { total: 1, maps: [ { mapId: 1, copies: 1 } ] }, { total: 1, maps: [ { mapId: 5, copies: 1 } ] } ]);
+    });
+  });
+
+  /*
+   * A map another window holds and this one does not counts as that window's copy stands, unsaved copies and all, looked
+   * at through the sync between windows without being held here: every map the others hold once they have all been
+   * heard from, and again whenever one of them takes a map up, moves it on or lets it go. A map held here counts as it
+   * stands here, and one no other window holds any more counts as the disk has it. One look at a map at a time; a map
+   * moved on while its look is on its way is looked at once more after. No count is handed out before the others have
+   * been heard from, while a look is on its way, or while a window still holding a map did not answer the last look at
+   * it; a later look, or that window letting go, settles it. Only maps are looked at.
+   */
+  describe('BlueprintCopyCounter: other windows', () =>
+  {
+    /**
+     * The other windows as the sync between them tells of them: which maps they hold, told to whoever listens as it
+     * changes, and their copy of each, handed over when looked at, at once, later when the test says, or never.
+     * @returns {object} The sync, the maps looked at, and how the test moves the other windows.
+     */
+    const otherWindows = () =>
+    {
+      const holding = new Map<DocumentKey, RmmzMap>();
+      const listeners = new Set<(key: DocumentKey) => void>();
+      const looked: DocumentKey[] = [];
+      const later: (() => void)[] = [];
+      const answers = { mode: 'at once' as 'at once' | 'later' | 'never' };
+      let hear: () => void = () => undefined;
+      const discovery = new Promise<void>(resolve =>
+      {
+        hear = resolve;
+      });
+
+      /**
+       * Hands over a window's copy of a map, as a snapshot carries it.
+       * @param {DocumentKey} key The map.
+       * @returns {DocumentSnapshot | null} The copy, or null when no window holds it.
+       */
+      const copyOf = (key: DocumentKey): DocumentSnapshot | null =>
+      {
+        const file = holding.get(key);
+        return file === undefined ? null : { content: structuredClone(file) as unknown as JsonValue } as DocumentSnapshot;
+      };
+
+      const sync: CopySync = {
+        holders: key => (holding.has(key) ? [ 'window-b' ] : []),
+        documentsHeldElsewhere: () => [ ...holding.keys() ],
+        onHoldingChange: listener =>
+        {
+          listeners.add(listener);
+          return () =>
+          {
+            listeners.delete(listener);
+          };
+        },
+        whenDiscovered: () => discovery,
+        requestSnapshot: key =>
+        {
+          looked.push(key);
+          if (answers.mode === 'never')
+          {
+            return Promise.resolve(null);
+          }
+
+          return answers.mode === 'at once'
+            ? Promise.resolve(copyOf(key))
+            : new Promise(resolve =>
+            {
+              later.push(() => resolve(copyOf(key)));
+            });
+        },
+      };
+
+      /**
+       * Has another window take a map up, or move it on, holding the copy given, and tells whoever listens.
+       * @param {DocumentKey} key The map.
+       * @param {RmmzMap} file Its copy there.
+       */
+      const hold = (key: DocumentKey, file: RmmzMap) =>
+      {
+        holding.set(key, file);
+        listeners.forEach(listener => listener(key));
+      };
+
+      /**
+       * Has the other window let a map go, and tells whoever listens.
+       * @param {DocumentKey} key The map.
+       */
+      const letGo = (key: DocumentKey) =>
+      {
+        holding.delete(key);
+        listeners.forEach(listener => listener(key));
+      };
+
+      /**
+       * Has the other window go quiet holding a map, as one that closed without a word is no longer counted live once
+       * long enough has passed: nobody is told.
+       * @param {DocumentKey} key The map.
+       */
+      const fallSilent = (key: DocumentKey) =>
+      {
+        holding.delete(key);
+      };
+
+      return { sync, looked, later, answers, hold, letGo, fallSilent, heard: () => hear() };
+    };
+
+    /**
+     * Map 5 as another window holds it: the copy of aa under words kept, the copy of bb taken out, and a copy of aa placed
+     * as event 8, unsaved.
+     * @returns {RmmzMap} The map.
+     */
+    const map5There = (): RmmzMap => mapWithNotes([ 'a', 'b', 'c', 'Guard\n<blueprint:[aa, 3]>', 'e', 'f', 'just words', '<blueprint:[aa, 3]>' ]);
+
+    /**
+     * Builds the window, and a counter over it reading the disk above and asking the other windows.
+     * @param {CopySync} sync The other windows.
+     * @returns {object} The window's documents and the counter.
+     */
+    const counting = (sync: CopySync) =>
+    {
+      const hub = hubWithMaps({ 1: mapWithNotes([ '<blueprint:[aa, 3]>', 'event 2' ]), 2: mapWithNotes([ 'event 1' ]) });
+      const counter = new BlueprintCopyCounter({ hub, readNotes: async () => DISK, sync });
+      return { hub, counter };
+    };
+
+    /**
+     * Lets every look and reading already answered land.
+     * @param {BlueprintCopyCounter} counter The counter.
+     */
+    const landed = async (counter: BlueprintCopyCounter): Promise<void> =>
+    {
+      await counter.settled();
+      await new Promise(resolve =>
+      {
+        setTimeout(resolve, 0);
+      });
+    };
+
+    it('counts a map only another window holds from that window\'s copy, unsaved copies and all, over what the disk says of it', async () =>
+    {
+      // Arrange: the other window holds map 5.
+      const others = otherWindows();
+      others.hold('map:5', map5There());
+      const { counter } = counting(others.sync);
+
+      // Act.
+      counter.start();
+      others.heard();
+      await landed(counter);
+
+      // Assert: aa's two copies there, with this window's own on map 1; bb's copy, gone there, no longer counted.
+      expect([ counter.countOf('aa'), counter.countOf('bb'), others.looked ])
+        .toStrictEqual([ { total: 3, maps: [ { mapId: 1, copies: 1 }, { mapId: 5, copies: 2 } ] }, { total: 0, maps: [] }, [ 'map:5' ] ]);
+    });
+
+    it('looks again when the other window moves its map on, and counts the disk again once no other window holds it', async () =>
+    {
+      // Arrange.
+      const others = otherWindows();
+      others.hold('map:5', map5There());
+      const { counter } = counting(others.sync);
+      counter.start();
+      others.heard();
+      await landed(counter);
+
+      // Act: event 8's copy taken out there; then the map let go of without saving.
+      others.hold('map:5', mapWithNotes([ 'a', 'b', 'c', 'Guard\n<blueprint:[aa, 3]>' ]));
+      await landed(counter);
+      const movedOn = counter.countOf('aa');
+      others.letGo('map:5');
+
+      // Assert: once let go of, map 5 counts as the disk has it, its copy of bb back.
+      expect([ movedOn?.total, counter.countOf('aa')?.total, counter.countOf('bb')?.total, others.looked ])
+        .toStrictEqual([ 2, 2, 1, [ 'map:5', 'map:5' ] ]);
+    });
+
+    it('counts a map this window takes up as it stands here, and looks at the other window\'s copy again once it lets go of it here', async () =>
+    {
+      // Arrange.
+      const others = otherWindows();
+      others.hold('map:5', map5There());
+      const { hub, counter } = counting(others.sync);
+      counter.start();
+      others.heard();
+      await landed(counter);
+
+      // Act: map 5 taken up here with no copy on it, then let go of again.
+      hub.adopt('map:5', mapWithNotes([ 'a' ]) as unknown as JsonValue);
+      const heldHere = counter.countOf('aa')?.total;
+      hub.release('map:5');
+      await landed(counter);
+
+      // Assert.
+      expect([ heldHere, counter.countOf('aa')?.total, others.looked ])
+        .toStrictEqual([ 1, 3, [ 'map:5', 'map:5' ] ]);
+    });
+
+    it('hands out no count before the other windows have all been heard from, or while a look is on its way', async () =>
+    {
+      // Arrange: the other window answers only when told.
+      const others = otherWindows();
+      others.hold('map:5', map5There());
+      others.answers.mode = 'later';
+      const { counter } = counting(others.sync);
+      counter.start();
+      await counter.settled();
+
+      // Act.
+      const beforeHeard = counter.countOf('aa');
+      others.heard();
+      await landed(counter);
+      const whileLooking = counter.countOf('aa');
+      others.later.forEach(answer => answer());
+      await landed(counter);
+
+      // Assert.
+      expect([ beforeHeard, whileLooking, counter.countOf('aa')?.total ])
+        .toStrictEqual([ null, null, 3 ]);
+    });
+
+    it('hands out no count while a window still holding a map did not answer the last look, until it answers or lets the map go', async () =>
+    {
+      // Arrange: the other window never answers.
+      const others = otherWindows();
+      others.hold('map:5', map5There());
+      others.hold('map:6', mapWithNotes([ '<blueprint:[aa, 3]>' ]));
+      others.answers.mode = 'never';
+      const { counter } = counting(others.sync);
+      counter.start();
+      others.heard();
+      await landed(counter);
+
+      // Act: map 6 let go of; then map 5's file changes, and this time the other window answers.
+      const unanswered = counter.countOf('aa');
+      others.letGo('map:6');
+      const stillUnanswered = counter.countOf('aa');
+      others.answers.mode = 'at once';
+      counter.fileChanged('data/Map005.json');
+      await landed(counter);
+
+      // Assert: map 5 asked about again with the file change.
+      expect([ unanswered, stillUnanswered, counter.countOf('aa')?.total, others.looked ])
+        .toStrictEqual([ null, null, 3, [ 'map:5', 'map:6', 'map:5' ] ]);
+    });
+
+    it('looks once more after a look on its way when the map moves on meanwhile, counting what the second look found', async () =>
+    {
+      // Arrange: the other window answers only when told.
+      const others = otherWindows();
+      others.hold('map:5', map5There());
+      others.answers.mode = 'later';
+      const { counter } = counting(others.sync);
+      counter.start();
+      others.heard();
+      await landed(counter);
+
+      // Act: event 8's copy taken out while the first look is on its way; both looks answered.
+      others.hold('map:5', mapWithNotes([ 'a', 'b', 'c', 'Guard\n<blueprint:[aa, 3]>' ]));
+      const asked = others.looked.length;
+      others.later.splice(0).forEach(answer => answer());
+      await landed(counter);
+      others.later.splice(0).forEach(answer => answer());
+      await landed(counter);
+
+      // Assert: two looks, the second asked for only once the first landed, and its count kept.
+      expect([ asked, others.looked.length, counter.countOf('aa')?.total ])
+        .toStrictEqual([ 1, 2, 2 ]);
+    });
+
+    it('counts a map as the disk has it again once its window has gone quiet, the next time anything moves the count', async () =>
+    {
+      // Arrange.
+      const others = otherWindows();
+      others.hold('map:5', map5There());
+      const { hub, counter } = counting(others.sync);
+      counter.start();
+      others.heard();
+      await landed(counter);
+
+      // Act: the other window goes quiet; then a copy of aa is placed on map 2 here.
+      others.fallSilent('map:5');
+      placeCopy(hub);
+
+      // Assert: map 1's copy and map 2's here, and map 5's from the disk, which holds one of aa and one of bb.
+      expect([ counter.countOf('aa'), counter.countOf('bb')?.total ])
+        .toStrictEqual([ { total: 3, maps: [ { mapId: 1, copies: 1 }, { mapId: 2, copies: 1 }, { mapId: 5, copies: 1 } ] }, 1 ]);
+    });
+
+    it('trusts the count again once a window that did not answer has gone quiet, its map counting as the disk has it', async () =>
+    {
+      // Arrange: the other window holds map 6 and never answers.
+      const others = otherWindows();
+      others.hold('map:6', mapWithNotes([ '<blueprint:[aa, 3]>' ]));
+      others.answers.mode = 'never';
+      const { counter } = counting(others.sync);
+      counter.start();
+      others.heard();
+      await landed(counter);
+
+      // Act.
+      const unanswered = counter.countOf('aa');
+      others.fallSilent('map:6');
+
+      // Assert.
+      expect([ unanswered, counter.countOf('aa')?.total ])
+        .toStrictEqual([ null, 2 ]);
+    });
+
+    it('counts a map this window takes up while a look at it is on its way as it stands here, whatever the look finds', async () =>
+    {
+      // Arrange: the other window answers only when told.
+      const others = otherWindows();
+      others.hold('map:5', map5There());
+      others.answers.mode = 'later';
+      const { hub, counter } = counting(others.sync);
+      counter.start();
+      others.heard();
+      await landed(counter);
+
+      // Act: map 5 taken up here, with no copy on it, before the look is answered.
+      hub.adopt('map:5', mapWithNotes([ 'a' ]) as unknown as JsonValue);
+      others.later.splice(0).forEach(answer => answer());
+      await landed(counter);
+
+      // Assert.
+      expect([ counter.countOf('aa'), others.looked ])
+        .toStrictEqual([ { total: 1, maps: [ { mapId: 1, copies: 1 } ] }, [ 'map:5' ] ]);
+    });
+
+    it('looks at nothing but maps, and at nothing more once stopped', async () =>
+    {
+      // Arrange.
+      const others = otherWindows();
+      const { counter } = counting(others.sync);
+      counter.start();
+      others.heard();
+      await landed(counter);
+
+      // Act: the system's names taken up elsewhere; then, once stopped, map 5.
+      others.hold('system', mapWithNotes([]));
+      counter.stop();
+      others.hold('map:5', map5There());
+      await landed(counter);
+
+      // Assert.
+      expect([ others.looked, counter.countOf('aa')?.total ])
+        .toStrictEqual([ [], 2 ]);
     });
   });
 });

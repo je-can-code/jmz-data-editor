@@ -1,6 +1,7 @@
-import type { DocumentHub } from '../history/DocumentHub.ts';
-import { documentKeyForProjectPath, mapDocumentKey, parseDocumentKey } from '../model/documentKeys.ts';
-import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
+import type { DocumentHub, DocumentSnapshot } from '../history/DocumentHub.ts';
+import { documentKeyForProjectPath, mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
+import type { RmmzMap, RmmzMapEvent } from '../model/rmmzTypes.ts';
+import type { SyncPeer } from '../sync/SyncPeer.ts';
 import { blueprintLinkOf } from './blueprintLink.ts';
 
 /**
@@ -47,6 +48,12 @@ type BlueprintCopyCounts = {
 };
 
 /**
+ * What a counter asks of the other windows, through the sync between them: which maps each holds, told whenever one
+ * takes a map up, lets it go or moves it on, and a look at a map one holds, unsaved edits included, without holding it.
+ */
+type CopySync = Pick<SyncPeer, 'onHoldingChange' | 'documentsHeldElsewhere' | 'holders' | 'requestSnapshot' | 'whenDiscovered'>;
+
+/**
  * What a counter reads the project with.
  */
 type CopyCounterOptions = {
@@ -60,6 +67,12 @@ type CopyCounterOptions = {
    * server, which cannot count the maps it does not hold.
    */
   readonly readNotes: (() => Promise<readonly EventNote[]>) | null;
+
+  /**
+   * The other windows, whose copies of the maps this window does not hold are counted as they stand there, unsaved edits
+   * and all; left out, or null, for a window with no others to ask, which counts those maps as the disk has them.
+   */
+  readonly sync?: CopySync | null;
 };
 
 /**
@@ -190,6 +203,10 @@ const sameCounts = (left: ReadonlyMap<string, BlueprintCopyCount>, right: Readon
  *
  * - every map this window holds is counted from its live document, unsaved placements, deletions and undos included,
  *   afresh whenever its revision moves, which any step, undo, redo, reload or copy taken from another window does;
+ * - every map another window holds and this one does not is counted from that window's copy, unsaved placements and
+ *   all, looked at through the sync between windows without being held here: once when counting starts, and again
+ *   whenever that window moves the map on, one look at a map at a time, a map moved on while its look was on its way
+ *   looked at once more after;
  * - every other map is counted from the server's reading of every map's notes, read again whenever a map's file changes
  *   on disk, from this window's saves, another window's, MZ's or a script's, and whenever the change stream comes back,
  *   since changes made while it was down were never announced. The server keeps each map's reading until its file
@@ -199,8 +216,10 @@ const sameCounts = (left: ReadonlyMap<string, BlueprintCopyCount>, right: Readon
  * undo or a redo that would take a blueprint away must know its count, so a window that never shows the count and never
  * takes a blueprint away never asks the server for it. Until the server's first answer the count is still being
  * worked out, and a count that could not be had says so: neither is ever taken for a blueprint having no copies. Nor is
- * the count shown while a reading asked for after a map's file changed is on its way: the cards keep it, but no one
- * blueprint's count is handed out (see {@link countOf}), since a delete trusting it could miss a copy just saved.
+ * the count shown while a reading asked for after a map's file changed is on its way, while the other windows have not
+ * all been heard from, while a look at another window's map is on its way, or while a window still holding a map did
+ * not answer the last look at it: the cards keep the count they had, but no one blueprint's count is handed out (see
+ * {@link countOf}), since a delete trusting it could miss a copy just placed.
  */
 class BlueprintCopyCounter
 {
@@ -238,13 +257,45 @@ class BlueprintCopyCounter
    */
   #stale = false;
 
+  #sync: CopySync | null;
+
+  #stopSync: (() => void) | null = null;
+
   /**
-   * @param {CopyCounterOptions} options The window's documents, and how to read every map's notes on disk.
+   * Whether the other windows are still to be heard from, which they are from the moment counting starts until the sync's
+   * discovery is over and every map they hold has been asked about.
+   */
+  #discovering = false;
+
+  /**
+   * The copies on each map another window holds and this one does not, by map, as that window's copy last showed them.
+   */
+  #elsewhere = new Map<number, BlueprintCopy[]>();
+
+  /**
+   * The maps another window holds whose look is on its way.
+   */
+  #looking = new Set<number>();
+
+  /**
+   * The maps moved on in another window while their look was on its way, to be looked at once more after it.
+   */
+  #lookAgain = new Set<number>();
+
+  /**
+   * The maps whose holder did not answer the last look at them.
+   */
+  #unanswered = new Set<number>();
+
+  /**
+   * @param {CopyCounterOptions} options The window's documents, how to read every map's notes on disk, and the other
+   * windows, if any.
    */
   constructor(options: CopyCounterOptions)
   {
     this.#hub = options.hub;
     this.#readNotes = options.readNotes;
+    this.#sync = options.sync ?? null;
   }
 
   /**
@@ -274,14 +325,15 @@ class BlueprintCopyCounter
   /**
    * Finds how many copies one blueprint has across the project, and where, once that can be told. While a reading asked
    * for after a map's file changed is on its way, none can: a copy just saved in another window, or placed in MZ, could
-   * be missing from the count still shown, and a blueprint deleted on that count would lose it.
+   * be missing from the count still shown, and a blueprint deleted on that count would lose it. Nor while another
+   * window's copies are still to be looked at (see {@link #elsewhereUnsettled}).
    * @param {string} blueprintId The blueprint.
    * @returns {BlueprintCopyCount | null} The count, none for a blueprint without copies; or null while the copies are
    * still being counted, or counted again, or cannot be.
    */
   countOf(blueprintId: string): BlueprintCopyCount | null
   {
-    if (this.#counts.state !== 'counted' || this.#stale)
+    if (this.#counts.state !== 'counted' || this.#stale || this.#elsewhereUnsettled())
     {
       return null;
     }
@@ -305,7 +357,8 @@ class BlueprintCopyCounter
 
   /**
    * Asks the server for every map's notes again, once counting has started: one reading at a time, and however many
-   * asks come while one waits to begin, the one reading answers them all.
+   * asks come while one waits to begin, the one reading answers them all. A map whose holder did not answer the last
+   * look at it is looked at again too.
    */
   readAgain(): void
   {
@@ -313,6 +366,8 @@ class BlueprintCopyCounter
     {
       return;
     }
+
+    [ ...this.#unanswered ].forEach(mapId => this.#followElsewhere(mapDocumentKey(mapId)));
 
     // what the disk says is not to be trusted from now until the reading asked for lands.
     this.#stale = true;
@@ -353,16 +408,144 @@ class BlueprintCopyCounter
     this.#started = true;
     this.#stopHub = this.#hub.subscribe(() => this.#followHeld());
     this.#followHeld();
+    this.#followOthers();
     this.readAgain();
   }
 
   /**
-   * Stops following the window's documents; a reading on its way still lands.
+   * Stops following the window's documents and the other windows; a reading or a look on its way still lands.
    */
   stop(): void
   {
     this.#stopHub?.();
     this.#stopHub = null;
+    this.#stopSync?.();
+    this.#stopSync = null;
+  }
+
+  /**
+   * Starts following the maps the other windows hold: every one they take up, let go of or move on from now, and, once
+   * the sync has heard from them all, every one they hold already. A window with no others to ask follows nothing.
+   */
+  #followOthers(): void
+  {
+    const sync = this.#sync;
+    if (sync === null)
+    {
+      return;
+    }
+
+    this.#discovering = true;
+    this.#stopSync = sync.onHoldingChange(key => this.#followElsewhere(key));
+    sync.whenDiscovered()
+      .then(() =>
+      {
+        this.#discovering = false;
+        sync.documentsHeldElsewhere().forEach(key => this.#followElsewhere(key));
+        this.#publish();
+      })
+      .catch(() => undefined);
+  }
+
+  /**
+   * Follows one document as the other windows hold it: a map another window holds and this one does not is looked at
+   * there; a map held here counts as it stands here, and one no other window holds any more counts as the disk has it,
+   * so either is let go of. Anything but a map holds no copies.
+   * @param {DocumentKey} key The document.
+   */
+  #followElsewhere(key: DocumentKey): void
+  {
+    const parsed = parseDocumentKey(key);
+    if (parsed.kind !== 'map')
+    {
+      return;
+    }
+
+    const { mapId } = parsed;
+    if (this.#isElsewhere(mapId) === false)
+    {
+      this.#lookAgain.delete(mapId);
+      this.#unanswered.delete(mapId);
+      if (this.#elsewhere.delete(mapId))
+      {
+        this.#publish();
+      }
+
+      return;
+    }
+
+    this.#look(mapId);
+  }
+
+  /**
+   * Reports whether a map is one only other windows hold, so it counts as their copy has it.
+   * @param {number} mapId The map.
+   * @returns {boolean} True when some other live window holds it and this one does not.
+   */
+  #isElsewhere(mapId: number): boolean
+  {
+    const key = mapDocumentKey(mapId);
+    return this.#hub.has(key) === false && (this.#sync as CopySync).holders(key).length > 0;
+  }
+
+  /**
+   * Looks at a map another window holds, holding nothing: one look at a map at a time, and a map moved on while its look
+   * is on its way is looked at once more after it.
+   * @param {number} mapId The map.
+   */
+  #look(mapId: number): void
+  {
+    if (this.#looking.has(mapId))
+    {
+      this.#lookAgain.add(mapId);
+      return;
+    }
+
+    this.#looking.add(mapId);
+    (this.#sync as CopySync).requestSnapshot(mapDocumentKey(mapId))
+      .then(snapshot => this.#landLook(mapId, snapshot))
+      .catch(() => undefined);
+  }
+
+  /**
+   * Takes what a look at another window's map found: its copies, unless the map moved on meanwhile, which has it followed
+   * afresh. A window that did not answer leaves the map unanswered, so no count is trusted while that window holds it,
+   * until a later look is answered. What is kept counts only while some other window holds the map and this one does
+   * not (see {@link #publish}), so a map taken up here, or let go of everywhere, meanwhile needs nothing more.
+   * @param {number} mapId The map.
+   * @param {DocumentSnapshot | null} snapshot That window's copy, or null when no window answered in time.
+   */
+  #landLook(mapId: number, snapshot: DocumentSnapshot | null): void
+  {
+    this.#looking.delete(mapId);
+    if (this.#lookAgain.delete(mapId))
+    {
+      this.#followElsewhere(mapDocumentKey(mapId));
+      return;
+    }
+
+    if (snapshot === null)
+    {
+      this.#unanswered.add(mapId);
+      this.#publish();
+      return;
+    }
+
+    this.#unanswered.delete(mapId);
+    this.#elsewhere.set(mapId, copiesOnMap(mapId, (snapshot.content as unknown as RmmzMap).events));
+    this.#publish();
+  }
+
+  /**
+   * Reports whether what the other windows hold is not settled enough to count from: they are still to be heard from, a
+   * look is on its way, or a window still holding a map did not answer the last look at it.
+   * @returns {boolean} True while no count is to be trusted for it.
+   */
+  #elsewhereUnsettled(): boolean
+  {
+    return this.#discovering
+      || this.#looking.size > 0
+      || [ ...this.#unanswered ].some(mapId => this.#isElsewhere(mapId));
   }
 
   /**
@@ -396,7 +579,7 @@ class BlueprintCopyCounter
 
   /**
    * Counts afresh every held map whose document moved since it was last counted, and lets go of the maps no longer
-   * held, whose copies the server's reading counts again.
+   * held, whose copies the server's reading counts again, or another window's copy where another window holds them.
    */
   #followHeld(): void
   {
@@ -420,11 +603,17 @@ class BlueprintCopyCounter
       }
     });
 
-    [ ...this.#held.keys() ].filter(mapId => held.has(mapId) === false).forEach(mapId =>
+    // a map let go of here may still be held in another window, whose copy is looked at then.
+    const released = [ ...this.#held.keys() ].filter(mapId => held.has(mapId) === false);
+    released.forEach(mapId =>
     {
       this.#held.delete(mapId);
       moved = true;
     });
+    if (this.#sync !== null)
+    {
+      released.forEach(mapId => this.#followElsewhere(mapDocumentKey(mapId)));
+    }
 
     if (moved)
     {
@@ -433,14 +622,18 @@ class BlueprintCopyCounter
   }
 
   /**
-   * Works the count out afresh, the maps held standing in for what the disk says of them, and tells every listener when
-   * it says anything new.
+   * Works the count out afresh, the maps held here standing in for what the disk says of them, and the maps only other
+   * windows hold, as their copies were last looked at, standing in for the disk too, for as long as some window still
+   * holds them; and tells every listener when it says anything new.
    */
   #publish(): void
   {
-    const fromDisk = [ ...this.#disk ?? [] ].filter(([ mapId ]) => this.#held.has(mapId) === false).flatMap(([ , copies ]) => copies);
+    const elsewhere = [ ...this.#elsewhere ].filter(([ mapId ]) => this.#isElsewhere(mapId));
+    const counted = new Set([ ...this.#held.keys(), ...elsewhere.map(([ mapId ]) => mapId) ]);
+    const fromDisk = [ ...this.#disk ?? [] ].filter(([ mapId ]) => counted.has(mapId) === false).flatMap(([ , copies ]) => copies);
     const fromHeld = [ ...this.#held.values() ].flatMap(({ copies }) => copies);
-    const byBlueprint = tallyCopies([ ...fromDisk, ...fromHeld ]);
+    const fromElsewhere = elsewhere.flatMap(([ , copies ]) => copies);
+    const byBlueprint = tallyCopies([ ...fromDisk, ...fromHeld, ...fromElsewhere ]);
     if (this.#counts.state === this.#state && sameCounts(this.#counts.byBlueprint, byBlueprint))
     {
       return;
@@ -452,4 +645,4 @@ class BlueprintCopyCounter
 }
 
 export { BlueprintCopyCounter, copiesInNotes, copiesOnMap, copyCountWords, tallyCopies };
-export type { BlueprintCopy, BlueprintCopyCount, BlueprintCopyCounts, CopyCountState, CopyCounterOptions, EventNote };
+export type { BlueprintCopy, BlueprintCopyCount, BlueprintCopyCounts, CopyCountState, CopyCounterOptions, CopySync, EventNote };
