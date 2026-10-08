@@ -42,8 +42,9 @@ vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerDialog.tsx
 
 /*
  * Each control shows one shared setting and hands on a new value only when the author has made one: boxes commit
- * when left or on Enter and refuse what their bounds do not allow, drop-downs and pickers commit on a choice, and a
- * setting the selected events hold differently reads "Mixed" rather than any one of their values. Pickers name rows
+ * when left or on Enter and refuse what their bounds do not allow, drop-downs and pickers commit on a choice (a
+ * drop-down hands on the choice's own value, a number or a name), and a setting the selected events hold differently
+ * reads "Mixed" rather than any one of their values, even a drop-down choice named by nothing. Pickers name rows
  * and maps once the names arrive and take a typed id until then, and keep a value their list lacks. The graphic
  * picker lists the character sheets, picks one of a sheet's eight characters unless it holds one alone, reads a
  * tile as a tile, and previews the frame the engine would cut from the sheet. The place control picks a map and a
@@ -354,6 +355,38 @@ describe('QuickControl', () =>
     // Assert.
     expect(screen.queryByRole('button', { name: 'Pick on the map' }))
       .toBeNull();
+  });
+
+  it('hands on a named choice by its name, and a numbered one by its number', () =>
+  {
+    // Arrange: looks named by words, among them a choice named by nothing, and fades numbered.
+    const looks = [ { value: '', label: 'None of its own' }, { value: 'rain', label: 'rain' } ];
+    const fades = [ { value: 0, label: 'Black' }, { value: 2, label: 'None' } ];
+    const { onChange: onLook } = renderControl(fieldOf({ kind: 'select', options: looks }, 'rain', 'Look'));
+    const { onChange: onFade } = renderControl(fieldOf({ kind: 'select', options: fades }, 0, 'Fade'));
+
+    // Act.
+    fireEvent.mouseDown(screen.getByLabelText('Look'));
+    fireEvent.click(screen.getByRole('option', { name: 'None of its own' }));
+    fireEvent.mouseDown(screen.getByLabelText('Fade'));
+    fireEvent.click(screen.getByRole('option', { name: 'None' }));
+
+    // Assert.
+    expect([ onLook.mock.calls, onFade.mock.calls ])
+      .toStrictEqual([ [ [ '' ] ], [ [ 2 ] ] ]);
+  });
+
+  it('reads a mixed drop-down as mixed even when one of its choices is named by nothing', () =>
+  {
+    // Arrange: looks whose first choice is named by nothing, held differently.
+    const looks = [ { value: '', label: 'None of its own' }, { value: 'rain', label: 'rain' } ];
+
+    // Act.
+    renderControl(fieldOf({ kind: 'select', options: looks }, null, 'Look'));
+
+    // Assert.
+    expect(screen.getByLabelText('Look').textContent)
+      .toBe('Mixed');
   });
 
   it('shows a drop-down\'s hint under it', () =>

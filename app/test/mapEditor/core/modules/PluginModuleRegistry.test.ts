@@ -44,6 +44,10 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * when it switches off. Every module is handed words for a page, read from the page's own conditions and from every
  * page condition the active modules add, a module switching on after it included.
  *
+ * A module may say its plugin reads whether a map has a sky, named under its own id, so Map Properties can offer the one
+ * sky setting however many plugins read it. Every module is handed the readers of the active modules as they stand when
+ * it asks, in the order they were said, a module switching on after it included and one switched off left out.
+ *
  * A module may let the preview set a kind of state of its own, as J-OMNI-Quests lets it set where each quest stands,
  * named under its own id like everything else it adds, so it can never take over the switches, the variables or another
  * module's kind; listed while it is on, in the order the modules added them, and taken back when it switches off.
@@ -358,6 +362,7 @@ describe('PluginModuleRegistry', () =>
         plugins: [],
         register: add => add.liveNotice({ id: 'core.x', current: () => null, subscribe: () => () => undefined }),
       },
+      { id: 'l', title: 'L', plugins: [], register: add => add.skyReader({ id: 'lighting.sky', follows: 'x', does: 'x' }) },
     ];
 
     // Act.
@@ -386,6 +391,8 @@ describe('PluginModuleRegistry', () =>
       .toThrow('j can only add weather layers whose id starts with "j.", not core.x');
     expect(failures[10])
       .toThrow('k can only add notices whose id starts with "k.", not core.x');
+    expect(failures[11])
+      .toThrow('l can only add sky readers whose id starts with "l.", not lighting.sky');
   });
 
   describe('configs read on demand', () =>
@@ -737,6 +744,60 @@ describe('PluginModuleRegistry', () =>
       // Assert.
       expect(words)
         .toStrictEqual([ 'while switch 4 is on', 'time reads <hourRangePage:18-5>' ]);
+    });
+  });
+
+  describe('skyReaders', () =>
+  {
+    /**
+     * A module saying its plugin reads the sky, once its plugin is on, and keeping the context it is handed.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @param {{ context?: ModuleContext }} kept Where it keeps the context it is handed.
+     * @returns {PluginModule} The module.
+     */
+    const readingModule = (id: string, pluginName: string, kept: { context?: ModuleContext } = {}): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: (contributions, context) =>
+      {
+        kept.context = context;
+        contributions.skyReader({ id: `${id}.sky`, follows: `the ${id}`, does: `The ${id} reaches this map.` });
+      },
+    });
+
+    it('hands every module the sky readers of the active modules as they stand, those said after it included', () =>
+    {
+      // Arrange: two modules saying their plugins read the sky, the first keeping its context, and a third whose plugin
+      // is off.
+      const kept: { context?: ModuleContext } = {};
+      const modules = [ readingModule('clock', 'J-Lighting-Time', kept), readingModule('weather', 'J-Weather'), readingModule('tides', 'J-Tides') ];
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate(modules, [ plugin('j/lighting/ext/J-Lighting-Time', true), plugin('j/weather/J-Weather', true), plugin('j/tides/J-Tides', false) ]);
+
+      // Act.
+      const readers = kept.context?.skyReaders().map(reader => reader.id);
+
+      // Assert.
+      expect(readers)
+        .toStrictEqual([ 'clock.sky', 'weather.sky' ]);
+    });
+
+    it('takes a module\'s sky reader back once it switches off', () =>
+    {
+      // Arrange: both on, then the second switched off, the first keeping the context of each switch-on.
+      const kept: { context?: ModuleContext } = {};
+      const modules = [ readingModule('clock', 'J-Lighting-Time', kept), readingModule('weather', 'J-Weather') ];
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate(modules, [ plugin('j/lighting/ext/J-Lighting-Time', true), plugin('j/weather/J-Weather', true) ]);
+
+      // Act.
+      registry.activate(modules, [ plugin('j/lighting/ext/J-Lighting-Time', true), plugin('j/weather/J-Weather', false) ]);
+
+      // Assert.
+      expect(kept.context?.skyReaders().map(reader => reader.id))
+        .toStrictEqual([ 'clock.sky' ]);
     });
   });
 

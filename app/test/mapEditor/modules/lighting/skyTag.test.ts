@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import type { SkyReader } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
 import { OTHER_TAGS_MISREAD } from '../../../../src/mapEditor/core/properties/noteText.ts';
-import { SKY_MISREAD, skyFollowsClock, withSkyFollowingClock } from '../../../../src/mapEditor/modules/lighting/skyTag.ts';
+import { SKY_MISREAD, skyFollowsClock, skySettingFor, withSkyFollowingClock } from '../../../../src/mapEditor/modules/lighting/skyTag.ts';
 
 /*
  * Whether a map's sky follows the clock is read exactly as J-Lighting-Time reads it on arrival: from the map's metadata,
@@ -13,6 +14,11 @@ import { SKY_MISREAD, skyFollowsClock, withSkyFollowingClock } from '../../../..
  * other character of the note stays exactly as written, and a note the game would read back otherwise is refused rather
  * than written: one whose sky would read otherwise, and one where some other tag would, as when a stray bracket would
  * swallow the tag after the one taken out.
+ *
+ * Map Properties offers the sky setting once, however many plugins read the tag: in the section of the plugin the
+ * active modules said first reads it, never in another's, and nowhere while none does. It is named for what the sky
+ * follows in each of those plugins, listed as a sentence lists things, says under it what the sky does in each, and
+ * reads and writes the one tag above, whichever section shows it.
  */
 describe('skyTag', () =>
 {
@@ -151,6 +157,89 @@ describe('skyTag', () =>
       // Assert.
       expect(write)
         .toThrow(SKY_MISREAD);
+    });
+  });
+
+  describe('skySettingFor', () =>
+  {
+    /**
+     * A plugin reading the sky for the hour's tint.
+     */
+    const CLOCK: SkyReader = { id: 'lighting.sky', follows: 'the clock', does: 'The hour tints and darkens this map.' };
+
+    /**
+     * A plugin reading the sky for its weather.
+     */
+    const WEATHER: SkyReader = { id: 'weather.sky', follows: 'the weather', does: 'The sky\'s weather reaches this map.' };
+
+    /**
+     * A third plugin reading the sky.
+     */
+    const TIDES: SkyReader = { id: 'tides.sky', follows: 'the tides', does: 'The tide floods this map.' };
+
+    it('offers nothing while no plugin reads the sky, nor to a section whose plugin reads it after another', () =>
+    {
+      // Arrange: no readers; and the weather's section while the clock reads the sky first.
+      const asked: [ SkyReader, readonly SkyReader[] ][] = [ [ CLOCK, [] ], [ WEATHER, [ CLOCK, WEATHER ] ] ];
+
+      // Act.
+      const settings = asked.map(([ host, readers ]) => skySettingFor('<noToneChange>', host, readers));
+
+      // Assert.
+      expect(settings)
+        .toStrictEqual([ [], [] ]);
+    });
+
+    it('offers the first reader\'s section one setting, keyed by its reading, named for what the sky follows in each plugin', () =>
+    {
+      // Arrange: the clock's section with the clock alone, with the weather after it, and with the tides after both.
+      const readerLists: readonly SkyReader[][] = [ [ CLOCK ], [ CLOCK, WEATHER ], [ CLOCK, WEATHER, TIDES ] ];
+
+      // Act.
+      const settings = readerLists.map(readers => skySettingFor('<noToneChange>', CLOCK, readers));
+
+      // Assert.
+      expect(settings.map(fields => fields.map(field => [ field.key, field.label, field.hint, field.value, field.step, field.control ])))
+        .toStrictEqual([
+          [ [
+            'lighting.sky',
+            'Sky follows the clock',
+            'The hour tints and darkens this map. Untick it for interiors and caves, which have no sky.',
+            false,
+            'Change sky',
+            { kind: 'check' },
+          ] ],
+          [ [
+            'lighting.sky',
+            'Sky follows the clock and the weather',
+            'The hour tints and darkens this map. The sky\'s weather reaches this map. Untick it for interiors and caves, which have no sky.',
+            false,
+            'Change sky',
+            { kind: 'check' },
+          ] ],
+          [ [
+            'lighting.sky',
+            'Sky follows the clock, the weather and the tides',
+            'The hour tints and darkens this map. The sky\'s weather reaches this map. The tide floods this map. Untick it for '
+              + 'interiors and caves, which have no sky.',
+            false,
+            'Change sky',
+            { kind: 'check' },
+          ] ],
+        ]);
+    });
+
+    it('reads the sky from the note and writes the one tag in place, whichever section shows it', () =>
+    {
+      // Arrange: an outdoor map with weather, in the weather's section while the weather alone reads the sky.
+      const [ setting ] = skySettingFor('<weather:rain>\n', WEATHER, [ WEATHER ]);
+
+      // Act.
+      const written = setting.write(false);
+
+      // Assert.
+      expect([ setting.key, setting.value, written ])
+        .toStrictEqual([ 'weather.sky', true, { note: '<weather:rain>\n<noToneChange>\n' } ]);
     });
   });
 });

@@ -8,6 +8,7 @@ import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/Plu
 import type { SkyWeather, WeatherFrame } from '../../../../src/mapEditor/core/renderer/weatherLayer.ts';
 import { MAP_WEATHER_ID, WEATHER_CONFIG_NOTICE_ID, weatherConfigNotice, weatherModule } from '../../../../src/mapEditor/modules/weather/weatherModule.ts';
 import { WeatherOnDemand } from '../../../../src/mapEditor/modules/weather/weatherOnDemand.ts';
+import { SHIPPED_MODULES } from '../../../../src/mapEditor/services/pluginModules.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
@@ -21,6 +22,13 @@ import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
  * its motions and its presets) is said over every map view once it has been read, so a map shown without its weather is
  * never taken for one that has none, and the notice clears as soon as a later read serves; a config that serves says
  * nothing, and neither does one never read.
+ *
+ * The module adds a Weather section to Map Properties (its own tests hold what each setting reads and writes), handing
+ * the views the config to ask for once the section shows rather than asking for it itself. J-Weather reads whether a map
+ * has a sky, as J-Lighting-Time does, and the module says so, so the editor's modules together offer the map's sky in
+ * Map Properties exactly once while any plugin reading it is on: in the Lighting section, worded for both, while
+ * J-Lighting-Time is on, and otherwise in this one; and nowhere while neither is, J-Weather-Time on its own included,
+ * since it cannot run without J-Weather.
  */
 describe('weatherModule', () =>
 {
@@ -179,6 +187,63 @@ describe('weatherModule', () =>
           detail: `It could not be read: ${words}. This clears as soon as the file is fixed.`,
         } ],
         [],
+      ]);
+  });
+
+  it('adds a Weather section to Map Properties, which asks for the config only once it shows', () =>
+  {
+    // Arrange: switched on, the config not yet read, and a map naming a look.
+    const held = heldConfig();
+    const registry = activated([ plugin('j/weather/J-Weather') ], held.config);
+    const map = MapDocument.fromJson('map:1', { ...buildMapJson(), note: '<weather:snow>' });
+
+    // Act: the section works out its settings, as it does while it is merely worked out, before it shows.
+    const [ section ] = registry.mapPropertiesSections();
+    const labels = section.source(map).fields.map(field => field.label);
+
+    // Assert: the section hands the views the config to ask for, and nothing has asked yet.
+    expect([ section.id, section.title, labels, section.config === held.config, held.asked() ])
+      .toStrictEqual([ 'weather.settings', 'Weather', [ 'Look', 'No weather', 'Sky follows the weather' ], true, 0 ]);
+  });
+
+  it('offers a map\'s sky once in Map Properties while any plugin reading it is on, and nowhere while none is', () =>
+  {
+    // Arrange: the editor's modules over a cave naming a look, under each set of plugins: all of them, as the game
+    // ships; the weather plugins alone; J-Lighting without its time extension beside J-Weather; J-Lighting's time
+    // extension without J-Weather; J-Lighting alone; and J-Weather-Time listed without the J-Weather it cannot run
+    // without.
+    const cave = MapDocument.fromJson('map:1', { ...buildMapJson(), note: '<noToneChange>\n<weather:fog>' });
+    const time = plugin('j/time/J-TIME');
+    const lighting = plugin('j/lighting/J-Lighting');
+    const lightingTime = plugin('j/lighting/ext/J-Lighting-Time');
+    const weather = plugin('j/weather/J-Weather');
+    const weatherTime = plugin('j/weather/ext/J-Weather-Time');
+    const projects = [
+      [ time, lighting, lightingTime, weather, weatherTime ],
+      [ time, weather, weatherTime ],
+      [ lighting, weather ],
+      [ time, lighting, lightingTime ],
+      [ lighting ],
+      [ time, lighting, plugin('j/weather/J-Weather', false), weatherTime ],
+    ];
+
+    // Act.
+    const sections = projects.map(plugins =>
+    {
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate(SHIPPED_MODULES, plugins, new Map(), new Map(), () => heldConfig().config);
+      return registry.mapPropertiesSections().map(section => [ section.title, section.source(cave).fields.map(field => field.label) ]);
+    });
+
+    // Assert.
+    expect(sections)
+      .toStrictEqual([
+        [ [ 'Lighting', [ 'Darkness', 'Sky follows the clock and the weather' ] ], [ 'Weather', [ 'Look', 'No weather' ] ] ],
+        [ [ 'Weather', [ 'Look', 'No weather', 'Sky follows the weather' ] ] ],
+        [ [ 'Lighting', [ 'Darkness' ] ], [ 'Weather', [ 'Look', 'No weather', 'Sky follows the weather' ] ] ],
+        [ [ 'Lighting', [ 'Darkness', 'Sky follows the clock' ] ] ],
+        [ [ 'Lighting', [ 'Darkness' ] ] ],
+        [ [ 'Lighting', [ 'Darkness' ] ] ],
       ]);
   });
 

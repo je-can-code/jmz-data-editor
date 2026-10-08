@@ -8,8 +8,9 @@ import '@testing-library/jest-dom/vitest';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import type { MapPropertiesSection } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
+import type { ConfigRead, MapPropertiesSection, OnDemandConfig } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
 import { CLOCK_SKY, mapLightingSource } from '../../../../src/mapEditor/modules/lighting/mapLighting.ts';
+import { weatherSettingsSource } from '../../../../src/mapEditor/modules/weather/weatherSettings.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { ModulePropertiesSection } from '../../../../src/mapEditor/workspace/panels/ModulePropertiesSection.tsx';
 import { WorkspaceController } from '../../../../src/mapEditor/workspace/WorkspaceController.ts';
@@ -24,7 +25,9 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * setting changes, or when the section goes, is kept as its own step first, so no change is lost or merged into another.
  * A change the map cannot take is refused, saying why, and leaves the map as it was; the refusal goes once a change is
  * made. The section reads its settings again whenever the map's own properties change, even mid-edit, and never for a
- * brush stroke's tiles or an event moved, which change many times a second.
+ * brush stroke's tiles or an event moved, which change many times a second. A config its settings read only once
+ * something needs it is asked for once the section shows, and every read of it shows the settings afresh; a drop-down
+ * choosing among names, as J-Weather's looks are, writes the name picked.
  *
  * J-Lighting's own section stands in for any module's here, over a cave at 85% darkness with no sky.
  */
@@ -34,6 +37,45 @@ describe('ModulePropertiesSection', () =>
    * J-Lighting's section, its sky offered as it is while J-Lighting-Time alone reads it.
    */
   const LIGHTING: MapPropertiesSection = { id: 'lighting.map', title: 'Lighting', source: mapLightingSource('#000000', () => [ CLOCK_SKY ]) };
+
+  /**
+   * J-Weather's config, holding two looks.
+   */
+  const WEATHER_CONFIG = { motions: { fall: { edge: 'top' } }, presets: { rain: { stops: {} }, fog: { stops: {} } } } as unknown as JsonValue;
+
+  /**
+   * A config the window holds and reads only once asked for: unread until the test reads it in, which its listeners
+   * hear, noting how often it was asked for.
+   * @returns {{ config: OnDemandConfig, asked: () => number, arrive: (read: ConfigRead) => void }} The config, how
+   * often it was asked for, and a read arriving.
+   */
+  const heldConfig = () =>
+  {
+    const listeners = new Set<() => void>();
+    let read: ConfigRead | undefined;
+    let asked = 0;
+    const config: OnDemandConfig = {
+      current: () => read,
+      request: () =>
+      {
+        asked += 1;
+      },
+      subscribe: listener =>
+      {
+        listeners.add(listener);
+        return () =>
+        {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const arrive = (next: ConfigRead) =>
+    {
+      read = next;
+      listeners.forEach(listener => listener());
+    };
+    return { config, asked: () => asked, arrive };
+  };
 
   /**
    * Renders a section over a hub holding map 1 with the given note.
@@ -263,6 +305,50 @@ describe('ModulePropertiesSection', () =>
     // Assert.
     expect(screen.queryByRole('alert'))
       .toBeNull();
+  });
+
+  it('asks for the config its settings read once it shows, and shows them afresh on each read of it', () =>
+  {
+    // Arrange: a section whose one line says what its config holds, over a config read only once asked for.
+    const held = heldConfig();
+    const section: MapPropertiesSection = {
+      id: 'test.map',
+      title: 'Test',
+      source: () =>
+      {
+        const read = held.config.current();
+        return { note: read === undefined ? 'Not read yet.' : `Read: ${String(read.content)}.`, fields: [] };
+      },
+      config: held.config,
+    };
+    renderSection('', section);
+    const before = [ held.asked(), screen.getByText(/read/u).textContent ];
+
+    // Act: the config arrives, then is read again holding something else.
+    act(() => held.arrive({ content: 'clouds', problem: null }));
+    const first = screen.getByText(/Read:/u).textContent;
+    act(() => held.arrive({ content: 'rain', problem: null }));
+
+    // Assert: asked for once, as it showed, and each read shown.
+    expect([ before, first, screen.getByText(/Read:/u).textContent, held.asked() ])
+      .toStrictEqual([ [ 1, 'Not read yet.' ], 'Read: clouds.', 'Read: rain.', 1 ]);
+  });
+
+  it('writes a look picked by name as one step in the map\'s history', () =>
+  {
+    // Arrange: J-Weather's section over a map naming rain, its config read.
+    const held = heldConfig();
+    held.arrive({ content: WEATHER_CONFIG, problem: null });
+    const weather: MapPropertiesSection = { id: 'weather.settings', title: 'Weather', source: weatherSettingsSource(held.config, () => []), config: held.config };
+    const { hub } = renderSection('<weather:rain>', weather);
+
+    // Act.
+    fireEvent.mouseDown(screen.getByLabelText('Look'));
+    fireEvent.click(screen.getByRole('option', { name: 'fog' }));
+
+    // Assert.
+    expect([ noteIn(hub), stepsIn(hub) ])
+      .toStrictEqual([ '<weather:fog>', [ 'Change weather' ] ]);
   });
 
   it('says what a refusal says even when it is no error', () =>
