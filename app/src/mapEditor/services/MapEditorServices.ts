@@ -100,8 +100,10 @@ type MapEditorServices = {
   readonly paints: WindowPaints;
 
   /**
-   * The time of day the window shows: one clock for every map view in it, torn-out windows included. It starts at the
-   * game's own starting time once a plugin module offering a clock switches on, and keeps the hour the author picks.
+   * The time of day the window shows, and the season: one clock for every map view in it, torn-out windows included. It
+   * starts at the game's own starting time once a plugin module offering a clock switches on, and keeps the hour the
+   * author picks; it stays in the season the game starts in until the author picks another, which moves the date every
+   * page is judged at. Like the preview, both are remembered between sessions for this project on this machine.
    */
   readonly clock: WindowClock;
 

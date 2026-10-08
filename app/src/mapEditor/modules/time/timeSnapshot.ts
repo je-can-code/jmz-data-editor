@@ -17,9 +17,10 @@ type TimeSnapshot = {
 };
 
 /**
- * Everything of a new game's moment the window's clock does not move: the date it starts on, and the second.
+ * A date on the game's calendar, with the second the window's clock never moves: the date a new game starts on, or the
+ * date the clock's season moves that to ({@link dateOfSeason}).
  */
-type StartingDate = {
+type GameDate = {
   readonly seconds: number;
   readonly days: number;
   readonly months: number;
@@ -49,6 +50,18 @@ const SEASON_NAMES: readonly string[] = [ 'Spring', 'Summer', 'Autumn', 'Winter'
 const SEASON_MONTHS: readonly (readonly number[])[] = [ [ 3, 4, 5 ], [ 6, 7, 8 ], [ 9, 10, 11 ], [ 1, 2, 12 ] ];
 
 /**
+ * The month each season opens with, by season, as J-TIME's help lists each season's months: Spring from March, Summer
+ * from June, Autumn from September and Winter from December, so Winter's opening is the last month of the year.
+ */
+const SEASON_OPENINGS: readonly number[] = [ 3, 6, 9, 12 ];
+
+/**
+ * How many days J-TIME's calendar gives a month (Game_Time.daysPerMonth): thirty, every month alike, February too. Its
+ * clock goes from the 30th to the 1st of the next month, so no month it counts holds a 31st.
+ */
+const DAYS_PER_MONTH = 30;
+
+/**
  * How long a day and an hour last, in milliseconds, as J-TIME's Date#addDays and Date#addHours move a date.
  */
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -65,14 +78,14 @@ const seasonOfMonth = (months: number): number =>
 };
 
 /**
- * Builds the moment the game's clock reads at a time of day on its starting date: the hour and minute from the window's
- * clock, the second and the date from the start, and the part of the day and the season from those, as J-TIME builds
- * its artificial snapshot.
- * @param {StartingDate} date The starting date and second.
+ * Builds the moment the game's clock reads at a time of day on a date: the hour and minute from the window's clock, the
+ * second and the date from the date given, and the part of the day and the season from those, as J-TIME builds its
+ * artificial snapshot.
+ * @param {GameDate} date The date and second.
  * @param {number} timeOfDay The time of day, in minutes past midnight.
  * @returns {TimeSnapshot} The moment.
  */
-const snapshotAt = (date: StartingDate, timeOfDay: number): TimeSnapshot =>
+const snapshotAt = (date: GameDate, timeOfDay: number): TimeSnapshot =>
 {
   const hours = hourOf(timeOfDay);
   return {
@@ -85,6 +98,42 @@ const snapshotAt = (date: StartingDate, timeOfDay: number): TimeSnapshot =>
     timeOfDay: phaseOfHour(hours),
     seasonOfYear: seasonOfMonth(date.months),
   };
+};
+
+/**
+ * Moves the date a new game starts on to a season, as the window's clock does when the author picks one. A start already
+ * in that season stays as it is. Otherwise the date becomes the start's day in the month the season opens with, the first
+ * such date after the start, so a start in December reaches Spring the next March; a day past the 30th, which no month
+ * of J-TIME's calendar holds, becomes the 30th. No season, or one J-TIME does not number, leaves the start as it is.
+ * @param {GameDate} start The date a new game starts on, and the second.
+ * @param {number | null} season The season, 0 to 3, or null for the season the game starts in.
+ * @returns {GameDate} The date, the start's second kept.
+ */
+const dateOfSeason = (start: GameDate, season: number | null): GameDate =>
+{
+  const opening = season === null ? undefined : SEASON_OPENINGS[season];
+  if (opening === undefined || seasonOfMonth(start.months) === season)
+  {
+    return start;
+  }
+
+  // the season's first month comes round again in the next year once this year's has gone by.
+  const years = opening > start.months ? start.years : start.years + 1;
+  return { seconds: start.seconds, days: Math.min(start.days, DAYS_PER_MONTH), months: opening, years };
+};
+
+/**
+ * Builds the moment the game's clock reads at the window's clock: its time of day, on the date its season moves the
+ * starting date to ({@link dateOfSeason}). Every page tag is judged at this moment, and the season a sky follows is this
+ * moment's.
+ * @param {GameDate} start The date a new game starts on, and the second.
+ * @param {number} timeOfDay The clock's time of day, in minutes past midnight.
+ * @param {number | null} season The clock's season, or null while it stays in the season the game starts in.
+ * @returns {TimeSnapshot} The moment.
+ */
+const snapshotOfClock = (start: GameDate, timeOfDay: number, season: number | null): TimeSnapshot =>
+{
+  return snapshotAt(dateOfSeason(start, season), timeOfDay);
 };
 
 /**
@@ -128,13 +177,17 @@ const instantOfPoint = (point: CalendarPoint): number =>
 
 export {
   DAY_MS,
+  DAYS_PER_MONTH,
+  dateOfSeason,
   HOUR_MS,
   instantOf,
   instantOfPoint,
   instantOfSnapshot,
   SEASON_NAMES,
+  SEASON_OPENINGS,
   seasonOfMonth,
   snapshotAt,
+  snapshotOfClock,
   UNKNOWN_SEASON,
 };
-export type { CalendarPoint, StartingDate, TimeSnapshot };
+export type { CalendarPoint, GameDate, TimeSnapshot };

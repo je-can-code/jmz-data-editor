@@ -601,15 +601,28 @@ class PixiMapRenderer implements MapRenderer
   setTimeOfDay(minutes: number): void
   {
     this.#timeOfDay = minutes;
-    const turned = this.#pages.setTime(minutes);
-    if (turned.length === 0)
-    {
-      return;
-    }
+    this.#drawTurned(this.#pages.setTime(minutes));
+  }
 
-    turned.forEach(id => this.#events.markChanged(id));
-    this.#eventsDirty = true;
-    this.#lighting.markStale();
+  /**
+   * Sets the season the window's clock shows, which moves the date the page rule picks each event's page at. Nothing
+   * draws for it at once: the events whose pages read the date are judged again, and those now showing another page are
+   * drawn again in the next frame, with the lighting asked to draw, since their lights may have come or gone. A season
+   * no event's pages read draws nothing at all.
+   * @param {number | null} season The season, or null for the season the game starts in.
+   */
+  setSeason(season: number | null): void
+  {
+    this.#drawTurned(this.#pages.setSeason(season));
+  }
+
+  /**
+   * The season every event's pages are judged at, as last set.
+   * @returns {number | null} The season, or null for the season the game starts in.
+   */
+  get season(): number | null
+  {
+    return this.#pages.season;
   }
 
   /**
@@ -622,15 +635,7 @@ class PixiMapRenderer implements MapRenderer
    */
   setPreview(preview: GamePreview): void
   {
-    const turned = this.#pages.setPreview(preview);
-    if (turned.length === 0)
-    {
-      return;
-    }
-
-    turned.forEach(id => this.#events.markChanged(id));
-    this.#eventsDirty = true;
-    this.#lighting.markStale();
+    this.#drawTurned(this.#pages.setPreview(preview));
   }
 
   /**
@@ -1851,6 +1856,24 @@ class PixiMapRenderer implements MapRenderer
     this.#events.markChanged(id);
     this.#eventsDirty = true;
     this.#selectionDirty = true;
+  }
+
+  /**
+   * Draws again, in the next frame, the events a move of the clock, of its season or of the preview turned to another
+   * page, asking the lighting to draw with them, since their lights may have come or gone; when it turned none, nothing
+   * is asked of anything.
+   * @param {readonly number[]} turned The ids of the events now showing another page.
+   */
+  #drawTurned(turned: readonly number[]): void
+  {
+    if (turned.length === 0)
+    {
+      return;
+    }
+
+    turned.forEach(id => this.#events.markChanged(id));
+    this.#eventsDirty = true;
+    this.#lighting.markStale();
   }
 
   /**

@@ -1,6 +1,25 @@
 import type { TimeTag } from './timeTags.ts';
-import { SEASON_NAMES } from './timeSnapshot.ts';
+import { SEASON_NAMES, type GameDate } from './timeSnapshot.ts';
 import { HOURS_PER_PHASE, PHASE_NAMES } from './timePhases.ts';
+
+/**
+ * What each month is called, by month from January, for naming a date as an author would: J-TIME numbers its months 1
+ * to 12, and its help names each season's months by these names.
+ */
+const MONTH_NAMES: readonly string[] = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
 /**
  * Words a clock time on a 24-hour face, two digits each, as the game's own clock shows one; an hour past 23, which a
@@ -129,4 +148,16 @@ const timeTagWords = (tag: TimeTag): string =>
   }
 };
 
-export { clockWords, timeTagWords };
+/**
+ * Words a date as an author would say it: the month by name, the day, then the year, as "June 16, 2027". A month the
+ * calendar has no name for, which only a start set off the calendar holds, keeps its number.
+ * @param {GameDate} date The date.
+ * @returns {string} The words.
+ */
+const dateWords = (date: GameDate): string =>
+{
+  const month = MONTH_NAMES[date.months - 1] ?? `Month ${date.months}`;
+  return `${month} ${date.days}, ${date.years}`;
+};
+
+export { clockWords, dateWords, MONTH_NAMES, timeTagWords };

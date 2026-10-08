@@ -368,10 +368,11 @@ describe('PixiMapRenderer', () =>
   describe('pages', () =>
   {
     /*
-     * Each event shows the page the page rule handed over picks at the clock's time and the preview's switches and
-     * variables. Moving the clock judges again the events whose pages ask something of it, and changing the preview the
-     * events whose pages read what it changed; only those turned to another page are drawn again, the lighting asked to
-     * draw with them, and when none turned, nothing is asked of anything. A new rule draws every event and the lighting
+     * Each event shows the page the page rule handed over picks at the clock's time and season and the preview's
+     * switches and variables. Moving the clock judges again the events whose pages ask something of it, moving its season
+     * the events whose pages read the date, and changing the preview the events whose pages read what it changed; only
+     * those turned to another page are drawn again, the lighting asked to draw with them, and when none turned, nothing
+     * is asked of anything. A new rule draws every event and the lighting
      * again. An event that changes, or the list itself, is judged afresh. Events no page holds for show, faded, only
      * while the markers overlay is on, so a map drawn as the game draws it shows nothing of them.
      */
@@ -398,6 +399,41 @@ describe('PixiMapRenderer', () =>
       // Assert.
       expect([ turning, marked.mock.calls.length, stale.mock.calls.length, renderer.timeOfDay ])
         .toStrictEqual([ [ [ 4, 9 ], 1 ], 2, 1, 1140 ]);
+    });
+
+    it('draws again only the events the season turned to another page, asking the lighting to draw, and nothing when it turned none', () =>
+    {
+      // Arrange: a season turning event 7, then one turning none.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      vi.spyOn(ShownPages.prototype, 'setSeason').mockReturnValueOnce([ 7 ])
+        .mockReturnValueOnce([]);
+      const marked = vi.spyOn(EventLayer.prototype, 'markChanged');
+      const stale = vi.spyOn(LightingLayers.prototype, 'markStale');
+
+      // Act: Summer, then Autumn.
+      renderer.setSeason(1);
+      const turning = [ marked.mock.calls.map(([ id ]) => id), stale.mock.calls.length ];
+      renderer.setSeason(2);
+
+      // Assert.
+      expect([ turning, marked.mock.calls.length, stale.mock.calls.length ])
+        .toStrictEqual([ [ [ 7 ], 1 ], 1, 1 ]);
+    });
+
+    it('judges events in the season it was last handed, the one the game starts in until then', () =>
+    {
+      // Arrange: a renderer as a map view makes it.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      const before = renderer.season;
+
+      // Act: Summer.
+      renderer.setSeason(1);
+
+      // Assert.
+      expect([ before, renderer.season ])
+        .toStrictEqual([ null, 1 ]);
     });
 
     it('draws again only the events the preview turned to another page, asking the lighting to draw, and nothing when it turned none', () =>

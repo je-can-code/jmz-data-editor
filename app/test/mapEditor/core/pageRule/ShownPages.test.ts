@@ -14,9 +14,10 @@ import { command, event, page } from '../../support/eventKindFixtures.ts';
  *
  * Every event is read once and remembered: until whoever draws it says it changed, or it is put back in its slot as
  * another object, or the rule changes. Moving the clock judges again only the events read so far whose pages ask
- * something the clock can change; changing the preview, only those whose pages read a switch, a variable or a piece of
- * state it changed. Each answers the events now showing another page; an event neither can change is never read again
- * for it, and a clock standing still or a preview changing nothing judges nothing at all.
+ * something the clock can change; moving its season, only those whose pages read the date; changing the preview, only
+ * those whose pages read a switch, a variable or a piece of state it changed. Each answers the events now showing
+ * another page; an event none of them can change is never read again for it, and a clock or a season standing still,
+ * or a preview changing nothing, judges nothing at all.
  */
 describe('ShownPages', () =>
 {
@@ -80,9 +81,43 @@ describe('ShownPages', () =>
   };
 
   /**
+   * How often the stand-in seasons have judged a page.
+   */
+  const seasons = { judged: 0 };
+
+  /**
+   * A stand-in for a plugin's calendar: a comment {@code <inSeason:N>} keeps a page to the moments in season N, a moment
+   * whose clock picked no season being in season 3, the one the game starts in.
+   */
+  const SEASONS: PageCondition = {
+    id: 'test.seasons',
+    read: shown =>
+    {
+      const line = shown.list.map(each => String(each.parameters[0] ?? '')).find(text => text.startsWith('<inSeason:'));
+      if (line === undefined)
+      {
+        return null;
+      }
+
+      const wanted = Number(line.slice('<inSeason:'.length, -1));
+      const holds = (moment: PageMoment) =>
+      {
+        seasons.judged += 1;
+        return (moment.season ?? 3) === wanted;
+      };
+      return { followsClock: false, followsDate: true, holds, words: [] };
+    },
+  };
+
+  /**
    * A rule over Chef Adventure's starting party, with the stand-in hours and flags.
    */
   const RULE: PageRule = { save: { party: [ 1, 2 ] }, conditions: [ OPEN_HOURS, FLAGS ] };
+
+  /**
+   * The same rule with the stand-in seasons as well.
+   */
+  const SEASON_RULE: PageRule = { save: RULE.save, conditions: [ OPEN_HOURS, FLAGS, SEASONS ] };
 
   /**
    * A page with comments, waiting for nothing of its own unless told otherwise.
@@ -245,6 +280,96 @@ describe('ShownPages', () =>
       // Assert.
       expect([ before, active ])
         .toStrictEqual([ null, 0 ]);
+    });
+  });
+
+  describe('with a season', () =>
+  {
+    /**
+     * A stall shut on its first page and open in Summer on its second.
+     * @param {number} id The event id.
+     * @returns {RmmzMapEvent} The stall.
+     */
+    const stall = (id: number): RmmzMapEvent => event(id, [ commented([]), commented([ '<inSeason:1>' ]) ]);
+
+    it('answers which events now show another page as the season moves, judging only those whose pages read the date', () =>
+    {
+      // Arrange: a stall, a lamp and a sign read at noon in the season the game starts in, the lamp's judgements counted
+      // from then.
+      const pages = new ShownPages(SEASON_RULE, 720);
+      const events = [ stall(1), lamp(2), sign(3) ];
+      events.forEach(each => pages.shownPage(each));
+      reads.judged = 0;
+
+      // Act: Summer, when the stall opens; then Autumn, when it shuts again.
+      const summer = [ pages.setSeason(1), events.map(each => pages.activePage(each)) ];
+      const autumn = [ pages.setSeason(2), events.map(each => pages.activePage(each)) ];
+
+      // Assert: the lamp's hours never judged again.
+      expect([ summer, autumn, reads.judged, pages.season ])
+        .toStrictEqual([ [ [ 1 ], [ 1, 0, 0 ] ], [ [ 1 ], [ 0, 0, 0 ] ], 0, 2 ]);
+    });
+
+    it('judges nothing when the season does not change', () =>
+    {
+      // Arrange: a stall read in the season the game starts in, its judgements counted from then.
+      const pages = new ShownPages(SEASON_RULE, 720);
+      pages.shownPage(stall(1));
+      seasons.judged = 0;
+
+      // Act: the game's own season again, then Spring, which judges the stall's open page once.
+      const turned = pages.setSeason(null);
+      const still = seasons.judged;
+      pages.setSeason(0);
+
+      // Assert.
+      expect([ turned, still, seasons.judged ])
+        .toStrictEqual([ [], 0, 1 ]);
+    });
+
+    it('stops following an event put back in its slot as one whose pages no longer read the date', () =>
+    {
+      // Arrange: a stall read, then put back as a plain sign, as a paste over it would.
+      const pages = new ShownPages(SEASON_RULE, 720);
+      pages.shownPage(stall(1));
+      pages.shownPage({ ...sign(1) });
+
+      // Act.
+      const turned = pages.setSeason(1);
+
+      // Assert.
+      expect(turned)
+        .toStrictEqual([]);
+    });
+
+    it('forgets which events read the date once told every event changed, and judges each read afterwards in the season', () =>
+    {
+      // Arrange: a stall read, then the whole list changed.
+      const pages = new ShownPages(SEASON_RULE, 720);
+      const shownStall = stall(1);
+      pages.shownPage(shownStall);
+      pages.forget(null);
+
+      // Act: Summer, then the stall asked about again.
+      const turned = pages.setSeason(1);
+      const shown = pages.shownPage(shownStall);
+
+      // Assert.
+      expect([ turned, shown ])
+        .toStrictEqual([ [], { index: 1, faded: false } ]);
+    });
+
+    it('starts in the season the game starts in unless told otherwise', () =>
+    {
+      // Arrange: the table as a renderer makes it.
+      const pages = new ShownPages();
+
+      // Act.
+      const { season } = pages;
+
+      // Assert.
+      expect(season)
+        .toBeNull();
     });
   });
 

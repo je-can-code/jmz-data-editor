@@ -234,10 +234,11 @@ const DrawNotice = (props: { state: DrawState; notices?: readonly ModuleNotice[]
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
  * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look
  * (Lighting among them while a plugin module lights the map, Weather while one draws its weather, and the window's one
- * clock while a module offers a time of day, the sky drawn and each event's page shown at its hour), the window's preview beside it, saying how far along the
- * story the maps show the game, the painting tools, and a status line naming the zoom, the tile under the pointer, how
- * many events are selected and the GPU drawing it. Each event shows the page the game would at the clock's time, with
- * the preview's switches and variables set and a fresh save's everything else, by the window's page rule.
+ * clock while a module offers a time of day, the sky drawn and each event's page shown at its hour and in its season),
+ * the window's preview beside it, saying how far along the story the maps show the game, the painting tools, and a
+ * status line naming the zoom, the tile under the pointer, how many events are selected and the GPU drawing it. Each
+ * event shows the page the game would at the clock's time and date, with the preview's switches and variables set and a
+ * fresh save's everything else, by the window's page rule.
  *
  * The view paints with its window's paint: the page's own for a map docked in the main window, and a torn-out window's
  * own for a map torn out, so each window's palette, layer strip and tools go together and no further.
@@ -334,8 +335,16 @@ const MapView = (props: MapViewProps) =>
     stops.push(services.modules.subscribe(() => renderer.setWeatherLayers(services.modules.weatherLayers())));
     renderer.setPageRule(services.pages.rule());
     stops.push(services.pages.subscribe(() => renderer.setPageRule(services.pages.rule())));
-    renderer.setTimeOfDay(services.clock.time());
-    stops.push(services.clock.subscribe(() => renderer.setTimeOfDay(services.clock.time())));
+
+    // the clock's season moves the date the page rule reads, so it goes to the renderer with the time, each untouched
+    // when the other moves.
+    const followClock = () =>
+    {
+      renderer.setTimeOfDay(services.clock.time());
+      renderer.setSeason(services.clock.season());
+    };
+    followClock();
+    stops.push(services.clock.subscribe(followClock));
 
     // the pages are judged at the window's preview too, the switches and variables set in place of a fresh save's, and a
     // change to it draws again only the events whose pages read what changed.
@@ -571,7 +580,7 @@ const MapView = (props: MapViewProps) =>
           />
         ))}
         {clockOffer !== null && (
-          <ClockChip clock={services.clock} partOfDay={clockOffer.partOfDay}/>
+          <ClockChip clock={services.clock} partOfDay={clockOffer.partOfDay} seasons={clockOffer.seasons}/>
         )}
         <PreviewChip preview={services.preview} nouns={nouns} onOpen={() => openPreview()}/>
         <Divider flexItem orientation={'vertical'} sx={{ mx: 0.5 }}/>

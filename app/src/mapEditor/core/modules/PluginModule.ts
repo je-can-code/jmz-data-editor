@@ -296,10 +296,35 @@ type ModuleContext = {
 };
 
 /**
+ * The seasons a clock's calendar runs through, for a plugin whose date decides one, as J-TIME's month does. The window's
+ * clock holds the season the author picks beside its time of day, numbered as the offer numbers them, and the module
+ * reads it as moving the date: the map views name the season on the clock and offer a picker for it, and the module's
+ * page conditions judge every page at the date the season gives.
+ */
+type SeasonOffer = {
+  /**
+   * What the game calls each season, by the number the clock holds for it, in the order the picker lists them.
+   */
+  readonly names: readonly string[];
+
+  /**
+   * The season the game starts in, which the clock shows until the author picks one.
+   */
+  readonly startsIn: number;
+
+  /**
+   * Words the date a season moves the clock to, as an author would say it, such as "June 16, 2027".
+   * @param {number} season The season.
+   * @returns {string} The date.
+   */
+  readonly dateWords: (season: number) => string;
+};
+
+/**
  * A clock a module offers the map views, for a plugin that gives the game a time of day: where the window's clock
- * starts, which is the game's own starting time, and what the game calls each part of the day. The map views show the
- * clock only while some module offers one, and the window has one clock, whichever module offers it, so every map in
- * it shows the same hour.
+ * starts, which is the game's own starting time, what the game calls each part of the day, and the seasons its calendar
+ * runs through, if it has any. The map views show the clock only while some module offers one, and the window has one
+ * clock, whichever module offers it, so every map in it shows the same hour and the same season.
  */
 type ClockOffer = {
   /**
@@ -314,6 +339,11 @@ type ClockOffer = {
    * @returns {string} The name.
    */
   readonly partOfDay: (minutes: number) => string;
+
+  /**
+   * The seasons the game's calendar runs through. Left out, the clock has none: it names no season and offers no picker.
+   */
+  readonly seasons?: SeasonOffer;
 };
 
 /**
@@ -442,9 +472,9 @@ type ModuleContributions = {
 
   /**
    * Offers the map views a clock, for as long as the module is on: the views show it, and the window's clock starts at
-   * the time the offer gives. Should several modules offer one, the first to offer says where it starts and how the day
-   * is named.
-   * @param {ClockOffer} offer Where the clock starts, and what each part of the day is called.
+   * the time the offer gives. Should several modules offer one, the first to offer says where it starts, how the day is
+   * named and which seasons it has.
+   * @param {ClockOffer} offer Where the clock starts, what each part of the day is called, and the seasons, if any.
    */
   clock(offer: ClockOffer): void;
 
@@ -547,5 +577,6 @@ export type {
   PluginModule,
   PreviewKindDefinition,
   QuickPanelProps,
+  SeasonOffer,
   SkyReader,
 };

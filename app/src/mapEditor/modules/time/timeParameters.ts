@@ -1,7 +1,7 @@
 import type { PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.ts';
 import { timeOfDayAt } from '../../core/time/timeOfDay.ts';
 import { isClockHour } from './timePhases.ts';
-import type { StartingDate } from './timeSnapshot.ts';
+import type { GameDate } from './timeSnapshot.ts';
 
 /**
  * J-TIME's file name, as js/plugins.js lists it.
@@ -22,7 +22,7 @@ const DEFAULT_STARTING_MINUTE = 0;
  * The second, day, month and year a new game starts on when J-TIME's parameters cannot say: the plugin's own defaults,
  * 29 May 2021 at the top of the minute.
  */
-const DEFAULT_STARTING_DATE: StartingDate = { seconds: 0, days: 29, months: 5, years: 2021 };
+const DEFAULT_STARTING_DATE: GameDate = { seconds: 0, days: 29, months: 5, years: 2021 };
 
 /**
  * Reads one of J-TIME's starting values as the plugin reads it, a number from text, so an empty parameter reads as 0,
@@ -73,15 +73,15 @@ const startingTimeOf = (plugin: PluginsJsEntry, now: Date): number =>
 };
 
 /**
- * Reads everything of a new game's moment the window's clock does not move, from J-TIME's parameters: its Starting
- * Second, Day, Month and Year, each kept when it is a whole number, as the plugin reads any number there, or the
- * plugin's own default otherwise; or, for a game running on real time, today's date, at the top of the minute the clock
- * shows.
+ * Reads the date a new game starts on, and the second, which the window's clock never moves, from J-TIME's parameters:
+ * its Starting Second, Day, Month and Year, each kept when it is a whole number, as the plugin reads any number there,
+ * or the plugin's own default otherwise; or, for a game running on real time, today's date, at the top of the minute the
+ * clock shows. The clock's season moves the date on from here.
  * @param {PluginsJsEntry} plugin J-TIME, as js/plugins.js lists it.
  * @param {Date} now The time now, for a game on real time.
- * @returns {StartingDate} The second and the date.
+ * @returns {GameDate} The second and the date.
  */
-const startingDateOf = (plugin: PluginsJsEntry, now: Date): StartingDate =>
+const startingDateOf = (plugin: PluginsJsEntry, now: Date): GameDate =>
 {
   const { parameters } = plugin;
   if (parameters['useRealTime'] === 'true')

@@ -27,6 +27,39 @@ type ProbeMap = {
    * map's weather is set aside, as in every other pass.
    */
   weather?: { x: number; y: number };
+
+  /**
+   * The moments to judge the map's pages at, which the probe does instead of every other pass: once there, it sets the
+   * game's clock straight to each moment in turn, judges every page of every event on the map and the page each would
+   * show, and puts the clock back as it found it, all before a frame can tick it on. Left out, nothing is judged at any
+   * moment but the one the game arrived at.
+   */
+  moments?: ProbeMoment[];
+};
+
+/**
+ * A moment the game's clock is set to, to the second, and the key it is reported under: a season's date and a time of
+ * day, such as {@code summer@1320}.
+ */
+type ProbeMoment = {
+  key: string;
+  years: number;
+  months: number;
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+};
+
+/**
+ * How the game judges one event's pages at a moment: whether each page holds, by Game_Event#meetsConditions with every
+ * plugin's condition, null where judging it threw; and the page the event would show then, by its own
+ * findProperPageIndex, -1 for none, or null where picking threw.
+ */
+type ProbeVerdicts = {
+  id: number;
+  page: number | null;
+  meets: (boolean | null)[];
 };
 
 /**
@@ -166,7 +199,8 @@ type ProbeEvent = {
  * What the probe reports when it finishes. The events are kept by map, under the map's id, or under the id and the time
  * of day for a map drawn under its sky ({@code 337@1320}), since which page an event shows can depend on the hour; and
  * under the same keys, the time of day the game's clock read as they were recorded, in minutes past midnight, or -1 for
- * a game with no clock.
+ * a game with no clock. The judgements at each moment a map was asked about are kept under the map's id and the
+ * moment's key ({@code 337@summer@1320}).
  */
 type ProbeReport = {
   phase: string;
@@ -174,6 +208,7 @@ type ProbeReport = {
   captures: ProbeCapture[];
   events: Record<string, ProbeEvent[]>;
   clocks: Record<string, number>;
+  moments?: Record<string, ProbeVerdicts[]>;
 
   /**
    * The weather read on each map the probe was asked to read it on, by the map's id; and what J-Weather-Time's sky was
@@ -185,4 +220,16 @@ type ProbeReport = {
   log: string[];
 };
 
-export type { ProbeCapture, ProbeConfig, ProbeEvent, ProbeMap, ProbeReport, ProbeSpread, WeatherDepthProbe, WeatherLayerProbe, WeatherProbe };
+export type {
+  ProbeCapture,
+  ProbeConfig,
+  ProbeEvent,
+  ProbeMap,
+  ProbeMoment,
+  ProbeReport,
+  ProbeSpread,
+  ProbeVerdicts,
+  WeatherDepthProbe,
+  WeatherLayerProbe,
+  WeatherProbe,
+};

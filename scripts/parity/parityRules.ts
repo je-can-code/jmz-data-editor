@@ -2,23 +2,28 @@
  * The parity check's rules, apart from the browser and the game so they can be tested: which views cover a map,
  * which maps are worth comparing at every animation step, which dark and which under their sky at a time of day, which
  * page the editor shows each event at the hour the game's clock read, how the game and the editor judge each page of
- * the maps holding quest-gated events, what explains a difference in the events pass and in the dark and sky passes, how
- * the game copy's lights are held steady, which differences the engine predicts against snapshot.js, and how a map's
- * weather is read on both sides and compared, by its numbers rather than its pixels, and where each side draws it.
+ * the maps holding quest-gated events, and of those holding time-gated events at each season's date, with a fixture map
+ * of the date's own tags, what explains a difference in the events pass and in the dark and sky passes, how the game
+ * copy's lights are held steady, which differences the engine predicts against snapshot.js, and how a map's weather is
+ * read on both sides and compared, by its numbers rather than its pixels, and where each side draws it.
  */
 import { CommandCatalog } from '../../app/src/mapEditor/core/commands/CommandCatalog.ts';
+import { createEventPage, createMapEvent } from '../../app/src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../app/src/mapEditor/core/model/json.ts';
-import type { RmmzMapEvent } from '../../app/src/mapEditor/core/model/rmmzTypes.ts';
+import type { RmmzEventPage, RmmzMap, RmmzMapEvent } from '../../app/src/mapEditor/core/model/rmmzTypes.ts';
 import { PluginModuleRegistry } from '../../app/src/mapEditor/core/modules/PluginModuleRegistry.ts';
-import { activePageOf, pageHolds, readEvent, type PageRule } from '../../app/src/mapEditor/core/pageRule/pageRule.ts';
+import { activePageOf, pageHolds, readEvent, type PageMoment, type PageRule } from '../../app/src/mapEditor/core/pageRule/pageRule.ts';
+import { newMapContent } from '../../app/src/mapEditor/core/tree/treePlans.ts';
 import { ambientPayloadOf } from '../../app/src/mapEditor/modules/lighting/ambientTags.ts';
 import { lightsOf, PLUGIN_DEFAULTS } from '../../app/src/mapEditor/modules/lighting/lightTags.ts';
 import { NO_SKY_TAG, skyFollowsClock } from '../../app/src/mapEditor/modules/lighting/skyTag.ts';
 import { questModule } from '../../app/src/mapEditor/modules/quest/questModule.ts';
 import { readQuestTags } from '../../app/src/mapEditor/modules/quest/questTags.ts';
 import { timeModule } from '../../app/src/mapEditor/modules/time/timeModule.ts';
+import { dateOfSeason, SEASON_NAMES, seasonOfMonth, type GameDate } from '../../app/src/mapEditor/modules/time/timeSnapshot.ts';
+import { readTimeTags } from '../../app/src/mapEditor/modules/time/timeTags.ts';
 import type { PluginsJsEntry } from '../../app/src/services/plugins/PluginsJsReader.ts';
-import type { ProbeEvent, ProbeMap, ProbeSpread, WeatherDepthProbe, WeatherLayerProbe } from './probeTypes.ts';
+import type { ProbeEvent, ProbeMap, ProbeMoment, ProbeSpread, ProbeVerdicts, WeatherDepthProbe, WeatherLayerProbe } from './probeTypes.ts';
 
 /**
  * A map cell that differs, as far as the rules read it.
@@ -69,11 +74,12 @@ type DarkLight = {
 type EditorPages = ReadonlyMap<number, number>;
 
 /**
- * One event that shows another page in the game than in the editor, either one -1 for none.
+ * One event that shows another page in the game than in the editor, either one -1 for none, and the game's null where
+ * picking its page threw.
  */
 type PageDifference = {
   readonly id: number;
-  readonly game: number;
+  readonly game: number | null;
   readonly editor: number;
 };
 
@@ -89,10 +95,10 @@ type VerdictDifference = {
 };
 
 /**
- * How the game and the editor judged one map's events at one hour, counting the quest-gated apart: the events the game
- * has there, and those on the editor's page; the events with a page carrying a quest tag, and those on the editor's
- * page; every page of the events both sides have, and those both judge alike; the quest-gated pages, and those both
- * judge alike; and the quest-gated pages judged differently.
+ * How the game and the editor judged one map's events at one moment, counting the gated apart, the quest-gated or the
+ * time-gated: the events the game has there, and those on the editor's page; the events with a gated page, and those on
+ * the editor's page; every page of the events both sides have, and those both judge alike; the gated pages, and those
+ * both judge alike; and the gated pages judged differently.
  */
 type PagesTally = {
   readonly events: number;
@@ -123,6 +129,15 @@ type LightingConfigFile = {
 type WeatherFixture = {
   readonly mapId: number;
   readonly time?: number;
+};
+
+/**
+ * One moment every time-gated page is judged at: a season, by J-TIME's number for it, whose date the clock moves the
+ * game's start to, and a time of day, in minutes past midnight.
+ */
+type SeasonFixture = {
+  readonly season: number;
+  readonly time: number;
 };
 
 /**
@@ -193,6 +208,24 @@ const WEATHER_FIXTURES = '65,102,245,316,220,16,191,309@22:00';
  * a 24-hour clock.
  */
 const WEATHER_FIXTURE = /^(\d+)(?:@([01]?\d|2[0-3]):([0-5]\d))?$/u;
+
+/**
+ * The moments every time-gated page is judged at unless told otherwise: Summer's date at four hours, so each span Chef
+ * Adventure ships is seen open and shut (the small hours, the morning, the evening before 18:00 and the night), and
+ * Spring's and Autumn's at one hour each, both on the minute a span closes, so a span's end is seen exactly.
+ */
+const SEASON_FIXTURES = 'summer@02:00,summer@10:00,summer@17:00,summer@22:00,spring@05:00,autumn@16:00';
+
+/**
+ * A season and a time of day as --seasons takes them: the season's name, in any case, or J-TIME's number for it, then,
+ * after an at sign, hours and minutes on a 24-hour clock.
+ */
+const SEASON_FIXTURE = /^(spring|summer|autumn|winter|[0-3])@([01]?\d|2[0-3]):([0-5]\d)$/iu;
+
+/**
+ * How many layers a map file holds: four of tiles, then shadows, then regions.
+ */
+const MAP_LAYERS = 6;
 
 /**
  * The tile size.
@@ -329,20 +362,20 @@ const parityPageRule = (plugins: readonly PluginsJsEntry[], party: readonly numb
 };
 
 /**
- * Names the page the editor shows each of a map's events at a time of day.
+ * Names the page the editor shows each of a map's events at a moment: a time of day, and the season the clock is in.
  * @param {MapFile} map The map.
  * @param {PageRule} rule The rule the editor shows the game by.
- * @param {number} timeOfDay The time of day, in minutes past midnight.
+ * @param {PageMoment} moment The moment, its time of day in minutes past midnight.
  * @returns {EditorPages} Each event's page, -1 for none, by its id.
  */
-const editorPagesOf = (map: MapFile, rule: PageRule, timeOfDay: number): EditorPages =>
+const editorPagesOf = (map: MapFile, rule: PageRule, moment: PageMoment): EditorPages =>
 {
   const pages = new Map<number, number>();
   map.events.forEach(event =>
   {
     if (event !== null)
     {
-      pages.set(event.id, activePageOf(readEvent(event, rule), { timeOfDay }));
+      pages.set(event.id, activePageOf(readEvent(event, rule), moment));
     }
   });
   return pages;
@@ -351,11 +384,11 @@ const editorPagesOf = (map: MapFile, rule: PageRule, timeOfDay: number): EditorP
 /**
  * Lists the events the game shows another page than the editor does, which is the page rule's own measure: an event
  * the editor has no page for at all, as one a plugin put on the map, counts as showing none there.
- * @param {readonly ProbeEvent[]} events The game's events on the map.
+ * @param {readonly ProbeVerdicts[]} events The game's events on the map, each with the page it shows.
  * @param {EditorPages} editorPages The editor's page for each event.
  * @returns {PageDifference[]} The events that differ, in the game's order.
  */
-const pageDifferencesOf = (events: readonly ProbeEvent[], editorPages: EditorPages): PageDifference[] =>
+const pageDifferencesOf = (events: readonly ProbeVerdicts[], editorPages: EditorPages): PageDifference[] =>
 {
   return events.flatMap(event =>
   {
@@ -376,17 +409,18 @@ const pagesProbeMapFor = (mapId: number): ProbeMap =>
 };
 
 /**
- * Lists the pages of a map's events carrying any of J-OMNI-Quests' page tags, as its module reads them.
+ * Lists the pages of a map's events that carry what a reading finds, such as a plugin's page tags.
  * @param {MapFile} map The map.
- * @returns {Map<number, number[]>} Each quest-gated event's quest-gated pages, by index, by the event's id; an event with
- * none has no entry.
+ * @param {(page: RmmzEventPage) => boolean} carries Whether a page carries it.
+ * @returns {Map<number, number[]>} Each such event's pages carrying it, by index, by the event's id; an event with none
+ * has no entry.
  */
-const questGatedPagesOf = (map: MapFile): Map<number, number[]> =>
+const pagesCarrying = (map: MapFile, carries: (page: RmmzEventPage) => boolean): Map<number, number[]> =>
 {
   const gated = new Map<number, number[]>();
   map.events.forEach(event =>
   {
-    const pages = event === null ? [] : event.pages.flatMap((page, index) => (readQuestTags(page).length > 0 ? [ index ] : []));
+    const pages = event === null ? [] : event.pages.flatMap((page, index) => (carries(page) ? [ index ] : []));
     if (event !== null && pages.length > 0)
     {
       gated.set(event.id, pages);
@@ -396,21 +430,44 @@ const questGatedPagesOf = (map: MapFile): Map<number, number[]> =>
 };
 
 /**
- * Judges every page of a map's events as the editor does at a time of day: whether each holds, as the page rule asks of
+ * Lists the pages of a map's events carrying any of J-OMNI-Quests' page tags, as its module reads them.
+ * @param {MapFile} map The map.
+ * @returns {Map<number, number[]>} Each quest-gated event's quest-gated pages, by index, by the event's id; an event with
+ * none has no entry.
+ */
+const questGatedPagesOf = (map: MapFile): Map<number, number[]> =>
+{
+  return pagesCarrying(map, page => readQuestTags(page).length > 0);
+};
+
+/**
+ * Lists the pages of a map's events carrying any of J-TIME's page tags, as its module reads them: those gated by the
+ * time of day, by the date, or by both.
+ * @param {MapFile} map The map.
+ * @returns {Map<number, number[]>} Each time-gated event's time-gated pages, by index, by the event's id; an event with
+ * none has no entry.
+ */
+const timeGatedPagesOf = (map: MapFile): Map<number, number[]> =>
+{
+  return pagesCarrying(map, page => readTimeTags(page).length > 0);
+};
+
+/**
+ * Judges every page of a map's events as the editor does at a moment: whether each holds, as the page rule asks of
  * each page when it picks one.
  * @param {MapFile} map The map.
  * @param {PageRule} rule The rule the editor shows the game by.
- * @param {number} timeOfDay The time of day, in minutes past midnight.
+ * @param {PageMoment} moment The moment: a time of day, in minutes past midnight, and the season the clock is in.
  * @returns {Map<number, boolean[]>} Whether each page holds, by index, by the event's id.
  */
-const editorVerdictsOf = (map: MapFile, rule: PageRule, timeOfDay: number): Map<number, boolean[]> =>
+const editorVerdictsOf = (map: MapFile, rule: PageRule, moment: PageMoment): Map<number, boolean[]> =>
 {
   const verdicts = new Map<number, boolean[]>();
   map.events.forEach(event =>
   {
     if (event !== null)
     {
-      verdicts.set(event.id, readEvent(event, rule).pages.map(page => pageHolds(page, { timeOfDay })));
+      verdicts.set(event.id, readEvent(event, rule).pages.map(page => pageHolds(page, moment)));
     }
   });
   return verdicts;
@@ -420,11 +477,11 @@ const editorVerdictsOf = (map: MapFile, rule: PageRule, timeOfDay: number): Map<
  * Lists the pages the game judges otherwise than the editor, the editor's pages compared one by one with how the game
  * judged the same page; a page whose judging threw in the game differs whatever the editor says. An event the editor has
  * no pages for, as one a plugin put on the map, has nothing to compare and is passed over.
- * @param {readonly ProbeEvent[]} events The game's events on the map.
+ * @param {readonly ProbeVerdicts[]} events The game's events on the map, with how it judged each page.
  * @param {ReadonlyMap<number, readonly boolean[]>} verdicts The editor's judgement of each page, by the event's id.
  * @returns {VerdictDifference[]} The pages judged differently, in the game's order of events, then by page.
  */
-const verdictDifferencesOf = (events: readonly ProbeEvent[], verdicts: ReadonlyMap<number, readonly boolean[]>): VerdictDifference[] =>
+const verdictDifferencesOf = (events: readonly ProbeVerdicts[], verdicts: ReadonlyMap<number, readonly boolean[]>): VerdictDifference[] =>
 {
   return events.flatMap(event =>
   {
@@ -438,20 +495,27 @@ const verdictDifferencesOf = (events: readonly ProbeEvent[], verdicts: ReadonlyM
 };
 
 /**
- * Tallies how the game and the editor judged one map's events at one hour, the quest-gated apart: which events each
- * shows on the same page, and which pages each judges alike.
+ * Tallies how the game and the editor judged one map's events at one moment, the gated apart: which events each shows on
+ * the same page, and which pages each judges alike.
  * @param {MapFile} map The map.
- * @param {readonly ProbeEvent[]} events The game's events on the map, as the probe recorded them.
+ * @param {readonly ProbeVerdicts[]} events The game's events on the map, as the probe recorded them.
  * @param {PageRule} rule The rule the editor shows the game by.
- * @param {number} timeOfDay The time of day the game's clock read, in minutes past midnight.
+ * @param {PageMoment} moment The moment the game's clock read: its time of day, in minutes past midnight, and the
+ * season.
+ * @param {ReadonlyMap<number, readonly number[]>} gated The pages counted apart, by index, by the event's id; the
+ * quest-gated unless told otherwise.
  * @returns {PagesTally} The tally.
  */
-const tallyPages = (map: MapFile, events: readonly ProbeEvent[], rule: PageRule, timeOfDay: number): PagesTally =>
+const tallyPages = (
+  map: MapFile,
+  events: readonly ProbeVerdicts[],
+  rule: PageRule,
+  moment: PageMoment,
+  gated: ReadonlyMap<number, readonly number[]> = questGatedPagesOf(map)): PagesTally =>
 {
-  const shownElsewhere = new Set(pageDifferencesOf(events, editorPagesOf(map, rule, timeOfDay)).map(difference => difference.id));
-  const gated = questGatedPagesOf(map);
+  const shownElsewhere = new Set(pageDifferencesOf(events, editorPagesOf(map, rule, moment)).map(difference => difference.id));
   const gatedEvents = events.filter(event => gated.has(event.id));
-  const verdicts = editorVerdictsOf(map, rule, timeOfDay);
+  const verdicts = editorVerdictsOf(map, rule, moment);
   const differ = verdictDifferencesOf(events, verdicts);
   const gatedDiffer = differ.filter(difference => (gated.get(difference.id) ?? []).includes(difference.page));
   const pages = events.reduce((sum, event) => sum + (verdicts.get(event.id) ?? []).length, 0);
@@ -485,23 +549,155 @@ const verdictWords = (difference: VerdictDifference): string =>
 
 /**
  * Words a page as a reason names it.
- * @param {number} pageIndex The page's index, -1 for none.
- * @returns {string} The words, such as "page 2" or "no page".
+ * @param {number | null} pageIndex The page's index, -1 for none, or null where picking one threw.
+ * @returns {string} The words, such as "page 2", "no page" or "no page it could pick".
  */
-const pageNameOf = (pageIndex: number): string =>
+const pageNameOf = (pageIndex: number | null): string =>
 {
+  if (pageIndex === null)
+  {
+    return 'no page it could pick';
+  }
+
   return pageIndex < 0 ? 'no page' : `page ${pageIndex + 1}`;
 };
 
 /**
  * Words the pages an event shows on each side, for a reason.
- * @param {number} game The page the game shows, -1 for none.
+ * @param {number | null} game The page the game shows, -1 for none, or null where picking one threw.
  * @param {number} editor The page the editor shows, -1 for none.
  * @returns {string} The words, such as "shows page 2 in the game, page 1 in the editor".
  */
-const pagesWords = (game: number, editor: number): string =>
+const pagesWords = (game: number | null, editor: number): string =>
 {
   return `shows ${pageNameOf(game)} in the game, ${pageNameOf(editor)} in the editor`;
+};
+
+/**
+ * Reads --seasons's list of moments to judge every time-gated page at.
+ * @param {string} list The list, such as {@code summer@22:00,spring@05:00}; empty for none.
+ * @returns {SeasonFixture[]} The seasons and times, in the order given.
+ */
+const parseSeasonFixtures = (list: string): SeasonFixture[] =>
+{
+  return list.split(',').filter(entry => entry !== '').map(entry =>
+  {
+    const match = SEASON_FIXTURE.exec(entry);
+    if (match === null)
+    {
+      throw new Error(`--seasons takes seasons, each at a time, such as summer@22:00 or 1@22:00, not ${entry}`);
+    }
+
+    const [ , season, hours, minutes ] = match;
+    const named = SEASON_NAMES.findIndex(name => name.toLowerCase() === season.toLowerCase());
+    return { season: named >= 0 ? named : Number(season), time: (Number(hours) * 60) + Number(minutes) };
+  });
+};
+
+/**
+ * Names a season fixture as the probe keys its judgements: the season's name in lower case, then the time of day.
+ * @param {SeasonFixture} fixture The fixture.
+ * @returns {string} The key, such as {@code summer@1320}.
+ */
+const seasonKeyOf = (fixture: SeasonFixture): string =>
+{
+  return `${SEASON_NAMES[fixture.season].toLowerCase()}@${fixture.time}`;
+};
+
+/**
+ * Builds the moment the game's clock is set to for a season fixture: the date the season moves the game's start to,
+ * exactly as the editor's clock moves it, at the fixture's time of day, on the start's own second.
+ * @param {GameDate} start The date a new game starts on, and the second, as the editor reads them.
+ * @param {SeasonFixture} fixture The season and the time of day.
+ * @returns {ProbeMoment} The moment.
+ */
+const seasonMomentOf = (start: GameDate, fixture: SeasonFixture): ProbeMoment =>
+{
+  const date = dateOfSeason(start, fixture.season);
+  const { years, months, days, seconds } = date;
+  return { key: seasonKeyOf(fixture), years, months, days, hours: Math.floor(fixture.time / 60), minutes: fixture.time % 60, seconds };
+};
+
+/**
+ * Builds what the probe does on a map whose pages are judged at moments: it arrives there, judges every page at each
+ * moment with the game's clock set to it, and draws nothing.
+ * @param {number} mapId The map.
+ * @param {readonly ProbeMoment[]} moments The moments.
+ * @returns {ProbeMap} The probe's orders.
+ */
+const seasonProbeMapFor = (mapId: number, moments: readonly ProbeMoment[]): ProbeMap =>
+{
+  return { mapId, views: [], steps: [ 0 ], dark: false, moments: [ ...moments ] };
+};
+
+/**
+ * Lists the page tags reading the date that hold on one date, with a near miss on each side of each: its day, month and
+ * year and those either side; a span of days, of months, of years and of the whole day around it, the same spans just
+ * before it and just after, and spans of days and of months that close in the next month or year without being open yet.
+ * @param {GameDate} date The date.
+ * @returns {string[]} The tags, each one comment line.
+ */
+const dateTagsAround = (date: GameDate): string[] =>
+{
+  const { days, months, years } = date;
+  const wholeDay = (day: number): string => `<fullDateRangePage:[0,0,${day},${months},${years}]-[59,23,${day},${months},${years}]>`;
+  return [
+    `<dayPage:${days}>`,
+    `<dayPage:${days - 1}>`,
+    `<dayPage:${days + 1}>`,
+    `<monthPage:${months}>`,
+    `<monthPage:${months - 1}>`,
+    `<monthPage:${months + 1}>`,
+    `<yearPage:${years}>`,
+    `<yearPage:${years - 1}>`,
+    `<yearPage:${years + 1}>`,
+    `<dayRangePage:${days - 1}-${days + 1}>`,
+    `<dayRangePage:${days - 3}-${days - 1}>`,
+    `<dayRangePage:${days + 1}-${days + 3}>`,
+    `<dayRangePage:${days + 1}-${days}>`,
+    `<monthRangePage:${months}-${months}>`,
+    `<monthRangePage:${months - 2}-${months - 1}>`,
+    `<monthRangePage:${months + 1}-${months + 2}>`,
+    `<monthRangePage:${months + 1}-${months}>`,
+    `<yearRangePage:${years}-${years + 1}>`,
+    `<yearRangePage:${years - 1}-${years}>`,
+    `<yearRangePage:${years + 1}-${years + 2}>`,
+    wholeDay(days),
+    wholeDay(days - 1),
+    wholeDay(days + 1),
+  ];
+};
+
+/**
+ * Builds the date fixture: a blank map, in the game copy only, of events whose pages ask for the date, since a game may
+ * ship none, as Chef Adventure does, and the season moves nothing else. Each tag that holds on any date given, and its
+ * near misses, has an event of its own on one page; every season, by name and by number, has one; each date's season
+ * gated by a night's hours shares a page; and one event has a page for each season after a plain first page, so the
+ * page it shows names the season.
+ * @param {readonly GameDate[]} dates The dates the fixture is judged on.
+ * @param {number} tilesetId The tileset the blank map draws with.
+ * @returns {RmmzMap} The map's file.
+ */
+const dateFixtureMap = (dates: readonly GameDate[], tilesetId: number): RmmzMap =>
+{
+  const seasons = SEASON_NAMES.map(name => `<seasonOfYearPage:${name.toLowerCase()}>`);
+  const numbered = SEASON_NAMES.map((_name, season) => `<seasonOfYearPage:${season}>`);
+  const singles = [ ...new Set([ ...seasons, ...numbered, ...dates.flatMap(dateTagsAround) ]) ].map(line => [ [ line ] ]);
+  const byNight = [ ...new Set(dates.map(date => seasons[seasonOfMonth(date.months)])) ].map(line => [ [ line, '<hourRangePage:18-5>' ] ]);
+  const pageLists = [ ...singles, ...byNight, [ [], ...seasons.map(line => [ line ]) ] ];
+  const blank = newMapContent(tilesetId);
+  const events = pageLists.map((lines, index) =>
+  {
+    const pages = lines.map(comments => ({
+      ...createEventPage(),
+      list: [ ...comments.map(text => ({ code: 108, indent: 0, parameters: [ text ] })), { code: 0, indent: 0, parameters: [] } ],
+    }));
+    return { ...createMapEvent(index + 1, index % blank.width, Math.floor(index / blank.width)), pages };
+  });
+
+  // a tile for every event, the map growing downward past MZ's new size should there be more of them than it holds.
+  const height = Math.max(blank.height, Math.ceil(events.length / blank.width));
+  return { ...blank, height, data: new Array<number>(blank.width * height * MAP_LAYERS).fill(0), events: [ null, ...events ] };
 };
 
 /**
@@ -950,6 +1146,8 @@ export {
   WEATHER_FIXTURES,
   weatherProbeMapFor,
   darkLightsOf,
+  dateFixtureMap,
+  dateTagsAround,
   editorPagesOf,
   editorVerdictsOf,
   eventsKeyOf,
@@ -961,8 +1159,13 @@ export {
   pagesProbeMapFor,
   pagesWords,
   parityPageRule,
+  parseSeasonFixtures,
   probeMapFor,
   questGatedPagesOf,
+  SEASON_FIXTURES,
+  seasonKeyOf,
+  seasonMomentOf,
+  seasonProbeMapFor,
   skyProbeMapFor,
   snapshotPredictions,
   spriteCovers,
@@ -970,6 +1173,7 @@ export {
   steadyLighting,
   tallyPages,
   TILE,
+  timeGatedPagesOf,
   timeOfCapture,
   verdictDifferencesOf,
   verdictWords,
@@ -983,6 +1187,7 @@ export type {
   MapFile,
   PageDifference,
   PagesTally,
+  SeasonFixture,
   VerdictDifference,
   WeatherCheck,
   WeatherFixture,

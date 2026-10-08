@@ -54,15 +54,33 @@ type ReadEvent = {
 };
 
 /**
+ * Keeps an event among those a change judges again, or stops keeping it there, as its reading says: an event read
+ * afresh may no longer ask what it asked before.
+ * @param {Set<number>} following The events a change judges again.
+ * @param {number} id The event.
+ * @param {boolean} follows Whether its pages now ask anything that change can answer otherwise.
+ */
+const follow = (following: Set<number>, id: number, follows: boolean): void =>
+{
+  if (follows)
+  {
+    following.add(id);
+    return;
+  }
+
+  following.delete(id);
+};
+
+/**
  * The page every event on one map shows at the window's clock and preview, as a map view draws them: the game's own page
  * rule, judged against the switches and variables the preview sets and a fresh save everywhere else, with the plugins'
  * conditions added. Without a rule, every event shows its first page, as MZ's own editor shows it, and nothing is faded.
  *
  * Each event is read once and remembered until it changes: whoever draws it says so ({@link forget}), and an event put
  * back in its slot as a new object is read afresh on its own. Moving the clock judges again only the events read so far
- * whose pages ask something the clock can change; changing the preview, only those whose pages read a switch, a variable
- * or another piece of state it changed. Each answers which of those now show another page, so only those are drawn
- * again; every other event keeps its page without being looked at.
+ * whose pages ask something the clock can change; moving its season, only those whose pages read the date; changing the
+ * preview, only those whose pages read a switch, a variable or another piece of state it changed. Each answers which of
+ * those now show another page, so only those are drawn again; every other event keeps its page without being looked at.
  */
 class ShownPages implements ActivePages, ShownPageReader
 {
@@ -70,11 +88,15 @@ class ShownPages implements ActivePages, ShownPageReader
 
   #time: number;
 
+  #season: number | null = null;
+
   #preview: GamePreview;
 
   #read = new Map<number, ReadEvent>();
 
   #followingClock = new Set<number>();
+
+  #followingDate = new Set<number>();
 
   /**
    * @param {PageRule | null} rule The rule, or null to show every event's first page.
@@ -104,6 +126,15 @@ class ShownPages implements ActivePages, ShownPageReader
   get preview(): GamePreview
   {
     return this.#preview;
+  }
+
+  /**
+   * The season events are judged at.
+   * @returns {number | null} The season, or null for the season the game starts in.
+   */
+  get season(): number | null
+  {
+    return this.#season;
   }
 
   /**
@@ -144,6 +175,24 @@ class ShownPages implements ActivePages, ShownPageReader
   }
 
   /**
+   * Moves to another season, judging again every event read so far whose pages read the date the season moves.
+   * @param {number | null} season The season, or null for the season the game starts in.
+   * @returns {number[]} The ids of the events now showing another page; none when the season did not change.
+   */
+  setSeason(season: number | null): number[]
+  {
+    if (season === this.#season)
+    {
+      return [];
+    }
+
+    this.#season = season;
+
+    // only events read so far are ever in the set, so each has its reading.
+    return this.#judgeAgain([ ...this.#followingDate ].map(id => this.#read.get(id) as ReadEvent));
+  }
+
+  /**
    * Moves to another preview, judging again every event read so far whose pages read a piece of state it sets otherwise
    * than the preview before: switch 74 turned on judges the events waiting on switch 74, and no event waiting only on
    * switch 47.
@@ -173,11 +222,13 @@ class ShownPages implements ActivePages, ShownPageReader
     {
       this.#read.clear();
       this.#followingClock.clear();
+      this.#followingDate.clear();
       return;
     }
 
     this.#read.delete(id);
     this.#followingClock.delete(id);
+    this.#followingDate.delete(id);
   }
 
   activePage(event: RmmzMapEvent): number
@@ -204,12 +255,12 @@ class ShownPages implements ActivePages, ShownPageReader
   }
 
   /**
-   * The moment events are judged at: the time of day and the preview as they stand.
+   * The moment events are judged at: the time of day, the season and the preview as they stand.
    * @returns {PageMoment} The moment.
    */
   #moment(): PageMoment
   {
-    return { timeOfDay: this.#time, preview: this.#preview };
+    return { timeOfDay: this.#time, season: this.#season, preview: this.#preview };
   }
 
   /**
@@ -250,15 +301,10 @@ class ShownPages implements ActivePages, ShownPageReader
     const reading = readEvent(event, rule);
     const entry: ReadEvent = { event, reading, active: activePageOf(reading, this.#moment()) };
     this.#read.set(event.id, entry);
-    if (reading.followsClock)
-    {
-      this.#followingClock.add(event.id);
-    }
-    else
-    {
-      this.#followingClock.delete(event.id);
-    }
 
+    // the clock and its season judge it again only while its pages, as they now read, ask something of them.
+    follow(this.#followingClock, event.id, reading.followsClock);
+    follow(this.#followingDate, event.id, reading.followsDate);
     return entry;
   }
 }

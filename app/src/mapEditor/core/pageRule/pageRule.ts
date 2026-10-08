@@ -3,15 +3,21 @@ import { switchKey, variableKey, type GamePreview, type PreviewKey } from '../pr
 import { conditionWords, ownWaitsHold, ownWaitsOf, type FreshSave, type OwnWaits } from './freshSave.ts';
 
 /**
- * The moment a page is judged at: the time of day the window's clock shows, and how far along the story the author
- * asks to see the game. The clock moves only the time of day, so everything else a plugin's condition reads, such as
- * the date, is the game's own starting value.
+ * The moment a page is judged at: the time of day and the season the window's clock shows, and how far along the story
+ * the author asks to see the game. The season moves the date a plugin's condition reads, as the module offering the
+ * clock reads it; everything else such a condition reads is the game's own starting value.
  */
 type PageMoment = {
   /**
    * The time of day, in minutes past midnight, 0 to 1439.
    */
   readonly timeOfDay: number;
+
+  /**
+   * The season the author picked on the clock, as the module offering the clock numbers them, which moves the date to
+   * that season's. Null, or left out, the clock stays in the season the game starts in, on its starting date.
+   */
+  readonly season?: number | null;
 
   /**
    * The switches, variables and whatever else the author set to see the game further along than a fresh save. Left
@@ -30,6 +36,13 @@ type PageTest = {
    * the clock moves, and no other event ever is.
    */
   readonly followsClock: boolean;
+
+  /**
+   * Whether the answer can change as the clock's season moves the date, as a page shown only in June does. An event with
+   * a page asking such a thing is judged again whenever the season changes, and no other event ever is. Left out, the
+   * answer never reads the date.
+   */
+  readonly followsDate?: boolean;
 
   /**
    * The pieces of preview state the answer reads, such as where a quest stands. An event with a page asking about one is
@@ -86,12 +99,13 @@ type PageReading = {
 };
 
 /**
- * One event as the rule read it: each page in order, whether any of them asks something the clock can change, and every
- * piece of preview state any of them reads.
+ * One event as the rule read it: each page in order, whether any of them asks something the clock's time can change,
+ * whether any asks something its season can, and every piece of preview state any of them reads.
  */
 type EventReading = {
   readonly pages: readonly PageReading[];
   readonly followsClock: boolean;
+  readonly followsDate: boolean;
   readonly reads: ReadonlySet<PreviewKey>;
 };
 
@@ -143,6 +157,7 @@ const readEvent = (event: RmmzMapEvent, rule: PageRule): EventReading =>
   return {
     pages,
     followsClock: pages.some(page => page.tests.some(test => test.followsClock)),
+    followsDate: pages.some(page => page.tests.some(test => test.followsDate === true)),
     reads: new Set(pages.flatMap(previewReadsOf)),
   };
 };

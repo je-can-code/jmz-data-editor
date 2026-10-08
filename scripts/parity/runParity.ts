@@ -5,8 +5,9 @@
  * the map.
  *
  *   bun run parity [--maps 102,31,94,316] [--sky 337@22:00,337@14:00] [--pages 20,21] [--weather 65,102,309@22:00]
- *                  [--mode game|snapshot|both] [--scratch <base folder>] [--shots <folder>] [--project <game>]
- *                  [--ui-port 18200] [--api-port 18201] [--display :90] [--nw <binary>]
+ *                  [--seasons summer@22:00,spring@05:00] [--mode game|snapshot|both] [--scratch <base folder>]
+ *                  [--shots <folder>] [--project <game>] [--ui-port 18200] [--api-port 18201] [--display :90]
+ *                  [--nw <binary>]
  *
  * Each invocation works in a folder of its own inside the base folder (the system's temporary folder unless --scratch
  * names another), builds the editor afresh there, and leaves its pictures and report there; it prints where.
@@ -44,6 +45,15 @@
  * with. Each such map prints how many events both show on the same page and how many pages both judge alike, the
  * quest-gated ones counted apart, and a quest-gated page judged differently fails the check.
  *
+ * Every map holding a time-gated page is visited once more, after those, and its pages judged at moments rather than
+ * drawn (--seasons; Summer's date at 02:00, 10:00, 17:00 and 22:00, Spring's at 05:00 and Autumn's at 16:00 unless told
+ * otherwise): each season's date is the one the editor's clock moves the game's start to, and the game's clock is set
+ * to that date and hour, judged there, and put back. The editor judges the same pages at the same season and hour, by
+ * its own rule. A game may ship no page asking for the date, as Chef Adventure ships none, so the game copy alone also
+ * gets a date fixture, a blank map of its own whose events each ask for the date one way, a near miss on each side of
+ * every season's date among them, judged at the same moments. Each moment prints how many time-gated pages, and how
+ * many of the fixture's, both sides judge alike, and a time-gated page judged differently fails the check.
+ *
  * Maps with water or waterfalls are compared at all four animation steps. The game draws on SwiftShader, which is
  * fine for pictures and meaningless for timing. The game runs from a copy in the run's folder, muted, on a virtual
  * display, its lights held steady in the copy's config so that every frame of it is the same frame; nothing here
@@ -57,17 +67,23 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import type { Page } from 'playwright-core';
 import type { JsonValue } from '../../app/src/mapEditor/core/model/json.ts';
+import type { RmmzMap } from '../../app/src/mapEditor/core/model/rmmzTypes.ts';
 import type { PageRule } from '../../app/src/mapEditor/core/pageRule/pageRule.ts';
-import { readPluginEntries } from '../../app/src/services/plugins/PluginsJsReader.ts';
+import { newMapRow } from '../../app/src/mapEditor/core/tree/treePlans.ts';
+import { startingDateOf, TIME_PLUGIN } from '../../app/src/mapEditor/modules/time/timeParameters.ts';
+import { SEASON_NAMES, type GameDate } from '../../app/src/mapEditor/modules/time/timeSnapshot.ts';
+import { dateWords } from '../../app/src/mapEditor/modules/time/timeWords.ts';
+import { pluginBasename, readPluginEntries } from '../../app/src/services/plugins/PluginsJsReader.ts';
 import { startEditorStack } from '../speed/editorStack.ts';
 import { openSpeedBrowser } from '../speed/gpuChromium.ts';
 import { createRunFolder } from '../speed/runFolder.ts';
 import { comparePictures, decodePng, differencePicture, sideBySide, writePng, type CellDifference, type Comparison } from './compareImages.ts';
-import type { ProbeCapture, ProbeReport, WeatherLayerProbe, WeatherProbe } from './probeTypes.ts';
+import type { ProbeCapture, ProbeMoment, ProbeReport, WeatherLayerProbe, WeatherProbe } from './probeTypes.ts';
 import { runHeadlessGame } from './headlessGame.ts';
 import {
   compareWeather,
   darkLightsOf,
+  dateFixtureMap,
   editorPagesOf,
   editorWeatherDepth,
   eventsKeyOf,
@@ -79,15 +95,20 @@ import {
   pagesProbeMapFor,
   pagesWords,
   parityPageRule,
+  parseSeasonFixtures,
   parseWeatherFixtures,
   probeMapFor,
   questGatedPagesOf,
+  SEASON_FIXTURES,
+  seasonMomentOf,
+  seasonProbeMapFor,
   skyProbeMapFor,
   snapshotPredictions,
   startingPartyOf,
   steadyLighting,
   tallyPages,
   TILE,
+  timeGatedPagesOf,
   timeOfCapture,
   verdictWords,
   WEATHER_FIXTURES,
@@ -98,6 +119,7 @@ import {
   type MapFile,
   type PageDifference,
   type PagesTally,
+  type SeasonFixture,
   type WeatherCheck,
   type WeatherFixture,
 } from './parityRules.ts';
@@ -119,6 +141,7 @@ type Options = {
   sky: SkyFixture[];
   pages: number[] | null;
   weather: WeatherFixture[];
+  seasons: SeasonFixture[];
   mode: 'game' | 'snapshot' | 'both';
   scratch: string;
   shots: string;
@@ -156,6 +179,30 @@ type PageComparison = {
 type QuestPages = {
   key: string;
   tally: PagesTally;
+};
+
+/**
+ * What the season pass judges: each season fixture and the moment the game's clock is set to for it, the season's date
+ * as the editor's clock moves the game's start; every map holding a time-gated page; and the date fixture, a blank map
+ * of events asking for the date, which goes into the game copy alone under the first id no map of the game holds.
+ */
+type SeasonPlan = {
+  fixtures: SeasonFixture[];
+  moments: ProbeMoment[];
+  mapIds: number[];
+  fixtureId: number;
+  fixture: RmmzMap;
+};
+
+/**
+ * How the game and the editor judged every time-gated page at one season fixture: the date it brought, each map's
+ * tally, the time-gated pages counted apart, and the date fixture's.
+ */
+type SeasonPages = {
+  fixture: SeasonFixture;
+  date: string;
+  maps: { mapId: number; tally: PagesTally }[];
+  dateFixture: PagesTally;
 };
 
 /**
@@ -314,6 +361,7 @@ const parseOptions = (argv: string[]): Options =>
     sky: parseSkyFixtures(flags.get('sky') ?? SKY_FIXTURES),
     pages: parsePageMaps(flags.get('pages')),
     weather: parseWeatherFixtures(flags.get('weather') ?? WEATHER_FIXTURES),
+    seasons: parseSeasonFixtures(flags.get('seasons') ?? SEASON_FIXTURES),
     mode: (flags.get('mode') ?? 'both') as Options['mode'],
     scratch: flags.get('scratch') ?? tmpdir(),
     shots: flags.get('shots') ?? '',
@@ -354,24 +402,76 @@ const readPageRule = async (project: string): Promise<PageRule> =>
 };
 
 /**
- * Finds every map of the game holding an event with a quest-gated page.
+ * Finds every map of the game holding an event with a gated page, such as a quest-gated or a time-gated one.
  * @param {string} project The game.
+ * @param {(map: MapFile) => ReadonlyMap<number, readonly number[]>} gatedOf Lists a map's gated pages, by event.
  * @returns {Promise<number[]>} The maps' ids, in order.
  */
-const questGatedMapIds = async (project: string): Promise<number[]> =>
+const gatedMapIds = async (project: string, gatedOf: (map: MapFile) => ReadonlyMap<number, readonly number[]>): Promise<number[]> =>
 {
   const files = readdirSync(`${project}/data`).filter(name => /^Map\d{3,}\.json$/u.test(name)).sort();
   const mapIds: number[] = [];
   for (const file of files)
   {
     const map = await Bun.file(`${project}/data/${file}`).json() as MapFile;
-    if (questGatedPagesOf(map).size > 0)
+    if (gatedOf(map).size > 0)
     {
       mapIds.push(Number.parseInt(file.slice('Map'.length), 10));
     }
   }
 
   return mapIds;
+};
+
+/**
+ * Plans the season pass from the game's own files: the moment each season fixture brings, its date the one the editor's
+ * clock moves the game's start to; every map holding a time-gated page; and the date fixture, judged on those dates,
+ * under the first map id the game's map list leaves free. A game that does not enable J-TIME has no date to move, and no
+ * season pass.
+ * @param {Options} options The settings.
+ * @returns {Promise<SeasonPlan | null>} The plan, or null for no season pass.
+ */
+const seasonPlanOf = async (options: Options): Promise<SeasonPlan | null> =>
+{
+  const plugins = readPluginEntries(await Bun.file(`${options.project}/js/plugins.js`).text());
+  const time = plugins.find(plugin => plugin.status && pluginBasename(plugin.name) === TIME_PLUGIN);
+  if (options.seasons.length === 0 || time === undefined)
+  {
+    return null;
+  }
+
+  const start = startingDateOf(time, new Date());
+  const moments = options.seasons.map(fixture => seasonMomentOf(start, fixture));
+  const mapIds = await gatedMapIds(options.project, timeGatedPagesOf);
+
+  // the fixture asks for each date once, however many hours it is judged at.
+  const dates = new Map<string, GameDate>(moments.map(({ seconds, days, months, years }) => [ `${years}-${months}-${days}`, { seconds, days, months, years } ]));
+  const infos = await Bun.file(`${options.project}/data/MapInfos.json`).json() as unknown[];
+  const tilesetId = mapIds.length === 0 ? 1 : (await readMap(options.project, mapIds[0])).tilesetId;
+  return { fixtures: options.seasons, moments, mapIds, fixtureId: infos.length, fixture: dateFixtureMap([ ...dates.values() ], tilesetId) };
+};
+
+/**
+ * Writes the date fixture into the game copy, never the game: its map file, and its row in the copy's map list, which
+ * the copy gets as a fresh file of its own, so not even a link could lead the write back to the game's. A map file
+ * already there under the fixture's id is refused rather than written over.
+ * @param {string} copy The game copy.
+ * @param {SeasonPlan} plan The season pass.
+ */
+const writeDateFixture = (copy: string, plan: SeasonPlan): void =>
+{
+  const mapFile = `${copy}/data/Map${String(plan.fixtureId).padStart(3, '0')}.json`;
+  if (existsSync(mapFile))
+  {
+    throw new Error(`the date fixture's id, ${plan.fixtureId}, is already a map of the game`);
+  }
+
+  writeFileSync(mapFile, JSON.stringify(plan.fixture));
+  const infosFile = `${copy}/data/MapInfos.json`;
+  const infos = JSON.parse(readFileSync(infosFile, 'utf8')) as unknown[];
+  infos[plan.fixtureId] = newMapRow(plan.fixtureId, 'Date fixture');
+  rmSync(infosFile);
+  writeFileSync(infosFile, JSON.stringify(infos));
 };
 
 /**
@@ -385,7 +485,7 @@ const questGatedMapIds = async (project: string): Promise<number[]> =>
  */
 const editorPagesFor = (capture: ProbeCapture, map: MapFile, report: ProbeReport, rule: PageRule): EditorPages =>
 {
-  return editorPagesOf(map, rule, timeOfCapture(capture, report.clocks) ?? 0);
+  return editorPagesOf(map, rule, { timeOfDay: timeOfCapture(capture, report.clocks) ?? 0 });
 };
 
 /**
@@ -645,23 +745,34 @@ const runGameParity = async (options: Options): Promise<boolean> =>
 
   // the maps compared by their pages alone: those holding quest-gated events, unless the run names others, leaving out
   // any already drawn, whose pages are judged with the rest of what is drawn there.
-  const pageMapIds = (options.pages ?? await questGatedMapIds(options.project)).filter(mapId => mapIds.includes(mapId) === false);
-  for (const mapId of [ ...mapIds, ...pageMapIds, ...options.weather.map(fixture => fixture.mapId) ])
+  const pageMapIds = (options.pages ?? await gatedMapIds(options.project, questGatedPagesOf)).filter(mapId => mapIds.includes(mapId) === false);
+  const seasons = await seasonPlanOf(options);
+  const seasonMapIds = seasons === null ? [] : seasons.mapIds;
+  for (const mapId of [ ...mapIds, ...pageMapIds, ...seasonMapIds, ...options.weather.map(fixture => fixture.mapId) ])
   {
     maps.set(mapId, await readMap(options.project, mapId));
   }
 
+  // the date fixture lives in the game copy alone, so the editor judges the file built for it.
+  if (seasons !== null)
+  {
+    maps.set(seasons.fixtureId, seasons.fixture);
+  }
+
   // the skies come after the maps drawn as they are, so the game has always arrived somewhere before its clock is set
-  // for one; the maps compared by their pages alone come before them, so their pages are judged at the game's own hour.
-  // The weather comes last of all, since the probe holds the sky's weather off from the first map read for it on, and a
-  // page waiting on the weather must not be judged under a sky held off: those read at the hour the clock was left at
-  // first, then those read at a time of day, the clock set like a sky's.
+  // for one; the maps compared by their pages alone come before them, so their pages are judged at the game's own hour,
+  // and the maps judged at each season's date after those, each putting the clock back as it found it. The weather comes
+  // last of all, since the probe holds the sky's weather off from the first map read for it on, and a page waiting on the
+  // weather must not be judged under a sky held off: those read at the hour the clock was left at first, then those read
+  // at a time of day, the clock set like a sky's.
   const weatherAt = (timed: boolean) => options.weather
     .filter(fixture => (fixture.time !== undefined) === timed)
     .map(fixture => weatherProbeMapFor(fixture, maps.get(fixture.mapId) as MapFile, screen));
+  const seasonMaps = seasons === null ? [] : [ ...seasons.mapIds, seasons.fixtureId ].map(mapId => seasonProbeMapFor(mapId, seasons.moments));
   const probeMaps = [
     ...options.maps.map(mapId => probeMapFor(mapId, maps.get(mapId) as MapFile, screen)),
     ...pageMapIds.map(pagesProbeMapFor),
+    ...seasonMaps,
     ...options.sky.map(fixture => skyProbeMapFor(fixture.mapId, maps.get(fixture.mapId) as MapFile, screen, fixture.time)),
     ...weatherAt(false),
     ...weatherAt(true),
@@ -673,7 +784,14 @@ const runGameParity = async (options: Options): Promise<boolean> =>
       display: options.display,
       nwBinary: options.nw,
       timeoutMs: 10 * 60_000,
-      prepare: holdLightsSteady,
+      prepare: copy =>
+      {
+        holdLightsSteady(copy);
+        if (seasons !== null)
+        {
+          writeDateFixture(copy, seasons);
+        }
+      },
     },
     { outDir: folder, maps: probeMaps, tickLimit: 6000 });
   if (report.phase !== 'done')
@@ -728,15 +846,88 @@ const runGameParity = async (options: Options): Promise<boolean> =>
   }
 
   const quests = questPagesOf(report, maps, pageMapIds, rule);
-  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results, pages: Object.fromEntries(pages), quests, weathers }, null, 2));
+  const seasonPages = seasons === null ? [] : seasonPagesOf(report, maps, seasons, rule);
+  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results, pages: Object.fromEntries(pages), quests, seasonPages, weathers }, null, 2));
   const drawn = printGameParity(mapIds, results, pages);
   const questsAlike = printQuestPages(quests);
+  const seasonsAlike = printSeasonPages(seasonPages);
   if (report.freshSky !== undefined)
   {
     console.log(`The sky on the fresh save, held off for the weather: ${JSON.stringify(report.freshSky)}`);
   }
 
-  return printWeather(weathers) && questsAlike && drawn;
+  return printWeather(weathers) && seasonsAlike && questsAlike && drawn;
+};
+
+/**
+ * Tallies every time-gated page at each season fixture, on every map holding one and on the date fixture: the game's
+ * judgements at the moment its clock was set to, against the editor's at the same season and hour.
+ * @param {ProbeReport} report The probe's report.
+ * @param {ReadonlyMap<number, MapFile>} maps Every map the probe visited, by id, the date fixture's among them.
+ * @param {SeasonPlan} plan The season pass.
+ * @param {PageRule} rule The rule the editor shows the game by.
+ * @returns {SeasonPages[]} The tallies, by season fixture, in the order asked for.
+ */
+const seasonPagesOf = (report: ProbeReport, maps: ReadonlyMap<number, MapFile>, plan: SeasonPlan, rule: PageRule): SeasonPages[] =>
+{
+  return plan.fixtures.map((fixture, index) =>
+  {
+    const moment = plan.moments[index];
+    const tallyOf = (mapId: number): PagesTally =>
+    {
+      const map = maps.get(mapId) as MapFile;
+      const judged = (report.moments ?? {})[`${mapId}@${moment.key}`];
+      if (judged === undefined)
+      {
+        throw new Error(`the game's probe judged nothing on Map${String(mapId).padStart(3, '0')} at ${moment.key}`);
+      }
+
+      return tallyPages(map, judged, rule, { timeOfDay: fixture.time, season: fixture.season }, timeGatedPagesOf(map));
+    };
+    return {
+      fixture,
+      date: dateWords(moment),
+      maps: plan.mapIds.map(mapId => ({ mapId, tally: tallyOf(mapId) })),
+      dateFixture: tallyOf(plan.fixtureId),
+    };
+  });
+};
+
+/**
+ * Prints how the game and the editor judged every time-gated page at each season fixture: the season, the hour and the
+ * date it brought; the time-gated pages both judge alike across every map holding one, and every page there; the events
+ * both show on the same page; and the date fixture's pages; then each gated page judged differently.
+ * @param {readonly SeasonPages[]} seasons The tallies.
+ * @returns {boolean} True when every time-gated page, and every page of the date fixture, was judged alike.
+ */
+const printSeasonPages = (seasons: readonly SeasonPages[]): boolean =>
+{
+  if (seasons.length === 0)
+  {
+    return true;
+  }
+
+  console.log('Time-gated pages, and the date fixture\'s, the game\'s clock set to each season\'s date and hour as the editor moves its own:');
+  seasons.forEach(({ fixture, date, maps, dateFixture }) =>
+  {
+    const total = (pick: (tally: PagesTally) => number): number => maps.reduce((sum, { tally }) => sum + pick(tally), 0);
+    const differ = [
+      ...maps.flatMap(({ mapId, tally }) => tally.gatedDiffer.map(difference => `Map${String(mapId).padStart(3, '0')} ${verdictWords(difference)}`)),
+      ...dateFixture.gatedDiffer.map(difference => `the date fixture's ${verdictWords(difference)}`),
+    ];
+    console.log(`  ${SEASON_NAMES[fixture.season]} at ${clockOf(fixture.time)}, ${date}:`
+      + ` ${total(tally => tally.gatedPagesAlike)} of ${total(tally => tally.gatedPages)} time-gated pages on ${maps.length} maps judged alike,`
+      + ` ${total(tally => tally.pagesAlike)} of ${total(tally => tally.pages)} pages there;`
+      + ` ${total(tally => tally.eventsAlike)} of ${total(tally => tally.events)} events on the editor's page;`
+      + ` the date fixture: ${dateFixture.gatedPagesAlike} of ${dateFixture.gatedPages} pages judged alike`);
+    differ.slice(0, 8).forEach(words => console.log(`           ${words}`));
+    if (differ.length > 8)
+    {
+      console.log(`           and ${differ.length - 8} more`);
+    }
+  });
+
+  return seasons.every(({ maps, dateFixture }) => dateFixture.gatedDiffer.length === 0 && maps.every(({ tally }) => tally.gatedDiffer.length === 0));
 };
 
 /**
@@ -760,7 +951,7 @@ const questPagesOf = (report: ProbeReport, maps: ReadonlyMap<number, MapFile>, p
     }
 
     const clock = report.clocks[key];
-    return [ { key, tally: tallyPages(map, events, rule, clock >= 0 ? clock : 0) } ];
+    return [ { key, tally: tallyPages(map, events, rule, { timeOfDay: clock >= 0 ? clock : 0 }) } ];
   });
 };
 
@@ -981,8 +1172,8 @@ const main = async (): Promise<void> =>
   }
 
   console.log(pass
-    ? 'PARITY: every difference from the game was explained, every quest-gated page was judged alike, every weather check agreed, and every'
-      + ' snapshot.js difference was predicted'
+    ? 'PARITY: every difference from the game was explained, every quest-gated page was judged alike, every time-gated page agreed at every'
+      + ' season\'s date, every weather check agreed, and every snapshot.js difference was predicted'
     : 'PARITY: differences need a look');
   process.exit(pass ? 0 : 1);
 };
