@@ -23,7 +23,8 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * so. A note naming a look more than once says so above the settings, showing the one the game reads.
  *
  * The section shows the map's sky setting too while J-Weather is the first plugin the active modules say reads the sky,
- * and otherwise leaves it to that plugin's section, so it shows once. Each change is one step in the map's history.
+ * and otherwise leaves it to that plugin's section, so it shows once. Each change is one step in the map's history, and
+ * undoing it puts back the note's exact bytes, whatever line breaks it was written with.
  */
 describe('weatherSettings', () =>
 {
@@ -340,6 +341,43 @@ describe('weatherSettings', () =>
           '<noToneChange>\n<weather:rain>\n<noWeather>',
           '<noToneChange>\n<weather:rain>',
           '<noToneChange>',
+        ]);
+    });
+
+    it('undoes every change back to the note\'s exact bytes, Windows line breaks and words included, and redoes it', () =>
+    {
+      // Arrange: a map written on Windows, held in the window's documents, while J-Weather alone reads the sky, so its
+      // section shows the sky setting too.
+      const note = 'A pool, still.\r\n<weather:rain>\r\n';
+      const hub = new DocumentHub({ clientId: 'window-a' });
+      hub.adopt('map:1', { ...buildMapJson(), note } as unknown as JsonValue);
+      const source = weatherSettingsSource(held(READ), () => [ WEATHER_SKY ]);
+      const noteIn = () => hub.map('map:1').property('note');
+
+      // Act: another look, the opt-out and the sky, one step each; each undone, newest first; then each redone.
+      editModuleProperty(hub, 1, source, 'weather.look', 'fog');
+      editModuleProperty(hub, 1, source, 'weather.none', true);
+      editModuleProperty(hub, 1, source, 'weather.sky', false);
+      const changed = [ noteIn(), hub.isDirty('map:1') ];
+      const undone = [ 0, 1, 2 ].map(() =>
+      {
+        hub.undo(mapHistoryKey(1));
+        return noteIn();
+      });
+      const clean = hub.isDirty('map:1') === false;
+      [ 0, 1, 2 ].forEach(() => hub.redo(mapHistoryKey(1)));
+
+      // Assert: the bytes at every step back are the bytes before it, and nothing is left to save once all are undone.
+      expect([ changed, undone, clean, noteIn() ])
+        .toStrictEqual([
+          [ 'A pool, still.\r\n<weather:fog>\r\n<noWeather>\r\n<noToneChange>\r\n', true ],
+          [
+            'A pool, still.\r\n<weather:fog>\r\n<noWeather>\r\n',
+            'A pool, still.\r\n<weather:fog>\r\n',
+            note,
+          ],
+          true,
+          'A pool, still.\r\n<weather:fog>\r\n<noWeather>\r\n<noToneChange>\r\n',
         ]);
     });
   });

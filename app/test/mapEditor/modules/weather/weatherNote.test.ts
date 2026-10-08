@@ -11,7 +11,9 @@ import { readMapWeather, WEATHER_MISREAD, withWeatherPreset, withWeatherSuppress
  * written over its name alone, the tag's own case and spacing kept; a map naming none gains a tag on a line of its own at
  * the end of the note; and no look at all takes every weather tag out, cleanly, since with the one the game reads gone it
  * would read another. Any opt-out anywhere keeps the map out of weather, whatever look it names, so opting out adds one
- * on a line of its own at the end, and opting back in takes every one out.
+ * on a line of its own at the end, and opting back in takes every one out. A line added or taken out brings or takes the
+ * note's own line break, Windows' pair included, and a tag the game's pattern does not read as a look or an opt-out is
+ * no tag of either, so it stays exactly as written.
  *
  * Every write is read back as the game reads it before it is handed on: the look and the opt-out must read exactly as
  * meant, the one the change is not about as it did, and the engine must read every other tag in the note as it did, so a
@@ -134,6 +136,57 @@ describe('weatherNote', () =>
         .toStrictEqual([ '<noToneChange>\n', 'words' ]);
     });
 
+    it('keeps a note\'s Windows line breaks, adding, writing over and taking out a look with the note\'s own', () =>
+    {
+      // Arrange: a cave written on Windows, its look between two other lines; and one naming no look, ending on its last
+      // line, and again ending on a line break.
+      const named = '<noToneChange>\r\nA cave.\r\n<weather:rain>\r\n<ambient:[85]>';
+      const bare = [ '<noToneChange>\r\nA cave.', '<noToneChange>\r\nA cave.\r\n' ];
+
+      // Act.
+      const written = [ withWeatherPreset(named, 'motes'), withWeatherPreset(named, null), ...bare.map(note => withWeatherPreset(note, 'motes')) ];
+
+      // Assert.
+      expect(written)
+        .toStrictEqual([
+          '<noToneChange>\r\nA cave.\r\n<weather:motes>\r\n<ambient:[85]>',
+          '<noToneChange>\r\nA cave.\r\n<ambient:[85]>',
+          '<noToneChange>\r\nA cave.\r\n<weather:motes>',
+          '<noToneChange>\r\nA cave.\r\n<weather:motes>\r\n',
+        ]);
+    });
+
+    it('takes a look out from among words on its line, with the one space that keeps them apart', () =>
+    {
+      // Arrange.
+      const note = 'the rain <weather:rain> falls';
+
+      // Act.
+      const written = withWeatherPreset(note, null);
+
+      // Assert.
+      expect(written)
+        .toBe('the rain falls');
+    });
+
+    it('leaves a tag the game does not read as a look as written, adding the look after it', () =>
+    {
+      // Arrange: two spaces after the colon, a space before it, and a space before the closing bracket, none of which
+      // the game reads as naming a look.
+      const note = '<weather:  rain>\n<weather :rain>\n<weather:rain >';
+
+      // Act.
+      const read = readMapWeather(note);
+      const written = [ withWeatherPreset(note, 'snow'), withWeatherPreset(note, null) ];
+
+      // Assert.
+      expect([ read, written ])
+        .toStrictEqual([
+          { preset: null, suppressed: false, tags: 0 },
+          [ '<weather:  rain>\n<weather :rain>\n<weather:rain >\n<weather:snow>', note ],
+        ]);
+    });
+
     it('keeps what the note says of opting out, whatever look it names', () =>
     {
       // Arrange: an opted-out map naming a look.
@@ -215,6 +268,39 @@ describe('weatherNote', () =>
       // Assert.
       expect(written)
         .toBe('<weather:rain>\nwords');
+    });
+
+    it('keeps a note\'s Windows line breaks opting out and back in, and opts an empty note out with the tag alone', () =>
+    {
+      // Arrange: a cave written on Windows ending on a line break, the same cave opted out, the opt-out on its last line,
+      // and an empty note.
+      const notes: [ string, boolean ][] = [
+        [ '<noToneChange>\r\nA cave.\r\n', true ],
+        [ '<noToneChange>\r\n<noWeather>\r\nA cave.', false ],
+        [ 'A cave.\r\n<noWeather>', false ],
+        [ '', true ],
+      ];
+
+      // Act.
+      const written = notes.map(([ note, suppressed ]) => withWeatherSuppressed(note, suppressed));
+
+      // Assert.
+      expect(written)
+        .toStrictEqual([ '<noToneChange>\r\nA cave.\r\n<noWeather>\r\n', '<noToneChange>\r\nA cave.', 'A cave.', '<noWeather>' ]);
+    });
+
+    it('leaves tags only named like the opt-out as written, adding the opt-out after them', () =>
+    {
+      // Arrange: a space inside the name, and a written value, neither of which the game reads as opting out.
+      const note = '<no Weather>\n<noWeather:true>';
+
+      // Act.
+      const read = readMapWeather(note);
+      const written = [ withWeatherSuppressed(note, true), withWeatherSuppressed(note, false) ];
+
+      // Assert.
+      expect([ read.suppressed, written ])
+        .toStrictEqual([ false, [ '<no Weather>\n<noWeather:true>\n<noWeather>', note ] ]);
     });
 
     it('leaves the note exactly as it is when the map already opts out, or in, as asked', () =>
