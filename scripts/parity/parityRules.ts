@@ -5,7 +5,8 @@
  * the maps holding quest-gated events, and of those holding time-gated events at each season's date, with a fixture map
  * of the date's own tags, what explains a difference in the events pass and in the dark and sky passes, how the game
  * copy's lights are held steady, which differences the engine predicts against snapshot.js, and how a map's weather is
- * read on both sides and compared, by its numbers rather than its pixels, and where each side draws it.
+ * read on both sides and compared, by its numbers rather than its pixels, and where each side draws it, J-Weather-Time's
+ * sky held over it at a season and an hour or held off.
  */
 import { CommandCatalog } from '../../app/src/mapEditor/core/commands/CommandCatalog.ts';
 import { createEventPage, createMapEvent } from '../../app/src/mapEditor/core/model/eventModel.ts';
@@ -141,6 +142,19 @@ type SeasonFixture = {
 };
 
 /**
+ * One map whose weather is read under a sky: the condition and the strength J-Weather-Time's sky is set to, as the
+ * plugin names them, and the season, by J-TIME's number for it, and time of day, in minutes past midnight, both sides'
+ * clocks are set to.
+ */
+type SkyWeatherFixture = {
+  readonly mapId: number;
+  readonly condition: string;
+  readonly strength: string;
+  readonly season: number;
+  readonly time: number;
+};
+
+/**
  * A map's weather as one side draws it, as far as the comparison reads it: the weather it resolved, and every layer.
  */
 type WeatherSide = {
@@ -221,6 +235,41 @@ const SEASON_FIXTURES = 'summer@02:00,summer@10:00,summer@17:00,summer@22:00,spr
  * after an at sign, hours and minutes on a 24-hour clock.
  */
 const SEASON_FIXTURE = /^(spring|summer|autumn|winter|[0-3])@([01]?\d|2[0-3]):([0-5]\d)$/iu;
+
+/**
+ * The maps whose weather the check reads under a sky unless told otherwise. Map337, an outdoor map naming no weather of
+ * its own, under every condition Chef Adventure's sky has and every face it wears: heavy rain, light snow and clouds in
+ * Winter; clear's starfall on a winter night, fireflies on a summer night, scorcher on a summer afternoon, frigid on a
+ * winter morning and its own sun on a spring morning; maple on an autumn afternoon; sakura in Spring; a monsoon, and a
+ * light mist, in Autumn. Then Map016, an outdoor map naming leaves, under a heavy sky, and Map220, naming rain, under a
+ * light one, so a map's own look runs at the sky's strength; and under a heavy rain, Map056, kept from the sky by
+ * <noToneChange>, and Map364, an outdoor map opting out with <noWeather>, both staying clear.
+ */
+const SKY_WEATHER_FIXTURES = [
+  '337:rain:heavy@winter@12:00',
+  '337:snow:light@winter@09:00',
+  '337:overcast:moderate@winter@15:00',
+  '337:clear:moderate@winter@22:00',
+  '337:clear:heavy@summer@22:00',
+  '337:clear:light@summer@14:00',
+  '337:clear:moderate@winter@10:00',
+  '337:clear:moderate@spring@10:00',
+  '337:breezy:heavy@autumn@16:00',
+  '337:sakura:moderate@spring@08:00',
+  '337:monsoon:heavy@autumn@18:00',
+  '337:mist:light@autumn@06:00',
+  '16:rain:heavy@winter@12:00',
+  '220:overcast:light@winter@12:00',
+  '56:rain:heavy@winter@12:00',
+  '364:rain:heavy@winter@12:00',
+].join(',');
+
+/**
+ * A map read under a sky as --sky-weather takes it: the map's id, a colon, the sky's condition, a colon and its
+ * strength, then, after an at sign, the season's name, in any case, or J-TIME's number for it, and after another, hours
+ * and minutes on a 24-hour clock.
+ */
+const SKY_WEATHER_FIXTURE = /^(\d+):([a-zA-Z][a-zA-Z0-9_-]*):([a-zA-Z][a-zA-Z0-9_-]*)@(spring|summer|autumn|winter|[0-3])@([01]?\d|2[0-3]):([0-5]\d)$/iu;
 
 /**
  * How many layers a map file holds: four of tiles, then shadows, then regions.
@@ -966,6 +1015,83 @@ const weatherProbeMapFor = (fixture: WeatherFixture, map: MapFile, screen: { wid
 };
 
 /**
+ * Reads --sky-weather's list of maps, each under a sky at a season and an hour.
+ * @param {string} list The list, such as {@code 337:rain:heavy@winter@12:00}; empty for none.
+ * @returns {SkyWeatherFixture[]} The maps and skies, in the order given.
+ */
+const parseSkyWeatherFixtures = (list: string): SkyWeatherFixture[] =>
+{
+  return list.split(',').filter(entry => entry !== '').map(entry =>
+  {
+    const match = SKY_WEATHER_FIXTURE.exec(entry);
+    if (match === null)
+    {
+      throw new Error(`--sky-weather takes maps under a sky, at a season and an hour, such as 337:rain:heavy@winter@12:00, not ${entry}`);
+    }
+
+    const [ , mapId, condition, strength, season, hours, minutes ] = match;
+    const named = SEASON_NAMES.findIndex(name => name.toLowerCase() === season.toLowerCase());
+    return {
+      mapId: Number(mapId),
+      condition,
+      strength,
+      season: named >= 0 ? named : Number(season),
+      time: (Number(hours) * 60) + Number(minutes),
+    };
+  });
+};
+
+/**
+ * Names a map read under a sky as the probe keys its weather: the map, the sky's condition and strength, the season's
+ * name in lower case and the time of day.
+ * @param {SkyWeatherFixture} fixture The fixture.
+ * @returns {string} The key, such as {@code 337:rain:heavy@winter@720}.
+ */
+const skyWeatherKeyOf = (fixture: SkyWeatherFixture): string =>
+{
+  return `${fixture.mapId}:${fixture.condition}:${fixture.strength}@${SEASON_NAMES[fixture.season].toLowerCase()}@${fixture.time}`;
+};
+
+/**
+ * Builds what the probe does on a map read under a sky: it arrives there on the date the editor's clock moves the
+ * game's start to for the fixture's season, at the fixture's hour, the clock stopped, holds J-Weather-Time's sky in the
+ * fixture's condition at its strength, and reads the weather as it reads any map's, with the display in the middle of
+ * the map.
+ * @param {SkyWeatherFixture} fixture The map, the sky, the season and the hour.
+ * @param {MapFile} map Its file.
+ * @param {{ width: number, height: number }} screen The game's screen, in pixels.
+ * @param {GameDate} start The date a new game starts on, and the second, as the editor reads them.
+ * @returns {ProbeMap} The probe's orders.
+ */
+const skyWeatherProbeMapFor = (fixture: SkyWeatherFixture, map: MapFile, screen: { width: number; height: number }, start: GameDate): ProbeMap =>
+{
+  const { weather } = weatherProbeMapFor({ mapId: fixture.mapId }, map, screen);
+  const { years, months, days, seconds } = seasonMomentOf(start, { season: fixture.season, time: fixture.time });
+  return {
+    mapId: fixture.mapId,
+    views: [],
+    steps: [ 0 ],
+    dark: false,
+    weather,
+    time: fixture.time,
+    date: { years, months, days, seconds },
+    sky: { type: fixture.condition, intensity: fixture.strength, key: skyWeatherKeyOf(fixture) },
+  };
+};
+
+/**
+ * Compares what each side's sky hands J-Weather: the face it wears, its strength and its condition, all exact, since
+ * both sides pick them from the same config the same way.
+ * @param {unknown} game What J-Weather-Time handed J-Weather in the game.
+ * @param {unknown} editor What the editor's sky told its renderer.
+ * @returns {WeatherCheck} The check.
+ */
+const compareSky = (game: unknown, editor: unknown): WeatherCheck =>
+{
+  return { name: 'sky', game: JSON.stringify(game), editor: JSON.stringify(editor), holds: canonicalJson(game) === canonicalJson(editor) };
+};
+
+/**
  * Writes a value with its keys in order, so two objects holding the same values compare alike whatever order their keys
  * were written in.
  * @param {unknown} value The value.
@@ -1136,12 +1262,17 @@ const editorWeatherDepth = (depth: EditorWeatherDepth): { holds: boolean; words:
 export {
   animates,
   canonicalJson,
+  compareSky,
   compareWeather,
   coverAxis,
   editorWeatherDepth,
   gameWeatherDepth,
+  parseSkyWeatherFixtures,
   parseWeatherFixtures,
   sharesAgree,
+  SKY_WEATHER_FIXTURES,
+  skyWeatherKeyOf,
+  skyWeatherProbeMapFor,
   spreadsAgree,
   WEATHER_FIXTURES,
   weatherProbeMapFor,
@@ -1188,6 +1319,7 @@ export type {
   PageDifference,
   PagesTally,
   SeasonFixture,
+  SkyWeatherFixture,
   VerdictDifference,
   WeatherCheck,
   WeatherFixture,

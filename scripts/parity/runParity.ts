@@ -5,6 +5,7 @@
  * the map.
  *
  *   bun run parity [--maps 102,31,94,316] [--sky 337@22:00,337@14:00] [--pages 20,21] [--weather 65,102,309@22:00]
+ *                  [--sky-weather 337:rain:heavy@winter@12:00,56:rain:heavy@winter@12:00]
  *                  [--seasons summer@22:00,spring@05:00] [--mode game|snapshot|both] [--scratch <base folder>]
  *                  [--shots <folder>] [--project <game>] [--ui-port 18200] [--api-port 18201] [--display :90]
  *                  [--nw <binary>]
@@ -38,6 +39,15 @@
  * game's screen and its weather started over, reports the same of its own; each check prints with both sides' numbers.
  * Both sides' whole pictures are saved side by side, the game's on the left, for an eye to judge, into --shots.
  *
+ * A map read under a sky (--sky-weather; Map337, an outdoor map naming no weather, under every condition and face Chef
+ * Adventure's sky has, a map naming its own look under a heavy and a light sky, and a <noToneChange> and a <noWeather>
+ * map under heavy rain, unless told otherwise) is read the same way, after the others, with J-Weather-Time made to hold
+ * that sky: the game's clock is set to the date the editor's clock moves the game's start to for the fixture's season,
+ * and the fixture's hour, and J-Weather-Time's forecast to the condition and strength, then pushed as the plugin pushes
+ * it, so the plugin picks the face; the editor, on a page of its own, picks the same sky, season and hour on its clock.
+ * Each side's sky, the face J-Weather is told, is compared exactly, then the weather by its numbers, and both pictures
+ * are saved side by side as sky-*.png. A game without J-TIME, J-Weather and J-Weather-Time enabled has no sky to read.
+ *
  * Every map holding an event with a quest-gated page (or the maps --pages names instead, none for an empty list) is
  * visited too, after the drawn maps and before the skies, and compared by its pages alone, nothing drawn: on arrival
  * the game records how it judges each page of each event, every plugin's condition included, and the editor judges the
@@ -65,7 +75,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import type { Page } from 'playwright-core';
+import type { Browser, Page } from 'playwright-core';
 import type { JsonValue } from '../../app/src/mapEditor/core/model/json.ts';
 import type { RmmzMap } from '../../app/src/mapEditor/core/model/rmmzTypes.ts';
 import type { PageRule } from '../../app/src/mapEditor/core/pageRule/pageRule.ts';
@@ -81,6 +91,7 @@ import { comparePictures, decodePng, differencePicture, sideBySide, writePng, ty
 import type { ProbeCapture, ProbeMoment, ProbeReport, WeatherLayerProbe, WeatherProbe } from './probeTypes.ts';
 import { runHeadlessGame } from './headlessGame.ts';
 import {
+  compareSky,
   compareWeather,
   darkLightsOf,
   dateFixtureMap,
@@ -96,13 +107,17 @@ import {
   pagesWords,
   parityPageRule,
   parseSeasonFixtures,
+  parseSkyWeatherFixtures,
   parseWeatherFixtures,
   probeMapFor,
   questGatedPagesOf,
   SEASON_FIXTURES,
   seasonMomentOf,
   seasonProbeMapFor,
+  SKY_WEATHER_FIXTURES,
   skyProbeMapFor,
+  skyWeatherKeyOf,
+  skyWeatherProbeMapFor,
   snapshotPredictions,
   startingPartyOf,
   steadyLighting,
@@ -120,6 +135,7 @@ import {
   type PageDifference,
   type PagesTally,
   type SeasonFixture,
+  type SkyWeatherFixture,
   type WeatherCheck,
   type WeatherFixture,
 } from './parityRules.ts';
@@ -141,6 +157,7 @@ type Options = {
   sky: SkyFixture[];
   pages: number[] | null;
   weather: WeatherFixture[];
+  skyWeather: SkyWeatherFixture[];
   seasons: SeasonFixture[];
   mode: 'game' | 'snapshot' | 'both';
   scratch: string;
@@ -206,6 +223,29 @@ type SeasonPages = {
 };
 
 /**
+ * A sky as the editor's clock picks it: a condition and a strength, by the plugin's own names.
+ */
+type SkyPick = {
+  condition: string;
+  strength: string;
+};
+
+/**
+ * How the check asks the page to draw a map: with its events or without, at an animation step and engine frame, with
+ * the game's lighting and weather or without, and at the hour, the season and under the sky the game's clock was set to.
+ */
+type ParityOptions = {
+  events: boolean;
+  step: number;
+  frames: number;
+  lighting?: boolean;
+  weather?: boolean;
+  time?: number;
+  season?: number;
+  sky?: SkyPick | null;
+};
+
+/**
  * The page's hooks, as far as the check calls them.
  */
 type HookWindow = {
@@ -213,12 +253,13 @@ type HookWindow = {
     ready: () => boolean;
     info: () => { stats: { loadingImages: number }; view: { width: number; height: number } };
     setCamera: (x: number, y: number, zoom: number) => void;
-    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean; weather?: boolean; time?: number }) => void;
+    prepareParity: (options: ParityOptions) => void;
     extract: (rect: { x: number; y: number; width: number; height: number }) => Promise<string>;
     weather: {
       describe: () => (EditorWeather | null)[];
       reset: () => void;
       depth: () => EditorWeatherDepth;
+      sky: () => { preset: string; intensity: string; type: string } | null;
     };
   };
 };
@@ -242,6 +283,29 @@ type WeatherResult = {
   checks: WeatherCheck[];
   gameDepth: { holds: boolean; words: string };
   editorDepth: { holds: boolean; words: string };
+};
+
+/**
+ * One map's weather compared under a sky: the fixture, what each side read, the sky the editor told its renderer, every
+ * check, the sky's first, and where each side draws it.
+ */
+type SkyWeatherResult = {
+  fixture: SkyWeatherFixture;
+  game: WeatherProbe;
+  editor: EditorWeather;
+  editorSky: unknown;
+  checks: WeatherCheck[];
+  gameDepth: { holds: boolean; words: string };
+  editorDepth: { holds: boolean; words: string };
+};
+
+/**
+ * What the sky pass reads: the maps and skies, and the date a new game starts on, which each season's date is moved
+ * from.
+ */
+type SkyWeatherPlan = {
+  fixtures: SkyWeatherFixture[];
+  start: GameDate;
 };
 
 /**
@@ -361,6 +425,7 @@ const parseOptions = (argv: string[]): Options =>
     sky: parseSkyFixtures(flags.get('sky') ?? SKY_FIXTURES),
     pages: parsePageMaps(flags.get('pages')),
     weather: parseWeatherFixtures(flags.get('weather') ?? WEATHER_FIXTURES),
+    skyWeather: parseSkyWeatherFixtures(flags.get('sky-weather') ?? SKY_WEATHER_FIXTURES),
     seasons: parseSeasonFixtures(flags.get('seasons') ?? SEASON_FIXTURES),
     mode: (flags.get('mode') ?? 'both') as Options['mode'],
     scratch: flags.get('scratch') ?? tmpdir(),
@@ -449,6 +514,26 @@ const seasonPlanOf = async (options: Options): Promise<SeasonPlan | null> =>
   const infos = await Bun.file(`${options.project}/data/MapInfos.json`).json() as unknown[];
   const tilesetId = mapIds.length === 0 ? 1 : (await readMap(options.project, mapIds[0])).tilesetId;
   return { fixtures: options.seasons, moments, mapIds, fixtureId: infos.length, fixture: dateFixtureMap([ ...dates.values() ], tilesetId) };
+};
+
+/**
+ * Plans the sky pass from the game's own files: the maps and skies asked for, and the date a new game starts on, which
+ * the editor's clock moves for each season. A game without J-TIME, J-Weather and J-Weather-Time enabled has no sky to
+ * read, and no sky pass.
+ * @param {Options} options The settings.
+ * @returns {Promise<SkyWeatherPlan | null>} The plan, or null for no sky pass.
+ */
+const skyWeatherPlanOf = async (options: Options): Promise<SkyWeatherPlan | null> =>
+{
+  const plugins = readPluginEntries(await Bun.file(`${options.project}/js/plugins.js`).text());
+  const enabled = (name: string) => plugins.find(plugin => plugin.status && pluginBasename(plugin.name) === name);
+  const time = enabled(TIME_PLUGIN);
+  if (options.skyWeather.length === 0 || time === undefined || enabled('J-Weather') === undefined || enabled('J-Weather-Time') === undefined)
+  {
+    return null;
+  }
+
+  return { fixtures: options.skyWeather, start: startingDateOf(time, new Date()) };
 };
 
 /**
@@ -611,21 +696,15 @@ const readEditorWeather = async (
   await openEditorMap(page, uiBase, mapId);
 
   // the page's bars take some of the window, so the window grows by them until the map's view is the game's screen.
-  const view = await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView?.info().view ?? { width: 0, height: 0 });
-  const size = page.viewportSize() ?? screen;
-  await page.setViewportSize({ width: size.width + screen.width - view.width, height: size.height + screen.height - view.height });
-  await page.waitForFunction(wanted =>
-  {
-    const shown = (window as unknown as HookWindow).__jmzMapView?.info().view;
-    return shown?.width === wanted.width && shown.height === wanted.height;
-  }, screen, { timeout: 30_000 });
+  await fitViewToScreen(page, screen);
 
+  // the game's sky is held off for these, so the editor's is too.
   const rect = { x: probe.display.x * TILE, y: probe.display.y * TILE, ...screen };
   await page.evaluate(({ at, time }) =>
   {
     const hooks = (window as unknown as HookWindow).__jmzMapView;
     hooks?.setCamera(at.x, at.y, 1);
-    hooks?.prepareParity({ events: true, step: 0, frames: 0, lighting: true, weather: true, time: time >= 0 ? time : undefined });
+    hooks?.prepareParity({ events: true, step: 0, frames: 0, lighting: true, weather: true, time: time >= 0 ? time : undefined, sky: null });
     hooks?.weather.reset();
   }, { at: rect, time: probe.clock });
 
@@ -644,6 +723,194 @@ const readEditorWeather = async (
   const url = await page.evaluate(stretch => (window as unknown as HookWindow).__jmzMapView?.extract(stretch) ?? '', rect);
   await saveDataUrl(url, file);
   return read;
+};
+
+/**
+ * Lines a page's map view up with the game's screen: the window grown or shrunk by the page's bars until the view is
+ * exactly the game's screen.
+ * @param {Page} page The page, on a map.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ */
+const fitViewToScreen = async (page: Page, screen: { width: number; height: number }): Promise<void> =>
+{
+  const view = await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView?.info().view ?? { width: 0, height: 0 });
+  const size = page.viewportSize() ?? screen;
+  await page.setViewportSize({ width: size.width + screen.width - view.width, height: size.height + screen.height - view.height });
+  await page.waitForFunction(wanted =>
+  {
+    const shown = (window as unknown as HookWindow).__jmzMapView?.info().view;
+    return shown?.width === wanted.width && shown.height === wanted.height;
+  }, screen, { timeout: 30_000 });
+};
+
+/**
+ * Reads one map's weather in the editor under a sky, where the game read it, on a page of its own, so nothing a page
+ * remembered of an earlier fixture's clock reaches it: the view lined up with the game's screen, drawn as the game draws
+ * (events, lighting and weather, held still), the clock at the fixture's hour and season and the sky picked on it as an
+ * author picks it. Once the page has read the project's sky and told the renderer, the weather is started over as on
+ * arriving and read once its pictures are in, or, where the game shows none, once it has had time to draw any; then
+ * the same stretch is drawn into a picture.
+ * @param {Browser} browser The browser.
+ * @param {string} uiBase The UI's origin.
+ * @param {WeatherProbe} probe What the game read on the map.
+ * @param {SkyWeatherFixture} fixture The map, the sky, the season and the hour.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ * @param {string} file Where to write the editor's picture.
+ * @returns {Promise<{ weather: EditorWeather, depth: EditorWeatherDepth, sky: unknown }>} What the editor read.
+ */
+const readEditorSkyWeather = async (
+  browser: Browser,
+  uiBase: string,
+  probe: WeatherProbe,
+  fixture: SkyWeatherFixture,
+  screen: { width: number; height: number },
+  file: string): Promise<{ weather: EditorWeather; depth: EditorWeatherDepth; sky: unknown }> =>
+{
+  const page = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
+  try
+  {
+    await openEditorMap(page, uiBase, fixture.mapId);
+    await fitViewToScreen(page, screen);
+    const rect = { x: probe.display.x * TILE, y: probe.display.y * TILE, ...screen };
+    const pick = { condition: fixture.condition, strength: fixture.strength };
+    await page.evaluate(({ at, time, season, sky }) =>
+    {
+      const hooks = (window as unknown as HookWindow).__jmzMapView;
+      hooks?.setCamera(at.x, at.y, 1);
+      hooks?.prepareParity({ events: true, step: 0, frames: 0, lighting: true, weather: true, time, season, sky });
+    }, { at: rect, time: fixture.time, season: fixture.season, sky: pick });
+
+    // the sky reaches the renderer once the page has read the project's sky; the weather then starts over as on arriving.
+    await page.waitForFunction(() => (window as unknown as HookWindow).__jmzMapView?.weather.sky() !== null, null, { timeout: 30_000 });
+    await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView?.weather.reset());
+    if (probe.current === null)
+    {
+      await page.waitForTimeout(1000);
+    }
+    else
+    {
+      await page.waitForFunction(() =>
+      {
+        const [ drawn ] = (window as unknown as HookWindow).__jmzMapView?.weather.describe() ?? [];
+        return drawn !== undefined && drawn !== null && drawn.layers.every(layer => layer.pictureSize !== null || layer.problem !== '');
+      }, null, { timeout: 30_000 });
+    }
+
+    const read = await page.evaluate(() =>
+    {
+      const hooks = (window as unknown as HookWindow).__jmzMapView;
+      const [ weather ] = hooks?.weather.describe() ?? [];
+      return { weather: (weather ?? null) as EditorWeather | null, depth: hooks?.weather.depth() as EditorWeatherDepth, sky: hooks?.weather.sky() ?? null };
+    });
+    const url = await page.evaluate(stretch => (window as unknown as HookWindow).__jmzMapView?.extract(stretch) ?? '', rect);
+    await saveDataUrl(url, file);
+
+    // a map the sky does not reach has no drawing at all, which is no weather and no layers.
+    const weather = read.weather ?? { weather: null, problem: '', layers: [] };
+    return { weather, depth: read.depth, sky: read.sky };
+  }
+  finally
+  {
+    await page.close();
+  }
+};
+
+/**
+ * Names a sky picture after its map, its sky, its season and its hour.
+ * @param {SkyWeatherFixture} fixture The fixture.
+ * @returns {string} The file's name, such as {@code sky-Map337-clear-moderate-winter-2200.png}.
+ */
+const skyShotName = (fixture: SkyWeatherFixture): string =>
+{
+  const season = SEASON_NAMES[fixture.season].toLowerCase();
+  return `sky-Map${String(fixture.mapId).padStart(3, '0')}-${fixture.condition}-${fixture.strength}-${season}-${clockOf(fixture.time).replace(':', '')}.png`;
+};
+
+/**
+ * Reads every sky fixture in the editor, compares each with what the game read, the sky first, and lays both sides'
+ * pictures side by side for an eye, the game's on the left.
+ * @param {Browser} browser The browser.
+ * @param {string} uiBase The UI's origin.
+ * @param {SkyWeatherPlan} plan The sky pass.
+ * @param {ProbeReport} report The probe's report.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ * @param {string} folder Where the pictures are.
+ * @param {string} shots Where the side-by-side pictures go.
+ * @returns {Promise<SkyWeatherResult[]>} Every map's comparison.
+ */
+const compareSkyWeathers = async (
+  browser: Browser,
+  uiBase: string,
+  plan: SkyWeatherPlan,
+  report: ProbeReport,
+  screen: { width: number; height: number },
+  folder: string,
+  shots: string): Promise<SkyWeatherResult[]> =>
+{
+  const results: SkyWeatherResult[] = [];
+  for (const fixture of plan.fixtures)
+  {
+    const game = (report.weather ?? {})[skyWeatherKeyOf(fixture)];
+    if (game === undefined)
+    {
+      throw new Error(`the game's probe read no weather on Map${String(fixture.mapId).padStart(3, '0')} under ${skyWeatherKeyOf(fixture)}`);
+    }
+
+    const editorFile = `${folder}/${game.file.replace(/^game-/u, 'editor-')}`;
+    const { weather, depth, sky } = await readEditorSkyWeather(browser, uiBase, game, fixture, screen, editorFile);
+    const checks = [ compareSky(game.sky ?? null, sky), ...compareWeather(game, { current: weather.weather, layers: weather.layers }) ];
+    results.push({ fixture, game, editor: weather, editorSky: sky, checks, gameDepth: gameWeatherDepth(game.depth), editorDepth: editorWeatherDepth(depth) });
+
+    mkdirSync(shots, { recursive: true });
+    const together = sideBySide(await decodePng(`${folder}/${game.file}`), await decodePng(editorFile), 16);
+    await writePng(together, `${shots}/${skyShotName(fixture)}`);
+  }
+
+  return results;
+};
+
+/**
+ * Prints every map's weather under a sky: the sky each side handed J-Weather, the weather, each side's count per layer,
+ * where each side draws it, and every check that does not hold, with both sides' numbers.
+ * @param {readonly SkyWeatherResult[]} results The comparisons.
+ * @returns {boolean} True when every check held and both sides draw the weather where they should.
+ */
+const printSkyWeather = (results: readonly SkyWeatherResult[]): boolean =>
+{
+  if (results.length === 0)
+  {
+    return true;
+  }
+
+  console.log('Weather under the sky, J-Weather-Time held in each condition, compared by its numbers (game | editor):');
+  results.forEach(({ fixture, game, editor, editorSky, checks, gameDepth, editorDepth }) =>
+  {
+    const map = `Map${String(fixture.mapId).padStart(3, '0')}`;
+    const at = `${fixture.condition} ${fixture.strength} in ${SEASON_NAMES[fixture.season]} at ${clockOf(fixture.time)}`;
+    const look = game.current === null ? 'no weather' : `${game.current.preset} ${game.current.intensity}`;
+    const failed = checks.filter(check => check.holds === false);
+    const verdict = failed.length === 0 && gameDepth.holds && editorDepth.holds ? 'MATCH' : `DIFFER in ${failed.length} checks`;
+    const skyWords = (sky: unknown): string => (sky === null || sky === undefined ? 'none' : JSON.stringify(sky));
+    console.log(`  ${map} under ${at}: ${look}, ${checks.length} checks  ${verdict}`);
+    console.log(`    sky: ${skyWords(game.sky)} | ${skyWords(editorSky)}`);
+    game.layers.forEach((layer, index) =>
+    {
+      const mine = editor.layers[index];
+      const stats = (side: WeatherLayerProbe | undefined): string => (side === undefined
+        ? 'none'
+        : `${side.stats.count} x ${side.asset}, down ${side.stats.velocityY.mean.toFixed(2)}, across ${side.stats.velocityX.mean.toFixed(2)},`
+          + ` size ${side.stats.scaleX.mean.toFixed(3)}, strength ${side.stats.opacity.mean.toFixed(1)}, on screen ${side.stats.onScreen.toFixed(2)}`);
+      console.log(`    layer ${index + 1}: ${stats(layer)} | ${stats(mine)}`);
+    });
+    failed.forEach(check => console.log(`    ${check.name}: ${check.game} | ${check.editor}`));
+    if (gameDepth.holds === false || editorDepth.holds === false)
+    {
+      console.log(`    game depth: ${gameDepth.words}`);
+      console.log(`    editor depth: ${editorDepth.words}`);
+    }
+  });
+
+  return results.every(result => result.checks.every(check => check.holds) && result.gameDepth.holds && result.editorDepth.holds);
 };
 
 /**
@@ -731,6 +998,55 @@ const printWeather = (results: readonly WeatherResult[]): boolean =>
 };
 
 /**
+ * Draws and reads in the editor everything the game's probe drew and read: every view of every drawn map, then each
+ * map's weather on a page of its own, since lining its view up with the game's screen resizes the window, then each
+ * map's weather under a sky, each on a page of its own, its clock and its sky its own. The editor draws on SwiftShader
+ * reached as the game reaches it, so its light pictures rasterise as the game's do.
+ * @param {Options} options The settings.
+ * @param {ProbeReport} report The probe's report.
+ * @param {SkyWeatherPlan | null} skies The sky pass, or null for none.
+ * @param {readonly number[]} mapIds The maps drawn view by view.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ * @param {string} folder Where the pictures are.
+ * @returns {Promise<{ weathers: WeatherResult[], skyWeathers: SkyWeatherResult[] }>} The weather compared, held off and
+ * under each sky.
+ */
+const readEditorSide = async (
+  options: Options,
+  report: ProbeReport,
+  skies: SkyWeatherPlan | null,
+  mapIds: readonly number[],
+  screen: { width: number; height: number },
+  folder: string): Promise<{ weathers: WeatherResult[]; skyWeathers: SkyWeatherResult[] }> =>
+{
+  const stack = await startEditorStack({ projectRoot: options.project, scratch: `${options.scratch}/editor`, uiPort: options.uiPort, apiPort: options.apiPort });
+  const { browser } = await openSpeedBrowser({ mode: 'swiftshader-as-game' });
+  try
+  {
+    const page = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
+    for (const mapId of mapIds)
+    {
+      await openEditorMap(page, stack.uiBase, mapId);
+      for (const capture of report.captures.filter(each => each.mapId === mapId))
+      {
+        await drawInEditor(page, capture, report, `${folder}/${capture.file.replace(/^game-/u, 'editor-')}`);
+      }
+    }
+
+    const weatherPage = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
+    const weathers = options.weather.length === 0 ? [] : await compareWeathers(weatherPage, stack.uiBase, options, report, screen, folder);
+    const shots = options.shots === '' ? folder : options.shots;
+    const skyWeathers = skies === null ? [] : await compareSkyWeathers(browser, stack.uiBase, skies, report, screen, folder, shots);
+    return { weathers, skyWeathers };
+  }
+  finally
+  {
+    await browser.close();
+    await stack.stop();
+  }
+};
+
+/**
  * Runs the game and the editor over the fixtures and compares every view.
  * @param {Options} options The settings.
  * @returns {Promise<boolean>} True when every tiles pass matched.
@@ -748,7 +1064,9 @@ const runGameParity = async (options: Options): Promise<boolean> =>
   const pageMapIds = (options.pages ?? await gatedMapIds(options.project, questGatedPagesOf)).filter(mapId => mapIds.includes(mapId) === false);
   const seasons = await seasonPlanOf(options);
   const seasonMapIds = seasons === null ? [] : seasons.mapIds;
-  for (const mapId of [ ...mapIds, ...pageMapIds, ...seasonMapIds, ...options.weather.map(fixture => fixture.mapId) ])
+  const skies = await skyWeatherPlanOf(options);
+  const skyMapIds = skies === null ? [] : skies.fixtures.map(fixture => fixture.mapId);
+  for (const mapId of [ ...mapIds, ...pageMapIds, ...seasonMapIds, ...options.weather.map(fixture => fixture.mapId), ...skyMapIds ])
   {
     maps.set(mapId, await readMap(options.project, mapId));
   }
@@ -764,11 +1082,13 @@ const runGameParity = async (options: Options): Promise<boolean> =>
   // and the maps judged at each season's date after those, each putting the clock back as it found it. The weather comes
   // last of all, since the probe holds the sky's weather off from the first map read for it on, and a page waiting on the
   // weather must not be judged under a sky held off: those read at the hour the clock was left at first, then those read
-  // at a time of day, the clock set like a sky's.
+  // at a time of day, the clock set like a sky's, then those read under a sky, each on the date and at the hour of its
+  // own.
   const weatherAt = (timed: boolean) => options.weather
     .filter(fixture => (fixture.time !== undefined) === timed)
     .map(fixture => weatherProbeMapFor(fixture, maps.get(fixture.mapId) as MapFile, screen));
   const seasonMaps = seasons === null ? [] : [ ...seasons.mapIds, seasons.fixtureId ].map(mapId => seasonProbeMapFor(mapId, seasons.moments));
+  const skyMaps = skies === null ? [] : skies.fixtures.map(fixture => skyWeatherProbeMapFor(fixture, maps.get(fixture.mapId) as MapFile, screen, skies.start));
   const probeMaps = [
     ...options.maps.map(mapId => probeMapFor(mapId, maps.get(mapId) as MapFile, screen)),
     ...pageMapIds.map(pagesProbeMapFor),
@@ -776,6 +1096,7 @@ const runGameParity = async (options: Options): Promise<boolean> =>
     ...options.sky.map(fixture => skyProbeMapFor(fixture.mapId, maps.get(fixture.mapId) as MapFile, screen, fixture.time)),
     ...weatherAt(false),
     ...weatherAt(true),
+    ...skyMaps,
   ];
   const report = await runHeadlessGame(
     {
@@ -799,35 +1120,7 @@ const runGameParity = async (options: Options): Promise<boolean> =>
     throw new Error(`the game's probe ended in "${report.phase}": ${report.errors.join('; ')}`);
   }
 
-  // the editor draws on SwiftShader reached as the game reaches it, so its light pictures rasterise as the game's do.
-  const stack = await startEditorStack({ projectRoot: options.project, scratch: `${options.scratch}/editor`, uiPort: options.uiPort, apiPort: options.apiPort });
-  const { browser } = await openSpeedBrowser({ mode: 'swiftshader-as-game' });
-  let weathers: WeatherResult[] = [];
-  try
-  {
-    const page = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
-    for (const mapId of mapIds)
-    {
-      await openEditorMap(page, stack.uiBase, mapId);
-      for (const capture of report.captures.filter(each => each.mapId === mapId))
-      {
-        await drawInEditor(page, capture, report, `${folder}/${capture.file.replace(/^game-/u, 'editor-')}`);
-      }
-    }
-
-    // the weather on a page of its own, since lining its view up with the game's screen resizes the window.
-    if (options.weather.length > 0)
-    {
-      const weatherPage = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
-      weathers = await compareWeathers(weatherPage, stack.uiBase, options, report, screen, folder);
-    }
-  }
-  finally
-  {
-    await browser.close();
-    await stack.stop();
-  }
-
+  const { weathers, skyWeathers } = await readEditorSide(options, report, skies, mapIds, screen, folder);
   const rule = await readPageRule(options.project);
   const results: ViewResult[] = [];
   const pages = new Map<string, PageComparison>();
@@ -847,7 +1140,7 @@ const runGameParity = async (options: Options): Promise<boolean> =>
 
   const quests = questPagesOf(report, maps, pageMapIds, rule);
   const seasonPages = seasons === null ? [] : seasonPagesOf(report, maps, seasons, rule);
-  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results, pages: Object.fromEntries(pages), quests, seasonPages, weathers }, null, 2));
+  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results, pages: Object.fromEntries(pages), quests, seasonPages, weathers, skyWeathers }, null, 2));
   const drawn = printGameParity(mapIds, results, pages);
   const questsAlike = printQuestPages(quests);
   const seasonsAlike = printSeasonPages(seasonPages);
@@ -856,7 +1149,13 @@ const runGameParity = async (options: Options): Promise<boolean> =>
     console.log(`The sky on the fresh save, held off for the weather: ${JSON.stringify(report.freshSky)}`);
   }
 
-  return printWeather(weathers) && seasonsAlike && questsAlike && drawn;
+  if (skies === null && options.skyWeather.length > 0)
+  {
+    console.log('No weather was read under a sky: the game does not enable J-TIME, J-Weather and J-Weather-Time.');
+  }
+
+  const weatherAlike = printWeather(weathers);
+  return printSkyWeather(skyWeathers) && weatherAlike && seasonsAlike && questsAlike && drawn;
 };
 
 /**

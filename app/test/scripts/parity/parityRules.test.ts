@@ -3,12 +3,16 @@ import type { ProbeEvent, WeatherLayerProbe } from '../../../../scripts/parity/p
 import {
   animates,
   canonicalJson,
+  compareSky,
   compareWeather,
   coverAxis,
   editorWeatherDepth,
   gameWeatherDepth,
+  parseSkyWeatherFixtures,
   parseWeatherFixtures,
   sharesAgree,
+  skyWeatherKeyOf,
+  skyWeatherProbeMapFor,
   spreadsAgree,
   weatherProbeMapFor,
   darkLightsOf,
@@ -96,6 +100,11 @@ import { command, event, page } from '../../mapEditor/support/eventKindFixtures.
  * three standard errors of what chance alone strays by for populations that size, never tighter than a twentieth. The
  * engine's blend numbers read as pixi's names. Both sides must draw the weather inside what the screen's tone
  * colours, after the map and its characters, and beneath the dark.
+ *
+ * A map's weather may be read under a sky too: a map, a condition and a strength, a season by name or number and an
+ * hour, keyed by all of them so one map is read under several skies. The game arrives on the date the editor's clock
+ * moves the game's start to for that season, at that hour, holding that sky, read from the map's middle as any weather
+ * is; and the sky each side hands J-Weather, its face, strength and condition, must match exactly.
  */
 
 /**
@@ -1184,6 +1193,102 @@ describe('parityRules', () =>
           { mapId: 309, views: [], steps: [ 0 ], dark: false, weather: { x: 2, y: 16 }, time: 1320 },
           { mapId: 7, views: [], steps: [ 0 ], dark: false, weather: { x: 0, y: 0 } },
         ]);
+    });
+  });
+
+  describe('parseSkyWeatherFixtures, skyWeatherKeyOf and skyWeatherProbeMapFor', () =>
+  {
+    it('reads maps under a sky, each at a season by name or number and an hour, and refuses anything else', () =>
+    {
+      // Arrange.
+      const lists = [ '337:rain:heavy@winter@12:00,56:clear:light@1@22:00', '' ];
+
+      // Act.
+      const read = lists.map(parseSkyWeatherFixtures);
+
+      // Assert.
+      expect(read)
+        .toStrictEqual([
+          [ { mapId: 337, condition: 'rain', strength: 'heavy', season: 3, time: 720 }, { mapId: 56, condition: 'clear', strength: 'light', season: 1, time: 1320 } ],
+          [],
+        ]);
+      [ '337:rain@winter@12:00', '337:rain:heavy@monsoon@12:00', '337:rain:heavy@winter', 'rain:heavy@winter@12:00' ].forEach(entry =>
+      {
+        expect(() => parseSkyWeatherFixtures(entry))
+          .toThrow(`--sky-weather takes maps under a sky, at a season and an hour, such as 337:rain:heavy@winter@12:00, not ${entry}`);
+      });
+    });
+
+    it('keys each map under a sky by the map, the sky, the season and the hour, so one map is read under several', () =>
+    {
+      // Arrange: Map337 under two skies.
+      const fixtures = parseSkyWeatherFixtures('337:rain:heavy@winter@12:00,337:clear:moderate@Summer@22:00');
+
+      // Act.
+      const keys = fixtures.map(skyWeatherKeyOf);
+
+      // Assert.
+      expect(keys)
+        .toStrictEqual([ '337:rain:heavy@winter@720', '337:clear:moderate@summer@1320' ]);
+    });
+
+    it('arrives on the date the editor\'s clock moves the start to for the season, at the hour, holding the sky, read mid-map', () =>
+    {
+      // Arrange: a 45 by 55 map under a clear summer night and a winter rain, a new game starting on 16 December 2026.
+      const [ summer, winter ] = parseSkyWeatherFixtures('337:clear:moderate@summer@22:00,337:rain:heavy@winter@12:00');
+      const start = { seconds: 5, days: 16, months: 12, years: 2026 };
+      const screen = { width: 1920, height: 1080 };
+
+      // Act.
+      const orders = [ skyWeatherProbeMapFor(summer, mapFile(45, 55), screen, start), skyWeatherProbeMapFor(winter, mapFile(45, 55), screen, start) ];
+
+      // Assert.
+      expect(orders)
+        .toStrictEqual([
+          {
+            mapId: 337,
+            views: [],
+            steps: [ 0 ],
+            dark: false,
+            weather: { x: 2, y: 16 },
+            time: 1320,
+            date: { years: 2027, months: 6, days: 16, seconds: 5 },
+            sky: { type: 'clear', intensity: 'moderate', key: '337:clear:moderate@summer@1320' },
+          },
+          {
+            mapId: 337,
+            views: [],
+            steps: [ 0 ],
+            dark: false,
+            weather: { x: 2, y: 16 },
+            time: 720,
+            date: { years: 2026, months: 12, days: 16, seconds: 5 },
+            sky: { type: 'rain', intensity: 'heavy', key: '337:rain:heavy@winter@720' },
+          },
+        ]);
+    });
+  });
+
+  describe('compareSky', () =>
+  {
+    it('holds when both sides hand J-Weather the same face, strength and condition, whatever order the keys came in', () =>
+    {
+      // Arrange: the game's starfall, the editor's written in another order, and one differing in each part or missing.
+      const game = { preset: 'starfall', intensity: 'moderate', type: 'clear' };
+      const editors = [
+        { type: 'clear', intensity: 'moderate', preset: 'starfall' },
+        { ...game, preset: 'fireflies' },
+        { ...game, intensity: 'heavy' },
+        { ...game, type: 'breezy' },
+        null,
+      ];
+
+      // Act.
+      const checks = editors.map(editor => compareSky(game, editor));
+
+      // Assert.
+      expect([ checks.map(check => check.holds), checks[0].name, checks[4].editor ])
+        .toStrictEqual([ [ true, false, false, false, false ], 'sky', 'null' ]);
     });
   });
 

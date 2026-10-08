@@ -29,6 +29,20 @@ type ProbeMap = {
   weather?: { x: number; y: number };
 
   /**
+   * The date to set the game's clock to before arriving, beside the time of day, so the sky's season is the one the
+   * editor's clock moves the game's start to. Left out, the date stands as the game left it.
+   */
+  date?: { years: number; months: number; days: number; seconds: number };
+
+  /**
+   * The sky J-Weather-Time is made to hold over a map read for its weather: its forecast set to this condition at this
+   * strength for the phase the clock reads, and the sky pushed to J-Weather as the plugin pushes it, face and all; the
+   * weather is reported under the key given. Left out, the sky stays held off, so the map resolves as J-Weather alone
+   * resolves it.
+   */
+  sky?: { type: string; intensity: string; key: string };
+
+  /**
    * The moments to judge the map's pages at, which the probe does instead of every other pass: once there, it sets the
    * game's clock straight to each moment in turn, judges every page of every event on the map and the page each would
    * show, and puts the clock back as it found it, all before a frame can tick it on. Left out, nothing is judged at any
@@ -118,7 +132,8 @@ type WeatherDepthProbe = {
 
 /**
  * What the probe read of one map's weather: the weather J-Weather resolved for it, where its plane sits, every layer on
- * the plane, the display it was drawn at, the hour the game's clock read, and the picture of the whole spriteset.
+ * the plane, the display it was drawn at, the hour the game's clock read, and the picture of the whole spriteset; and,
+ * for a map read under a sky, what J-Weather-Time handed J-Weather, its face, strength and condition.
  */
 type WeatherProbe = {
   current: { preset: string; intensity: string } | null;
@@ -127,6 +142,7 @@ type WeatherProbe = {
   display: { x: number; y: number };
   clock: number;
   file: string;
+  sky?: { preset: string; intensity: string; type: string } | null;
 };
 
 /**
@@ -211,8 +227,9 @@ type ProbeReport = {
   moments?: Record<string, ProbeVerdicts[]>;
 
   /**
-   * The weather read on each map the probe was asked to read it on, by the map's id; and what J-Weather-Time's sky was
-   * doing on the fresh save before the probe held it off, so the weather reads as J-Weather alone resolves it.
+   * The weather read on each map the probe was asked to read it on, by the map's id, or by the key a map read under a
+   * sky was given; and what J-Weather-Time's sky was doing on the fresh save before the probe held it off, so the
+   * weather reads as J-Weather alone resolves it.
    */
   weather?: Record<string, WeatherProbe>;
   freshSky?: unknown;

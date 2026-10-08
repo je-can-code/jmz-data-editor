@@ -12,7 +12,10 @@
  * sits in the sprite tree against the tone and the dark, and every layer on the plane, its pictures, blend, tint, the
  * layer as resolved and its population summed up; then the whole spriteset is drawn as the player sees it, weather and
  * all. Before the first such map the probe holds J-Weather-Time's sky off, noting what it was doing on the fresh save,
- * so every map's weather resolves as J-Weather alone resolves it: a tagged map at its middle strength.
+ * so every map's weather resolves as J-Weather alone resolves it: a tagged map at its middle strength. A map asked for
+ * its weather under a sky is arrived at on the date and at the hour asked, the clock stopped, and J-Weather-Time made
+ * to hold that sky: its forecast set to the condition and strength for that phase, then pushed to J-Weather as the
+ * plugin pushes it, so the plugin itself picks the face and J-Weather resolves the map under it.
  *
  * A map asked about at moments, such as a season's date at a few hours, is judged instead of drawn: the game's clock is
  * set straight to each moment, date and all, every page of every event there is judged as the game judges it then, and
@@ -462,11 +465,33 @@ const parityProbe = (config: ProbeConfig): void =>
     };
   };
 
+  // J-Weather-Time's own way of telling J-Weather what the sky is doing, kept aside when the probe holds the sky off, so
+  // a map read under a sky can still be pushed one exactly as the plugin pushes it; and whether one was pushed, so a map
+  // read without a sky afterwards has it held off again.
+  let pushSky: ((clock: unknown) => void) | null = null;
+  let skyPushed = false;
+
+  // makes J-Weather-Time hold a sky over the map: its forecast set to the condition and strength for the phase the
+  // clock reads, that phase marked as the one applied so nothing rolls it again, then pushed to J-Weather as the plugin
+  // pushes it on arrival, so J-Weather-Time picks the face the condition wears at that season and hour. Returns what it
+  // handed J-Weather.
+  const holdSky = (sky: { type: string; intensity: string }): unknown =>
+  {
+    const director = engine.ForecastDirector;
+    const skyPhase = director.phaseOf(engine.$gameTime);
+    engine.$gameSystem.setSkyForecast({ startPhase: skyPhase, types: [ sky.type ], intensities: [ sky.intensity ] });
+    engine.$gameSystem.setLastAppliedSkyPhase(skyPhase);
+    pushSky?.call(director, engine.$gameTime);
+    skyPushed = true;
+    return director.skyFor(engine.$gameTime);
+  };
+
   // reads a map's weather and draws the whole spriteset at the asked display: where the plane sits against the tone
   // (the base sprite's colour filter) and the dark (J-Lighting's mask beside the base sprite), every layer on it, and
   // the picture the player would see there, characters but the events set aside. The weather is settled afresh first,
   // exactly as on arriving, and read and drawn before a frame moves it, which is the moment the editor reads its own:
-  // a population a few frames on from settling has more of its queued particles in view and faded in.
+  // a population a few frames on from settling has more of its queued particles in view and faded in. A map read under
+  // a sky has it held over it first, and the sky held off again for a map read without one after it.
   const captureWeather = (map: ProbeMap): void =>
   {
     const view = map.weather as { x: number; y: number };
@@ -484,6 +509,17 @@ const parityProbe = (config: ProbeConfig): void =>
       {
         report.freshSky = `unread: ${String(error)}`;
       }
+    }
+
+    let sky: unknown = null;
+    if (map.sky !== undefined)
+    {
+      sky = holdSky(map.sky);
+    }
+    else if (skyPushed)
+    {
+      engine.WeatherDirector.setSky(null);
+      skyPushed = false;
     }
 
     spriteset.refreshWeatherLayers();
@@ -536,23 +572,28 @@ const parityProbe = (config: ProbeConfig): void =>
     renderer.render(spriteset, texture);
     const url: string = renderer.extract.base64(texture);
     texture.destroy(true);
-    const file = `game-weather-${map.mapId}-${display.x}-${display.y}.png`;
+    // a map read under several skies keeps a picture for each.
+    const under = map.sky === undefined ? '' : `-${map.sky.key.replace(/[^a-zA-Z0-9]+/gu, '-')}`;
+    const file = `game-weather-${map.mapId}-${display.x}-${display.y}${under}.png`;
     fs.writeFileSync(`${config.outDir}/${file}`, NodeBuffer.from(url.split(',')[1], 'base64'));
 
     const time = engine.$gameTime;
-    (report.weather as Record<string, unknown>)[String(map.mapId)] = {
+    const key = map.sky === undefined ? String(map.mapId) : map.sky.key;
+    (report.weather as Record<string, unknown>)[key] = {
       current: engine.WeatherDirector.current(),
       depth,
       layers: plane.children.map(describeWeatherLayer),
       display,
       clock: time === undefined || time === null ? -1 : (time.hours() * 60) + time.minutes(),
       file,
+      sky,
     };
   };
 
   // holds J-Weather-Time's sky off, once, so every map's weather resolves as J-Weather alone resolves it, noting first
   // what the sky was doing on the fresh save. Pushing a sky is J-Weather-Time's only way in, so stilling it and handing
-  // J-Weather none is the whole of it; with no game started yet, there is no sky to hand back and no map to read.
+  // J-Weather none is the whole of it; with no game started yet, there is no sky to hand back and no map to read. The
+  // plugin's own push is kept aside for a map read under a sky.
   let skyHeld = false;
   const holdSkyOff = (gameStarted: boolean): void =>
   {
@@ -568,6 +609,7 @@ const parityProbe = (config: ProbeConfig): void =>
       engine.WeatherDirector.setSky(null);
     }
 
+    pushSky = engine.ForecastDirector.push;
     engine.ForecastDirector.push = () => undefined;
   };
 
@@ -649,6 +691,16 @@ const parityProbe = (config: ProbeConfig): void =>
       // that ticked on the way here sits half a minute past it, and a page opening on the minute, as 18-5 does at 18:00,
       // would show in the game and not in the editor.
       engine.$gameTime.setSeconds(engine.J.TIME.Metadata.StartingSecond);
+    }
+
+    // a map read under a sky is read on the date the editor's clock moves the game's start to, so the sky's season is
+    // the one the editor's sky wears, set straight into the clock's fields like the hour.
+    if (next.date !== undefined)
+    {
+      engine.$gameTime.setYears(next.date.years);
+      engine.$gameTime.setMonths(next.date.months);
+      engine.$gameTime.setDays(next.date.days);
+      engine.$gameTime.setSeconds(next.date.seconds);
     }
 
     engine.$gamePlayer.requestMapReload();
