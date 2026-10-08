@@ -16,7 +16,7 @@ import {
   type FlagClick,
   type FlagMode,
 } from '../../../core/palette/passabilityEdits.ts';
-import { TILESET_MARKS_DOCUMENT, toggleTileMark } from '../../../core/palette/tilesetMarkEdits.ts';
+import { saveTileMarks, toggleTileMark } from '../../../core/palette/tilesetMarkEdits.ts';
 import { isAutotile } from '../../../core/tiles/tileIds.ts';
 import { takeUpPenForPick } from '../../../core/tools/paintSelectionLink.ts';
 import { useHeldMap, useTilesets, useWorkspace, useWorkspaceState } from '../../workspaceHooks.tsx';
@@ -189,7 +189,7 @@ const TilesetPalette = (props: { readonly tileset: RmmzTileset }) =>
 
   /**
    * Toggles a tile's "goes on top" mark for this tileset, saving the marks at once so every window and every later
-   * session paints with them.
+   * session paints with them, unless they wait for a choice about changes made elsewhere, which the author hears.
    * @param {number} tileId The tile.
    */
   const toggleMark = (tileId: number) =>
@@ -204,10 +204,18 @@ const TilesetPalette = (props: { readonly tileset: RmmzTileset }) =>
       const step = toggleTileMark(hub, tileset.id, tileId);
       if (step !== null)
       {
-        hub.save(TILESET_MARKS_DOCUMENT).catch((error: unknown) =>
-        {
-          controller.notify(`The tile marks could not be saved: ${error instanceof Error ? error.message : String(error)}`, 'error');
-        });
+        saveTileMarks(hub)
+          .then(outcome =>
+          {
+            if (outcome.ok === false)
+            {
+              controller.notify(outcome.message, 'error');
+            }
+          })
+          .catch((error: unknown) =>
+          {
+            controller.notify(`The tile marks could not be saved: ${error instanceof Error ? error.message : String(error)}`, 'error');
+          });
       }
     }
     catch (error)

@@ -1,4 +1,5 @@
 import type { MapEditorApi } from '../api/MapEditorApi.ts';
+import type { DocumentHub } from '../history/DocumentHub.ts';
 import { editorDataDocumentKey, type EditorDataDocumentKey } from '../model/documentKeys.ts';
 import { isJsonObject, type JsonObject, type JsonValue } from '../model/json.ts';
 
@@ -31,6 +32,14 @@ type StoredEditorData = {
   schemaVersion: number;
   data: JsonValue;
 };
+
+/**
+ * What writing an editor-only document came to: written, or nothing to write (saved is false), or held back, with the
+ * reason in words for the author.
+ */
+type EditorDataSaveOutcome =
+  | { readonly ok: true; readonly saved: boolean }
+  | { readonly ok: false; readonly message: string };
 
 /**
  * Blueprints: saved stamps whose copies stay linked, so changing one changes them all. Keyed by each blueprint's id,
@@ -97,6 +106,35 @@ const requireReadable = (definition: EditorDataDefinition, stored: JsonValue): S
 };
 
 /**
+ * Writes an editor-only document the window holds to disk, as an edit to the blueprints or to the tile marks does at
+ * once, so every window and every later session has it. A document with nothing unsaved is left alone. A document
+ * flagged in conflict (its file changed on disk, or another window's copy went another way, while this window held
+ * edits the file lacks) is held back exactly as the workspace's Save all holds a map back: writing it would put this
+ * copy over the other one before the author has chosen between them, and once written it would read as saved, so
+ * nothing would be left to warn them.
+ * @param {DocumentHub} hub The window's documents; the document must be held.
+ * @param {EditorDataDocumentKey} key The document.
+ * @param {string} what What the author calls it, in the plural: "blueprints", or "tile marks".
+ * @returns {Promise<EditorDataSaveOutcome>} Settles once the file is written, or at once when there is nothing to write
+ * or the write is held back; rejects when the write itself fails.
+ */
+const saveEditorDocument = async (hub: DocumentHub, key: EditorDataDocumentKey, what: string): Promise<EditorDataSaveOutcome> =>
+{
+  if (hub.isDirty(key) === false)
+  {
+    return { ok: true, saved: false };
+  }
+
+  if (hub.isConflicted(key))
+  {
+    return { ok: false, message: `The ${what} were not saved: they are waiting for a choice about changes made elsewhere.` };
+  }
+
+  await hub.save(key);
+  return { ok: true, saved: true };
+};
+
+/**
  * Reads and writes editor-only documents through the server. A project that has never saved one gets the
  * empty document, so nothing downstream has to tell "absent" from "empty".
  */
@@ -156,6 +194,7 @@ export {
   emptyEditorData,
   LAYOUTS,
   requireReadable,
+  saveEditorDocument,
   TILESET_MARKS,
 };
-export type { EditorDataDefinition, StoredEditorData };
+export type { EditorDataDefinition, EditorDataSaveOutcome, StoredEditorData };

@@ -1,3 +1,4 @@
+import { saveEditorDocument, type EditorDataSaveOutcome } from '../editorData/editorData.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { blueprintHistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
@@ -13,20 +14,6 @@ import { BLUEPRINTS_DOCUMENT, blueprintIn, newBlueprintId, savedBlueprintOf, typ
 type BlueprintOutcome =
   | { readonly ok: true; readonly step: HistoryStep | null; readonly blueprint: Blueprint | null }
   | { readonly ok: false; readonly message: string };
-
-/**
- * What writing the blueprints came to: written, or nothing to write (saved is false), or held back, with the reason in
- * words for the author.
- */
-type BlueprintsSaveOutcome =
-  | { readonly ok: true; readonly saved: boolean }
-  | { readonly ok: false; readonly message: string };
-
-/**
- * What the author reads when the blueprints wait for them to choose between this window's copy and changes made
- * elsewhere: the same wait the workspace's Save all reports for a map.
- */
-const BLUEPRINTS_CONFLICT_MESSAGE = 'The blueprints were not saved: they are waiting for a choice about changes made elsewhere.';
 
 /**
  * How many maps a refused delete names before it sums up the rest.
@@ -217,30 +204,17 @@ const deleteBlueprint = (
 };
 
 /**
- * Writes the blueprints to disk, as every edit to them does at once, so every window and every later session has them.
- * Blueprints with nothing unsaved are left alone. Blueprints flagged in conflict (their file changed on disk, or another
- * window's copy went another way, while this window held edits the file lacks) are held back exactly as the workspace's
- * Save all holds a map back: writing them would put this copy over the other one before the author has chosen between
- * them, and once written they would read as saved, so nothing would be left to warn them.
+ * Writes the blueprints to disk, as every edit to them does at once, so every window and every later session has them:
+ * nothing when nothing is unsaved, and nothing while they wait for the author's choice about changes made elsewhere,
+ * which writing them would put this copy over (see {@link saveEditorDocument}).
  * @param {DocumentHub} hub The window's documents; the blueprints document must be held.
- * @returns {Promise<BlueprintsSaveOutcome>} Settles once the file is written, or at once when there is nothing to write
+ * @returns {Promise<EditorDataSaveOutcome>} Settles once the file is written, or at once when there is nothing to write
  * or the write is held back; rejects when the write itself fails.
  */
-const saveBlueprints = async (hub: DocumentHub): Promise<BlueprintsSaveOutcome> =>
+const saveBlueprints = (hub: DocumentHub): Promise<EditorDataSaveOutcome> =>
 {
-  if (hub.isDirty(BLUEPRINTS_DOCUMENT) === false)
-  {
-    return { ok: true, saved: false };
-  }
-
-  if (hub.isConflicted(BLUEPRINTS_DOCUMENT))
-  {
-    return { ok: false, message: BLUEPRINTS_CONFLICT_MESSAGE };
-  }
-
-  await hub.save(BLUEPRINTS_DOCUMENT);
-  return { ok: true, saved: true };
+  return saveEditorDocument(hub, BLUEPRINTS_DOCUMENT, 'blueprints');
 };
 
-export { BLUEPRINTS_CONFLICT_MESSAGE, deleteBlueprint, renameBlueprint, saveBlueprint, saveBlueprints };
-export type { BlueprintOutcome, BlueprintsSaveOutcome };
+export { deleteBlueprint, renameBlueprint, saveBlueprint, saveBlueprints };
+export type { BlueprintOutcome };

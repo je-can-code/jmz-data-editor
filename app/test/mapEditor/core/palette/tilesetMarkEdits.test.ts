@@ -8,6 +8,7 @@ import {
   isMarkableTile,
   marksOf,
   openTilesetMarks,
+  saveTileMarks,
   seedTilesetMarks,
   TILESET_MARKS_DOCUMENT,
   toggleTileMark,
@@ -21,6 +22,8 @@ import { makeAutotileId, TileId } from '../../../../src/mapEditor/core/tiles/til
  * toggle must change exactly one tile (or one autotile kind, all its shapes) on exactly one tileset, and leave every
  * other entry as it was. It is one step on the marks document, and a tileset left with nothing marked leaves the
  * document, as the marks service tidies it. Only A-sheet tiles can be marked; B to E always stack on layers 3 and 4.
+ * Each toggle writes the marks at once, but never over a file that changed elsewhere while this window held a toggle it
+ * lacks: those marks wait for the author's choice.
  *
  * A project that has never saved marks starts from its own maps: every A-sheet tile mostly laid above its auto layer
  * by hand. That seed is worked out once, from every map the tree lists, saved, and from then on the saved document is
@@ -180,6 +183,64 @@ describe('toggleTileMark', () =>
     // Assert.
     expect(hub.document(TILESET_MARKS_DOCUMENT).toJson())
       .toStrictEqual(before);
+  });
+});
+
+describe('saveTileMarks', () =>
+{
+  /**
+   * Builds a window holding the marks with tileset 13's rock marked, writing down every file its saves write.
+   * @returns {{ hub: DocumentHub, written: JsonValue[] }} The window, and the content of every file written.
+   */
+  const writingWindow = () =>
+  {
+    const written: JsonValue[] = [];
+    const hub = new DocumentHub({
+      clientId: 'window-a',
+      store: {
+        load: async () => null,
+        save: async (_key, content) =>
+        {
+          written.push(content);
+        },
+      },
+    });
+    hub.adopt(TILESET_MARKS_DOCUMENT, { schemaVersion: 1, data: { tilesets: { '13': { tiles: [ ROCK ], kinds: [] } } } });
+    return { hub, written };
+  };
+
+  it('writes the marks once a toggle leaves them holding what their file lacks', async () =>
+  {
+    // Arrange: the cliff corner marked on tileset 12.
+    const { hub, written } = writingWindow();
+    toggleTileMark(hub, 12, CLIFF_CORNER);
+
+    // Act.
+    const outcome = await saveTileMarks(hub);
+
+    // Assert.
+    expect([ outcome, written.length, hub.isDirty(TILESET_MARKS_DOCUMENT) ])
+      .toStrictEqual([ { ok: true, saved: true }, 1, false ]);
+  });
+
+  it('writes nothing over marks that changed on disk while a toggle was unsaved, saying they wait for a choice', async () =>
+  {
+    // Arrange: the cliff corner marked on tileset 12, not yet written, when the file loses the rock elsewhere.
+    const { hub, written } = writingWindow();
+    toggleTileMark(hub, 12, CLIFF_CORNER);
+    const conflict = hub.applyOutsideContent(TILESET_MARKS_DOCUMENT, { schemaVersion: 1, data: { tilesets: {} } });
+
+    // Act.
+    const outcome = await saveTileMarks(hub);
+
+    // Assert: the file keeps what was saved elsewhere until the author chooses, and the toggle stays unsaved.
+    expect([ conflict, outcome, written, hub.isDirty(TILESET_MARKS_DOCUMENT) ])
+      .toStrictEqual([
+        'conflicted',
+        { ok: false, message: 'The tile marks were not saved: they are waiting for a choice about changes made elsewhere.' },
+        [],
+        true,
+      ]);
   });
 });
 
