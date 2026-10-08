@@ -10,6 +10,7 @@ import { BLUEPRINTS_DOCUMENT, blueprintsOf } from '../../../../src/mapEditor/cor
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
+import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
 import { StampHistory } from '../../../../src/mapEditor/core/stamps/StampHistory.ts';
 import { WindowPaints } from '../../../../src/mapEditor/core/tools/WindowPaint.ts';
@@ -18,7 +19,7 @@ import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/Ma
 import { StampsPanel } from '../../../../src/mapEditor/workspace/panels/StampsPanel.tsx';
 import { WorkspaceController } from '../../../../src/mapEditor/workspace/WorkspaceController.ts';
 import { WorkspaceProvider } from '../../../../src/mapEditor/workspace/workspaceHooks.tsx';
-import { holdBlueprints, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
+import { holdBlueprints, storedBlueprints, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
@@ -214,7 +215,8 @@ describe('StampsPanel', () =>
  * following in the paint settings while it is picked. Deleting one with copies says how many and on which maps, and
  * deleting one whose copies are still being counted says so, both changing nothing; one with no copies is deleted after
  * a question, Keep leaving it be. Clicking a blueprint takes it up as the brush, and clicking it again puts it down.
- * Blueprints that cannot be read say so.
+ * Blueprints that cannot be read say so, as do blueprints that could not be written, and blueprints held back from disk
+ * while they wait for a choice about changes made elsewhere.
  */
 describe('StampsPanel: blueprints', () =>
 {
@@ -513,6 +515,33 @@ describe('StampsPanel: blueprints', () =>
     // Assert.
     expect([ controller.getState().notice?.text, blueprintCards() ])
       .toStrictEqual([ 'The blueprints could not be saved: the disk is full', [ 'Goblin campNo copies yet' ] ]);
+  });
+
+  it('writes nothing over blueprints waiting for a choice about changes made elsewhere, saying so and keeping the edit', async () =>
+  {
+    // Arrange: the blueprints' file changed somewhere else, waiting for the author's choice.
+    const { hub, stamps, controller, saved, blueprintCopies } = renderWithBlueprints({});
+    act(() =>
+    {
+      hub.flagConflict(BLUEPRINTS_DOCUMENT, { kind: 'disk', content: storedBlueprints({ k3x9q2mf: { name: 'Bat roost', stamp: goblin() } }) as JsonValue });
+      stamps.add(goblin());
+    });
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Save as blueprint' }));
+    const field = screen.getByLabelText('Name the blueprint');
+    fireEvent.change(field, { target: { value: 'Goblin camp' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    await settle(blueprintCopies);
+
+    // Assert.
+    expect([ controller.getState().notice?.text, blueprintCards(), saved, hub.isDirty(BLUEPRINTS_DOCUMENT) ])
+      .toStrictEqual([
+        'The blueprints were not saved: they are waiting for a choice about changes made elsewhere.',
+        [ 'Goblin campNo copies yet' ],
+        [],
+        true,
+      ]);
   });
 
   it('opens the blueprints when the window does not hold them yet, listing them once they are open', async () =>

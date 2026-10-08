@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { deleteBlueprint, renameBlueprint, saveBlueprint } from '../../../../src/mapEditor/core/blueprints/blueprintEdits.ts';
+import {
+  deleteBlueprint,
+  renameBlueprint,
+  saveBlueprint,
+  saveBlueprints,
+} from '../../../../src/mapEditor/core/blueprints/blueprintEdits.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintsOf, savedBlueprintOf } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { blueprintHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
+import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
 import { drawsFor, holdBlueprints, storedBlueprints, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
@@ -18,6 +24,10 @@ import { stampOf } from '../../support/stampFixtures.ts';
  * save. Renaming changes the name alone, so every copy's link, which names the id, still names the blueprint. Deleting is
  * refused while anything is a copy of the blueprint, saying how many copies there are and on which maps, and while the
  * copies are still being counted; a blueprint gone since it was shown refuses every edit.
+ *
+ * Writing the blueprints, which every edit does at once, writes only what the file lacks, and never over a file that
+ * changed elsewhere while this window held edits it lacks: those wait for the author's choice, as Save all leaves a map,
+ * since once written they would read as saved and nothing would be left to warn them.
  */
 describe('blueprintEdits', () =>
 {
@@ -284,6 +294,96 @@ describe('blueprintEdits', () =>
           ],
           [ [ 'k3x9q2mf', 'Goblin' ] ],
         ]);
+    });
+  });
+
+  describe('saveBlueprints', () =>
+  {
+    /**
+     * Builds a window holding the blueprints document, writing down every file its saves write.
+     * @param {BlueprintSeed} blueprints The blueprints, by id.
+     * @param {() => Promise<void>} write What a save does once written down; by default, nothing more.
+     * @returns {{ hub: DocumentHub, written: JsonValue[] }} The window, and the content of every file written.
+     */
+    const writingWindow = (blueprints: BlueprintSeed = {}, write: () => Promise<void> = async () => undefined) =>
+    {
+      const written: JsonValue[] = [];
+      const hub = new DocumentHub({
+        clientId: 'window-a',
+        store: {
+          load: async () => null,
+          save: async (_key, content) =>
+          {
+            written.push(content);
+            await write();
+          },
+        },
+      });
+      holdBlueprints(hub, blueprints);
+      return { hub, written };
+    };
+
+    it('writes blueprints holding an edit their file lacks, leaving them saved', async () =>
+    {
+      // Arrange: a goblin saved as a blueprint, not yet written.
+      const { hub, written } = writingWindow();
+      saveBlueprint(hub, goblin(), 'Goblin', drawsFor([ 'k3x9q2mf' ]));
+
+      // Act.
+      const outcome = await saveBlueprints(hub);
+
+      // Assert.
+      expect([ outcome, written, hub.isDirty(BLUEPRINTS_DOCUMENT) ])
+        .toStrictEqual([ { ok: true, saved: true }, [ hub.document(BLUEPRINTS_DOCUMENT).toJson() ], false ]);
+    });
+
+    it('leaves blueprints with nothing unsaved alone', async () =>
+    {
+      // Arrange: the blueprints exactly as their file holds them.
+      const { hub, written } = writingWindow({ k3x9q2mf: { name: 'Goblin', stamp: goblin() } });
+
+      // Act.
+      const outcome = await saveBlueprints(hub);
+
+      // Assert.
+      expect([ outcome, written ])
+        .toStrictEqual([ { ok: true, saved: false }, [] ]);
+    });
+
+    it('holds back blueprints waiting for a choice about their file changed on disk, writing nothing over it', async () =>
+    {
+      // Arrange: a goblin saved as a blueprint and not yet written when the file gains a bat from somewhere else.
+      const { hub, written } = writingWindow();
+      saveBlueprint(hub, goblin(), 'Goblin', drawsFor([ 'k3x9q2mf' ]));
+      const conflict = hub.applyOutsideContent(BLUEPRINTS_DOCUMENT, storedBlueprints({ aa22: { name: 'Bat', stamp: goblin() } }) as JsonValue);
+
+      // Act.
+      const outcome = await saveBlueprints(hub);
+
+      // Assert: the file keeps the bat until the author chooses, and the goblin stays unsaved.
+      expect([ conflict, outcome, written, hub.isDirty(BLUEPRINTS_DOCUMENT) ])
+        .toStrictEqual([
+          'conflicted',
+          { ok: false, message: 'The blueprints were not saved: they are waiting for a choice about changes made elsewhere.' },
+          [],
+          true,
+        ]);
+    });
+
+    it('rejects when the write itself fails, leaving the blueprints unsaved', async () =>
+    {
+      // Arrange: a disk that refuses the write.
+      const { hub } = writingWindow({}, () => Promise.reject(new Error('the disk is full')));
+      saveBlueprint(hub, goblin(), 'Goblin', drawsFor([ 'k3x9q2mf' ]));
+
+      // Act.
+      const write = saveBlueprints(hub);
+
+      // Assert.
+      await expect(write)
+        .rejects.toThrow('the disk is full');
+      expect(hub.isDirty(BLUEPRINTS_DOCUMENT))
+        .toBe(true);
     });
   });
 });

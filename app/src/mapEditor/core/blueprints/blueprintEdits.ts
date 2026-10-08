@@ -15,6 +15,20 @@ type BlueprintOutcome =
   | { readonly ok: false; readonly message: string };
 
 /**
+ * What writing the blueprints came to: written, or nothing to write (saved is false), or held back, with the reason in
+ * words for the author.
+ */
+type BlueprintsSaveOutcome =
+  | { readonly ok: true; readonly saved: boolean }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * What the author reads when the blueprints wait for them to choose between this window's copy and changes made
+ * elsewhere: the same wait the workspace's Save all reports for a map.
+ */
+const BLUEPRINTS_CONFLICT_MESSAGE = 'The blueprints were not saved: they are waiting for a choice about changes made elsewhere.';
+
+/**
  * How many maps a refused delete names before it sums up the rest.
  */
 const MAPS_NAMED = 4;
@@ -202,5 +216,31 @@ const deleteBlueprint = (
   return { ok: true, step, blueprint: null };
 };
 
-export { deleteBlueprint, renameBlueprint, saveBlueprint };
-export type { BlueprintOutcome };
+/**
+ * Writes the blueprints to disk, as every edit to them does at once, so every window and every later session has them.
+ * Blueprints with nothing unsaved are left alone. Blueprints flagged in conflict (their file changed on disk, or another
+ * window's copy went another way, while this window held edits the file lacks) are held back exactly as the workspace's
+ * Save all holds a map back: writing them would put this copy over the other one before the author has chosen between
+ * them, and once written they would read as saved, so nothing would be left to warn them.
+ * @param {DocumentHub} hub The window's documents; the blueprints document must be held.
+ * @returns {Promise<BlueprintsSaveOutcome>} Settles once the file is written, or at once when there is nothing to write
+ * or the write is held back; rejects when the write itself fails.
+ */
+const saveBlueprints = async (hub: DocumentHub): Promise<BlueprintsSaveOutcome> =>
+{
+  if (hub.isDirty(BLUEPRINTS_DOCUMENT) === false)
+  {
+    return { ok: true, saved: false };
+  }
+
+  if (hub.isConflicted(BLUEPRINTS_DOCUMENT))
+  {
+    return { ok: false, message: BLUEPRINTS_CONFLICT_MESSAGE };
+  }
+
+  await hub.save(BLUEPRINTS_DOCUMENT);
+  return { ok: true, saved: true };
+};
+
+export { BLUEPRINTS_CONFLICT_MESSAGE, deleteBlueprint, renameBlueprint, saveBlueprint, saveBlueprints };
+export type { BlueprintOutcome, BlueprintsSaveOutcome };

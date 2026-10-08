@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, Box, Button, ButtonBase, InputBase, Stack, Typography } from '@mui/material';
 import { copyCountWords } from '../../core/blueprints/blueprintCopies.ts';
-import { deleteBlueprint, renameBlueprint, saveBlueprint, type BlueprintOutcome } from '../../core/blueprints/blueprintEdits.ts';
+import {
+  deleteBlueprint,
+  renameBlueprint,
+  saveBlueprint,
+  saveBlueprints,
+  type BlueprintOutcome,
+} from '../../core/blueprints/blueprintEdits.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintsOf, type Blueprint } from '../../core/blueprints/blueprints.ts';
 import { blueprintHistoryKey } from '../../core/history/historyKeys.ts';
 import type { EditorDocument } from '../../core/model/EditorDocument.ts';
@@ -447,15 +453,24 @@ const DeleteConfirm = (props: { readonly name: string; readonly onDelete: () => 
 /**
  * Writes the blueprints to disk once an edit to them has gone through, so every window and every later session has
  * them, as the "goes on top" marks are written; the history the edit joined stays where it is, and an undo leaves the
- * document unsaved until the next save.
+ * document unsaved until the next save. Blueprints waiting for a choice about changes made elsewhere are not written,
+ * which the author hears, as is a write that fails.
  * @param {WorkspaceController} controller The workspace, for its documents and its notices.
  */
 const writeBlueprints = (controller: WorkspaceController) =>
 {
-  controller.services.hub.save(BLUEPRINTS_DOCUMENT).catch((error: unknown) =>
-  {
-    controller.notify(`The blueprints could not be saved: ${messageOf(error)}`, 'error');
-  });
+  saveBlueprints(controller.services.hub)
+    .then(outcome =>
+    {
+      if (outcome.ok === false)
+      {
+        controller.notify(outcome.message, 'error');
+      }
+    })
+    .catch((error: unknown) =>
+    {
+      controller.notify(`The blueprints could not be saved: ${messageOf(error)}`, 'error');
+    });
 };
 
 /**
