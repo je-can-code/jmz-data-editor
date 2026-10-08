@@ -219,15 +219,25 @@ describe('StampsPanel', () =>
 describe('StampsPanel: blueprints', () =>
 {
   /**
+   * How the blueprints reach the window: held from the start, opened only once the panel asks, or never to be had; and
+   * whether writing them fails.
+   */
+  type BlueprintsSource = {
+    readonly readNotes?: () => Promise<readonly EventNote[]>;
+    readonly open?: 'held' | 'on-ask' | 'never';
+    readonly failSaves?: boolean;
+  };
+
+  /**
    * Renders the panel in a workspace with a project server, holding the blueprints given, whose copies on disk are those
    * the notes say.
    * @param {BlueprintSeed} blueprints The blueprints, by id.
-   * @param {() => Promise<readonly EventNote[]>} readNotes How every map's notes are read.
-   * @param {boolean} readable Whether the blueprints can be opened at all.
+   * @param {BlueprintsSource} source How the notes are read, how the blueprints reach the window, and whether saves fail.
    * @returns {object} The window's documents and stamps, its paint, the controller, what was saved and the counter.
    */
-  const renderWithBlueprints = (blueprints: BlueprintSeed, readNotes: () => Promise<readonly EventNote[]> = async () => [], readable = true) =>
+  const renderWithBlueprints = (blueprints: BlueprintSeed, source: BlueprintsSource = {}) =>
   {
+    const { readNotes = async () => [], open = 'held', failSaves = false } = source;
     const saved: DocumentKey[] = [];
     const hub = new DocumentHub({
       clientId: 'window-a',
@@ -235,11 +245,16 @@ describe('StampsPanel: blueprints', () =>
         load: async () => null,
         save: async key =>
         {
+          if (failSaves)
+          {
+            throw new Error('the disk is full');
+          }
+
           saved.push(key);
         },
       },
     });
-    if (readable)
+    if (open === 'held')
     {
       holdBlueprints(hub, blueprints);
     }
@@ -255,6 +270,11 @@ describe('StampsPanel: blueprints', () =>
       blueprintCopies,
       openDocument: async (key: DocumentKey) =>
       {
+        if (open === 'on-ask' && hub.has(key) === false)
+        {
+          holdBlueprints(hub, blueprints);
+        }
+
         if (hub.has(key))
         {
           return hub.document(key);
@@ -310,7 +330,7 @@ describe('StampsPanel: blueprints', () =>
       { mapId: 3, eventId: 2, note: '<blueprint:[aa22, 4]>' },
       { mapId: 7, eventId: 5, note: 'Guard\n<blueprint:[aa22, 4]>' },
     ];
-    const { blueprintCopies } = renderWithBlueprints({ aa22: { name: 'Goblin camp', stamp: goblin() }, k3x9q2mf: { name: 'Bat roost', stamp: goblin() } }, async () => notes);
+    const { blueprintCopies } = renderWithBlueprints({ aa22: { name: 'Goblin camp', stamp: goblin() }, k3x9q2mf: { name: 'Bat roost', stamp: goblin() } }, { readNotes: async () => notes });
     const counting = blueprintCards();
 
     // Act.
@@ -399,7 +419,7 @@ describe('StampsPanel: blueprints', () =>
   {
     // Arrange.
     const notes = [ { mapId: 3, eventId: 1, note: '<blueprint:[aa22, 4]>' }, { mapId: 7, eventId: 5, note: '<blueprint:[aa22, 4]>' } ];
-    const { controller, saved, blueprintCopies } = renderWithBlueprints({ aa22: { name: 'Goblin camp', stamp: goblin() } }, async () => notes);
+    const { controller, saved, blueprintCopies } = renderWithBlueprints({ aa22: { name: 'Goblin camp', stamp: goblin() } }, { readNotes: async () => notes });
     await settle(blueprintCopies);
 
     // Act.
@@ -417,7 +437,7 @@ describe('StampsPanel: blueprints', () =>
     {
       // the answer never comes.
     });
-    const { controller } = renderWithBlueprints({ aa22: { name: 'Goblin camp', stamp: goblin() } }, unanswered);
+    const { controller } = renderWithBlueprints({ aa22: { name: 'Goblin camp', stamp: goblin() } }, { readNotes: unanswered });
 
     // Act.
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
@@ -427,17 +447,19 @@ describe('StampsPanel: blueprints', () =>
       .toStrictEqual([ '"Goblin camp" can\'t be deleted until its copies have been counted.', [ 'Goblin campCounting copies' ] ]);
   });
 
-  it('asks before deleting a blueprint with no copies, keeping it on Keep and deleting it on Delete', async () =>
+  it('asks before deleting a blueprint with no copies, keeping it on Keep or Escape and deleting it on Delete', async () =>
   {
     // Arrange.
     const { controller, saved, blueprintCopies } = renderWithBlueprints({ aa22: { name: 'Goblin camp', stamp: goblin() }, k3x9q2mf: { name: 'Bat roost', stamp: goblin() } });
     await settle(blueprintCopies);
 
-    // Act: asked about the bat roost and kept, then asked again and deleted.
+    // Act: asked about the bat roost and kept with Keep, asked again and kept with Escape, then asked once more and deleted.
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
     const asked = screen.getByTestId('blueprint-delete-confirm').textContent;
     fireEvent.click(within(screen.getByTestId('blueprint-delete-confirm')).getByRole('button', { name: 'Keep' }));
-    const kept = blueprintCards();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
+    fireEvent.keyDown(screen.getByTestId('blueprint-delete-confirm'), { key: 'Escape' });
+    const kept = [ blueprintCards(), screen.queryByTestId('blueprint-delete-confirm') ];
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
     fireEvent.click(within(screen.getByTestId('blueprint-delete-confirm')).getByRole('button', { name: 'Delete' }));
     await settle(blueprintCopies);
@@ -446,12 +468,92 @@ describe('StampsPanel: blueprints', () =>
     expect([ asked, kept, blueprintCards(), saved, controller.getState().notice?.text, controller.getState().activeHistory ])
       .toStrictEqual([
         'Delete the blueprint "Bat roost"?DeleteKeep',
-        [ 'Bat roostNo copies yet', 'Goblin campNo copies yet' ],
+        [ [ 'Bat roostNo copies yet', 'Goblin campNo copies yet' ], null ],
         [ 'Goblin campNo copies yet' ],
         [ BLUEPRINTS_DOCUMENT ],
         'Deleted the blueprint "Bat roost".',
         'blueprint:k3x9q2mf',
       ]);
+  });
+
+  it('says why a rename was refused, changing nothing', async () =>
+  {
+    // Arrange.
+    const { controller, saved, blueprintCopies } = renderWithBlueprints({ aa22: { name: 'Goblin camp', stamp: goblin() } });
+    await settle(blueprintCopies);
+
+    // Act: a name of nothing but spaces kept by leaving the field.
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    const field = screen.getByLabelText('Blueprint name');
+    fireEvent.change(field, { target: { value: '   ' } });
+    fireEvent.blur(field);
+    await settle(blueprintCopies);
+
+    // Assert.
+    expect([ controller.getState().notice?.text, blueprintCards(), saved ])
+      .toStrictEqual([ 'Give the blueprint a name.', [ 'Goblin campNo copies yet' ], [] ]);
+  });
+
+  it('says the blueprints could not be written, keeping the edit in the window', async () =>
+  {
+    // Arrange: a disk that refuses every write.
+    const { stamps, controller, blueprintCopies } = renderWithBlueprints({}, { failSaves: true });
+    act(() =>
+    {
+      stamps.add(goblin());
+    });
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Save as blueprint' }));
+    const field = screen.getByLabelText('Name the blueprint');
+    fireEvent.change(field, { target: { value: 'Goblin camp' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    await settle(blueprintCopies);
+
+    // Assert.
+    expect([ controller.getState().notice?.text, blueprintCards() ])
+      .toStrictEqual([ 'The blueprints could not be saved: the disk is full', [ 'Goblin campNo copies yet' ] ]);
+  });
+
+  it('opens the blueprints when the window does not hold them yet, listing them once they are open', async () =>
+  {
+    // Arrange.
+    const { blueprintCopies } = renderWithBlueprints({ aa22: { name: 'Goblin camp', stamp: goblin() } }, { open: 'on-ask' });
+    const opening = screen.queryByText('Opening the blueprints') !== null;
+
+    // Act.
+    await settle(blueprintCopies);
+
+    // Assert.
+    expect([ opening, screen.queryByText('Opening the blueprints'), blueprintCards() ])
+      .toStrictEqual([ true, null, [ 'Goblin campNo copies yet' ] ]);
+  });
+
+  it('says the blueprints could not be read when the document holds something else', () =>
+  {
+    // Arrange: a document holding a list where the blueprints should be, held before the panel shows.
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    hub.adopt(BLUEPRINTS_DOCUMENT, { schemaVersion: 1, data: { blueprints: [] } });
+    const services = {
+      hub,
+      api: {},
+      stamps: new StampHistory('window-a'),
+      paints: new WindowPaints(window),
+      blueprintCopies: new BlueprintCopyCounter({ hub, readNotes: null }),
+    } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <WorkspaceProvider controller={new WorkspaceController(services)}>
+          <StampsPanel/>
+        </WorkspaceProvider>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert.
+    expect(screen.queryByText('The blueprints could not be read: the saved blueprints are not a blueprints document') !== null)
+      .toBe(true);
   });
 
   it('takes a blueprint clicked up as the brush, pressed, and puts it down when clicked again', async () =>
@@ -474,7 +576,7 @@ describe('StampsPanel: blueprints', () =>
   it('says why the blueprints could not be read, and offers to save no stamp as one', async () =>
   {
     // Arrange: blueprints that cannot be opened.
-    const { stamps } = renderWithBlueprints({}, async () => [], false);
+    const { stamps } = renderWithBlueprints({}, { open: 'never' });
 
     // Act.
     await act(async () =>

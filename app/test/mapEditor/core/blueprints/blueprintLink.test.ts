@@ -164,6 +164,19 @@ describe('blueprintLink', () =>
         ]);
     });
 
+    it('writes and reads back what a copy keeps of its own after the link\'s first two values, as written', () =>
+    {
+      // Arrange: a link keeping two values.
+      const link = { ...LINK, differences: [ 'sight+2', 'name=Goblin chief' ] };
+
+      // Act.
+      const written = withBlueprintLink('Guard', link);
+
+      // Assert.
+      expect([ written, blueprintLinkOf(written) ])
+        .toStrictEqual([ 'Guard\n<blueprint:[k3x9q2mf, 2, sight+2, name=Goblin chief]>', link ]);
+    });
+
     it('takes a link the note holds already out first, so a note holds one link at most', () =>
     {
       // Arrange: a link to another blueprint, and two links where one stood among words.

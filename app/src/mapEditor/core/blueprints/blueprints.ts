@@ -113,7 +113,7 @@ const readBlueprint = (id: string, saved: JsonValue): Blueprint =>
  */
 const byName = (left: Blueprint, right: Blueprint): number =>
 {
-  return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }) || (left.id < right.id ? -1 : 1);
+  return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }) || left.id.localeCompare(right.id);
 };
 
 /**

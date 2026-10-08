@@ -204,6 +204,38 @@ describe('blueprintCopies', () =>
         .toStrictEqual([ [ 'counting', 0 ], 'counting', 'counted', 1 ]);
     });
 
+    it('starts once however many listen, reading the disk once, and tells each listener', async () =>
+    {
+      // Arrange.
+      const { counter, read } = setUp();
+      const heard = [ vi.fn(), vi.fn() ];
+
+      // Act.
+      heard.forEach(listener => counter.subscribe(listener));
+      await counter.settled();
+
+      // Assert: the first heard the held maps counted as it started, and both heard the disk's answer.
+      expect([ read?.mock.calls.length, heard.map(listener => listener.mock.calls.length) ])
+        .toStrictEqual([ 1, [ 2, 1 ] ]);
+    });
+
+    it('stops telling a listener that left', async () =>
+    {
+      // Arrange: the listener hears the held maps counted as it starts the counting.
+      const { counter } = setUp();
+      const heard = vi.fn();
+      const leave = counter.subscribe(heard);
+      const atStart = heard.mock.calls.length;
+
+      // Act.
+      leave();
+      await counter.settled();
+
+      // Assert: the disk's answer arrived, and the listener gone was not told.
+      expect([ atStart, counter.getSnapshot().state, heard.mock.calls.length ])
+        .toStrictEqual([ 1, 'counted', 1 ]);
+    });
+
     it('counts every map the window holds as it stands there, and every other map as the disk holds it', async () =>
     {
       // Arrange.
