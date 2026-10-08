@@ -230,17 +230,19 @@ describe('weatherNote', () =>
         .toStrictEqual([ '<noWeather>', '<weather:rain>' ]);
     });
 
-    it('refuses an opt-out added after a stray bracket that would swallow it', () =>
+    it('refuses an opt-out added after a stray bracket that would swallow it, and one taken out from under one', () =>
     {
-      // Arrange: a bracket opened and never closed at the note's end.
-      const note = 'the gate <foo:';
+      // Arrange: a bracket opened and never closed at the note's end; and one whose tag runs on to swallow the opt-out's
+      // line, ahead of the tag saying the map has no sky.
+      const open = 'the gate <foo:';
+      const swallowing = '<foo:\n<noWeather>\n<noToneChange>';
 
       // Act.
-      const refusal = outcome(() => withWeatherSuppressed(note, true));
+      const refusals = [ outcome(() => withWeatherSuppressed(open, true)), outcome(() => withWeatherSuppressed(swallowing, false)) ];
 
       // Assert.
-      expect(refusal)
-        .toBe(OTHER_TAGS_MISREAD);
+      expect(refusals)
+        .toStrictEqual([ OTHER_TAGS_MISREAD, OTHER_TAGS_MISREAD ]);
     });
 
     it('refuses opting back in when the words left behind would opt the map out again', () =>
