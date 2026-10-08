@@ -167,8 +167,7 @@ const lightingModule: PluginModule = {
     });
 
     // J-Lighting-Time tints and darkens only a map with a sky, so whether a map has one is set in Map Properties while it
-    // is on: in the section of the first module to say its plugin reads it, which is this one, the editor switching it
-    // on before J-Weather's.
+    // is on: in the section of the first module to say its plugin reads it, which in the editor's order is this one.
     if (context.plugins.has(LIGHTING_TIME_PLUGIN))
     {
       contributions.skyReader(CLOCK_SKY);

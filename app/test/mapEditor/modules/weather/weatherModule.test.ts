@@ -17,11 +17,11 @@ import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
  * J-Weather's module switches on only while J-Weather is enabled in js/plugins.js, which is what offers every map view
  * its Weather switch: it then draws each map's own weather into the weather layer, from the project's
  * config.weather.json. Weather must cost a map without any nothing, so the module reads no config while it switches on:
- * it says which maps have weather from their notes and the sky alone, and the config is asked for only once a map with
- * weather is drawn. A config the module cannot draw from (unread, in the server's words where it gave any, or without
- * its motions and its presets) is said over every map view once it has been read, so a map shown without its weather is
- * never taken for one that has none, and the notice clears as soon as a later read serves; a config that serves says
- * nothing, and neither does one never read.
+ * it says which maps have weather from their notes and the sky alone, and the config is asked for only once something
+ * needs it, a map with weather drawn or the Weather section shown. A config the module cannot draw from (unread, in the
+ * server's words where it gave any, or without its motions and its presets) is said over every map view once it has
+ * been read, so a map shown without its weather is never taken for one that has none, and the notice clears as soon as
+ * a later read serves; a config that serves says nothing, and neither does one never read.
  *
  * The module adds a Weather section to Map Properties (its own tests hold what each setting reads and writes), handing
  * the views the config to ask for once the section shows rather than asking for it itself. J-Weather reads whether a map

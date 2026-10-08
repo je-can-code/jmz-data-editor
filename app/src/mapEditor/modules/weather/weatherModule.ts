@@ -103,14 +103,15 @@ const drawsWeatherOn = (frame: WeatherFrame): boolean =>
  * or naming no look, draws nothing, as it does in the game with nothing driving a sky; a look the map names runs at its
  * middle strength until something drives one.
  *
- * Weather costs a map without any nothing: the config is read, and the code that draws loaded, only the first time a map
- * has weather, never while the window opens. A config that then turns out not to serve is said over every map view.
+ * Weather costs a map without any nothing: the code that draws is loaded only the first time a map has weather, and the
+ * config is read only once something needs it, a map with weather to draw it or Map Properties' Weather section to list
+ * the looks, never as the module switches on. A config that then turns out not to serve is said over every map view.
  *
  * Map Properties gains a Weather section: the look the map shows, chosen from those the config lists, and whether it
- * opts out of weather altogether, each written into the map's note in place. The config is read for it only once the
- * section shows. J-Weather reads whether a map has a sky too, which the module says, so the sky setting shows in
- * Map Properties while J-Weather is on: in this section while no module said so first, and otherwise in that one's,
- * worded for both. J-Weather-Time cannot run without J-Weather, so nothing here asks whether it is on.
+ * opts out of weather altogether, each written into the map's note in place. J-Weather reads whether a map has a sky
+ * too, which the module says, so the sky setting shows in Map Properties while J-Weather is on: in this section while no
+ * module said so first, and otherwise in that one's, worded for both. J-Weather-Time cannot run without J-Weather, so
+ * nothing here asks whether it is on.
  */
 const weatherModule: PluginModule = {
   id: 'weather',
