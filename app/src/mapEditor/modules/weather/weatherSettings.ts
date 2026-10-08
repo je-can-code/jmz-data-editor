@@ -14,8 +14,8 @@ const WEATHER_SETTINGS_ID = 'weather.settings';
 
 /**
  * J-Weather, as a plugin reading whether a map has a sky (MapWeatherResolver.declarationFor): the sky's weather reaches
- * only a map with one, and a look the map names rises and falls with the sky's strength only under one. J-Weather-Time,
- * which drives that sky, cannot run without J-Weather, so J-Weather being on speaks for both.
+ * only a map with one, and a look the map names rises and falls with the sky's strength only under one. Both matter only
+ * while J-Weather-Time drives that sky, so J-Weather's module says J-Weather reads it only then.
  */
 const WEATHER_SKY: SkyReader = {
   id: 'weather.sky',
@@ -134,9 +134,9 @@ const weatherNote = (weather: MapWeather): string | null =>
 /**
  * Builds the settings of a map's weather, as J-Weather reads them from its note on arrival: the look it shows, named
  * from those the project's config lists; whether it opts out of weather altogether; and whether it has a sky, while
- * J-Weather is the first plugin the active modules say reads it ({@link skySettingFor}), as it is while J-Lighting-Time
- * is off. Each shows what the game will do, and each change writes the note in place, so every other tag and every other
- * word of it stays as written.
+ * J-Weather is the first plugin the active modules say reads it ({@link skySettingFor}), as it is while J-Weather-Time
+ * drives a sky and J-Lighting-Time is off. Each shows what the game will do, and each change writes the note in place, so
+ * every other tag and every other word of it stays as written.
  *
  * The config is read only once the section shows ({@link MapPropertiesSection.config}), never while a map merely opens,
  * so until it arrives the look lists only what the note names.

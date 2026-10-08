@@ -6,20 +6,26 @@ import type { WeatherDeclaration } from '../../../../src/mapEditor/modules/weath
  * A map's weather is decided as MapWeatherResolver#resolve decides it, in J-Weather's own order: an opt-out shows
  * nothing whatever the sky does; a look the map names shows wherever it was named; a map naming none under a roof shows
  * nothing; and one naming none under open sky shows whatever the sky is doing, which with nothing driving a sky, as with
- * J-Weather on its own and in the editor until the sky is driven, is nothing at all. A named look runs at the sky's
- * strength under open sky and at its middle rung under a roof or with no sky driven. Two resolutions are the same
- * weather when their look and strength are, nothing being the same as nothing.
+ * J-Weather on its own and in the editor until a sky is picked, is nothing at all. A named look runs at the sky's
+ * strength under open sky, bent through the map's climate as J-Weather-Time bends it, and at its middle rung under a
+ * roof or with no sky driven; a map naming no look takes the sky's own strength, whatever climate it names. Two
+ * resolutions are the same weather when their look and strength are, nothing being the same as nothing.
  */
 describe('weatherResolver', () =>
 {
-  const SKY = { preset: 'clear', intensity: 'heavy' };
+  const SKY = { preset: 'clear', intensity: 'heavy', type: 'clear' };
+
+  /**
+   * A climate answering a clear sky lightly, which the config holds.
+   */
+  const CLIMATES = { dreaming: { byType: { clear: 'light' } } };
 
   /**
    * Builds a declaration.
    * @param {Partial<WeatherDeclaration>} said What the note says beyond nothing.
    * @returns {WeatherDeclaration} The declaration.
    */
-  const declared = (said: Partial<WeatherDeclaration>): WeatherDeclaration => ({ suppressed: false, preset: null, hasSky: true, ...said });
+  const declared = (said: Partial<WeatherDeclaration>): WeatherDeclaration => ({ suppressed: false, preset: null, hasSky: true, climate: null, ...said });
 
   describe('resolveWeather', () =>
   {
@@ -73,7 +79,21 @@ describe('weatherResolver', () =>
 
       // Assert.
       expect(weathers)
-        .toStrictEqual([ SKY, null ]);
+        .toStrictEqual([ { preset: 'clear', intensity: 'heavy' }, null ]);
+    });
+
+    it('bends a look the map names through its climate, and leaves the sky\'s own look on a map naming none as it is', () =>
+    {
+      // Arrange: fog named in a dreaming place, and a dreaming place naming no look, under a heavy clear sky.
+      const named = declared({ preset: 'fog', climate: 'dreaming' });
+      const unnamed = declared({ climate: 'dreaming' });
+
+      // Act.
+      const weathers = [ resolveWeather(named, SKY, CLIMATES), resolveWeather(unnamed, SKY, CLIMATES) ];
+
+      // Assert.
+      expect(weathers)
+        .toStrictEqual([ { preset: 'fog', intensity: 'light' }, { preset: 'clear', intensity: 'heavy' } ]);
     });
 
     it('shows nothing on a map with a roof that names nothing, whatever the sky does', () =>
@@ -107,6 +127,25 @@ describe('weatherResolver', () =>
       // Assert.
       expect(intensities)
         .toStrictEqual([ 'heavy', 'moderate', 'moderate' ]);
+    });
+
+    it('bends the sky\'s strength through a climate the config holds, and only under open sky with a sky driven', () =>
+    {
+      // Arrange: a dreaming place under the sky, the same under a roof, the same with no sky driven, and a place naming
+      // no climate, each naming fog.
+      const cases: [ WeatherDeclaration, typeof SKY | null ][] = [
+        [ declared({ preset: 'fog', climate: 'dreaming' }), SKY ],
+        [ declared({ preset: 'fog', climate: 'dreaming', hasSky: false }), SKY ],
+        [ declared({ preset: 'fog', climate: 'dreaming' }), null ],
+        [ declared({ preset: 'fog' }), SKY ],
+      ];
+
+      // Act.
+      const intensities = cases.map(([ declaration, sky ]) => intensityFor(declaration, sky, CLIMATES));
+
+      // Assert.
+      expect(intensities)
+        .toStrictEqual([ 'light', 'moderate', 'moderate', 'heavy' ]);
     });
   });
 

@@ -9,8 +9,18 @@ import type { TextureSource, WorldRect } from './MapRenderer.ts';
  * driving a sky hands one in, as J-Weather-Time does; with none, a map shows what its note says and nothing else.
  */
 type SkyWeather = {
+  /**
+   * The look the sky is drawn with: J-Weather-Time hands over the face its condition wears at the hour and the season,
+   * such as starfall for a clear night.
+   */
   readonly preset: string;
   readonly intensity: string;
+
+  /**
+   * The condition the sky is in, such as clear, which J-Weather-Time hands over beside its face, so a place whose
+   * climate answers the sky by its condition can tell how clear it is, which no face can say.
+   */
+  readonly type: string;
 };
 
 /**
@@ -78,8 +88,8 @@ type WeatherFrame = {
   readonly images: TextureSource | null;
 
   /**
-   * What the sky is doing, or null while nothing drives one, which is J-Weather on its own: then a map tagged with a
-   * look shows it at its middle strength, and a map without one shows nothing.
+   * What the sky is doing, or null while nothing drives one, which is J-Weather on its own, and while the author has
+   * picked no sky: then a map tagged with a look shows it at its middle strength, and a map without one shows nothing.
    */
   readonly sky: SkyWeather | null;
 };

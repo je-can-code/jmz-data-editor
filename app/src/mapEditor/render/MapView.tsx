@@ -34,6 +34,8 @@ import { usePaletteLinks } from './paletteLinks.ts';
 import { PixiMapRenderer } from './PixiMapRenderer.ts';
 import { PreviewChip } from './PreviewChip.tsx';
 import { projectImagesFor } from './projectImages.ts';
+import { SkyChip } from './SkyChip.tsx';
+import { followSky } from './skyFollower.ts';
 import { installSpeedHooks, wantsSpeedHooks } from './speedHooks.ts';
 import { followToolInHand } from './tools/leftButton.ts';
 import { PaintController } from './tools/PaintController.ts';
@@ -233,8 +235,9 @@ const DrawNotice = (props: { state: DrawState; notices?: readonly ModuleNotice[]
 /**
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
  * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look
- * (Lighting among them while a plugin module lights the map, Weather while one draws its weather, and the window's one
- * clock while a module offers a time of day, the sky drawn and each event's page shown at its hour and in its season),
+ * (Lighting among them while a plugin module lights the map, Weather while one draws its weather, the window's one
+ * clock while a module offers a time of day, the sky drawn and each event's page shown at its hour and in its season,
+ * and the sky's weather picked beside it while a module offers a sky, every outdoor map drawn under it at that moment),
  * the window's preview beside it, saying how far along the story the maps show the game, the painting tools, and a
  * status line naming the zoom, the tile under the pointer, how many events are selected and the GPU drawing it. Each
  * event shows the page the game would at the clock's time and date, with the preview's switches and variables set and a
@@ -274,14 +277,15 @@ const MapView = (props: MapViewProps) =>
 
   // the plugin modules switch on once js/plugins.js is read, which can be after the bar first drew; whether any of them
   // lights the map decides whether the bar offers its Lighting switch, whether any draws weather its Weather switch,
-  // whether one offers a clock, its clock, and the kinds of state they let the preview set, what the preview chip calls
-  // them.
+  // whether one offers a clock, its clock, whether one offers a sky, its sky, and the kinds of state they let the preview
+  // set, what the preview chip calls them.
   useSyncExternalStore(services.modules.subscribe, () => services.modules.revision);
 
   // what the modules say over the map can change while they are on, such as a config read only once a map needed it.
   useSyncExternalStore(services.modules.subscribeNotices, () => services.modules.noticesRevision);
   const switches = shownSwitches(services.modules.lightingLayers().length > 0, services.modules.weatherLayers().length > 0);
   const clockOffer = services.modules.clockOffer();
+  const skyOffer = services.modules.skyOffer();
   const nouns = previewNouns(services.modules.previewKinds());
   const [ openMap, setOpenMap ] = useState<MapDocument | null>(null);
   const [ status, setStatus ] = useState<MapViewStatus>({ gpu: '', zoom: 1, cell: null, problem: null, note: '' });
@@ -345,6 +349,10 @@ const MapView = (props: MapViewProps) =>
     };
     followClock();
     stops.push(services.clock.subscribe(followClock));
+
+    // the sky's weather follows the clock too, while a module offers a sky and the author has picked one; with none
+    // picked, the renderer is told nothing and nothing is read for it.
+    stops.push(followSky(renderer, services.clock, services.modules));
 
     // the pages are judged at the window's preview too, the switches and variables set in place of a fresh save's, and a
     // change to it draws again only the events whose pages read what changed.
@@ -581,6 +589,9 @@ const MapView = (props: MapViewProps) =>
         ))}
         {clockOffer !== null && (
           <ClockChip clock={services.clock} partOfDay={clockOffer.partOfDay} seasons={clockOffer.seasons}/>
+        )}
+        {skyOffer !== null && (
+          <SkyChip clock={services.clock} offer={skyOffer}/>
         )}
         <PreviewChip preview={services.preview} nouns={nouns} onOpen={() => openPreview()}/>
         <Divider flexItem orientation={'vertical'} sx={{ mx: 0.5 }}/>

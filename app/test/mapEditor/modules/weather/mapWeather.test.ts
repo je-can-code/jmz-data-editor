@@ -10,10 +10,12 @@ import type { CanvasMaker } from '../../../../src/mapEditor/modules/weather/weat
 import { buildMapJson } from '../../support/fixtures.ts';
 
 /*
- * A map's own weather is drawn as J-Weather draws it: the look the map's note names, each of its layers a batch of
- * particles blended as the layer says, moved exactly as the plugin moves them, settled on arrival, and drawn with the
- * project's own pictures once they arrive, one sprite per particle, centred, tinted as the layer is. An opt-out, a map
- * naming no look, and a look the config does not know draw nothing; a layer whose picture the project lacks draws
+ * A map's weather is drawn as J-Weather draws it: the look the map's note names, or on an outdoor map naming none, the
+ * sky's, each of its layers a batch of particles blended as the layer says, moved exactly as the plugin moves them,
+ * settled on arrival, and drawn with the project's own pictures once they arrive, one sprite per particle, centred,
+ * tinted as the layer is. A look the map names runs at the sky's strength under open sky, bent through the climate the
+ * map names, from the config's own climates. An opt-out, a map naming no look under no sky, and a look the config does
+ * not know draw nothing; a layer whose picture the project lacks draws
  * nothing and says so, and a layer whose stage names no picture draws that stage as nothing, as the game draws its empty
  * picture. A raindrop and its ripple are laid side by side on one canvas, so a layer draws in one batch.
  *
@@ -221,12 +223,46 @@ describe('MapWeather', () =>
 
       // Act.
       clouds.weather.draw(frame(mapWith('<weather:clouds>')));
-      embers.weather.draw(frame(mapWith('<weather:embers>'), { sky: { preset: 'clear', intensity: 'heavy' } }));
+      embers.weather.draw(frame(mapWith('<weather:embers>'), { sky: { preset: 'clear', intensity: 'heavy', type: 'clear' } }));
 
       // Assert: the heavy rung has one layer, of 40 to the default window.
       const heavy = embers.weather.describe() as { weather: unknown; layers: { stats: { count: number } }[] };
       expect([ batchesOf(clouds.stage)[0].blendMode, heavy.weather, heavy.layers.map(layer => layer.stats.count) ])
         .toStrictEqual([ 'multiply', { preset: 'embers', intensity: 'heavy' }, [ 40 ] ]);
+    });
+
+    it('draws the sky\'s own look on an outdoor map naming none, at the sky\'s strength', () =>
+    {
+      // Arrange: an outdoor map naming nothing, under a sky snowing moderately.
+      const { weather, stage } = weatherOn();
+
+      // Act.
+      weather.draw(frame(mapWith(''), { sky: { preset: 'snow', intensity: 'moderate', type: 'snow' } }));
+
+      // Assert: snow's one layer, 20 to the default window.
+      const drawn = weather.describe() as { weather: unknown; layers: { stats: { count: number } }[] };
+      expect([ drawn.weather, drawn.layers.map(layer => layer.stats.count), batchesOf(stage).length ])
+        .toStrictEqual([ { preset: 'snow', intensity: 'moderate' }, [ 20 ], 1 ]);
+    });
+
+    it('bends the sky\'s strength through the climate a map names, from the config\'s own climates', () =>
+    {
+      // Arrange: embers named in a place answering a clear sky heavily and every other sky moderately, under a light
+      // clear sky; and the same map with the config holding no climates at all.
+      const climates = { ...CONFIG, climates: { dreaming: { byType: { clear: 'heavy' }, default: 'moderate' } } };
+      const bent = weatherOn(undefined, climates);
+      const plain = weatherOn();
+      const sky = { preset: 'clear', intensity: 'light', type: 'clear' };
+      const map = mapWith('<weather:embers>\n<climate:dreaming>');
+
+      // Act.
+      bent.weather.draw(frame(map, { sky }));
+      plain.weather.draw(frame(map, { sky }));
+
+      // Assert: the climate makes it heavy; with none to read, it follows the sky's light, which embers has no rung for.
+      const weatherOf = (drawing: MapWeather) => (drawing.describe() as { weather: unknown }).weather;
+      expect([ weatherOf(bent.weather), weatherOf(plain.weather) ])
+        .toStrictEqual([ { preset: 'embers', intensity: 'heavy' }, { preset: 'embers', intensity: 'light' } ]);
     });
 
     it('fits each layer with its pictures once they arrive: a particle each, centred, tinted as the layer is', async () =>

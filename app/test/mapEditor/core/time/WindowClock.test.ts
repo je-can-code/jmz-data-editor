@@ -11,6 +11,11 @@ import { WindowClock } from '../../../../src/mapEditor/core/time/WindowClock.ts'
  * It holds a season too, which the author picks: none until then, which is the season the game starts in, whichever
  * that is. Picking one tells whoever listens, unless it is the season already held; the hour and the season move apart,
  * neither disturbing the other.
+ *
+ * And it holds the sky the author picks, a condition and a strength: none until then, as on a new game, whose sky is
+ * random, and none again once the author picks none. Picking one tells whoever listens, unless it is the same condition
+ * at the same strength, by value, and the clock keeps a copy of its own, so nothing a caller does to its object moves
+ * the sky behind the listeners' backs. The sky moves apart from the hour and the season.
  */
 describe('WindowClock', () =>
 {
@@ -152,6 +157,78 @@ describe('WindowClock', () =>
     // Assert.
     expect([ clock.time(), clock.moved, clock.season() ])
       .toStrictEqual([ 840, false, 1 ]);
+  });
+
+  it('holds no sky until the author picks one, and tells every listener once one is picked', () =>
+  {
+    // Arrange: two listeners.
+    const clock = new WindowClock(840);
+    const before = clock.sky();
+    const heard: string[] = [];
+    clock.subscribe(() => heard.push(`first under ${JSON.stringify(clock.sky())}`));
+    clock.subscribe(() => heard.push(`second under ${JSON.stringify(clock.sky())}`));
+
+    // Act: heavy rain picked.
+    clock.chooseSky({ condition: 'rain', strength: 'heavy' });
+
+    // Assert.
+    const rain = '{"condition":"rain","strength":"heavy"}';
+    expect([ before, clock.sky(), heard ])
+      .toStrictEqual([ null, { condition: 'rain', strength: 'heavy' }, [ `first under ${rain}`, `second under ${rain}` ] ]);
+  });
+
+  it('tells nobody when the sky picked is the one it already holds, and tells everyone of the same condition at another strength, another condition at the same strength, and none', () =>
+  {
+    // Arrange: heavy rain held, and a listener.
+    const clock = new WindowClock(840);
+    clock.chooseSky({ condition: 'rain', strength: 'heavy' });
+    const held = clock.sky();
+    const heard: string[] = [];
+    clock.subscribe(() => heard.push(JSON.stringify(clock.sky())));
+
+    // Act: heavy rain again, as an object of its own; then light rain, light snow, and none, twice.
+    clock.chooseSky({ condition: 'rain', strength: 'heavy' });
+    const kept = clock.sky();
+    clock.chooseSky({ condition: 'rain', strength: 'light' });
+    clock.chooseSky({ condition: 'snow', strength: 'light' });
+    clock.chooseSky(null);
+    clock.chooseSky(null);
+
+    // Assert: the same sky was kept as the very object held, unheard.
+    expect([ kept === held, heard ])
+      .toStrictEqual([
+        true,
+        [ '{"condition":"rain","strength":"light"}', '{"condition":"snow","strength":"light"}', 'null' ],
+      ]);
+  });
+
+  it('keeps a sky of its own, which nothing done to the object it was handed moves', () =>
+  {
+    // Arrange: a pick the caller goes on holding.
+    const clock = new WindowClock(840);
+    const handed = { condition: 'rain', strength: 'heavy' };
+
+    // Act: picked, then the caller's object changed.
+    clock.chooseSky(handed);
+    handed.strength = 'light';
+
+    // Assert.
+    expect(clock.sky())
+      .toStrictEqual({ condition: 'rain', strength: 'heavy' });
+  });
+
+  it('moves its sky apart from its hour and its season', () =>
+  {
+    // Arrange: 14:00 in Autumn.
+    const clock = new WindowClock(840);
+    clock.chooseSeason(2);
+
+    // Act: light snow picked.
+    clock.chooseSky({ condition: 'snow', strength: 'light' });
+
+    // Assert.
+    expect([ clock.time(), clock.season(), clock.moved, clock.sky() ])
+      .toStrictEqual([ 840, 2, false, { condition: 'snow', strength: 'light' } ]);
   });
 
   it('stops telling a listener that stopped listening, and keeps telling the others', () =>

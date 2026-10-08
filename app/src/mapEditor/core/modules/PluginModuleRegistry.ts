@@ -18,6 +18,7 @@ import type {
   PassabilityRule,
   PluginModule,
   PreviewKindDefinition,
+  SkyOffer,
   SkyReader,
 } from './PluginModule.ts';
 
@@ -52,6 +53,7 @@ type Contributions = {
    */
   notices: LiveNotice[];
   clocks: ClockOffer[];
+  skies: SkyOffer[];
   mapProperties: MapPropertiesSection[];
   skyReaders: SkyReader[];
   pageConditions: PageCondition[];
@@ -73,6 +75,7 @@ const noContributions = (): Contributions => ({
   templateMaps: [],
   notices: [],
   clocks: [],
+  skies: [],
   mapProperties: [],
   skyReaders: [],
   pageConditions: [],
@@ -145,10 +148,10 @@ const configNamesOf = (pluginModule: PluginModule, enabled: ReadonlyMap<string, 
 
 /**
  * Holds the event kinds, palette entries, passability rules, overlays, lighting layers, weather layers and command
- * entries the editor knows, the maps whose events are a plugin's patterns, what the modules say over every map view, the clock they offer,
- * the sections they add to Map Properties and the plugins they say read a map's sky, the conditions they add to the
- * game's page rule and the kinds of state they let the preview set: the core's kinds, always, and each plugin module's
- * contributions while its plugins are enabled.
+ * entries the editor knows, the maps whose events are a plugin's patterns, what the modules say over every map view, the
+ * clock and the sky they offer, the sections they add to Map Properties and the plugins they say read a map's sky, the
+ * conditions they add to the game's page rule and the kinds of state they let the preview set: the core's kinds, always,
+ * and each plugin module's contributions while its plugins are enabled.
  */
 class PluginModuleRegistry
 {
@@ -437,6 +440,17 @@ class PluginModuleRegistry
   }
 
   /**
+   * Finds the sky the active modules offer the map views: the first one offered, or none while no module offers one,
+   * which is when no map view shows a sky's picker, and every map's sky shows nothing.
+   * @returns {SkyOffer | null} The offer, or null.
+   */
+  skyOffer(): SkyOffer | null
+  {
+    const [ first ] = this.#contributions.skies;
+    return first ?? null;
+  }
+
+  /**
    * Lists the sections the active modules add to Map Properties, in the order they added them; empty while none adds
    * any.
    * @returns {readonly MapPropertiesSection[]} The sections.
@@ -535,6 +549,10 @@ class PluginModuleRegistry
       clock: offer =>
       {
         this.#contributions.clocks.push(offer);
+      },
+      sky: offer =>
+      {
+        this.#contributions.skies.push(offer);
       },
       mapProperties: section =>
       {

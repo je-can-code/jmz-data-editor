@@ -323,13 +323,13 @@ describe('PixiMapRenderer', () =>
       const stale = vi.spyOn(WeatherLayers.prototype, 'markStale');
 
       // Act.
-      renderer.setWeatherSky({ preset: 'rain', intensity: 'heavy' });
+      renderer.setWeatherSky({ preset: 'rain', intensity: 'heavy', type: 'rain' });
       const calls = stale.mock.calls.length;
       stale.mockRestore();
 
       // Assert.
       expect([ before, renderer.weatherSky, calls ])
-        .toStrictEqual([ null, { preset: 'rain', intensity: 'heavy' }, 1 ]);
+        .toStrictEqual([ null, { preset: 'rain', intensity: 'heavy', type: 'rain' }, 1 ]);
     });
 
     it('starts the weather over when asked, and says what the weather shows, nothing while it holds no drawing', () =>

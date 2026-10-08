@@ -1,4 +1,4 @@
-import type { RawKnobs, WeatherConfigFile } from './weatherConfig.ts';
+import { entryOf, type RawKnobs, type WeatherConfigFile } from './weatherConfig.ts';
 import { pulseRateOf, swayRateOf } from './weatherMotion.ts';
 
 /**
@@ -94,20 +94,6 @@ const knob = (knobs: RawKnobs, name: string): number =>
 const optionalKnob = (knobs: RawKnobs, name: string): number | undefined =>
 {
   return knobs[name] as number | undefined;
-};
-
-/**
- * Finds an entry of a config table by name, as J-Weather's plain property read finds it, minus what every object holds
- * by birth: a look named "constructor" is no look, where the plugin would find the object's own constructor and fail.
- * @param {Readonly<Record<string, T>>} table The table.
- * @param {string} name The entry's name.
- * @returns {T | undefined} The entry, or undefined when the table has none by that name.
- */
-const entryOf = <T>(table: Readonly<Record<string, T>>, name: string): T | undefined =>
-{
-  return Object.hasOwn(table, name)
-    ? table[name]
-    : undefined;
 };
 
 /**

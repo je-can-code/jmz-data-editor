@@ -10,9 +10,9 @@ import { ModulePropertyDrag, type MapPropertiesSource } from '../core/properties
 import type { MapEventTools } from '../events/MapEventTools.ts';
 import { TILE_SIZE, type Camera } from '../core/renderer/camera.ts';
 import type { LightingLayerDefinition } from '../core/renderer/lightingLayer.ts';
-import type { SkyWeather, WeatherLayerDefinition } from '../core/renderer/weatherLayer.ts';
+import type { WeatherLayerDefinition } from '../core/renderer/weatherLayer.ts';
 import { onTheClock, timeOfDayAt } from '../core/time/timeOfDay.ts';
-import type { WindowClock } from '../core/time/WindowClock.ts';
+import type { SkyPick, WindowClock } from '../core/time/WindowClock.ts';
 import {
   GAME_LOOK,
   NO_OVERLAY_STATE,
@@ -181,6 +181,34 @@ const parityLightingLayers = (layers: readonly LightingLayerDefinition[]): Light
  * Timings of opening a map, in milliseconds on the page's clock (from navigation start).
  */
 type OpenTimings = Record<string, number>;
+
+/**
+ * How the parity check asks a map to be drawn: with its events or without, at an animation step and engine frame, with
+ * the lighting and the weather the game shows, if it shows them, at the hour, in the season and under the sky the game's
+ * clock and forecast were set to, any of them left as they stand when it says nothing of them.
+ */
+type ParityOptions = {
+  readonly events: boolean;
+  readonly step: number;
+  readonly frames: number;
+  readonly lighting?: boolean;
+  readonly weather?: boolean;
+
+  /**
+   * The time of day, in minutes past midnight.
+   */
+  readonly time?: number;
+
+  /**
+   * The season, as the module offering the clock numbers it.
+   */
+  readonly season?: number;
+
+  /**
+   * The sky, or null for none, as on a new game whose sky is held off.
+   */
+  readonly sky?: SkyPick | null;
+};
 
 /**
  * What the hooks need from the map view: its renderer, the window's hub, its painting tools and their settings, its
@@ -584,14 +612,25 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     },
     // the parity check draws the map as the game would, still, with nothing of the editor's on top: of the lighting,
     // only what the game itself shows, such as a map's darkness and the sky's colour, and never an aid like a light's
-    // ring; the weather only when asked; at the hour the game's clock was set to, when it says one.
-    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean; weather?: boolean; time?: number }) =>
+    // ring; the weather only when asked; at the hour the game's clock was set to, when it says one, in the season whose
+    // date the game's clock was set to, when it says one, and under the sky the game's forecast was set to, or none.
+    prepareParity: (options: ParityOptions) =>
     {
       hoverFollows = false;
       overlayState = NO_OVERLAY_STATE;
       if (options.time !== undefined)
       {
         clock.set(options.time);
+      }
+
+      if (options.season !== undefined)
+      {
+        clock.chooseSeason(options.season);
+      }
+
+      if (options.sky !== undefined)
+      {
+        clock.chooseSky(options.sky);
       }
 
       renderer.setOverlayState(overlayState);
@@ -602,12 +641,13 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       renderer.holdAnimation({ step: options.step, frames: options.frames });
     },
     // what the weather shows and what the sky is doing, for the parity check to hold against the game's, and for the
-    // speed script to put a look on a map that names none: the sky an outdoor map's weather follows, which nothing in
-    // the editor drives yet. Starting the weather over settles it afresh for the part of the map the view shows.
+    // speed script to put a look on a map that names none: the sky picked on the window's clock, as an author picks it,
+    // which the view follows to tell the renderer the sky an outdoor map's weather follows. Starting the weather over
+    // settles it afresh for the part of the map the view shows.
     weather: {
       describe: () => renderer.weatherDescriptions(),
       sky: () => renderer.weatherSky,
-      setSky: (sky: SkyWeather | null) => renderer.setWeatherSky(sky),
+      pick: (pick: SkyPick | null) => clock.chooseSky(pick),
       reset: () => renderer.resetWeather(),
       depth: () => weatherDepthOf(renderer),
     },
@@ -719,4 +759,4 @@ export {
   wantsSpeedHooks,
   weatherDepthOf,
 };
-export type { CameraPath, SpeedHooksContext, StrokeSettings, SweptSlider };
+export type { CameraPath, ParityOptions, SpeedHooksContext, StrokeSettings, SweptSlider };

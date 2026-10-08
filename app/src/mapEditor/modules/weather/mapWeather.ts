@@ -2,6 +2,7 @@ import { Particle, ParticleContainer, type BLEND_MODES } from 'pixi.js';
 import type { JsonValue } from '../../core/model/json.ts';
 import type { TextureImage, TextureSource, WorldRect } from '../../core/renderer/MapRenderer.ts';
 import type { WeatherDrawing, WeatherFrame, WeatherStage } from '../../core/renderer/weatherLayer.ts';
+import { climatesFrom, type ClimateTables } from './climateCurves.ts';
 import { ensureParticlePipe } from './particlePipe.ts';
 import type { WeatherConfigFile } from './weatherConfig.ts';
 import { WeatherField } from './weatherField.ts';
@@ -81,11 +82,12 @@ const weatherRectFor = (view: WorldRect, mapWidth: number, mapHeight: number): W
 };
 
 /**
- * A map's own weather in one map view, as J-Weather draws it in the game: the look the map's note names, at the strength
- * the sky gives it or its middle one, each of the look's layers a population of particles moved exactly as the plugin
- * moves them and drawn with its pictures, sizes, colours, strengths and blends, settled on arrival so it opens as
- * weather that has been going. An opt-out, a map naming no look, and a look the config does not know draw nothing, as
- * they do in the game.
+ * A map's weather in one map view, as J-Weather draws it in the game: the look the map's note names, at the strength the
+ * sky gives it, bent through the map's climate, or its middle one, or on an outdoor map naming none, the sky's own look
+ * at the sky's strength; each of the look's layers a population of particles moved exactly as the plugin moves them and
+ * drawn with its pictures, sizes, colours, strengths and blends, settled on arrival so it opens as weather that has been
+ * going. An opt-out, a map naming no look under no sky, and a look the config does not know draw nothing, as they do in
+ * the game.
  *
  * The game draws its weather over its screen; here the screen is the part of the map the view shows, so the weather is
  * as thick, as big and as fast as the game's at every zoom, and stays put on the view as it pans, as the game's stays put
@@ -98,6 +100,11 @@ class MapWeather implements WeatherDrawing
   #stage: WeatherStage;
 
   #config: WeatherConfigFile | null;
+
+  /**
+   * The climates the config holds, which bend the sky's strength for a map naming a look and a climate.
+   */
+  #climates: ClimateTables;
 
   #makeCanvas: CanvasMaker;
 
@@ -128,13 +135,14 @@ class MapWeather implements WeatherDrawing
   {
     this.#stage = stage;
     this.#config = config;
+    this.#climates = climatesFrom(config?.climates);
     this.#makeCanvas = makeCanvas;
   }
 
   draw(frame: WeatherFrame): void
   {
     const { document } = frame;
-    const weather = resolveWeather(weatherDeclarationOf(document.property('note')), frame.sky);
+    const weather = resolveWeather(weatherDeclarationOf(document.property('note')), frame.sky, this.#climates);
 
     // the same weather on the same map is kept as it is, falling on from where it was; anything else arrives afresh.
     if (document.mapId !== this.#mapId || isSameWeather(weather, this.#weather) === false)

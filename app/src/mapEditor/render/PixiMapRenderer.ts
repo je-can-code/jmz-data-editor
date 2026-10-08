@@ -550,8 +550,8 @@ class PixiMapRenderer implements MapRenderer
 
   /**
    * Says what the sky is doing, which the weather is drawn under: an outdoor map tagged with a look rises and falls with
-   * it, and one with no look of its own shows the sky's. Nothing in the editor drives a sky yet, so it stays null, which
-   * is J-Weather on its own; the weather is asked to draw again in the next frame.
+   * it, and one with no look of its own shows the sky's. It stays null, which is J-Weather on its own, until the view
+   * follows a sky the author picked; the weather is asked to draw again in the next frame.
    * @param {SkyWeather | null} sky What the sky is doing, or null for no sky.
    */
   setWeatherSky(sky: SkyWeather | null): void

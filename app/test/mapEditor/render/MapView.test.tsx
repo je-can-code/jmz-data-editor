@@ -330,6 +330,7 @@ describe('MapView', () =>
     subscribeNotices: () => () => undefined,
     noticesRevision: 0,
     clockOffer: () => null,
+    skyOffer: () => null,
     pageConditions: () => [],
     previewKinds: () => [],
   };

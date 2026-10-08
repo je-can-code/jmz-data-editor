@@ -861,10 +861,10 @@ describe('MapEditorServices', () =>
       event.services.stop();
     });
 
-    it('brings back the clock, its season and the preview the project left, and shares every change with every other window', async () =>
+    it('brings back the clock, its season, its sky and the preview the project left, and shares every change with every other window', async () =>
     {
-      // Arrange: a window turning switch 147 on, moving the clock to 22:00 and picking Summer, on a machine serving Chef
-      // Adventure.
+      // Arrange: a window turning switch 147 on, moving the clock to 22:00, picking Summer and picking heavy rain, on a
+      // machine serving Chef Adventure.
       const network = new MemoryChannelNetwork();
       const machine = buildMachine();
       const server = buildServer('/games/chef-adventure');
@@ -872,10 +872,12 @@ describe('MapEditorServices', () =>
       first.services.preview.setSwitch(147, true);
       first.services.clock.set(1320);
       first.services.clock.chooseSeason(1);
+      first.services.clock.chooseSky({ condition: 'rain', strength: 'heavy' });
+      const rain = '"sky":{"condition":"rain","strength":"heavy"}';
       await vi.waitFor(() =>
       {
         expect(machine.texts.get('/games/chef-adventure'))
-          .toBe('{"version":1,"clock":1320,"season":1,"preview":{"switch":{"147":true}}}');
+          .toBe(`{"version":1,"clock":1320,"season":1,${rain},"preview":{"switch":{"147":true}}}`);
       });
 
       // Act: a second window opens, then goes back to a fresh save.
@@ -885,12 +887,16 @@ describe('MapEditorServices', () =>
         expect(second.services.preview.preview().switchesOn())
           .toStrictEqual([ 147 ]);
       });
-      const opened = [ second.services.clock.time(), second.services.clock.moved, second.services.clock.season() ];
+      const opened = [ second.services.clock.time(), second.services.clock.moved, second.services.clock.season(), second.services.clock.sky() ];
       second.services.preview.reset();
 
-      // Assert: the season stays as the author picked it when the preview goes back to a fresh save.
+      // Assert: the season and the sky stay as the author picked them when the preview goes back to a fresh save.
       expect([ opened, first.services.preview.preview().isFresh, machine.texts.get('/games/chef-adventure') ])
-        .toStrictEqual([ [ 1320, true, 1 ], true, '{"version":1,"clock":1320,"season":1,"preview":{}}' ]);
+        .toStrictEqual([
+          [ 1320, true, 1, { condition: 'rain', strength: 'heavy' } ],
+          true,
+          `{"version":1,"clock":1320,"season":1,${rain},"preview":{}}`,
+        ]);
       first.services.stop();
       second.services.stop();
     });

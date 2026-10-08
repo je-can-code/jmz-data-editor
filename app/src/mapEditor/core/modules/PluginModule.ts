@@ -13,7 +13,8 @@ import type { PreviewNouns } from '../preview/previewWords.ts';
 import type { MapPropertiesSource } from '../properties/moduleProperties.ts';
 import type { LightingLayerDefinition } from '../renderer/lightingLayer.ts';
 import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
-import type { WeatherLayerDefinition } from '../renderer/weatherLayer.ts';
+import type { SkyWeather, WeatherLayerDefinition } from '../renderer/weatherLayer.ts';
+import type { SkyPick } from '../time/WindowClock.ts';
 
 /**
  * What a quick panel is handed: the map and the selected events, all of one kind.
@@ -347,6 +348,91 @@ type ClockOffer = {
 };
 
 /**
+ * One condition the sky can be in, as the sky's picker lists it at a moment of the window's clock: its name, as the
+ * plugin names it, the strengths it is ever at, whether the sky can be in it at that moment at all, and the strength it
+ * takes when picked.
+ */
+type SkyCondition = {
+  readonly name: string;
+
+  /**
+   * The strengths the condition is ever at, as the plugin names them, weakest first.
+   */
+  readonly strengths: readonly string[];
+
+  /**
+   * Whether the sky can be in the condition at the moment, as it never snows in a summer that does not allow snow.
+   */
+  readonly possible: boolean;
+
+  /**
+   * The strength the condition takes when picked: the nearest it is ever at to the one wanted, or its usual one when none
+   * is.
+   * @param {string | null} wanted The strength wanted, such as the one picked before, or null for none.
+   * @returns {string} The strength.
+   */
+  readonly strengthFor: (wanted: string | null) => string;
+};
+
+/**
+ * The conditions the sky's picker lists at a moment of the window's clock, in the order the config lists them, or none,
+ * and why not, in the author's words, while the config is read or when it holds no sky.
+ */
+type SkyListing = {
+  readonly conditions: readonly SkyCondition[];
+
+  /**
+   * Why no conditions are listed, such as "Reading the project's sky…", or null once they are.
+   */
+  readonly problem: string | null;
+};
+
+/**
+ * What the sky is doing at a moment of the window's clock, for the sky the author picked: the weather J-Weather is told,
+ * or null when the sky shows nothing then, and what that comes to, in the author's words, such as "Shows as starfall
+ * (moderate) at this hour and season."
+ */
+type SkyReading = {
+  readonly weather: SkyWeather | null;
+  readonly words: string;
+};
+
+/**
+ * A sky a module offers the map views, for a plugin that drives one, as J-Weather-Time does: the weather in the sky over
+ * every outdoor map, following the window's clock. The author picks its condition and strength on the clock, since a new
+ * game's sky is random, and the module works out what the sky looks like at each moment the clock shows. Its config is
+ * read only once something needs it: a sky picked, or the picker opened.
+ */
+type SkyOffer = {
+  /**
+   * The config the sky is read from, read only once something needs it.
+   */
+  readonly config: OnDemandConfig;
+
+  /**
+   * Every strength the sky is ever at, weakest first, as the plugin names them, for the picker to list.
+   */
+  readonly strengths: readonly string[];
+
+  /**
+   * Lists the conditions the sky can be in, at a moment of the window's clock, in the order the config lists them.
+   * @param {number} minutes The clock's time of day, in minutes past midnight.
+   * @param {number | null} season The clock's season, or null for the season the game starts in.
+   * @returns {SkyListing} The conditions, or none and why not.
+   */
+  readonly conditionsAt: (minutes: number, season: number | null) => SkyListing;
+
+  /**
+   * Works out what the sky is doing at a moment of the window's clock, for the sky the author picked.
+   * @param {SkyPick | null} pick The sky picked, or null for none.
+   * @param {number} minutes The clock's time of day, in minutes past midnight.
+   * @param {number | null} season The clock's season, or null for the season the game starts in.
+   * @returns {SkyReading} What the sky is doing.
+   */
+  readonly readingAt: (pick: SkyPick | null, minutes: number, season: number | null) => SkyReading;
+};
+
+/**
  * A project config file a module reads only while some plugins beyond its own are enabled too, such as an extension's
  * config, which is read only while the extension is on: the name the server serves it under, and those plugins, by
  * file name.
@@ -479,6 +565,14 @@ type ModuleContributions = {
   clock(offer: ClockOffer): void;
 
   /**
+   * Offers the map views a sky, for as long as the module is on: the views show its picker beside the clock, and hand
+   * their renderers the weather it works out at the clock's moment for the sky picked. Should several modules offer one,
+   * the first to offer is the sky.
+   * @param {SkyOffer} offer The sky.
+   */
+  sky(offer: SkyOffer): void;
+
+  /**
    * Adds a section to Map Properties, shown for every map while the module is on.
    * @param {MapPropertiesSection} section The section.
    */
@@ -578,5 +672,9 @@ export type {
   PreviewKindDefinition,
   QuickPanelProps,
   SeasonOffer,
+  SkyCondition,
+  SkyListing,
+  SkyOffer,
   SkyReader,
+  SkyReading,
 };

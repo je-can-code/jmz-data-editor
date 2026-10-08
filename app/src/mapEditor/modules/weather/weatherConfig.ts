@@ -8,12 +8,28 @@ import type { JsonValue } from '../../core/model/json.ts';
 type RawKnobs = Readonly<Record<string, JsonValue | undefined>>;
 
 /**
- * J-Weather's config as the server serves it, as far as drawing goes: every motion by name, and every look by name,
- * each with its ladder of intensities.
+ * J-Weather's config as the server serves it, as far as drawing goes: every motion by name, every look by name, each
+ * with its ladder of intensities, and the climates J-Weather-Time bends the sky's strength through, as the file holds
+ * them, if it holds any.
  */
 type WeatherConfigFile = {
   readonly motions: Readonly<Record<string, RawKnobs>>;
   readonly presets: Readonly<Record<string, { readonly stops: Readonly<Record<string, readonly RawKnobs[]>> }>>;
+  readonly climates?: JsonValue;
+};
+
+/**
+ * Finds an entry of a config table by name, as the plugins' plain property reads find it, minus what every object holds
+ * by birth: a look or a climate named "constructor" is none, where a plugin would find the object's own constructor.
+ * @param {Readonly<Record<string, T>>} table The table.
+ * @param {string} name The entry's name.
+ * @returns {T | undefined} The entry, or undefined when the table has none by that name.
+ */
+const entryOf = <T>(table: Readonly<Record<string, T>>, name: string): T | undefined =>
+{
+  return Object.hasOwn(table, name)
+    ? table[name]
+    : undefined;
 };
 
 /**
@@ -37,5 +53,5 @@ const weatherConfigFrom = (config: JsonValue | null): WeatherConfigFile | null =
     : null;
 };
 
-export { weatherConfigFrom };
+export { entryOf, weatherConfigFrom };
 export type { RawKnobs, WeatherConfigFile };

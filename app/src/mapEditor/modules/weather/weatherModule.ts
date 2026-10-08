@@ -1,5 +1,8 @@
-import type { ConfigRead, LiveNotice, ModuleNotice, OnDemandConfig, PluginModule } from '../../core/modules/PluginModule.ts';
+import type { PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.ts';
+import type { ConfigRead, LiveNotice, ModuleContext, ModuleNotice, OnDemandConfig, PluginModule } from '../../core/modules/PluginModule.ts';
 import type { WeatherFrame } from '../../core/renderer/weatherLayer.ts';
+import { startingDateOf, TIME_PLUGIN } from '../time/timeParameters.ts';
+import { skyOfferFor } from './skyWeather.ts';
 import { WeatherOnDemand } from './weatherOnDemand.ts';
 import { weatherConfigFrom } from './weatherConfig.ts';
 import { resolveWeather } from './weatherResolver.ts';
@@ -10,6 +13,12 @@ import { weatherDeclarationOf } from './weatherTags.ts';
  * J-Weather's file name, as js/plugins.js lists it.
  */
 const WEATHER_PLUGIN = 'J-Weather';
+
+/**
+ * J-Weather-Time's file name, as js/plugins.js lists it: the extension driving a sky over every outdoor map, from the
+ * date and the hour J-TIME keeps.
+ */
+const WEATHER_TIME_PLUGIN = 'J-Weather-Time';
 
 /**
  * The name the server serves J-Weather's config under, from {@code data/config.weather.json}.
@@ -96,6 +105,18 @@ const drawsWeatherOn = (frame: WeatherFrame): boolean =>
 };
 
 /**
+ * Reports whether J-Weather-Time drives a sky: while it is on, with J-TIME, whose date and hour it reads, and without
+ * which the game does not start at all. Only then does any map have a sky's weather to take, and only then does whether a
+ * map has a sky matter to J-Weather.
+ * @param {ModuleContext} context The enabled plugins.
+ * @returns {boolean} True while both are enabled.
+ */
+const drivesSky = (context: ModuleContext): boolean =>
+{
+  return context.plugins.has(WEATHER_TIME_PLUGIN) && context.plugins.has(TIME_PLUGIN);
+};
+
+/**
  * What the editor knows of J-Weather: a map's own weather, from the look its note names, drawn into the weather layer as
  * the game draws it, its particles moved exactly as the plugin moves them and drawn with the project's own pictures,
  * sizes, colours, strengths and blends from config.weather.json. It sits where the game draws its weather, coloured by
@@ -103,15 +124,23 @@ const drawsWeatherOn = (frame: WeatherFrame): boolean =>
  * or naming no look, draws nothing, as it does in the game with nothing driving a sky; a look the map names runs at its
  * middle strength until something drives one.
  *
+ * While J-Weather-Time is on too, with J-TIME, it drives a sky, which the module offers the map views beside the clock:
+ * the author picks its condition and strength, since a new game's forecast is random, so none shows until one is picked.
+ * Every outdoor map naming no look then shows the face the condition wears at the clock's hour and season, and every
+ * outdoor map naming one runs it at the sky's strength, bent through its climate if it names one; a map under a roof or
+ * opting out shows what it showed before. That is J-Weather-Time's whole say in where weather falls: a map is outdoors
+ * exactly when its sky follows the clock.
+ *
  * Weather costs a map without any nothing: the code that draws is loaded only the first time a map has weather, and the
- * config is read only once something needs it, a map with weather to draw it or Map Properties' Weather section to list
- * the looks, never as the module switches on. A config that then turns out not to serve is said over every map view.
+ * config is read only once something needs it, a map with weather to draw it, a sky picked to work out its face, the
+ * sky's picker to list its conditions or Map Properties' Weather section to list the looks, never as the module switches
+ * on. A config that then turns out not to serve is said over every map view.
  *
  * Map Properties gains a Weather section: the look the map shows, chosen from those the config lists, and whether it
- * opts out of weather altogether, each written into the map's note in place. J-Weather reads whether a map has a sky
- * too, which the module says, so the sky setting shows in Map Properties while J-Weather is on: in this section while no
- * module said so first, and otherwise in that one's, worded for both. J-Weather-Time cannot run without J-Weather, so
- * nothing here asks whether it is on.
+ * opts out of weather altogether, each written into the map's note in place. While J-Weather-Time drives a sky, J-Weather
+ * reads whether a map has one, which the module then says, so the sky setting shows in Map Properties: in this section
+ * while no module said so first, and otherwise in that one's, worded for both. With no sky driven, whether a map has one
+ * changes nothing J-Weather draws, and the module says nothing of it.
  */
 const weatherModule: PluginModule = {
   id: 'weather',
@@ -129,8 +158,14 @@ const weatherModule: PluginModule = {
       create: stage => new WeatherOnDemand(stage, config),
     });
 
-    // J-Weather keeps the sky's weather off a map with no sky, so whether a map has one is set while it is on.
-    contributions.skyReader(WEATHER_SKY);
+    // only a driven sky brings weather to a map naming none, and only then does J-Weather read whether a map has a sky.
+    if (drivesSky(context))
+    {
+      const time = context.plugins.get(TIME_PLUGIN) as PluginsJsEntry;
+      contributions.sky(skyOfferFor(config, startingDateOf(time, new Date())));
+      contributions.skyReader(WEATHER_SKY);
+    }
+
     contributions.mapProperties({
       id: WEATHER_SETTINGS_ID,
       title: 'Weather',
@@ -140,4 +175,13 @@ const weatherModule: PluginModule = {
   },
 };
 
-export { MAP_WEATHER_ID, WEATHER_CONFIG, WEATHER_CONFIG_NOTICE_ID, WEATHER_PLUGIN, weatherConfigNotice, weatherModule };
+export {
+  drivesSky,
+  MAP_WEATHER_ID,
+  WEATHER_CONFIG,
+  WEATHER_CONFIG_NOTICE_ID,
+  WEATHER_PLUGIN,
+  WEATHER_TIME_PLUGIN,
+  weatherConfigNotice,
+  weatherModule,
+};

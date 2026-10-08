@@ -23,12 +23,17 @@ import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
  * been read, so a map shown without its weather is never taken for one that has none, and the notice clears as soon as
  * a later read serves; a config that serves says nothing, and neither does one never read.
  *
+ * While J-Weather-Time is on too, with the J-TIME it cannot run without, it drives a sky, which the module offers the map
+ * views, read from J-Weather's own config, and only then: with no sky driven, no map has a sky's weather to take. Saying
+ * no sky is picked asks nothing of the server.
+ *
  * The module adds a Weather section to Map Properties (its own tests hold what each setting reads and writes), handing
- * the views the config to ask for once the section shows rather than asking for it itself. J-Weather reads whether a map
- * has a sky, as J-Lighting-Time does, and the module says so, so the editor's modules together offer the map's sky in
- * Map Properties exactly once while any plugin reading it is on: in the Lighting section, worded for both, while
- * J-Lighting-Time is on, and otherwise in this one; and nowhere while neither is, J-Weather-Time on its own included,
- * since it cannot run without J-Weather.
+ * the views the config to ask for once the section shows rather than asking for it itself. While J-Weather-Time drives a
+ * sky, J-Weather reads whether a map has one, as J-Lighting-Time does, and the module says so, so the editor's modules
+ * together offer the map's sky in Map Properties exactly once while any plugin reading it is on: in the Lighting section,
+ * worded for both, while J-Lighting-Time is on, and otherwise in this one; and nowhere while neither is, J-Weather on its
+ * own included, whose reading changes nothing with no sky driven, and J-Weather-Time on its own, which cannot run
+ * without J-Weather.
  */
 describe('weatherModule', () =>
 {
@@ -123,7 +128,7 @@ describe('weatherModule', () =>
   {
     // Arrange: the module's weather layer, and maps by their notes, each under a sky or none.
     const [ layer ] = activated([ plugin('j/weather/J-Weather') ]).weatherLayers();
-    const sky: SkyWeather = { preset: 'rain', intensity: 'heavy' };
+    const sky: SkyWeather = { preset: 'rain', intensity: 'heavy', type: 'rain' };
     const frameOf = (note: string, given: SkyWeather | null): WeatherFrame => ({
       document: MapDocument.fromJson('map:1', { ...buildMapJson(), note }),
       renderer: {} as WebGLRenderer,
@@ -201,17 +206,19 @@ describe('weatherModule', () =>
     const [ section ] = registry.mapPropertiesSections();
     const labels = section.source(map).fields.map(field => field.label);
 
-    // Assert: the section hands the views the config to ask for, and nothing has asked yet.
+    // Assert: the section hands the views the config to ask for, and nothing has asked yet; with no sky driven, it offers
+    // no sky setting.
     expect([ section.id, section.title, labels, section.config === held.config, held.asked() ])
-      .toStrictEqual([ 'weather.settings', 'Weather', [ 'Look', 'No weather', 'Sky follows the weather' ], true, 0 ]);
+      .toStrictEqual([ 'weather.settings', 'Weather', [ 'Look', 'No weather' ], true, 0 ]);
   });
 
   it('offers a map\'s sky once in Map Properties while any plugin reading it is on, and nowhere while none is', () =>
   {
     // Arrange: the editor's modules over a cave naming a look, under each set of plugins: all of them, as the game
-    // ships; the weather plugins alone; J-Lighting without its time extension beside J-Weather; J-Lighting's time
-    // extension without J-Weather; J-Lighting alone; and J-Weather-Time listed without the J-Weather it cannot run
-    // without.
+    // ships; the weather plugins alone; J-Lighting without its time extension beside J-Weather, which then drives no sky;
+    // J-Weather with J-TIME but not its time extension; J-Weather with its time extension but not the J-TIME it cannot
+    // run without; J-Lighting's time extension without J-Weather; J-Lighting alone; and J-Weather-Time listed without the
+    // J-Weather it cannot run without.
     const cave = MapDocument.fromJson('map:1', { ...buildMapJson(), note: '<noToneChange>\n<weather:fog>' });
     const time = plugin('j/time/J-TIME');
     const lighting = plugin('j/lighting/J-Lighting');
@@ -222,6 +229,8 @@ describe('weatherModule', () =>
       [ time, lighting, lightingTime, weather, weatherTime ],
       [ time, weather, weatherTime ],
       [ lighting, weather ],
+      [ time, weather ],
+      [ weather, weatherTime ],
       [ time, lighting, lightingTime ],
       [ lighting ],
       [ time, lighting, plugin('j/weather/J-Weather', false), weatherTime ],
@@ -240,11 +249,43 @@ describe('weatherModule', () =>
       .toStrictEqual([
         [ [ 'Lighting', [ 'Darkness', 'Sky follows the clock and the weather' ] ], [ 'Weather', [ 'Look', 'No weather' ] ] ],
         [ [ 'Weather', [ 'Look', 'No weather', 'Sky follows the weather' ] ] ],
-        [ [ 'Lighting', [ 'Darkness' ] ], [ 'Weather', [ 'Look', 'No weather', 'Sky follows the weather' ] ] ],
+        [ [ 'Lighting', [ 'Darkness' ] ], [ 'Weather', [ 'Look', 'No weather' ] ] ],
+        [ [ 'Weather', [ 'Look', 'No weather' ] ] ],
+        [ [ 'Weather', [ 'Look', 'No weather' ] ] ],
         [ [ 'Lighting', [ 'Darkness', 'Sky follows the clock' ] ] ],
         [ [ 'Lighting', [ 'Darkness' ] ] ],
         [ [ 'Lighting', [ 'Darkness' ] ] ],
       ]);
+  });
+
+  it('offers the map views a sky only while J-Weather-Time drives one, with the J-TIME it reads the date and hour from', () =>
+  {
+    // Arrange: J-Weather alone; with J-TIME; with J-Weather-Time but not J-TIME; and with both, as the game ships.
+    const time = plugin('j/time/J-TIME');
+    const weather = plugin('j/weather/J-Weather');
+    const weatherTime = plugin('j/weather/ext/J-Weather-Time');
+    const projects = [ [ weather ], [ time, weather ], [ weather, weatherTime ], [ time, weather, weatherTime ] ];
+
+    // Act.
+    const offered = projects.map(plugins => activated(plugins).skyOffer() !== null);
+
+    // Assert.
+    expect(offered)
+      .toStrictEqual([ false, false, false, true ]);
+  });
+
+  it('offers a sky read from J-Weather\'s own config, asking nothing of the server to switch on, nor to say no sky is picked', () =>
+  {
+    // Arrange: the game's plugins, the config not yet read.
+    const held = heldConfig();
+    const offer = activated([ plugin('j/time/J-TIME'), plugin('j/weather/J-Weather'), plugin('j/weather/ext/J-Weather-Time') ], held.config).skyOffer();
+
+    // Act: what the sky does at 22:00 with none picked.
+    const reading = offer?.readingAt(null, 1320, null);
+
+    // Assert.
+    expect([ offer?.config === held.config, reading, held.asked() ])
+      .toStrictEqual([ true, { weather: null, words: 'A new game\'s sky is random, so none shows until you pick one.' }, 0 ]);
   });
 
   describe('weatherConfigNotice', () =>

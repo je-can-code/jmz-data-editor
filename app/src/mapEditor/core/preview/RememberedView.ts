@@ -1,12 +1,12 @@
 import { isJsonObject } from '../model/json.ts';
 import { MINUTES_PER_DAY } from '../time/timeOfDay.ts';
-import type { WindowClock } from '../time/WindowClock.ts';
+import type { SkyPick, WindowClock } from '../time/WindowClock.ts';
 import { GamePreview } from './GamePreview.ts';
 import type { WindowPreview } from './WindowPreview.ts';
 
 /**
  * What one project remembers between sessions, on this machine, of the moment its maps are shown at: the clock's time,
- * once the author moved it, its season, once the author picked one, and the preview.
+ * once the author moved it, its season, once the author picked one, the sky, once the author picked one, and the preview.
  */
 type RememberedState = {
   /**
@@ -20,6 +20,12 @@ type RememberedState = {
    * the season the game starts in.
    */
   readonly season: number | null;
+
+  /**
+   * The sky the author picked, a condition and a strength by the names the module offering it gives them, or null while
+   * none is picked.
+   */
+  readonly sky: SkyPick | null;
 
   /**
    * The switches, variables and the rest the author set.
@@ -65,7 +71,13 @@ const REMEMBERED_VERSION = 1;
  */
 const writeRemembered = (state: RememberedState): string =>
 {
-  return JSON.stringify({ version: REMEMBERED_VERSION, clock: state.clock, season: state.season, preview: state.preview.toJson() });
+  return JSON.stringify({
+    version: REMEMBERED_VERSION,
+    clock: state.clock,
+    season: state.season,
+    sky: state.sky,
+    preview: state.preview.toJson(),
+  });
 };
 
 /**
@@ -82,9 +94,29 @@ const keptSeason = (season: unknown): number | null =>
 };
 
 /**
+ * Reads a kept sky, which names a condition and a strength, each as some text. Whether the project's sky has them is
+ * the business of the module offering the sky, which reads the pick against the project as it stands each time.
+ * @param {unknown} sky What was kept.
+ * @returns {SkyPick | null} The sky, or null for anything else, nothing kept included, as text written before the
+ * clock had a sky holds.
+ */
+const keptSky = (sky: unknown): SkyPick | null =>
+{
+  if (isJsonObject(sky) === false)
+  {
+    return null;
+  }
+
+  const { condition, strength } = sky;
+  return typeof condition === 'string' && condition !== '' && typeof strength === 'string' && strength !== ''
+    ? { condition, strength }
+    : null;
+};
+
+/**
  * Reads kept text back, keeping whatever of it can still be used: a clock time that is a whole minute of the day, a
- * season, and whatever of the preview a preview could set. Nothing kept, or text that is not the kept shape, reads as
- * nothing set and the clock following the game.
+ * season, a sky, and whatever of the preview a preview could set. Nothing kept, or text that is not the kept shape,
+ * reads as nothing set and the clock following the game.
  * @param {string | null} text The kept text, or null.
  * @returns {RememberedState} The state.
  */
@@ -103,22 +135,29 @@ const readRemembered = (text: string | null): RememberedState =>
 
   if (isJsonObject(kept) === false)
   {
-    return { clock: null, season: null, preview: GamePreview.FRESH };
+    return { clock: null, season: null, sky: null, preview: GamePreview.FRESH };
   }
 
   const { clock } = kept;
   const onTheClock = typeof clock === 'number' && Number.isInteger(clock) && clock >= 0 && clock < MINUTES_PER_DAY;
-  return { clock: onTheClock ? clock : null, season: keptSeason(kept['season']), preview: GamePreview.fromJson(kept['preview']) };
+  return {
+    clock: onTheClock ? clock : null,
+    season: keptSeason(kept['season']),
+    sky: keptSky(kept['sky']),
+    preview: GamePreview.fromJson(kept['preview']),
+  };
 };
 
 /**
- * Keeps a window's clock and preview in step with a project's remembered state: the preview, the clock's time and its
- * season come back as they were left last session, and every window of the session shares them live, so moving the
- * clock, picking a season or turning a switch on in one window shows in every map in every window at once.
+ * Keeps a window's clock and preview in step with a project's remembered state: the preview, the clock's time, its
+ * season and its sky come back as they were left last session, and every window of the session shares them live, so
+ * moving the clock, picking a season or a sky or turning a switch on in one window shows in every map in every window at
+ * once.
  *
  * Only what the author chose is kept: a clock still following the game's starting time keeps no time, and one still in
- * the season the game starts in keeps no season, so a game whose start changes starts there. What another window keeps
- * is taken without being written back, so two windows never echo one change between them.
+ * the season the game starts in keeps no season, so a game whose start changes starts there. A sky is the author's to
+ * take back, so a window taking a kept text without one picks none, as the window that wrote it did. What another window
+ * keeps is taken without being written back, so two windows never echo one change between them.
  */
 class RememberedView
 {
@@ -153,7 +192,7 @@ class RememberedView
     if (kept === null)
     {
       // nothing kept means nothing set, which needs no writing; anything this window set already does.
-      this.#last = writeRemembered({ clock: null, season: null, preview: GamePreview.FRESH });
+      this.#last = writeRemembered({ clock: null, season: null, sky: null, preview: GamePreview.FRESH });
       this.#write(store);
     }
     else
@@ -172,7 +211,8 @@ class RememberedView
   }
 
   /**
-   * Takes a kept text: the clock moved to its time and its season, when it has them, and its preview.
+   * Takes a kept text: the clock moved to its time and its season, when it has them, its sky, none included, and its
+   * preview.
    * @param {string | null} text The kept text, or null.
    */
   #take(text: string | null): void
@@ -191,6 +231,8 @@ class RememberedView
         this.#clock.chooseSeason(state.season);
       }
 
+      // a sky taken back in another window is taken back here too, so a kept text without one picks none.
+      this.#clock.chooseSky(state.sky);
       this.#preview.set(state.preview);
     }
     finally
@@ -230,7 +272,7 @@ class RememberedView
   #current(): string
   {
     const clock = this.#clock.moved ? this.#clock.time() : null;
-    return writeRemembered({ clock, season: this.#clock.season(), preview: this.#preview.preview() });
+    return writeRemembered({ clock, season: this.#clock.season(), sky: this.#clock.sky(), preview: this.#preview.preview() });
   }
 }
 

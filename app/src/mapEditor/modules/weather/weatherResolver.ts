@@ -1,4 +1,5 @@
 import type { SkyWeather } from '../../core/renderer/weatherLayer.ts';
+import { climateIntensity, NO_CLIMATES, type ClimateTables } from './climateCurves.ts';
 import type { WeatherDeclaration } from './weatherTags.ts';
 
 /**
@@ -25,32 +26,34 @@ const INTENSITIES = {
 const SHELTERED_INTENSITY = INTENSITIES.moderate;
 
 /**
- * How strongly a look a map names runs, as MapWeatherResolver#intensityFor decides: under open sky it rises and falls
- * with the sky's own strength; under a roof, or with no sky driven at all, it sits at its middle rung.
+ * How strongly a look a map names runs, as MapWeatherResolver#intensityFor decides with J-Weather-Time's climates bent
+ * into it: under open sky it rises and falls with the sky's own strength, as the map's climate, if it names one the
+ * config knows, answers it; under a roof, or with no sky driven at all, it sits at its middle rung.
  * @param {WeatherDeclaration} declaration What the map's note says.
  * @param {SkyWeather | null} sky What the sky is doing, or null when nothing drives one.
+ * @param {ClimateTables} climates The climates J-Weather's config holds; none unless given.
  * @returns {string} The intensity.
  */
-const intensityFor = (declaration: WeatherDeclaration, sky: SkyWeather | null): string =>
+const intensityFor = (declaration: WeatherDeclaration, sky: SkyWeather | null, climates: ClimateTables = NO_CLIMATES): string =>
 {
-  if (declaration.hasSky && sky !== null)
-  {
-    return sky.intensity;
-  }
-
-  return SHELTERED_INTENSITY;
+  const skyIntensity = declaration.hasSky && sky !== null
+    ? sky.intensity
+    : SHELTERED_INTENSITY;
+  return climateIntensity(declaration, sky, skyIntensity, climates);
 };
 
 /**
  * Decides what a map's weather is, as MapWeatherResolver#resolve does: an opt-out shows nothing whatever the sky does; a
  * look the map names shows wherever it was named, at the strength {@link intensityFor} gives; a map naming none under a
- * roof shows nothing; and a map naming none under open sky shows whatever the sky is doing, which is nothing while no
- * sky is driven, as with J-Weather on its own. Nothing carries in from anywhere: a map's weather is its own.
+ * roof shows nothing; and a map naming none under open sky shows whatever the sky is doing, at the sky's own strength
+ * whatever climate it names, which is nothing while no sky is driven, as with J-Weather on its own. Nothing carries in
+ * from anywhere: a map's weather is its own.
  * @param {WeatherDeclaration} declaration What the map's note says.
  * @param {SkyWeather | null} sky What the sky is doing, or null when nothing drives one.
+ * @param {ClimateTables} climates The climates J-Weather's config holds; none unless given.
  * @returns {ResolvedWeather | null} The weather to draw, or null for none.
  */
-const resolveWeather = (declaration: WeatherDeclaration, sky: SkyWeather | null): ResolvedWeather | null =>
+const resolveWeather = (declaration: WeatherDeclaration, sky: SkyWeather | null, climates: ClimateTables = NO_CLIMATES): ResolvedWeather | null =>
 {
   // an explicit opt-out outranks everything, including a sky with opinions.
   if (declaration.suppressed)
@@ -61,7 +64,7 @@ const resolveWeather = (declaration: WeatherDeclaration, sky: SkyWeather | null)
   // a look somebody typed applies wherever it was typed, sky or no sky.
   if (declaration.preset !== null)
   {
-    return { preset: declaration.preset, intensity: intensityFor(declaration, sky) };
+    return { preset: declaration.preset, intensity: intensityFor(declaration, sky, climates) };
   }
 
   // with nothing named, only the sky could have an opinion, and a roof keeps it out.
