@@ -245,7 +245,7 @@ const isModuleConfigFile = (path: string, modules: readonly PluginModule[] = SHI
  * switched on from, so asking again when nothing changed costs two reads and nothing more. Reads never overlap: asks
  * that come while a read is running are answered by one more read after it, however many came. A refresh never
  * rejects: a list that cannot be read leaves the modules as they were, which before the first read is the core's kinds
- * on their own, as in a project without those plugins.
+ * on their own, as in a project without those plugins, and the registry keeps why until a later read succeeds.
  *
  * A config a module reads on demand is never read by a refresh until the module has asked for it. The window keeps one
  * copy of each, from one switch-on to the next, and once asked for it is read again at the end of every refresh, its
@@ -304,10 +304,16 @@ class ModuleActivation
    */
   #read(): Promise<void>
   {
-    return this.#api.loadPluginList()
-      .then(async list =>
+    return this.#readList()
+      .then(async found =>
       {
-        const plugins = readPluginEntries(list);
+        // a list that could not be read switches nothing on or off, and the registry has been told why.
+        if (found === null)
+        {
+          return;
+        }
+
+        const { list, plugins } = found;
         const read: ModuleInputs = { list, configs: await readModuleConfigs(this.#api, SHIPPED_MODULES, plugins) };
         if (this.#applied === null || sameInputs(this.#applied, read) === false)
         {
@@ -323,6 +329,29 @@ class ModuleActivation
         await Promise.all(copies.map(([ , copy ]) => copy.reread()));
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * Reads js/plugins.js and the plugins it lists, and tells the registry how that went: why the list could not be read,
+   * or that it was. Whatever must know which maps a plugin copies its events from can then say why it cannot tell, rather
+   * than ask the author to wait for a reading that has already failed. Never rejects.
+   * @returns {Promise<{ list: string, plugins: PluginsJsEntry[] } | null>} The list and its plugins, or null when the
+   * list could not be read or makes no sense.
+   */
+  #readList(): Promise<{ list: string; plugins: PluginsJsEntry[] } | null>
+  {
+    return this.#api.loadPluginList()
+      .then(list =>
+      {
+        const plugins = readPluginEntries(list);
+        this.#registry.noteListProblem(null);
+        return { list, plugins };
+      })
+      .catch((error: unknown) =>
+      {
+        this.#registry.noteListProblem(error instanceof Error ? problemOf(error) : String(error));
+        return null;
+      });
   }
 
   /**

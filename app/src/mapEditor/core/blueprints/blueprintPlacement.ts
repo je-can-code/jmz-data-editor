@@ -11,11 +11,13 @@ import { BLUEPRINTS_DOCUMENT, blueprintIn } from './blueprints.ts';
 type LinkGate = (mapId: number) => string | null;
 
 /**
- * What the link gate reads of the window's plugin modules: whether they have switched on yet, and which plugin, if any,
- * copies a map's events while the game runs. The plugin module registry is one.
+ * What the link gate reads of the window's plugin modules: whether they have switched on yet, why the project's plugin
+ * list could not be read when it could not, and which plugin, if any, copies a map's events while the game runs. The
+ * plugin module registry is one.
  */
 type TemplateMapSource = {
   readonly revision: number;
+  readonly listProblem: string | null;
   templateMapOwner(mapId: number): string | null;
 };
 
@@ -26,11 +28,22 @@ type TemplateMapSource = {
 const PLUGINS_UNREAD = 'the project\'s plugins are still being read; try again in a moment';
 
 /**
+ * Why no map takes a link when the project's plugin list could not be read: the window cannot tell which maps a plugin
+ * copies its events from, and waiting will not tell it, so it says what went wrong instead.
+ * @param {string} problem Why the list could not be read.
+ * @returns {string} The reason.
+ */
+const pluginsUnreadable = (problem: string): string =>
+{
+  return `the project's plugin list could not be read (${problem})`;
+};
+
+/**
  * Builds the gate that keeps links off every map whose events a plugin copies while the game runs, notes and all, such
  * as J-ABS's action map (Map002 in Chef Adventure, named by J-ABS's Action Map Id). Nothing in the game reads an event's
  * note on any other map, which is why the note is where a copy's link lives; on those maps the plugin reads it, so a link
  * there is never written. Until the plugin modules have switched on, which maps those are is not known, so no map takes
- * a link.
+ * a link: while the plugin list is still being read, and for as long as it cannot be, which the gate says, with why.
  * @param {TemplateMapSource} modules The window's plugin modules.
  * @returns {LinkGate} The gate.
  */
@@ -40,7 +53,9 @@ const linkGateFor = (modules: TemplateMapSource): LinkGate =>
   {
     if (modules.revision === 0)
     {
-      return PLUGINS_UNREAD;
+      return modules.listProblem === null
+        ? PLUGINS_UNREAD
+        : pluginsUnreadable(modules.listProblem);
     }
 
     const owner = modules.templateMapOwner(mapId);

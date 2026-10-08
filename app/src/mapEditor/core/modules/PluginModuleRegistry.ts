@@ -169,6 +169,12 @@ class PluginModuleRegistry
 
   #revision = 0;
 
+  /**
+   * Why js/plugins.js could not be read the last time it was asked for, or null when it was read, or has not been asked
+   * for yet.
+   */
+  #listProblem: string | null = null;
+
   #listeners = new Set<() => void>();
 
   /**
@@ -296,6 +302,26 @@ class PluginModuleRegistry
   get revision(): number
   {
     return this.#revision;
+  }
+
+  /**
+   * Says why js/plugins.js could not be read the last time it was asked for. A list that cannot be read switches no
+   * module on or off, so the modules stay as the last activation left them, which before the first is none at all; what
+   * must know which maps a plugin copies its events from reads this to say why it cannot tell, rather than to wait.
+   * @returns {string | null} Why, or null when the list was read, or has not been asked for yet.
+   */
+  get listProblem(): string | null
+  {
+    return this.#listProblem;
+  }
+
+  /**
+   * Notes how the last reading of js/plugins.js went: why it could not be read, or null once it was.
+   * @param {string | null} problem Why the list could not be read, or null for a list read.
+   */
+  noteListProblem(problem: string | null): void
+  {
+    this.#listProblem = problem;
   }
 
   /**

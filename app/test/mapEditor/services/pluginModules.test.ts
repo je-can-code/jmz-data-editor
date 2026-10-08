@@ -26,8 +26,10 @@ import type { PluginsJsEntry } from '../../../src/services/plugins/PluginsJsRead
  * disk, it reads the list and the configs again and switches the modules on afresh when anything they are built from
  * changed (the list, a config, or why a config cannot be read), and leaves them, drawings and all, when nothing did.
  * Reads never overlap, and asks made while one runs are answered by one more read after it. A list that cannot be read
- * later leaves the modules as they were. A changed file is a module's config when it sits where the server reads the
- * config some module names, one it reads on demand included.
+ * later leaves the modules as they were, and a list that cannot be read at all leaves the registry holding why, in the
+ * server's own words where it gave any, until a read succeeds: whatever must know which maps a plugin copies its events
+ * from says so then, rather than waiting for the modules forever. A changed file is a module's config when it sits where
+ * the server reads the config some module names, one it reads on demand included.
  *
  * A config a module reads only on demand, as J-Weather's is, is never read while the modules switch on, so a window
  * whose maps have no weather never reads it at all. The window keeps one copy of it across switch-ons, read the first
@@ -639,6 +641,59 @@ describe('pluginModules', () =>
       // Assert.
       expect([ registry.isActive('lighting'), registry.revision ])
         .toStrictEqual([ true, 1 ]);
+    });
+
+    it('keeps why the plugin list could not be read, in the server\'s own words, and forgets it once a read succeeds', async () =>
+    {
+      // Arrange: a list the server cannot give at first, and then can.
+      const words = 'open /game/js/plugins.js: no such file or directory';
+      const project = { list: LIGHTING_ONLY, config: async () => lightingConfig('#ffffff') };
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      const { api } = serverOver(project);
+      const readList = api.loadPluginList;
+      api.loadPluginList = () => Promise.reject(new MapEditorApiError(`GET plugin-metadata answered 500: ${words}`, 500, words));
+      const activation = new ModuleActivation(api, registry);
+
+      // Act.
+      await activation.refresh();
+      const failed = [ registry.listProblem, registry.revision ];
+      api.loadPluginList = readList;
+      await activation.refresh();
+
+      // Assert.
+      expect([ failed, [ registry.listProblem, registry.revision ] ])
+        .toStrictEqual([ [ words, 0 ], [ null, 1 ] ]);
+    });
+
+    it('keeps why a plugin list that makes no sense could not be read, and why when the read failed with no words of the server\'s', async () =>
+    {
+      // Arrange: a file holding no list, and a server that never answered.
+      const registries = [ new PluginModuleRegistry(new CommandCatalog()), new PluginModuleRegistry(new CommandCatalog()) ];
+      const sources: ModuleSource[] = [
+        { loadPluginList: async () => 'not a plugin list' },
+        { loadPluginList: () => Promise.reject(new TypeError('Failed to fetch')) },
+      ];
+
+      // Act.
+      await Promise.all(sources.map((source, index) => new ModuleActivation(source, registries[index]).refresh()));
+
+      // Assert.
+      expect(registries.map(registry => [ registry.listProblem, registry.revision ]))
+        .toStrictEqual([ [ 'plugins.js: could not locate JSON array', 0 ], [ 'Failed to fetch', 0 ] ]);
+    });
+
+    it('keeps why the plugin list could not be read when the read failed with something other than an error', async () =>
+    {
+      // Arrange: a read that rejects with bare words.
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      const source: ModuleSource = { loadPluginList: () => Promise.reject('the server went away') };
+
+      // Act.
+      await new ModuleActivation(source, registry).refresh();
+
+      // Assert.
+      expect([ registry.listProblem, registry.revision ])
+        .toStrictEqual([ 'the server went away', 0 ]);
     });
   });
 

@@ -22,7 +22,8 @@ import { stampOf, tiledMap } from '../../support/stampFixtures.ts';
  *
  * The link gate is what says which maps may hold no link: every map whose events a plugin module says its plugin copies
  * while the game runs, J-ABS's action map among them, and every map before the modules have switched on at all, when
- * which maps those are cannot be told.
+ * which maps those are cannot be told; a plugin list that could not be read says so, with why, since waiting will not
+ * tell.
  *
  * The blueprint, "Goblin camp" (k3x9q2mf), was saved from map 12: two cells of dirt with event 7 on the left one and event
  * 9, whose note reads "Guard captain", on the right. Map 1, drawn with the same tileset, is 4 by 3, with event 1 at 3, 2;
@@ -96,7 +97,7 @@ describe('linkGateFor', () =>
   it('keeps every map from holding a link until the plugin modules have switched on', () =>
   {
     // Arrange: modules not yet switched on, which name no map.
-    const gate = linkGateFor({ revision: 0, templateMapOwner: () => null });
+    const gate = linkGateFor({ revision: 0, listProblem: null, templateMapOwner: () => null });
 
     // Act.
     const reasons = [ gate(2), gate(5) ];
@@ -109,10 +110,39 @@ describe('linkGateFor', () =>
       ]);
   });
 
+  it('keeps every map from holding a link while the plugin list cannot be read, saying why rather than asking to wait', () =>
+  {
+    // Arrange: modules never switched on, since the server could not give js/plugins.js.
+    const gate = linkGateFor({ revision: 0, listProblem: 'js/plugins.js does not exist', templateMapOwner: () => null });
+
+    // Act.
+    const reasons = [ gate(2), gate(5) ];
+
+    // Assert.
+    expect(reasons)
+      .toStrictEqual([
+        'the project\'s plugin list could not be read (js/plugins.js does not exist)',
+        'the project\'s plugin list could not be read (js/plugins.js does not exist)',
+      ]);
+  });
+
+  it('goes by the modules switched on when a later reading of the plugin list fails, as they still stand', () =>
+  {
+    // Arrange: J-ABS switched on from the list, which a later reading could not read.
+    const gate = linkGateFor({ revision: 1, listProblem: 'js/plugins.js does not exist', templateMapOwner: mapId => (mapId === 2 ? 'J-ABS' : null) });
+
+    // Act.
+    const reasons = [ gate(2), gate(3) ];
+
+    // Assert.
+    expect(reasons)
+      .toStrictEqual([ 'this map\'s events are patterns J-ABS copies while the game runs', null ]);
+  });
+
   it('keeps a map a plugin copies events from from holding a link, naming the plugin, and lets every other hold one', () =>
   {
     // Arrange: J-ABS copies its actions from map 2.
-    const gate = linkGateFor({ revision: 1, templateMapOwner: mapId => (mapId === 2 ? 'J-ABS' : null) });
+    const gate = linkGateFor({ revision: 1, listProblem: null, templateMapOwner: mapId => (mapId === 2 ? 'J-ABS' : null) });
 
     // Act.
     const reasons = [ gate(2), gate(3) ];
