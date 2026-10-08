@@ -6,6 +6,7 @@ import {
   noteLines,
   noteMetaOf,
   withLineAdded,
+  withLineTakenOut,
   withSpanRemoved,
 } from '../../../../src/mapEditor/core/properties/noteText.ts';
 
@@ -16,6 +17,7 @@ import {
  * opening bracket swallows the tag after it. These helpers read a note the way each reader does, with where everything
  * sits, add a line at the end without touching anything already there, and take a tag out cleanly: a tag alone on its
  * line takes the line and one line break with it, and a tag among words takes one space with it so the words close up.
+ * A line added and taken out again leaves the note byte for byte as it was, whatever line breaks it mixes.
  * Since a stray bracket can swallow a tag nobody touched once a tag beside it is added or taken out, a writer can ask
  * whether every name the engine reads, other than the ones its change is about, still reads exactly as it did.
  */
@@ -250,6 +252,74 @@ describe('noteText', () =>
       // Assert.
       expect(removed)
         .toStrictEqual([ 'ab', 'a b', 'a b' ]);
+    });
+  });
+
+  describe('withLineTakenOut', () =>
+  {
+    /**
+     * Takes the last copy of a tag out of a note, as a line added to it last sits.
+     * @param {string} note The note.
+     * @param {string} tag The tag.
+     * @returns {string} The note without it.
+     */
+    const without = (note: string, tag: string): string =>
+    {
+      const start = note.lastIndexOf(tag);
+      return withLineTakenOut(note, start, start + tag.length);
+    };
+
+    it('undoes a line added to every shape of note, byte for byte, whatever line breaks it mixes', () =>
+    {
+      // Arrange: empty; text alone; ending on a break; Windows' pairs; a newline first and a pair last, where the break
+      // after the added line is not the one it brought; breaks alone; and a pair alone.
+      const notes = [ '', 'a', 'a\n', 'a\r\nb\r\n', 'a\nb\r\n', 'a\r\nb\n\n', '\n\n', '\r\n' ];
+
+      // Act.
+      const back = notes.map(note => without(withLineAdded(note, '<t>'), '<t>'));
+
+      // Assert.
+      expect(back)
+        .toStrictEqual(notes);
+    });
+
+    it('takes a tag alone on its line out with the break before it, where the break after it would change the note', () =>
+    {
+      // Arrange: a newline before the tag and Windows' pair after it, and spaces around it on its line.
+      const notes = [ 'a\n<t>\r\nb', 'a\r\n  <t> \nb' ];
+
+      // Act.
+      const removed = notes.map(note => without(note, '<t>'));
+
+      // Assert: withSpanRemoved would have left 'a\nb' and 'a\r\nb' with the other breaks.
+      expect([ removed, notes.map(note => withSpanRemoved(note, note.indexOf('<t>'), note.indexOf('<t>') + 3)) ])
+        .toStrictEqual([ [ 'a\r\nb', 'a\nb' ], [ 'a\nb', 'a\r\nb' ] ]);
+    });
+
+    it('takes a tag alone on the note\'s first line out with the break after it, and a tag that was all of it alone', () =>
+    {
+      // Arrange.
+      const notes = [ '<t>\r\nb', '<t>' ];
+
+      // Act.
+      const removed = notes.map(note => without(note, '<t>'));
+
+      // Assert.
+      expect(removed)
+        .toStrictEqual([ 'b', '' ]);
+    });
+
+    it('takes a tag among words out as withSpanRemoved does, tidying the spaces around it', () =>
+    {
+      // Arrange.
+      const notes = [ 'deep <t> cave', 'a\ndeep <t>' ];
+
+      // Act.
+      const removed = notes.map(note => without(note, '<t>'));
+
+      // Assert.
+      expect(removed)
+        .toStrictEqual([ 'deep cave', 'a\ndeep' ]);
     });
   });
 

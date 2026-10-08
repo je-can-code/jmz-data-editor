@@ -314,6 +314,22 @@ describe('PluginModuleRegistry', () =>
       .toStrictEqual([ [ null, 'core.decor' ], 'core.decor' ]);
   });
 
+  it('names the plugin whose module says it copies a map\'s events, for that map alone, until the module switches off', () =>
+  {
+    // Arrange: J-ABS's module naming map 2 as its patterns.
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+    const patterns: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register: add => add.templateMap(2) };
+
+    // Act.
+    registry.activate([ patterns ], [ plugin('j/abs/J-ABS', true) ]);
+    const whileOn = [ registry.templateMapOwner(2), registry.templateMapOwner(3) ];
+    registry.activate([ patterns ], [ plugin('j/abs/J-ABS', false) ]);
+
+    // Assert.
+    expect([ whileOn, registry.templateMapOwner(2) ])
+      .toStrictEqual([ [ 'J-ABS', null ], null ]);
+  });
+
   it('tells whoever listens after each activation, and stops once they stop listening', () =>
   {
     // Arrange.

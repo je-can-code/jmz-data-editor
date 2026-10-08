@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { captureAreaStamp, captureEventsStamp, type Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
-import { cutStampSource, placeStamp, type StampPlacement } from '../../../../src/mapEditor/core/stamps/stampPlacement.ts';
+import { cutStampSource, placeStamp, planStamp, type StampPlacement } from '../../../../src/mapEditor/core/stamps/stampPlacement.ts';
 import { shapedTileAt, TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes.ts';
 import { gridReader } from '../../../../src/mapEditor/core/tiles/tileGrid.ts';
 import { autotileShape, makeAutotileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
@@ -22,6 +22,8 @@ import { fill, put, type TestGrid } from '../tiles/support/tileGridBuilder.ts';
  * another following the copies; an event that would land past the map's edge is left out and the author told how many.
  * Tiles copied from a map with another tileset are left out, the events going down alone and the author told; a stamp
  * of such tiles alone is refused. A stamp landing any event on another, or nothing at all on the map, is refused whole.
+ * Events copied off copies of a blueprint carry their links along, so they are copies too; a stamp carrying any onto a
+ * map that may hold no link, such as J-ABS's action map, is refused whole with the map's reason.
  *
  * A cut takes away what its stamp was captured from, as one step: the events it copied, and every layer it carries
  * emptied over the cells it came from, with the autotiles around the hole reshaped.
@@ -278,6 +280,44 @@ describe('placeStamp', () =>
       .toStrictEqual({ ok: false, message: 'Nothing in the stamp lands on the map there.' });
   });
 
+  it('carries the links of copies of a blueprint along, so the copies placed are copies of it too', () =>
+  {
+    // Arrange: event 1 of the source is a copy of a blueprint's event 7.
+    const file = source();
+    (file.events[1] as RmmzMapEvent).note = 'Guard\n<blueprint:[k3x9q2mf, 7]>';
+    const hub = hubWithMaps({ 1: file, 2: target() });
+    const stamp = captureEventsStamp(hub.map('map:1'), [ 1, 2 ], 'window-a:1') as Stamp;
+
+    // Act.
+    placeStamp(hub, 2, stamp, at(0, 0), 'Paste');
+
+    // Assert.
+    expect(mapFileOf(hub, 2).events.map(event => (event === null ? null : (event as RmmzMapEvent).note)))
+      .toStrictEqual([ null, 'event 1', 'Guard\n<blueprint:[k3x9q2mf, 7]>', 'event 2' ]);
+  });
+
+  it('refuses a stamp carrying copies of a blueprint onto a map that may hold no link, and places one carrying none there', () =>
+  {
+    // Arrange: one stamp of a copy, one of an event that is no copy, both bound for a map that may hold no link.
+    const file = source();
+    (file.events[1] as RmmzMapEvent).note = '<blueprint:[k3x9q2mf, 7]>';
+    const hub = hubWithMaps({ 1: file, 2: target() });
+    const linked = captureEventsStamp(hub.map('map:1'), [ 1 ], 'window-a:1') as Stamp;
+    const plain = captureEventsStamp(hub.map('map:1'), [ 2 ], 'window-a:2') as Stamp;
+    const refusal = 'this map\'s events are patterns J-ABS copies while the game runs';
+
+    // Act.
+    const outcomes = [ placeStamp(hub, 2, linked, at(0, 0, { linkRefusal: refusal }), 'Paste'), placeStamp(hub, 2, plain, at(0, 0, { linkRefusal: refusal }), 'Paste') ];
+
+    // Assert: the copy refused whole, the other event placed as 2.
+    expect([ outcomes[0], outcomes[1].ok && outcomes[1].eventIds, spotsOf(mapFileOf(hub, 2)) ])
+      .toStrictEqual([
+        { ok: false, message: 'This stamp holds copies of blueprints, which can\'t go here: this map\'s events are patterns J-ABS copies while the game runs.' },
+        [ 2 ],
+        [ null, [ 7, 4 ], [ 0, 0 ] ],
+      ]);
+  });
+
   it('records nothing for tiles landing on exactly what is there already', () =>
   {
     // Arrange: the block's ground alone, put back where it was copied from.
@@ -290,6 +330,23 @@ describe('placeStamp', () =>
     // Assert.
     expect([ outcome, hub.history(mapHistoryKey(1)).rows.length ])
       .toStrictEqual([ { ok: true, step: null, eventIds: [], notes: [] }, 0 ]);
+  });
+});
+
+describe('planStamp', () =>
+{
+  it('names the id each event to be placed had in the stamp, in order, leaving out those falling past the edge', () =>
+  {
+    // Arrange: the source's two events side by side, the second past the right edge with the first on 7, 0.
+    const hub = window3();
+    const pair = captureEventsStamp(hub.map('map:1'), [ 1, 2 ], 'window-a:1') as Stamp;
+
+    // Act.
+    const plans = [ planStamp(hub.map('map:2'), pair, at(0, 0)), planStamp(hub.map('map:2'), pair, at(7, 0)) ];
+
+    // Assert.
+    expect(plans.map(plan => plan.ok && [ plan.sourceIds, plan.events.map(event => event.id) ]))
+      .toStrictEqual([ [ [ 1, 2 ], [ 2, 3 ] ], [ [ 1 ], [ 2 ] ] ]);
   });
 });
 
