@@ -177,6 +177,51 @@ describe('blueprintLink', () =>
         .toStrictEqual([ 'Guard\n<blueprint:[k3x9q2mf, 2, sight+2, name=Goblin chief]>', link ]);
     });
 
+    it('appends the link after notes of every other shape, with the first line break each writes, whatever it is', () =>
+    {
+      // Arrange: lone carriage returns; a newline then a carriage return; a last line of spaces; tabs; a stray closing
+      // bracket; carriage returns alone; and a lone carriage return before a closing Windows' pair.
+      const notes = [ 'a\rb', 'a\n\rb\n\r', 'Guard\n   ', 'a\tb\t', 'x > y', '\r\r', 'a\rb\r\n' ];
+
+      // Act.
+      const written = notes.map(note => withBlueprintLink(note, LINK));
+
+      // Assert: every character the note held stays where it was.
+      expect(written)
+        .toStrictEqual([
+          'a\rb\r<blueprint:[k3x9q2mf, 2]>',
+          'a\n\rb\n<blueprint:[k3x9q2mf, 2]>\n\r',
+          'Guard\n   \n<blueprint:[k3x9q2mf, 2]>',
+          'a\tb\t\n<blueprint:[k3x9q2mf, 2]>',
+          'x > y\n<blueprint:[k3x9q2mf, 2]>',
+          '<blueprint:[k3x9q2mf, 2]>\r\r\r',
+          'a\rb\r<blueprint:[k3x9q2mf, 2]>\r\n',
+        ]);
+    });
+
+    it('takes a link typed by hand out first whatever it holds, bare, broken or two, keeping the rest of the note', () =>
+    {
+      // Arrange: a bare tag between Windows' lines, a broken one first, two links over Windows' pairs, and one among words.
+      const notes = [
+        'Guard\r\n<blueprint>\r\nkept',
+        '<blueprint:junk>\nGuard',
+        'a\r\n<blueprint:[aaaa, 1]>\r\n<blueprint:[bbbb, 2]>\r\n',
+        'see <blueprint:[aaaa, 1]>\r\nhere',
+      ];
+
+      // Act.
+      const written = notes.map(note => withBlueprintLink(note, LINK));
+
+      // Assert.
+      expect(written)
+        .toStrictEqual([
+          'Guard\r\nkept\r\n<blueprint:[k3x9q2mf, 2]>',
+          'Guard\n<blueprint:[k3x9q2mf, 2]>',
+          'a\r\n<blueprint:[k3x9q2mf, 2]>\r\n',
+          'see\r\nhere\r\n<blueprint:[k3x9q2mf, 2]>',
+        ]);
+    });
+
     it('takes a link the note holds already out first, so a note holds one link at most', () =>
     {
       // Arrange: a link to another blueprint, and two links where one stood among words.
@@ -228,8 +273,25 @@ describe('blueprintLink', () =>
   {
     it('undoes withBlueprintLink byte for byte on every shape of note', () =>
     {
-      // Arrange: empty, words, a tag, Windows' pairs, a newline then a pair, trailing blank lines, and breaks alone.
-      const notes = [ '', 'Guard captain', '<moveSpeed:6.0>', 'a\r\nb\r\n', 'a\nb\r\n', 'a\n\n', '\r\n' ];
+      // Arrange: empty, words, a tag, Windows' pairs, a newline then a pair, trailing blank lines, and breaks alone; then
+      // lone carriage returns, a newline then a carriage return, a last line of spaces, tabs, a stray closing bracket,
+      // carriage returns alone, and a lone carriage return before a closing Windows' pair.
+      const notes = [
+        '',
+        'Guard captain',
+        '<moveSpeed:6.0>',
+        'a\r\nb\r\n',
+        'a\nb\r\n',
+        'a\n\n',
+        '\r\n',
+        'a\rb',
+        'a\n\rb\n\r',
+        'Guard\n   ',
+        'a\tb\t',
+        'x > y',
+        '\r\r',
+        'a\rb\r\n',
+      ];
 
       // Act.
       const back = notes.map(note => withoutBlueprintLink(withBlueprintLink(note, LINK)));
