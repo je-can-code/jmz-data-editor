@@ -7,6 +7,10 @@ import { WindowClock } from '../../../../src/mapEditor/core/time/WindowClock.ts'
  * and only then. The author moves it; the game's starting time, which a plugin module offers once it switches on, sets
  * it only until the author first moves it, so a starting time read again later, say from a plugin list changed on disk,
  * never takes back the hour the author chose.
+ *
+ * It holds a season too, which the author picks: none until then, which is the season the game starts in, whichever
+ * that is. Picking one tells whoever listens, unless it is the season already held; the hour and the season move apart,
+ * neither disturbing the other.
  */
 describe('WindowClock', () =>
 {
@@ -84,6 +88,70 @@ describe('WindowClock', () =>
     // Assert.
     expect([ clock.time(), heard ])
       .toStrictEqual([ 1320, [] ]);
+  });
+
+  it('holds no season until the author picks one, and tells every listener once one is picked', () =>
+  {
+    // Arrange: two listeners.
+    const clock = new WindowClock(840);
+    const before = clock.season();
+    const heard: string[] = [];
+    clock.subscribe(() => heard.push(`first in ${clock.season()}`));
+    clock.subscribe(() => heard.push(`second in ${clock.season()}`));
+
+    // Act: Summer picked.
+    clock.chooseSeason(1);
+
+    // Assert.
+    expect([ before, clock.season(), heard ])
+      .toStrictEqual([ null, 1, [ 'first in 1', 'second in 1' ] ]);
+  });
+
+  it('tells nobody when the season picked is the one it already holds', () =>
+  {
+    // Arrange: Summer held.
+    const clock = new WindowClock(840);
+    clock.chooseSeason(1);
+    const heard: (number | null)[] = [];
+    clock.subscribe(() => heard.push(clock.season()));
+
+    // Act.
+    clock.chooseSeason(1);
+
+    // Assert.
+    expect(heard)
+      .toStrictEqual([]);
+  });
+
+  it('moves its hour and its season apart, neither disturbing the other', () =>
+  {
+    // Arrange: the game's start at 14:00, then Autumn picked.
+    const clock = new WindowClock();
+    clock.startAt(840);
+    clock.chooseSeason(2);
+
+    // Act: the author's 22:00, then Spring.
+    clock.set(1320);
+    const atNight = [ clock.time(), clock.season() ];
+    clock.chooseSeason(0);
+
+    // Assert.
+    expect([ atNight, clock.time(), clock.season() ])
+      .toStrictEqual([ [ 1320, 2 ], 1320, 0 ]);
+  });
+
+  it('keeps following the game\'s starting time with a season picked, until the author moves the hour', () =>
+  {
+    // Arrange: Summer picked before the game's start is known.
+    const clock = new WindowClock();
+    clock.chooseSeason(1);
+
+    // Act: the game's start, 14:00, read.
+    clock.startAt(840);
+
+    // Assert.
+    expect([ clock.time(), clock.moved, clock.season() ])
+      .toStrictEqual([ 840, false, 1 ]);
   });
 
   it('stops telling a listener that stopped listening, and keeps telling the others', () =>

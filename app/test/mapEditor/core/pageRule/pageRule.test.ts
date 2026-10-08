@@ -18,9 +18,10 @@ import { command, event, page } from '../../support/eventKindFixtures.ts';
  * moment's preview (a fresh save wherever the preview sets nothing) and whose every plugin condition holds at the
  * moment. A page whose own conditions fail is never asked anything by a plugin, and an event no page holds for shows
  * nothing. Each event is read once, so judging it at another moment reads nothing again, and it says whether any of its
- * pages asks something the clock can change, and which pieces of preview state any of them reads: those are the only
- * events worth judging again as the clock moves or the preview changes. A page also reads as words: what its own
- * conditions wait for, then what each plugin's condition asks.
+ * pages asks something the clock can change, whether any reads the date the clock's season moves, and which pieces of
+ * preview state any of them reads: those are the only events worth judging again as the clock moves, its season
+ * changes or the preview changes. A plugin condition is handed the moment whole, its season included. A page also reads
+ * as words: what its own conditions wait for, then what each plugin's condition asks.
  */
 describe('pageRule', () =>
 {
@@ -78,9 +79,20 @@ describe('pageRule', () =>
   };
 
   /**
+   * A stand-in for a plugin's calendar: a comment {@code <summer>} keeps a page to the moments whose clock is in season
+   * 1, which reads the date the season moves.
+   */
+  const IN_SUMMER: PageCondition = {
+    id: 'test.summer',
+    read: shown => (shown.list.some(each => each.parameters[0] === '<summer>')
+      ? { followsClock: false, followsDate: true, holds: (moment: PageMoment) => moment.season === 1, words: [ 'in Summer' ] }
+      : null),
+  };
+
+  /**
    * The rule over Chef Adventure's starting party with the stand-ins.
    */
-  const RULE: PageRule = { save: { party: [ 1, 2 ] }, conditions: [ OPEN_HOURS, SEALED, QUESTS ] };
+  const RULE: PageRule = { save: { party: [ 1, 2 ] }, conditions: [ OPEN_HOURS, SEALED, QUESTS, IN_SUMMER ] };
 
   /**
    * A page with comments, waiting for nothing of its own unless told otherwise.
@@ -161,6 +173,23 @@ describe('pageRule', () =>
       expect(follows)
         .toStrictEqual([ true, false, false ]);
     });
+
+    it('follows the date when any page reads it, and not for pages asking only the hour, or nothing', () =>
+    {
+      // Arrange: a stall open in Summer on its second page; a lamp open by night; a plain sign.
+      const events = [
+        event(1, [ commented([]), commented([ '<summer>' ]) ]),
+        event(2, [ commented([]), commented([ '<open:1080-1440>' ]) ]),
+        event(3, [ commented([ 'a sign' ]) ]),
+      ];
+
+      // Act.
+      const follows = events.map(each => readEvent(each, RULE).followsDate);
+
+      // Assert.
+      expect(follows)
+        .toStrictEqual([ true, false, false ]);
+    });
   });
 
   describe('pageHolds', () =>
@@ -216,6 +245,20 @@ describe('pageRule', () =>
       // Assert.
       expect(held)
         .toStrictEqual([ true, false ]);
+    });
+
+    it('hands the moment\'s season to a plugin condition reading the date', () =>
+    {
+      // Arrange: a page open in Summer, at noon in Summer, in Autumn, and with no season picked.
+      const reading = readEvent(event(1, [ commented([ '<summer>' ]) ]), RULE);
+      const moments: PageMoment[] = [ { ...NOON, season: 1 }, { ...NOON, season: 2 }, NOON ];
+
+      // Act.
+      const held = moments.map(moment => pageHolds(reading.pages[0], moment));
+
+      // Assert.
+      expect(held)
+        .toStrictEqual([ true, false, false ]);
     });
   });
 
