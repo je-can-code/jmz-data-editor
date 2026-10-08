@@ -207,6 +207,10 @@ const StampsPanel = () =>
           gap: 1,
           alignContent: 'start',
           gridTemplateColumns: `repeat(auto-fill, minmax(${THUMBNAIL_BOX.width + 8}px, 1fr))`,
+
+          // every card as tall as what it holds, however many there are: rows left to size themselves would shrink to
+          // fit the panel, and a card, which clips what overflows it, would cut its own words off.
+          gridAutoRows: 'max-content',
         }}
       >
         {list.map(stamp => (
