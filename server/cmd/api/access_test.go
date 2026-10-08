@@ -85,6 +85,7 @@ func TestOtherSitesPagesAreRefused(t *testing.T) {
 		{name: "an image folder's listing", method: http.MethodGet, target: "/api/img/faces"},
 		{name: "the change stream", method: http.MethodGet, target: "/api/file-changes"},
 		{name: "an enemy's placements", method: http.MethodGet, target: "/api/enemies/1/placements"},
+		{name: "every event's note", method: http.MethodGet, target: "/api/event-notes"},
 		{name: "the command usage counts", method: http.MethodGet, target: "/api/command-usage"},
 		{name: "the database names", method: http.MethodGet, target: "/api/database-names"},
 		{name: "a map save", method: http.MethodPut, target: "/api/maps/1", body: mapFixture},
