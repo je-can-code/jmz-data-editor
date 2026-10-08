@@ -1,3 +1,4 @@
+import type { Stamp } from '../stamps/stamp.ts';
 import type { LayerChoice } from '../tiles/layering.ts';
 import type { TileLayerIndex } from '../tiles/tileGrid.ts';
 import type { Brush } from './brush.ts';
@@ -6,16 +7,16 @@ import type { Brush } from './brush.ts';
  * What the left button does on the map. With {@code events} in hand it works on the events, selecting, moving and
  * opening them, and paints nothing; every other tool paints and leaves the events alone. The pen, eraser and shadow pen
  * paint as they are dragged; the rectangle and ellipse paint their shape when the button comes up; the fill and the
- * swap act on a click; the eyedropper picks a brush off the map; and the select tool lifts a piece of the map to move
- * or copy. The shadow pen and the region pen are the pen with a shadows or regions brush in hand, since the brush says
- * what it paints.
+ * swap act on a click; the eyedropper picks a brush off the map; the select tool lifts a piece of the map to move or
+ * copy; and the stamp places the stamp picked in the Stamps panel with each click. The shadow pen and the region pen are
+ * the pen with a shadows or regions brush in hand, since the brush says what it paints.
  */
-type PaintTool = 'events' | 'pen' | 'rectangle' | 'ellipse' | 'fill' | 'eraser' | 'eyedropper' | 'select' | 'swap';
+type PaintTool = 'events' | 'pen' | 'rectangle' | 'ellipse' | 'fill' | 'eraser' | 'eyedropper' | 'select' | 'swap' | 'stamp';
 
 /**
  * Every tool, in the order the tool bar shows them.
  */
-const PAINT_TOOLS: readonly PaintTool[] = [ 'events', 'pen', 'rectangle', 'ellipse', 'fill', 'eraser', 'eyedropper', 'select', 'swap' ];
+const PAINT_TOOLS: readonly PaintTool[] = [ 'events', 'pen', 'rectangle', 'ellipse', 'fill', 'eraser', 'eyedropper', 'select', 'swap', 'stamp' ];
 
 /**
  * Reports whether a tool paints, as every tool but the events one does.
@@ -51,6 +52,12 @@ type PaintSettings = {
    * one is, since laying a tile over the ground on layer 3 is what the override was asked for.
    */
   readonly overrideLayer: TileLayerIndex;
+
+  /**
+   * The stamp the stamp tool places, the one picked last in the Stamps panel, or null before any is. It stays picked
+   * once the tool is put down, so the tool bar can take it up again.
+   */
+  readonly stamp: Stamp | null;
 };
 
 /**
@@ -60,20 +67,25 @@ type PaintSettingsListener = (settings: PaintSettings) => void;
 
 /**
  * Where a window starts: the events in hand, so a click on the map selects as it always has, nothing picked, automatic
- * layering, and layer 3 for the override.
+ * layering, layer 3 for the override, and no stamp.
  */
-const INITIAL_PAINT_SETTINGS: PaintSettings = { tool: 'events', brush: null, strip: 'auto', overrideLayer: 2 };
+const INITIAL_PAINT_SETTINGS: PaintSettings = { tool: 'events', brush: null, strip: 'auto', overrideLayer: 2, stamp: null };
 
 /**
- * The window's painting settings: the tool, the brush, the layer strip's choice and the override's layer. The palette
- * hands its brush over here, the layer strip its choice, and every map view in the window paints with what this
- * holds, so picking a tile once serves every map on screen.
+ * The window's painting settings: the tool, the brush, the layer strip's choice, the override's layer and the stamp.
+ * The palette hands its brush over here, the layer strip its choice and the Stamps panel its stamp, and every map view
+ * in the window paints with what this holds, so picking a tile or a stamp once serves every map on screen.
+ *
+ * Taking up the stamp remembers the tool in hand before it, which putting the stamp down goes back to: Escape over a
+ * stamp in hand returns to whatever the author was doing.
  */
 class PaintState
 {
   #settings: PaintSettings;
 
   #listeners = new Set<PaintSettingsListener>();
+
+  #toolBeforeStamp: PaintTool = 'events';
 
   /**
    * @param {PaintSettings} settings Where to start.
@@ -130,6 +142,28 @@ class PaintState
   }
 
   /**
+   * Takes up a stamp: it becomes the stamp in hand, and the stamp tool the tool, so the next click on a map places it.
+   * The tool in hand before is remembered for {@link putDownStamp}.
+   * @param {Stamp} stamp The stamp.
+   */
+  takeUpStamp(stamp: Stamp): void
+  {
+    this.#update({ stamp, tool: 'stamp' });
+  }
+
+  /**
+   * Puts the stamp down, going back to the tool that was in hand before it was taken up. The stamp stays picked, and
+   * with any other tool in hand nothing changes.
+   */
+  putDownStamp(): void
+  {
+    if (this.#settings.tool === 'stamp')
+    {
+      this.#update({ tool: this.#toolBeforeStamp });
+    }
+  }
+
+  /**
    * Listens for changes.
    * @param {PaintSettingsListener} listener Called with the new settings after each change.
    * @returns {() => void} Stops listening.
@@ -144,7 +178,8 @@ class PaintState
   }
 
   /**
-   * Applies a change and tells every listener, unless nothing changed.
+   * Applies a change and tells every listener, unless nothing changed. A change taking up the stamp tool from another
+   * remembers that other, however the stamp tool was taken up: from the Stamps panel or from the tool bar.
    * @param {Partial<PaintSettings>} change The fields to change.
    */
   #update(change: Partial<PaintSettings>): void
@@ -154,6 +189,11 @@ class PaintState
     if (same)
     {
       return;
+    }
+
+    if (next.tool === 'stamp' && this.#settings.tool !== 'stamp')
+    {
+      this.#toolBeforeStamp = this.#settings.tool;
     }
 
     this.#settings = next;

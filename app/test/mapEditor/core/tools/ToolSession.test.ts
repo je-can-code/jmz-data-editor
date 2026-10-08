@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
+import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
+import type { StampOutcome } from '../../../../src/mapEditor/core/stamps/stampPlacement.ts';
 import type { TilesetLayering } from '../../../../src/mapEditor/core/tiles/layering.ts';
 import { makeAutotileId, TileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
 import { regionBrush, SHADOW_BRUSH, singleTileBrush, tileBrush, type Brush } from '../../../../src/mapEditor/core/tools/brush.ts';
 import { INITIAL_PAINT_SETTINGS, PaintState, type PaintSettings } from '../../../../src/mapEditor/core/tools/PaintState.ts';
 import { ToolSession, type ToolPointer } from '../../../../src/mapEditor/core/tools/ToolSession.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 import { fill, kindTile, put, type TestGrid } from '../tiles/support/tileGridBuilder.ts';
 import { benchWith, cellsOf, layeringWith, stackAt, type PaintBench } from './support/paintFixtures.ts';
 
@@ -484,7 +488,7 @@ describe('ToolSession: with the events in hand', () =>
 
     // Assert: the events leave the map and its history alone and show nothing; the pen lays the dirt.
     expect([ cellsOf(events.map), events.hub.history(events.history).rows, shown, stackAt(pen.map, 1, 1)[0] ])
-      .toEqual([ before, [], { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: null }, 'k18' ]);
+      .toEqual([ before, [], { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: null, ghostEvents: [], blockedCells: [] }, 'k18' ]);
   });
 
   it('never goes back to the events once the eyedropper has picked, since what it picks is for painting', () =>
@@ -517,7 +521,12 @@ describe('ToolSession: what the map shows', () =>
 
     // Assert.
     expect([ over.hover, over.hoverLabel, over.ghostTiles.length, gone ])
-      .toEqual([ { x: 2, y: 1, width: 1, height: 1 }, 'Auto: layer 4', 1, { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: null } ]);
+      .toEqual([
+        { x: 2, y: 1, width: 1, height: 1 },
+        'Auto: layer 4',
+        1,
+        { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: null, ghostEvents: [], blockedCells: [] },
+      ]);
   });
 
   it('follows Shift and the override\'s key as they go down, without the pointer moving', () =>
@@ -548,6 +557,132 @@ describe('ToolSession: what the map shows', () =>
 
     // Assert.
     expect(overlay)
-      .toEqual({ hover: { x: 1, y: 2, width: 2, height: 1 }, hoverLabel: 'Auto: layer 1', ghostTiles: [], selectedCells: null });
+      .toEqual({ hover: { x: 1, y: 2, width: 2, height: 1 }, hoverLabel: 'Auto: layer 1', ghostTiles: [], selectedCells: null, ghostEvents: [], blockedCells: [] });
+  });
+});
+
+/*
+ * The stamp tool: with a stamp in hand, the map shows the stamp under the pointer, its corner on the cell, its tiles and
+ * its events as ghosts and in red any tile where another event stands in the way; each click places it as one step of
+ * the map's history, Shift laying its tiles exactly as copied, and the host hears what each click came to, refusals
+ * included. With no stamp picked, a click does nothing and only the cell shows.
+ *
+ * The bench's 4x3 map holds grass all round, a tree over 0, 0, and no events.
+ */
+describe('ToolSession: the stamp', () =>
+{
+  /**
+   * Builds a stamp of a 2 by 1 piece of dirt on the ground with one event on its right cell, from the bench's tileset.
+   * @returns {Stamp} The stamp.
+   */
+  const dirtWithEvent = (): Stamp =>
+  {
+    const dirt = makeAutotileId(DIRT, 0);
+    return stampOf({
+      width: 2,
+      height: 1,
+      tilesetId: 4,
+      tiles: { layers: [ 0 ], values: [ dirt, dirt ], calledFor: [ 0, 0 ] },
+      events: [ { ...createMapEvent(7, 1, 0), note: 'event 7' } ],
+    });
+  };
+
+  /**
+   * Builds a session with a stamp in hand on the bench, hearing every outcome.
+   * @param {Stamp | null} stamp The stamp, or null for none picked.
+   * @returns {{ bench: SessionBench, heard: StampOutcome[] }} The session and what it heard.
+   */
+  const stamping = (stamp: Stamp | null) =>
+  {
+    const bench = benchWith(4, 3, meadow);
+    const state = new PaintState({ ...INITIAL_PAINT_SETTINGS, tool: 'stamp', stamp });
+    const heard: StampOutcome[] = [];
+    const session = new ToolSession({
+      hub: bench.hub,
+      map: () => bench.map,
+      layering: () => layeringWith(),
+      settings: () => state.settings,
+      pickBrush: brush => state.setBrush(brush),
+      pickTool: tool => state.setTool(tool),
+      stamped: outcome => heard.push(outcome),
+    });
+    return { bench: { ...bench, session, state }, heard };
+  };
+
+  it('previews the stamp with its corner under the pointer: its footprint, its tiles and its events', () =>
+  {
+    // Arrange.
+    const { bench } = stamping(dirtWithEvent());
+
+    // Act.
+    bench.session.move(at(1, 2));
+    const overlay = bench.session.overlay();
+
+    // Assert: the event lands one right of the corner.
+    expect([ overlay.hover, overlay.hoverLabel, overlay.ghostTiles.map(ghost => [ ghost.x, ghost.y, ghost.layer ]), overlay.ghostEvents.map(ghost => [ ghost.x, ghost.y ]), overlay.blockedCells ])
+      .toEqual([ { x: 1, y: 2, width: 2, height: 1 }, 'Stamp', [ [ 1, 2, 0 ], [ 2, 2, 0 ] ], [ [ 2, 2 ] ], [] ]);
+  });
+
+  it('places the stamp with each click as one step, naming what went down, and hands over what came of it', () =>
+  {
+    // Arrange.
+    const { bench, heard } = stamping(dirtWithEvent());
+
+    // Act: two clicks in different places.
+    drag(bench.session, [ at(0, 1) ]);
+    drag(bench.session, [ at(2, 0) ]);
+    const labels = bench.hub.history(bench.history).rows.map(row => row.label);
+    const placed = [ bench.map.event(1)?.x, bench.map.event(2)?.x ];
+
+    // Assert: the event took ids 1 and 2 on a map holding none, each stamp its own step.
+    expect([ labels, placed, stackAt(bench.map, 0, 1)[0], heard.map(outcome => outcome.ok && outcome.eventIds) ])
+      .toEqual([ [ 'Stamp 2 by 1 tiles and 1 event', 'Stamp 2 by 1 tiles and 1 event' ], [ 1, 3 ], 'k18', [ [ 1 ], [ 2 ] ] ]);
+  });
+
+  it('hands over a refusal, changing nothing, when an event would land on another', () =>
+  {
+    // Arrange: one click places the stamp; a second at the same spot would land its event on the first's.
+    const { bench, heard } = stamping(dirtWithEvent());
+    drag(bench.session, [ at(0, 1) ]);
+    const after = cellsOf(bench.map);
+
+    // Act.
+    bench.session.move(at(0, 1));
+    const blocked = bench.session.overlay();
+    drag(bench.session, [ at(0, 1) ]);
+
+    // Assert.
+    expect([ blocked.blockedCells, blocked.hoverLabel, heard[1], cellsOf(bench.map), bench.hub.history(bench.history).rows.length ])
+      .toEqual([ [ { x: 1, y: 1 } ], 'Another event is in the way', { ok: false, message: 'The stamp\'s event would land on another event.' }, after, 1 ]);
+  });
+
+  it('lays the tiles exactly as copied with Shift held, its edges included', () =>
+  {
+    // Arrange: grass that met nothing at its left edge, shaped by hand, stamped into the middle of the meadow.
+    const odd = makeAutotileId(GRASS, 5);
+    const { bench } = stamping(stampOf({ events: [], tiles: { layers: [ 0 ], values: [ odd ], calledFor: [ 9 ] } }));
+
+    // Act.
+    drag(bench.session, [ at(1, 1, { shift: true }) ]);
+
+    // Assert.
+    expect(bench.map.cellAt(1, 1, 0))
+      .toBe(odd);
+  });
+
+  it('does nothing at a click with no stamp picked, showing only the cell', () =>
+  {
+    // Arrange.
+    const { bench, heard } = stamping(null);
+    const before = cellsOf(bench.map);
+
+    // Act.
+    bench.session.move(at(1, 1));
+    const overlay = bench.session.overlay();
+    drag(bench.session, [ at(1, 1) ]);
+
+    // Assert.
+    expect([ overlay.hover, overlay.ghostTiles, cellsOf(bench.map), heard ])
+      .toEqual([ { x: 1, y: 1, width: 1, height: 1 }, [], before, [] ]);
   });
 });

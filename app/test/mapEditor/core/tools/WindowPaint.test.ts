@@ -50,7 +50,7 @@ describe('WindowPaint', () =>
     // Assert.
     expect([ tornOut.painting.settings, tornOut.selection.getState(), [ ...tornOut.memories ], tornOut.mode.getState().editing ])
       .toStrictEqual([
-        { tool: 'pen', brush: { kind: 'tiles', tilesetId: 4, width: 1, height: 1, cells: [ 1536 ] }, strip: 2, overrideLayer: 2 },
+        { tool: 'pen', brush: { kind: 'tiles', tilesetId: 4, width: 1, height: 1, cells: [ 1536 ] }, strip: 2, overrideLayer: 2, stamp: null },
         { brush: tileBrush(1536), layer: 2 },
         [ [ 4, { tab: 'A', pick: { kind: 'shadow' } } ] ],
         'tiles',
@@ -67,7 +67,7 @@ describe('WindowPaint', () =>
 
     // Assert.
     expect([ fresh.painting.settings, fresh.selection.brush.cells.length, fresh.selection.layer, fresh.memories.size ])
-      .toStrictEqual([ { tool: 'events', brush: null, strip: 'auto', overrideLayer: 2 }, 0, 'auto', 0 ]);
+      .toStrictEqual([ { tool: 'events', brush: null, strip: 'auto', overrideLayer: 2, stamp: null }, 0, 'auto', 0 ]);
   });
 
   it('goes its own way once built: picks in either window never reach the other', () =>

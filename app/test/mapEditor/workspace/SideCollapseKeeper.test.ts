@@ -214,13 +214,13 @@ describe('SideCollapseKeeper', () =>
 
   it('forgets one collapsed group once it is removed from the dock, keeping the rest of the side collapsed', () =>
   {
-    // Arrange: the palette panel is the only one in its group, so closing it removes the group too.
+    // Arrange: the palette and the stamps share a group, so closing both removes the group too.
     const keeper = new SideCollapseKeeper();
     keeper.attach(dock.api);
     keeper.toggle('left');
 
     // Act.
-    (dock.api.getPanel('palette') as IDockviewPanel).api.close();
+    [ 'palette', 'stamps' ].forEach(id => (dock.api.getPanel(id) as IDockviewPanel).api.close());
 
     // Assert: map-tree and layers are still kept, palette is not.
     expect([ keeper.isCollapsed('left'), keeper.collapsed.get('left')?.size ])
@@ -235,8 +235,8 @@ describe('SideCollapseKeeper', () =>
     keeper.toggle('left');
     keeper.toggle('right');
 
-    // Act.
-    (dock.api.getPanel('palette') as IDockviewPanel).api.close();
+    // Act: the palette's whole group closed.
+    [ 'palette', 'stamps' ].forEach(id => (dock.api.getPanel(id) as IDockviewPanel).api.close());
 
     // Assert: the right side keeps both of its groups, untouched by a closing that was never one of its own.
     expect(keeper.collapsed.get('right')?.size)
@@ -245,13 +245,13 @@ describe('SideCollapseKeeper', () =>
 
   it('forgets a side entirely once every group it caught is gone', () =>
   {
-    // Arrange: the whole left column collapsed, each of its panels the only one in its own group.
+    // Arrange: the whole left column collapsed.
     const keeper = new SideCollapseKeeper();
     keeper.attach(dock.api);
     keeper.toggle('left');
 
     // Act.
-    [ 'map-tree', 'palette', 'layers' ].forEach(id => (dock.api.getPanel(id) as IDockviewPanel).api.close());
+    [ 'map-tree', 'palette', 'stamps', 'layers' ].forEach(id => (dock.api.getPanel(id) as IDockviewPanel).api.close());
 
     // Assert.
     expect(keeper.isCollapsed('left'))

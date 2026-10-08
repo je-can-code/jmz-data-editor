@@ -1,7 +1,9 @@
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { MapCell } from '../renderer/camera.ts';
-import type { CellRect, GhostTile } from '../renderer/MapRenderer.ts';
+import type { CellRect, GhostEvent, GhostTile } from '../renderer/MapRenderer.ts';
+import { placeStamp, type StampOutcome } from '../stamps/stampPlacement.ts';
+import { previewStamp } from '../stamps/stampPreview.ts';
 import type { Shaping, TilesetLayering } from '../tiles/layering.ts';
 import type { TileLayerIndex } from '../tiles/tileGrid.ts';
 import { fitsTileset, type Brush, type BrushKind } from './brush.ts';
@@ -37,13 +39,16 @@ type ToolPointer = {
 
 /**
  * What the map should show for the tools: the brush cursor (the cells a click would reach, or the extent of a shape or
- * an eyedropper drag) and its words, the ghost preview, and the selected area.
+ * an eyedropper drag) and its words, the ghost preview, the selected area, and, for the stamp, the ghosts of the events
+ * it would place and in red the tiles where another event stands in their way.
  */
 type ToolOverlay = {
   readonly hover: CellRect | null;
   readonly hoverLabel: string | null;
   readonly ghostTiles: readonly GhostTile[];
   readonly selectedCells: CellRect | null;
+  readonly ghostEvents: readonly GhostEvent[];
+  readonly blockedCells: readonly MapCell[];
 };
 
 /**
@@ -79,6 +84,12 @@ type ToolSessionHost = {
    * Takes up another tool, as the eyedropper does when it has picked.
    */
   pickTool(tool: PaintTool): void;
+
+  /**
+   * Hears what a click of the stamp tool came to: the events it placed, which take the selection, what it left out, or
+   * why it was refused. Left out, nobody hears.
+   */
+  stamped?(outcome: StampOutcome): void;
 };
 
 /**
@@ -135,9 +146,22 @@ const STEP_LABELS = {
 const IDLE: Gesture = { kind: 'idle' };
 
 /**
+ * No ghost events and no blocked tiles: shared, so the renderer sees nothing change while none show.
+ */
+const NO_GHOST_EVENTS: readonly GhostEvent[] = Object.freeze([]);
+const NO_CELLS: readonly MapCell[] = Object.freeze([]);
+
+/**
  * An overlay showing nothing of the tools: no cursor, no words, no ghosts and no selected area.
  */
-const NO_TOOL_OVERLAY: ToolOverlay = { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: null };
+const NO_TOOL_OVERLAY: ToolOverlay = {
+  hover: null,
+  hoverLabel: null,
+  ghostTiles: [],
+  selectedCells: null,
+  ghostEvents: NO_GHOST_EVENTS,
+  blockedCells: NO_CELLS,
+};
 
 /**
  * One map view's painting: what the tool in hand does as the left button goes down, drags and comes up over the map,
@@ -145,9 +169,9 @@ const NO_TOOL_OVERLAY: ToolOverlay = { hover: null, hoverLabel: null, ghostTiles
  * keys, and draws the overlay it answers with.
  *
  * Every edit is one step of the map's history: a pen, eraser or shadow pen stroke from press to release, however many
- * cells it crossed, and a rectangle, ellipse, fill, swap, move or copy as it lands. Everything a stroke paints with is
- * fixed when it starts: the brush, the tool, the layer (the override's while its key is held) and whether Shift holds
- * autotiles exact, so letting a key go mid-stroke never changes what the rest of the stroke does.
+ * cells it crossed, and a rectangle, ellipse, fill, swap, move, copy or stamp as it lands. Everything a stroke paints
+ * with is fixed when it starts: the brush, the tool, the layer (the override's while its key is held) and whether Shift
+ * holds autotiles exact, so letting a key go mid-stroke never changes what the rest of the stroke does.
  */
 class ToolSession
 {
@@ -298,8 +322,9 @@ class ToolSession
 
   /**
    * Follows the tool in hand changing: the selection goes when another tool than the select tool is taken up, since
-   * only that tool shows or uses it, and every painting tool but the eyedropper is remembered as the one to go back to
-   * once the eyedropper has picked; what it picks is for painting, so it never goes back to the events.
+   * only that tool shows or uses it, and every painting tool but the eyedropper and the stamp is remembered as the one
+   * to go back to once the eyedropper has picked; what it picks is a brush to paint with, which neither the events nor
+   * the stamp read.
    * @param {PaintTool} tool The tool in hand now.
    */
   toolChanged(tool: PaintTool): void
@@ -309,7 +334,7 @@ class ToolSession
       this.#selection = null;
     }
 
-    if (tool !== 'eyedropper' && isPaintingTool(tool))
+    if (tool !== 'eyedropper' && tool !== 'stamp' && isPaintingTool(tool))
     {
       this.#toolBeforePick = tool;
     }
@@ -336,15 +361,21 @@ class ToolSession
       return this.#gestureOverlay(map, gesture, pointer);
     }
 
-    if (isPaintingTool(this.#host.settings().tool) === false)
+    const { tool } = this.#host.settings();
+    if (isPaintingTool(tool) === false)
     {
       return NO_TOOL_OVERLAY;
     }
 
-    const preview = pointer === null || pointer.cell === null
+    if (tool === 'stamp' && pointer !== null && pointer.cell !== null)
+    {
+      return this.#stampOverlay(map, pointer, pointer.cell);
+    }
+
+    const preview = pointer === null || pointer.cell === null || tool === 'stamp'
       ? NO_PREVIEW
       : this.#idlePreview(map, pointer, pointer.cell);
-    return { hover: preview.hover, hoverLabel: preview.label, ghostTiles: preview.ghosts, selectedCells };
+    return { ...NO_TOOL_OVERLAY, hover: preview.hover, hoverLabel: preview.label, ghostTiles: preview.ghosts, selectedCells };
   }
 
   /**
@@ -360,7 +391,8 @@ class ToolSession
     const mode = this.#layerMode(pointer);
     const context = paintContextFor(mode, pointer.shift ? 'exact' : 'auto', this.#host.layering(map));
 
-    // the eyedropper, the select tool and the eraser lay none of the brush's values, so its tileset is no matter.
+    // the eyedropper, the select tool, the eraser and the stamp lay none of the brush's values, so its tileset is no
+    // matter.
     switch (tool)
     {
       case 'eyedropper':
@@ -371,6 +403,9 @@ class ToolSession
         return;
       case 'eraser':
         this.#startFreehand(map, cell, inHand, inHand?.kind ?? 'tiles', context, label);
+        return;
+      case 'stamp':
+        this.#stamp(map, cell, context.shaping);
         return;
       default:
         break;
@@ -428,6 +463,26 @@ class ToolSession
     const gesture = { kind: 'freehand', stroke, trail, origin: cell, brush, erasing, context, label } as const;
     this.#gesture = gesture;
     this.#paintFreehand(gesture, cell);
+  }
+
+  /**
+   * Places the stamp in hand with its top-left corner on the cell clicked, as one step of the map's history, and tells
+   * the host what came of it: the events it placed, or why it was refused. With no stamp in hand nothing happens.
+   * @param {MapDocument} map The map.
+   * @param {MapCell} cell The cell clicked.
+   * @param {Shaping} shaping Whether the tiles go down exactly as copied (Shift held).
+   */
+  #stamp(map: MapDocument, cell: MapCell, shaping: Shaping): void
+  {
+    const { stamp } = this.#host.settings();
+    if (stamp === null)
+    {
+      return;
+    }
+
+    const { mode } = this.#host.layering(map);
+    const outcome = placeStamp(this.#host.hub, map.mapId, stamp, { at: cell, shaping, mode }, 'Stamp');
+    this.#host.stamped?.(outcome);
   }
 
   /**
@@ -616,20 +671,20 @@ class ToolSession
         // the stroke paints as it goes, so the cursor needs no ghost: the tiles are already there.
         const size = gesture.brush === null ? { width: 1, height: 1 } : gesture.brush;
         const hover = cell === null ? null : { x: cell.x, y: cell.y, width: size.width, height: size.height };
-        return { hover, hoverLabel: gesture.label, ghostTiles: [], selectedCells: null };
+        return { ...NO_TOOL_OVERLAY, hover, hoverLabel: gesture.label };
       }
       case 'shadow':
-        return { hover: null, hoverLabel: gesture.adding ? 'Add shadows' : 'Remove shadows', ghostTiles: [], selectedCells: null };
+        return { ...NO_TOOL_OVERLAY, hoverLabel: gesture.adding ? 'Add shadows' : 'Remove shadows' };
       case 'shape':
         return this.#shapeOverlay(map, gesture, cell ?? gesture.anchor);
       case 'pick':
-        return { hover: rectangleBetween(gesture.anchor, cell ?? gesture.anchor), hoverLabel: null, ghostTiles: [], selectedCells: null };
+        return { ...NO_TOOL_OVERLAY, hover: rectangleBetween(gesture.anchor, cell ?? gesture.anchor) };
       case 'marquee':
-        return { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: this.#selection };
+        return { ...NO_TOOL_OVERLAY, selectedCells: this.#selection };
       case 'drag-clip':
         return this.#clipOverlay(map, gesture, cell ?? gesture.grab);
       default:
-        return { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: null };
+        return NO_TOOL_OVERLAY;
     }
   }
 
@@ -650,7 +705,7 @@ class ToolSession
     const hoverLabel = brush.kind === 'tiles'
       ? layerLabel(mode, underAnchor === undefined ? -1 : underAnchor.layer as TileLayerIndex, context.shaping)
       : null;
-    return { hover: rect, hoverLabel, ghostTiles, selectedCells: null };
+    return { ...NO_TOOL_OVERLAY, hover: rect, hoverLabel, ghostTiles };
   }
 
   /**
@@ -666,10 +721,38 @@ class ToolSession
     const topLeft = { x: clip.source.x + at.x - grab.x, y: clip.source.y + at.y - grab.y };
     const landed = { x: topLeft.x, y: topLeft.y, width: clip.source.width, height: clip.source.height };
     return {
-      hover: null,
+      ...NO_TOOL_OVERLAY,
       hoverLabel: copy ? 'Copy' : 'Move',
       ghostTiles: clipGhosts(clip, topLeft, map),
       selectedCells: landed,
+    };
+  }
+
+  /**
+   * Works out the overlay while the stamp tool is in hand: the stamp's footprint with its corner under the pointer, its
+   * tiles and events where a click would put them, and in red the tiles another event holds in their way. With no stamp
+   * picked, only the cell under the pointer.
+   * @param {MapDocument} map The map.
+   * @param {ToolPointer} pointer The pointer and keys.
+   * @param {MapCell} cell The cell under it.
+   * @returns {ToolOverlay} The overlay.
+   */
+  #stampOverlay(map: MapDocument, pointer: ToolPointer, cell: MapCell): ToolOverlay
+  {
+    const { stamp } = this.#host.settings();
+    if (stamp === null)
+    {
+      return { ...NO_TOOL_OVERLAY, hover: { x: cell.x, y: cell.y, width: 1, height: 1 } };
+    }
+
+    const preview = previewStamp(map, stamp, cell, pointer.shift ? 'exact' : 'auto');
+    return {
+      hover: preview.hover,
+      hoverLabel: preview.label,
+      ghostTiles: preview.ghostTiles,
+      selectedCells: null,
+      ghostEvents: preview.ghostEvents.length === 0 ? NO_GHOST_EVENTS : preview.ghostEvents,
+      blockedCells: preview.blockedCells.length === 0 ? NO_CELLS : preview.blockedCells,
     };
   }
 

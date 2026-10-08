@@ -4,6 +4,7 @@ import { singleTileBrush, type Brush } from '../../../../src/mapEditor/core/tool
 import { linkPaintSelection, takeUpPenForPick, toolBrushFrom } from '../../../../src/mapEditor/core/tools/paintSelectionLink.ts';
 import { PaintState } from '../../../../src/mapEditor/core/tools/PaintState.ts';
 import { ToolSession } from '../../../../src/mapEditor/core/tools/ToolSession.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 import { fill, kindTile, put, type TestGrid } from '../tiles/support/tileGridBuilder.ts';
 import { benchWith, cellsOf, layeringWith, stackAt } from './support/paintFixtures.ts';
 
@@ -16,7 +17,8 @@ import { benchWith, cellsOf, layeringWith, stackAt } from './support/paintFixtur
  * wherever a rectangle or a fill reached. The link runs both ways, so the eyedropper's pick shows in the palette and the
  * palette's brush picked again afterwards is heard; a brush the palette cannot show (one naming no tileset) stays the
  * tools' alone. The palette's choices win when the link starts, and neither side echoes a change back. Picking in the
- * palette with the events in hand takes up the pen, since a tile is picked to be painted.
+ * palette with the events or the stamp in hand takes up the pen, since a tile is picked to be painted, and neither of
+ * those reads the brush.
  */
 const GRASS = 16;
 const DIRT = 18;
@@ -76,7 +78,7 @@ describe('toolBrushFrom', () =>
   {
     // Arrange: the palette linked to the tools, the rectangle in hand, a tile picked and then the palette emptied.
     const selection = new PaintSelection();
-    const painting = new PaintState({ tool: 'rectangle', brush: null, strip: 'auto', overrideLayer: 2 });
+    const painting = new PaintState({ tool: 'rectangle', brush: null, strip: 'auto', overrideLayer: 2, stamp: null });
     linkPaintSelection(selection, painting);
     selection.setBrush(paletteTiles([ kindTile(DIRT) ]));
     selection.setBrush(EMPTY_BRUSH);
@@ -223,19 +225,22 @@ describe('linkPaintSelection', () =>
 
 describe('takeUpPenForPick', () =>
 {
-  it('takes up the pen for a pick with the events in hand, and leaves a painting tool in hand alone', () =>
+  it('takes up the pen for a pick with the events or the stamp in hand, and leaves a painting tool in hand alone', () =>
   {
-    // Arrange: one window with the events in hand, one with the fill.
+    // Arrange: one window with the events in hand, one with the stamp, one with the fill.
     const events = new PaintState();
+    const stampInHand = new PaintState();
+    stampInHand.takeUpStamp(stampOf());
     const fillInHand = new PaintState();
     fillInHand.setTool('fill');
 
     // Act.
     takeUpPenForPick(events);
+    takeUpPenForPick(stampInHand);
     takeUpPenForPick(fillInHand);
 
     // Assert.
-    expect([ events.settings.tool, fillInHand.settings.tool ])
-      .toEqual([ 'pen', 'fill' ]);
+    expect([ events.settings.tool, stampInHand.settings.tool, fillInHand.settings.tool ])
+      .toEqual([ 'pen', 'pen', 'fill' ]);
   });
 });

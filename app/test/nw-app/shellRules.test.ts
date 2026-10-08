@@ -2,9 +2,9 @@ import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import DatabaseFilenames from '../../src/core/enums/DatabaseFilenames.ts';
 import { CLIPBOARD_FORMAT as COMMAND_CLIPBOARD_FORMAT } from '../../src/mapEditor/core/commandList/commandClipboard.ts';
-import { EVENT_CLIPBOARD_MARKER } from '../../src/mapEditor/core/events/eventClipboard.ts';
 import { encodePageClipboard, PAGE_CLIPBOARD_MARKER } from '../../src/mapEditor/core/eventWindow/pageOperations.ts';
-import { createEventPage } from '../../src/mapEditor/core/model/eventModel.ts';
+import { encodeStampClipboard, STAMP_CLIPBOARD_MARKER } from '../../src/mapEditor/core/stamps/stampClipboard.ts';
+import { createEventPage, createMapEvent } from '../../src/mapEditor/core/model/eventModel.ts';
 import { ROW_CLIPBOARD_FORMAT, RowClipboard } from '../../src/services/rows/RowClipboard.ts';
 
 /*
@@ -239,42 +239,43 @@ describe('shellRules', () =>
   describe('clipboardAnswer', () =>
   {
     const REPLY = 'jmz-clipboard-0f8fad5b-d9cb-469f-a165-70867728950e';
-    const EVENTS = JSON.stringify({ marker: 'jmz-map-editor/events', version: 1, mapId: 3, events: [] });
+    const STAMP = JSON.stringify({ marker: 'jmz-map-editor/stamp', version: 1, stamp: { id: 'a:1', mapId: 3, events: [] } });
 
     it('answers on the reply channel the page named, with the clipboard\'s text when it carries the marker asked for', () =>
     {
       // Arrange.
-      const request = { type: 'clipboard-read', marker: 'jmz-map-editor/events', replyTo: REPLY };
+      const request = { type: 'clipboard-read', marker: 'jmz-map-editor/stamp', replyTo: REPLY };
 
       // Act.
-      const answer = rules.clipboardAnswer(request, () => EVENTS);
+      const answer = rules.clipboardAnswer(request, () => STAMP);
 
       // Assert.
       expect(answer)
-        .toStrictEqual({ channel: REPLY, message: { type: 'clipboard-text', text: EVENTS } });
+        .toStrictEqual({ channel: REPLY, message: { type: 'clipboard-text', text: STAMP } });
     });
 
     it('answers with nothing when the clipboard holds anything else, or the page asks for a kind the shell never reads', () =>
     {
-      // Arrange: plain text, a list, the marker under another field, another program's JSON, and a kind not read.
+      // Arrange: plain text, a list, the marker under another field, another program's JSON, the events clipboard the
+      // map editor wrote before its copies became stamps, and a kind not read.
       const clipboards = [
         'hunter2',
-        JSON.stringify([ 'jmz-map-editor/events' ]),
-        JSON.stringify({ format: 'jmz-map-editor/events' }),
-        JSON.stringify({ marker: 'something-else/events' }),
-        '{"marker":"jmz-map-editor/events"',
+        JSON.stringify([ 'jmz-map-editor/stamp' ]),
+        JSON.stringify({ format: 'jmz-map-editor/stamp' }),
+        JSON.stringify({ marker: 'something-else/stamp' }),
+        '{"marker":"jmz-map-editor/stamp"',
       ];
-      const kindsNotRead = [ '__proto__', 'jmz-map-editor/secrets' ];
+      const kindsNotRead = [ '__proto__', 'jmz-map-editor/secrets', 'jmz-map-editor/events' ];
 
       // Act.
       const texts = [
-        ...clipboards.map(text => rules.clipboardAnswer({ marker: 'jmz-map-editor/events', replyTo: REPLY }, () => text)),
-        ...kindsNotRead.map(marker => rules.clipboardAnswer({ marker, replyTo: REPLY }, () => EVENTS)),
+        ...clipboards.map(text => rules.clipboardAnswer({ marker: 'jmz-map-editor/stamp', replyTo: REPLY }, () => text)),
+        ...kindsNotRead.map(marker => rules.clipboardAnswer({ marker, replyTo: REPLY }, () => JSON.stringify({ marker }))),
       ].map(answer => answer?.message.text);
 
       // Assert.
       expect(texts)
-        .toStrictEqual([ '', '', '', '', '', '', '' ]);
+        .toStrictEqual([ '', '', '', '', '', '', '', '' ]);
     });
 
     it('gives no answer, and never reads the clipboard, for a read naming no proper reply channel', () =>
@@ -284,10 +285,10 @@ describe('shellRules', () =>
       let reads = 0;
 
       // Act.
-      const answers = replies.map(replyTo => rules.clipboardAnswer({ marker: 'jmz-map-editor/events', replyTo }, () =>
+      const answers = replies.map(replyTo => rules.clipboardAnswer({ marker: 'jmz-map-editor/stamp', replyTo }, () =>
       {
         reads += 1;
-        return EVENTS;
+        return STAMP;
       }));
 
       // Assert.
@@ -297,10 +298,11 @@ describe('shellRules', () =>
 
     it('reads each of the editors\' own clipboards only for a page asking for that one', () =>
     {
-      // Arrange: commands, rows and pages as the editors write them.
+      // Arrange: commands, rows, pages and a stamp as the editors write them.
       const commands = JSON.stringify({ format: COMMAND_CLIPBOARD_FORMAT, version: 1, commands: [] });
       const rows = RowClipboard.copy(DatabaseFilenames.Items, [ { id: 9, name: 'Potion' } ]);
       const pages = encodePageClipboard({ marker: PAGE_CLIPBOARD_MARKER, version: 1, pages: [ createEventPage() ] });
+      const stamp = encodeStampClipboard({ id: 'a:1', mapId: 3, tilesetId: 1, origin: { x: 0, y: 0 }, width: 1, height: 1, tiles: null, events: [ createMapEvent(1, 0, 0) ] });
       const ask = (marker: string, text: string) => rules.clipboardAnswer({ marker, replyTo: REPLY }, () => text)?.message.text;
 
       // Act.
@@ -308,16 +310,17 @@ describe('shellRules', () =>
         ask(COMMAND_CLIPBOARD_FORMAT, commands),
         ask(ROW_CLIPBOARD_FORMAT, rows),
         ask(PAGE_CLIPBOARD_MARKER, pages),
-        ask(EVENT_CLIPBOARD_MARKER, commands),
+        ask(STAMP_CLIPBOARD_MARKER, stamp),
+        ask(STAMP_CLIPBOARD_MARKER, commands),
         ask(COMMAND_CLIPBOARD_FORMAT, rows),
-        ask(ROW_CLIPBOARD_FORMAT, EVENTS),
-        ask(PAGE_CLIPBOARD_MARKER, EVENTS),
-        ask(EVENT_CLIPBOARD_MARKER, pages),
+        ask(ROW_CLIPBOARD_FORMAT, stamp),
+        ask(PAGE_CLIPBOARD_MARKER, stamp),
+        ask(STAMP_CLIPBOARD_MARKER, pages),
       ];
 
       // Assert.
       expect(answers)
-        .toStrictEqual([ commands, rows, pages, '', '', '', '', '' ]);
+        .toStrictEqual([ commands, rows, pages, stamp, '', '', '', '', '' ]);
     });
 
     it('reads exactly the clipboards the editors write, each by the field its marker sits in', () =>
@@ -330,7 +333,7 @@ describe('shellRules', () =>
       // Assert.
       expect(kinds)
         .toStrictEqual({
-          [EVENT_CLIPBOARD_MARKER]: 'marker',
+          [STAMP_CLIPBOARD_MARKER]: 'marker',
           [PAGE_CLIPBOARD_MARKER]: 'marker',
           [COMMAND_CLIPBOARD_FORMAT]: 'format',
           [ROW_CLIPBOARD_FORMAT]: 'format',

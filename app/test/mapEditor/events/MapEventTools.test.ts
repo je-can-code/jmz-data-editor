@@ -2,7 +2,6 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { decodeEventClipboard, encodeEventClipboard, copyEvents } from '../../../src/mapEditor/core/events/eventClipboard.ts';
 import { EventSelection } from '../../../src/mapEditor/core/events/EventSelection.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import type { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
@@ -12,17 +11,16 @@ import { MapEventTools, type EventMenuRequest } from '../../../src/mapEditor/eve
 import { hubWithMaps, mapFileOf, mapWithEvents, spotsOf } from '../support/eventFixtures.ts';
 
 /*
- * The event tools are the map view's hands: they turn the mouse, the keys and the clipboard into the event services'
- * steps and the window's selection, and hand the renderer what to show. What they owe, beyond the services' own
- * promises: a click, a box and a drag each do what the gesture says (a drag shows ghosts and its drop is one undoable
- * step, or a refusal said aloud); a double-click opens an event, or places one on the ground and opens it, acting on
- * the spot its presses landed on even where the browser reports the double-click itself in whole pixels a tile away,
- * as it does zoomed out at a device pixel ratio of 1.5; a click on the tile beside an event never picks it; the keys act
- * only while the view has focus and nudge only when something is selected, and while the left button is down only Esc
- * acts, every other key (an undo included) waiting until it comes up; copy and paste go through the browser's
- * clipboard events with the map editor's marker, pasting under the pointer with fresh ids and leaving plain text
- * alone, the tile under the pointer following the camera as it zooms; a right click picks the event it lands on
- * before the menu opens; standing down ignores all of it; and an event removed by an undo leaves the selection.
+ * The event tools are the map view's hands: they turn the mouse and the keys into the event services' steps and the
+ * window's selection, and hand the renderer what to show. What they owe, beyond the services' own promises: a click, a
+ * box and a drag each do what the gesture says (a drag shows ghosts and its drop is one undoable step, or a refusal
+ * said aloud); a double-click opens an event, or places one on the ground and opens it, acting on the spot its presses
+ * landed on even where the browser reports the double-click itself in whole pixels a tile away, as it does zoomed out
+ * at a device pixel ratio of 1.5; a click on the tile beside an event never picks it; the keys act only while the view
+ * has focus and nudge only when something is selected, never answer a key another tool took first, and while the left
+ * button is down only Esc acts, every other key (an undo included) waiting until it comes up; a right click picks the
+ * event it lands on before the menu opens; standing down ignores all of it; and an event removed by an undo leaves the
+ * selection. Copying, cutting and pasting are the stamp tools' (see MapStampTools.test.ts).
  *
  * The view is at zoom 1 with the map's corner at the view's, so a tile is 48 pixels. The 6x4 map holds event 1 at
  * 0, 0, event 2 at 1, 0, and event 3 at 4, 2.
@@ -35,17 +33,7 @@ describe('MapEventTools', () =>
   {
     built.splice(0).forEach(tools => tools.destroy());
     document.body.innerHTML = '';
-    Reflect.deleteProperty(window.navigator, 'clipboard');
   });
-
-  /**
-   * Gives the page's navigator a clipboard whose writes go where the test says, as the browser's own would.
-   * @param {(text: string) => Promise<void>} writeText What a write does.
-   */
-  const stubClipboard = (writeText: (text: string) => Promise<void>) =>
-  {
-    Object.defineProperty(window.navigator, 'clipboard', { value: { writeText }, configurable: true });
-  };
 
   /**
    * Builds the tools over the fixture map, in a view in the page, with a stand-in renderer that finds events by the
@@ -102,20 +90,18 @@ describe('MapEventTools', () =>
     const opened: string[] = [];
     const notices: string[] = [];
     const menuRequests: EventMenuRequest[] = [];
-    const clipboard: { text: string | null } = { text: null };
     const tools = new MapEventTools({
       renderer,
       host,
       hub,
       selection,
       openEvent: (mapId, eventId) => opened.push(`${mapId}:${eventId}`),
-      readClipboard: async () => clipboard.text,
       notify: text => notices.push(text),
       openMenu: request => menuRequests.push(request),
     });
     tools.setMap(map);
     built.push(tools);
-    return { hub, map, host, canvas, overlays, menus, selection, opened, notices, menuRequests, tools, clipboard, moveCamera };
+    return { hub, map, host, canvas, overlays, menus, selection, opened, notices, menuRequests, tools, moveCamera };
   };
 
   /**
@@ -192,29 +178,6 @@ describe('MapEventTools', () =>
     const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ctrlKey: held.ctrlKey ?? false });
     target.dispatchEvent(event);
     return event;
-  };
-
-  /**
-   * Fires a clipboard event on the page, as the browser does on Ctrl+C, X or V, with a clipboard holding some text.
-   * @param {string} type copy, cut or paste.
-   * @param {string} text What the clipboard holds.
-   * @returns {{ event: Event, written: () => string }} The event, and what was written to the clipboard.
-   */
-  const clipboardEvent = (type: string, text = ''): { event: Event; written: () => string } =>
-  {
-    let written = '';
-    const event = new Event(type, { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: {
-        getData: () => text,
-        setData: (_format: string, value: string) =>
-        {
-          written = value;
-        },
-      },
-    });
-    document.body.dispatchEvent(event);
-    return { event, written: () => written };
   };
 
   describe('clicks and boxes', () =>
@@ -504,157 +467,31 @@ describe('MapEventTools', () =>
       expect(event.defaultPrevented)
         .toBe(false);
     });
-  });
 
-  describe('clipboard', () =>
-  {
-    it('copies the selection with the marker while the view has focus, and leaves a copy elsewhere alone', () =>
+    it('leaves a key another tool took first alone, such as the Esc that put a stamp down', () =>
     {
-      // Arrange: event 2 selected.
-      const { host, map, selection, notices } = setUp();
-      selection.select(1, [ 2 ]);
-
-      // Act: once with the focus elsewhere, then with the view focused.
-      const elsewhere = clipboardEvent('copy');
-      host.focus();
-      const focused = clipboardEvent('copy');
-
-      // Assert.
-      expect([ elsewhere.event.defaultPrevented, focused.event.defaultPrevented, decodeEventClipboard(focused.written()), notices ])
-        .toStrictEqual([ false, true, copyEvents(map, 1, [ 2 ]), [ 'Copied event.' ] ]);
-    });
-
-    it('cuts the selection to the clipboard, removing it as one undoable step', () =>
-    {
-      // Arrange.
-      const { hub, host, map, selection } = setUp();
+      // Arrange: event 1 selected, and a listener ahead of the tools taking Esc, as the painting tools take it to put a
+      // stamp down; a Delete nobody took acts as ever.
+      const { hub, host, selection } = setUp();
       selection.select(1, [ 1 ]);
-      const copy = copyEvents(map, 1, [ 1 ]);
-      host.focus();
-
-      // Act.
-      const cut = clipboardEvent('cut');
-
-      // Assert.
-      expect([ cut.event.defaultPrevented, decodeEventClipboard(cut.written()), spotsOf(mapFileOf(hub, 1))[1], hub.history(mapHistoryKey(1)).rows.map(row => row.label) ])
-        .toStrictEqual([ true, copy, null, [ 'Cut event' ] ]);
-    });
-
-    it('pastes copied events with their corner on the tile under the pointer, with fresh ids, selecting them', () =>
-    {
-      // Arrange: events 1 and 2 copied, the pointer resting on 2, 2.
-      const { hub, host, map, canvas, selection } = setUp();
-      const text = encodeEventClipboard(copyEvents(map, 1, [ 1, 2 ]) as NonNullable<ReturnType<typeof copyEvents>>);
-      point(canvas, 'pointermove', { x: 2, y: 2 });
-      host.focus();
-
-      // Act.
-      const paste = clipboardEvent('paste', text);
-
-      // Assert.
-      expect([ paste.event.defaultPrevented, spotsOf(mapFileOf(hub, 1)), selection.eventsOn(1) ])
-        .toStrictEqual([ true, [ null, [ 0, 0 ], [ 1, 0 ], [ 4, 2 ], [ 2, 2 ], [ 3, 2 ] ], [ 4, 5 ] ]);
-    });
-
-    it('lands a paste on the tile a zoom puts under the still pointer, not the one it rested on before', () =>
-    {
-      // Arrange: event 3 copied, the pointer resting over 2, 2; at zoom 2 that spot lies over tile 1, 1.
-      const { hub, host, map, canvas, moveCamera } = setUp();
-      const text = encodeEventClipboard(copyEvents(map, 1, [ 3 ]) as NonNullable<ReturnType<typeof copyEvents>>);
-      point(canvas, 'pointermove', { x: 2, y: 2 });
-      host.focus();
-      moveCamera({ x: 0, y: 0, zoom: 2 });
-
-      // Act.
-      clipboardEvent('paste', text);
-
-      // Assert.
-      expect(spotsOf(mapFileOf(hub, 1))[4])
-        .toStrictEqual([ 1, 1 ]);
-    });
-
-    it('cuts from the menu once the clipboard holds the events, removing them as one undoable step', async () =>
-    {
-      // Arrange: event 1 selected; the clipboard takes whatever is written to it.
-      const { hub, map, tools, selection } = setUp();
-      selection.select(1, [ 1 ]);
-      const copy = copyEvents(map, 1, [ 1 ]);
-      let written = '';
-      stubClipboard(async text =>
+      const takeEscape = (event: KeyboardEvent) =>
       {
-        written = text;
-      });
+        if (event.key === 'Escape')
+        {
+          event.preventDefault();
+        }
+      };
+      window.addEventListener('keydown', takeEscape, true);
 
       // Act.
-      await tools.cutToClipboard();
+      key(host, 'Escape');
+      const afterEscape = selection.eventsOn(1);
+      key(host, 'Delete');
+      window.removeEventListener('keydown', takeEscape, true);
 
-      // Assert.
-      expect([ decodeEventClipboard(written), spotsOf(mapFileOf(hub, 1))[1], hub.history(mapHistoryKey(1)).rows.map(row => row.label) ])
-        .toStrictEqual([ copy, null, [ 'Cut event' ] ]);
-    });
-
-    it('keeps the events when the menu\'s cut cannot write the clipboard, whether it refuses or there is none', async () =>
-    {
-      // Arrange: event 1 selected; first a clipboard that refuses, then none at all.
-      const { hub, tools, selection, notices } = setUp();
-      selection.select(1, [ 1 ]);
-      stubClipboard(async () => Promise.reject(new Error('not allowed')));
-
-      // Act.
-      await tools.cutToClipboard();
-      Reflect.deleteProperty(window.navigator, 'clipboard');
-      await tools.cutToClipboard();
-
-      // Assert: event 1 stays, nothing was recorded, and the author hears why, twice.
-      expect([ spotsOf(mapFileOf(hub, 1))[1], hub.history(mapHistoryKey(1)).rows.length, notices ])
-        .toStrictEqual([
-          [ 0, 0 ],
-          0,
-          [ 'The clipboard could not be written here; press Ctrl+C instead.', 'The clipboard could not be written here; press Ctrl+C instead.' ],
-        ]);
-    });
-
-    it('pastes from the menu what the clipboard read hands over, with the corner on the right-clicked tile', async () =>
-    {
-      // Arrange: event 3 copied; the read answers with it.
-      const { hub, map, tools, clipboard, selection } = setUp();
-      clipboard.text = encodeEventClipboard(copyEvents(map, 1, [ 3 ]) as NonNullable<ReturnType<typeof copyEvents>>);
-
-      // Act.
-      await tools.pasteFromClipboard({ x: 2, y: 3 });
-
-      // Assert.
-      expect([ spotsOf(mapFileOf(hub, 1))[4], selection.eventsOn(1) ])
-        .toStrictEqual([ [ 2, 3 ], [ 4 ] ]);
-    });
-
-    it('says why the menu pasted nothing: a clipboard it could not read, or one holding no events', async () =>
-    {
-      // Arrange.
-      const { hub, tools, clipboard, notices } = setUp();
-
-      // Act.
-      await tools.pasteFromClipboard({ x: 2, y: 3 });
-      clipboard.text = 'Welcome to Nimbus!';
-      await tools.pasteFromClipboard({ x: 2, y: 3 });
-
-      // Assert.
-      expect([ notices, hub.history(mapHistoryKey(1)).rows.length ])
-        .toStrictEqual([ [ 'The clipboard could not be read here; press Ctrl+V to paste instead.', 'The clipboard holds no events to paste.' ], 0 ]);
-    });
-
-    it('leaves a paste of anything but copied events to the page, changing nothing', () =>
-    {
-      // Arrange.
-      const { hub, host } = setUp();
-      host.focus();
-
-      // Act.
-      const paste = clipboardEvent('paste', 'Welcome to Nimbus!');
-
-      // Assert.
-      expect([ paste.event.defaultPrevented, hub.history(mapHistoryKey(1)).rows.length ])
-        .toStrictEqual([ false, 0 ]);
+      // Assert: the selection survived the taken Esc, and the Delete removed event 1.
+      expect([ afterEscape, spotsOf(mapFileOf(hub, 1))[1] ])
+        .toStrictEqual([ [ 1 ], null ]);
     });
   });
 

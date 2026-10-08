@@ -11,6 +11,7 @@ const PANEL_COMPONENTS = {
   history: 'history',
   properties: 'map-properties',
   palette: 'palette',
+  stamps: 'stamps',
   layers: 'layers',
   quick: 'quick-settings',
   events: 'events',
@@ -30,6 +31,7 @@ const SINGLE_PANEL_IDS = {
   history: 'history',
   properties: 'map-properties',
   palette: 'palette',
+  stamps: 'stamps',
   layers: 'layers',
   quick: 'quick-settings',
   events: 'events',
@@ -44,6 +46,7 @@ const SINGLE_PANEL_IDS = {
 const PANEL_MIN_WIDTHS: Readonly<Partial<Record<string, number>>> = {
   [PANEL_COMPONENTS.mapTree]: 240,
   [PANEL_COMPONENTS.palette]: 240,
+  [PANEL_COMPONENTS.stamps]: 240,
   [PANEL_COMPONENTS.layers]: 240,
   [PANEL_COMPONENTS.properties]: 300,
   [PANEL_COMPONENTS.quick]: 300,

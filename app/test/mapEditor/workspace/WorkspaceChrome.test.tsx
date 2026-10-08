@@ -240,6 +240,7 @@ describe('WorkspaceChrome', () =>
         .toStrictEqual([
           [ 'Maps', true ],
           [ 'Tiles', true ],
+          [ 'Stamps', true ],
           [ 'Layers', true ],
           [ 'Map properties', true ],
           [ 'Quick settings', true ],

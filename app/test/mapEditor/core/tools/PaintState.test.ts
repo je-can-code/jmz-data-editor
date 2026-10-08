@@ -1,19 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { singleTileBrush } from '../../../../src/mapEditor/core/tools/brush.ts';
 import { INITIAL_PAINT_SETTINGS, isPaintingTool, PAINT_TOOLS, PaintState, type PaintSettings } from '../../../../src/mapEditor/core/tools/PaintState.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
  * The window's painting settings.
  *
- * Every map view in a window paints with one tool, one brush and one layer choice, so picking a tile once serves every
- * map on screen, and each view hears every change. A window starts with the events in hand, so the left button works
- * on events, as it does with no painting tool picked, and every other tool paints. A layer picked on the strip also
- * becomes the one the override key paints, so after switching back to automatic layering that layer stays a held key
- * away; until one is picked the override paints layer 3. A change that changes nothing tells nobody.
+ * Every map view in a window paints with one tool, one brush, one layer choice and one stamp, so picking a tile or a
+ * stamp once serves every map on screen, and each view hears every change. A window starts with the events in hand,
+ * so the left button works on events, as it does with no painting tool picked, and every other tool paints. A layer
+ * picked on the strip also becomes the one the override key paints, so after switching back to automatic layering that
+ * layer stays a held key away; until one is picked the override paints layer 3. Taking up a stamp makes the stamp tool
+ * the tool, and putting it down goes back to whichever tool was in hand before it, however the stamp tool was taken up;
+ * the stamp stays picked. A change that changes nothing tells nobody.
  */
 describe('PaintState', () =>
 {
-  it('starts with the events in hand, nothing picked, automatic layering, and layer 3 for the override', () =>
+  it('starts with the events in hand, nothing picked, automatic layering, layer 3 for the override and no stamp', () =>
   {
     // Arrange: nothing beyond a fresh state.
     const state = new PaintState();
@@ -23,7 +26,7 @@ describe('PaintState', () =>
 
     // Assert.
     expect(settings)
-      .toEqual({ tool: 'events', brush: null, strip: 'auto', overrideLayer: 2 });
+      .toEqual({ tool: 'events', brush: null, strip: 'auto', overrideLayer: 2, stamp: null });
   });
 
   it('counts every tool but the events as painting', () =>
@@ -36,7 +39,62 @@ describe('PaintState', () =>
 
     // Assert.
     expect(painting)
-      .toEqual([ 'pen', 'rectangle', 'ellipse', 'fill', 'eraser', 'eyedropper', 'select', 'swap' ]);
+      .toEqual([ 'pen', 'rectangle', 'ellipse', 'fill', 'eraser', 'eyedropper', 'select', 'swap', 'stamp' ]);
+  });
+
+  it('takes up a stamp as the tool, and puts it down back to the tool held before, keeping the stamp picked', () =>
+  {
+    // Arrange: the pen in hand.
+    const state = new PaintState();
+    state.setTool('pen');
+    const stamp = stampOf();
+
+    // Act.
+    state.takeUpStamp(stamp);
+    const taken = { ...state.settings };
+    state.putDownStamp();
+
+    // Assert.
+    expect([ taken.tool, taken.stamp, state.settings.tool, state.settings.stamp ])
+      .toEqual([ 'stamp', stamp, 'pen', stamp ]);
+  });
+
+  it('remembers the tool held before the stamp tool however it was taken up, and keeps it while stamps change', () =>
+  {
+    // Arrange: the select tool in hand, then the stamp tool taken up from the tool bar, then another stamp picked.
+    const state = new PaintState();
+    state.takeUpStamp(stampOf({ id: 'test:1' }));
+    state.putDownStamp();
+    state.setTool('select');
+    state.setTool('stamp');
+    state.takeUpStamp(stampOf({ id: 'test:2' }));
+
+    // Act.
+    state.putDownStamp();
+
+    // Assert.
+    expect([ state.settings.tool, state.settings.stamp?.id ])
+      .toEqual([ 'select', 'test:2' ]);
+  });
+
+  it('leaves the tool in hand alone when the stamp is put down while another tool is in hand', () =>
+  {
+    // Arrange: a stamp picked, then the fill taken up instead.
+    const state = new PaintState();
+    state.takeUpStamp(stampOf());
+    state.setTool('fill');
+    let heard = 0;
+    state.subscribe(() =>
+    {
+      heard += 1;
+    });
+
+    // Act.
+    state.putDownStamp();
+
+    // Assert.
+    expect([ state.settings.tool, heard ])
+      .toEqual([ 'fill', 0 ]);
   });
 
   it('tells every listener each change, with the settings after it', () =>

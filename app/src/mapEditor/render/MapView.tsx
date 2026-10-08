@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Box, Chip, Divider, Stack, Typography } from '@mui/material';
 import { markerSymbolFor } from '../core/eventKinds/eventMarkers.ts';
-import { EVENT_CLIPBOARD_MARKER } from '../core/events/eventClipboard.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { RmmzEventPage, RmmzMapEvent } from '../core/model/rmmzTypes.ts';
@@ -11,11 +10,13 @@ import { previewNouns } from '../core/preview/previewWords.ts';
 import type { Camera, MapCell } from '../core/renderer/camera.ts';
 import { GAME_LOOK, type MarkerClassifier, type OverlayId } from '../core/renderer/MapRenderer.ts';
 import { openTilesetMarks } from '../core/palette/tilesetMarkEdits.ts';
+import { STAMP_CLIPBOARD_MARKER } from '../core/stamps/stampClipboard.ts';
 import { TilesetLayeringSource } from '../core/tools/tilesetLayering.ts';
 import type { WindowPaint } from '../core/tools/WindowPaint.ts';
 import { EventMenu } from '../events/EventMenu.tsx';
 import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity, type EventToolsRenderer } from '../events/MapEventTools.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
+import { MapStampTools } from '../stamps/MapStampTools.ts';
 import { openEventWindow, openSwitchesVariablesWindow } from '../views/mapEditorViews.ts';
 import { ClockChip } from './ClockChip.tsx';
 import type { DrawState } from './ContextKeeper.ts';
@@ -247,11 +248,12 @@ const DrawNotice = (props: { state: DrawState; notices?: readonly ModuleNotice[]
  * own for a map torn out, so each window's palette, layer strip and tools go together and no further.
  *
  * The tool in hand decides what the left button does. With the events in hand, the map's events are selected, moved,
- * created, deleted, copied and pasted with the mouse, the keys and a right-click menu, through {@link MapEventTools},
- * into the window's selection; with any painting tool in hand the left button paints, previewed before each click, and
- * the event tools stand down. An event picked out, such as the battler the data editor asked to see, becomes the
- * selection, with the view centred on it at the game's scale; an event picked from the events list is centred at the
- * zoom the view already has.
+ * created and deleted with the mouse, the keys and a right-click menu, through {@link MapEventTools}, into the window's
+ * selection; with any painting tool in hand the left button paints, previewed before each click, and the event tools
+ * stand down; with the stamp in hand each click places it. Whatever tool is in hand, Ctrl+C and Ctrl+X make a stamp of
+ * the select tool's area or of the events selected, and Ctrl+V places the newest stamp, through {@link MapStampTools}.
+ * An event picked out, such as the battler the data editor asked to see, becomes the selection, with the view centred
+ * on it at the game's scale; an event picked from the events list is centred at the zoom the view already has.
  *
  * A view off screen, behind another tab, lets its GPU context go and draws again, camera and all, when it shows; a map
  * that cannot draw says why over the canvas rather than leaving it blank, and whatever the plugin modules say, such as
@@ -270,6 +272,7 @@ const MapView = (props: MapViewProps) =>
   const rendererRef = useRef<PixiMapRenderer | null>(null);
   const controllerRef = useRef<MapViewController | null>(null);
   const toolsRef = useRef<MapEventTools | null>(null);
+  const stampToolsRef = useRef<MapStampTools | null>(null);
   const visibleRef = useRef(visible);
   const [ ownSelection ] = useState(() => new EventSelection());
   const selection = props.selection ?? ownSelection;
@@ -373,6 +376,7 @@ const MapView = (props: MapViewProps) =>
       layering: map => layering.layeringFor(map),
       painting,
       overlay: part => overlays.update('tools', part),
+      onStamped: outcome => stampTools.settle(outcome),
     });
     stops.push(painter.attach());
 
@@ -431,11 +435,27 @@ const MapView = (props: MapViewProps) =>
           notifyRef.current('The event\'s window was blocked; allow pop-ups for the editor to open it.', 'error');
         }
       },
-      readClipboard: () => services.shell.readClipboard(EVENT_CLIPBOARD_MARKER),
       notify: (text: string, severity: EventNoticeSeverity) => notifyRef.current(text, severity),
       openMenu: setMenu,
     });
     toolsRef.current = tools;
+
+    // copying, cutting and pasting go through stamps, whichever tool is in hand: the select tool's area or the events
+    // selected become a stamp, and a paste places the newest one, waiting while a drag, a box or a stroke is in hand.
+    const stampTools = new MapStampTools({
+      renderer: eventRenderer,
+      host,
+      hub: services.hub,
+      stamps: services.stamps,
+      selection,
+      painting,
+      tileArea: () => painter.session.selection,
+      busy: () => painter.session.isActive || tools.busy,
+      tilesetMode: map => layering.layeringFor(map).mode,
+      readClipboard: () => services.shell.readClipboard(STAMP_CLIPBOARD_MARKER),
+      notify: (text: string, severity: EventNoticeSeverity) => notifyRef.current(text, severity),
+    });
+    stampToolsRef.current = stampTools;
 
     // the left button is the event tools' only while the events are in hand; a painting tool stands them down.
     stops.push(followToolInHand(painting, tools));
@@ -469,6 +489,7 @@ const MapView = (props: MapViewProps) =>
           if (opened !== null)
           {
             tools.setMap(opened);
+            stampTools.setMap(opened);
           }
         },
         timings: speedTimings,
@@ -484,6 +505,8 @@ const MapView = (props: MapViewProps) =>
       stops.forEach(stop => stop());
       tools.destroy();
       toolsRef.current = null;
+      stampTools.destroy();
+      stampToolsRef.current = null;
       controller.close();
       controllerRef.current = null;
       rendererRef.current = null;
@@ -508,6 +531,7 @@ const MapView = (props: MapViewProps) =>
         if (map !== null)
         {
           toolsRef.current?.setMap(map);
+          stampToolsRef.current?.setMap(map);
           setOpenMap(map);
           setStatus(current => ({ ...current, problem: null }));
         }
@@ -643,6 +667,7 @@ const MapView = (props: MapViewProps) =>
         request={menu}
         selectedCount={selected.mapId === mapId ? selected.eventIds.length : 0}
         tools={toolsRef.current}
+        stampTools={stampToolsRef.current}
         onClose={() => setMenu(null)}
       />
     </Box>

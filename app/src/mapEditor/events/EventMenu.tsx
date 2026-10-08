@@ -1,28 +1,32 @@
 import React from 'react';
 import { Divider, ListItemText, Menu, MenuItem, Typography } from '@mui/material';
 import { eventsPhrase } from '../core/events/eventPlacement.ts';
+import type { MapStampTools } from '../stamps/MapStampTools.ts';
 import type { EventMenuRequest, MapEventTools } from './MapEventTools.ts';
 
 /**
- * What the map's menu shows: where it was asked for, how many events are selected, and the tools it acts through.
+ * What the map's menu shows: where it was asked for, how many events are selected, and the tools it acts through: the
+ * event tools, and the stamp tools for cutting, copying and pasting.
  */
 type EventMenuProps = {
   readonly request: EventMenuRequest | null;
   readonly selectedCount: number;
   readonly tools: MapEventTools | null;
+  readonly stampTools: MapStampTools | null;
   readonly onClose: () => void;
 };
 
 /**
  * The menu a still right click opens on a map. On an event it offers to edit, cut, copy, duplicate and delete what is
- * selected (the event clicked is selected first, when it was not); on the ground, to place a new event there or paste
- * the events on the clipboard with their top-left corner on that tile. Each item names the keys that do the same.
+ * selected (the event clicked is selected first, when it was not), a cut or a copy becoming a stamp; on the ground, to
+ * place a new event there or paste the newest stamp with its top-left corner on that tile. Each item names the keys
+ * that do the same.
  * @param {EventMenuProps} props Where, what is selected, and the tools.
  * @returns {React.JSX.Element} The menu, closed while nothing asked for it.
  */
 const EventMenu = (props: EventMenuProps) =>
 {
-  const { request, selectedCount, tools, onClose } = props;
+  const { request, selectedCount, tools, stampTools, onClose } = props;
 
   /**
    * Builds one menu item that closes the menu and then acts.
@@ -59,13 +63,13 @@ const EventMenu = (props: EventMenuProps) =>
   const items = eventId === null
     ? [
       ...(cell === null ? [] : [ item('New event', () => tools?.createAt(cell)) ]),
-      item('Paste', () => run(tools?.pasteFromClipboard(cell)), 'Ctrl+V'),
+      item('Paste', () => run(stampTools?.pasteFromClipboard(cell)), 'Ctrl+V'),
     ]
     : [
       item('Edit event', () => tools?.open(eventId), 'Enter'),
       <Divider key={'edit-divider'}/>,
-      item(`Cut${count}`, () => run(tools?.cutToClipboard()), 'Ctrl+X'),
-      item(`Copy${count}`, () => run(tools?.copyToClipboard()), 'Ctrl+C'),
+      item(`Cut${count}`, () => run(stampTools?.cutToClipboard()), 'Ctrl+X'),
+      item(`Copy${count}`, () => run(stampTools?.copyToClipboard()), 'Ctrl+C'),
       item(`Duplicate${count}`, () => tools?.duplicateSelected(), 'Ctrl+D'),
       item(`Delete${count}`, () => tools?.deleteSelected(), 'Del'),
     ];

@@ -1,6 +1,7 @@
 import type { DocumentHub } from '../../core/history/DocumentHub.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
 import { screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../../core/renderer/camera.ts';
+import type { StampOutcome } from '../../core/stamps/stampPlacement.ts';
 import type { TilesetLayering } from '../../core/tiles/layering.ts';
 import { shadowQuarterAt } from '../../core/tools/paintPlan.ts';
 import { isPaintingTool, type PaintState } from '../../core/tools/PaintState.ts';
@@ -57,6 +58,12 @@ type PaintControllerOptions = {
    * Hands the tools' part of the overlay to the view.
    */
   readonly overlay: (overlay: ToolOverlay) => void;
+
+  /**
+   * Hears what each click of the stamp tool came to: the events it placed, what it left out, or why it was refused.
+   * Left out, nobody hears.
+   */
+  readonly onStamped?: (outcome: StampOutcome) => void;
 };
 
 /**
@@ -70,8 +77,9 @@ type HeldKeys = {
 
 /**
  * Wires one map view's painting to the page: the left button on the canvas drives the tool in hand, the keys held
- * (Shift, Ctrl, the space bar) change what it does, Escape abandons what it is doing, and the view is told what to
- * show after every change. The right button and the wheel stay the renderer's, for panning and zooming.
+ * (Shift, Ctrl, the space bar) change what it does, Escape abandons what it is doing, or puts a stamp in hand down and
+ * takes up the tool held before it, and the view is told what to show after every change. The right button and the
+ * wheel stay the renderer's, for panning and zooming.
  *
  * A stroke never outlives the gesture that made it: losing the pointer or the window's focus ends it, keeping what it
  * painted, and so does any Ctrl shortcut pressed mid-stroke, so an undo pressed while drawing takes back the whole
@@ -107,6 +115,7 @@ class PaintController
       settings: () => painting.settings,
       pickBrush: brush => painting.setBrush(brush),
       pickTool: tool => painting.setTool(tool),
+      stamped: outcome => options.onStamped?.(outcome),
     });
   }
 
@@ -316,6 +325,11 @@ class PaintController
       return;
     }
 
+    if (this.#putDownStampOnEscape(event, down))
+    {
+      return;
+    }
+
     if (down && event.key === 'Escape' && mine && (session.isActive || session.selection !== null))
     {
       event.preventDefault();
@@ -328,6 +342,27 @@ class PaintController
     {
       this.#setKeys({ ...this.#keys, shift: event.shiftKey, copy: event.ctrlKey || event.metaKey });
     }
+  }
+
+  /**
+   * Puts a stamp in hand down on Escape, wherever the pointer is, going back to the tool held before it. The key is
+   * taken, so nothing else in the window answers it too, such as the event tools deselecting what is selected; an
+   * Escape typed in a text field is the field's.
+   * @param {KeyboardEvent} event The key.
+   * @param {boolean} down True when it went down.
+   * @returns {boolean} True when it put the stamp down.
+   */
+  #putDownStampOnEscape(event: KeyboardEvent, down: boolean): boolean
+  {
+    const { painting } = this.#options;
+    if (down === false || event.key !== 'Escape' || painting.settings.tool !== 'stamp' || isTextEntry(event.target as unknown as KeyTarget))
+    {
+      return false;
+    }
+
+    event.preventDefault();
+    painting.putDownStamp();
+    return true;
   }
 
   /**

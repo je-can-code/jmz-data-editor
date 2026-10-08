@@ -3,8 +3,21 @@ import { mapHistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
 import { mapDocumentKey } from '../model/documentKeys.ts';
 import { createMapEvent } from '../model/eventModel.ts';
+import { cloneJson } from '../model/json.ts';
+import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
 import type { MapCell } from '../renderer/camera.ts';
-import { blockedCells, eventCellsOf, eventsPhrase, isOnMap, newEventIds } from './eventPlacement.ts';
+import type { CellRect } from '../renderer/MapRenderer.ts';
+import {
+  blockedCells,
+  boundsOf,
+  eventCellsOf,
+  eventsPhrase,
+  isOnMap,
+  newEventIds,
+  shiftWithinMap,
+  type EventMap,
+} from './eventPlacement.ts';
+import { rewireGroupReferences } from './eventReferences.ts';
 
 /**
  * What an edit to a map's events came to: the step it recorded (null when there was nothing to change) and the events
@@ -74,5 +87,83 @@ const deleteEvents = (hub: DocumentHub, mapId: number, eventIds: readonly number
   return { ok: true, step, eventIds: [] };
 };
 
-export { createEvent, deleteEvents };
+/**
+ * Where a duplicate tries to go, in order: one tile right of the originals, then below, left and above, whichever the
+ * whole group fits first.
+ */
+const DUPLICATE_SHIFTS: readonly MapCell[] = [ { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 0, y: -1 } ];
+
+/**
+ * Works out copies of a group of events shifted beside themselves: the group keeps its layout and is slid back onto the
+ * map at an edge, and the copies take new ids past the end of the list, in the order given, with their commands naming
+ * one another pointed at the copies. A shift that would land a copy on another event, an original included (as a shift
+ * slid back onto the originals does), is refused.
+ * @param {EventMap} map The map.
+ * @param {readonly RmmzMapEvent[]} events The originals, in id order.
+ * @param {MapCell} shift How far across and down the copies go.
+ * @returns {RmmzMapEvent[] | null} The copies, with their ids and cells, or null when they would land on events.
+ */
+const planDuplicate = (map: EventMap, events: readonly RmmzMapEvent[], shift: MapCell): RmmzMapEvent[] | null =>
+{
+  // a group of events on the map always has bounds, inside the map.
+  const bounds = boundsOf(events) as CellRect;
+  const { dx, dy } = shiftWithinMap(bounds, shift.x, shift.y, map);
+  const cells = events.map(event => ({ x: event.x + dx, y: event.y + dy }));
+  if (blockedCells(map, cells, new Set()).length > 0)
+  {
+    return null;
+  }
+
+  // the copies' references to one another follow them to their new ids; the originals keep theirs.
+  const ids = newEventIds(map, events.length);
+  const newIds = new Map(events.map((event, index) => [ event.id, ids[index] ]));
+  return events.map((event, index) => ({
+    ...rewireGroupReferences(cloneJson(event), newIds),
+    id: ids[index],
+    x: cells[index].x,
+    y: cells[index].y,
+  }));
+};
+
+/**
+ * Duplicates events beside themselves as one step in the map's history: the copies keep the group's layout one tile
+ * right of the originals, or below, left or above when the group does not fit there, and take fresh ids; the copies'
+ * commands naming each other name the copies, while the originals keep theirs. A duplicate is no copy to the clipboard
+ * and no stamp: it places the copies at once and leaves the Stamps panel as it was.
+ * @param {DocumentHub} hub The window's documents; the map must be held.
+ * @param {number} mapId The map.
+ * @param {readonly number[]} eventIds The events.
+ * @returns {EventEditOutcome} The step and the copies, which take the selection, or why there was no room.
+ */
+const duplicateEvents = (hub: DocumentHub, mapId: number, eventIds: readonly number[]): EventEditOutcome =>
+{
+  const key = mapDocumentKey(mapId);
+  const map = hub.map(key);
+  const held = eventCellsOf(map, eventIds).map(cell => cell.id).sort((left, right) => left - right);
+  if (held.length === 0)
+  {
+    return { ok: true, step: null, eventIds: [] };
+  }
+
+  // the first shift the whole group fits, trying the next only once one is refused.
+  const originals = held.map(id => map.event(id) as RmmzMapEvent);
+  for (const shift of DUPLICATE_SHIFTS)
+  {
+    const copies = planDuplicate(map, originals, shift);
+    if (copies !== null)
+    {
+      const step = hub.edit(`Duplicate ${eventsPhrase(copies.length)}`, [ mapHistoryKey(mapId) ], tx =>
+      {
+        // each patch is built against the list as the one before left it, since placing past its end grows it.
+        copies.forEach(event => tx.apply(key, map.placeEventPatch(event)));
+      });
+
+      return { ok: true, step, eventIds: copies.map(event => event.id) };
+    }
+  }
+
+  return { ok: false, message: 'There is no room beside the selection for a copy.' };
+};
+
+export { createEvent, deleteEvents, duplicateEvents };
 export type { EventEditOutcome };

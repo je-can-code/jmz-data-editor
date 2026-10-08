@@ -1,5 +1,6 @@
 import React, { useSyncExternalStore } from 'react';
 import { Box, Divider, ToggleButton, ToggleButtonGroup, Tooltip, Typography } from '@mui/material';
+import Approval from '@mui/icons-material/Approval';
 import Colorize from '@mui/icons-material/Colorize';
 import Create from '@mui/icons-material/Create';
 import CropSquare from '@mui/icons-material/CropSquare';
@@ -9,6 +10,7 @@ import HighlightAlt from '@mui/icons-material/HighlightAlt';
 import LayersClear from '@mui/icons-material/LayersClear';
 import NearMe from '@mui/icons-material/NearMe';
 import PanoramaFishEye from '@mui/icons-material/PanoramaFishEye';
+import { stampCaption } from '../../core/stamps/stamp.ts';
 import { describeBrush } from '../../core/tools/brush.ts';
 import type { PaintSettings, PaintState, PaintTool } from '../../core/tools/PaintState.ts';
 
@@ -34,6 +36,7 @@ const TOOL_BUTTONS: readonly ToolButton[] = [
   { tool: 'eyedropper', title: 'Eyedropper: picks tiles off the map; drag to pick several', icon: <Colorize fontSize={'small'}/> },
   { tool: 'select', title: 'Select: drag to select, then drag the selection to move it, or hold Ctrl to copy it', icon: <HighlightAlt fontSize={'small'}/> },
   { tool: 'swap', title: 'Swap: replaces the tile you click everywhere on the map', icon: <FindReplace fontSize={'small'}/> },
+  { tool: 'stamp', title: 'Stamp: places the stamp picked in the Stamps panel with each click', icon: <Approval fontSize={'small'}/> },
 ];
 
 /**
@@ -47,10 +50,36 @@ const usePaintSettings = (painting: PaintState): PaintSettings =>
 };
 
 /**
- * The painting tools for a map: one button per tool, the events first, and a readout of the brush in hand. Brushes
- * come from the palette (tiles, regions and the shadow pen) and from the eyedropper, and the layer from the layer
- * strip. Holding Shift lays tiles exactly as picked, shapes and all, and holding the space bar paints one stroke on the
- * layer named beside the tools.
+ * Words what the tools hold, beside them: the stamp while the stamp is in hand, and the brush otherwise.
+ * @param {PaintSettings} settings The window's painting settings.
+ * @returns {string} The words.
+ */
+const inHandWords = (settings: PaintSettings): string =>
+{
+  return settings.tool === 'stamp' && settings.stamp !== null
+    ? `Stamp: ${stampCaption(settings.stamp)}`
+    : describeBrush(settings.brush);
+};
+
+/**
+ * Words the keys that change what the tool in hand does: with the stamp, Shift and Esc; with anything else, Shift and
+ * the space bar.
+ * @param {PaintSettings} settings The window's painting settings.
+ * @returns {string} The words.
+ */
+const keyHints = (settings: PaintSettings): string =>
+{
+  return settings.tool === 'stamp'
+    ? 'Shift: exact tiles · Esc: put the stamp down'
+    : `Shift: exact tiles · Space: paint layer ${settings.overrideLayer + 1}`;
+};
+
+/**
+ * The painting tools for a map: one button per tool, the events first and the stamp last, and a readout of what is in
+ * hand. Brushes come from the palette (tiles, regions and the shadow pen) and from the eyedropper, the layer from the
+ * layer strip, and the stamp from the Stamps panel, the stamp's button waiting until one is picked there. Holding Shift
+ * lays tiles exactly as picked, shapes and all, and holding the space bar paints one stroke on the layer named beside
+ * the tools.
  * @param {{ painting: PaintState }} props The window's painting settings.
  * @returns {React.JSX.Element} The tool bar.
  */
@@ -58,7 +87,6 @@ const PaintToolBar = (props: { painting: PaintState }) =>
 {
   const { painting } = props;
   const settings = usePaintSettings(painting);
-  const held = settings.overrideLayer + 1;
 
   return (
     <Box
@@ -78,7 +106,13 @@ const PaintToolBar = (props: { painting: PaintState }) =>
         }}
       >
         {TOOL_BUTTONS.map(({ tool, title, icon }) => (
-          <ToggleButton key={tool} value={tool} aria-label={title} sx={{ px: 0.75, py: 0.25 }}>
+          <ToggleButton
+            key={tool}
+            value={tool}
+            aria-label={title}
+            disabled={tool === 'stamp' && settings.stamp === null}
+            sx={{ px: 0.75, py: 0.25 }}
+          >
             <Tooltip title={title} describeChild>
               <Box component={'span'} sx={{ display: 'inline-flex' }}>
                 {icon}
@@ -89,10 +123,10 @@ const PaintToolBar = (props: { painting: PaintState }) =>
       </ToggleButtonGroup>
       <Divider flexItem orientation={'vertical'} sx={{ mx: 0.5 }}/>
       <Typography variant={'caption'} color={'text.secondary'} data-testid={'paint-brush'}>
-        {describeBrush(settings.brush)}
+        {inHandWords(settings)}
       </Typography>
       <Typography variant={'caption'} color={'text.disabled'}>
-        {`Shift: exact tiles · Space: paint layer ${held}`}
+        {keyHints(settings)}
       </Typography>
     </Box>
   );

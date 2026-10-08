@@ -15,6 +15,7 @@ import { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import { WindowPageRule } from '../core/pageRule/WindowPageRule.ts';
 import { localViewStore, RememberedView, rememberedViewKey, type ViewStore } from '../core/preview/RememberedView.ts';
 import { WindowPreview } from '../core/preview/WindowPreview.ts';
+import { StampHistory } from '../core/stamps/StampHistory.ts';
 import { WindowClock } from '../core/time/WindowClock.ts';
 import { WindowPaints } from '../core/tools/WindowPaint.ts';
 import { FileChangeFeed, openEventSource, type EventSourceFactory } from '../core/sync/FileChangeFeed.ts';
@@ -98,6 +99,12 @@ type MapEditorServices = {
    * picks for that window alone.
    */
   readonly paints: WindowPaints;
+
+  /**
+   * Every stamp copied in this window this session, newest first: what the Stamps panel lists, what Ctrl+V places the
+   * newest of on any map in the window, torn-out ones included, and what the stamp tool's stamps are picked from.
+   */
+  readonly stamps: StampHistory;
 
   /**
    * The time of day the window shows, and the season: one clock for every map view in it, torn-out windows included. It
@@ -289,6 +296,9 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
 
   // the window the close guard listens on is the page's own, the one whose paint the page starts with.
   const paints = new WindowPaints(environment.closeTarget);
+
+  // every stamp is named after the window that copied it, so another window knows whether it holds it already.
+  const stamps = new StampHistory(clientId);
   const clock = new WindowClock();
   const pages = new WindowPageRule(modules);
   const preview = new WindowPreview();
@@ -374,6 +384,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     locationPicks: commandEditing.locationPicks,
     modules,
     paints,
+    stamps,
     clock,
     pages,
     preview,

@@ -1,18 +1,9 @@
-import {
-  copyEvents,
-  cutEvents,
-  decodeEventClipboard,
-  duplicateEvents,
-  encodeEventClipboard,
-  pasteEvents,
-  type EventClipboard,
-} from '../core/events/eventClipboard.ts';
 import { EventDragPreview, type DragFrame } from '../core/events/eventDragPreview.ts';
-import { createEvent, deleteEvents, type EventEditOutcome } from '../core/events/eventEdits.ts';
+import { createEvent, deleteEvents, duplicateEvents, type EventEditOutcome } from '../core/events/eventEdits.ts';
 import { EventGesture, type GestureBox, type GestureStep } from '../core/events/eventGesture.ts';
 import { eventKeyFor } from '../core/events/eventKeys.ts';
 import { moveEvents } from '../core/events/eventMoves.ts';
-import { eventsPhrase, isOnMap } from '../core/events/eventPlacement.ts';
+import { isOnMap } from '../core/events/eventPlacement.ts';
 import { NO_EVENTS, type EventSelection } from '../core/events/EventSelection.ts';
 import { boxCells, boxSelection, eventsInCells, modifiersOf } from '../core/events/selectionRules.ts';
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
@@ -21,7 +12,7 @@ import type { MapDocument } from '../core/model/MapDocument.ts';
 import { screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../core/renderer/camera.ts';
 import type { CellRect, GhostEvent, GhostTile, MapContextMenu, OverlayState, WorldRect } from '../core/renderer/MapRenderer.ts';
 import { precisePoint } from '../core/renderer/precisePoint.ts';
-import { isTextEntry, shortcutFor, type KeyTarget } from '../core/workspace/shortcuts.ts';
+import { shortcutFor, type KeyTarget } from '../core/workspace/shortcuts.ts';
 
 /**
  * What the event tools need from the renderer: its canvas and camera, the event under a point, the overlay state it
@@ -69,13 +60,6 @@ type MapEventToolsOptions = {
    * Opens an event's full editor in its own window, or brings forward the one editing it.
    */
   readonly openEvent: (mapId: number, eventId: number) => void;
-
-  /**
-   * Reads the system clipboard's text for the menu's Paste, which has no clipboard event to carry it: the window
-   * shell's read of the event clipboard, which asks the NW.js shell where the page itself may not read, and comes back
-   * empty when the clipboard holds anything else. Null when it could not be read.
-   */
-  readonly readClipboard: () => Promise<string | null>;
   readonly notify: (text: string, severity: EventNoticeSeverity) => void;
   readonly openMenu: (request: EventMenuRequest) => void;
 };
@@ -99,19 +83,18 @@ const NO_GHOST_EVENTS: readonly GhostEvent[] = Object.freeze([]);
 const NO_CELLS: readonly MapCell[] = Object.freeze([]);
 
 /**
- * Selecting, moving, creating, deleting, copying and pasting events on one map view, with the mouse, the keyboard and
- * the right-click menu. Every change goes through the event services, as one step in the map's history, and the
- * selection lives in the window's {@link EventSelection}, which the quick panel reads.
+ * Selecting, moving, creating, deleting and duplicating events on one map view, with the mouse, the keyboard and the
+ * right-click menu. Every change goes through the event services, as one step in the map's history, and the selection
+ * lives in the window's {@link EventSelection}, which the quick panel reads. Copying, cutting and pasting the selection
+ * are the stamp tools' (see MapStampTools), since whatever is copied off a map becomes a stamp.
  *
  * - Click an event to select it; Shift adds and Ctrl toggles; a click on the ground selects nothing.
  * - Drag from the ground, or from beside the map, to box-select; Shift and Ctrl add and toggle here too.
  * - Drag a selected event to move the whole selection: ghosts show where it would land, red where another event is in
  *   the way, and the drop moves it. The arrow keys nudge it a tile.
  * - Double-click an event to open its window; double-click the ground to place a new event there and open it.
- * - Delete, Ctrl+D, Ctrl+A, Enter and Esc delete, duplicate, select all, open and deselect. Ctrl+C, X and V copy, cut and
- *   paste through the system clipboard, across maps and windows; a paste lands with its top-left corner on the tile
- *   under the pointer, or where the events were copied from when the pointer is off the map. The tile under the
- *   pointer follows the camera too, so a zoom under a still pointer moves the paste with it.
+ * - Delete, Ctrl+D, Ctrl+A, Enter and Esc delete, duplicate, select all, open and deselect. A key another tool took
+ *   first, such as the Esc that puts a stamp down, is left alone.
  * - While the left button is down, only Esc acts: the arrows, Delete, Ctrl+D, Ctrl+X, Ctrl+V, Ctrl+Z and the rest wait
  *   until it comes up, since each would change the map under a drag or a box still in hand.
  *
@@ -188,12 +171,8 @@ class MapEventTools
       this.#listen(canvas, 'dblclick', this.#onDoubleClick);
     }
 
-    // keys reach the focused view; the clipboard's events reach its document, whose body they fire on.
+    // keys reach the focused view.
     this.#listen(host, 'keydown', this.#onKeyDown);
-    const { ownerDocument } = host;
-    this.#listen(ownerDocument, 'copy', this.#onCopy);
-    this.#listen(ownerDocument, 'cut', this.#onCut);
-    this.#listen(ownerDocument, 'paste', this.#onPaste);
   }
 
   /**
@@ -206,12 +185,21 @@ class MapEventTools
   }
 
   /**
-   * Whether the tools answer the left button, the keys and the clipboard.
+   * Whether the tools answer the left button and the keys.
    * @returns {boolean} False while another tool owns them.
    */
   get enabled(): boolean
   {
     return this.#enabled;
+  }
+
+  /**
+   * Whether a drag or a box is in hand, while which nothing else may change the map under it.
+   * @returns {boolean} True between a press that started one and its release.
+   */
+  get busy(): boolean
+  {
+    return this.#gesture.isActive;
   }
 
   /**
@@ -343,59 +331,6 @@ class MapEventTools
     this.#onSelection(mapId => duplicateEvents(this.#options.hub, mapId, this.#selected));
   }
 
-  /**
-   * Copies the selected events to the system clipboard, as the menu's Copy does; Ctrl+C goes through the browser's own
-   * copy instead.
-   * @returns {Promise<void>} Settles once written, or once it could not be.
-   */
-  async copyToClipboard(): Promise<void>
-  {
-    const clipboard = this.#copySelection();
-    if (clipboard !== null && await this.#writeClipboard(clipboard))
-    {
-      this.#options.notify(`Copied ${eventsPhrase(clipboard.events.length)}.`, 'info');
-    }
-  }
-
-  /**
-   * Cuts the selected events to the system clipboard, as the menu's Cut does: they are removed only once the clipboard
-   * holds them, so a clipboard that cannot be written never loses them.
-   * @returns {Promise<void>} Settles once done.
-   */
-  async cutToClipboard(): Promise<void>
-  {
-    const map = this.#map;
-    const clipboard = this.#copySelection();
-    if (map !== null && clipboard !== null && await this.#writeClipboard(clipboard))
-    {
-      this.#settle(deleteEvents(this.#options.hub, map.mapId, clipboard.events.map(event => event.id), 'Cut'));
-    }
-  }
-
-  /**
-   * Pastes the events on the system clipboard, as the menu's Paste does.
-   * @param {MapCell | null} target The tile the pasted group's top-left corner goes to, or null for where it was copied.
-   * @returns {Promise<void>} Settles once done.
-   */
-  async pasteFromClipboard(target: MapCell | null): Promise<void>
-  {
-    const text = await this.#options.readClipboard();
-    if (text === null)
-    {
-      this.#options.notify('The clipboard could not be read here; press Ctrl+V to paste instead.', 'error');
-      return;
-    }
-
-    const events = decodeEventClipboard(text);
-    if (events === null)
-    {
-      this.#options.notify('The clipboard holds no events to paste.', 'error');
-      return;
-    }
-
-    this.#paste(events, target);
-  }
-
   //endregion actions
 
   /**
@@ -497,8 +432,9 @@ class MapEventTools
 
   #onKeyDown = (event: KeyboardEvent): void =>
   {
+    // a key another tool took first, such as the Esc that puts a stamp down, is not the event tools' to answer too.
     const map = this.#map;
-    if (this.#enabled === false || map === null)
+    if (this.#enabled === false || map === null || event.defaultPrevented)
     {
       return;
     }
@@ -544,53 +480,6 @@ class MapEventTools
         this.#escape();
         break;
     }
-  };
-
-  #onCopy = (event: ClipboardEvent): void =>
-  {
-    const clipboard = this.#ownsClipboard() ? this.#copySelection() : null;
-    if (clipboard === null || event.clipboardData === null)
-    {
-      return;
-    }
-
-    event.clipboardData.setData('text/plain', encodeEventClipboard(clipboard));
-    event.preventDefault();
-    this.#options.notify(`Copied ${eventsPhrase(clipboard.events.length)}.`, 'info');
-  };
-
-  #onCut = (event: ClipboardEvent): void =>
-  {
-    // a cut removes events, which waits, like every edit, until no drag or box is in hand.
-    const map = this.#map;
-    if (this.#ownsClipboard() === false || this.#gesture.isActive || map === null || event.clipboardData === null || this.#selected.length === 0)
-    {
-      return;
-    }
-
-    const { clipboard, outcome } = cutEvents(this.#options.hub, map.mapId, this.#selected);
-    if (clipboard !== null)
-    {
-      event.clipboardData.setData('text/plain', encodeEventClipboard(clipboard));
-      event.preventDefault();
-    }
-
-    this.#settle(outcome);
-  };
-
-  #onPaste = (event: ClipboardEvent): void =>
-  {
-    // a paste places events, which waits, like every edit, until no drag or box is in hand.
-    const events = this.#ownsClipboard() && this.#gesture.isActive === false && event.clipboardData !== null
-      ? decodeEventClipboard(event.clipboardData.getData('text/plain'))
-      : null;
-    if (events === null)
-    {
-      return;
-    }
-
-    event.preventDefault();
-    this.#paste(events, this.#hover === null ? null : { x: this.#hover.x, y: this.#hover.y });
   };
 
   //endregion input
@@ -908,20 +797,6 @@ class MapEventTools
   }
 
   /**
-   * Pastes copied events onto the map.
-   * @param {EventClipboard} events The copied events.
-   * @param {MapCell | null} target The tile the group's top-left corner goes to, or null for where it was copied.
-   */
-  #paste(events: EventClipboard, target: MapCell | null): void
-  {
-    const map = this.#map;
-    if (map !== null)
-    {
-      this.#settle(pasteEvents(this.#options.hub, map.mapId, events, target));
-    }
-  }
-
-  /**
    * Opens the window of the event picked last.
    */
   #openPicked(): void
@@ -950,64 +825,8 @@ class MapEventTools
     }
   }
 
-  /**
-   * Copies the selection for the clipboard.
-   * @returns {EventClipboard | null} The copy, or null with nothing selected here.
-   */
-  #copySelection(): EventClipboard | null
-  {
-    const map = this.#map;
-    return map === null
-      ? null
-      : copyEvents(map, map.mapId, this.#selected);
-  }
-
-  /**
-   * Writes copied events to the system clipboard, saying so when it cannot.
-   * @param {EventClipboard} events The copied events.
-   * @returns {Promise<boolean>} True once written.
-   */
-  async #writeClipboard(events: EventClipboard): Promise<boolean>
-  {
-    const clipboard = navigatorOf(this.#options.host)?.clipboard;
-    const written = clipboard === undefined
-      ? false
-      : await clipboard.writeText(encodeEventClipboard(events)).then(() => true, () => false);
-    if (written === false)
-    {
-      this.#options.notify('The clipboard could not be written here; press Ctrl+C instead.', 'error');
-    }
-
-    return written;
-  }
-
-  /**
-   * Reports whether a clipboard event is the map's to answer: the view has focus, and no text field inside it does.
-   * @returns {boolean} True when the tools should answer it.
-   */
-  #ownsClipboard(): boolean
-  {
-    const { host } = this.#options;
-    const { activeElement: active } = host.ownerDocument;
-    return this.#enabled
-      && this.#map !== null
-      && active !== null
-      && host.contains(active)
-      && isTextEntry(active as unknown as KeyTarget) === false;
-  }
-
   //endregion internals
 }
-
-/**
- * Finds the navigator of the window an element lives in, which for a torn-out map is the torn-out window's own.
- * @param {HTMLElement} element The element.
- * @returns {Navigator | undefined} The navigator, or undefined for an element in no window.
- */
-const navigatorOf = (element: HTMLElement): Navigator | undefined =>
-{
-  return element.ownerDocument.defaultView?.navigator;
-};
 
 export { MapEventTools };
 export type { EventMenuRequest, EventNoticeSeverity, EventToolsRenderer, EventToolsState, MapEventToolsOptions };

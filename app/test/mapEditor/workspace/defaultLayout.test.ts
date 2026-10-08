@@ -105,10 +105,10 @@ describe('defaultLayout', () =>
     // Act.
     addDefaultPanels(dock.api);
 
-    // Assert: the events list waits behind the history.
+    // Assert: the stamps wait behind the palette, and the events list behind the history.
     expect([ describeGrid(dock.api), widths() ])
       .toStrictEqual([
-        [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ],
+        [ 'map-tree', 'palette+stamps', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ],
         {
           'map-tree': '300/240',
           'palette': '300/240',
@@ -170,7 +170,7 @@ describe('defaultLayout', () =>
 
     // Assert.
     expect([ outcome, describeGrid(dock.api), onRestored.mock.calls.length ])
-      .toStrictEqual([ 'default', [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ], 0 ]);
+      .toStrictEqual([ 'default', [ 'map-tree', 'palette+stamps', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ], 0 ]);
   });
 
   it('hands the saved layout on once rebuilt, and lays out afresh when nothing is saved', async () =>
@@ -187,7 +187,7 @@ describe('defaultLayout', () =>
 
     // Assert.
     expect([ restored, fresh, onRestored.mock.calls, describeGrid(dock.api) ])
-      .toStrictEqual([ 'restored', 'default', [ [ saved ] ], [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ] ]);
+      .toStrictEqual([ 'restored', 'default', [ [ saved ] ], [ 'map-tree', 'palette+stamps', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ] ]);
   });
 
   describe('SIDE_PANEL_SPECS', () =>
@@ -205,8 +205,8 @@ describe('defaultLayout', () =>
       // Assert.
       expect([ ids, titles ])
         .toStrictEqual([
-          [ 'map-tree', 'palette', 'layers', 'map-properties', 'quick-settings', 'history', 'events' ],
-          [ 'Maps', 'Tiles', 'Layers', 'Map properties', 'Quick settings', 'History', 'Events' ],
+          [ 'map-tree', 'palette', 'stamps', 'layers', 'map-properties', 'quick-settings', 'history', 'events' ],
+          [ 'Maps', 'Tiles', 'Stamps', 'Layers', 'Map properties', 'Quick settings', 'History', 'Events' ],
         ]);
     });
   });
@@ -240,7 +240,26 @@ describe('defaultLayout', () =>
 
       // Assert: back where addDefaultPanels put them, below the palette.
       expect([ describeGrid(dock.api), dock.api.getPanel('layers')?.group.activePanel?.id ])
-        .toStrictEqual([ [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ], 'layers' ]);
+        .toStrictEqual([ [ 'map-tree', 'palette+stamps', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ], 'layers' ]);
+    });
+
+    it('puts the stamps back behind the palette, in front of it, and in the palette\'s place when that is closed too', () =>
+    {
+      // Arrange: the stamps closed, as their close button would leave them.
+      (dock.api.getPanel('stamps') as IDockviewPanel).api.close();
+
+      // Act: the stamps chosen from the menu; then, with the palette and the stamps both closed, the stamps alone.
+      openSidePanel(dock.api, collapsesFor(), 'stamps');
+      const besideThePalette = [ describeGrid(dock.api), dock.api.getPanel('stamps')?.group.activePanel?.id ];
+      [ 'palette', 'stamps' ].forEach(id => (dock.api.getPanel(id) as IDockviewPanel).api.close());
+      openSidePanel(dock.api, collapsesFor(), 'stamps');
+
+      // Assert: alone, they go where the palette would, below the map tree.
+      expect([ besideThePalette, describeGrid(dock.api) ])
+        .toStrictEqual([
+          [ [ 'map-tree', 'palette+stamps', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ], 'stamps' ],
+          [ 'map-tree', 'stamps', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ],
+        ]);
     });
 
     it('brings a panel a reset leaves behind another to the front when it is reopened on its own', () =>
@@ -253,7 +272,7 @@ describe('defaultLayout', () =>
 
       // Assert.
       expect([ describeGrid(dock.api), dock.api.getPanel('quick-settings')?.group.activePanel?.id ])
-        .toStrictEqual([ [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ], 'quick-settings' ]);
+        .toStrictEqual([ [ 'map-tree', 'palette+stamps', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ], 'quick-settings' ]);
     });
 
     it('puts a panel back with the open panel a reset stacks with it, whichever of the two closed', () =>
@@ -266,7 +285,7 @@ describe('defaultLayout', () =>
 
       // Assert: back in the events list's group, in front of it, rather than in a group of its own.
       expect([ describeGrid(dock.api), dock.api.getPanel('history')?.group.activePanel?.id ])
-        .toStrictEqual([ [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'events+history' ], 'history' ]);
+        .toStrictEqual([ [ 'map-tree', 'palette+stamps', 'layers', 'start', 'map-properties+quick-settings', 'events+history' ], 'history' ]);
     });
 
     it('puts a panel whose spec names a closed panel where that panel would go, rather than refusing', () =>
@@ -285,8 +304,8 @@ describe('defaultLayout', () =>
       // would be, at the right.
       expect([ eventsBack, describeGrid(dock.api) ])
         .toStrictEqual([
-          [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'events' ],
-          [ 'map-tree', 'palette', 'layers', 'start', 'quick-settings' ],
+          [ 'map-tree', 'palette+stamps', 'layers', 'start', 'map-properties+quick-settings', 'events' ],
+          [ 'map-tree', 'palette+stamps', 'layers', 'start', 'quick-settings' ],
         ]);
     });
 
@@ -300,7 +319,7 @@ describe('defaultLayout', () =>
 
       // Assert.
       expect([ group.activePanel?.id, describeGrid(dock.api) ])
-        .toStrictEqual([ 'quick-settings', [ 'map-tree', 'palette', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ] ]);
+        .toStrictEqual([ 'quick-settings', [ 'map-tree', 'palette+stamps', 'layers', 'start', 'map-properties+quick-settings', 'history+events' ] ]);
     });
 
     it('expands an open panel\'s group if choosing it found it collapsed', () =>
