@@ -10,7 +10,8 @@ import (
 	"strings"
 )
 
-// imageFolders are the folders under img/ that RPG Maker MZ's ImageManager loads from.
+// imageFolders are the folders under img/ that RPG Maker MZ's ImageManager loads from, and weather,
+// where J-Weather's ImageManager.loadWeather finds the pictures its particles are drawn with.
 var imageFolders = map[string]bool{
 	"animations":   true,
 	"battlebacks1": true,
@@ -26,6 +27,7 @@ var imageFolders = map[string]bool{
 	"tilesets":     true,
 	"titles1":      true,
 	"titles2":      true,
+	"weather":      true,
 }
 
 // audioFolders are the folders under audio/ that RPG Maker MZ's AudioManager plays from.

@@ -110,6 +110,7 @@ func writeProject(t *testing.T) *project {
 		"img/characters/Actor1.png":             "\x89PNG-actor",
 		"img/faces/!$Door (open).png":           "\x89PNG-door",
 		"img/hud/Gauge.png":                     "\x89PNG-hud",
+		"img/weather/Rain_01A.png":              "\x89PNG-rain",
 		"audio/se/Cursor.ogg":                   "OggS-cursor-sound",
 		"js/plugins/Hello.js":                   "console.log('hello');",
 		"js/plugins/others/PluginCommonBase.js": "// common base",

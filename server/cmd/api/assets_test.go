@@ -16,8 +16,8 @@ import (
 // way a browser would and expects it refused without a byte of the file it aimed at. A plain `..`
 // never reaches a handler at all, because the router redirects to the cleaned path first.
 
-// TestGetImageServesTheImage covers an ordinary image, and a name with the punctuation character
-// sheets really use.
+// TestGetImageServesTheImage covers an ordinary image, a name with the punctuation character sheets
+// really use, and a picture from img/weather, where J-Weather keeps what its particles are drawn with.
 func TestGetImageServesTheImage(t *testing.T) {
 	cases := []struct {
 		target  string
@@ -25,6 +25,7 @@ func TestGetImageServesTheImage(t *testing.T) {
 	}{
 		{target: "/api/img/characters/Actor1", content: "\x89PNG-actor"},
 		{target: "/api/img/faces/%21%24Door%20%28open%29", content: "\x89PNG-door"},
+		{target: "/api/img/weather/Rain_01A", content: "\x89PNG-rain"},
 	}
 
 	for _, testCase := range cases {

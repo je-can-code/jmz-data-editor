@@ -1,12 +1,15 @@
 package plugins
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"jmz-data-editor/server/internal/gametest"
+	"jmz-data-editor/server/internal/store"
 )
 
 // TestWeatherConfigurationRoundTripPreservesEveryBlock is the guard for the failure mode
@@ -65,8 +68,11 @@ func TestWeatherConfigurationRoundTripPreservesEveryBlock(t *testing.T) {
 	}
 }
 
-// TestWeatherConfigurationRoundTripsChefAdventure runs the same guard over the real file, which is
-// the only copy carrying every authoring note in the position an author actually put it.
+// TestWeatherConfigurationRoundTripsChefAdventure runs the same guard over the real file through the
+// store's own strict read, which is the read GET /api/config/weather serves it with, and which the map
+// editor's weather draws from: it must load, and every value it holds, at every depth, must come back
+// out. The real file is the only copy carrying every authoring note in the position an author
+// actually put it, and every knob J-Weather reads off a motion or a preset's layer.
 func TestWeatherConfigurationRoundTripsChefAdventure(t *testing.T) {
 	// Arrange- optional, like the unmarshal test beside it: gametest decides whether the game's
 	// absence skips or fails.
@@ -76,9 +82,9 @@ func TestWeatherConfigurationRoundTripsChefAdventure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Act.
-	var config WeatherConfiguration
-	if err := json.Unmarshal(original, &config); err != nil {
+	// Act- the strict read the API performs, then the model written back out.
+	config, err := store.Load[WeatherConfiguration](path)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -87,19 +93,33 @@ func TestWeatherConfigurationRoundTripsChefAdventure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Assert- the same keys, in the same order. Order matters because the authoring notes read as
-	// headings for the blocks beneath them, and one that moves explains the wrong thing.
-	var before, after map[string]json.RawMessage
-	if err := json.Unmarshal(original, &before); err != nil {
-		t.Fatal(err)
+	// Assert- the same document, value for value, compared decoded so the source's spacing does not
+	// count.
+	if decodeBlock(t, saved) != decodeBlock(t, original) {
+		t.Errorf("the round trip changed config.weather.json:\n got %s\nwant %s", decodeBlock(t, saved), decodeBlock(t, original))
 	}
-	if err := json.Unmarshal(saved, &after); err != nil {
-		t.Fatal(err)
-	}
+}
 
-	for key := range before {
-		if _, present := after[key]; !present {
-			t.Errorf("block %q was erased by a save", key)
-		}
+// TestWeatherConfigurationRefusesABlockItDoesNotDeclare holds the other half of the strict read: a
+// top-level block the model has not learned is refused by name rather than read and then dropped, so
+// a save can never erase it and the map editor never draws from a file it only half read.
+func TestWeatherConfigurationRefusesABlockItDoesNotDeclare(t *testing.T) {
+	// Arrange- a near miss of the shipped file: every block it carries, plus one the model does not
+	// declare.
+	original := []byte(`{
+		"motions": { "fall": { "edge": "top", "speedY": 4 } },
+		"presets": { "rain": { "stops": { "moderate": [] } } },
+		"forecastFonts": { "title": "VictorMono" }
+	}`)
+
+	// Act- the strict decode the store's read performs.
+	var config WeatherConfiguration
+	decoder := json.NewDecoder(bytes.NewReader(original))
+	decoder.DisallowUnknownFields()
+	err := decoder.Decode(&config)
+
+	// Assert- refused, naming the block.
+	if err == nil || strings.Contains(err.Error(), `"forecastFonts"`) == false {
+		t.Errorf("expected the undeclared block to be refused by name, got %v", err)
 	}
 }
