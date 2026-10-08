@@ -197,7 +197,9 @@ const sameCounts = (left: ReadonlyMap<string, BlueprintCopyCount>, right: Readon
  *
  * Nothing is read until something first listens, which only the Blueprints section of the Stamps panel does, so a window
  * that never shows the count never asks the server for it. Until the server's first answer the count is still being
- * worked out, and a count that could not be had says so: neither is ever taken for a blueprint having no copies.
+ * worked out, and a count that could not be had says so: neither is ever taken for a blueprint having no copies. Nor is
+ * the count shown while a reading asked for after a map's file changed is on its way: the cards keep it, but no one
+ * blueprint's count is handed out (see {@link countOf}), since a delete trusting it could miss a copy just saved.
  */
 class BlueprintCopyCounter
 {
@@ -228,6 +230,12 @@ class BlueprintCopyCounter
   #reading: Promise<void> = Promise.resolve();
 
   #waiting = false;
+
+  /**
+   * Whether a reading of the disk has been asked for and has not landed yet: a map's file changed since the last reading,
+   * so what the disk says of the maps this window does not hold may have moved on, and no count is trusted until it lands.
+   */
+  #stale = false;
 
   /**
    * @param {CopyCounterOptions} options The window's documents, and how to read every map's notes on disk.
@@ -263,14 +271,16 @@ class BlueprintCopyCounter
   };
 
   /**
-   * Finds how many copies one blueprint has across the project, and where, once that can be told.
+   * Finds how many copies one blueprint has across the project, and where, once that can be told. While a reading asked
+   * for after a map's file changed is on its way, none can: a copy just saved in another window, or placed in MZ, could
+   * be missing from the count still shown, and a blueprint deleted on that count would lose it.
    * @param {string} blueprintId The blueprint.
    * @returns {BlueprintCopyCount | null} The count, none for a blueprint without copies; or null while the copies are
-   * still being counted, or cannot be.
+   * still being counted, or counted again, or cannot be.
    */
   countOf(blueprintId: string): BlueprintCopyCount | null
   {
-    if (this.#counts.state !== 'counted')
+    if (this.#counts.state !== 'counted' || this.#stale)
     {
       return null;
     }
@@ -298,7 +308,14 @@ class BlueprintCopyCounter
    */
   readAgain(): void
   {
-    if (this.#started === false || this.#waiting)
+    if (this.#started === false)
+    {
+      return;
+    }
+
+    // what the disk says is not to be trusted from now until the reading asked for lands.
+    this.#stale = true;
+    if (this.#waiting)
     {
       return;
     }
@@ -369,6 +386,8 @@ class BlueprintCopyCounter
       this.#state = 'unavailable';
     }
 
+    // a reading asked for while this one was on its way waits to begin, and the count is not to be trusted until it lands.
+    this.#stale = this.#waiting;
     this.#publish();
   }
 

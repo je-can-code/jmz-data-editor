@@ -26,7 +26,9 @@ import { hubWithMaps, mapWithEvents } from '../../support/eventFixtures.ts';
  * the disk again. It reads nothing until something listens, reads one reading at a time however many asks pile up while
  * one waits, and tells its listeners only when the count says something new. Until the server's first answer the copies
  * are still being counted, and a window with no server, or a reading that failed, has them uncounted until a later
- * reading succeeds: neither is ever taken for a blueprint having no copies.
+ * reading succeeds: neither is ever taken for a blueprint having no copies. Nor is a count while a reading asked for
+ * after a map's file changed is on its way: no blueprint's count is handed out, for a delete to trust, until the last
+ * reading asked for lands, though the cards keep showing the count they had.
  *
  * The window holds map 1, where event 1 is a copy of blueprint aa, and map 2, with no copies. On disk, map 1 still has
  * the two copies it had before this window's unsaved edits, and map 5, which the window does not hold, has a copy of aa
@@ -188,6 +190,30 @@ describe('blueprintCopies', () =>
 
   describe('BlueprintCopyCounter', () =>
   {
+    /**
+     * Reads the disk above at once the first time, and every later time answers only when the test hands over what the
+     * disk holds by then, as a reading still on its way to the server does.
+     * @returns {{ readNotes: () => Promise<readonly EventNote[]>, answers: ((notes: readonly EventNote[]) => void)[] }}
+     * The reading, and the answer each later reading waits on, in the order they were asked.
+     */
+    const answeredLater = () =>
+    {
+      const answers: ((notes: readonly EventNote[]) => void)[] = [];
+      let readings = 0;
+      const readNotes = (): Promise<readonly EventNote[]> =>
+      {
+        readings += 1;
+        return readings === 1
+          ? Promise.resolve(DISK)
+          : new Promise(resolve =>
+          {
+            answers.push(resolve);
+          });
+      };
+
+      return { readNotes, answers };
+    };
+
     it('reads nothing until something listens, and is still counting until the server answers', async () =>
     {
       // Arrange.
@@ -335,6 +361,56 @@ describe('blueprintCopies', () =>
       // Assert.
       expect([ calls, read?.mock.calls.length, counter.countOf('bb') ])
         .toStrictEqual([ 1, 2, { total: 0, maps: [] } ]);
+    });
+
+    it('hands out no blueprint\'s count while a reading asked for after a map\'s file changed is on its way, and the new count once it lands', async () =>
+    {
+      // Arrange: after the first reading, map 5's copy of bb is taken out on disk, as a save in another window would; the
+      // second reading answers only when told.
+      const { readNotes, answers } = answeredLater();
+      const { counter } = setUp(readNotes);
+      counter.subscribe(() => undefined);
+      await counter.settled();
+      counter.fileChanged('data/System.json');
+      const untouched = counter.countOf('bb');
+
+      // Act.
+      counter.fileChanged('data/Map005.json');
+      const asked = counter.countOf('bb');
+      await vi.waitFor(() => expect(answers)
+        .toHaveLength(1));
+      const onItsWay = counter.countOf('bb');
+      answers[0](DISK.filter(note => note.eventId !== 6));
+      await counter.settled();
+
+      // Assert: the cards kept the old count meanwhile.
+      expect([ untouched, asked, onItsWay, counter.countOf('bb'), counter.getSnapshot().state ])
+        .toStrictEqual([ { total: 1, maps: [ { mapId: 5, copies: 1 } ] }, null, null, { total: 0, maps: [] }, 'counted' ]);
+    });
+
+    it('hands out no count until the last reading asked for lands, when a map changes again while one is on its way', async () =>
+    {
+      // Arrange: two readings after the first, each answering only when told.
+      const { readNotes, answers } = answeredLater();
+      const { counter } = setUp(readNotes);
+      counter.subscribe(() => undefined);
+      await counter.settled();
+      counter.fileChanged('data/Map005.json');
+      await vi.waitFor(() => expect(answers)
+        .toHaveLength(1));
+
+      // Act: map 5 changes again while the second reading is on its way, which lands still holding bb's copy.
+      counter.fileChanged('data/Map005.json');
+      answers[0](DISK);
+      await vi.waitFor(() => expect(answers)
+        .toHaveLength(2));
+      const afterSecond = counter.countOf('bb');
+      answers[1](DISK.filter(note => note.eventId !== 6));
+      await counter.settled();
+
+      // Assert.
+      expect([ afterSecond, counter.countOf('bb') ])
+        .toStrictEqual([ null, { total: 0, maps: [] } ]);
     });
 
     it('reads once for every ask that comes while a reading waits to begin', async () =>
