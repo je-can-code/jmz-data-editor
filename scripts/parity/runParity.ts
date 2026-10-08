@@ -651,18 +651,19 @@ const runGameParity = async (options: Options): Promise<boolean> =>
     maps.set(mapId, await readMap(options.project, mapId));
   }
 
-  // the skies come last, so the game has always arrived somewhere before its clock is set for one; the maps compared by
-  // their pages alone come before them, so their pages are judged at the game's own hour, and the weather read at the
-  // game's own hour after those, since the probe holds the sky's weather off from there on. A weather read at a time of
-  // day comes last of all, its clock set like a sky's.
+  // the skies come after the maps drawn as they are, so the game has always arrived somewhere before its clock is set
+  // for one; the maps compared by their pages alone come before them, so their pages are judged at the game's own hour.
+  // The weather comes last of all, since the probe holds the sky's weather off from the first map read for it on, and a
+  // page waiting on the weather must not be judged under a sky held off: those read at the hour the clock was left at
+  // first, then those read at a time of day, the clock set like a sky's.
   const weatherAt = (timed: boolean) => options.weather
     .filter(fixture => (fixture.time !== undefined) === timed)
     .map(fixture => weatherProbeMapFor(fixture, maps.get(fixture.mapId) as MapFile, screen));
   const probeMaps = [
     ...options.maps.map(mapId => probeMapFor(mapId, maps.get(mapId) as MapFile, screen)),
     ...pageMapIds.map(pagesProbeMapFor),
-    ...weatherAt(false),
     ...options.sky.map(fixture => skyProbeMapFor(fixture.mapId, maps.get(fixture.mapId) as MapFile, screen, fixture.time)),
+    ...weatherAt(false),
     ...weatherAt(true),
   ];
   const report = await runHeadlessGame(
