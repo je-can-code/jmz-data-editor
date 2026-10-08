@@ -150,6 +150,35 @@ type MapPropertiesSection = {
    * Works out the section's settings for a map, from the map as it stands.
    */
   readonly source: MapPropertiesSource;
+
+  /**
+   * A config the settings read that is read only once something needs it, such as J-Weather's, whose looks the weather
+   * setting lists: the section asks for it as it shows, never before, and shows its settings afresh on each read of it.
+   * Left out, the settings read the map alone.
+   */
+  readonly config?: OnDemandConfig;
+};
+
+/**
+ * One plugin that reads whether a map has a sky, from the one tag saying a map has none ({@code <noToneChange>}), and
+ * what the sky does to a map in it. Map Properties offers the sky setting once, however many plugins read the tag, and
+ * names what each of them does.
+ */
+type SkyReader = {
+  /**
+   * Unique, prefixed like event kinds; the setting takes it as its key in the section that shows it.
+   */
+  readonly id: string;
+
+  /**
+   * What a map's sky follows in the plugin, as the setting's name says it: "the clock".
+   */
+  readonly follows: string;
+
+  /**
+   * What the sky does to a map in the plugin, as one sentence: "The hour tints and darkens this map."
+   */
+  readonly does: string;
 };
 
 /**
@@ -256,6 +285,14 @@ type ModuleContext = {
    * @returns {readonly string[]} The words, one entry for each thing the page waits for; none for a page waiting for nothing.
    */
   readonly pageWords: (page: RmmzEventPage) => readonly string[];
+
+  /**
+   * Every plugin the active modules say reads whether a map has a sky, in the order they said it. It reads them as they
+   * stand when it is asked, so one a module said after this one switched on counts too: the sky setting shows in the
+   * section of the module that said so first, and names what each of them does.
+   * @returns {readonly SkyReader[]} The readers; none while no plugin that reads the tag is on.
+   */
+  readonly skyReaders: () => readonly SkyReader[];
 };
 
 /**
@@ -418,6 +455,14 @@ type ModuleContributions = {
   mapProperties(section: MapPropertiesSection): void;
 
   /**
+   * Says the module's plugin reads whether a map has a sky, for as long as the module is on, and what the sky does to a
+   * map in it. However many modules say so, Map Properties offers the sky setting once, in the section of the first to
+   * say so, which every active module hears through {@link ModuleContext.skyReaders}.
+   * @param {SkyReader} reader The plugin's reading.
+   */
+  skyReader(reader: SkyReader): void;
+
+  /**
    * Adds a condition to the game's page rule, for as long as the module is on, as J-TIME adds its hours: every map view
    * then shows each event's page as the game would on a fresh save at the clock's time, this condition judged beside
    * the engine's own.
@@ -502,4 +547,5 @@ export type {
   PluginModule,
   PreviewKindDefinition,
   QuickPanelProps,
+  SkyReader,
 };

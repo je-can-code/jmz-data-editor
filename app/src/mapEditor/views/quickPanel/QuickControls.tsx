@@ -216,8 +216,8 @@ const NumberControl = (props: ControlProps & { limits: NumberLimits }) =>
 };
 
 /**
- * A drop-down committed as soon as a choice is made. A value none of the choices names is still shown, as itself, and
- * the field's hint, such as what the choice does, sits under it.
+ * A drop-down committed as soon as a choice is made, handing on the choice's own value, a number or a name. A value none
+ * of the choices names is still shown, as itself, and the field's hint, such as what the choice does, sits under it.
  * @param {ControlProps & { options: readonly QuickOption[] }} props The field and its choices.
  * @returns {React.JSX.Element} The drop-down.
  */
@@ -225,19 +225,31 @@ const SelectControl = (props: ControlProps & { options: readonly QuickOption[] }
 {
   const { field, onChange, options } = props;
   const known = field.mixed || options.some(option => option.value === field.value);
-  const shown = known ? options : [ ...options, { value: field.value as number, label: String(field.value) } ];
+  const shown = known ? options : [ ...options, { value: field.value as number | string, label: String(field.value) } ];
 
   /**
-   * Says what a stored choice reads as, or that the events differ.
+   * Says what a stored choice reads as, or that the events differ, whatever the choices hold: a choice named by an empty
+   * value must never read as events that differ, nor they as it.
    * @param {unknown} selected The choice's value, as the drop-down holds it.
    * @returns {string} The words.
    */
   const renderValue = (selected: unknown): string =>
   {
     const picked = shown.find(option => String(option.value) === selected);
-    return picked === undefined
+    return field.mixed || picked === undefined
       ? MIXED
       : picked.label;
+  };
+
+  /**
+   * Finds the choice the drop-down hands back by its text, so a name stays a name and a number a number.
+   * @param {string} selected The choice's value, as the drop-down holds it.
+   * @returns {number | string} The choice's own value.
+   */
+  const valueOf = (selected: string): number | string =>
+  {
+    // every item the drop-down offers is one of the choices shown, so the one picked is always among them.
+    return (shown.find(option => String(option.value) === selected) as QuickOption).value;
   };
 
   return (
@@ -249,7 +261,7 @@ const SelectControl = (props: ControlProps & { options: readonly QuickOption[] }
       sx={{ minWidth: 150 }}
       helperText={field.hint}
       slotProps={{ ...raisedWhenMixed(field.mixed), select: { displayEmpty: true, renderValue } }}
-      onChange={event => onChange(Number(event.target.value))}
+      onChange={event => onChange(valueOf(event.target.value))}
     >
       {shown.map(option => (
         <MenuItem key={option.value} value={String(option.value)}>

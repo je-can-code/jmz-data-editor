@@ -1,15 +1,16 @@
 import type { NameLookup } from '../commands/sentence.ts';
 import { PRIORITY_OPTIONS, TRIGGER_OPTIONS } from '../eventKinds/pageFields.ts';
+import type { QuickOption } from '../eventKinds/quickFields.ts';
 import type { RmmzEventPage } from '../model/rmmzTypes.ts';
 import { describePageConditions } from './pageConditions.ts';
 
 /**
  * Finds an option's label by its value, or the bare value when no option names it.
- * @param {readonly { value: number, label: string }[]} options The options.
+ * @param {readonly QuickOption[]} options The options.
  * @param {number} value The value.
  * @returns {string} The label.
  */
-const labelOf = (options: readonly { readonly value: number; readonly label: string }[], value: number): string =>
+const labelOf = (options: readonly QuickOption[], value: number): string =>
 {
   return options.find(option => option.value === value)?.label ?? String(value);
 };

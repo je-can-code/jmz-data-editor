@@ -5,8 +5,9 @@ import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts'
 import type { MapPropertyField } from '../../../../src/mapEditor/core/properties/moduleProperties.ts';
 import { readMapDarkness, type MapDarkness } from '../../../../src/mapEditor/modules/lighting/ambientNote.ts';
 import { ambientColorFrom } from '../../../../src/mapEditor/modules/lighting/lightingConfig.ts';
-import { mapLightingSource } from '../../../../src/mapEditor/modules/lighting/mapLighting.ts';
+import { CLOCK_SKY, mapLightingSource } from '../../../../src/mapEditor/modules/lighting/mapLighting.ts';
 import { skyFollowsClock } from '../../../../src/mapEditor/modules/lighting/skyTag.ts';
+import { WEATHER_SKY } from '../../../../src/mapEditor/modules/weather/weatherSettings.ts';
 import { listMapFiles, locateGameProject, readDataFile } from '../../../support/gameProject.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
@@ -61,9 +62,9 @@ const shipped: ShippedNote[] = project === null
 const DEFAULT = ambientColorFrom(project === null ? null : readDataFile(project, 'config.lighting.json') as JsonValue);
 
 /**
- * The settings, as they show with J-Lighting-Time and J-Weather on, which is how the game ships.
+ * The settings, as they show with J-Lighting-Time and J-Weather on, each reading the sky, which is how the game ships.
  */
-const source = mapLightingSource(DEFAULT, true, true);
+const source = mapLightingSource(DEFAULT, () => [ CLOCK_SKY, WEATHER_SKY ]);
 
 /**
  * The sky tag, as every shipped map writes it.

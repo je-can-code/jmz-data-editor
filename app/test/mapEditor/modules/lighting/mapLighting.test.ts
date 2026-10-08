@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
+import type { SkyReader } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
 import type { MapPropertyField } from '../../../../src/mapEditor/core/properties/moduleProperties.ts';
-import { DARKNESS_CONTROL, mapLightingSource, PLAIN_BLACK_HINT, SKY_HINT } from '../../../../src/mapEditor/modules/lighting/mapLighting.ts';
+import { CLOCK_SKY, DARKNESS_CONTROL, mapLightingSource, PLAIN_BLACK_HINT } from '../../../../src/mapEditor/modules/lighting/mapLighting.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
 /*
  * A map's lighting settings, as Map Properties shows them while J-Lighting is on: how dark the map is, always; the
  * colour of its dark, only once it is dark, since the colour belongs to the dark; and whether it has a sky, only while
- * J-Lighting-Time or J-Weather-Time is on, since those are what a sky changes the map for: J-Lighting-Time tints and
- * darkens the map by the hour, and J-Weather-Time's weather never reaches a map under a roof. The sky setting names only
- * those of the two that are on, in its name and under it, and writes the same tag whichever it names. Each setting shows
- * what the game reads from the note, and each writes the note in place.
+ * J-Lighting-Time, which tints and darkens a map with a sky by the hour, is the first plugin the active modules say reads
+ * the tag. The setting then names every plugin that reads it, in its name and under it (the sky tag's own tests hold the
+ * wording), and writes the same tag whichever it names; while another plugin reads it first, that plugin's section shows
+ * it instead, so it never shows twice. Each setting shows what the game reads from the note, and each writes the note in
+ * place.
  *
  * The colour shows the colour the map names; plain black, and says so, when it names none; and the project's default,
  * saying why, for one the game cannot use. A colour the map names can be taken off again, back to plain black. Above the
@@ -22,6 +24,28 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * The project's colour of the dark in these tests, for a colour the game cannot use.
  */
 const DEFAULT = '#102030';
+
+/**
+ * What the sky setting says under it while J-Lighting-Time alone reads the tag.
+ */
+const CLOCK_HINT = 'The hour tints and darkens this map. Untick it for interiors and caves, which have no sky.';
+
+/**
+ * Another plugin reading the sky, standing in for any other module's.
+ */
+const TIDES: SkyReader = { id: 'tides.sky', follows: 'the tides', does: 'The tide floods this map.' };
+
+/**
+ * The plugins reading the sky while J-Lighting-Time alone does.
+ * @returns {readonly SkyReader[]} J-Lighting-Time's reading.
+ */
+const clockOnly = (): readonly SkyReader[] => [ CLOCK_SKY ];
+
+/**
+ * The plugins reading the sky while none does.
+ * @returns {readonly SkyReader[]} None.
+ */
+const noReaders = (): readonly SkyReader[] => [];
 
 /**
  * A map whose note is the given text.
@@ -54,7 +78,7 @@ describe('mapLighting', () =>
       const field = mapNoted('<weather:rain>');
 
       // Act.
-      const model = mapLightingSource(DEFAULT, true, false)(field);
+      const model = mapLightingSource(DEFAULT, clockOnly)(field);
 
       // Assert.
       expect([ model.note, model.fields.map(shown) ])
@@ -62,7 +86,7 @@ describe('mapLighting', () =>
           null,
           [
             { key: 'lighting.darkness', label: 'Darkness', control: DARKNESS_CONTROL, value: 0, step: 'Change darkness' },
-            { key: 'lighting.sky', label: 'Sky follows the clock', control: { kind: 'check' }, value: true, step: 'Change sky', hint: SKY_HINT },
+            { key: 'lighting.sky', label: 'Sky follows the clock', control: { kind: 'check' }, value: true, step: 'Change sky', hint: CLOCK_HINT },
           ],
         ]);
     });
@@ -73,7 +97,7 @@ describe('mapLighting', () =>
       const cave = mapNoted('<noToneChange>\n<ambient:[85]>');
 
       // Act.
-      const model = mapLightingSource(DEFAULT, true, false)(cave);
+      const model = mapLightingSource(DEFAULT, clockOnly)(cave);
 
       // Assert.
       expect(model.fields.map(shown))
@@ -87,7 +111,7 @@ describe('mapLighting', () =>
             step: 'Change darkness colour',
             hint: PLAIN_BLACK_HINT,
           },
-          { key: 'lighting.sky', label: 'Sky follows the clock', control: { kind: 'check' }, value: false, step: 'Change sky', hint: SKY_HINT },
+          { key: 'lighting.sky', label: 'Sky follows the clock', control: { kind: 'check' }, value: false, step: 'Change sky', hint: CLOCK_HINT },
         ]);
     });
 
@@ -97,7 +121,7 @@ describe('mapLighting', () =>
       const grotto = mapNoted('<ambient:[85, #0A2A2A]>');
 
       // Act.
-      const [ , color ] = mapLightingSource(DEFAULT, true, false)(grotto).fields;
+      const [ , color ] = mapLightingSource(DEFAULT, clockOnly)(grotto).fields;
 
       // Assert.
       expect(shown(color))
@@ -116,18 +140,19 @@ describe('mapLighting', () =>
       const map = mapNoted('<ambient:[60, teal]>');
 
       // Act.
-      const [ , color ] = mapLightingSource(DEFAULT, true, false)(map).fields;
+      const [ , color ] = mapLightingSource(DEFAULT, clockOnly)(map).fields;
 
       // Assert.
       expect([ color.value, color.hint, color.control ])
         .toStrictEqual([ '#102030', 'teal is not a colour, so the project\'s default shows.', { kind: 'color', clear: 'Plain black' } ]);
     });
 
-    it('names only the clock, only the weather, or both, as J-Lighting-Time and J-Weather-Time are on, writing the same tag', () =>
+    it('words the sky for every plugin reading it while J-Lighting-Time reads it first, writing the same tag', () =>
     {
-      // Arrange: a cave with no sky, its settings with J-Lighting-Time alone, J-Weather-Time alone, and both.
+      // Arrange: a cave with no sky, its settings while J-Lighting-Time alone reads the sky, and while another plugin
+      // reads it after J-Lighting-Time.
       const cave = mapNoted('<noToneChange>\n<ambient:[85]>');
-      const sources = [ mapLightingSource(DEFAULT, true, false), mapLightingSource(DEFAULT, false, true), mapLightingSource(DEFAULT, true, true) ];
+      const sources = [ mapLightingSource(DEFAULT, clockOnly), mapLightingSource(DEFAULT, () => [ CLOCK_SKY, TIDES ]) ];
 
       // Act.
       const skies = sources.map(source => source(cave).fields.find(field => field.key === 'lighting.sky') as MapPropertyField);
@@ -135,33 +160,33 @@ describe('mapLighting', () =>
       // Assert: the cave given its sky back loses the same tag whichever way the setting is worded.
       expect(skies.map(sky => [ sky.label, sky.hint, sky.value, sky.write(true) ]))
         .toStrictEqual([
-          [ 'Sky follows the clock', SKY_HINT, false, { note: '<ambient:[85]>' } ],
+          [ 'Sky follows the clock', CLOCK_HINT, false, { note: '<ambient:[85]>' } ],
           [
-            'Sky follows the weather',
-            'The sky\'s weather reaches this map. Untick it for interiors and caves, which have no sky.',
-            false,
-            { note: '<ambient:[85]>' },
-          ],
-          [
-            'Sky follows the clock and the weather',
-            'The hour tints and darkens this map, and the sky\'s weather reaches it. Untick it for interiors and caves, which have no sky.',
+            'Sky follows the clock and the tides',
+            'The hour tints and darkens this map. The tide floods this map. Untick it for interiors and caves, which have no sky.',
             false,
             { note: '<ambient:[85]>' },
           ],
         ]);
     });
 
-    it('offers no sky while neither J-Lighting-Time nor J-Weather-Time is on', () =>
+    it('leaves the sky to the section of a plugin reading it first, and offers none while no plugin reads it', () =>
     {
-      // Arrange.
+      // Arrange: a cave, its settings while another plugin reads the sky before J-Lighting-Time, while another reads it
+      // alone, and while none does.
       const cave = mapNoted('<noToneChange>\n<ambient:[85]>');
+      const sources = [ mapLightingSource(DEFAULT, () => [ TIDES, CLOCK_SKY ]), mapLightingSource(DEFAULT, () => [ TIDES ]), mapLightingSource(DEFAULT, noReaders) ];
 
       // Act.
-      const model = mapLightingSource(DEFAULT, false, false)(cave);
+      const keys = sources.map(source => source(cave).fields.map(field => field.key));
 
       // Assert.
-      expect(model.fields.map(field => field.key))
-        .toStrictEqual([ 'lighting.darkness', 'lighting.darkColor' ]);
+      expect(keys)
+        .toStrictEqual([
+          [ 'lighting.darkness', 'lighting.darkColor' ],
+          [ 'lighting.darkness', 'lighting.darkColor' ],
+          [ 'lighting.darkness', 'lighting.darkColor' ],
+        ]);
     });
 
     it('says when the game cannot read the map\'s darkness, offering no colour until it can', () =>
@@ -170,7 +195,7 @@ describe('mapLighting', () =>
       const map = mapNoted('<ambient:[50, #0a2a2a, 5]>');
 
       // Act.
-      const model = mapLightingSource(DEFAULT, false, false)(map);
+      const model = mapLightingSource(DEFAULT, noReaders)(map);
 
       // Assert.
       expect([ model.note, model.fields.map(field => [ field.key, field.value ]) ])
@@ -186,7 +211,7 @@ describe('mapLighting', () =>
       const map = mapNoted('<ambient:[30]>\n<ambient:[70]>');
 
       // Act.
-      const model = mapLightingSource(DEFAULT, false, false)(map);
+      const model = mapLightingSource(DEFAULT, noReaders)(map);
 
       // Assert.
       expect([ model.note, model.fields[0].value ])
@@ -199,7 +224,7 @@ describe('mapLighting', () =>
       const map = mapNoted('<ambient:[30]>\n<ambient:[..]>');
 
       // Act.
-      const model = mapLightingSource(DEFAULT, false, false)(map);
+      const model = mapLightingSource(DEFAULT, noReaders)(map);
 
       // Assert.
       expect(model.note)
@@ -211,7 +236,7 @@ describe('mapLighting', () =>
     {
       // Arrange.
       const cave = mapNoted('<noWeather>\n<noToneChange>\n<ambient:[85]>');
-      const [ darkness, color, sky ] = mapLightingSource(DEFAULT, true, false)(cave).fields;
+      const [ darkness, color, sky ] = mapLightingSource(DEFAULT, clockOnly)(cave).fields;
 
       // Act.
       const written = [ darkness.write(60), color.write('#0a2a2a'), sky.write(true) ];

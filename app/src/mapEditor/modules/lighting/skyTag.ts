@@ -1,3 +1,5 @@
+import type { SkyReader } from '../../core/modules/PluginModule.ts';
+import type { MapPropertyField } from '../../core/properties/moduleProperties.ts';
 import {
   keepsOtherMeta,
   metaTagsOf,
@@ -12,6 +14,11 @@ import {
  * {@code $dataMap.meta['noToneChange']}, matched exactly, case and all.
  */
 const NO_SKY_KEY = 'noToneChange';
+
+/**
+ * What the sky setting says last under it, whichever plugins read it.
+ */
+const NO_SKY_ADVICE = 'Untick it for interiors and caves, which have no sky.';
 
 /**
  * The tag that says a map has no sky, written as the game's maps write it.
@@ -101,4 +108,51 @@ const withSkyFollowingClock = (note: string, follows: boolean): string =>
   return written;
 };
 
-export { NO_SKY_KEY, NO_SKY_TAG, SKY_MISREAD, skyFollowsClock, withSkyFollowingClock };
+/**
+ * Joins what each plugin's sky follows the way a sentence lists things: "the clock", "the clock and the weather".
+ * @param {readonly string[]} parts What each follows, in order.
+ * @returns {string} The list.
+ */
+const listed = (parts: readonly string[]): string =>
+{
+  const head = parts.slice(0, -1);
+  const last = parts[parts.length - 1];
+  return head.length === 0
+    ? last
+    : `${head.join(', ')} and ${last}`;
+};
+
+/**
+ * The map's sky setting, for the section of the module whose plugin said first that it reads whether a map has a sky:
+ * one setting, however many plugins read the tag, named for what the sky follows in each of them and saying under it
+ * what it does in each, so unticking it never takes any of them by surprise nor speaks of one the game does not run.
+ * Every other section, and every section while no plugin that reads the tag is on, offers none, so the setting never
+ * shows twice. It reads and writes the one tag through {@link skyFollowsClock} and {@link withSkyFollowingClock}, in
+ * place, whichever section shows it.
+ * @param {string} note The map's note.
+ * @param {SkyReader} host The plugin the asking section speaks for, as its module said it reads the sky.
+ * @param {readonly SkyReader[]} readers Every plugin the active modules say reads the sky, in the order they said it.
+ * @returns {MapPropertyField[]} The setting, keyed by the host's id, or none when the asking section is not the first
+ * reader's.
+ */
+const skySettingFor = (note: string, host: SkyReader, readers: readonly SkyReader[]): MapPropertyField[] =>
+{
+  const [ first ] = readers;
+  if (first === undefined || first.id !== host.id)
+  {
+    return [];
+  }
+
+  const does = readers.map(reader => reader.does);
+  return [ {
+    key: host.id,
+    label: `Sky follows ${listed(readers.map(reader => reader.follows))}`,
+    control: { kind: 'check' },
+    value: skyFollowsClock(note),
+    step: 'Change sky',
+    hint: [ ...does, NO_SKY_ADVICE ].join(' '),
+    write: value => ({ note: withSkyFollowingClock(note, value as boolean) }),
+  } ];
+};
+
+export { NO_SKY_KEY, NO_SKY_TAG, SKY_MISREAD, skyFollowsClock, skySettingFor, withSkyFollowingClock };

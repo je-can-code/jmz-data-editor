@@ -147,10 +147,11 @@ vi.mock('pixi.js', async importOriginal =>
  * cannot be read is said over the map, the sky still.
  *
  * It adds a Lighting section to Map Properties too (its own tests hold what each setting reads and writes), which offers
- * whether the map has a sky only while J-Lighting-Time or J-Weather-Time, whose sky's weather J-Weather keeps off a map
- * with none, is enabled as well, each known by its exact name and the setting worded for those that are; J-Weather
- * alone drives no sky, so it is offered nothing for it. The section shows a colour of the dark the note names but the
- * game cannot use as the project's.
+ * whether the map has a sky only while J-Lighting-Time, known by its exact name, is enabled as well: the module then says
+ * its plugin reads the sky, and the setting shows in its section, worded for the clock. It never asks whether J-Weather
+ * or J-Weather-Time is on; J-Weather's module says for itself that its plugin reads the sky (its own tests hold the one
+ * setting the two make together). The section shows a colour of the dark the note names but the game cannot use as the
+ * project's.
  */
 describe('lightingModule', () =>
 {
@@ -452,11 +453,11 @@ describe('lightingModule', () =>
         .toStrictEqual([]);
     });
 
-    it('adds a Lighting section to Map Properties, offering the sky while J-Lighting-Time or J-Weather-Time is enabled too, worded for those that are', () =>
+    it('adds a Lighting section to Map Properties, offering the sky there while J-Lighting-Time is enabled too, whatever else is', () =>
     {
       // Arrange: a cave at 85%, and the plugins beside J-Lighting as js/plugins.js lists them: J-Lighting-Time alone;
-      // J-Weather-Time alone, with J-Weather beneath it; both; and both time extensions off, with J-Weather alone on,
-      // which drives no sky of its own.
+      // J-Lighting-Time with J-Weather and J-Weather-Time, whose own module is not switched on here; the two weather
+      // plugins alone; and J-Lighting-Time listed but switched off.
       const cave = MapDocument.fromJson('map:1', { ...buildMapJson(), note: '<noToneChange>\n<ambient:[85]>' });
       const plugin = (name: string, status: boolean): PluginsJsEntry => ({ name, status, description: '', parameters: {} });
       const lightingTime = plugin('j/lighting/ext/J-Lighting-Time', true);
@@ -464,9 +465,9 @@ describe('lightingModule', () =>
       const weatherTime = plugin('j/weather/ext/J-Weather-Time', true);
       const projects = [
         [ lightingTime ],
-        [ weather, weatherTime ],
         [ lightingTime, weather, weatherTime ],
-        [ plugin('j/lighting/ext/J-Lighting-Time', false), weather, plugin('j/weather/ext/J-Weather-Time', false) ],
+        [ weather, weatherTime ],
+        [ plugin('j/lighting/ext/J-Lighting-Time', false) ],
       ];
       const registries = projects.map(plugins =>
       {
@@ -482,13 +483,13 @@ describe('lightingModule', () =>
         section.source(cave).fields.map(field => field.label),
       ]));
 
-      // Assert.
+      // Assert: the clock alone, whatever the weather plugins are doing, since their own module speaks for them.
       expect([ sections, registryWith(lighting(false)).mapPropertiesSections() ])
         .toStrictEqual([
           [
             [ [ 'lighting.map', 'Lighting', [ 'Darkness', 'Colour of the dark', 'Sky follows the clock' ] ] ],
-            [ [ 'lighting.map', 'Lighting', [ 'Darkness', 'Colour of the dark', 'Sky follows the weather' ] ] ],
-            [ [ 'lighting.map', 'Lighting', [ 'Darkness', 'Colour of the dark', 'Sky follows the clock and the weather' ] ] ],
+            [ [ 'lighting.map', 'Lighting', [ 'Darkness', 'Colour of the dark', 'Sky follows the clock' ] ] ],
+            [ [ 'lighting.map', 'Lighting', [ 'Darkness', 'Colour of the dark' ] ] ],
             [ [ 'lighting.map', 'Lighting', [ 'Darkness', 'Colour of the dark' ] ] ],
           ],
           [],

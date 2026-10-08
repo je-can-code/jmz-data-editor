@@ -1,10 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, Box, Stack, Typography } from '@mui/material';
 import type { SharedField } from '../../core/eventKinds/quickFields.ts';
 import type { DocumentChange } from '../../core/model/EditorDocument.ts';
 import type { JsonValue } from '../../core/model/json.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
-import type { MapPropertiesSection } from '../../core/modules/PluginModule.ts';
+import type { ConfigRead, MapPropertiesSection, OnDemandConfig } from '../../core/modules/PluginModule.ts';
 import { editModuleProperty, ModulePropertyDrag, type MapPropertyField } from '../../core/properties/moduleProperties.ts';
 import { QuickControl } from '../../views/quickPanel/QuickControls.tsx';
 import type { QuickResources } from '../../views/quickPanel/quickResources.ts';
@@ -69,6 +69,37 @@ const useMapSettingsRevision = (map: MapDocument): void =>
 };
 
 /**
+ * Never hears of a read, for a section whose settings read no config of their own.
+ * @returns {() => void} Stops listening, which there is nothing to stop.
+ */
+const NO_READS = (): (() => void) => () => undefined;
+
+/**
+ * Nothing read, for a section whose settings read no config of their own.
+ * @returns {undefined} Nothing.
+ */
+const NOTHING_READ = (): undefined => undefined;
+
+/**
+ * Asks for the config a section's settings read only once something needs it, as the section shows and never before,
+ * and draws the section again on each read of it, the first included, so its settings show what the config holds as soon
+ * as it arrives. A section reading no config of its own asks for nothing.
+ * @param {OnDemandConfig | undefined} config The config, or undefined for none.
+ */
+const useSectionConfig = (config: OnDemandConfig | undefined): void =>
+{
+  const subscribe = config === undefined ? NO_READS : config.subscribe;
+  const current = config === undefined ? NOTHING_READ : config.current;
+  useSyncExternalStore<ConfigRead | undefined>(subscribe, current);
+
+  // asked for once the section is on screen, never while it is merely worked out.
+  useEffect(() =>
+  {
+    config?.request();
+  }, [ config ]);
+};
+
+/**
  * Shows a map's setting the way a quick panel shows an event's: one map holds one value, so it is never mixed.
  * @param {MapPropertyField} field The setting.
  * @returns {SharedField} The setting as a control reads it.
@@ -85,7 +116,8 @@ const sharedOf = (field: MapPropertyField): SharedField =>
  * from the map, these properties or the history panel alike. A value still being chosen, as a slider is dragged, shows
  * on the map as it goes and becomes one step when it is chosen; one still showing when the section goes, as when another
  * map is picked, is kept as that step. A change the map cannot take is refused, saying why. The section follows changes
- * to the map's own properties, and sits still while a brush paints or an event moves.
+ * to the map's own properties, and sits still while a brush paints or an event moves. A config its settings read only
+ * once something needs it is asked for as the section shows, and each read of it shows the settings afresh.
  * @param {{ mapId: number, map: MapDocument, section: MapPropertiesSection }} props The map and the section.
  * @returns {React.JSX.Element} The section.
  */
@@ -98,6 +130,9 @@ const ModulePropertiesSection = (props: { mapId: number; map: MapDocument; secti
 
   // a value being dragged changes the map before it is a step, so the settings follow the map itself.
   useMapSettingsRevision(map);
+
+  // a config the settings read only once needed is needed now, and each read of it may change what they show.
+  useSectionConfig(section.config);
 
   // a value still showing when the section goes is kept, as the step it would have been.
   useEffect(() => () => settleDrag(drag), []);

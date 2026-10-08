@@ -9,7 +9,7 @@ import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { MapPropertiesSection } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
-import { mapLightingSource } from '../../../../src/mapEditor/modules/lighting/mapLighting.ts';
+import { CLOCK_SKY, mapLightingSource } from '../../../../src/mapEditor/modules/lighting/mapLighting.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { ModulePropertiesSection } from '../../../../src/mapEditor/workspace/panels/ModulePropertiesSection.tsx';
 import { WorkspaceController } from '../../../../src/mapEditor/workspace/WorkspaceController.ts';
@@ -31,9 +31,9 @@ import { buildMapJson } from '../../support/fixtures.ts';
 describe('ModulePropertiesSection', () =>
 {
   /**
-   * J-Lighting's section, its sky offered as it is while J-Lighting-Time is on.
+   * J-Lighting's section, its sky offered as it is while J-Lighting-Time alone reads it.
    */
-  const LIGHTING: MapPropertiesSection = { id: 'lighting.map', title: 'Lighting', source: mapLightingSource('#000000', true, false) };
+  const LIGHTING: MapPropertiesSection = { id: 'lighting.map', title: 'Lighting', source: mapLightingSource('#000000', () => [ CLOCK_SKY ]) };
 
   /**
    * Renders a section over a hub holding map 1 with the given note.

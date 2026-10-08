@@ -3,6 +3,7 @@ import type { WeatherFrame } from '../../core/renderer/weatherLayer.ts';
 import { WeatherOnDemand } from './weatherOnDemand.ts';
 import { weatherConfigFrom } from './weatherConfig.ts';
 import { resolveWeather } from './weatherResolver.ts';
+import { WEATHER_SETTINGS_ID, WEATHER_SKY, weatherSettingsSource } from './weatherSettings.ts';
 import { weatherDeclarationOf } from './weatherTags.ts';
 
 /**
@@ -104,6 +105,12 @@ const drawsWeatherOn = (frame: WeatherFrame): boolean =>
  *
  * Weather costs a map without any nothing: the config is read, and the code that draws loaded, only the first time a map
  * has weather, never while the window opens. A config that then turns out not to serve is said over every map view.
+ *
+ * Map Properties gains a Weather section: the look the map shows, chosen from those the config lists, and whether it
+ * opts out of weather altogether, each written into the map's note in place. The config is read for it only once the
+ * section shows. J-Weather reads whether a map has a sky too, which the module says, so the sky setting shows in
+ * Map Properties while J-Weather is on: in this section while no module said so first, and otherwise in that one's,
+ * worded for both. J-Weather-Time cannot run without J-Weather, so nothing here asks whether it is on.
  */
 const weatherModule: PluginModule = {
   id: 'weather',
@@ -119,6 +126,15 @@ const weatherModule: PluginModule = {
       title: 'Weather',
       drawsOn: drawsWeatherOn,
       create: stage => new WeatherOnDemand(stage, config),
+    });
+
+    // J-Weather keeps the sky's weather off a map with no sky, so whether a map has one is set while it is on.
+    contributions.skyReader(WEATHER_SKY);
+    contributions.mapProperties({
+      id: WEATHER_SETTINGS_ID,
+      title: 'Weather',
+      source: weatherSettingsSource(config, context.skyReaders),
+      config,
     });
   },
 };

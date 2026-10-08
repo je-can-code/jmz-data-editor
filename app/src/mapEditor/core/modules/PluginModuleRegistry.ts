@@ -18,6 +18,7 @@ import type {
   PassabilityRule,
   PluginModule,
   PreviewKindDefinition,
+  SkyReader,
 } from './PluginModule.ts';
 
 /**
@@ -52,6 +53,7 @@ type Contributions = {
   notices: LiveNotice[];
   clocks: ClockOffer[];
   mapProperties: MapPropertiesSection[];
+  skyReaders: SkyReader[];
   pageConditions: PageCondition[];
   previewKinds: PreviewKindDefinition[];
 };
@@ -72,6 +74,7 @@ const noContributions = (): Contributions => ({
   notices: [],
   clocks: [],
   mapProperties: [],
+  skyReaders: [],
   pageConditions: [],
   previewKinds: [],
 });
@@ -143,8 +146,9 @@ const configNamesOf = (pluginModule: PluginModule, enabled: ReadonlyMap<string, 
 /**
  * Holds the event kinds, palette entries, passability rules, overlays, lighting layers, weather layers and command
  * entries the editor knows, the maps whose events are a plugin's patterns, what the modules say over every map view, the clock they offer,
- * the sections they add to Map Properties, the conditions they add to the game's page rule and the kinds of state they
- * let the preview set: the core's kinds, always, and each plugin module's contributions while its plugins are enabled.
+ * the sections they add to Map Properties and the plugins they say read a map's sky, the conditions they add to the
+ * game's page rule and the kinds of state they let the preview set: the core's kinds, always, and each plugin module's
+ * contributions while its plugins are enabled.
  */
 class PluginModuleRegistry
 {
@@ -242,8 +246,10 @@ class PluginModuleRegistry
         const problem = problems.get(name);
         return problem === undefined ? [] : [ [ name, problem ] as const ];
       }));
-      // a page's words read the conditions as they stand when asked, so those added by modules after this one count.
+      // a page's words read the conditions as they stand when asked, so those added by modules after this one count, and
+      // the sky's readers are read the same way.
       const pageWords = (page: RmmzEventPage) => pageWordsOf(page, this.#contributions.pageConditions);
+      const skyReaders = (): readonly SkyReader[] => this.#contributions.skyReaders;
       const onDemandConfig = (name: string): OnDemandConfig =>
       {
         if ((pluginModule.onDemandConfigs ?? []).includes(name) === false)
@@ -253,7 +259,14 @@ class PluginModuleRegistry
 
         return onDemand(name);
       };
-      pluginModule.register(this.#contributionsFor(pluginModule), { plugins: enabled, configs: own, configProblems: ownProblems, onDemandConfig, pageWords });
+      pluginModule.register(this.#contributionsFor(pluginModule), {
+        plugins: enabled,
+        configs: own,
+        configProblems: ownProblems,
+        onDemandConfig,
+        pageWords,
+        skyReaders,
+      });
       this.#active.push(pluginModule.id);
     });
 
@@ -527,6 +540,11 @@ class PluginModuleRegistry
       {
         requirePrefix(section.id, 'map properties sections');
         this.#contributions.mapProperties.push(section);
+      },
+      skyReader: reader =>
+      {
+        requirePrefix(reader.id, 'sky readers');
+        this.#contributions.skyReaders.push(reader);
       },
       pageCondition: condition =>
       {

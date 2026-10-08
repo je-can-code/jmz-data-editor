@@ -25,10 +25,11 @@ type EventEdit =
   };
 
 /**
- * One choice of a select field.
+ * One choice of a select field: a number for a choice the game stores as one, such as a facing, or a name for one it
+ * stores by name, such as a weather look.
  */
 type QuickOption = {
-  readonly value: number;
+  readonly value: number | string;
   readonly label: string;
 };
 
@@ -83,7 +84,7 @@ type ColorControl = {
 /**
  * The control a quick field shows, which also says what its value holds:
  * - {@code number}: a whole number within the bounds;
- * - {@code select}: one of the choices' numbers;
+ * - {@code select}: one of the choices' values, a number or a name;
  * - {@code text}: text, over several lines when {@code multiline};
  * - {@code row}: the id of an item, weapon or armor, picked by name;
  * - {@code map}: a map id, picked from the map tree;
