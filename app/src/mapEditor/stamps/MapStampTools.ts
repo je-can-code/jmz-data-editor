@@ -1,3 +1,5 @@
+import { blueprintLinkOf } from '../core/blueprints/blueprintLink.ts';
+import { BLUEPRINTS_DOCUMENT } from '../core/blueprints/blueprints.ts';
 import { isOnMap } from '../core/events/eventPlacement.ts';
 import type { EventSelection } from '../core/events/EventSelection.ts';
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
@@ -77,6 +79,12 @@ type MapStampToolsOptions = {
    * Says why a map may hold no copy of a blueprint, or null when it may: a paste carrying copies of one is refused there.
    */
   readonly linkRefusal: (mapId: number) => string | null;
+
+  /**
+   * Has the window hold the blueprints, as the Stamps panel does: a paste carrying copies of blueprints waits for them, so
+   * a copy of one no longer there can be told and go down plain. Settles once held, or rejects when they cannot be.
+   */
+  readonly openBlueprints: () => Promise<unknown>;
 };
 
 /**
@@ -391,7 +399,9 @@ class MapStampTools
   }
 
   /**
-   * Places a stamp on the map as one step, as a paste: its top-left corner on a tile, or where it was copied from.
+   * Places a stamp on the map as one step, as a paste: its top-left corner on a tile, or where it was copied from. A
+   * stamp carrying copies of blueprints, in a window not holding the blueprints yet, waits for them first, so a copy of
+   * one no longer there goes down plain; should they not open, every link goes down as it is.
    * @param {Stamp} stamp The stamp.
    * @param {MapCell | null} target The tile, or null for where it was copied from.
    */
@@ -403,6 +413,26 @@ class MapStampTools
       return;
     }
 
+    const linked = stamp.events.some(event => blueprintLinkOf(event.note) !== null);
+    if (linked && this.#options.hub.has(BLUEPRINTS_DOCUMENT) === false)
+    {
+      // placed once the blueprints are open, or, should they not open, with every link as it is.
+      const place = () => this.#placeOn(map, stamp, target);
+      this.#options.openBlueprints().then(place, place);
+      return;
+    }
+
+    this.#placeOn(map, stamp, target);
+  }
+
+  /**
+   * Places a stamp on a map as one step, as a paste, and takes what came of it.
+   * @param {MapDocument} map The map.
+   * @param {Stamp} stamp The stamp.
+   * @param {MapCell | null} target The tile its top-left corner goes to, or null for where it was copied from.
+   */
+  #placeOn(map: MapDocument, stamp: Stamp, target: MapCell | null): void
+  {
     const at = target ?? stamp.origin;
     const placement: StampPlacement = { at, shaping: 'auto', mode: this.#options.tilesetMode(map), linkRefusal: this.#options.linkRefusal(map.mapId) };
     this.settle(placeStamp(this.#options.hub, map.mapId, stamp, placement, 'Paste'));

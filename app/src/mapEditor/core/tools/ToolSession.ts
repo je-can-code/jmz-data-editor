@@ -1,5 +1,6 @@
 import { blueprintLinkOf } from '../blueprints/blueprintLink.ts';
 import { placeBlueprint } from '../blueprints/blueprintPlacement.ts';
+import { liveBlueprintsIn } from '../blueprints/blueprints.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { MapCell } from '../renderer/camera.ts';
@@ -764,8 +765,14 @@ class ToolSession
       return { ...NO_TOOL_OVERLAY, hover: { x: cell.x, y: cell.y, width: 1, height: 1 } };
     }
 
-    // a map that may hold no link says so before the click that would be refused.
-    const linked = blueprint !== null || stamp.events.some(event => blueprintLinkOf(event.note) !== null);
+    // a map that may hold no link says so before the click that would be refused; a copy of a blueprint gone goes down
+    // plain, so it is no copy here.
+    const live = liveBlueprintsIn(this.#host.hub);
+    const linked = blueprint !== null || stamp.events.some(event =>
+    {
+      const link = blueprintLinkOf(event.note);
+      return link !== null && (live === null || live(link.blueprintId));
+    });
     const refused = linked && this.#host.linkRefusal(map.mapId) !== null;
     const preview = previewStamp(map, stamp, cell, pointer.shift ? 'exact' : 'auto');
     return {

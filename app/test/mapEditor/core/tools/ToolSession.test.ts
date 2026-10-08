@@ -569,7 +569,8 @@ describe('ToolSession: what the map shows', () =>
  * the map's history, Shift laying its tiles exactly as copied, and the host hears what each click came to, refusals
  * included. With no stamp picked, a click does nothing and only the cell shows. A blueprint in hand places linked copies
  * of itself; over a map that may hold no link, a blueprint, or a stamp carrying copies of one, says so under the pointer
- * and is refused at the click.
+ * and is refused at the click. A stamp's copy of a blueprint no longer there is no copy any more: it goes down plain,
+ * there too, and the author is told.
  *
  * The bench's 4x3 map holds grass all round, a tree over 0, 0, and no events.
  */
@@ -750,5 +751,27 @@ describe('ToolSession: the stamp', () =>
     // Assert.
     expect(labels)
       .toEqual([ 'Blueprints can\'t go here', 'Stamp' ]);
+  });
+
+  it('places a plain stamp\'s copy of a blueprint no longer there as a plain event, over a map that may hold no link, saying so', () =>
+  {
+    // Arrange: the dirt's event a copy of a blueprint the window's blueprints no longer hold, over a map that may hold no
+    // link.
+    const linked = { ...dirtWithEvent(), events: [ { ...createMapEvent(7, 1, 0), note: 'event 7\n<blueprint:[k3x9q2mf, 7]>' } ] };
+    const { bench, heard } = stamping(linked, { refusal: 'its events are patterns' });
+    holdBlueprints(bench.hub);
+
+    // Act.
+    bench.session.move(at(0, 1));
+    const label = bench.session.overlay().hoverLabel;
+    drag(bench.session, [ at(0, 1) ]);
+
+    // Assert.
+    expect([ label, bench.map.event(1)?.note, heard.map(outcome => outcome.ok && outcome.notes) ])
+      .toEqual([
+        'Stamp',
+        'event 7',
+        [ [ 'One of the stamp\'s events was a copy of a blueprint that no longer exists, so it went down as a plain event.' ] ],
+      ]);
   });
 });

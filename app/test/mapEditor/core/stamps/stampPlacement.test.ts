@@ -6,9 +6,10 @@ import { cutStampSource, placeStamp, planStamp, type StampPlacement } from '../.
 import { shapedTileAt, TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes.ts';
 import { gridReader } from '../../../../src/mapEditor/core/tiles/tileGrid.ts';
 import { autotileShape, makeAutotileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
+import { holdBlueprints } from '../../support/blueprintFixtures.ts';
 import { hubWithMaps, mapFileOf, spotsOf } from '../../support/eventFixtures.ts';
 import { command } from '../../support/eventKindFixtures.ts';
-import { tiledMap } from '../../support/stampFixtures.ts';
+import { stampOf, tiledMap } from '../../support/stampFixtures.ts';
 import { fill, put, type TestGrid } from '../tiles/support/tileGridBuilder.ts';
 
 /*
@@ -23,7 +24,11 @@ import { fill, put, type TestGrid } from '../tiles/support/tileGridBuilder.ts';
  * Tiles copied from a map with another tileset are left out, the events going down alone and the author told; a stamp
  * of such tiles alone is refused. A stamp landing any event on another, or nothing at all on the map, is refused whole.
  * Events copied off copies of a blueprint carry their links along, so they are copies too; a stamp carrying any onto a
- * map that may hold no link, such as J-ABS's action map, is refused whole with the map's reason.
+ * map that may hold no link, such as J-ABS's action map, is refused whole with the map's reason. A copy of a blueprint
+ * the window's blueprints no longer hold goes down as a plain event instead, its dead link's line taken out and the rest
+ * of its note byte for byte, and the author is told; on a map that may hold no link too, since it is no copy any more.
+ * While the window does not hold the blueprints, no link can be told dead, and every link goes down as it is. A note
+ * that could not lose its dead link cleanly refuses the stamp.
  *
  * A cut takes away what its stamp was captured from, as one step: the events it copied, and every layer it carries
  * emptied over the cells it came from, with the autotiles around the hole reshaped.
@@ -107,6 +112,16 @@ const blockStamp = (hub: ReturnType<typeof hubWithMaps>): Stamp =>
 const at = (x: number, y: number, fields: Partial<StampPlacement> = {}): StampPlacement =>
 {
   return { at: { x, y }, shaping: 'auto', mode: TilesetMode.area, linkRefusal: null, ...fields };
+};
+
+/**
+ * Reads every event's note on a map, by id, empty slots as null.
+ * @param {RmmzMap} file The map.
+ * @returns {(string | null)[]} The notes.
+ */
+const notesOn = (file: RmmzMap): (string | null)[] =>
+{
+  return file.events.map(event => (event === null ? null : (event as RmmzMapEvent).note));
 };
 
 /**
@@ -282,18 +297,98 @@ describe('placeStamp', () =>
 
   it('carries the links of copies of a blueprint along, so the copies placed are copies of it too', () =>
   {
-    // Arrange: event 1 of the source is a copy of a blueprint's event 7.
+    // Arrange: event 1 of the source is a copy of event 7 of the camp, which the window's blueprints hold.
     const file = source();
     (file.events[1] as RmmzMapEvent).note = 'Guard\n<blueprint:[k3x9q2mf, 7]>';
     const hub = hubWithMaps({ 1: file, 2: target() });
+    holdBlueprints(hub, { k3x9q2mf: { name: 'Goblin camp', stamp: stampOf() } });
     const stamp = captureEventsStamp(hub.map('map:1'), [ 1, 2 ], 'window-a:1') as Stamp;
 
     // Act.
-    placeStamp(hub, 2, stamp, at(0, 0), 'Paste');
+    const outcome = placeStamp(hub, 2, stamp, at(0, 0), 'Paste');
 
     // Assert.
-    expect(mapFileOf(hub, 2).events.map(event => (event === null ? null : (event as RmmzMapEvent).note)))
-      .toStrictEqual([ null, 'event 1', 'Guard\n<blueprint:[k3x9q2mf, 7]>', 'event 2' ]);
+    expect([ notesOn(mapFileOf(hub, 2)), outcome.ok && outcome.notes ])
+      .toStrictEqual([ [ null, 'event 1', 'Guard\n<blueprint:[k3x9q2mf, 7]>', 'event 2' ], [] ]);
+  });
+
+  it('places a copy of a blueprint no longer there as a plain event, the rest of its note byte for byte, and says so', () =>
+  {
+    // Arrange: event 1 is a copy of the camp, deleted since; event 2 a copy of the bat roost, still kept.
+    const file = source();
+    (file.events[1] as RmmzMapEvent).note = 'Guard\r\n  captain\r\n<blueprint:[k3x9q2mf, 7]>';
+    (file.events[2] as RmmzMapEvent).note = '<blueprint:[aa22aa22, 1]>';
+    const hub = hubWithMaps({ 1: file, 2: target() });
+    holdBlueprints(hub, { aa22aa22: { name: 'Bat roost', stamp: stampOf() } });
+    const stamp = captureEventsStamp(hub.map('map:1'), [ 1, 2 ], 'window-a:1') as Stamp;
+
+    // Act.
+    const outcome = placeStamp(hub, 2, stamp, at(0, 0), 'Paste');
+
+    // Assert.
+    expect([ notesOn(mapFileOf(hub, 2)), outcome.ok && outcome.notes ])
+      .toStrictEqual([
+        [ null, 'event 1', 'Guard\r\n  captain', '<blueprint:[aa22aa22, 1]>' ],
+        [ 'One of the stamp\'s events was a copy of a blueprint that no longer exists, so it went down as a plain event.' ],
+      ]);
+  });
+
+  it('places copies of blueprints no longer there even on a map that may hold no link, as the plain events they become', () =>
+  {
+    // Arrange: both events copies of blueprints the window's blueprints no longer hold, bound for J-ABS's action map.
+    const file = source();
+    (file.events[1] as RmmzMapEvent).note = '<blueprint:[k3x9q2mf, 7]>';
+    (file.events[2] as RmmzMapEvent).note = 'Wolf\n<blueprint:[zz99zz99, 2]>';
+    const hub = hubWithMaps({ 1: file, 2: target() });
+    holdBlueprints(hub);
+    const stamp = captureEventsStamp(hub.map('map:1'), [ 1, 2 ], 'window-a:1') as Stamp;
+    const refusal = 'this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it';
+
+    // Act.
+    const outcome = placeStamp(hub, 2, stamp, at(0, 0, { linkRefusal: refusal }), 'Paste');
+
+    // Assert.
+    expect([ notesOn(mapFileOf(hub, 2)), outcome.ok && outcome.notes ])
+      .toStrictEqual([
+        [ null, 'event 1', '', 'Wolf' ],
+        [ '2 of the stamp\'s events were copies of blueprints that no longer exist, so they went down as plain events.' ],
+      ]);
+  });
+
+  it('keeps every link as it is while the window does not hold the blueprints, since none can be told dead', () =>
+  {
+    // Arrange: a copy of a blueprint, in a window that has not opened the blueprints.
+    const file = source();
+    (file.events[1] as RmmzMapEvent).note = '<blueprint:[k3x9q2mf, 7]>';
+    const hub = hubWithMaps({ 1: file, 2: target() });
+    const stamp = captureEventsStamp(hub.map('map:1'), [ 1 ], 'window-a:1') as Stamp;
+
+    // Act.
+    const outcome = placeStamp(hub, 2, stamp, at(0, 0), 'Paste');
+
+    // Assert.
+    expect([ notesOn(mapFileOf(hub, 2)), outcome.ok && outcome.notes ])
+      .toStrictEqual([ [ null, 'event 1', '<blueprint:[k3x9q2mf, 7]>' ], [] ]);
+  });
+
+  it('refuses a stamp whose copy of a blueprint no longer there could not lose its link cleanly, changing nothing', () =>
+  {
+    // Arrange: a stray bracket before the dead link opens a tag of its own once the link is out.
+    const file = source();
+    (file.events[1] as RmmzMapEvent).note = 'z<<blueprint:[k3x9q2mf, 7]>w> <moveSpeed:6.0>';
+    const hub = hubWithMaps({ 1: file, 2: target() });
+    holdBlueprints(hub);
+    const stamp = captureEventsStamp(hub.map('map:1'), [ 1 ], 'window-a:1') as Stamp;
+
+    // Act.
+    const outcome = placeStamp(hub, 2, stamp, at(0, 0), 'Paste');
+
+    // Assert.
+    expect([ outcome, mapFileOf(hub, 2) ])
+      .toStrictEqual([
+        { ok: false, message: 'This stamp can\'t be placed: in EV001\'s note, the game would read the rest of this note differently; look for a stray < in it.' },
+        target(),
+      ]);
   });
 
   it('refuses a stamp carrying copies of a blueprint onto a map that may hold no link, and places one carrying none there', () =>
@@ -346,7 +441,7 @@ describe('planStamp', () =>
     const pair = captureEventsStamp(hub.map('map:1'), [ 1, 2 ], 'window-a:1') as Stamp;
 
     // Act.
-    const plans = [ planStamp(hub.map('map:2'), pair, at(0, 0)), planStamp(hub.map('map:2'), pair, at(7, 0)) ];
+    const plans = [ planStamp(hub.map('map:2'), pair, at(0, 0), null), planStamp(hub.map('map:2'), pair, at(7, 0), null) ];
 
     // Assert.
     expect(plans.map(plan => plan.ok && [ plan.sourceIds, plan.events.map(event => event.id) ]))

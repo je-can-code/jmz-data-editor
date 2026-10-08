@@ -165,7 +165,7 @@ const roomFor = (map: MapDocument, stamp: Stamp): { x: number; y: number } =>
   {
     for (let x = 0; x + stamp.width <= map.width; x++)
     {
-      const plan = planStamp(map, stamp, { at: { x, y }, shaping: 'auto', mode: TilesetMode.area, linkRefusal: null });
+      const plan = planStamp(map, stamp, { at: { x, y }, shaping: 'auto', mode: TilesetMode.area, linkRefusal: null }, null);
       if (plan.ok && plan.eventsLeftOut === 0 && (x !== stamp.origin.x || y !== stamp.origin.y || stamp.mapId !== map.mapId))
       {
         return { x, y };

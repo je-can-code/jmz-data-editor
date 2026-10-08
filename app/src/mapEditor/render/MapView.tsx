@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Box, Chip, Divider, Stack, Typography } from '@mui/material';
 import { linkGateFor } from '../core/blueprints/blueprintPlacement.ts';
+import { BLUEPRINTS_DOCUMENT } from '../core/blueprints/blueprints.ts';
 import { markerSymbolFor } from '../core/eventKinds/eventMarkers.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
@@ -460,6 +461,7 @@ const MapView = (props: MapViewProps) =>
       readClipboard: () => services.shell.readClipboard(STAMP_CLIPBOARD_MARKER),
       notify: (text: string, severity: EventNoticeSeverity) => notifyRef.current(text, severity),
       linkRefusal,
+      openBlueprints: () => services.openDocument(BLUEPRINTS_DOCUMENT),
     });
     stampToolsRef.current = stampTools;
 

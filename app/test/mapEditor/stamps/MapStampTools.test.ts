@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventSelection } from '../../../src/mapEditor/core/events/EventSelection.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import type { Camera } from '../../../src/mapEditor/core/renderer/camera.ts';
@@ -14,6 +14,7 @@ import { makeAutotileId } from '../../../src/mapEditor/core/tiles/tileIds.ts';
 import { PaintState } from '../../../src/mapEditor/core/tools/PaintState.ts';
 import { MapStampTools } from '../../../src/mapEditor/stamps/MapStampTools.ts';
 import { fill } from '../core/tiles/support/tileGridBuilder.ts';
+import { holdBlueprints, type BlueprintSeed } from '../support/blueprintFixtures.ts';
 import { hubWithMaps, mapFileOf, spotsOf } from '../support/eventFixtures.ts';
 import { stampOf, tiledMap } from '../support/stampFixtures.ts';
 
@@ -28,7 +29,9 @@ import { stampOf, tiledMap } from '../support/stampFixtures.ts';
  * read off the clipboard, joins the window's stamps as the newest before it is placed; plain text with no stamp kept is
  * left to the page; each answers only while the view has focus outside a text field, and a cut or a paste waits while
  * anything is in hand. The menu's actions do the same through the clipboard API, a stamp kept even where the clipboard
- * cannot be written or read; and the author hears what a placement left out, and why one was refused.
+ * cannot be written or read; and the author hears what a placement left out, and why one was refused. A paste carrying
+ * copies of blueprints, in a window not holding the blueprints yet, opens them first, so a copy of one no longer there
+ * goes down plain; blueprints that cannot be opened leave every link as it is.
  *
  * The view is at zoom 1 with the map's corner at the view's, so a tile is 48 pixels. The 6x4 map holds grass at 0, 0 to
  * 1, 0, event 1 at 0, 0, event 2 at 1, 0 and event 3 at 4, 2.
@@ -94,11 +97,20 @@ describe('MapStampTools', () =>
     const painting = new PaintState();
     const stamps = new StampHistory('window-a');
     const notices: string[] = [];
-    const state: { area: CellRect | null; busy: boolean; clipboard: string | null; refusals: Map<number, string> } = {
+    const state: {
+      area: CellRect | null;
+      busy: boolean;
+      clipboard: string | null;
+      refusals: Map<number, string>;
+      blueprints: BlueprintSeed | null;
+      opened: number;
+    } = {
       area: null,
       busy: false,
       clipboard: null,
       refusals: new Map(),
+      blueprints: {},
+      opened: 0,
     };
     const tools = new MapStampTools({
       renderer,
@@ -113,6 +125,17 @@ describe('MapStampTools', () =>
       readClipboard: async () => state.clipboard,
       notify: text => notices.push(text),
       linkRefusal: mapId => state.refusals.get(mapId) ?? null,
+      openBlueprints: async () =>
+      {
+        // the blueprints on disk, or none to be had.
+        state.opened += 1;
+        if (state.blueprints === null)
+        {
+          throw new Error('the server is down');
+        }
+
+        holdBlueprints(hub, state.blueprints);
+      },
     });
     tools.setMap(map);
     built.push(tools);
@@ -400,8 +423,10 @@ describe('MapStampTools', () =>
 
     it('refuses a paste carrying copies of a blueprint onto a map the window\'s link gate keeps from holding one', () =>
     {
-      // Arrange: event 2 made a copy of a blueprint's and copied; the gate keeps map 1 from holding a link.
+      // Arrange: event 2 made a copy of the camp, which the window's blueprints hold, and copied; the gate keeps map 1
+      // from holding a link.
       const { hub, host, canvas, selection, notices, state } = setUp();
+      holdBlueprints(hub, { k3x9q2mf: { name: 'Goblin camp', stamp: stampOf() } });
       hub.edit('Link', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'events', 2, 'note' ], '<blueprint:[k3x9q2mf, 1]>'));
       selection.select(1, [ 2 ]);
       host.focus();
@@ -414,8 +439,54 @@ describe('MapStampTools', () =>
       clipboardEvent('paste');
 
       // Assert.
-      expect([ notices.at(-1), hub.map('map:1').eventIds() ])
-        .toStrictEqual([ 'This stamp holds copies of blueprints, which can\'t go here: its events are patterns.', before ]);
+      expect([ notices.at(-1), hub.map('map:1').eventIds(), state.opened ])
+        .toStrictEqual([ 'This stamp holds copies of blueprints, which can\'t go here: its events are patterns.', before, 0 ]);
+    });
+
+    it('opens the blueprints before pasting copies of them in a window not holding them yet, a copy of one gone going down plain', async () =>
+    {
+      // Arrange: event 2 a copy of the camp, which the blueprints on disk no longer hold, copied.
+      const { hub, host, canvas, selection, notices, state } = setUp();
+      hub.edit('Link', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'events', 2, 'note' ], 'Guard\n<blueprint:[k3x9q2mf, 1]>'));
+      selection.select(1, [ 2 ]);
+      host.focus();
+      clipboardEvent('copy');
+
+      // Act.
+      pointAt(canvas, { x: 3, y: 3 });
+      const paste = clipboardEvent('paste');
+      await vi.waitFor(() => expect(hub.map('map:1').eventIds())
+        .toHaveLength(4));
+
+      // Assert: the copy went down as event 4, plain.
+      expect([ paste.event.defaultPrevented, state.opened, hub.map('map:1').event(4)?.note, notices.at(-1) ])
+        .toStrictEqual([
+          true,
+          1,
+          'Guard',
+          'One of the stamp\'s events was a copy of a blueprint that no longer exists, so it went down as a plain event.',
+        ]);
+    });
+
+    it('pastes copies of blueprints with their links as they are when the blueprints cannot be opened, since none can be told dead', async () =>
+    {
+      // Arrange: event 2 a copy of the camp, copied, and blueprints that cannot be read.
+      const { hub, host, canvas, selection, state } = setUp();
+      hub.edit('Link', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'events', 2, 'note' ], '<blueprint:[k3x9q2mf, 1]>'));
+      selection.select(1, [ 2 ]);
+      host.focus();
+      clipboardEvent('copy');
+      state.blueprints = null;
+
+      // Act.
+      pointAt(canvas, { x: 3, y: 3 });
+      clipboardEvent('paste');
+      await vi.waitFor(() => expect(hub.map('map:1').eventIds())
+        .toHaveLength(4));
+
+      // Assert.
+      expect([ state.opened, hub.map('map:1').event(4)?.note ])
+        .toStrictEqual([ 1, '<blueprint:[k3x9q2mf, 1]>' ]);
     });
   });
 

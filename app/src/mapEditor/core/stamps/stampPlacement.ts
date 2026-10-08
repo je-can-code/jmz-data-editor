@@ -1,4 +1,5 @@
-import { blueprintLinkOf } from '../blueprints/blueprintLink.ts';
+import { blueprintLinkOf, withoutBlueprintLink } from '../blueprints/blueprintLink.ts';
+import { liveBlueprintsIn, type LiveBlueprint } from '../blueprints/blueprints.ts';
 import { blockedCells, eventCellsOf, isOnMap, newEventIds, type EventMap } from '../events/eventPlacement.ts';
 import { rewireGroupReferences } from '../events/eventReferences.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
@@ -49,8 +50,8 @@ type StampTarget = TileGrid & EventMap & { readonly tilesetId: number };
 
 /**
  * What placing a stamp would do: the cells it would change, the events it would place, with their fresh ids and the
- * cells they land on, the id each of those had in the stamp, and what of the stamp it would leave out; or why it cannot
- * go there at all.
+ * cells they land on, the id each of those had in the stamp, what of the stamp it would leave out, and how many of its
+ * events go down plain for naming a blueprint no longer there; or why it cannot go there at all.
  */
 type StampPlan =
   | {
@@ -61,7 +62,15 @@ type StampPlan =
     readonly sourceIds: readonly number[];
     readonly tilesLeftOut: boolean;
     readonly eventsLeftOut: number;
+    readonly deadLinks: number;
   }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * A stamp's events with every dead link taken out, and how many there were; or why one could not lose its link cleanly.
+ */
+type DeadLinksOut =
+  | { readonly ok: true; readonly events: readonly RmmzMapEvent[]; readonly deadLinks: number }
   | { readonly ok: false; readonly message: string };
 
 /**
@@ -165,6 +174,45 @@ const blockedMessage = (blocked: number, landing: number): string =>
 };
 
 /**
+ * Takes the link out of every event copied off a copy of a blueprint that is no longer there, deleted or its save
+ * undone, so the event goes down as a plain one rather than naming nothing: its link's line goes, and the rest of its
+ * note stays byte for byte. A link to a blueprint still there stays, and so does every link while the blueprints are not
+ * held, since none can be told dead then. A note that could not lose its link cleanly refuses the stamp, as every note
+ * the editor writes in place is refused rather than read otherwise.
+ * @param {readonly RmmzMapEvent[]} events The stamp's events going down.
+ * @param {LiveBlueprint | null} liveBlueprint Whether a blueprint is still there, or null while the window does not hold
+ * the blueprints.
+ * @returns {DeadLinksOut} The events, each with its dead link out, and how many there were; or why one could not lose it.
+ */
+const withDeadLinksOut = (events: readonly RmmzMapEvent[], liveBlueprint: LiveBlueprint | null): DeadLinksOut =>
+{
+  const placing: RmmzMapEvent[] = [];
+  let deadLinks = 0;
+  for (const event of events)
+  {
+    const link = blueprintLinkOf(event.note);
+    if (link === null || liveBlueprint === null || liveBlueprint(link.blueprintId))
+    {
+      placing.push(event);
+      continue;
+    }
+
+    try
+    {
+      // spreading keeps the event's own key order, so the note stays where its file put it.
+      placing.push({ ...event, note: withoutBlueprintLink(event.note) });
+      deadLinks += 1;
+    }
+    catch (error)
+    {
+      return { ok: false, message: `This stamp can't be placed: in ${event.name}'s note, ${(error as Error).message}.` };
+    }
+  }
+
+  return { ok: true, events: placing, deadLinks };
+};
+
+/**
  * Works out a stamp going down on a map with its top-left corner on a cell. Everything is placed as an independent
  * copy; nothing links it to the stamp or to what the stamp was copied from.
  *
@@ -178,13 +226,17 @@ const blockedMessage = (blocked: number, landing: number): string =>
  * - A stamp that would land any of its events on a tile another event holds is refused whole, as MZ never stacks two
  *   events on one tile; so is one of which nothing at all would land on the map.
  * - Events copied off copies of a blueprint carry their links along, so they are copies of it too, as their notes say;
- *   a stamp landing any such event on a map that may hold no link is refused whole, with the map's reason.
+ *   a stamp landing any such event on a map that may hold no link is refused whole, with the map's reason. A copy of a
+ *   blueprint no longer there goes down as a plain event instead, its dead link taken out (see {@link withDeadLinksOut}),
+ *   which a map that may hold no link takes too.
  * @param {StampTarget} map The map, as it stands.
  * @param {Stamp} stamp The stamp.
  * @param {StampPlacement} placement Where it goes and how.
+ * @param {LiveBlueprint | null} liveBlueprint Whether a blueprint a copy names is still there, or null while the window
+ * does not hold the blueprints, when every link goes down as it is.
  * @returns {StampPlan} What would change, or why it cannot go there.
  */
-const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement): StampPlan =>
+const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement, liveBlueprint: LiveBlueprint | null): StampPlan =>
 {
   const { at, linkRefusal } = placement;
   const tilesFit = stamp.tiles !== null && stamp.tilesetId === map.tilesetId;
@@ -196,22 +248,30 @@ const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement): S
     return { ok: false, message: nothingLandsMessage(tilesLeftOut, stamp.events.length) };
   }
 
-  if (linkRefusal !== null && landing.some(event => blueprintLinkOf(event.note) !== null))
+  const unlinked = withDeadLinksOut(landing, liveBlueprint);
+  if (unlinked.ok === false)
+  {
+    return unlinked;
+  }
+
+  // only links to blueprints still there make copies.
+  const placing = unlinked.events;
+  if (linkRefusal !== null && placing.some(event => blueprintLinkOf(event.note) !== null))
   {
     return { ok: false, message: `This stamp holds copies of blueprints, which can't go here: ${linkRefusal}.` };
   }
 
-  const cells = landing.map(event => landingOf(event, at));
+  const cells = placing.map(event => landingOf(event, at));
   const blocked = blockedCells(map, cells, new Set());
   if (blocked.length > 0)
   {
-    return { ok: false, message: blockedMessage(blocked.length, landing.length) };
+    return { ok: false, message: blockedMessage(blocked.length, placing.length) };
   }
 
   // the copies' references to one another follow them to their new ids.
-  const ids = newEventIds(map, landing.length);
-  const newIds = new Map(landing.map((event, index) => [ event.id, ids[index] ]));
-  const events = landing.map((event, index) => ({
+  const ids = newEventIds(map, placing.length);
+  const newIds = new Map(placing.map((event, index) => [ event.id, ids[index] ]));
+  const events = placing.map((event, index) => ({
     ...rewireGroupReferences(cloneJson(event), newIds),
     id: ids[index],
     x: cells[index].x,
@@ -223,16 +283,18 @@ const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement): S
     tiles: tilesPlaced ? planStampTiles(map, stamp, placement) : [],
     tilesPlaced,
     events,
-    sourceIds: landing.map(event => event.id),
+    sourceIds: placing.map(event => event.id),
     tilesLeftOut,
-    eventsLeftOut: stamp.events.length - landing.length,
+    eventsLeftOut: stamp.events.length - placing.length,
+    deadLinks: unlinked.deadLinks,
   };
 };
 
 /**
- * Words what a placement left out, for the author: the tiles of another tileset, and the events past the map's edge.
+ * Words what a placement left out or changed, for the author: the tiles of another tileset, the events past the map's
+ * edge, and the copies of blueprints no longer there, which went down as plain events.
  * @param {Extract<StampPlan, { ok: true }>} plan The placement.
- * @returns {string[]} One line per thing left out; none when everything went down.
+ * @returns {string[]} One line per thing; none when everything went down as it was.
  */
 const leftOutNotes = (plan: Extract<StampPlan, { ok: true }>): string[] =>
 {
@@ -249,6 +311,15 @@ const leftOutNotes = (plan: Extract<StampPlan, { ok: true }>): string[] =>
   else if (plan.eventsLeftOut > 1)
   {
     notes.push(`${plan.eventsLeftOut} of the stamp's events fell past the map's edge and were left out.`);
+  }
+
+  if (plan.deadLinks === 1)
+  {
+    notes.push('One of the stamp\'s events was a copy of a blueprint that no longer exists, so it went down as a plain event.');
+  }
+  else if (plan.deadLinks > 1)
+  {
+    notes.push(`${plan.deadLinks} of the stamp's events were copies of blueprints that no longer exist, so they went down as plain events.`);
   }
 
   return notes;
@@ -278,8 +349,9 @@ const commitStampPlan = (hub: DocumentHub, mapId: number, plan: Extract<StampPla
 };
 
 /**
- * Places a stamp on a map as one step in its history, as {@link planStamp} works it out, from this map or any other.
- * The step is named for what went down, after the verb: "Stamp 20 by 15 tiles and 3 events", "Paste event".
+ * Places a stamp on a map as one step in its history, as {@link planStamp} works it out, from this map or any other,
+ * telling copies of blueprints the window's blueprints no longer hold from copies of those still there. The step is
+ * named for what went down, after the verb: "Stamp 20 by 15 tiles and 3 events", "Paste event".
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map.
  * @param {Stamp} stamp The stamp.
@@ -290,7 +362,7 @@ const commitStampPlan = (hub: DocumentHub, mapId: number, plan: Extract<StampPla
  */
 const placeStamp = (hub: DocumentHub, mapId: number, stamp: Stamp, placement: StampPlacement, verb: string): StampOutcome =>
 {
-  const plan = planStamp(hub.map(mapDocumentKey(mapId)), stamp, placement);
+  const plan = planStamp(hub.map(mapDocumentKey(mapId)), stamp, placement, liveBlueprintsIn(hub));
   if (plan.ok === false)
   {
     return plan;

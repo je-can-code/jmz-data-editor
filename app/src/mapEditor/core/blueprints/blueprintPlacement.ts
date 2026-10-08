@@ -95,7 +95,8 @@ const placeBlueprint = (hub: DocumentHub, mapId: number, blueprintId: string, pl
     return { ok: false, message: `Blueprints can't be placed here: ${placement.linkRefusal}.` };
   }
 
-  const plan = planStamp(hub.map(mapDocumentKey(mapId)), blueprint.stamp, placement);
+  // every event placed takes this blueprint's link, whatever its note held, so no link is told dead on the way.
+  const plan = planStamp(hub.map(mapDocumentKey(mapId)), blueprint.stamp, placement, null);
   if (plan.ok === false)
   {
     return plan;

@@ -1,4 +1,5 @@
 import { BLUEPRINTS } from '../editorData/editorData.ts';
+import type { DocumentHub } from '../history/DocumentHub.ts';
 import { editorDataDocumentKey, type EditorDataDocumentKey } from '../model/documentKeys.ts';
 import type { EditorDocument } from '../model/EditorDocument.ts';
 import { isJsonObject, type JsonObject, type JsonValue } from '../model/json.ts';
@@ -159,6 +160,28 @@ const blueprintIn = (document: EditorDocument, blueprintId: string): Blueprint |
 };
 
 /**
+ * Says whether the blueprint a copy's link names is still there.
+ */
+type LiveBlueprint = (blueprintId: string) => boolean;
+
+/**
+ * Reads which blueprints a window has, for telling a link to one that is gone, as the blueprints stand whenever it is
+ * asked: deleted, or its save undone, here or in another window.
+ * @param {Pick<DocumentHub, 'has' | 'document'>} hub The window's documents.
+ * @returns {LiveBlueprint | null} Whether a blueprint is there, by its id; null while the window does not hold the
+ * blueprints, when no link can be told dead.
+ */
+const liveBlueprintsIn = (hub: Pick<DocumentHub, 'has' | 'document'>): LiveBlueprint | null =>
+{
+  if (hub.has(BLUEPRINTS_DOCUMENT) === false)
+  {
+    return null;
+  }
+
+  return (blueprintId: string) => hub.document(BLUEPRINTS_DOCUMENT).valueAt([ 'data', 'blueprints', blueprintId ]) !== undefined;
+};
+
+/**
  * Makes a new blueprint's id: {@link BLUEPRINT_ID_LENGTH} lowercase letters and digits drawn at random, drawn again in
  * the unlikely case that the document holds that id already. That check sees every blueprint the document holds now,
  * another window's included, since every window holding the document keeps the same copy of it, and two windows saving
@@ -188,8 +211,9 @@ export {
   blueprintIn,
   blueprintsOf,
   blueprintStampId,
+  liveBlueprintsIn,
   newBlueprintId,
   readBlueprints,
   savedBlueprintOf,
 };
-export type { Blueprint };
+export type { Blueprint, LiveBlueprint };
