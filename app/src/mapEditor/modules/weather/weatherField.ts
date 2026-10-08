@@ -15,6 +15,7 @@ import {
   type WeatherBounds,
   type WeatherParticle,
 } from './weatherMotion.ts';
+import { leapBy, leapFor } from './weatherLeap.ts';
 import type { WeatherLayer } from './weatherPresets.ts';
 import { rollsFrom, type Roller } from './weatherRandom.ts';
 
@@ -306,19 +307,49 @@ class WeatherField
    * Runs one particle forward by a random slice of its own journey (Sprite_WeatherLayer#settle), rebuilding it whenever it
    * finishes on the way, then leaves it fully faded in, as a population that has been going a while is, and waiting for
    * nothing.
+   *
+   * The plugin runs every one of those frames, which is affordable over a screen and not over a whole map in view: a
+   * snowfall settled across a large map is tens of millions of frames. So the frames that move a particle by the same
+   * amounts each time are taken together, landing it where those frames would ({@link leapFor}), its wait is counted
+   * down at once, and only the frames that change something along the way (a lifetime running out, a wander near an
+   * edge) are run one at a time.
    * @param {number} index The particle.
    */
   #settle(index: number): void
   {
     const bounds = this.#bounds;
-    const frames = Math.floor(this.#roll() * settleFramesFor(this.#particles[index], this.#layer, bounds));
-    for (let frame = 0; frame < frames; frame++)
+    let frames = Math.floor(this.#roll() * settleFramesFor(this.#particles[index], this.#layer, bounds));
+    while (frames > 0)
     {
       // read afresh every step, since a particle that finishes is replaced outright.
       const living = this.#particles[index];
       const params = this.paramsFor(index);
-      advance(living, params);
-      if (hasEscaped(living, bounds, params) || hasExpired(living))
+
+      // a particle waiting its turn only waits, so its wait passes at once.
+      if (living.stagger > 0)
+      {
+        const waited = Math.min(living.stagger, frames);
+        living.stagger -= waited;
+        frames -= waited;
+        continue;
+      }
+
+      const leap = leapFor(living, params, bounds, frames);
+      if (leap === null)
+      {
+        advance(living, params);
+        frames -= 1;
+        if (hasEscaped(living, bounds, params) || hasExpired(living))
+        {
+          this.#reseat(index);
+        }
+
+        continue;
+      }
+
+      leapBy(living, params, leap.frames);
+      frames -= leap.frames;
+      if (leap.escapes)
       {
         this.#reseat(index);
       }
