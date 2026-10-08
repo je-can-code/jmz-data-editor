@@ -10,6 +10,7 @@ import { ModulePropertyDrag, type MapPropertiesSource } from '../core/properties
 import type { MapEventTools } from '../events/MapEventTools.ts';
 import { TILE_SIZE, type Camera } from '../core/renderer/camera.ts';
 import type { LightingLayerDefinition } from '../core/renderer/lightingLayer.ts';
+import type { SkyWeather, WeatherLayerDefinition } from '../core/renderer/weatherLayer.ts';
 import { onTheClock, timeOfDayAt } from '../core/time/timeOfDay.ts';
 import type { WindowClock } from '../core/time/WindowClock.ts';
 import {
@@ -146,18 +147,23 @@ const ringsOverlay = (): OverlayDefinition =>
 };
 
 /**
- * Builds what the parity check draws: the game look, still, with events or without, never the shadows, and the
- * lighting only when the game it is held against draws its lighting too: its light mask over its base layer, and the
- * sky's tone over the base layer itself. Nothing animates: the check holds the water and the parallax at the game's
- * moment, and the game copy's lights are held steady, so every light draws at its full strength, as it does with no
- * effect running.
+ * Builds what the parity check draws: the game look, still, with events or without, never the shadows, the lighting only
+ * when the game it is held against draws its lighting too (its light mask over its base layer, and the sky's tone over
+ * the base layer itself), and the weather only when the game's is drawn too. Nothing animates: the check holds the
+ * water and the parallax at the game's moment, the game copy's lights are held steady, so every light draws at its full
+ * strength, as it does with no effect running, and the weather holds where it is.
  * @param {boolean} events Whether the events show.
  * @param {boolean | undefined} lighting Whether the lighting shows; left out, it does not.
+ * @param {boolean | undefined} weather Whether the weather shows; left out, it does not.
  * @returns {LayerVisibility} The visibility.
  */
-const parityLook = (events: boolean, lighting?: boolean): LayerVisibility =>
+const parityLook = (events: boolean, lighting?: boolean, weather?: boolean): LayerVisibility =>
 {
-  return { ...GAME_LOOK, animate: false, layers: { ...GAME_LOOK.layers, events, shadows: false, lighting: lighting === true } };
+  return {
+    ...GAME_LOOK,
+    animate: false,
+    layers: { ...GAME_LOOK.layers, events, shadows: false, lighting: lighting === true, weather: weather === true },
+  };
 };
 
 /**
@@ -179,7 +185,7 @@ type OpenTimings = Record<string, number>;
 /**
  * What the hooks need from the map view: its renderer, the window's hub, its painting tools and their settings, its
  * event tools and selection, the map on show, a way to open another, the page's open timings, what the plugin modules
- * draw into the lighting layer, and the sections they add to Map Properties.
+ * draw into the lighting and weather layers, and the sections they add to Map Properties.
  */
 type SpeedHooksContext = {
   readonly renderer: PixiMapRenderer;
@@ -192,6 +198,7 @@ type SpeedHooksContext = {
   readonly openMap: (mapId: number) => Promise<void>;
   readonly timings: OpenTimings;
   readonly lightingLayers: () => readonly LightingLayerDefinition[];
+  readonly weatherLayers: () => readonly WeatherLayerDefinition[];
   readonly mapProperties: () => readonly MapPropertiesSection[];
 
   /**
@@ -458,6 +465,9 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     drawState: () => renderer.drawState,
     contextMenus: () => [ ...contextMenus ],
     lookAt: (x: number, y: number, zoom: number) => renderer.lookAt({ x, y }, zoom),
+    // puts the view's top-left corner on a world pixel at a zoom, as the parity check lines the view up with the game's
+    // screen.
+    setCamera: (x: number, y: number, zoom: number) => renderer.setCamera({ x, y, zoom }),
     zoomToFit: () => renderer.zoomToFit(),
     screenOfCell: (x: number, y: number) =>
     {
@@ -550,8 +560,8 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     },
     // the parity check draws the map as the game would, still, with nothing of the editor's on top: of the lighting,
     // only what the game itself shows, such as a map's darkness and the sky's colour, and never an aid like a light's
-    // ring; at the hour the game's clock was set to, when it says one.
-    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean; time?: number }) =>
+    // ring; the weather only when asked; at the hour the game's clock was set to, when it says one.
+    prepareParity: (options: { events: boolean; step: number; frames: number; lighting?: boolean; weather?: boolean; time?: number }) =>
     {
       hoverFollows = false;
       overlayState = NO_OVERLAY_STATE;
@@ -563,8 +573,18 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       renderer.setOverlayState(overlayState);
       renderer.setOverlays({ enabled: new Set(), definitions: [] });
       renderer.setLightingLayers(parityLightingLayers(context.lightingLayers()));
-      renderer.setLayerVisibility(parityLook(options.events, options.lighting));
+      renderer.setWeatherLayers(context.weatherLayers());
+      renderer.setLayerVisibility(parityLook(options.events, options.lighting, options.weather));
       renderer.holdAnimation({ step: options.step, frames: options.frames });
+    },
+    // what the weather shows and what the sky is doing, for the parity check to hold against the game's, and for the
+    // speed script to put a look on a map that names none: the sky an outdoor map's weather follows, which nothing in
+    // the editor drives yet. Starting the weather over settles it afresh for the part of the map the view shows.
+    weather: {
+      describe: () => renderer.weatherDescriptions(),
+      sky: () => renderer.weatherSky,
+      setSky: (sky: SkyWeather | null) => renderer.setWeatherSky(sky),
+      reset: () => renderer.resetWeather(),
     },
     extract: (rect: { x: number; y: number; width: number; height: number }) => renderer.extract(rect),
     paintState: () => ({ steps: painter.paintedInputs, redrawnFrames, painting: painter.session.isActive }),

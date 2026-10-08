@@ -7,9 +7,10 @@ import type { FreshSave } from '../pageRule/freshSave.ts';
 import type { MapArrival } from '../properties/arrivals.ts';
 
 /**
- * The image folders the map editor draws from: tilesets, character sheets, faces, parallaxes and system sheets.
+ * The image folders the map editor draws from: tilesets, character sheets, faces, parallaxes and system sheets, and the
+ * pictures J-Weather draws its particles with.
  */
-type ImageFolder = 'tilesets' | 'characters' | 'faces' | 'parallaxes' | 'system';
+type ImageFolder = 'tilesets' | 'characters' | 'faces' | 'parallaxes' | 'system' | 'weather';
 
 /**
  * The audio folders RMMZ keeps sounds in.

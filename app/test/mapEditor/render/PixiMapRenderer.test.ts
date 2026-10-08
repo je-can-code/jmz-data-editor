@@ -9,9 +9,11 @@ import { ShownPages } from '../../../src/mapEditor/core/pageRule/ShownPages.ts';
 import { GamePreview } from '../../../src/mapEditor/core/preview/GamePreview.ts';
 import type { LightingLayerDefinition, LightingStage, ScreenTone } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import { GAME_LOOK } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import type { WeatherLayerDefinition } from '../../../src/mapEditor/core/renderer/weatherLayer.ts';
 import { PixiMapRenderer } from '../../../src/mapEditor/render/PixiMapRenderer.ts';
 import { EventLayer } from '../../../src/mapEditor/render/scene/EventLayer.ts';
 import { LightingLayers } from '../../../src/mapEditor/render/scene/LightingLayers.ts';
+import { WeatherLayers } from '../../../src/mapEditor/render/scene/WeatherLayers.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 
 // the tone filter compiles a shader, which needs a GPU; a stand-in keeps the tone it is given and whether it was let go.
@@ -205,9 +207,149 @@ describe('PixiMapRenderer', () =>
     const game = [ slots.game.children.slice(0, 3), slots.game.children.length ];
     const bottom = world.children.slice(0, 3);
 
-    // Assert: the black, the parallax and the lower tiles first, then the three event groups around the upper tiles.
+    // Assert: the black, the parallax and the lower tiles first, then the three event groups around the upper tiles,
+    // then the weather's clip and the weather.
     expect([ game, bottom, slots.game.children.includes(slots.markers), slots.game.children.includes(slots.upperTiles) ])
-      .toStrictEqual([ [ [ slots.backdrop, slots.parallax, slots.lowerTiles ], 7 ], [ slots.game, slots.lighting, slots.markers ], false, true ]);
+      .toStrictEqual([ [ [ slots.backdrop, slots.parallax, slots.lowerTiles ], 9 ], [ slots.game, slots.lighting, slots.markers ], false, true ]);
+  });
+
+  describe('weather', () =>
+  {
+    /*
+     * J-Weather appends its plane to the spriteset's base sprite after the tilemap, and J-Lighting slots its mask into
+     * the spriteset just above the weather: so the game's weather is over every tile and character, coloured by the
+     * screen's tone the base sprite carries, and under the dark. The editor holds its weather in the same place: last in
+     * what the game tones, under the lighting, and clipped to the map, so none of it falls on the editor around the map.
+     * The layer shows only while the layer visibility's weather is on, which is what the view's Weather switch flips, and
+     * every change to the map is passed on to it, so it decides which edits make its drawings draw again.
+     */
+
+    it('draws the weather last in what the game tones, over the events above characters, and under the lighting', () =>
+    {
+      // Arrange.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      const { slots } = renderer;
+      const world = slots.game.parent as Container;
+
+      // Act: the game's container's last two layers, how far past the upper tiles they start (the events above
+      // characters sit between), and where the lighting sits.
+      const { children } = slots.game;
+      const top = children.slice(-2);
+      const pastUpperTiles = children.indexOf(slots.weatherClip) - children.indexOf(slots.upperTiles);
+      const lightingAboveGame = world.children.indexOf(slots.lighting) > world.children.indexOf(slots.game);
+
+      // Assert: the clip rides beside the weather it masks, after the events above characters.
+      expect([ top, pastUpperTiles, lightingAboveGame, slots.weather.mask, renderer.weatherLayer ])
+        .toStrictEqual([ [ slots.weatherClip, slots.weather ], 2, true, slots.weatherClip, slots.weather ]);
+    });
+
+    it('shows the weather layer only while the layer visibility\'s weather is on', () =>
+    {
+      // Arrange.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      const shown: boolean[] = [];
+
+      // Act: the game look, then the weather off, then on again.
+      shown.push(renderer.weatherLayer.visible);
+      renderer.setLayerVisibility({ ...GAME_LOOK, layers: { ...GAME_LOOK.layers, weather: false } });
+      shown.push(renderer.weatherLayer.visible);
+      renderer.setLayerVisibility(GAME_LOOK);
+      shown.push(renderer.weatherLayer.visible);
+
+      // Assert.
+      expect(shown)
+        .toStrictEqual([ true, false, true ]);
+    });
+
+    it('makes each module\'s weather on a container of its own inside the weather layer, and lets it go with the renderer', () =>
+    {
+      // Arrange: a weather layer whose drawing notes where it was made and when it is let go.
+      const renderer = new PixiMapRenderer();
+      const log: string[] = [];
+      const stages: Container[] = [];
+      const rain: WeatherLayerDefinition = {
+        id: 'weather.map',
+        title: 'Weather',
+        create: stage =>
+        {
+          stages.push(stage.layer);
+          return { draw: () => undefined, tick: () => false, destroy: () => log.push('let go') };
+        },
+      };
+
+      // Act.
+      renderer.setWeatherLayers([ rain ]);
+      const children = [ ...renderer.weatherLayer.children ];
+      renderer.destroy();
+
+      // Assert.
+      expect([ children, log ])
+        .toStrictEqual([ stages, [ 'let go' ] ]);
+    });
+
+    it('passes every change to its map on to the weather, a tile edit as well as a change to the note', () =>
+    {
+      // Arrange: a renderer holding a map, and an ear on what its weather hears.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      const map = MapDocument.fromJson('map:1', buildMapJson());
+      renderer.setDocument(map);
+      const hear = vi.spyOn(WeatherLayers.prototype, 'hear');
+
+      // Act: the note rewritten, then a tile painted.
+      map.apply(map.setPatch([ 'note' ], '<weather:rain>'));
+      map.apply(map.tilesPatch([ [ 0, 99 ] ]));
+      const heard = hear.mock.calls.map(([ effect ]) => effect);
+      hear.mockRestore();
+
+      // Assert.
+      expect(heard)
+        .toStrictEqual([ { kind: 'overlays' }, { kind: 'tiles', indices: [ 0 ] } ]);
+    });
+
+    it('holds what the sky is doing, none until told, and asks the weather to draw again once told', () =>
+    {
+      // Arrange: a renderer, and an ear on the weather being asked to draw.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      const before = renderer.weatherSky;
+      const stale = vi.spyOn(WeatherLayers.prototype, 'markStale');
+
+      // Act.
+      renderer.setWeatherSky({ preset: 'rain', intensity: 'heavy' });
+      const calls = stale.mock.calls.length;
+      stale.mockRestore();
+
+      // Assert.
+      expect([ before, renderer.weatherSky, calls ])
+        .toStrictEqual([ null, { preset: 'rain', intensity: 'heavy' }, 1 ]);
+    });
+
+    it('starts the weather over when asked, making every drawing afresh', () =>
+    {
+      // Arrange: a renderer with one weather layer, whose drawings are counted as they are made and let go.
+      const renderer = new PixiMapRenderer();
+      built.push(renderer);
+      const log: string[] = [];
+      renderer.setWeatherLayers([ {
+        id: 'weather.map',
+        title: 'Weather',
+        create: () =>
+        {
+          log.push('made');
+          return { draw: () => undefined, tick: () => false, destroy: () => log.push('let go'), describe: () => ({ shown: log.length }) };
+        },
+      } ]);
+
+      // Act.
+      renderer.resetWeather();
+
+      // Assert: the first let go and a second made, which says what it shows.
+      expect([ log, renderer.weatherDescriptions() ])
+        .toStrictEqual([ [ 'made', 'let go', 'made' ], [ { shown: 3 } ] ]);
+    });
   });
 
   it('reads the sky at midnight until told the time of day, and at the time it was told after', () =>

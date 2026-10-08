@@ -18,9 +18,10 @@ type SettingSwitch =
 
 /**
  * The switches the bar can offer, in the order it shows them: the overlays an author edits with, then the game look.
- * Animate starts and stops everything that moves in the game at once: water and waterfalls, a drifting parallax, and the
- * lights' flicker, pulse and glitch. Lighting shows and hides everything plugin modules draw into the lighting layer, such
- * as a light's reach and a map's darkness, so it is offered only while some module draws there ({@link shownSwitches}).
+ * Animate starts and stops everything that moves in the game at once: water and waterfalls, a drifting parallax, the
+ * lights' flicker, pulse and glitch, and the weather. Lighting shows and hides everything plugin modules draw into the
+ * lighting layer, such as a light's reach and a map's darkness, and Weather everything they draw into the weather layer,
+ * such as a map's rain; each is offered only while some module draws there ({@link shownSwitches}).
  */
 const SETTING_SWITCHES: readonly SettingSwitch[] = [
   { kind: 'overlay', id: 'grid', label: 'Grid' },
@@ -31,6 +32,7 @@ const SETTING_SWITCHES: readonly SettingSwitch[] = [
   { kind: 'layer', id: 'events', label: 'Events' },
   { kind: 'layer', id: 'shadows', label: 'Shadows' },
   { kind: 'layer', id: 'lighting', label: 'Lighting' },
+  { kind: 'layer', id: 'weather', label: 'Weather' },
 ];
 
 /**
@@ -40,13 +42,32 @@ const TILE_LAYERS: readonly TileLayer[] = [ 'tiles1', 'tiles2', 'tiles3', 'tiles
 
 /**
  * Lists the switches the bar shows: all of them, except Lighting while no plugin module draws into the lighting layer,
- * so a project without such a plugin is never offered a switch that does nothing.
+ * and Weather while none draws into the weather layer, so a project without such a plugin is never offered a switch
+ * that does nothing.
  * @param {boolean} drawsLighting Whether any active module draws into the lighting layer.
+ * @param {boolean} drawsWeather Whether any active module draws into the weather layer.
  * @returns {SettingSwitch[]} The switches, in the bar's order.
  */
-const shownSwitches = (drawsLighting: boolean): SettingSwitch[] =>
+const shownSwitches = (drawsLighting: boolean, drawsWeather: boolean): SettingSwitch[] =>
 {
-  return SETTING_SWITCHES.filter(setting => drawsLighting || setting.kind !== 'layer' || setting.id !== 'lighting');
+  return SETTING_SWITCHES.filter(setting =>
+  {
+    if (setting.kind !== 'layer')
+    {
+      return true;
+    }
+
+    // each module-drawn layer's switch shows only while some module draws into it.
+    switch (setting.id)
+    {
+      case 'lighting':
+        return drawsLighting;
+      case 'weather':
+        return drawsWeather;
+      default:
+        return true;
+    }
+  });
 };
 
 /**

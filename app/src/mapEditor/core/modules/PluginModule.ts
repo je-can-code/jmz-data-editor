@@ -13,6 +13,7 @@ import type { PreviewNouns } from '../preview/previewWords.ts';
 import type { MapPropertiesSource } from '../properties/moduleProperties.ts';
 import type { LightingLayerDefinition } from '../renderer/lightingLayer.ts';
 import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
+import type { WeatherLayerDefinition } from '../renderer/weatherLayer.ts';
 
 /**
  * What a quick panel is handed: the map and the selected events, all of one kind.
@@ -298,6 +299,14 @@ type ModuleContributions = {
    * @param {LightingLayerDefinition} layer What the module draws there.
    */
   lightingLayer(layer: LightingLayerDefinition): void;
+
+  /**
+   * Draws into every map view's weather layer, which sits where the game draws its weather, toned with the map and under
+   * the lighting's dark, and which the view's Weather switch shows and hides as one; the switch is offered only while
+   * some module draws there.
+   * @param {WeatherLayerDefinition} layer What the module draws there.
+   */
+  weatherLayer(layer: WeatherLayerDefinition): void;
 
   /**
    * Names a map the plugin copies events from while the game runs, such as J-ABS's action map. Its events are

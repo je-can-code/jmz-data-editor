@@ -233,8 +233,8 @@ const DrawNotice = (props: { state: DrawState; notices?: readonly ModuleNotice[]
 /**
  * One map, drawn as the game draws it, in whatever element hosts it. The drawing never goes through React: this
  * component mounts a renderer, opens the map into it, and offers a bar of switches for the overlays and the game look
- * (Lighting among them while a plugin module lights the map, and the window's one clock while a module offers a time of
- * day, the sky drawn and each event's page shown at its hour), the window's preview beside it, saying how far along the
+ * (Lighting among them while a plugin module lights the map, Weather while one draws its weather, and the window's one
+ * clock while a module offers a time of day, the sky drawn and each event's page shown at its hour), the window's preview beside it, saying how far along the
  * story the maps show the game, the painting tools, and a status line naming the zoom, the tile under the pointer, how
  * many events are selected and the GPU drawing it. Each event shows the page the game would at the clock's time, with
  * the preview's switches and variables set and a fresh save's everything else, by the window's page rule.
@@ -272,10 +272,11 @@ const MapView = (props: MapViewProps) =>
   const selected = useSyncExternalStore(selection.subscribe, selection.get);
 
   // the plugin modules switch on once js/plugins.js is read, which can be after the bar first drew; whether any of them
-  // lights the map decides whether the bar offers its Lighting switch, whether one offers a clock, its clock, and the
-  // kinds of state they let the preview set, what the preview chip calls them.
+  // lights the map decides whether the bar offers its Lighting switch, whether any draws weather its Weather switch,
+  // whether one offers a clock, its clock, and the kinds of state they let the preview set, what the preview chip calls
+  // them.
   useSyncExternalStore(services.modules.subscribe, () => services.modules.revision);
-  const switches = shownSwitches(services.modules.lightingLayers().length > 0);
+  const switches = shownSwitches(services.modules.lightingLayers().length > 0, services.modules.weatherLayers().length > 0);
   const clockOffer = services.modules.clockOffer();
   const nouns = previewNouns(services.modules.previewKinds());
   const [ openMap, setOpenMap ] = useState<MapDocument | null>(null);
@@ -324,6 +325,10 @@ const MapView = (props: MapViewProps) =>
     // page the window's page rule picks at that hour, the rule changing as the modules switch on and the new game is read.
     renderer.setLightingLayers(services.modules.lightingLayers());
     stops.push(services.modules.subscribe(() => renderer.setLightingLayers(services.modules.lightingLayers())));
+
+    // the weather layer likewise holds what the modules draw there, the map's own weather falling over it.
+    renderer.setWeatherLayers(services.modules.weatherLayers());
+    stops.push(services.modules.subscribe(() => renderer.setWeatherLayers(services.modules.weatherLayers())));
     renderer.setPageRule(services.pages.rule());
     stops.push(services.pages.subscribe(() => renderer.setPageRule(services.pages.rule())));
     renderer.setTimeOfDay(services.clock.time());
@@ -448,6 +453,7 @@ const MapView = (props: MapViewProps) =>
         },
         timings: speedTimings,
         lightingLayers: () => services.modules.lightingLayers(),
+        weatherLayers: () => services.modules.weatherLayers(),
         mapProperties: () => services.modules.mapPropertiesSections(),
         clock: services.clock,
       }));

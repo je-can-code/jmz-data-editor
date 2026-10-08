@@ -35,8 +35,10 @@ import { buildMapJson } from '../support/fixtures.ts';
  *
  * The parity check holds the editor's drawing against the game's own, which it runs with no shadows, and with its light
  * mask only when the check compares a map dark; so the editor draws no shadows then, and its lighting only when asked,
- * and only what the game itself shows of it, never an aid such as a light's ring. The game copy's lights are held
- * steady, so the editor draws nothing moving, every light at full strength, and a run is the same every time.
+ * and only what the game itself shows of it, never an aid such as a light's ring. Its weather shows only when a weather
+ * frame asks for it, so every other pass compares the map alone, as the game's probe sets its weather aside. The game
+ * copy's lights are held steady, so the editor draws nothing moving, every light at full strength, the weather held
+ * where it is, and a run is the same every time.
  */
 describe('speedHooks', () =>
 {
@@ -284,7 +286,7 @@ describe('speedHooks', () =>
 
   describe('parityLook', () =>
   {
-    it('draws the game look with the events asked for, and neither shadows nor lighting', () =>
+    it('draws the game look with the events asked for, and neither shadows, lighting nor weather', () =>
     {
       // Arrange: a parity frame with its events, and one without.
 
@@ -294,9 +296,21 @@ describe('speedHooks', () =>
       // Assert.
       expect(looks.map(look => look.layers))
         .toStrictEqual([
-          { ...GAME_LOOK.layers, events: true, shadows: false, lighting: false },
-          { ...GAME_LOOK.layers, events: false, shadows: false, lighting: false },
+          { ...GAME_LOOK.layers, events: true, shadows: false, lighting: false, weather: false },
+          { ...GAME_LOOK.layers, events: false, shadows: false, lighting: false, weather: false },
         ]);
+    });
+
+    it('draws the weather too when a weather frame asks for it, held still with everything else', () =>
+    {
+      // Arrange: a weather frame with its events and its lighting, and one saying outright it wants no weather.
+
+      // Act.
+      const looks = [ parityLook(true, true, true), parityLook(true, true, false) ];
+
+      // Assert.
+      expect(looks.map(look => [ look.layers.weather, look.layers.lighting, look.animate ]))
+        .toStrictEqual([ [ true, true, false ], [ false, true, false ] ]);
     });
 
     it('draws it still, every light at full strength, as the game copy holds its lights steady', () =>
@@ -321,8 +335,8 @@ describe('speedHooks', () =>
       // Assert.
       expect(looks.map(look => look.layers))
         .toStrictEqual([
-          { ...GAME_LOOK.layers, events: false, shadows: false, lighting: true },
-          { ...GAME_LOOK.layers, events: false, shadows: false, lighting: false },
+          { ...GAME_LOOK.layers, events: false, shadows: false, lighting: true, weather: false },
+          { ...GAME_LOOK.layers, events: false, shadows: false, lighting: false, weather: false },
         ]);
     });
   });

@@ -12,10 +12,11 @@ import {
 /*
  * The map view's bar switches the overlays and the game look. Each switch must flip exactly its own setting and
  * leave every other alone, and the layer highlight must switch the dimming on with the layer and off with it, since
- * the renderer only dims while both say so. Animate is the one switch for everything that moves, the water and the
- * lights' effects alike, so one click freezes it all. Lighting, beside Shadows, shows and hides everything plugin
- * modules draw into the lighting layer, and is offered only while some module draws there, so a project without such a
- * plugin never shows a switch that does nothing.
+ * the renderer only dims while both say so. Animate is the one switch for everything that moves, the water, the
+ * lights' effects and the weather alike, so one click freezes it all. Lighting, beside Shadows, shows and hides
+ * everything plugin modules draw into the lighting layer, and Weather, beside Lighting, everything they draw into the
+ * weather layer; each is offered only while some module draws there, so a project without such a plugin never shows a
+ * switch that does nothing.
  */
 
 /**
@@ -28,7 +29,7 @@ describe('mapViewSettings', () =>
 {
   describe('isSwitchOn and flipSwitch', () =>
   {
-    it('starts with the game look: everything animating, the parallax, events and lighting on, shadows and the overlays off', () =>
+    it('starts with the game look: everything animating, the parallax, events, lighting and weather on, shadows and the overlays off', () =>
     {
       // Arrange.
       const settings = start();
@@ -47,6 +48,7 @@ describe('mapViewSettings', () =>
           [ 'Events', true ],
           [ 'Shadows', false ],
           [ 'Lighting', true ],
+          [ 'Weather', true ],
         ]);
     });
 
@@ -78,6 +80,20 @@ describe('mapViewSettings', () =>
         .toStrictEqual([ { ...GAME_LOOK.layers, lighting: false }, settings.overlays ]);
     });
 
+    it('switches the weather layer with Weather, and nothing else, the animation included', () =>
+    {
+      // Arrange.
+      const settings = start();
+      const weather = SETTING_SWITCHES.find(setting => setting.label === 'Weather') as (typeof SETTING_SWITCHES)[number];
+
+      // Act.
+      const flipped = flipSwitch(settings, weather);
+
+      // Assert: only the weather layer went off; the game look still moves.
+      expect([ flipped.visibility.layers, flipped.visibility.animate, flipped.overlays ])
+        .toStrictEqual([ { ...GAME_LOOK.layers, weather: false }, true, settings.overlays ]);
+    });
+
     it('flips each switch on its own, and back again', () =>
     {
       // Arrange.
@@ -96,24 +112,48 @@ describe('mapViewSettings', () =>
 
   describe('shownSwitches', () =>
   {
-    it('offers Lighting right after Shadows while a module lights the map', () =>
+    it('offers Lighting right after Shadows while a module lights the map, and no Weather while none draws weather', () =>
     {
-      // Arrange: some active module draws into the lighting layer.
+      // Arrange: some active module draws into the lighting layer, none into the weather layer.
 
       // Act.
-      const labels = shownSwitches(true).map(setting => setting.label);
+      const labels = shownSwitches(true, false).map(setting => setting.label);
 
       // Assert.
       expect(labels)
         .toStrictEqual([ 'Grid', 'Regions', 'Passability', 'Animate', 'Parallax', 'Events', 'Shadows', 'Lighting' ]);
     });
 
-    it('leaves Lighting out while no module lights the map, and every other overlay and layer switch in', () =>
+    it('offers Weather right after Lighting while modules draw both', () =>
     {
-      // Arrange: no active module draws into the lighting layer.
+      // Arrange: active modules draw into the lighting layer and the weather layer, as J-Lighting's and J-Weather's do.
 
       // Act.
-      const labels = shownSwitches(false).map(setting => setting.label);
+      const labels = shownSwitches(true, true).map(setting => setting.label);
+
+      // Assert.
+      expect(labels)
+        .toStrictEqual([ 'Grid', 'Regions', 'Passability', 'Animate', 'Parallax', 'Events', 'Shadows', 'Lighting', 'Weather' ]);
+    });
+
+    it('offers Weather on its own while a module draws weather and none lights the map', () =>
+    {
+      // Arrange: J-Weather enabled without J-Lighting.
+
+      // Act.
+      const labels = shownSwitches(false, true).map(setting => setting.label);
+
+      // Assert.
+      expect(labels)
+        .toStrictEqual([ 'Grid', 'Regions', 'Passability', 'Animate', 'Parallax', 'Events', 'Shadows', 'Weather' ]);
+    });
+
+    it('leaves Lighting and Weather out while no module draws either, and every other overlay and layer switch in', () =>
+    {
+      // Arrange: no active module draws into the lighting layer or the weather layer.
+
+      // Act.
+      const labels = shownSwitches(false, false).map(setting => setting.label);
 
       // Assert.
       expect(labels)

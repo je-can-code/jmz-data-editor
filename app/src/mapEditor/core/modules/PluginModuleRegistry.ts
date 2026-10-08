@@ -5,6 +5,7 @@ import type { RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
 import { pageWordsOf, type PageCondition } from '../pageRule/pageRule.ts';
 import type { LightingLayerDefinition } from '../renderer/lightingLayer.ts';
 import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
+import type { WeatherLayerDefinition } from '../renderer/weatherLayer.ts';
 import type {
   ClockOffer,
   EventKindDefinition,
@@ -39,6 +40,7 @@ type Contributions = {
   rules: PassabilityRule[];
   overlays: OverlayDefinition[];
   lighting: LightingLayerDefinition[];
+  weather: WeatherLayerDefinition[];
   catalogIds: string[];
   templateMaps: number[];
   notices: ModuleNotice[];
@@ -58,6 +60,7 @@ const noContributions = (): Contributions => ({
   rules: [],
   overlays: [],
   lighting: [],
+  weather: [],
   catalogIds: [],
   templateMaps: [],
   notices: [],
@@ -95,8 +98,8 @@ const configNamesOf = (pluginModule: PluginModule, enabled: ReadonlyMap<string, 
 };
 
 /**
- * Holds the event kinds, palette entries, passability rules, overlays, lighting layers and command entries the editor
- * knows, the maps whose events are a plugin's patterns, what the modules say over every map view, the clock they offer,
+ * Holds the event kinds, palette entries, passability rules, overlays, lighting layers, weather layers and command
+ * entries the editor knows, the maps whose events are a plugin's patterns, what the modules say over every map view, the clock they offer,
  * the sections they add to Map Properties, the conditions they add to the game's page rule and the kinds of state they
  * let the preview set: the core's kinds, always, and each plugin module's contributions while its plugins are enabled.
  */
@@ -290,6 +293,16 @@ class PluginModuleRegistry
   }
 
   /**
+   * Lists what the active modules draw into the weather layer, in the order they added it; empty while no module draws
+   * there, which is when no map view offers its Weather switch.
+   * @returns {readonly WeatherLayerDefinition[]} The weather layers.
+   */
+  weatherLayers(): readonly WeatherLayerDefinition[]
+  {
+    return this.#contributions.weather;
+  }
+
+  /**
    * Lists what the active modules say over every map view, in the order they said it; empty while none has anything to
    * say.
    * @returns {readonly ModuleNotice[]} The notices.
@@ -381,6 +394,11 @@ class PluginModuleRegistry
       {
         requirePrefix(layer.id, 'lighting layers');
         this.#contributions.lighting.push(layer);
+      },
+      weatherLayer: layer =>
+      {
+        requirePrefix(layer.id, 'weather layers');
+        this.#contributions.weather.push(layer);
       },
       catalogEntry: entry =>
       {

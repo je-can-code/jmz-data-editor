@@ -26,6 +26,7 @@ import { WindowPreview } from '../../../src/mapEditor/core/preview/WindowPreview
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { LightingLayerDefinition } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import type { LayerVisibility, MarkerClassifier, OverlaySet, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import type { WeatherLayerDefinition } from '../../../src/mapEditor/core/renderer/weatherLayer.ts';
 import { WindowClock } from '../../../src/mapEditor/core/time/WindowClock.ts';
 import { SHIPPED_MODULES } from '../../../src/mapEditor/services/pluginModules.ts';
 import type { PluginsJsEntry } from '../../../src/services/plugins/PluginsJsReader.ts';
@@ -38,9 +39,9 @@ import { buildMapJson } from '../support/fixtures.ts';
 
 /**
  * What the stand-in renderers and controllers record and answer: every renderer made, what each was asked to show
- * and where to look, the overlay switches, layer visibilities, lighting layers, marker classifiers and page rules it was
- * handed, what it was told of the view being on screen (with "mount" where it was mounted), ways to change its draw
- * state and its zoom, and the maps an open lands on.
+ * and where to look, the overlay switches, layer visibilities, lighting and weather layers, marker classifiers and page
+ * rules it was handed, what it was told of the view being on screen (with "mount" where it was mounted), ways to change
+ * its draw state and its zoom, and the maps an open lands on.
  */
 const stand = vi.hoisted(() => ({
   renderers: [] as {
@@ -49,6 +50,7 @@ const stand = vi.hoisted(() => ({
     overlaySets: OverlaySet[];
     visibilities: LayerVisibility[];
     lighting: (readonly LightingLayerDefinition[])[];
+    weather: (readonly WeatherLayerDefinition[])[];
     classifiers: MarkerClassifier[];
     pageRules: PageRule[];
     shown: (boolean | 'mount')[];
@@ -75,6 +77,7 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       overlaySets: [] as OverlaySet[],
       visibilities: [] as LayerVisibility[],
       lighting: [] as (readonly LightingLayerDefinition[])[],
+      weather: [] as (readonly WeatherLayerDefinition[])[],
       classifiers: [] as MarkerClassifier[],
       pageRules: [] as PageRule[],
       shown: [] as (boolean | 'mount')[],
@@ -166,6 +169,11 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
     setLightingLayers(definitions: readonly LightingLayerDefinition[]): void
     {
       this.record.lighting.push(definitions);
+    }
+
+    setWeatherLayers(definitions: readonly WeatherLayerDefinition[]): void
+    {
+      this.record.weather.push(definitions);
     }
 
     setTimeOfDay(minutes: number): void
@@ -268,7 +276,10 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  *
  * What the modules draw into the lighting layer is handed to the renderer from the start and again as they switch on,
  * and the bar offers its Lighting switch, after Shadows, only while some module draws there: a project without such a
- * plugin never sees a switch that does nothing. That one switch shows and hides the whole lighting layer.
+ * plugin never sees a switch that does nothing. That one switch shows and hides the whole lighting layer. The weather
+ * layer is handed over and offered the same way, its Weather switch after Lighting, which with the modules the editor
+ * ships means only while J-Weather is enabled; the switch hides the weather and nothing else, and the Animate switch
+ * holds the weather still with everything else that moves.
  *
  * The bar shows the window's clock only while a module offers one, naming the time and the part of the day as the
  * module names it, and the renderer is handed the clock's time from the start and every time it moves, wherever it was
@@ -296,8 +307,8 @@ describe('MapView', () =>
   });
 
   /**
-   * A window's plugin modules with none switched on: no kind claims any event, nothing draws into the lighting layer,
-   * the preview sets nothing beyond switches and variables, and nothing ever switches on.
+   * A window's plugin modules with none switched on: no kind claims any event, nothing draws into the lighting or the
+   * weather layer, the preview sets nothing beyond switches and variables, and nothing ever switches on.
    */
   const NO_MODULES = {
     overlays: () => [],
@@ -306,6 +317,7 @@ describe('MapView', () =>
     subscribe: () => () => undefined,
     revision: 0,
     lightingLayers: () => [],
+    weatherLayers: () => [],
     notices: () => [],
     clockOffer: () => null,
     pageConditions: () => [],
@@ -374,6 +386,42 @@ describe('MapView', () =>
       listeners.forEach(listener => listener());
     };
     return { modules, light, switchOn };
+  };
+
+  /**
+   * A window's plugin modules that switch on when the test says, and from then on draw a map's weather with one weather
+   * layer, as J-Weather's module does.
+   * @returns {{ modules: object, rain: WeatherLayerDefinition, switchOn: () => void }} The modules, what they draw once
+   * on, and the switch.
+   */
+  const weatherModules = () =>
+  {
+    const listeners = new Set<() => void>();
+    const rain: WeatherLayerDefinition = {
+      id: 'weather.map',
+      title: 'Weather',
+      create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }),
+    };
+    const modules = {
+      ...NO_MODULES,
+      layers: [] as WeatherLayerDefinition[],
+      weatherLayers()
+      {
+        return this.layers;
+      },
+      subscribe: (listener: () => void) =>
+      {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const switchOn = () =>
+    {
+      modules.layers = [ rain ];
+      modules.revision += 1;
+      listeners.forEach(listener => listener());
+    };
+    return { modules, rain, switchOn };
   };
 
   describe('mapIdFromQuery', () =>
@@ -803,6 +851,102 @@ describe('MapView', () =>
     // Assert: the layer showed from the start, and the switch hid it.
     const [ { visibilities } ] = stand.renderers;
     expect([ visibilities[0].layers.lighting, visibilities.at(-1)?.layers.lighting ])
+      .toStrictEqual([ true, false ]);
+  });
+
+  it('offers Weather once a module draws a map\'s weather, and hands the renderer what it draws there', () =>
+  {
+    // Arrange: a view over a project whose weather module switches on after the view first drew.
+    const { modules, rain, switchOn } = weatherModules();
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const before = screen.queryByText('Weather');
+
+    // Act.
+    act(() => switchOn());
+
+    // Assert: no switch before, the switch right after Shadows once on (no module lights this map), and the renderer
+    // handed nothing, then the weather.
+    const labels = screen.getAllByRole('button').map(chip => chip.textContent);
+    expect([ before, labels.slice(labels.indexOf('Shadows'), labels.indexOf('Shadows') + 2), stand.renderers[0].weather ])
+      .toStrictEqual([ null, [ 'Shadows', 'Weather' ], [ [], [ rain ] ] ]);
+  });
+
+  it('hides the whole weather layer with the Weather switch, and leaves the animation running', () =>
+  {
+    // Arrange: a view whose weather module is already on.
+    const { modules, switchOn } = weatherModules();
+    switchOn();
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act.
+    act(() => screen.getByText('Weather').click());
+
+    // Assert: the layer showed from the start, and the switch hid it and nothing else.
+    const [ { visibilities } ] = stand.renderers;
+    const last = visibilities.at(-1) as LayerVisibility;
+    expect([ visibilities[0].layers.weather, last.layers.weather, last.animate ])
+      .toStrictEqual([ true, false, true ]);
+  });
+
+  it('holds the weather still with the Animate switch, as it holds the water and the lights', () =>
+  {
+    // Arrange: a view whose weather module is already on.
+    const { modules, switchOn } = weatherModules();
+    switchOn();
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act.
+    act(() => screen.getByText('Animate').click());
+
+    // Assert: the weather still shows, and nothing in the game look moves.
+    const [ { visibilities } ] = stand.renderers;
+    const last = visibilities.at(-1) as LayerVisibility;
+    expect([ last.layers.weather, last.animate ])
+      .toStrictEqual([ true, false ]);
+  });
+
+  it('offers Weather with the modules the editor ships only while J-Weather is enabled', () =>
+  {
+    // Arrange: one window whose plugins enable J-Weather, and one whose plugins list it switched off.
+    const plugin = (name: string, status: boolean): PluginsJsEntry => ({ name, status, description: '', parameters: {} });
+    const enabled = new PluginModuleRegistry(new CommandCatalog());
+    enabled.activate(SHIPPED_MODULES, [ plugin('j/weather/J-Weather', true) ]);
+    const disabled = new PluginModuleRegistry(new CommandCatalog());
+    disabled.activate(SHIPPED_MODULES, [ plugin('j/weather/J-Weather', false) ]);
+    const labelsWith = (modules: PluginModuleRegistry): (string | null)[] =>
+    {
+      const services = { ...served(), modules, pages: new WindowPageRule(modules) } as unknown as MapEditorServices;
+      const view = render(
+        <MapEditorServicesProvider services={services}>
+          <MapView mapId={5}/>
+        </MapEditorServicesProvider>
+      );
+      const labels = screen.getAllByRole('button').map(chip => chip.textContent);
+      view.unmount();
+      return labels;
+    };
+
+    // Act.
+    const on = labelsWith(enabled);
+    const off = labelsWith(disabled);
+
+    // Assert.
+    expect([ on.includes('Weather'), off.includes('Weather') ])
       .toStrictEqual([ true, false ]);
   });
 

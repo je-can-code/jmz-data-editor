@@ -42,19 +42,19 @@ type TileLayer = 'tiles1' | 'tiles2' | 'tiles3' | 'tiles4';
 /**
  * Everything a renderer can show or hide.
  */
-type RenderLayer = TileLayer | 'shadows' | 'events' | 'parallax' | 'lighting';
+type RenderLayer = TileLayer | 'shadows' | 'events' | 'parallax' | 'lighting' | 'weather';
 
 /**
- * What shows. The game look is the default: every layer on, everything that moves in the game moving, the parallax and
- * lighting drawn. Highlighting a tile layer dims everything else, so what sits on it stands out.
+ * What shows. The game look is the default: every layer on, everything that moves in the game moving, the parallax,
+ * lighting and weather drawn. Highlighting a tile layer dims everything else, so what sits on it stands out.
  */
 type LayerVisibility = {
   readonly layers: Readonly<Record<RenderLayer, boolean>>;
 
   /**
-   * Whether the game look moves: water and waterfalls step, a scrolling parallax drifts, and lights run their effects.
-   * Off, all of it holds still as it shows with no animation running: water on its first step, the parallax where it
-   * starts, and every light at its full strength.
+   * Whether the game look moves: water and waterfalls step, a scrolling parallax drifts, lights run their effects and
+   * the weather falls. Off, all of it holds still as it shows with no animation running: water on its first step, the
+   * parallax where it starts, every light at its full strength, and the weather where it is.
    */
   readonly animate: boolean;
   readonly highlighted: TileLayer | null;
@@ -74,6 +74,7 @@ const GAME_LOOK: LayerVisibility = {
     events: true,
     parallax: true,
     lighting: true,
+    weather: true,
   },
   animate: true,
   highlighted: null,
