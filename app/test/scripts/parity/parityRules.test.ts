@@ -12,6 +12,8 @@ import {
   spreadsAgree,
   weatherProbeMapFor,
   darkLightsOf,
+  dateFixtureMap,
+  dateTagsAround,
   editorPagesOf,
   editorVerdictsOf,
   eventsKeyOf,
@@ -21,15 +23,21 @@ import {
   lightReaches,
   pageDifferencesOf,
   pagesProbeMapFor,
+  pagesWords,
   parityPageRule,
+  parseSeasonFixtures,
   probeMapFor,
   questGatedPagesOf,
+  seasonKeyOf,
+  seasonMomentOf,
+  seasonProbeMapFor,
   skyProbeMapFor,
   snapshotPredictions,
   spriteCovers,
   startingPartyOf,
   steadyLighting,
   tallyPages,
+  timeGatedPagesOf,
   timeOfCapture,
   verdictDifferencesOf,
   verdictWords,
@@ -68,6 +76,14 @@ import { command, event, page } from '../../mapEditor/support/eventKindFixtures.
  * game has no judgement of, differs; an event a plugin put on the map has nothing to compare. The tally counts the
  * events on the editor's page and the pages judged alike, the quest-gated apart, and lists the quest-gated pages judged
  * differently, each worded with how both sides judged it.
+ *
+ * Every map holding a time-gated page, one carrying any of J-TIME's page tags, is judged at moments: a season, by name or
+ * by J-TIME's number for it, at a time of day, its date the one the editor's clock moves the game's start to, which the
+ * game's clock is set to as well. The tally then counts the time-gated pages apart, at the moment's season and hour. A
+ * date fixture, built for the game copy alone, holds an event for each tag reading the date on each date judged, with a
+ * near miss either side of it, one for each season by name and by number, each date's season gated by a night's hours,
+ * and one whose pages run through the seasons, each on a tile of its own. Where the game could pick no page, the words
+ * say so.
  *
  * The game copy the check runs holds every light steady, each effect's depth at 0 and the rest of its config as it was,
  * so every frame of the game shows every light at full strength, as the editor draws them.
@@ -621,7 +637,7 @@ describe('parityRules', () =>
       const rule = parityPageRule([ jTime(true) ], [ 1, 2 ]);
 
       // Act.
-      const pages = [ 1320, 840 ].map(timeOfDay => [ ...editorPagesOf(map, rule, timeOfDay) ]);
+      const pages = [ 1320, 840 ].map(timeOfDay => [ ...editorPagesOf(map, rule, { timeOfDay }) ]);
 
       // Assert: the lamp lit and the creature out by night, and neither by day; the door on its first page throughout.
       expect([ rule.save.party, rule.conditions.map(condition => condition.id), pages ])
@@ -638,7 +654,7 @@ describe('parityRules', () =>
       const rule = parityPageRule([ jTime(false) ], [ 1 ]);
 
       // Act.
-      const pages = [ 1320, 840 ].map(timeOfDay => [ ...editorPagesOf(map, rule, timeOfDay) ]);
+      const pages = [ 1320, 840 ].map(timeOfDay => [ ...editorPagesOf(map, rule, { timeOfDay }) ]);
 
       // Assert: the lamp's last page and the creature's only page hold at every hour.
       expect([ rule.conditions, pages ])
@@ -662,7 +678,7 @@ describe('parityRules', () =>
       const rule = parityPageRule([ jQuests(true) ], [ 1 ], new Map([ [ 'quest', QUESTS ] ]));
 
       // Act.
-      const pages = [ ...editorPagesOf(map, rule, 840) ];
+      const pages = [ ...editorPagesOf(map, rule, { timeOfDay: 840 }) ];
 
       // Assert: the giver offers the delivery, its errand held back; the door on its first page.
       expect([ rule.conditions.map(condition => condition.id), pages ])
@@ -675,7 +691,7 @@ describe('parityRules', () =>
       const rule = parityPageRule([ jQuests(true) ], [ 1 ]);
 
       // Act.
-      const pages = [ ...editorPagesOf(map, rule, 840) ];
+      const pages = [ ...editorPagesOf(map, rule, { timeOfDay: 840 }) ];
 
       // Assert.
       expect(pages)
@@ -688,7 +704,7 @@ describe('parityRules', () =>
       const rule = parityPageRule([ jQuests(false) ], [ 1 ], new Map([ [ 'quest', QUESTS ] ]));
 
       // Act.
-      const pages = [ ...editorPagesOf(map, rule, 840) ];
+      const pages = [ ...editorPagesOf(map, rule, { timeOfDay: 840 }) ];
 
       // Assert: the giver's last page, which no condition of its own holds back.
       expect([ rule.conditions, pages ])
@@ -747,7 +763,7 @@ describe('parityRules', () =>
       const rule = parityPageRule([ jQuests(true), jTime(true) ], [ 1 ], new Map([ [ 'quest', QUESTS ] ]));
 
       // Act: at 14:00, then 22:00.
-      const verdicts = [ 840, 1320 ].map(timeOfDay => [ ...editorVerdictsOf(map, rule, timeOfDay) ]);
+      const verdicts = [ 840, 1320 ].map(timeOfDay => [ ...editorVerdictsOf(map, rule, { timeOfDay }) ]);
 
       // Assert.
       expect(verdicts)
@@ -824,7 +840,7 @@ describe('parityRules', () =>
       const events = [ probeEvent({ id: 1, page: 1, meets: [ true, true, false ] }), probeEvent({ id: 2, page: 0, meets: [ true, false ] }) ];
 
       // Act.
-      const tally = tallyPages(map, events, rule, 840);
+      const tally = tallyPages(map, events, rule, { timeOfDay: 840 });
 
       // Assert.
       expect(tally)
@@ -852,7 +868,7 @@ describe('parityRules', () =>
       ];
 
       // Act.
-      const tally = tallyPages(map, events, rule, 840);
+      const tally = tallyPages(map, events, rule, { timeOfDay: 840 });
 
       // Assert.
       expect(tally)
@@ -867,6 +883,195 @@ describe('parityRules', () =>
           gatedPagesAlike: 1,
           gatedDiffer: [ { id: 1, page: 1, game: false, editor: true } ],
         });
+    });
+  });
+
+  describe('the season pass', () =>
+  {
+    /**
+     * Chef Adventure's new game: 16 December 2026, at the top of the minute.
+     */
+    const START = { seconds: 0, days: 16, months: 12, years: 2026 };
+
+    it('reads seasons by name in any case or by number, each at a time of day, and refuses anything else', () =>
+    {
+      // Arrange.
+      const lists = [ 'summer@02:00,SPRING@5:30,3@23:59', '' ];
+
+      // Act.
+      const read = lists.map(parseSeasonFixtures);
+      const refused = [ 'summer', 'fall@10:00', '4@10:00', 'summer@24:00' ].map(list => () => parseSeasonFixtures(list));
+
+      // Assert.
+      expect(read)
+        .toStrictEqual([ [ { season: 1, time: 120 }, { season: 0, time: 330 }, { season: 3, time: 1439 } ], [] ]);
+      refused.forEach(parse => expect(parse)
+        .toThrow('--seasons takes seasons'));
+    });
+
+    it('sets the game\'s clock to the season\'s date as the editor moves the start, at the hour, keyed by both', () =>
+    {
+      // Arrange: Summer at 22:00, and Winter, the season the game starts in, at 05:30.
+      const fixtures = [ { season: 1, time: 1320 }, { season: 3, time: 330 } ];
+
+      // Act.
+      const moments = fixtures.map(fixture => seasonMomentOf(START, fixture));
+
+      // Assert.
+      expect([ moments, fixtures.map(seasonKeyOf) ])
+        .toStrictEqual([
+          [
+            { key: 'summer@1320', years: 2027, months: 6, days: 16, hours: 22, minutes: 0, seconds: 0 },
+            { key: 'winter@330', years: 2026, months: 12, days: 16, hours: 5, minutes: 30, seconds: 0 },
+          ],
+          [ 'summer@1320', 'winter@330' ],
+        ]);
+    });
+
+    it('visits a map to judge its pages at each moment, and draws nothing there', () =>
+    {
+      // Arrange: Summer's date at 22:00.
+      const moment = { key: 'summer@1320', years: 2027, months: 6, days: 16, hours: 22, minutes: 0, seconds: 0 };
+
+      // Act.
+      const probed = seasonProbeMapFor(337, [ moment ]);
+
+      // Assert.
+      expect(probed)
+        .toStrictEqual({ mapId: 337, views: [], steps: [ 0 ], dark: false, moments: [ moment ] });
+    });
+
+    it('lists each event\'s pages carrying a time tag, passing over a choice\'s tag and events with none', () =>
+    {
+      // Arrange: a lamp lit by night on its second page and in Summer on its third; an event whose tag gates a choice; a
+      // plain sign.
+      const map = mapFile(10, 10, {}, '', [
+        null,
+        taggedEvent(1, [ [], [ '<hourRangePage:18-5>' ], [ '<seasonOfYearPage:summer>' ] ]),
+        taggedEvent(2, [ [ '<timeOfDayChoice:night>' ] ]),
+        taggedEvent(3, [ [ 'a sign' ] ]),
+      ]);
+
+      // Act.
+      const gated = [ ...timeGatedPagesOf(map) ];
+
+      // Assert.
+      expect(gated)
+        .toStrictEqual([ [ 1, [ 1, 2 ] ] ]);
+    });
+
+    it('writes each tag reading the date that holds on it, with the near misses either side', () =>
+    {
+      // Arrange: Summer's date, 16 June 2027.
+      const date = { seconds: 0, days: 16, months: 6, years: 2027 };
+
+      // Act.
+      const tags = dateTagsAround(date);
+
+      // Assert.
+      expect(tags)
+        .toStrictEqual([
+          '<dayPage:16>',
+          '<dayPage:15>',
+          '<dayPage:17>',
+          '<monthPage:6>',
+          '<monthPage:5>',
+          '<monthPage:7>',
+          '<yearPage:2027>',
+          '<yearPage:2026>',
+          '<yearPage:2028>',
+          '<dayRangePage:15-17>',
+          '<dayRangePage:13-15>',
+          '<dayRangePage:17-19>',
+          '<dayRangePage:17-16>',
+          '<monthRangePage:6-6>',
+          '<monthRangePage:4-5>',
+          '<monthRangePage:7-8>',
+          '<monthRangePage:7-6>',
+          '<yearRangePage:2027-2028>',
+          '<yearRangePage:2026-2027>',
+          '<yearRangePage:2028-2029>',
+          '<fullDateRangePage:[0,0,16,6,2027]-[59,23,16,6,2027]>',
+          '<fullDateRangePage:[0,0,15,6,2027]-[59,23,15,6,2027]>',
+          '<fullDateRangePage:[0,0,17,6,2027]-[59,23,17,6,2027]>',
+        ]);
+    });
+
+    it('builds the date fixture as a blank map of single-page events, one for each tag once, then the seasons\' own events', () =>
+    {
+      // Arrange: Spring's and Summer's dates, which share their day and year, on tileset 2.
+      const dates = [ { seconds: 0, days: 16, months: 3, years: 2027 }, { seconds: 0, days: 16, months: 6, years: 2027 } ];
+
+      // Act.
+      const fixture = dateFixtureMap(dates, 2);
+
+      // Assert: four seasons by name and by number, 23 tags around the first date and 9 more around the second (its day,
+      // year and their spans shared, and one month span the same), two seasons by night, and the event of every season.
+      const placed = fixture.events.slice(1);
+      const events = placed.map(each => each?.pages.map(shown => shown.list.filter(line => line.code === 108).map(line => line.parameters[0])));
+      const cells = new Set(placed.map(each => `${each?.x},${each?.y}`));
+      expect([ fixture.tilesetId, fixture.events[0], events.length, events.slice(0, 2), events.slice(-3), cells.size, fixture.data.length ])
+        .toStrictEqual([
+          2,
+          null,
+          8 + 23 + 9 + 2 + 1,
+          [ [ [ '<seasonOfYearPage:spring>' ] ], [ [ '<seasonOfYearPage:summer>' ] ] ],
+          [
+            [ [ '<seasonOfYearPage:spring>', '<hourRangePage:18-5>' ] ],
+            [ [ '<seasonOfYearPage:summer>', '<hourRangePage:18-5>' ] ],
+            [ [], [ '<seasonOfYearPage:spring>' ], [ '<seasonOfYearPage:summer>' ], [ '<seasonOfYearPage:autumn>' ], [ '<seasonOfYearPage:winter>' ] ],
+          ],
+          43,
+          17 * 13 * 6,
+        ]);
+    });
+
+    it('tallies the time-gated pages apart at a season and an hour, and words a page the game could not pick', () =>
+    {
+      // Arrange: a stall open in Summer on its second page, and a sign; at noon in Summer the game judged the stall's
+      // pages as the editor does but picked no page for it, and showed the sign's.
+      const map = mapFile(10, 10, {}, '', [
+        null,
+        taggedEvent(1, [ [], [ '<seasonOfYearPage:summer>' ] ]),
+        taggedEvent(2, [ [ 'a sign' ] ]),
+      ]);
+      const rule = parityPageRule([ jTime(true) ], [ 1 ]);
+      const judged = [ { id: 1, page: null, meets: [ true, true ] }, { id: 2, page: 0, meets: [ true ] } ];
+
+      // Act.
+      const tally = tallyPages(map, judged, rule, { timeOfDay: 720, season: 1 }, timeGatedPagesOf(map));
+      const words = pageDifferencesOf(judged, editorPagesOf(map, rule, { timeOfDay: 720, season: 1 })).map(({ game, editor }) => pagesWords(game, editor));
+
+      // Assert.
+      expect([ tally, words ])
+        .toStrictEqual([
+          {
+            events: 2,
+            eventsAlike: 1,
+            gatedEvents: 1,
+            gatedEventsAlike: 0,
+            pages: 3,
+            pagesAlike: 3,
+            gatedPages: 1,
+            gatedPagesAlike: 1,
+            gatedDiffer: [],
+          },
+          [ 'shows no page it could pick in the game, page 2 in the editor' ],
+        ]);
+    });
+
+    it('judges the stall\'s Summer page at the season the moment names, and the start\'s season without one', () =>
+    {
+      // Arrange: a stall open in Summer on its second page.
+      const map = mapFile(10, 10, {}, '', [ null, taggedEvent(1, [ [], [ '<seasonOfYearPage:summer>' ] ]) ]);
+      const rule = parityPageRule([ jTime(true) ], [ 1 ]);
+
+      // Act: at noon in Summer, in Autumn, and with no season named.
+      const verdicts = [ { timeOfDay: 720, season: 1 }, { timeOfDay: 720, season: 2 }, { timeOfDay: 720 } ].map(moment => [ ...editorVerdictsOf(map, rule, moment) ]);
+
+      // Assert.
+      expect(verdicts)
+        .toStrictEqual([ [ [ 1, [ true, true ] ] ], [ [ 1, [ true, false ] ] ], [ [ 1, [ true, false ] ] ] ]);
     });
   });
 

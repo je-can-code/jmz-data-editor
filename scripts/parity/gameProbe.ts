@@ -14,6 +14,10 @@
  * all. Before the first such map the probe holds J-Weather-Time's sky off, noting what it was doing on the fresh save,
  * so every map's weather resolves as J-Weather alone resolves it: a tagged map at its middle strength.
  *
+ * A map asked about at moments, such as a season's date at a few hours, is judged instead of drawn: the game's clock is
+ * set straight to each moment, date and all, every page of every event there is judged as the game judges it then, and
+ * the clock goes back as it was before anything ticks it on.
+ *
  * It is serialized with toString() and run inside NW.js ahead of the game's own scripts, so it must stay one
  * self-contained function in plain JavaScript: nothing from this module's scope survives the trip, and the engine's
  * globals (SceneManager, $gameMap and the rest) are reached through the window. Its whole body runs inside try blocks,
@@ -32,7 +36,7 @@ const parityProbe = (config: ProbeConfig): void =>
   const fs = nodeRequire('fs');
   const { Buffer: NodeBuffer } = nodeRequire('buffer');
   const engine = window as unknown as Record<string, any>;
-  const report: ProbeReport = { phase: 'boot', screen: { width: 0, height: 0 }, captures: [], events: {}, clocks: {}, weather: {}, errors: [], log: [] };
+  const report: ProbeReport = { phase: 'boot', screen: { width: 0, height: 0 }, captures: [], events: {}, clocks: {}, moments: {}, weather: {}, errors: [], log: [] };
 
   // the game must never make a sound: every audio context it makes stays suspended, and media elements stay muted.
   // The launch also carries --mute-audio; this holds even if a launch ever forgets it.
@@ -294,6 +298,50 @@ const parityProbe = (config: ProbeConfig): void =>
     });
   };
 
+  // picks the page an event would show now, as the game picks it, plugins' guards and all: -1 for none, and null where
+  // picking threw, as it can with no plugin there to catch a page whose judging throws.
+  const pageOf = (character: any): number | null =>
+  {
+    try
+    {
+      return character.findProperPageIndex();
+    }
+    catch
+    {
+      return null;
+    }
+  };
+
+  // judges every page of every event on the map at each of its moments, the game's clock set straight into its fields
+  // for each, so no hour is announced on the way, and put back as it was found once all are judged. All of it happens
+  // within this one call, so no frame ticks the clock on between setting it and judging, and nothing after this map
+  // reads a clock it moved.
+  const judgeMoments = (map: ProbeMap): void =>
+  {
+    const time = engine.$gameTime;
+    const found = [ time.years(), time.months(), time.days(), time.hours(), time.minutes(), time.seconds() ];
+    const setClock = ([ years, months, days, hours, minutes, seconds ]: number[]): void =>
+    {
+      time.setYears(years);
+      time.setMonths(months);
+      time.setDays(days);
+      time.setHours(hours);
+      time.setMinutes(minutes);
+      time.setSeconds(seconds);
+    };
+    const events: any[] = engine.$gameMap.events();
+    (map.moments ?? []).forEach(moment =>
+    {
+      setClock([ moment.years, moment.months, moment.days, moment.hours, moment.minutes, moment.seconds ]);
+      (report.moments as Record<string, unknown>)[`${map.mapId}@${moment.key}`] = events.map(character => ({
+        id: character.eventId(),
+        page: pageOf(character),
+        meets: meetsOf(character),
+      }));
+    });
+    setClock(found);
+  };
+
   // records each event's active page, whether the game draws it and how, and how the game judges each of its pages,
   // before any pass hides anything, with the hour the game's clock reads; under its own key for a map drawn at a time of
   // day, since an event's page can depend on the hour.
@@ -548,6 +596,14 @@ const parityProbe = (config: ProbeConfig): void =>
     {
       captureWeather(map);
       report.log.push(`map ${map.mapId}: weather read at ${map.weather.x},${map.weather.y}`);
+      return;
+    }
+
+    // a map judged at moments is judged and nothing else, so a map drawn earlier keeps the events recorded for it.
+    if (map.moments !== undefined)
+    {
+      judgeMoments(map);
+      report.log.push(`map ${map.mapId}: judged at ${map.moments.map(moment => moment.key).join(', ')}`);
       return;
     }
 
