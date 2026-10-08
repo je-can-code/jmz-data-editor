@@ -28,8 +28,8 @@ import { isBlueprintId } from './blueprintLink.ts';
 const BLUEPRINTS_DOCUMENT: EditorDataDocumentKey = editorDataDocumentKey(BLUEPRINTS.name);
 
 /**
- * How many characters a new blueprint's id has: enough that two made anywhere, in any window or session, never
- * collide, and few enough to read at a glance in a copy's note.
+ * How many characters a new blueprint's id has: 36 to the eighth power, near three trillion ids, so two drawn anywhere,
+ * in any window or session, all but never match, and few enough to read at a glance in a copy's note.
  */
 const BLUEPRINT_ID_LENGTH = 8;
 
@@ -160,8 +160,12 @@ const blueprintIn = (document: EditorDocument, blueprintId: string): Blueprint |
 
 /**
  * Makes a new blueprint's id: {@link BLUEPRINT_ID_LENGTH} lowercase letters and digits drawn at random, drawn again in
- * the unlikely case that the document holds that id already. Never one taken before, so a link left behind by a
- * blueprint that is gone can never be read as a link to a new one.
+ * the unlikely case that the document holds that id already. That check sees every blueprint the document holds now,
+ * another window's included, since every window holding the document keeps the same copy of it, and two windows saving
+ * at the same moment have their copies flagged as gone different ways, for the author to choose between. Nothing
+ * remembers the id of a blueprint that is gone, deleted or its save undone, so only the size of the draw keeps a link
+ * left behind by one from ever being read as a link to a new one: a chance of one in near three trillion for each id
+ * drawn.
  * @param {(id: string) => boolean} taken Whether an id is in use.
  * @param {() => number} random Draws a number from 0 up to but not including 1.
  * @returns {string} The id.

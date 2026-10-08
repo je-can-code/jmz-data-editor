@@ -18,9 +18,10 @@ import { stampOf } from '../../support/stampFixtures.ts';
 /*
  * The blueprints live in one editor-only document, jmz-editor/blueprints.json, each under its own id, never in a list,
  * so an edit to one never moves another and every blueprint's own history can undo its steps whatever happened to the
- * others. An id is lowercase letters and digits, drawn at random so no two windows or sessions ever make the same one,
- * and drawn again on the rare one already taken; it never changes, so every copy's link keeps naming its blueprint
- * through any rename. A blueprint is a name and the stamp it was saved from, kept in the stamp's own shape without the
+ * others. An id is eight lowercase letters and digits, drawn at random from near three trillion so two windows or
+ * sessions all but never make the same one, and drawn again on the rare one the document already holds; nothing remembers
+ * the ids of blueprints gone, so the size of the draw is all that keeps a new one from taking one. An id never changes,
+ * so every copy's link keeps naming its blueprint through any rename. A blueprint is a name and the stamp it was saved from, kept in the stamp's own shape without the
  * stamp's id, and read back with an id of its own that no window's stamp ever has. The panel lists them by name, as a
  * person sorts words. Anything in the document that is not a blueprint is refused loudly, never read as none, since
  * saving over it would lose it.
