@@ -3,12 +3,13 @@ import type { OverlayState } from '../../../src/mapEditor/core/renderer/MapRende
 import { OverlayComposer } from '../../../src/mapEditor/render/overlayComposer.ts';
 
 /*
- * The overlay a map view shows is put together from two owners' parts: the event tools' selection, box, dragged ghosts
- * and refused tiles, and the painting tools' cursor words, ghost tiles and selected area. Each owner decides only its
- * own fields, so neither wipes what the other shows, whatever else it hands over. Both hand over a hover, and only the
- * one in hand shows one: the painting tools' hover wins while they have one, and the event tools' shows otherwise. The
- * renderer hears only of a real change, compared by value, so a pointer moving inside one cell (which rebuilds a part
- * afresh) redraws nothing. The first update always reaches the renderer, so its state is known to match from then on.
+ * The overlay a map view shows is put together from two owners' parts: the event tools' selection and box, and the
+ * painting tools' cursor words, ghost tiles and selected area. Each owner decides only its own fields, so neither wipes
+ * what the other shows, whatever else it hands over. Both hand over a hover, ghost events and the tiles those are
+ * refused on (the event tools' while events are dragged, the stamp's while it is in hand), and only the one in hand shows
+ * them: the painting tools' win while they have any, and the event tools' show otherwise. The renderer hears only of a
+ * real change, compared by value, so a pointer moving inside one cell (which rebuilds a part afresh) redraws nothing. The
+ * first update always reaches the renderer, so its state is known to match from then on.
  */
 describe('OverlayComposer', () =>
 {
@@ -72,6 +73,35 @@ describe('OverlayComposer', () =>
     // Assert.
     expect([ eventsAlone, both, composer.state.hover ])
       .toEqual([ eventHover, brushHover, eventHover ]);
+  });
+
+  it('shows the painting tools\' ghost events and refused tiles while they have any, and the event tools\' otherwise', () =>
+  {
+    // Arrange: the event tools drag a ghost refused on 2, 2; the stamp shows a ghost of its own, refused on 4, 4.
+    const { composer } = recorded();
+    const image = { tileId: 0, characterName: 'Actor1', direction: 2, pattern: 1, characterIndex: 0 };
+    const dragged = [ { x: 2, y: 2, image, priorityType: 1, eventId: 3 } ];
+    const stamped = [ { x: 4, y: 4, image, priorityType: 1 } ];
+
+    // Act: the drag alone; then the stamp over it; then the event tools hand over an empty drag while the stamp stays,
+    // as standing down does; then the stamp's ghosts gone, with the event tools' last drag shown again.
+    composer.update('events', { ghostEvents: dragged, blockedCells: [ { x: 2, y: 2 } ] });
+    const dragAlone = [ composer.state.ghostEvents, composer.state.blockedCells ];
+    composer.update('tools', { ghostEvents: stamped, blockedCells: [ { x: 4, y: 4 } ] });
+    const stampOver = [ composer.state.ghostEvents, composer.state.blockedCells ];
+    composer.update('events', { ghostEvents: [], blockedCells: [] });
+    const stampStays = [ composer.state.ghostEvents, composer.state.blockedCells ];
+    composer.update('events', { ghostEvents: dragged });
+    composer.update('tools', { ghostEvents: [], blockedCells: [] });
+
+    // Assert: the event tools' refused tiles stayed as they last handed them over, empty.
+    expect([ dragAlone, stampOver, stampStays, [ composer.state.ghostEvents, composer.state.blockedCells ] ])
+      .toEqual([
+        [ dragged, [ { x: 2, y: 2 } ] ],
+        [ stamped, [ { x: 4, y: 4 } ] ],
+        [ stamped, [ { x: 4, y: 4 } ] ],
+        [ dragged, [] ],
+      ]);
   });
 
   it('keeps an owner\'s hover when it updates other fields', () =>

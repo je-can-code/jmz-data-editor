@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import type { StampOutcome } from '../../../../src/mapEditor/core/stamps/stampPlacement.ts';
 import { makeAutotileId, TileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
 import { singleTileBrush } from '../../../../src/mapEditor/core/tools/brush.ts';
 import { INITIAL_PAINT_SETTINGS, PaintState, type PaintSettings } from '../../../../src/mapEditor/core/tools/PaintState.ts';
@@ -9,6 +10,7 @@ import type { ToolOverlay } from '../../../../src/mapEditor/core/tools/ToolSessi
 import { PaintController } from '../../../../src/mapEditor/render/tools/PaintController.ts';
 import { fill, put } from '../../core/tiles/support/tileGridBuilder.ts';
 import { benchWith, layeringWith, stackAt, type PaintBench } from '../../core/tools/support/paintFixtures.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
  * The page's side of painting.
@@ -16,21 +18,24 @@ import { benchWith, layeringWith, stackAt, type PaintBench } from '../../core/to
  * The controller turns the pointer on a map's canvas and the keys held into what the tools do: the left button
  * paints (the right stays the renderer's, for panning), Shift held with the pointer lays tiles exactly, the space bar
  * held over the map paints one stroke on the override's layer (and is kept from the page, which would otherwise
- * scroll or press a button), Escape takes back what is in progress, and a stroke is ended, keeping what it painted,
- * when a Ctrl shortcut arrives mid-stroke or the window loses focus, so an undo never finds a stroke still open. The
- * view is told what to show after every change, and nothing more happens once the controller lets go.
+ * scroll or press a button), Escape takes back what is in progress, or puts a stamp in hand down wherever the pointer
+ * is, and a stroke is ended, keeping what it painted, when a Ctrl shortcut arrives mid-stroke or the window loses
+ * focus, so an undo never finds a stroke still open. A click with the stamp places it, and whoever listens hears what
+ * came of it. The view is told what to show after every change, and nothing more happens once the controller lets go.
  */
 const GRASS = 16;
 const ROCK = TileId.A5 + 97;
 
 /**
- * A controller over a canvas, with the bench it paints on, the settings it reads, and every overlay it handed over.
+ * A controller over a canvas, with the bench it paints on, the settings it reads, every overlay it handed over, and
+ * what each click of the stamp came to.
  */
 type ControllerBench = PaintBench & {
   readonly canvas: HTMLCanvasElement;
   readonly painting: PaintState;
   readonly controller: PaintController;
   readonly overlays: ToolOverlay[];
+  readonly stamped: StampOutcome[];
   readonly detach: () => void;
 };
 
@@ -63,6 +68,7 @@ const controllerWith = (settings: Partial<PaintSettings>): ControllerBench =>
   canvases.push(canvas);
   const painting = new PaintState({ ...INITIAL_PAINT_SETTINGS, ...settings });
   const overlays: ToolOverlay[] = [];
+  const stamped: StampOutcome[] = [];
   const controller = new PaintController({
     surface: {
       canvas,
@@ -79,10 +85,11 @@ const controllerWith = (settings: Partial<PaintSettings>): ControllerBench =>
     layering: () => layeringWith(),
     painting,
     overlay: overlay => overlays.push(overlay),
+    onStamped: outcome => stamped.push(outcome),
   });
   const detach = controller.attach();
   detachers.push(detach);
-  return { ...bench, canvas, painting, controller, overlays, detach };
+  return { ...bench, canvas, painting, controller, overlays, stamped, detach };
 };
 
 /**
@@ -313,6 +320,41 @@ describe('PaintController', () =>
     // Assert: nothing painted, the canvas never took the keys from the view, and the space bar reached the page.
     expect([ bench.hub.history(bench.history).rows, document.activeElement === bench.canvas, space.defaultPrevented ])
       .toEqual([ [], false, false ]);
+  });
+
+  it('places the stamp in hand with a click, handing over what came of it', () =>
+  {
+    // Arrange: a stamp of one rock on the ground, with an event on it.
+    const rock = stampOf({ tiles: { layers: [ 0 ], values: [ ROCK ], calledFor: [ -1 ] } });
+    const bench = controllerWith({ tool: 'stamp', stamp: rock });
+
+    // Act.
+    pointer(bench.canvas, 'pointerdown', 2, 1);
+    pointer(bench.canvas, 'pointerup', 2, 1);
+
+    // Assert: the event took id 1 on a map holding none.
+    expect([ bench.map.cellAt(2, 1, 0), bench.map.event(1)?.x, bench.stamped.map(outcome => outcome.ok && outcome.eventIds) ])
+      .toEqual([ ROCK, 2, [ [ 1 ] ] ]);
+  });
+
+  it('puts the stamp down on Escape wherever the pointer is, taking the key, and leaves an Escape typed in a field alone', () =>
+  {
+    // Arrange: the pen in hand, then a stamp taken up; a text field elsewhere on the page.
+    const bench = controllerWith({ tool: 'pen', brush: singleTileBrush(ROCK) });
+    bench.painting.takeUpStamp(stampOf());
+    const field = document.createElement('input');
+    document.body.appendChild(field);
+
+    // Act: Escape typed into the field, then pressed with the pointer away from the map.
+    const typed = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' });
+    field.dispatchEvent(typed);
+    const toolAfterField = bench.painting.settings.tool;
+    const escape = key('keydown', { key: 'Escape' });
+    field.remove();
+
+    // Assert.
+    expect([ typed.defaultPrevented, toolAfterField, escape.defaultPrevented, bench.painting.settings.tool ])
+      .toEqual([ false, 'stamp', true, 'pen' ]);
   });
 
   it('shows a new tool at once, and nothing more once it has let go', () =>
