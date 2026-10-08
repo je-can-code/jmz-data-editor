@@ -340,6 +340,26 @@ describe('PaintController', () =>
       .toEqual([ ROCK, 2, [ [ 1 ] ] ]);
   });
 
+  it('asks the window\'s link gate about the map clicked, refusing a stamp carrying copies of a blueprint where it says no', () =>
+  {
+    // Arrange: a rock whose event is a copy of a blueprint's, over map 1, which the gate keeps from holding a link.
+    const rock = stampOf({ tiles: { layers: [ 0 ], values: [ ROCK ], calledFor: [ -1 ] }, events: [ { ...stampOf().events[0], note: '<blueprint:[k3x9q2mf, 1]>' } ] });
+    const asked: number[] = [];
+    const bench = controllerWith({ tool: 'stamp', stamp: rock }, mapId =>
+    {
+      asked.push(mapId);
+      return 'its events are patterns';
+    });
+
+    // Act.
+    pointer(bench.canvas, 'pointerdown', 2, 1);
+    pointer(bench.canvas, 'pointerup', 2, 1);
+
+    // Assert: nothing went down.
+    expect([ asked.includes(1), bench.stamped, bench.map.cellAt(2, 1, 0) === ROCK, bench.map.eventIds() ])
+      .toEqual([ true, [ { ok: false, message: 'This stamp holds copies of blueprints, which can\'t go here: its events are patterns.' } ], false, [] ]);
+  });
+
   it('puts the stamp down on Escape wherever the pointer is, taking the key, and leaves an Escape typed in a field alone', () =>
   {
     // Arrange: the pen in hand, then a stamp taken up; a text field elsewhere on the page.

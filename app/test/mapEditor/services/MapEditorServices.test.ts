@@ -30,6 +30,9 @@ import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../s
  * A window has one clock. It starts where the game does once a module offering it switches on, follows the game's
  * starting time while the author leaves it be, and keeps the hour the author picks however often the modules switch on
  * afresh.
+ *
+ * Once something asks, a window counts every blueprint's copies from every map's notes, and counts them again whenever a
+ * map changes on disk or the stream comes back, never before it is asked and never for a file that is no map.
  */
 describe('MapEditorServices', () =>
 {
@@ -452,6 +455,57 @@ describe('MapEditorServices', () =>
     });
     expect(before)
       .toStrictEqual({ party: [] });
+    services.stop();
+  });
+
+  it('counts the blueprints\' copies from every map\'s notes once asked, again when a map changes on disk or the stream comes back', async () =>
+  {
+    // Arrange: a project with one copy of blueprint aa on map 3, counting the reads of every map's notes.
+    let reads = 0;
+    const { fetch } = stubFetch(request =>
+    {
+      if (request.url.endsWith('/api/event-notes'))
+      {
+        reads += 1;
+        return envelope({ notes: [ { mapId: 3, eventId: 2, note: '<blueprint:[aa, 1]>' } ] });
+      }
+
+      return request.url.endsWith('/api/plugin-metadata') ? new Response('var $plugins = [];') : envelope({});
+    });
+    const { environment, sources } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    services.start();
+    await settle();
+    const beforeAsked = reads;
+
+    // Act: the Blueprints section asks; then a map changes on disk, then System.json, then the stream drops and comes back.
+    services.blueprintCopies.subscribe(() => undefined);
+    await vi.waitFor(() =>
+    {
+      expect(services.blueprintCopies.countOf('aa'))
+        .toStrictEqual({ total: 1, maps: [ { mapId: 3, copies: 1 } ] });
+    });
+    const asked = reads;
+    sources[0].emitChange({ path: 'data/Map003.json', kind: 'write', client: '' });
+    await vi.waitFor(() =>
+    {
+      expect(reads)
+        .toBe(asked + 1);
+    });
+    sources[0].emitChange({ path: 'data/System.json', kind: 'write', client: '' });
+    await services.blueprintCopies.settled();
+    const afterSystem = reads;
+    sources[0].emit('error');
+    sources[0].emit('open');
+
+    // Assert: nothing read before the section asked, and no read for System.json.
+    await vi.waitFor(() =>
+    {
+      expect(reads)
+        .toBe(asked + 2);
+    });
+    expect([ beforeAsked, afterSystem - asked ])
+      .toStrictEqual([ 0, 1 ]);
     services.stop();
   });
 

@@ -134,6 +134,20 @@ describe('HttpMapEditorApi', () =>
         .toStrictEqual([ [ door ], [ `GET ${BASE}/api/maps/12/arrivals` ] ]);
     });
 
+    it('reads every event note holding anything from its route, unwrapped from the answer', async () =>
+    {
+      // Arrange.
+      const notes = [ { mapId: 3, eventId: 2, note: '<blueprint:[k3x9q2mf, 1]>' }, { mapId: 5, eventId: 1, note: 'Guard' } ];
+      const { api, requests } = buildApi(() => envelope({ notes }));
+
+      // Act.
+      const read = await api.loadEventNotes();
+
+      // Assert.
+      expect([ read, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ notes, [ `GET ${BASE}/api/event-notes` ] ]);
+    });
+
     it('refuses an answer about another map\'s transfers rather than take it for this one\'s', async () =>
     {
       // Arrange.

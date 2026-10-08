@@ -8,7 +8,9 @@ import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapInfo } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { TREE_ROOT, WorkspaceController } from '../../../src/mapEditor/workspace/WorkspaceController.ts';
+import { holdBlueprints } from '../support/blueprintFixtures.ts';
 import { buildMapJson } from '../support/fixtures.ts';
+import { stampOf } from '../support/stampFixtures.ts';
 import { buildTreeRows } from '../support/treeFixtures.ts';
 
 /*
@@ -776,6 +778,20 @@ describe('WorkspaceController', () =>
     // Assert.
     expect([ before, controller.mapName(5), controller.mapName(99) ])
       .toStrictEqual([ 'Map 5', 'Cave', 'Map 99' ]);
+  });
+
+  it('names a blueprint from the blueprints, and by its id while they are not held or no longer hold it', () =>
+  {
+    // Arrange.
+    const { controller } = buildController();
+    const before = controller.blueprintName('k3x9q2mf');
+
+    // Act.
+    holdBlueprints(controller.services.hub, { k3x9q2mf: { name: 'Goblin camp', stamp: stampOf() } });
+
+    // Assert.
+    expect([ before, controller.blueprintName('k3x9q2mf'), controller.blueprintName('zz99') ])
+      .toStrictEqual([ 'k3x9q2mf', 'Goblin camp', 'zz99' ]);
   });
 
   it('dismisses only the notice still showing', () =>

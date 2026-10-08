@@ -24,7 +24,7 @@ import { CHECKERBOARD } from './palette/TileThumb.tsx';
 type BlueprintsView =
   | { readonly kind: 'none' }
   | { readonly kind: 'opening' }
-  | { readonly kind: 'open'; readonly blueprints: readonly Blueprint[] }
+  | { readonly kind: 'open'; readonly blueprints: readonly Blueprint[]; readonly revision: number }
   | { readonly kind: 'failed'; readonly message: string };
 
 /**
@@ -134,7 +134,8 @@ const useBlueprints = (): BlueprintsView =>
     };
   }, [ controller, api, opened.document ]);
 
-  // a blueprint saved, renamed or deleted, here or in another window, moves the document's revision.
+  // a blueprint saved, renamed or deleted, here or in another window, moves the document's revision, and the blueprints
+  // are read afresh only then, so their pictures are drawn again only when they change.
   const revision = useDocumentRevision(opened.document);
   return useMemo((): BlueprintsView =>
   {
@@ -155,7 +156,7 @@ const useBlueprints = (): BlueprintsView =>
 
     try
     {
-      return { kind: 'open', blueprints: blueprintsOf(opened.document) };
+      return { kind: 'open', blueprints: blueprintsOf(opened.document), revision };
     }
     catch (error)
     {

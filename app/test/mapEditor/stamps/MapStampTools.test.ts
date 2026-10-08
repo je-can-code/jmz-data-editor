@@ -397,6 +397,26 @@ describe('MapStampTools', () =>
           'One of the stamp\'s events fell past the map\'s edge and was left out.',
         ]);
     });
+
+    it('refuses a paste carrying copies of a blueprint onto a map the window\'s link gate keeps from holding one', () =>
+    {
+      // Arrange: event 2 made a copy of a blueprint's and copied; the gate keeps map 1 from holding a link.
+      const { hub, host, canvas, selection, notices, state } = setUp();
+      hub.edit('Link', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'events', 2, 'note' ], '<blueprint:[k3x9q2mf, 1]>'));
+      selection.select(1, [ 2 ]);
+      host.focus();
+      clipboardEvent('copy');
+      state.refusals.set(1, 'its events are patterns');
+      const before = hub.map('map:1').eventIds();
+
+      // Act.
+      pointAt(canvas, { x: 3, y: 3 });
+      clipboardEvent('paste');
+
+      // Assert.
+      expect([ notices.at(-1), hub.map('map:1').eventIds() ])
+        .toStrictEqual([ 'This stamp holds copies of blueprints, which can\'t go here: its events are patterns.', before ]);
+    });
   });
 
   describe('the menu', () =>

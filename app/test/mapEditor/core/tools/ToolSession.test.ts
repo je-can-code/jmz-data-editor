@@ -567,7 +567,9 @@ describe('ToolSession: what the map shows', () =>
  * The stamp tool: with a stamp in hand, the map shows the stamp under the pointer, its corner on the cell, its tiles and
  * its events as ghosts and in red any tile where another event stands in the way; each click places it as one step of
  * the map's history, Shift laying its tiles exactly as copied, and the host hears what each click came to, refusals
- * included. With no stamp picked, a click does nothing and only the cell shows.
+ * included. With no stamp picked, a click does nothing and only the cell shows. A blueprint in hand places linked copies
+ * of itself; over a map that may hold no link, a blueprint, or a stamp carrying copies of one, says so under the pointer
+ * and is refused at the click.
  *
  * The bench's 4x3 map holds grass all round, a tree over 0, 0, and no events.
  */
@@ -696,5 +698,57 @@ describe('ToolSession: the stamp', () =>
     // Assert.
     expect([ overlay.hover, overlay.ghostTiles, cellsOf(bench.map), heard ])
       .toEqual([ { x: 1, y: 1, width: 1, height: 1 }, [], before, [] ]);
+  });
+
+  it('places a blueprint in hand as linked copies, one step named for it, with each click', () =>
+  {
+    // Arrange: the dirt and its event saved as the blueprint "Dirt patch".
+    const { bench, heard } = stamping(dirtWithEvent(), { blueprint: { id: 'k3x9q2mf', name: 'Dirt patch' } });
+
+    // Act.
+    drag(bench.session, [ at(0, 1) ]);
+
+    // Assert: the copy is event 1, linked to the blueprint's event 7, and the dirt went down too.
+    expect([ heard, bench.map.event(1)?.note, stackAt(bench.map, 0, 1)[0], bench.hub.history(bench.history).rows.map(row => row.label) ])
+      .toEqual([
+        [ { ok: true, step: expect.objectContaining({ label: 'Place blueprint "Dirt patch"' }), eventIds: [ 1 ], notes: [] } ],
+        'event 7\n<blueprint:[k3x9q2mf, 7]>',
+        'k18',
+        [ 'Place blueprint "Dirt patch"' ],
+      ]);
+  });
+
+  it('says a map may hold no blueprint before the click, and hands over the refusal at it, changing nothing', () =>
+  {
+    // Arrange: the blueprint in hand over a map that may hold no link.
+    const { bench, heard } = stamping(dirtWithEvent(), { blueprint: { id: 'k3x9q2mf', name: 'Dirt patch' }, refusal: 'its events are patterns' });
+    const before = cellsOf(bench.map);
+
+    // Act.
+    bench.session.move(at(0, 1));
+    const overlay = bench.session.overlay();
+    drag(bench.session, [ at(0, 1) ]);
+
+    // Assert.
+    expect([ overlay.hoverLabel, heard, cellsOf(bench.map), bench.map.eventIds() ])
+      .toEqual([ 'Blueprints can\'t go here', [ { ok: false, message: 'Blueprints can\'t be placed here: its events are patterns.' } ], before, [] ]);
+  });
+
+  it('says so of a plain stamp carrying copies of a blueprint too, and of no other stamp, over a map that may hold no link', () =>
+  {
+    // Arrange: the dirt's event a copy of a blueprint's, and the plain dirt beside it, each over a map that may hold no link.
+    const linked = { ...dirtWithEvent(), events: [ { ...createMapEvent(7, 1, 0), note: '<blueprint:[k3x9q2mf, 7]>' } ] };
+    const sessions = [ stamping(linked, { refusal: 'its events are patterns' }), stamping(dirtWithEvent(), { refusal: 'its events are patterns' }) ];
+
+    // Act.
+    const labels = sessions.map(({ bench }) =>
+    {
+      bench.session.move(at(0, 1));
+      return bench.session.overlay().hoverLabel;
+    });
+
+    // Assert.
+    expect(labels)
+      .toEqual([ 'Blueprints can\'t go here', 'Stamp' ]);
   });
 });

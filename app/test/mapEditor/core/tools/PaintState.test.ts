@@ -12,7 +12,8 @@ import { stampOf } from '../../support/stampFixtures.ts';
  * picked on the strip also becomes the one the override key paints, so after switching back to automatic layering that
  * layer stays a held key away; until one is picked the override paints layer 3. Taking up a stamp makes the stamp tool
  * the tool, and putting it down goes back to whichever tool was in hand before it, however the stamp tool was taken up;
- * the stamp stays picked. A change that changes nothing tells nobody.
+ * the stamp stays picked. A blueprint is taken up the same way, as its stamp, with which blueprint it is and its name,
+ * which follows a rename; a plain stamp taken up after it is no blueprint. A change that changes nothing tells nobody.
  */
 describe('PaintState', () =>
 {
@@ -75,6 +76,44 @@ describe('PaintState', () =>
     // Assert.
     expect([ state.settings.tool, state.settings.stamp?.id ])
       .toEqual([ 'select', 'test:2' ]);
+  });
+
+  it('takes up a blueprint\'s stamp as a blueprint, and a plain stamp after it as no blueprint', () =>
+  {
+    // Arrange: the pen in hand.
+    const state = new PaintState({ ...INITIAL_PAINT_SETTINGS, tool: 'pen' });
+    const stamp = stampOf({ id: 'blueprint:k3x9q2mf' });
+
+    // Act.
+    state.takeUpBlueprint({ id: 'k3x9q2mf', name: 'Goblin', stamp });
+    const taken = { ...state.settings };
+    state.takeUpStamp(stampOf({ id: 'test:2' }));
+
+    // Assert.
+    expect([ taken.tool, taken.stamp, taken.blueprint, state.settings.stamp?.id, state.settings.blueprint ])
+      .toEqual([ 'stamp', stamp, { id: 'k3x9q2mf', name: 'Goblin' }, 'test:2', null ]);
+  });
+
+  it('follows the new name of the blueprint picked, and of no other, leaving the tool as it is', () =>
+  {
+    // Arrange: a blueprint picked, then put down to the pen, so it stays picked with another tool in hand.
+    const state = new PaintState({ ...INITIAL_PAINT_SETTINGS, tool: 'pen' });
+    state.takeUpBlueprint({ id: 'k3x9q2mf', name: 'Goblin', stamp: stampOf() });
+    state.putDownStamp();
+    let heard = 0;
+    state.subscribe(() =>
+    {
+      heard += 1;
+    });
+
+    // Act.
+    state.renameBlueprint('aa22', 'Bat');
+    const afterOther = heard;
+    state.renameBlueprint('k3x9q2mf', 'Goblin chief');
+
+    // Assert.
+    expect([ afterOther, heard, state.settings.blueprint, state.settings.tool ])
+      .toEqual([ 0, 1, { id: 'k3x9q2mf', name: 'Goblin chief' }, 'pen' ]);
   });
 
   it('leaves the tool in hand alone when the stamp is put down while another tool is in hand', () =>
