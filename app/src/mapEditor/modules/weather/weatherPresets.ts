@@ -50,7 +50,12 @@ type WeatherLayer = {
   readonly scaleJitter: number;
   readonly peakOpacity?: number;
   readonly tint?: number;
-  readonly asset: string;
+
+  /**
+   * The picture its particles draw with, by name in img/weather, or undefined when the config names none, which the
+   * game loads as an empty picture: the particles live and move, and nothing of them shows.
+   */
+  readonly asset: string | undefined;
   readonly density: number;
   readonly blend: string;
 
@@ -200,7 +205,7 @@ const inertLayer = (layer: RawKnobs): WeatherLayer =>
     staggerFrames: 0,
     scale: 1,
     scaleJitter: 0,
-    asset: String(layer['asset']),
+    asset: layer['asset'] as string | undefined,
     density: 0,
     blend: String(layer['blend']),
     becomes: null,
@@ -256,7 +261,7 @@ const resolveStage = (config: WeatherConfigFile, layer: RawKnobs): WeatherLayer 
     scaleJitter: jitterOf(layer) / PERCENT_BASE,
     peakOpacity: opacityOf(layer),
     tint: tintOf(layer),
-    asset: String(layer['asset']),
+    asset: layer['asset'] as string | undefined,
     density: knob(layer, 'density'),
     blend: String(layer['blend']),
     becomes: null,

@@ -44,6 +44,19 @@ type ShownLayer = {
 };
 
 /**
+ * Names the picture a layer or its stage draws with, as ImageManager#loadBitmap takes a name: an empty name, or none at
+ * all, is the empty picture, which draws nothing.
+ * @param {string | undefined} asset The picture's name in img/weather, as the config gives it.
+ * @returns {string | null} The name, or null for the empty picture.
+ */
+const pictureName = (asset: string | undefined): string | null =>
+{
+  return asset === undefined || asset === ''
+    ? null
+    : asset;
+};
+
+/**
  * Where a frame's weather falls: the part of the map the view shows, in world pixels, or null when the view shows none
  * of the map.
  * @param {WorldRect} view The part of the world the view shows.
@@ -200,6 +213,7 @@ class MapWeather implements WeatherDrawing
         dynamicProperties: { position: true, rotation: true, vertex: true, uvs: true, color: true },
       });
       container.blendMode = BLENDS[layer.blend] ?? 'normal';
+      container.position.set(rect?.x ?? 0, rect?.y ?? 0);
       this.#stage.layer.addChild(container);
       return { field: new WeatherField(layer, bounds, roll, true), container, sprites: [], pictures: null, problem: '' };
     });
@@ -208,7 +222,8 @@ class MapWeather implements WeatherDrawing
 
   /**
    * Asks for every layer's pictures, and fits each layer with them once they arrive, unless the weather was built
-   * afresh meanwhile.
+   * afresh meanwhile. A layer naming no picture draws nothing, as the game draws its empty picture; one whose stage
+   * names none draws its stage as nothing, the particles living on unseen.
    * @param {TextureSource | null} images Where the project's pictures come from.
    */
   #loadPictures(images: TextureSource | null): void
@@ -216,16 +231,18 @@ class MapWeather implements WeatherDrawing
     const generation = this.#generation;
     this.#layers.forEach(shown =>
     {
-      if (images === null)
+      const { layer } = shown.field;
+      const own = pictureName(layer.asset);
+      if (images === null || own === null)
       {
-        shown.problem = 'no pictures to draw with';
+        shown.problem = images === null ? 'no pictures to draw with' : 'it names no picture, so it draws nothing, as in the game';
         return;
       }
 
-      const { layer } = shown.field;
-      const becomes = layer.becomes === null || layer.becomes.asset === layer.asset ? null : layer.becomes.asset;
-      Promise.all([ images.image('weather', layer.asset), becomes === null ? Promise.resolve(null) : images.image('weather', becomes) ])
-        .then(([ first, second ]) => this.#fit(shown, generation, first, second, layer))
+      const stage = layer.becomes === null ? null : pictureName(layer.becomes.asset);
+      const separate = stage !== null && stage !== own;
+      Promise.all([ images.image('weather', own), separate ? images.image('weather', stage) : Promise.resolve(null) ])
+        .then(([ first, second ]) => this.#fit(shown, generation, { own, stage }, first, separate ? second : first))
         .catch((error: unknown) =>
         {
           shown.problem = `its pictures could not be loaded: ${String(error)}`;
@@ -234,14 +251,15 @@ class MapWeather implements WeatherDrawing
   }
 
   /**
-   * Fits one layer with its pictures, once they have arrived, so its particles draw from the next tick.
+   * Fits one layer with its pictures, once they have arrived, so its particles draw from the next tick. A stage whose
+   * picture the project lacks draws as nothing, and says so.
    * @param {ShownLayer} shown The layer.
    * @param {number} generation The build the pictures were asked for by.
+   * @param {{ own: string, stage: string | null }} names The layer's picture and its stage's, null for none.
    * @param {TextureImage | null} first The layer's own picture, or null when the project lacks it.
-   * @param {TextureImage | null} second What its particles turn into, or null for nothing else.
-   * @param {WeatherLayer} layer The layer's motion.
+   * @param {TextureImage | null} second Its stage's picture, the layer's own when they share one, or null.
    */
-  #fit(shown: ShownLayer, generation: number, first: TextureImage | null, second: TextureImage | null, layer: WeatherLayer): void
+  #fit(shown: ShownLayer, generation: number, names: { own: string; stage: string | null }, first: TextureImage | null, second: TextureImage | null): void
   {
     // a weather built afresh since has let this layer go.
     if (generation !== this.#generation)
@@ -251,21 +269,16 @@ class MapWeather implements WeatherDrawing
 
     if (first === null)
     {
-      shown.problem = `img/weather/${layer.asset}.png is missing`;
+      shown.problem = `img/weather/${names.own}.png is missing`;
       return;
     }
 
-    // a stage drawn with a picture of its own needs that picture too.
-    const { becomes } = layer;
-    const ownStage = becomes !== null && becomes.asset !== layer.asset;
-    if (ownStage && second === null)
+    if (names.stage !== null && second === null)
     {
-      shown.problem = `img/weather/${becomes.asset}.png is missing`;
-      return;
+      shown.problem = `img/weather/${names.stage}.png is missing`;
     }
 
-    const stagePicture = becomes === null ? null : (second ?? first);
-    shown.pictures = layerPicturesFor(first, stagePicture, this.#makeCanvas);
+    shown.pictures = layerPicturesFor(first, names.stage === null ? null : second, this.#makeCanvas);
     shown.container.texture = shown.pictures.first;
     this.#picturesArrived = true;
   }
@@ -354,7 +367,7 @@ class MapWeather implements WeatherDrawing
   }
 
   /**
-   * Puts one particle's look on its sprite.
+   * Puts one particle's look on its sprite; a particle in a stage with no picture of its own draws as nothing.
    * @param {Particle} sprite The sprite.
    * @param {WeatherParticle} particle The particle.
    * @param {WeatherLayer} params The motion it lives by now.
@@ -367,8 +380,9 @@ class MapWeather implements WeatherDrawing
     sprite.rotation = particle.rotation;
     sprite.scaleX = particle.scaleX * Math.cos(particle.flipPhase);
     sprite.scaleY = particle.scaleY;
+    const unseenStage = particle.stage > 0 && pictures.second === null;
     sprite.texture = particle.stage === 0 || pictures.second === null ? pictures.first : pictures.second;
-    const opacity = particle.stagger > 0 ? 0 : glowFor(particle, params);
+    const opacity = particle.stagger > 0 || unseenStage ? 0 : glowFor(particle, params);
     sprite.alpha = Math.min(Math.max(opacity, 0), 255) / 255;
   }
 
@@ -406,7 +420,7 @@ class MapWeather implements WeatherDrawing
   #rectOf(frame: WeatherFrame): WorldRect | null
   {
     const { document, view } = frame;
-    const tileSize = this.#stage.tileSize;
+    const { tileSize } = this.#stage;
     return weatherRectFor(view, document.width * tileSize, document.height * tileSize);
   }
 
@@ -423,8 +437,8 @@ class MapWeather implements WeatherDrawing
     const sizeOf = (texture: { readonly frame: { readonly width: number; readonly height: number } } | null) =>
       (texture === null ? null : [ texture.frame.width, texture.frame.height ]);
     return {
-      asset: layer.asset,
-      becomesAsset: layer.becomes === null ? null : layer.becomes.asset,
+      asset: layer.asset ?? null,
+      becomesAsset: layer.becomes === null ? null : layer.becomes.asset ?? null,
       blend: shown.container.blendMode,
       tint: layer.tint ?? null,
       pictureSize: pictures === null ? null : sizeOf(pictures.first),
@@ -455,4 +469,4 @@ class MapWeather implements WeatherDrawing
   }
 }
 
-export { BLENDS, MapWeather, MOST_STEPS_A_TICK, weatherRectFor };
+export { BLENDS, MapWeather, MOST_STEPS_A_TICK, pictureName, weatherRectFor };

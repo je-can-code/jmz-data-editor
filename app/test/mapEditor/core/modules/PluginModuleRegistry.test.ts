@@ -12,8 +12,8 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * The core editor works on any MZ project; each plugin's awareness is its own module, switched on only when that
  * plugin is enabled in js/plugins.js. The registry owes the editor exactly that: a module whose plugin is off (or
  * missing, or only a near namesake like J-ABS-Metrics) contributes nothing, a module that is on contributes its
- * kinds, palette entries, passability rules, overlays, lighting layers, command entries, notices and Map Properties
- * sections, a module can never claim a core kind, and the core's own kinds are on in every project. When several kinds recognise one event, the
+ * kinds, palette entries, passability rules, overlays, lighting layers, weather layers, command entries, notices and Map
+ * Properties sections, a module can never claim a core kind, and the core's own kinds are on in every project. When several kinds recognise one event, the
  * higher priority wins, since a battler is also a comment-only event. A map an active module copies its events from,
  * such as J-ABS's action map, holds the plugin's patterns, so no kind claims an event there. Every activation is
  * announced, since modules switch on after the views that show kinds have drawn.
@@ -97,6 +97,7 @@ describe('PluginModuleRegistry', () =>
       contributions.passabilityRule({ id: 'jabs.blocked', title: 'Blocked', deny: () => null });
       contributions.overlay({ id: 'jabs.pursuit', title: `Pursuit (${context.plugins.get('J-ABS')?.parameters['actionMapId']})`, defaultOn: false, draw: () => undefined });
       contributions.lightingLayer({ id: 'jabs.glow', title: 'Glow', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) });
+      contributions.weatherLayer({ id: 'jabs.dust', title: 'Dust', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) });
       contributions.catalogEntry(pluginCommandEntry({ plugin: 'J-ABS', command: 'spawn', args: [] }));
       contributions.notice({ id: 'jabs.config', title: 'Battlers fight as their database says.', detail: 'Their config was not read.' });
       contributions.mapProperties({ id: 'jabs.map', title: 'Battles', source: () => ({ note: null, fields: [] }) });
@@ -123,6 +124,7 @@ describe('PluginModuleRegistry', () =>
       registry.overlays().map(overlay => overlay.id),
       registry.overlays()[0].title,
       registry.lightingLayers().map(layer => layer.id),
+      registry.weatherLayers().map(layer => layer.id),
       catalog.entry('plugin:J-ABS:spawn')?.name,
       registry.notices().map(notice => notice.id),
       registry.mapPropertiesSections().map(section => section.id),
@@ -136,6 +138,7 @@ describe('PluginModuleRegistry', () =>
         [ 'jabs.pursuit', 'jabs.sight' ],
         'Pursuit (2)',
         [ 'jabs.glow' ],
+        [ 'jabs.dust' ],
         'Plugin: spawn',
         [ 'jabs.config' ],
         [ 'jabs.map' ],
@@ -184,11 +187,12 @@ describe('PluginModuleRegistry', () =>
       registry.eventKinds().map(kind => kind.id),
       registry.overlays(),
       registry.lightingLayers(),
+      registry.weatherLayers(),
       catalog.entry('plugin:J-ABS:spawn'),
       registry.notices(),
       registry.mapPropertiesSections(),
     ])
-      .toStrictEqual([ false, [ 'core.decor' ], [], [], null, [], [] ]);
+      .toStrictEqual([ false, [ 'core.decor' ], [], [], [], null, [], [] ]);
   });
 
   it('hands a module each config it names as it was read, null for one that was not, and no other module\'s', () =>
@@ -327,6 +331,12 @@ describe('PluginModuleRegistry', () =>
       { id: 'g', title: 'G', plugins: [], register: add => add.mapProperties({ id: 'core.x', title: 'x', source: () => ({ note: null, fields: [] }) }) },
       { id: 'h', title: 'H', plugins: [], register: add => add.pageCondition({ id: 'core.x', read: () => null }) },
       { id: 'i', title: 'I', plugins: [], register: add => add.previewKind({ ...previewKind('quest'), id: 'quest.states' }) },
+      {
+        id: 'j',
+        title: 'J',
+        plugins: [],
+        register: add => add.weatherLayer({ id: 'core.x', title: 'x', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) }),
+      },
     ];
 
     // Act.
@@ -351,6 +361,8 @@ describe('PluginModuleRegistry', () =>
       .toThrow('h can only add page conditions whose id starts with "h.", not core.x');
     expect(failures[8])
       .toThrow('i can only add preview kinds whose id starts with "i.", not quest.states');
+    expect(failures[9])
+      .toThrow('j can only add weather layers whose id starts with "j.", not core.x');
   });
 
   describe('enabledPlugins', () =>
