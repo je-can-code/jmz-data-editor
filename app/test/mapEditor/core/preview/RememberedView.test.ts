@@ -15,15 +15,17 @@ import { WindowPreview } from '../../../../src/mapEditor/core/preview/WindowPrev
 import { WindowClock } from '../../../../src/mapEditor/core/time/WindowClock.ts';
 
 /*
- * The clock's time and the preview are remembered between sessions, for each project on this machine, and shared live
- * by every window: a window coming up takes what its project left, every change made in one window is written for the
- * next session and for every other window, and every other window takes it at once, without writing it back, so no two
- * windows ever echo one change between them. Only what the author chose is kept: a clock still following the game's
- * starting time keeps no time, so a game whose start moves starts there. Whatever kind of state a plugin module lets the
- * preview set, such as where each quest stands, is kept and shared exactly as the module set it, unread.
+ * The clock's time, its season and the preview are remembered between sessions, for each project on this machine, and
+ * shared live by every window: a window coming up takes what its project left, every change made in one window is
+ * written for the next session and for every other window, and every other window takes it at once, without writing it
+ * back, so no two windows ever echo one change between them. Only what the author chose is kept: a clock still following
+ * the game's starting time keeps no time, and one still in the season the game starts in keeps no season, so a game
+ * whose start moves starts there. Whatever kind of state a plugin module lets the preview set, such as where each quest
+ * stands, is kept and shared exactly as the module set it, unread.
  *
- * What is kept is read leniently: anything that cannot be used, from text that is no JSON to a clock time no day holds,
- * reads as nothing set and the clock following the game, never as a reason the editor will not start.
+ * What is kept is read leniently: anything that cannot be used, from text that is no JSON to a clock time no day holds
+ * or a season that is no whole number, reads as nothing set and the clock following the game, never as a reason the
+ * editor will not start; text kept before the clock had seasons reads as no season picked.
  *
  * In the page it is kept in the window's local storage under the project's own name, and another window's write arrives
  * as a storage event; storage the browser refuses keeps nothing, and the editor carries on.
@@ -81,17 +83,18 @@ describe('RememberedView', () =>
   {
     it('reads back what was written', () =>
     {
-      // Arrange: 22:00, switch 147 on and variable 74 at 99.
-      const text = writeRemembered({ clock: 1320, preview: GamePreview.FRESH.withSwitch(147, true).withVariable(74, 99) });
+      // Arrange: 22:00 in Summer, switch 147 on and variable 74 at 99.
+      const text = writeRemembered({ clock: 1320, season: 1, preview: GamePreview.FRESH.withSwitch(147, true).withVariable(74, 99) });
 
       // Act.
       const state = readRemembered(text);
 
       // Assert.
-      expect([ text, state.clock, state.preview.toJson() ])
+      expect([ text, state.clock, state.season, state.preview.toJson() ])
         .toStrictEqual([
-          '{"version":1,"clock":1320,"preview":{"switch":{"147":true},"variable":{"74":99}}}',
+          '{"version":1,"clock":1320,"season":1,"preview":{"switch":{"147":true},"variable":{"74":99}}}',
           1320,
+          1,
           { switch: { 147: true }, variable: { 74: 99 } },
         ]);
     });
@@ -105,8 +108,21 @@ describe('RememberedView', () =>
       const states = texts.map(readRemembered);
 
       // Assert.
-      expect(states.every(state => state.clock === null && state.preview === GamePreview.FRESH))
+      expect(states.every(state => state.clock === null && state.season === null && state.preview === GamePreview.FRESH))
         .toBe(true);
+    });
+
+    it('keeps only a season that is a whole number from 0, and none from text kept before the clock had seasons', () =>
+    {
+      // Arrange: Spring, Winter, below Spring, half a season, text, nothing picked, and no season kept at all.
+      const kept = [ { season: 0 }, { season: 3 }, { season: -1 }, { season: 1.5 }, { season: '1' }, { season: null }, {} ];
+
+      // Act.
+      const read = kept.map(each => readRemembered(JSON.stringify({ version: 1, clock: null, ...each, preview: {} })).season);
+
+      // Assert.
+      expect(read)
+        .toStrictEqual([ 0, 3, null, null, null, null, null ]);
     });
 
     it('keeps only a clock time a day holds, as a whole minute', () =>
@@ -143,6 +159,31 @@ describe('RememberedView', () =>
         .toStrictEqual([ 1320, true, [ 147 ] ]);
     });
 
+    it('brings back the season the author picked last session, keeping none while the clock stays in the game\'s own', () =>
+    {
+      // Arrange: a session that only moved the clock to 22:00, closed; then one that picked Summer, closed.
+      const storage = new MemoryStorage();
+      const first = buildWindow(storage);
+      first.clock.set(1320);
+      const unpicked = storage.text;
+      first.detach();
+      const second = buildWindow(storage);
+      second.clock.chooseSeason(1);
+      second.detach();
+
+      // Act: the next session's first window.
+      const next = buildWindow(storage);
+
+      // Assert.
+      expect([ unpicked, storage.text, next.clock.season(), next.clock.time() ])
+        .toStrictEqual([
+          '{"version":1,"clock":1320,"season":null,"preview":{}}',
+          '{"version":1,"clock":1320,"season":1,"preview":{}}',
+          1,
+          1320,
+        ]);
+    });
+
     it('leaves the clock following the game and the preview fresh when nothing is kept, keeping nothing for it', () =>
     {
       // Arrange.
@@ -153,24 +194,25 @@ describe('RememberedView', () =>
       window.clock.startAt(840);
 
       // Assert.
-      expect([ window.clock.time(), window.clock.moved, window.preview.preview(), storage.text ])
-        .toStrictEqual([ 840, false, GamePreview.FRESH, null ]);
+      expect([ window.clock.time(), window.clock.moved, window.clock.season(), window.preview.preview(), storage.text ])
+        .toStrictEqual([ 840, false, null, GamePreview.FRESH, null ]);
     });
 
     it('keeps what a window set before it knew its project, when nothing was kept yet', () =>
     {
-      // Arrange: switch 24 turned on before the window's store is known.
+      // Arrange: switch 24 turned on and Autumn picked before the window's store is known.
       const storage = new MemoryStorage();
       const clock = new WindowClock();
       const preview = new WindowPreview();
       preview.setSwitch(24, true);
+      clock.chooseSeason(2);
 
       // Act.
       new RememberedView(clock, preview).attach(storage.open());
 
       // Assert.
       expect([ preview.preview().switchesOn(), storage.text ])
-        .toStrictEqual([ [ 24 ], '{"version":1,"clock":null,"preview":{"switch":{"24":true}}}' ]);
+        .toStrictEqual([ [ 24 ], '{"version":1,"clock":null,"season":2,"preview":{"switch":{"24":true}}}' ]);
     });
 
     it('keeps no time for a clock following the game\'s starting time, and the time once the author moves it', () =>
@@ -190,8 +232,8 @@ describe('RememberedView', () =>
       expect([ followed, switched, storage.text ])
         .toStrictEqual([
           null,
-          '{"version":1,"clock":null,"preview":{"switch":{"24":true}}}',
-          '{"version":1,"clock":1080,"preview":{"switch":{"24":true}}}',
+          '{"version":1,"clock":null,"season":null,"preview":{"switch":{"24":true}}}',
+          '{"version":1,"clock":1080,"season":null,"preview":{"switch":{"24":true}}}',
         ]);
     });
 
@@ -207,14 +249,15 @@ describe('RememberedView', () =>
         writes += 1;
       });
 
-      // Act: switch 74 on and the clock at 19:00 in the first, variable 74 at 99 in the second.
+      // Act: switch 74 on and the clock at 19:00 in the first, variable 74 at 99 and Spring in the second.
       first.preview.setSwitch(74, true);
       first.clock.set(1140);
       second.preview.setVariable(74, 99);
+      second.clock.chooseSeason(0);
 
       // Assert: each change written once, and both windows on one clock and one preview.
-      expect([ writes, second.clock.time(), second.preview.preview().switchesOn(), first.preview.preview().variable(74) ])
-        .toStrictEqual([ 3, 1140, [ 74 ], 99 ]);
+      expect([ writes, second.clock.time(), first.clock.season(), second.preview.preview().switchesOn(), first.preview.preview().variable(74) ])
+        .toStrictEqual([ 4, 1140, 0, [ 74 ], 99 ]);
     });
 
     it('keeps a module\'s kind for the next session and shares it live with every other window, as the module set it', () =>
@@ -234,7 +277,7 @@ describe('RememberedView', () =>
       // Assert.
       expect([ storage.text, shared, next.preview.preview().value('quest.states', 'cecil-001') ])
         .toStrictEqual([
-          '{"version":1,"clock":null,"preview":{"quest.states":{"cecil-001":{"objectives":{"1":"active"}}}}}',
+          '{"version":1,"clock":null,"season":null,"preview":{"quest.states":{"cecil-001":{"objectives":{"1":"active"}}}}}',
           { objectives: { 1: 'active' } },
           { objectives: { 1: 'active' } },
         ]);
@@ -271,7 +314,7 @@ describe('RememberedView', () =>
 
       // Assert.
       expect([ second.preview.preview().switchesOn(), storage.text ])
-        .toStrictEqual([ [ 9 ], '{"version":1,"clock":null,"preview":{"switch":{"74":true}}}' ]);
+        .toStrictEqual([ [ 9 ], '{"version":1,"clock":null,"season":null,"preview":{"switch":{"74":true}}}' ]);
     });
   });
 

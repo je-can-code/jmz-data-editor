@@ -55,6 +55,7 @@ const stand = vi.hoisted(() => ({
     pageRules: PageRule[];
     shown: (boolean | 'mount')[];
     times: number[];
+    seasons: (number | null)[];
     previews: GamePreview[];
     announce: (state: string) => void;
     zoomTo: (zoom: number) => void;
@@ -82,6 +83,7 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       pageRules: [] as PageRule[],
       shown: [] as (boolean | 'mount')[],
       times: [] as number[],
+      seasons: [] as (number | null)[],
       previews: [] as GamePreview[],
       announce: (state: string) =>
       {
@@ -179,6 +181,11 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
     setTimeOfDay(minutes: number): void
     {
       this.record.times.push(minutes);
+    }
+
+    setSeason(season: number | null): void
+    {
+      this.record.seasons.push(season);
     }
 
     setPageRule(rule: PageRule): void
@@ -282,9 +289,10 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * holds the weather still with everything else that moves.
  *
  * The bar shows the window's clock only while a module offers one, naming the time and the part of the day as the
- * module names it, and the renderer is handed the clock's time from the start and every time it moves, wherever it was
- * moved from, so every view of the window draws the sky at the same hour. With every module the editor ships on, the one
- * clock is J-TIME's, J-Lighting-Time casting its sky by it, and the bar shows one chip.
+ * module names it, and the season when the module's calendar has them; the renderer is handed the clock's time and its
+ * season from the start and every time either moves, wherever it was moved from, so every view of the window draws the
+ * sky at the same hour and judges every page on the same date. With every module the editor ships on, the one clock is
+ * J-TIME's, J-Lighting-Time casting its sky by it, and the bar shows one chip.
  *
  * The renderer is handed the window's page rule from the start, and again whenever it changes, as the modules switch
  * on or the new game is read, so every event shows the page a fresh save would show at the clock's time; and the
@@ -1036,13 +1044,13 @@ describe('MapView', () =>
   it('shows one clock, J-TIME\'s, with J-Lighting and J-Lighting-Time on beside it, its pages joining the page rule', () =>
   {
     // Arrange: the modules the editor ships, switched on over J-Lighting, J-Lighting-Time and J-TIME, the game starting
-    // at 14:00.
+    // at 14:00 on 16 December 2026, in Winter.
     const plugin = (name: string, parameters: Record<string, string> = {}): PluginsJsEntry => ({ name, status: true, description: '', parameters });
     const modules = new PluginModuleRegistry(new CommandCatalog());
     modules.activate(SHIPPED_MODULES, [
       plugin('j/lighting/J-Lighting'),
       plugin('j/lighting/ext/J-Lighting-Time'),
-      plugin('j/time/J-TIME', { useRealTime: 'false', startingHour: '14', startingMinute: '0' }),
+      plugin('j/time/J-TIME', { useRealTime: 'false', startingHour: '14', startingMinute: '0', startingDay: '16', startingMonth: '12', startingYear: '2026' }),
     ]);
     const services = { ...served(), modules, pages: new WindowPageRule(modules) } as unknown as MapEditorServices;
 
@@ -1055,7 +1063,7 @@ describe('MapView', () =>
 
     // Assert.
     expect([ screen.getAllByTestId('map-clock').map(chip => chip.textContent), stand.renderers[0].pageRules[0].conditions.map(condition => condition.id) ])
-      .toStrictEqual([ [ '14:00 Afternoon' ], [ 'time.pages' ] ]);
+      .toStrictEqual([ [ '14:00 Afternoon · Winter' ], [ 'time.pages' ] ]);
   });
 
   it('hands the renderer the clock\'s time from the start and each time it moves, wherever it was moved from', () =>
@@ -1076,6 +1084,26 @@ describe('MapView', () =>
     // Assert.
     expect(stand.renderers.map(renderer => renderer.times))
       .toStrictEqual([ [ 840, 1320, 120 ], [ 840, 1320, 120 ] ]);
+  });
+
+  it('hands the renderer the clock\'s season from the start and each time it is picked, wherever it was picked', () =>
+  {
+    // Arrange: two views of one window, the clock in the season the game starts in.
+    const services = served();
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+        <MapView mapId={6}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: Summer picked, then Autumn, as the chip in either view picks them.
+    act(() => services.clock.chooseSeason(1));
+    act(() => services.clock.chooseSeason(2));
+
+    // Assert.
+    expect(stand.renderers.map(renderer => renderer.seasons))
+      .toStrictEqual([ [ null, 1, 2 ], [ null, 1, 2 ] ]);
   });
 
   it('hands every view the window\'s preview from the start and each time it changes, wherever it was changed', () =>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { conditionalOf, tagsHold } from '../../../../src/mapEditor/modules/time/timeConditionals.ts';
-import { snapshotAt, type StartingDate } from '../../../../src/mapEditor/modules/time/timeSnapshot.ts';
+import { snapshotAt, type GameDate } from '../../../../src/mapEditor/modules/time/timeSnapshot.ts';
 import { readTimeTag, type TimeTag } from '../../../../src/mapEditor/modules/time/timeTags.ts';
 
 /*
@@ -26,7 +26,7 @@ describe('timeConditionals', () =>
   /**
    * Chef Adventure's new game: 16 December 2026, at the top of the minute.
    */
-  const START: StartingDate = { seconds: 0, days: 16, months: 12, years: 2026 };
+  const START: GameDate = { seconds: 0, days: 16, months: 12, years: 2026 };
 
   /**
    * Reads a tag that is certainly one.
@@ -39,10 +39,10 @@ describe('timeConditionals', () =>
    * Judges one tag at a time of day on a date.
    * @param {string} line The tag.
    * @param {string} clock The time, such as {@code 18:00} or {@code 18:00:30}.
-   * @param {StartingDate} date The date and second, the second overridden by the clock's when it names one.
+   * @param {GameDate} date The date and second, the second overridden by the clock's when it names one.
    * @returns {boolean} True when it holds.
    */
-  const holdsAt = (line: string, clock: string, date: StartingDate = START): boolean =>
+  const holdsAt = (line: string, clock: string, date: GameDate = START): boolean =>
   {
     const [ hours, minutes, seconds ] = clock.split(':').map(Number);
     const at = snapshotAt({ ...date, seconds: seconds ?? date.seconds }, hours * 60 + minutes);
@@ -291,7 +291,7 @@ describe('timeConditionals', () =>
     it('holds a year range from the first second of its first year until its last year begins', () =>
     {
       // Arrange: 2020 until 2030; 2027 until 2030; 2026 until 2027 at the first second of 2026, and at noon on the 1st.
-      const newYear: StartingDate = { seconds: 0, days: 1, months: 1, years: 2026 };
+      const newYear: GameDate = { seconds: 0, days: 1, months: 1, years: 2026 };
 
       // Act.
       const held = [
@@ -309,8 +309,8 @@ describe('timeConditionals', () =>
     it('reads a day past the end of its month as the next month\'s, and a year under 100 as 1900 and on, as the game\'s dates do', () =>
     {
       // Arrange: the 31st of April 2026, which the game's dates read as the 1st of May; and the year 26, read as 1926.
-      const april31: StartingDate = { seconds: 0, days: 31, months: 4, years: 2026 };
-      const year26: StartingDate = { seconds: 0, days: 16, months: 12, years: 26 };
+      const april31: GameDate = { seconds: 0, days: 31, months: 4, years: 2026 };
+      const year26: GameDate = { seconds: 0, days: 16, months: 12, years: 26 };
 
       // Act.
       const held = [

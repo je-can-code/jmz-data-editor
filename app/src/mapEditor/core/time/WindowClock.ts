@@ -6,14 +6,18 @@ import { onTheClock } from './timeOfDay.ts';
 type ClockListener = () => void;
 
 /**
- * The time of day one window shows, which every map view in it reads: the sky over each map is drawn at this hour,
- * whichever view shows it, torn-out windows included, so two maps side by side never show two different hours. Nothing
- * in the game's files holds it; it is the author's own, to see a map as it looks at any hour.
+ * The time of day one window shows, and the season, which every map view in it reads: the sky over each map is drawn at
+ * this hour, and each event's page judged at this hour and season, whichever view shows it, torn-out windows included,
+ * so two maps side by side never show two different moments. Nothing in the game's files holds either; they are the
+ * author's own, to see a map as it looks at any hour of any season.
  *
  * - {@link time} reads the time, in minutes past midnight. It is a plain number, so it can be handed straight to React's
  *   {@code useSyncExternalStore} along with {@link subscribe}.
- * - {@link subscribe} hears every move, and returns the call that stops listening.
- * - {@link set} moves the clock, as the author does.
+ * - {@link season} reads the season the author picked, likewise, or null while the clock stays in the season the game
+ *   starts in. The clock only holds it: what a season means, the date it moves the game's calendar to, is the business
+ *   of the module that offers the clock.
+ * - {@link subscribe} hears every move, of the time or the season, and returns the call that stops listening.
+ * - {@link set} moves the clock, as the author does, and {@link chooseSeason} picks its season.
  * - {@link startAt} sets the time the game itself starts at, which the clock follows until the author first moves it:
  *   a starting time read again later, say from a plugin list changed on disk, never takes back the hour the author
  *   chose.
@@ -23,6 +27,8 @@ class WindowClock
   #minutes: number;
 
   #moved = false;
+
+  #season: number | null = null;
 
   #listeners = new Set<ClockListener>();
 
@@ -44,6 +50,16 @@ class WindowClock
   };
 
   /**
+   * Reads the season the author picked, here or in another window.
+   * @returns {number | null} The season, as the module offering the clock numbers them, or null while the clock stays in
+   * the season the game starts in.
+   */
+  season = (): number | null =>
+  {
+    return this.#season;
+  };
+
+  /**
    * Whether the author has moved the clock, here or in another window, so it no longer follows the time the game starts
    * at: only an hour the author chose is worth remembering.
    * @returns {boolean} True once moved.
@@ -54,7 +70,7 @@ class WindowClock
   }
 
   /**
-   * Listens for every move of the clock.
+   * Listens for every move of the clock, of its time or its season.
    * @param {ClockListener} listener Called after each move.
    * @returns {() => void} Stops listening.
    */
@@ -75,6 +91,23 @@ class WindowClock
   {
     this.#moved = true;
     this.#moveTo(minutes);
+  }
+
+  /**
+   * Picks the clock's season, as the author does, and tells the listeners when that changed it. Once picked, the season
+   * is the author's, even the one the game starts in: a game whose start moves to another season later keeps the season
+   * picked here.
+   * @param {number} season The season, as the module offering the clock numbers them.
+   */
+  chooseSeason(season: number): void
+  {
+    if (season === this.#season)
+    {
+      return;
+    }
+
+    this.#season = season;
+    this.#listeners.forEach(listener => listener());
   }
 
   /**
