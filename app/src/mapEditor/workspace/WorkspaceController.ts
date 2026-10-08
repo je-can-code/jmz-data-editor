@@ -1,4 +1,5 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
+import { blueprintsKeptGuard } from '../core/blueprints/blueprintMoves.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../core/blueprints/blueprints.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
@@ -213,7 +214,10 @@ class WorkspaceController
     this.tree = services.api === null
       ? null
       : new MapTreeService({ hub: services.hub, api: services.api, openDocument: key => services.openDocument(key) });
-    this.router = new HistoryRouter(services.hub, this.tree);
+
+    // no undo, redo or jump takes away a blueprint whose copies still name it.
+    const blueprintsKept = blueprintsKeptGuard(services.hub, services.blueprintCopies, mapId => this.mapName(mapId));
+    this.router = new HistoryRouter(services.hub, this.tree, blueprintsKept);
     this.layouts = new LayoutStore({ api: services.api });
 
     // a map the window lets go of, such as one deleted from the tree, takes its selected events with it, so the

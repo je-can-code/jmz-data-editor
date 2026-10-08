@@ -195,8 +195,9 @@ const sameCounts = (left: ReadonlyMap<string, BlueprintCopyCount>, right: Readon
  *   since changes made while it was down were never announced. The server keeps each map's reading until its file
  *   changes, so reading again costs one map.
  *
- * Nothing is read until something first listens, which only the Blueprints section of the Stamps panel does, so a window
- * that never shows the count never asks the server for it. Until the server's first answer the count is still being
+ * Nothing is read until something first listens, which only the Blueprints section of the Stamps panel does, or until an
+ * undo or a redo that would take a blueprint away must know its count, so a window that never shows the count and never
+ * takes a blueprint away never asks the server for it. Until the server's first answer the count is still being
  * worked out, and a count that could not be had says so: neither is ever taken for a blueprint having no copies. Nor is
  * the count shown while a reading asked for after a map's file changed is on its way: the cards keep it, but no one
  * blueprint's count is handed out (see {@link countOf}), since a delete trusting it could miss a copy just saved.
@@ -263,7 +264,7 @@ class BlueprintCopyCounter
   subscribe = (listener: () => void): (() => void) =>
   {
     this.#listeners.add(listener);
-    this.#start();
+    this.start();
     return () =>
     {
       this.#listeners.delete(listener);
@@ -338,18 +339,11 @@ class BlueprintCopyCounter
   }
 
   /**
-   * Stops following the window's documents; a reading on its way still lands.
+   * Starts counting, once: following the maps this window holds, and asking the server for the rest. The first listener
+   * starts it, and so does whatever must know a count before anything listens, such as an undo that would take a
+   * blueprint away; asked again, it does nothing.
    */
-  stop(): void
-  {
-    this.#stopHub?.();
-    this.#stopHub = null;
-  }
-
-  /**
-   * Starts counting, once: following the maps this window holds, and asking the server for the rest.
-   */
-  #start(): void
+  start(): void
   {
     if (this.#started)
     {
@@ -360,6 +354,15 @@ class BlueprintCopyCounter
     this.#stopHub = this.#hub.subscribe(() => this.#followHeld());
     this.#followHeld();
     this.readAgain();
+  }
+
+  /**
+   * Stops following the window's documents; a reading on its way still lands.
+   */
+  stop(): void
+  {
+    this.#stopHub?.();
+    this.#stopHub = null;
   }
 
   /**

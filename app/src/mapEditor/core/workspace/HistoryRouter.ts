@@ -1,5 +1,6 @@
-import type { DocumentHub, HistoryFailure } from '../history/DocumentHub.ts';
+import type { DocumentHub, HistoryCheck, HistoryFailure } from '../history/DocumentHub.ts';
 import { TREE_HISTORY_KEY, type HistoryKey } from '../history/historyKeys.ts';
+import type { HistoryStep } from '../history/HistoryStep.ts';
 import type { MapTreeService, TreeOutcome } from '../tree/MapTreeService.ts';
 import { documentLabel } from '../../views/documentLabels.ts';
 
@@ -17,6 +18,13 @@ type HistoryOutcome =
  * Which way a history moves.
  */
 type Direction = 'backward' | 'forward';
+
+/**
+ * Says why one step must not move one way, for a reason the hub's own checks know nothing of, or null when nothing beyond
+ * them stands in its way: taking away a blueprint something is still a copy of, say. Asked of every step the hub would
+ * move, whatever its history, just before it moves, so it must change nothing.
+ */
+type MoveGuard = (step: HistoryStep, direction: Direction) => string | null;
 
 /**
  * Words the hub's refusal for the author.
@@ -73,6 +81,10 @@ const fromTreeOutcome = (outcome: TreeOutcome): HistoryOutcome =>
  * whole map files, which only the tree service writes, so the tree history always goes there; every other history
  * (a map's, an event's, a blueprint's) is the hub's alone. Ctrl+Z, Ctrl+Y and every click on a history panel row go
  * through here, and nothing else moves a history.
+ *
+ * A step the hub would move may still be refused by the window's guard, for what moving it would do beyond the hub's
+ * knowing: an undo that would take away a blueprint its copies still name. Such a refusal is worded and reported as one a
+ * later edit blocks, the step named as stuck, and a jump stops at it as it stops at any step that cannot move.
  */
 class HistoryRouter
 {
@@ -80,14 +92,18 @@ class HistoryRouter
 
   #tree: MapTreeService | null;
 
+  #guard: MoveGuard | null;
+
   /**
    * @param {DocumentHub} hub The window's documents and histories.
    * @param {MapTreeService | null} tree The tree service, or null when the window has no server to write through.
+   * @param {MoveGuard | null} guard What every step the hub would move must also pass, or null for nothing more.
    */
-  constructor(hub: DocumentHub, tree: MapTreeService | null)
+  constructor(hub: DocumentHub, tree: MapTreeService | null, guard: MoveGuard | null = null)
   {
     this.#hub = hub;
     this.#tree = tree;
+    this.#guard = guard;
   }
 
   /**
@@ -123,12 +139,7 @@ class HistoryRouter
       return fromTreeOutcome(await this.#requireTree().jumpTo(stepId));
     }
 
-    // a jump to an undone step redoes its way there; any other jump undoes.
-    const forward = this.#hub.history(key).rows.some(row => row.id === stepId && row.done === false);
-    const result = this.#hub.jumpTo(key, stepId);
-    return result.ok
-      ? { ok: true }
-      : fromHubFailure(result, forward ? 'forward' : 'backward');
+    return this.#jumpOnHub(key, stepId);
   }
 
   /**
@@ -164,12 +175,75 @@ class HistoryRouter
       return fromTreeOutcome(direction === 'backward' ? await tree.undo() : await tree.redo());
     }
 
+    return this.#moveOnHub(key, direction, check);
+  }
+
+  /**
+   * Undoes or redoes a hub history's head step once, unless the guard refuses what moving it would do, which it is asked
+   * only once the hub would move the step: a step the hub refuses is the hub's to word.
+   * @param {HistoryKey} key The history.
+   * @param {Direction} direction Which way.
+   * @param {HistoryCheck} check The hub's answer to whether it can move that way, asked just now.
+   * @returns {HistoryOutcome} What it came to.
+   */
+  #moveOnHub(key: HistoryKey, direction: Direction, check: HistoryCheck): HistoryOutcome
+  {
+    // the guard's refusal reads as a blocked step's does, the step named as stuck, so the history panel can say why.
+    if (check.ok && this.#guard !== null)
+    {
+      const refusal = this.#guard(check.step, direction);
+      if (refusal !== null)
+      {
+        const verb = direction === 'backward' ? 'undone' : 'redone';
+        return { ok: false, nothing: false, message: `"${check.step.label}" cannot be ${verb}: ${refusal}.`, stuckStepId: check.step.id };
+      }
+    }
+
     const moved = direction === 'backward'
       ? this.#hub.undo(key)
       : this.#hub.redo(key);
     return moved.ok
       ? { ok: true }
       : fromHubFailure(moved, direction);
+  }
+
+  /**
+   * Moves a hub history to just after one of its steps one undo or redo at a time, each through the same checks as a
+   * keypress's, so the jump stops at the first step that cannot move, the guard's refusals included, having moved every
+   * step before it. Nothing else can move the history between two of its moves, as they follow one another at once.
+   * @param {HistoryKey} key The history.
+   * @param {string | null} stepId The step to end on, or null for before the first.
+   * @returns {HistoryOutcome} What it came to; a step the history does not hold is nothing to jump to.
+   */
+  #jumpOnHub(key: HistoryKey, stepId: string | null): HistoryOutcome
+  {
+    for (;;)
+    {
+      // the rows list the steps done, oldest first, then those undone, next to redo first, so the history stands just
+      // after a row once as many steps are done as come up to it.
+      const { rows, position } = this.#hub.history(key);
+      const index = stepId === null ? -1 : rows.findIndex(row => row.id === stepId);
+      if (stepId !== null && index < 0)
+      {
+        return fromHubFailure({ ok: false, reason: 'nothing', historyKey: key }, 'backward');
+      }
+
+      const target = index + 1;
+      if (position === target)
+      {
+        return { ok: true };
+      }
+
+      const direction: Direction = position > target ? 'backward' : 'forward';
+      const check = direction === 'backward'
+        ? this.#hub.canUndo(key)
+        : this.#hub.canRedo(key);
+      const moved = this.#moveOnHub(key, direction, check);
+      if (moved.ok === false)
+      {
+        return moved;
+      }
+    }
   }
 
   /**
@@ -188,4 +262,4 @@ class HistoryRouter
 }
 
 export { HistoryRouter };
-export type { HistoryOutcome };
+export type { Direction as HistoryDirection, HistoryOutcome, MoveGuard };

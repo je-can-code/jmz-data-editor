@@ -162,6 +162,32 @@ const mapsPhrase = (copies: BlueprintCopyCount, mapName: (mapId: number) => stri
 };
 
 /**
+ * Says why a blueprint must not go while copies may name it, in the words a refused delete uses: how many copies there
+ * are and on which maps, or that they are still being counted, or cannot be, since it could have copies nobody has
+ * counted yet. Whatever would take it away is refused in these words: a delete, the undo of its save, the redo of its
+ * delete.
+ * @param {string} name The blueprint's name.
+ * @param {BlueprintCopyCount | null} copies Its copies across the project, or null while they cannot be told.
+ * @param {(mapId: number) => string} mapName Names a map as the author knows it.
+ * @returns {string | null} Why, with no full stop of its own, or null when nothing is a copy of it.
+ */
+const copiesKeepIt = (name: string, copies: BlueprintCopyCount | null, mapName: (mapId: number) => string): string | null =>
+{
+  if (copies === null)
+  {
+    return `"${name}" can't be deleted until its copies have been counted`;
+  }
+
+  if (copies.total === 0)
+  {
+    return null;
+  }
+
+  const count = copies.total === 1 ? '1 copy' : `${copies.total} copies`;
+  return `"${name}" still has ${count}, on ${mapsPhrase(copies, mapName)}, so it can't be deleted`;
+};
+
+/**
  * Deletes a blueprint, as one step in its own history, but only once nothing is a copy of it: a blueprint with copies is
  * refused, saying how many there are and on which maps, since every one of them names it. So is one whose copies are
  * still being counted, or cannot be, since it could have copies nobody has counted yet.
@@ -184,15 +210,10 @@ const deleteBlueprint = (
     return { ok: false, message: BLUEPRINT_GONE };
   }
 
-  if (copies === null)
+  const kept = copiesKeepIt(blueprint.name, copies, mapName);
+  if (kept !== null)
   {
-    return { ok: false, message: `"${blueprint.name}" can't be deleted until its copies have been counted.` };
-  }
-
-  if (copies.total > 0)
-  {
-    const count = copies.total === 1 ? '1 copy' : `${copies.total} copies`;
-    return { ok: false, message: `"${blueprint.name}" still has ${count}, on ${mapsPhrase(copies, mapName)}, so it can't be deleted.` };
+    return { ok: false, message: `${kept}.` };
   }
 
   const step = hub.edit(`Delete blueprint "${blueprint.name}"`, [ blueprintHistoryKey(blueprintId) ], tx =>
@@ -216,5 +237,5 @@ const saveBlueprints = (hub: DocumentHub): Promise<EditorDataSaveOutcome> =>
   return saveEditorDocument(hub, BLUEPRINTS_DOCUMENT, 'blueprints');
 };
 
-export { deleteBlueprint, renameBlueprint, saveBlueprint, saveBlueprints };
+export { copiesKeepIt, deleteBlueprint, renameBlueprint, saveBlueprint, saveBlueprints };
 export type { BlueprintOutcome };

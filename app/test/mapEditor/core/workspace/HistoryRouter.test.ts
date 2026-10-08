@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { mapHistoryKey, TREE_HISTORY_KEY } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { MapTreeService } from '../../../../src/mapEditor/core/tree/MapTreeService.ts';
-import { HistoryRouter } from '../../../../src/mapEditor/core/workspace/HistoryRouter.ts';
+import { HistoryRouter, type MoveGuard } from '../../../../src/mapEditor/core/workspace/HistoryRouter.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
@@ -12,6 +12,12 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * history always goes to the tree service and never to the hub directly, which would move the tree without its
  * files. Every other history goes to the hub. An empty direction is a quiet failure a keypress should not nag
  * about; a step a later edit blocks is named, so the history panel can offer to forget it.
+ *
+ * A step the hub would move must also pass the window's guard, which may refuse it for what moving it would do, such as
+ * taking away a blueprint its copies still name: the refusal is worded and reported as a blocked step's is, the step
+ * named as stuck, and nothing moves. The guard is asked only about steps the hub would move, so the hub's own refusals
+ * keep their words. A jump moves one undo or redo at a time through the same checks, stopping at the first step that
+ * cannot move, having moved those before it.
  */
 describe('HistoryRouter', () =>
 {
@@ -197,6 +203,113 @@ describe('HistoryRouter', () =>
     // Assert.
     expect([ forgotten, hub.history(mapHistoryKey(1)).rows ])
       .toStrictEqual([ [ true, false ], [] ]);
+  });
+
+  /**
+   * A guard refusing every move of one step, in fixed words, and writing down every step and way it was asked about.
+   * @param {() => string | undefined} refused The id of the step it refuses, read when asked.
+   * @returns {{ guard: MoveGuard, asked: string[] }} The guard, and what it was asked, as "label way".
+   */
+  const guardRefusing = (refused: () => string | undefined) =>
+  {
+    const asked: string[] = [];
+    const guard: MoveGuard = (step, direction) =>
+    {
+      asked.push(`${step.label} ${direction}`);
+      return step.id === refused() ? '"Goblin camp" still has 2 copies, on Map 3 (2), so it can\'t be deleted' : null;
+    };
+
+    return { guard, asked };
+  };
+
+  it('refuses an undo and a redo its guard refuses, naming the step as stuck in the guard\'s words, and moves nothing', async () =>
+  {
+    // Arrange: a map rename the guard refuses to move either way; its redo is reached by undoing it on the hub itself.
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
+    const step = hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+    const { guard } = guardRefusing(() => step?.id);
+    const router = new HistoryRouter(hub, null, guard);
+
+    // Act.
+    const undo = await router.undo(mapHistoryKey(1));
+    const named = hub.map('map:1').property('displayName');
+    hub.undo(mapHistoryKey(1));
+    const redo = await router.redo(mapHistoryKey(1));
+
+    // Assert.
+    const words = '"Goblin camp" still has 2 copies, on Map 3 (2), so it can\'t be deleted.';
+    expect([ undo, named, redo, hub.map('map:1').property('displayName') ])
+      .toStrictEqual([
+        { ok: false, nothing: false, message: `"Rename map" cannot be undone: ${words}`, stuckStepId: step?.id },
+        'Harbor',
+        { ok: false, nothing: false, message: `"Rename map" cannot be redone: ${words}`, stuckStepId: step?.id },
+        'Test Town',
+      ]);
+  });
+
+  it('asks its guard only about a step the hub would move, leaving the hub\'s own refusals in its words', async () =>
+  {
+    // Arrange: a map rename a later edit blocks, and an empty history beside it.
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
+    hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+    hub.edit('Rename from the event', [ 'event:1:1' ], tx => tx.set('map:1', [ 'displayName' ], 'Port'));
+    const { guard, asked } = guardRefusing(() => undefined);
+    const router = new HistoryRouter(hub, null, guard);
+
+    // Act.
+    const blocked = await router.undo(mapHistoryKey(1));
+    const empty = await router.redo(mapHistoryKey(1));
+
+    // Assert.
+    expect([ blocked.ok === false && blocked.message, empty.ok === false && empty.nothing, asked ])
+      .toStrictEqual([ '"Rename map" cannot be undone: "Rename from the event" later changed what "Rename map" changed.', true, [] ]);
+  });
+
+  it('stops a jump at the step its guard refuses, having moved every step after it, and asking about none before it', async () =>
+  {
+    // Arrange: three steps on map 1, the guard refusing to undo the second.
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
+    hub.edit('First', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'note' ], 'one'));
+    const second = hub.edit('Second', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+    hub.edit('Third', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'note' ], 'three'));
+    const { guard, asked } = guardRefusing(() => second?.id);
+    const router = new HistoryRouter(hub, null, guard);
+
+    // Act: a jump back to the start.
+    const outcome = await router.jumpTo(mapHistoryKey(1), null);
+
+    // Assert: the third undone, the second refused, the first never reached.
+    expect([ outcome.ok === false && outcome.stuckStepId === second?.id, hub.history(mapHistoryKey(1)).position, hub.map('map:1').property('note'), asked ])
+      .toStrictEqual([ true, 2, 'one', [ 'Third backward', 'Second backward' ] ]);
+  });
+
+  it('jumps forward one redo at a time through its guard, and finds nothing to jump to for a step its history does not hold', async () =>
+  {
+    // Arrange: two steps on map 1, both undone.
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
+    hub.edit('First', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'note' ], 'one'));
+    const second = hub.edit('Second', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+    hub.undo(mapHistoryKey(1));
+    hub.undo(mapHistoryKey(1));
+    const { guard, asked } = guardRefusing(() => undefined);
+    const router = new HistoryRouter(hub, null, guard);
+
+    // Act.
+    const forward = await router.jumpTo(mapHistoryKey(1), second?.id ?? null);
+    const unknown = await router.jumpTo(mapHistoryKey(1), 'never#1');
+
+    // Assert.
+    expect([ forward, hub.history(mapHistoryKey(1)).position, asked, unknown ])
+      .toStrictEqual([
+        { ok: true },
+        2,
+        [ 'First forward', 'Second forward' ],
+        { ok: false, nothing: true, message: 'Nothing to undo.', stuckStepId: null },
+      ]);
   });
 
   it('refuses to move the tree without a tree service', async () =>
