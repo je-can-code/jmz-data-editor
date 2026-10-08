@@ -68,7 +68,7 @@ describe('editorData', () =>
   it('reads a saved document as it is', async () =>
   {
     // Arrange.
-    const stored = { schemaVersion: 1, data: { blueprints: [ { id: 'slime-camp' } ] } };
+    const stored = { schemaVersion: 1, data: { blueprints: { k3x9q2mf: { name: 'Slime camp' } } } };
     const client = new EditorDataClient(buildApi(stored));
 
     // Act.

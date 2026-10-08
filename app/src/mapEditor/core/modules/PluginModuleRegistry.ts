@@ -46,7 +46,11 @@ type Contributions = {
   lighting: LightingLayerDefinition[];
   weather: WeatherLayerDefinition[];
   catalogIds: string[];
-  templateMaps: number[];
+
+  /**
+   * The maps whose events a plugin copies while the game runs, each with the title of the module that named it.
+   */
+  templateMaps: { readonly mapId: number; readonly owner: string }[];
 
   /**
    * Everything the modules say, in the order they said it: a fixed notice as one that never changes.
@@ -337,12 +341,24 @@ class PluginModuleRegistry
    */
   kindOf(event: RmmzMapEvent, mapId: number): EventKindDefinition | null
   {
-    if (this.#contributions.templateMaps.includes(mapId))
+    if (this.templateMapOwner(mapId) !== null)
     {
       return null;
     }
 
     return this.eventKinds().find(kind => kind.detect(event)) ?? null;
+  }
+
+  /**
+   * Finds the plugin that copies a map's events while the game runs, such as J-ABS, whose actions are copied from the
+   * events on its action map: those events are the plugin's patterns rather than things placed on a map, and the plugin
+   * reads their notes, so no copy of a blueprint is ever placed there.
+   * @param {number} mapId The map.
+   * @returns {string | null} The title of the active module that named the map, or null when no active module did.
+   */
+  templateMapOwner(mapId: number): string | null
+  {
+    return this.#contributions.templateMaps.find(entry => entry.mapId === mapId)?.owner ?? null;
   }
 
   /**
@@ -534,7 +550,7 @@ class PluginModuleRegistry
       },
       templateMap: mapId =>
       {
-        this.#contributions.templateMaps.push(mapId);
+        this.#contributions.templateMaps.push({ mapId, owner: pluginModule.title });
       },
       notice: notice =>
       {

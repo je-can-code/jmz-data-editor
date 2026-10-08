@@ -55,9 +55,11 @@ afterEach(() =>
 /**
  * Builds a controller painting a 4x3 map of grass through a canvas with one cell every 48 pixels.
  * @param {Partial<PaintSettings>} settings The settings to start from.
+ * @param {(mapId: number) => string | null} linkRefusal Why a map may hold no copy of a blueprint; by default every map
+ * may.
  * @returns {ControllerBench} The controller and everything around it.
  */
-const controllerWith = (settings: Partial<PaintSettings>): ControllerBench =>
+const controllerWith = (settings: Partial<PaintSettings>, linkRefusal: (mapId: number) => string | null = () => null): ControllerBench =>
 {
   const bench = benchWith(4, 3, grid => fill(grid, 0, 0, 3, 2, 0, makeAutotileId(GRASS, 0)));
   const canvas = document.createElement('canvas');
@@ -86,6 +88,7 @@ const controllerWith = (settings: Partial<PaintSettings>): ControllerBench =>
     painting,
     overlay: overlay => overlays.push(overlay),
     onStamped: outcome => stamped.push(outcome),
+    linkRefusal,
   });
   const detach = controller.attach();
   detachers.push(detach);
@@ -388,6 +391,7 @@ describe('PaintController without a canvas', () =>
       layering: () => layeringWith(),
       painting: new PaintState(),
       overlay: () => undefined,
+      linkRefusal: () => null,
     });
 
     // Act.

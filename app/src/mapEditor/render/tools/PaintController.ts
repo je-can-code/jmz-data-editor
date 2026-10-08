@@ -64,6 +64,11 @@ type PaintControllerOptions = {
    * Left out, nobody hears.
    */
   readonly onStamped?: (outcome: StampOutcome) => void;
+
+  /**
+   * Says why a map may hold no copy of a blueprint, or null when it may: the window's link gate, from its plugin modules.
+   */
+  readonly linkRefusal: (mapId: number) => string | null;
 };
 
 /**
@@ -107,7 +112,7 @@ class PaintController
   constructor(options: PaintControllerOptions)
   {
     this.#options = options;
-    const { hub, map, layering, painting } = options;
+    const { hub, map, layering, painting, linkRefusal } = options;
     this.#session = new ToolSession({
       hub,
       map,
@@ -116,6 +121,7 @@ class PaintController
       pickBrush: brush => painting.setBrush(brush),
       pickTool: tool => painting.setTool(tool),
       stamped: outcome => options.onStamped?.(outcome),
+      linkRefusal,
     });
   }
 

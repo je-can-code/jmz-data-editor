@@ -5,8 +5,9 @@ import type { StampOutcome } from '../../../../src/mapEditor/core/stamps/stampPl
 import type { TilesetLayering } from '../../../../src/mapEditor/core/tiles/layering.ts';
 import { makeAutotileId, TileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
 import { regionBrush, SHADOW_BRUSH, singleTileBrush, tileBrush, type Brush } from '../../../../src/mapEditor/core/tools/brush.ts';
-import { INITIAL_PAINT_SETTINGS, PaintState, type PaintSettings } from '../../../../src/mapEditor/core/tools/PaintState.ts';
+import { INITIAL_PAINT_SETTINGS, PaintState, type BlueprintInHand, type PaintSettings } from '../../../../src/mapEditor/core/tools/PaintState.ts';
 import { ToolSession, type ToolPointer } from '../../../../src/mapEditor/core/tools/ToolSession.ts';
+import { holdBlueprints } from '../../support/blueprintFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
 import { fill, kindTile, put, type TestGrid } from '../tiles/support/tileGridBuilder.ts';
 import { benchWith, cellsOf, layeringWith, stackAt, type PaintBench } from './support/paintFixtures.ts';
@@ -52,6 +53,7 @@ const sessionOn = (bench: PaintBench, settings: Partial<PaintSettings>, layering
     settings: () => state.settings,
     pickBrush: brush => state.setBrush(brush),
     pickTool: tool => state.setTool(tool),
+    linkRefusal: () => null,
   });
   state.subscribe(next => session.toolChanged(next.tool));
   return { ...bench, session, state };
@@ -588,14 +590,23 @@ describe('ToolSession: the stamp', () =>
   };
 
   /**
-   * Builds a session with a stamp in hand on the bench, hearing every outcome.
+   * Builds a session with a stamp in hand on the bench, hearing every outcome: a plain stamp, or a blueprint's stamp when
+   * a blueprint is named, the window then holding that blueprint under its id.
    * @param {Stamp | null} stamp The stamp, or null for none picked.
+   * @param {{ blueprint?: BlueprintInHand, refusal?: string }} options The blueprint in hand, if any, and why the map may
+   * hold no links, if it may not.
    * @returns {{ bench: SessionBench, heard: StampOutcome[] }} The session and what it heard.
    */
-  const stamping = (stamp: Stamp | null) =>
+  const stamping = (stamp: Stamp | null, options: { readonly blueprint?: BlueprintInHand; readonly refusal?: string } = {}) =>
   {
     const bench = benchWith(4, 3, meadow);
-    const state = new PaintState({ ...INITIAL_PAINT_SETTINGS, tool: 'stamp', stamp });
+    const { blueprint = null, refusal = null } = options;
+    if (blueprint !== null)
+    {
+      holdBlueprints(bench.hub, { [blueprint.id]: { name: blueprint.name, stamp: stamp as Stamp } });
+    }
+
+    const state = new PaintState({ ...INITIAL_PAINT_SETTINGS, tool: 'stamp', stamp, blueprint });
     const heard: StampOutcome[] = [];
     const session = new ToolSession({
       hub: bench.hub,
@@ -605,6 +616,7 @@ describe('ToolSession: the stamp', () =>
       pickBrush: brush => state.setBrush(brush),
       pickTool: tool => state.setTool(tool),
       stamped: outcome => heard.push(outcome),
+      linkRefusal: () => refusal,
     });
     return { bench: { ...bench, session, state }, heard };
   };

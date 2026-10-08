@@ -7,7 +7,7 @@ import type { CellRect } from '../core/renderer/MapRenderer.ts';
 import { captureAreaStamp, captureEventsStamp, stampContents, type Stamp } from '../core/stamps/stamp.ts';
 import { decodeStampClipboard, encodeStampClipboard } from '../core/stamps/stampClipboard.ts';
 import type { StampHistory } from '../core/stamps/StampHistory.ts';
-import { cutStampSource, placeStamp, type StampOutcome } from '../core/stamps/stampPlacement.ts';
+import { cutStampSource, placeStamp, type StampOutcome, type StampPlacement } from '../core/stamps/stampPlacement.ts';
 import type { PaintState } from '../core/tools/PaintState.ts';
 import { isTextEntry, type KeyTarget } from '../core/workspace/shortcuts.ts';
 import type { EventNoticeSeverity } from '../events/MapEventTools.ts';
@@ -72,6 +72,11 @@ type MapStampToolsOptions = {
    */
   readonly readClipboard: () => Promise<string | null>;
   readonly notify: (text: string, severity: EventNoticeSeverity) => void;
+
+  /**
+   * Says why a map may hold no copy of a blueprint, or null when it may: a paste carrying copies of one is refused there.
+   */
+  readonly linkRefusal: (mapId: number) => string | null;
 };
 
 /**
@@ -399,7 +404,8 @@ class MapStampTools
     }
 
     const at = target ?? stamp.origin;
-    this.settle(placeStamp(this.#options.hub, map.mapId, stamp, { at, shaping: 'auto', mode: this.#options.tilesetMode(map) }, 'Paste'));
+    const placement: StampPlacement = { at, shaping: 'auto', mode: this.#options.tilesetMode(map), linkRefusal: this.#options.linkRefusal(map.mapId) };
+    this.settle(placeStamp(this.#options.hub, map.mapId, stamp, placement, 'Paste'));
   }
 
   /**

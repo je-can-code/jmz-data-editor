@@ -78,7 +78,7 @@ describe('toolBrushFrom', () =>
   {
     // Arrange: the palette linked to the tools, the rectangle in hand, a tile picked and then the palette emptied.
     const selection = new PaintSelection();
-    const painting = new PaintState({ tool: 'rectangle', brush: null, strip: 'auto', overrideLayer: 2, stamp: null });
+    const painting = new PaintState({ tool: 'rectangle', brush: null, strip: 'auto', overrideLayer: 2, stamp: null, blueprint: null });
     linkPaintSelection(selection, painting);
     selection.setBrush(paletteTiles([ kindTile(DIRT) ]));
     selection.setBrush(EMPTY_BRUSH);
@@ -92,6 +92,7 @@ describe('toolBrushFrom', () =>
       settings: () => ({ ...painting.settings, brush }),
       pickBrush: () => undefined,
       pickTool: () => undefined,
+      linkRefusal: () => null,
     });
     const point = (x: number, y: number) => ({ cell: { x, y }, quarter: { x, y, quarter: 0 }, shift: false, copy: false, override: false });
 

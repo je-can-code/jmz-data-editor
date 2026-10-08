@@ -96,7 +96,7 @@ const blockStamp = (hub: ReturnType<typeof hubWithMaps>): Stamp =>
 };
 
 /**
- * Builds a placement with its corner on a cell, reshaping autotiles, on an Area tileset.
+ * Builds a placement with its corner on a cell, reshaping autotiles, on an Area tileset, on a map that may hold links.
  * @param {number} x The column.
  * @param {number} y The row.
  * @param {Partial<StampPlacement>} fields Anything else to change.
@@ -104,7 +104,7 @@ const blockStamp = (hub: ReturnType<typeof hubWithMaps>): Stamp =>
  */
 const at = (x: number, y: number, fields: Partial<StampPlacement> = {}): StampPlacement =>
 {
-  return { at: { x, y }, shaping: 'auto', mode: TilesetMode.area, ...fields };
+  return { at: { x, y }, shaping: 'auto', mode: TilesetMode.area, linkRefusal: null, ...fields };
 };
 
 /**

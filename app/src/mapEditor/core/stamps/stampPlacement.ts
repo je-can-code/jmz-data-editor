@@ -1,3 +1,4 @@
+import { blueprintLinkOf } from '../blueprints/blueprintLink.ts';
 import { blockedCells, eventCellsOf, isOnMap, newEventIds, type EventMap } from '../events/eventPlacement.ts';
 import { rewireGroupReferences } from '../events/eventReferences.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
@@ -32,6 +33,13 @@ type StampPlacement = {
    * The map's tileset mode, which the autotile shapes read.
    */
   readonly mode: number;
+
+  /**
+   * Why the map may hold no copy of a blueprint, or null when it may: a map whose events a plugin copies while the game
+   * runs, notes and all, such as J-ABS's action map, never holds a link (see blueprintPlacement's link gate). A stamp
+   * whose events are copies of a blueprint is refused there whole, as placing the blueprint itself is.
+   */
+  readonly linkRefusal: string | null;
 };
 
 /**
@@ -41,7 +49,8 @@ type StampTarget = TileGrid & EventMap & { readonly tilesetId: number };
 
 /**
  * What placing a stamp would do: the cells it would change, the events it would place, with their fresh ids and the
- * cells they land on, and what of the stamp it would leave out; or why it cannot go there at all.
+ * cells they land on, the id each of those had in the stamp, and what of the stamp it would leave out; or why it cannot
+ * go there at all.
  */
 type StampPlan =
   | {
@@ -49,6 +58,7 @@ type StampPlan =
     readonly tiles: readonly CellChange[];
     readonly tilesPlaced: boolean;
     readonly events: readonly RmmzMapEvent[];
+    readonly sourceIds: readonly number[];
     readonly tilesLeftOut: boolean;
     readonly eventsLeftOut: number;
   }
@@ -167,6 +177,8 @@ const blockedMessage = (blocked: number, landing: number): string =>
  *   past the map's edge is left out, as the tiles there are.
  * - A stamp that would land any of its events on a tile another event holds is refused whole, as MZ never stacks two
  *   events on one tile; so is one of which nothing at all would land on the map.
+ * - Events copied off copies of a blueprint carry their links along, so they are copies of it too, as their notes say;
+ *   a stamp landing any such event on a map that may hold no link is refused whole, with the map's reason.
  * @param {StampTarget} map The map, as it stands.
  * @param {Stamp} stamp The stamp.
  * @param {StampPlacement} placement Where it goes and how.
@@ -174,7 +186,7 @@ const blockedMessage = (blocked: number, landing: number): string =>
  */
 const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement): StampPlan =>
 {
-  const { at } = placement;
+  const { at, linkRefusal } = placement;
   const tilesFit = stamp.tiles !== null && stamp.tilesetId === map.tilesetId;
   const tilesLeftOut = stamp.tiles !== null && tilesFit === false;
   const tilesPlaced = tilesFit && clipRect({ x: at.x, y: at.y, width: stamp.width, height: stamp.height }, map.width, map.height) !== null;
@@ -182,6 +194,11 @@ const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement): S
   if (tilesPlaced === false && landing.length === 0)
   {
     return { ok: false, message: nothingLandsMessage(tilesLeftOut, stamp.events.length) };
+  }
+
+  if (linkRefusal !== null && landing.some(event => blueprintLinkOf(event.note) !== null))
+  {
+    return { ok: false, message: `This stamp holds copies of blueprints, which can't go here: ${linkRefusal}.` };
   }
 
   const cells = landing.map(event => landingOf(event, at));
@@ -206,6 +223,7 @@ const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement): S
     tiles: tilesPlaced ? planStampTiles(map, stamp, placement) : [],
     tilesPlaced,
     events,
+    sourceIds: landing.map(event => event.id),
     tilesLeftOut,
     eventsLeftOut: stamp.events.length - landing.length,
   };
@@ -237,6 +255,29 @@ const leftOutNotes = (plan: Extract<StampPlan, { ok: true }>): string[] =>
 };
 
 /**
+ * Puts down what a placement was worked out to do, as one step in the map's history: the tiles first, then each event.
+ * What placing a stamp and placing a blueprint both end with.
+ * @param {DocumentHub} hub The window's documents; the map must be held, as it was when the plan was made.
+ * @param {number} mapId The map.
+ * @param {Extract<StampPlan, { ok: true }>} plan The placement, worked out against the map as it stands.
+ * @param {string} label What the history panel calls the step.
+ * @returns {StampOutcome} The step, the events placed and what was left out.
+ */
+const commitStampPlan = (hub: DocumentHub, mapId: number, plan: Extract<StampPlan, { ok: true }>, label: string): StampOutcome =>
+{
+  const key = mapDocumentKey(mapId);
+  const map = hub.map(key);
+  const step = hub.edit(label, [ mapHistoryKey(mapId) ], tx =>
+  {
+    // the tiles first, then each event, its patch built against the list as the one before left it.
+    tx.tiles(key, plan.tiles);
+    plan.events.forEach(event => tx.apply(key, map.placeEventPatch(event)));
+  });
+
+  return { ok: true, step, eventIds: plan.events.map(event => event.id), notes: leftOutNotes(plan) };
+};
+
+/**
  * Places a stamp on a map as one step in its history, as {@link planStamp} works it out, from this map or any other.
  * The step is named for what went down, after the verb: "Stamp 20 by 15 tiles and 3 events", "Paste event".
  * @param {DocumentHub} hub The window's documents; the map must be held.
@@ -249,23 +290,13 @@ const leftOutNotes = (plan: Extract<StampPlan, { ok: true }>): string[] =>
  */
 const placeStamp = (hub: DocumentHub, mapId: number, stamp: Stamp, placement: StampPlacement, verb: string): StampOutcome =>
 {
-  const key = mapDocumentKey(mapId);
-  const map = hub.map(key);
-  const plan = planStamp(map, stamp, placement);
+  const plan = planStamp(hub.map(mapDocumentKey(mapId)), stamp, placement);
   if (plan.ok === false)
   {
     return plan;
   }
 
-  const label = `${verb} ${contentsPhrase(plan.tilesPlaced ? stamp : null, plan.events.length)}`;
-  const step = hub.edit(label, [ mapHistoryKey(mapId) ], tx =>
-  {
-    // the tiles first, then each event, its patch built against the list as the one before left it.
-    tx.tiles(key, plan.tiles);
-    plan.events.forEach(event => tx.apply(key, map.placeEventPatch(event)));
-  });
-
-  return { ok: true, step, eventIds: plan.events.map(event => event.id), notes: leftOutNotes(plan) };
+  return commitStampPlan(hub, mapId, plan, `${verb} ${contentsPhrase(plan.tilesPlaced ? stamp : null, plan.events.length)}`);
 };
 
 /**
@@ -307,5 +338,5 @@ const cutStampSource = (hub: DocumentHub, mapId: number, stamp: Stamp, mode: num
   return { ok: true, step, eventIds: [], notes: [] };
 };
 
-export { cutStampSource, placeStamp, planStamp };
+export { commitStampPlan, cutStampSource, placeStamp, planStamp };
 export type { StampOutcome, StampPlacement, StampPlan, StampTarget };

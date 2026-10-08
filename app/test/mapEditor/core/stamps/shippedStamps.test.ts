@@ -126,7 +126,7 @@ const roomFor = (map: MapDocument, stamp: Stamp): { x: number; y: number } | nul
   {
     for (let x = 0; x + stamp.width <= map.width; x++)
     {
-      const plan = planStamp(map, stamp, { at: { x, y }, shaping: 'auto', mode: TilesetMode.area });
+      const plan = planStamp(map, stamp, { at: { x, y }, shaping: 'auto', mode: TilesetMode.area, linkRefusal: null });
       if (plan.ok && plan.eventsLeftOut === 0 && (x !== stamp.origin.x || y !== stamp.origin.y || stamp.mapId !== map.mapId))
       {
         return { x, y };
@@ -156,7 +156,7 @@ const placeAndUndo = (hub: DocumentHub, mapId: number, stamp: Stamp): { placed: 
     return { placed: false, changed: 0, back: textOf(hub, mapId) === before };
   }
 
-  const outcome = placeStamp(hub, mapId, stamp, { at, shaping: 'auto', mode: TilesetMode.area }, 'Stamp');
+  const outcome = placeStamp(hub, mapId, stamp, { at, shaping: 'auto', mode: TilesetMode.area, linkRefusal: null }, 'Stamp');
   const changed = outcome.ok && outcome.step !== null ? outcome.step.entries.length : 0;
   const changedText = textOf(hub, mapId) !== before;
   hub.undo(mapHistoryKey(mapId));

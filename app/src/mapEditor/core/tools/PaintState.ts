@@ -58,6 +58,21 @@ type PaintSettings = {
    * once the tool is put down, so the tool bar can take it up again.
    */
   readonly stamp: Stamp | null;
+
+  /**
+   * The blueprint the stamp in hand is the stamp of, when a blueprint was picked rather than a stamp: the stamp tool then
+   * places linked copies of it. Null for a plain stamp, or none.
+   */
+  readonly blueprint: BlueprintInHand | null;
+};
+
+/**
+ * A blueprint taken up as the stamp tool's brush: which one, so every click places copies linked to it, and what it is
+ * called, for the words beside the tools.
+ */
+type BlueprintInHand = {
+  readonly id: string;
+  readonly name: string;
 };
 
 /**
@@ -67,9 +82,9 @@ type PaintSettingsListener = (settings: PaintSettings) => void;
 
 /**
  * Where a window starts: the events in hand, so a click on the map selects as it always has, nothing picked, automatic
- * layering, layer 3 for the override, and no stamp.
+ * layering, layer 3 for the override, and no stamp or blueprint.
  */
-const INITIAL_PAINT_SETTINGS: PaintSettings = { tool: 'events', brush: null, strip: 'auto', overrideLayer: 2, stamp: null };
+const INITIAL_PAINT_SETTINGS: PaintSettings = { tool: 'events', brush: null, strip: 'auto', overrideLayer: 2, stamp: null, blueprint: null };
 
 /**
  * The window's painting settings: the tool, the brush, the layer strip's choice, the override's layer and the stamp.
@@ -148,7 +163,33 @@ class PaintState
    */
   takeUpStamp(stamp: Stamp): void
   {
-    this.#update({ stamp, tool: 'stamp' });
+    this.#update({ stamp, blueprint: null, tool: 'stamp' });
+  }
+
+  /**
+   * Takes up a blueprint: its stamp becomes the stamp in hand, placed as linked copies of it, and the stamp tool the
+   * tool, as {@link takeUpStamp} does for a plain stamp.
+   * @param {{ id: string, name: string, stamp: Stamp }} blueprint The blueprint: its id, its name and its stamp.
+   */
+  takeUpBlueprint(blueprint: BlueprintInHand & { readonly stamp: Stamp }): void
+  {
+    const { id, name, stamp } = blueprint;
+    this.#update({ stamp, blueprint: { id, name }, tool: 'stamp' });
+  }
+
+  /**
+   * Follows a blueprint's new name, when it is the blueprint picked, so the words beside the tools say what it is called
+   * now; anything else picked is left as it is.
+   * @param {string} blueprintId The blueprint renamed.
+   * @param {string} name Its new name.
+   */
+  renameBlueprint(blueprintId: string, name: string): void
+  {
+    const { blueprint } = this.#settings;
+    if (blueprint !== null && blueprint.id === blueprintId)
+    {
+      this.#update({ blueprint: { id: blueprintId, name } });
+    }
   }
 
   /**
@@ -202,4 +243,4 @@ class PaintState
 }
 
 export { INITIAL_PAINT_SETTINGS, isPaintingTool, PAINT_TOOLS, PaintState };
-export type { PaintSettings, PaintSettingsListener, PaintTool };
+export type { BlueprintInHand, PaintSettings, PaintSettingsListener, PaintTool };

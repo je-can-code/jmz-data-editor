@@ -26,7 +26,7 @@ describe('PaintState', () =>
 
     // Assert.
     expect(settings)
-      .toEqual({ tool: 'events', brush: null, strip: 'auto', overrideLayer: 2, stamp: null });
+      .toEqual({ tool: 'events', brush: null, strip: 'auto', overrideLayer: 2, stamp: null, blueprint: null });
   });
 
   it('counts every tool but the events as painting', () =>

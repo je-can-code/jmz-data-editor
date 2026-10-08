@@ -1,3 +1,5 @@
+import { blueprintLinkOf } from '../blueprints/blueprintLink.ts';
+import { placeBlueprint } from '../blueprints/blueprintPlacement.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { MapCell } from '../renderer/camera.ts';
@@ -90,6 +92,12 @@ type ToolSessionHost = {
    * why it was refused. Left out, nobody hears.
    */
   stamped?(outcome: StampOutcome): void;
+
+  /**
+   * Says why a map may hold no copy of a blueprint, or null when it may (see blueprintPlacement's link gate): the stamp
+   * tool places neither a blueprint there nor a stamp carrying copies of one.
+   */
+  linkRefusal(mapId: number): string | null;
 };
 
 /**
@@ -144,6 +152,12 @@ const STEP_LABELS = {
  * The idle gesture.
  */
 const IDLE: Gesture = { kind: 'idle' };
+
+/**
+ * What the stamp tool's cursor says over a map that may hold no copy of a blueprint, with a blueprint, or a stamp
+ * carrying copies of one, in hand.
+ */
+const LINKS_REFUSED_LABEL = 'Blueprints can\'t go here';
 
 /**
  * No ghost events and no blocked tiles: shared, so the renderer sees nothing change while none show.
@@ -467,21 +481,25 @@ class ToolSession
 
   /**
    * Places the stamp in hand with its top-left corner on the cell clicked, as one step of the map's history, and tells
-   * the host what came of it: the events it placed, or why it was refused. With no stamp in hand nothing happens.
+   * the host what came of it: the events it placed, or why it was refused. A blueprint's stamp places copies linked to
+   * the blueprint. With no stamp in hand nothing happens.
    * @param {MapDocument} map The map.
    * @param {MapCell} cell The cell clicked.
    * @param {Shaping} shaping Whether the tiles go down exactly as copied (Shift held).
    */
   #stamp(map: MapDocument, cell: MapCell, shaping: Shaping): void
   {
-    const { stamp } = this.#host.settings();
+    const { stamp, blueprint } = this.#host.settings();
     if (stamp === null)
     {
       return;
     }
 
     const { mode } = this.#host.layering(map);
-    const outcome = placeStamp(this.#host.hub, map.mapId, stamp, { at: cell, shaping, mode }, 'Stamp');
+    const placement = { at: cell, shaping, mode, linkRefusal: this.#host.linkRefusal(map.mapId) };
+    const outcome = blueprint === null
+      ? placeStamp(this.#host.hub, map.mapId, stamp, placement, 'Stamp')
+      : placeBlueprint(this.#host.hub, map.mapId, blueprint.id, placement);
     this.#host.stamped?.(outcome);
   }
 
@@ -730,8 +748,9 @@ class ToolSession
 
   /**
    * Works out the overlay while the stamp tool is in hand: the stamp's footprint with its corner under the pointer, its
-   * tiles and events where a click would put them, and in red the tiles another event holds in their way. With no stamp
-   * picked, only the cell under the pointer.
+   * tiles and events where a click would put them, and in red the tiles another event holds in their way. Over a map that
+   * may hold no copy of a blueprint, a blueprint in hand, or a stamp carrying copies of one, says so beside the footprint.
+   * With no stamp picked, only the cell under the pointer.
    * @param {MapDocument} map The map.
    * @param {ToolPointer} pointer The pointer and keys.
    * @param {MapCell} cell The cell under it.
@@ -739,16 +758,19 @@ class ToolSession
    */
   #stampOverlay(map: MapDocument, pointer: ToolPointer, cell: MapCell): ToolOverlay
   {
-    const { stamp } = this.#host.settings();
+    const { stamp, blueprint } = this.#host.settings();
     if (stamp === null)
     {
       return { ...NO_TOOL_OVERLAY, hover: { x: cell.x, y: cell.y, width: 1, height: 1 } };
     }
 
+    // a map that may hold no link says so before the click that would be refused.
+    const linked = blueprint !== null || stamp.events.some(event => blueprintLinkOf(event.note) !== null);
+    const refused = linked && this.#host.linkRefusal(map.mapId) !== null;
     const preview = previewStamp(map, stamp, cell, pointer.shift ? 'exact' : 'auto');
     return {
       hover: preview.hover,
-      hoverLabel: preview.label,
+      hoverLabel: refused ? LINKS_REFUSED_LABEL : preview.label,
       ghostTiles: preview.ghostTiles,
       selectedCells: null,
       ghostEvents: preview.ghostEvents.length === 0 ? NO_GHOST_EVENTS : preview.ghostEvents,

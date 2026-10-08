@@ -81,7 +81,7 @@ describe('apiDocumentStore', () =>
 
     // Assert.
     expect(loaded)
-      .toStrictEqual({ schemaVersion: 1, data: { blueprints: [] } });
+      .toStrictEqual({ schemaVersion: 1, data: { blueprints: {} } });
   });
 
   it('saves each kind of document through its own call', async () =>

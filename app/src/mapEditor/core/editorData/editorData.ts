@@ -33,10 +33,10 @@ type StoredEditorData = {
 };
 
 /**
- * Blueprints: saved stamps whose copies stay linked, so changing one changes them all. The list's entries are
- * the stamps-and-blueprints package's to shape.
+ * Blueprints: saved stamps whose copies stay linked, so changing one changes them all. Keyed by each blueprint's id,
+ * which never changes, so every blueprint's edits address it alone (see core/blueprints/blueprints.ts).
  */
-const BLUEPRINTS: EditorDataDefinition = { name: 'blueprints', schemaVersion: 1, createEmpty: () => ({ blueprints: [] }) };
+const BLUEPRINTS: EditorDataDefinition = { name: 'blueprints', schemaVersion: 1, createEmpty: () => ({ blueprints: {} }) };
 
 /**
  * "Goes on top" marks: per tileset, the tiles that lay over the ground instead of replacing it. Keyed by

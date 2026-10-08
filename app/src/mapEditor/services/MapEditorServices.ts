@@ -2,6 +2,7 @@ import { CHANNEL_NAMES, openBroadcastChannel, type ChannelFactory } from '../../
 import { pageWindowShell, type WindowShell } from '../../core/infrastructure/shell/WindowShell.ts';
 import { apiDocumentStore } from '../core/api/apiDocumentStore.ts';
 import { HttpMapEditorApi, type MapEditorApi } from '../core/api/MapEditorApi.ts';
+import { BlueprintCopyCounter } from '../core/blueprints/blueprintCopies.ts';
 import { installCloseGuard, unsavedOnlyHere, type CloseTarget } from '../core/closeGuard.ts';
 import { registerBuiltInCommands } from '../core/commands/builtin/builtInCommands.ts';
 import { CommandCatalog } from '../core/commands/CommandCatalog.ts';
@@ -107,6 +108,13 @@ type MapEditorServices = {
   readonly stamps: StampHistory;
 
   /**
+   * How many copies of each blueprint stand across the project, counted from the maps' notes: the maps this window holds
+   * as they stand here, and the rest as the server reads them on disk, read again whenever a map's file changes. Nothing
+   * is counted until the Blueprints section first asks.
+   */
+  readonly blueprintCopies: BlueprintCopyCounter;
+
+  /**
    * The time of day the window shows, and the season: one clock for every map view in it, torn-out windows included. It
    * starts at the game's own starting time once a plugin module offering a clock switches on, and keeps the hour the
    * author picks; it stays in the season the game starts in until the author picks another, which moves the date every
@@ -161,8 +169,9 @@ type MapEditorServices = {
    * modules once js/plugins.js is read, and afresh whenever a config file one of them reads changes on disk, with the
    * window's clock following the starting time a module offers, and the page rule reading what a new game starts with.
    * The switch and variable names follow System.json as it stands in whichever window renames them, and the clock and
-   * the preview come back as this project last left them, kept in step with every other window from then on. When the
-   * page goes, it stops, which tells the other windows at once that this one no longer holds anything.
+   * the preview come back as this project last left them, kept in step with every other window from then on. Once the
+   * blueprints' copies are being counted, every map changed on disk has them counted again. When the page goes, it
+   * stops, which tells the other windows at once that this one no longer holds anything.
    */
   start(): void;
 
@@ -299,6 +308,12 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
 
   // every stamp is named after the window that copied it, so another window knows whether it holds it already.
   const stamps = new StampHistory(clientId);
+
+  // a client that cannot read every map's notes leaves the copies uncounted, rather than counted from this window alone.
+  const readNotes = api === null || api.loadEventNotes === undefined
+    ? null
+    : api.loadEventNotes.bind(api);
+  const blueprintCopies = new BlueprintCopyCounter({ hub, readNotes });
   const clock = new WindowClock();
   const pages = new WindowPageRule(modules);
   const preview = new WindowPreview();
@@ -385,6 +400,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     modules,
     paints,
     stamps,
+    blueprintCopies,
     clock,
     pages,
     preview,
@@ -492,6 +508,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
           feed.onChange(change =>
           {
             router.route(change).catch(() => undefined);
+            blueprintCopies.fileChanged(change.path);
             if (isModuleConfigFile(change.path))
             {
               activation?.refresh();
@@ -511,6 +528,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
           feed.onReconnect(() =>
           {
             router.recheck().catch(() => undefined);
+            blueprintCopies.readAgain();
             activation?.refresh();
             readNewGame();
             names?.refresh();
@@ -519,6 +537,8 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
         feed.start();
         stops.push(() => feed.stop());
       }
+
+      stops.push(() => blueprintCopies.stop());
 
       stops.push(installCloseGuard(environment.closeTarget, () => unsavedOnlyHere(hub, sync).length > 0));
     },

@@ -50,15 +50,22 @@ const usePaintSettings = (painting: PaintState): PaintSettings =>
 };
 
 /**
- * Words what the tools hold, beside them: the stamp while the stamp is in hand, and the brush otherwise.
+ * Words what the tools hold, beside them: the blueprint, by name, or the stamp while the stamp tool is in hand, and the
+ * brush otherwise.
  * @param {PaintSettings} settings The window's painting settings.
  * @returns {string} The words.
  */
 const inHandWords = (settings: PaintSettings): string =>
 {
-  return settings.tool === 'stamp' && settings.stamp !== null
-    ? `Stamp: ${stampCaption(settings.stamp)}`
-    : describeBrush(settings.brush);
+  const { tool, stamp, blueprint } = settings;
+  if (tool !== 'stamp' || stamp === null)
+  {
+    return describeBrush(settings.brush);
+  }
+
+  return blueprint === null
+    ? `Stamp: ${stampCaption(stamp)}`
+    : `Blueprint: ${blueprint.name}`;
 };
 
 /**
@@ -69,9 +76,14 @@ const inHandWords = (settings: PaintSettings): string =>
  */
 const keyHints = (settings: PaintSettings): string =>
 {
-  return settings.tool === 'stamp'
+  if (settings.tool !== 'stamp')
+  {
+    return `Shift: exact tiles · Space: paint layer ${settings.overrideLayer + 1}`;
+  }
+
+  return settings.blueprint === null
     ? 'Shift: exact tiles · Esc: put the stamp down'
-    : `Shift: exact tiles · Space: paint layer ${settings.overrideLayer + 1}`;
+    : 'Shift: exact tiles · Esc: put the blueprint down';
 };
 
 /**

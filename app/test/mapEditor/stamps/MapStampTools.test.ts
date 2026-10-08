@@ -94,7 +94,12 @@ describe('MapStampTools', () =>
     const painting = new PaintState();
     const stamps = new StampHistory('window-a');
     const notices: string[] = [];
-    const state: { area: CellRect | null; busy: boolean; clipboard: string | null } = { area: null, busy: false, clipboard: null };
+    const state: { area: CellRect | null; busy: boolean; clipboard: string | null; refusals: Map<number, string> } = {
+      area: null,
+      busy: false,
+      clipboard: null,
+      refusals: new Map(),
+    };
     const tools = new MapStampTools({
       renderer,
       host,
@@ -107,6 +112,7 @@ describe('MapStampTools', () =>
       tilesetMode: () => TilesetMode.area,
       readClipboard: async () => state.clipboard,
       notify: text => notices.push(text),
+      linkRefusal: mapId => state.refusals.get(mapId) ?? null,
     });
     tools.setMap(map);
     built.push(tools);

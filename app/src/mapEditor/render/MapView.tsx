@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Box, Chip, Divider, Stack, Typography } from '@mui/material';
+import { linkGateFor } from '../core/blueprints/blueprintPlacement.ts';
 import { markerSymbolFor } from '../core/eventKinds/eventMarkers.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
@@ -366,9 +367,11 @@ const MapView = (props: MapViewProps) =>
       setStatus(current => (current.zoom === camera.zoom ? current : { ...current, zoom: camera.zoom }));
     }));
 
-    // the event tools and the painting tools each hand the renderer their part of the overlay.
+    // the event tools and the painting tools each hand the renderer their part of the overlay. Neither places a copy of a
+    // blueprint on a map whose events a plugin copies while the game runs, which the plugin modules say.
     const overlays = new OverlayComposer(renderer);
     const layering = new TilesetLayeringSource(services.hub);
+    const linkRefusal = linkGateFor(services.modules);
     const painter = new PaintController({
       surface: renderer,
       hub: services.hub,
@@ -377,6 +380,7 @@ const MapView = (props: MapViewProps) =>
       painting,
       overlay: part => overlays.update('tools', part),
       onStamped: outcome => stampTools.settle(outcome),
+      linkRefusal,
     });
     stops.push(painter.attach());
 
@@ -454,6 +458,7 @@ const MapView = (props: MapViewProps) =>
       tilesetMode: map => layering.layeringFor(map).mode,
       readClipboard: () => services.shell.readClipboard(STAMP_CLIPBOARD_MARKER),
       notify: (text: string, severity: EventNoticeSeverity) => notifyRef.current(text, severity),
+      linkRefusal,
     });
     stampToolsRef.current = stampTools;
 

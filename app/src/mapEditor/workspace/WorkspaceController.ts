@@ -1,4 +1,5 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
+import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../core/blueprints/blueprints.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
 import { MapTreeService, type TreeOutcome } from '../core/tree/MapTreeService.ts';
@@ -448,6 +449,23 @@ class WorkspaceController
     return row === null || row === undefined
       ? documentLabel(`map:${mapId}`)
       : row.name;
+  }
+
+  /**
+   * Reads a blueprint's name, for titles.
+   * @param {string} blueprintId The blueprint.
+   * @returns {string} Its name, or its id while the blueprints are not held or no longer hold it, as after its save is
+   * undone.
+   */
+  blueprintName(blueprintId: string): string
+  {
+    const { hub } = this.services;
+    const blueprint = hub.has(BLUEPRINTS_DOCUMENT)
+      ? blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), blueprintId)
+      : null;
+    return blueprint === null
+      ? blueprintId
+      : blueprint.name;
   }
 
   //endregion dock

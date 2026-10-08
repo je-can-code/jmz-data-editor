@@ -142,7 +142,8 @@ const readEvents = (value: unknown, width: number, height: number): RmmzMapEvent
 };
 
 /**
- * Reads a stamp out of what the clipboard's JSON holds, refusing anything that is not a whole stamp holding something.
+ * Reads a stamp out of what some JSON holds, refusing anything that is not a whole stamp holding something: the
+ * clipboard's stamp, and every stamp a blueprint is saved with, which is kept in the very same shape.
  * @param {JsonObject} value The stamp as read.
  * @returns {Stamp | null} The stamp, or null when it is malformed.
  */
@@ -208,4 +209,4 @@ const decodeStampClipboard = (text: string): Stamp | null =>
     : null;
 };
 
-export { decodeStampClipboard, encodeStampClipboard, STAMP_CLIPBOARD_MARKER, STAMP_CLIPBOARD_VERSION };
+export { decodeStampClipboard, encodeStampClipboard, readStamp, STAMP_CLIPBOARD_MARKER, STAMP_CLIPBOARD_VERSION };

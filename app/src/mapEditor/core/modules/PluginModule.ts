@@ -537,7 +537,8 @@ type ModuleContributions = {
   /**
    * Names a map the plugin copies events from while the game runs, such as J-ABS's action map. Its events are
    * patterns for the plugin rather than things placed on a map, so no kind claims them, and none is offered what a
-   * placed event is, such as becoming a chest.
+   * placed event is, such as becoming a chest; and since the plugin reads those events' notes, no copy of a blueprint,
+   * whose link lives in its note, is ever placed there.
    * @param {number} mapId The map.
    */
   templateMap(mapId: number): void;

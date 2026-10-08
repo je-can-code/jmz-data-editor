@@ -1,3 +1,4 @@
+import type { EventNote } from '../blueprints/blueprintCopies.ts';
 import type { CommandUsageCounts } from '../commandList/commandUsage.ts';
 import type { DatabaseNamesJson } from '../commandList/databaseNames.ts';
 import { isEditorDataName } from '../model/documentKeys.ts';
@@ -88,6 +89,14 @@ interface MapEditorApi
    * @returns {Promise<MapArrival[]>} The transfers, by the map they are on, then event and page; empty when none.
    */
   loadArrivals(mapId: number): Promise<MapArrival[]>;
+
+  /**
+   * Reads every event note on disk, on any map, that holds anything, exactly as written: what the copies of every
+   * blueprint are counted from, since a copy's link to its blueprint lives in its note. Optional, so a client that
+   * cannot read them still serves everything else; the copies then cannot be counted.
+   * @returns {Promise<EventNote[]>} The notes, by map and then event; empty when none holds anything.
+   */
+  loadEventNotes?(): Promise<EventNote[]>;
 
   /**
    * Reads the map tree.
@@ -467,6 +476,12 @@ class HttpMapEditorApi implements MapEditorApi
     }
 
     return answer.arrivals;
+  }
+
+  async loadEventNotes(): Promise<EventNote[]>
+  {
+    const answer = await this.#getJson<{ notes: EventNote[] }>('/api/event-notes');
+    return answer.notes;
   }
 
   async loadMapInfos(): Promise<(RmmzMapInfo | null)[]>

@@ -191,6 +191,39 @@ const withSpanRemoved = (note: string, start: number, end: number): string =>
 };
 
 /**
+ * Takes a tag out of a note the way {@link withLineAdded} put it in, undoing it exactly. A tag alone on its line, give
+ * or take the spaces around it, takes its line with it and the one line break the line came with: the one before it,
+ * which is where a line added after a note's text brings its break, or, on a note's first line, the one after it, as a
+ * line added to a note of nothing but line breaks brings it. Adding a line and taking it out again therefore gives back
+ * the note byte for byte, whatever line breaks it mixes, where taking the break after the line could leave a Windows
+ * pair where a plain newline was, or the other way about. A tag sharing its line with words is taken out by
+ * {@link withSpanRemoved}, which tidies the spaces around it.
+ * @param {string} note The note.
+ * @param {number} start Where the tag starts.
+ * @param {number} end Where it ends.
+ * @returns {string} The note without the tag.
+ */
+const withLineTakenOut = (note: string, start: number, end: number): string =>
+{
+  // the line holding the tag runs from the line break before its start to the one after its end.
+  const lineStart = Math.max(note.lastIndexOf('\n', start - 1), note.lastIndexOf('\r', start - 1)) + 1;
+  const afterEnd = note.slice(end).search(/[\r\n]/);
+  const lineEnd = afterEnd === -1
+    ? note.length
+    : end + afterEnd;
+  if (note.slice(lineStart, start).trim() !== '' || note.slice(end, lineEnd).trim() !== '')
+  {
+    return withSpanRemoved(note, start, end);
+  }
+
+  // the line goes with the break before it, or, first in the note, the break after it.
+  const preceding = breakBefore(note, lineStart);
+  return preceding > 0
+    ? `${note.slice(0, lineStart - preceding)}${note.slice(lineEnd)}`
+    : `${note.slice(0, lineStart)}${note.slice(lineEnd + breakAfter(note, lineEnd))}`;
+};
+
+/**
  * Reads every tag the engine reads into a note's metadata, in order, as DataManager.extractMetadata reads them: one
  * search over the whole note, each tag taken whole before the search moves past it.
  * @param {string} note The note.
@@ -251,6 +284,7 @@ export {
   noteMetaOf,
   OTHER_TAGS_MISREAD,
   withLineAdded,
+  withLineTakenOut,
   withSpanRemoved,
 };
 export type { MetaTag, NoteLine };
