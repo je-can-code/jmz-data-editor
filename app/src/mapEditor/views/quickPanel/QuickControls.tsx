@@ -218,6 +218,7 @@ const NumberControl = (props: ControlProps & { limits: NumberLimits }) =>
 /**
  * A drop-down committed as soon as a choice is made, handing on the choice's own value, a number or a name. A value none
  * of the choices names is still shown, as itself, and the field's hint, such as what the choice does, sits under it.
+ * It always shows words, a choice named by nothing included, so its label always sits raised above them.
  * @param {ControlProps & { options: readonly QuickOption[] }} props The field and its choices.
  * @returns {React.JSX.Element} The drop-down.
  */
@@ -260,7 +261,7 @@ const SelectControl = (props: ControlProps & { options: readonly QuickOption[] }
       size={'small'}
       sx={{ minWidth: 150 }}
       helperText={field.hint}
-      slotProps={{ ...raisedWhenMixed(field.mixed), select: { displayEmpty: true, renderValue } }}
+      slotProps={{ inputLabel: { shrink: true }, select: { displayEmpty: true, renderValue } }}
       onChange={event => onChange(valueOf(event.target.value))}
     >
       {shown.map(option => (

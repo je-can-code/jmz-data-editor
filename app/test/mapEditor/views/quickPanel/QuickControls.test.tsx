@@ -389,6 +389,21 @@ describe('QuickControl', () =>
       .toBe('Mixed');
   });
 
+  it('raises a drop-down\'s label over a choice named by nothing, as over any other, so the two never overlap', () =>
+  {
+    // Arrange: looks whose first choice is named by nothing, showing that choice, showing a named one, and held
+    // differently.
+    const looks = [ { value: '', label: 'None of its own' }, { value: 'rain', label: 'rain' } ];
+    const fields = [ fieldOf({ kind: 'select', options: looks }, '', 'Look'), fieldOf({ kind: 'select', options: looks }, 'rain', 'Named'), fieldOf({ kind: 'select', options: looks }, null, 'Held') ];
+
+    // Act.
+    fields.forEach(field => renderControl(field));
+
+    // Assert: MUI marks a raised label as shrunk.
+    expect([ 'Look', 'Named', 'Held' ].map(label => screen.getByText(label, { selector: 'label' }).getAttribute('data-shrink')))
+      .toStrictEqual([ 'true', 'true', 'true' ]);
+  });
+
   it('shows a drop-down\'s hint under it', () =>
   {
     // Arrange.
