@@ -31,7 +31,7 @@ const TIME_ONLY: ReadonlySet<TimeTagKind> = new Set<TimeTagKind>([ 'Minute', 'Ho
  * as the plugin judges them at the moment the game's clock reads with the window's clock's time of day, on the date the
  * clock's season moves the start to: the starting date itself until the author picks another season. A page carrying
  * none is never held back by it.
- * @param {GameDate} start The date a new game starts on, and the second, which the window's clock never moves.
+ * @param {GameDate} start The date a new game starts on, and the second, which the clock's season moves the date on from.
  * @returns {PageCondition} The condition.
  */
 const timePageCondition = (start: GameDate): PageCondition =>

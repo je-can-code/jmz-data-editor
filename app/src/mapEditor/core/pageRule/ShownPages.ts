@@ -301,6 +301,8 @@ class ShownPages implements ActivePages, ShownPageReader
     const reading = readEvent(event, rule);
     const entry: ReadEvent = { event, reading, active: activePageOf(reading, this.#moment()) };
     this.#read.set(event.id, entry);
+
+    // the clock and its season judge it again only while its pages, as they now read, ask something of them.
     follow(this.#followingClock, event.id, reading.followsClock);
     follow(this.#followingDate, event.id, reading.followsDate);
     return entry;
