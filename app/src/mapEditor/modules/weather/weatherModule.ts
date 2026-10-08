@@ -1,8 +1,7 @@
-import type { JsonValue } from '../../core/model/json.ts';
-import type { ModuleNotice, PluginModule } from '../../core/modules/PluginModule.ts';
+import type { ConfigRead, LiveNotice, ModuleNotice, OnDemandConfig, PluginModule } from '../../core/modules/PluginModule.ts';
 import type { WeatherFrame } from '../../core/renderer/weatherLayer.ts';
-import { MapWeather } from './mapWeather.ts';
-import { weatherConfigFrom } from './weatherPresets.ts';
+import { WeatherOnDemand } from './weatherOnDemand.ts';
+import { weatherConfigFrom } from './weatherConfig.ts';
 import { resolveWeather } from './weatherResolver.ts';
 import { weatherDeclarationOf } from './weatherTags.ts';
 
@@ -41,21 +40,20 @@ const CLEARS_ONCE_FIXED = 'This clears as soon as the file is fixed.';
  * that has none: the file could not be read (it is missing, is not JSON, or holds a block the strict read refuses), in
  * the server's words, or it holds no motions or no looks, which J-Weather could not start from either. Nothing is said
  * of a config that serves.
- * @param {JsonValue | null} config The config as the server served it, or null when it could not be read.
- * @param {string | undefined} problem Why it could not be read, or undefined when nothing said why.
+ * @param {ConfigRead} read The config as the server served it, or null and why not.
  * @returns {ModuleNotice | null} The notice, or null when the config serves.
  */
-const weatherConfigNotice = (config: JsonValue | null, problem: string | undefined): ModuleNotice | null =>
+const weatherConfigNotice = (read: ConfigRead): ModuleNotice | null =>
 {
-  if (config === null)
+  if (read.content === null)
   {
-    const why = problem === undefined
+    const why = read.problem === null
       ? 'It was not read.'
-      : `It could not be read: ${problem}.`;
+      : `It could not be read: ${read.problem}.`;
     return { id: WEATHER_CONFIG_NOTICE_ID, title: NO_WEATHER_UNTIL_FIXED, detail: `${why} ${CLEARS_ONCE_FIXED}` };
   }
 
-  if (weatherConfigFrom(config) !== null)
+  if (weatherConfigFrom(read.content) !== null)
   {
     return null;
   }
@@ -66,6 +64,22 @@ const weatherConfigNotice = (config: JsonValue | null, problem: string | undefin
     detail: `It needs its motions and its presets, each a table by name. ${CLEARS_ONCE_FIXED}`,
   };
 };
+
+/**
+ * What the module says of its config over every map view: nothing until a map with weather has had it read, then why
+ * it cannot be drawn from, for as long as it cannot, and nothing for a config that serves.
+ * @param {OnDemandConfig} config J-Weather's config.
+ * @returns {LiveNotice} What is said of it.
+ */
+const weatherConfigNoticeOf = (config: OnDemandConfig): LiveNotice => ({
+  id: WEATHER_CONFIG_NOTICE_ID,
+  current: () =>
+  {
+    const read = config.current();
+    return read === undefined ? null : weatherConfigNotice(read);
+  },
+  subscribe: listener => config.subscribe(listener),
+});
 
 /**
  * Says whether J-Weather draws anything on a frame's map: a look its note names, or the sky's look on an outdoor map
@@ -86,29 +100,25 @@ const drawsWeatherOn = (frame: WeatherFrame): boolean =>
  * sizes, colours, strengths and blends from config.weather.json. It sits where the game draws its weather, coloured by
  * the screen's tone and beneath the lighting's dark, and the view's Weather switch shows and hides it. A map opting out,
  * or naming no look, draws nothing, as it does in the game with nothing driving a sky; a look the map names runs at its
- * middle strength until something drives one. A config that cannot be drawn from is said over every map view.
+ * middle strength until something drives one.
+ *
+ * Weather costs a map without any nothing: the config is read, and the code that draws loaded, only the first time a map
+ * has weather, never while the window opens. A config that then turns out not to serve is said over every map view.
  */
 const weatherModule: PluginModule = {
   id: 'weather',
   title: 'J-Weather',
   plugins: [ WEATHER_PLUGIN ],
-  configs: [ WEATHER_CONFIG ],
+  onDemandConfigs: [ WEATHER_CONFIG ],
   register: (contributions, context) =>
   {
-    // the registry hands over every config the module names, null for one the project lacks, with why it lacks it.
-    const served = context.configs.get(WEATHER_CONFIG) ?? null;
-    const notice = weatherConfigNotice(served, context.configProblems.get(WEATHER_CONFIG));
-    if (notice !== null)
-    {
-      contributions.notice(notice);
-    }
-
-    const config = weatherConfigFrom(served);
+    const config = context.onDemandConfig(WEATHER_CONFIG);
+    contributions.liveNotice(weatherConfigNoticeOf(config));
     contributions.weatherLayer({
       id: MAP_WEATHER_ID,
       title: 'Weather',
       drawsOn: drawsWeatherOn,
-      create: stage => new MapWeather(stage, config),
+      create: stage => new WeatherOnDemand(stage, config),
     });
   },
 };

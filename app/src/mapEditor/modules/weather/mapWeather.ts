@@ -2,10 +2,12 @@ import { Particle, ParticleContainer, type BLEND_MODES } from 'pixi.js';
 import type { JsonValue } from '../../core/model/json.ts';
 import type { TextureImage, TextureSource, WorldRect } from '../../core/renderer/MapRenderer.ts';
 import type { WeatherDrawing, WeatherFrame, WeatherStage } from '../../core/renderer/weatherLayer.ts';
+import { ensureParticlePipe } from './particlePipe.ts';
+import type { WeatherConfigFile } from './weatherConfig.ts';
 import { WeatherField } from './weatherField.ts';
 import { glowFor, type WeatherParticle } from './weatherMotion.ts';
 import { layerPicturesFor, pageCanvas, releasePictures, type CanvasMaker, type LayerPictures } from './weatherPictures.ts';
-import { layersFor, type WeatherConfigFile, type WeatherLayer } from './weatherPresets.ts';
+import { layersFor, type WeatherLayer } from './weatherPresets.ts';
 import { seededRoller, weatherSeed } from './weatherRandom.ts';
 import { isSameWeather, resolveWeather, type ResolvedWeather } from './weatherResolver.ts';
 import { layerStatsOf } from './weatherStats.ts';
@@ -203,6 +205,9 @@ class MapWeather implements WeatherDrawing
 
     const { layers, problem } = layersFor(config, weather.preset, weather.intensity);
     this.#problem = problem ?? '';
+
+    // the layers are particle containers, which a view made before the weather's code first loaded cannot yet draw.
+    ensureParticlePipe(frame.renderer);
     const rect = this.#rectOf(frame);
     this.#rect = rect;
     const bounds = rect === null ? { width: 0, height: 0 } : { width: rect.width, height: rect.height };

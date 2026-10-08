@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MapEditorApiError } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { CommandCatalog } from '../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
-import type { PluginModule } from '../../../src/mapEditor/core/modules/PluginModule.ts';
+import type { OnDemandConfig, PluginModule } from '../../../src/mapEditor/core/modules/PluginModule.ts';
 import { PluginModuleRegistry } from '../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import {
   activatePluginModules,
@@ -27,7 +27,13 @@ import type { PluginsJsEntry } from '../../../src/services/plugins/PluginsJsRead
  * changed (the list, a config, or why a config cannot be read), and leaves them, drawings and all, when nothing did.
  * Reads never overlap, and asks made while one runs are answered by one more read after it. A list that cannot be read
  * later leaves the modules as they were. A changed file is a module's config when it sits where the server reads the
- * config some module names.
+ * config some module names, one it reads on demand included.
+ *
+ * A config a module reads only on demand, as J-Weather's is, is never read while the modules switch on, so a window
+ * whose maps have no weather never reads it at all. The window keeps one copy of it across switch-ons, read the first
+ * time a module asks and once however often it asks, as null with why for one the server cannot give. From then on
+ * every refresh reads it again while the module naming it is on, its listeners hearing only a read that differs, and
+ * the modules are not switched on afresh for it; the read begun last is the one kept, whichever answers first.
  */
 
 /**
@@ -80,6 +86,15 @@ const serverWith = (list: string, answer: (name: string) => JsonValue = name => 
   return { api, asked };
 };
 
+/**
+ * Lets every read already answered be heard.
+ * @returns {Promise<void>} Settles once they have been.
+ */
+const settled = (): Promise<void> => new Promise(resolve =>
+{
+  setTimeout(resolve, 0);
+});
+
 describe('pluginModules', () =>
 {
   describe('readModuleConfigs', () =>
@@ -105,6 +120,20 @@ describe('pluginModules', () =>
           [],
           [ 'lighting', 'lighting-time' ],
         ]);
+    });
+
+    it('never reads a config a module reads only on demand', async () =>
+    {
+      // Arrange: a module reading its own config before switching on, and another only on demand.
+      const weather: PluginModule = { ...moduleNaming('weather', 'J-Weather', [ 'weather-fonts' ]), onDemandConfigs: [ 'weather' ] };
+      const { api, asked } = serverWith('');
+
+      // Act.
+      const { contents } = await readModuleConfigs(api, [ weather ], [ plugin('j/weather/J-Weather', true) ]);
+
+      // Assert.
+      expect([ [ ...contents.keys() ], asked ])
+        .toStrictEqual([ [ 'weather-fonts' ], [ 'weather-fonts' ] ]);
     });
 
     it('reads an extension\'s config only while every plugin the extension needs is enabled too', async () =>
@@ -402,6 +431,198 @@ describe('pluginModules', () =>
         .toStrictEqual([ 2, 1 ]);
     });
 
+    describe('configs read on demand', () =>
+    {
+      /**
+       * js/plugins.js enabling J-Weather alone, whose module reads its config only on demand.
+       */
+      const WEATHER_ONLY = 'var $plugins =\n[\n{"name":"j/weather/J-Weather","status":true,"description":"","parameters":{}}\n];\n';
+
+      /**
+       * Switches the modules on over a server, and finds the window's copy of J-Weather's config, as the last switch-on
+       * handed it to the modules.
+       * @param {ModuleSource} api The server.
+       * @returns {Promise<{ activation: ModuleActivation, registry: PluginModuleRegistry, copy: () => OnDemandConfig }>}
+       * The activation, its registry, and the copy as the latest switch-on hands it over.
+       */
+      const switchedOn = async (api: ModuleSource) =>
+      {
+        const registry = new PluginModuleRegistry(new CommandCatalog());
+        const activate = vi.spyOn(registry, 'activate');
+        const activation = new ModuleActivation(api, registry);
+        await activation.refresh();
+        const copy = () =>
+        {
+          const onDemand = activate.mock.calls.at(-1)?.[4] as (name: string) => OnDemandConfig;
+          return onDemand('weather');
+        };
+        return { activation, registry, copy };
+      };
+
+      it('reads no config read on demand while switching on, and reads it once however often a module asks', async () =>
+      {
+        // Arrange: J-Weather on, its config never asked for.
+        const { api, asked } = serverWith(WEATHER_ONLY);
+        const { copy } = await switchedOn(api);
+        const askedBefore = [ ...asked ];
+        const heard = vi.fn();
+        copy().subscribe(heard);
+
+        // Act: asked for twice.
+        copy().request();
+        copy().request();
+        await settled();
+
+        // Assert: read once, its content handed over, the listener told.
+        expect([ askedBefore, asked, copy().current(), heard.mock.calls.length ])
+          .toStrictEqual([ [], [ 'weather' ], { content: { name: 'weather' }, problem: null }, 1 ]);
+      });
+
+      it('reads a config the server cannot give on demand as null, with why', async () =>
+      {
+        // Arrange: a server refusing J-Weather's config.
+        const words = 'open /game/data/config.weather.json: no such file or directory';
+        const api: ModuleSource = {
+          loadPluginList: async () => WEATHER_ONLY,
+          loadPluginConfig: () => Promise.reject(new MapEditorApiError('GET /api/config/weather answered 500', 500, words)),
+        };
+        const { copy } = await switchedOn(api);
+
+        // Act.
+        copy().request();
+        await settled();
+
+        // Assert.
+        expect(copy().current())
+          .toStrictEqual({ content: null, problem: words });
+      });
+
+      it('hands every switch-on the same copy, so a config read once is not read again for modules switched on afresh', async () =>
+      {
+        // Arrange: the config read, then one of J-Weather's parameters changed in js/plugins.js.
+        const project = { list: WEATHER_ONLY };
+        const asked: string[] = [];
+        const api: ModuleSource = {
+          loadPluginList: async () => project.list,
+          loadPluginConfig: async (name: string) =>
+          {
+            asked.push(name);
+            return { name };
+          },
+        };
+        const { activation, registry, copy } = await switchedOn(api);
+        const first = copy();
+        first.request();
+        await settled();
+
+        // Act.
+        project.list = WEATHER_ONLY.replace('"parameters":{}', '"parameters":{"Debug":"false"}');
+        await activation.refresh();
+
+        // Assert: switched on afresh, the same copy handed over, already read, and read again only by the refresh.
+        expect([ registry.revision, copy() === first, copy().current(), asked ])
+          .toStrictEqual([ 2, true, { content: { name: 'weather' }, problem: null }, [ 'weather', 'weather' ] ]);
+      });
+
+      it('reads an asked-for config again at each refresh, telling its listeners of a read that differs, without switching on afresh', async () =>
+      {
+        // Arrange: the config read, and a listener on it.
+        const project = { content: { snow: 1 } as JsonValue };
+        const { api, asked } = serverWith(WEATHER_ONLY, () => project.content);
+        const { activation, registry, copy } = await switchedOn(api);
+        copy().request();
+        await settled();
+        const heard = vi.fn();
+        copy().subscribe(heard);
+
+        // Act: a refresh finding it the same, then one after it was tuned.
+        await activation.refresh();
+        const afterSame = heard.mock.calls.length;
+        project.content = { snow: 2 };
+        await activation.refresh();
+
+        // Assert: read at each refresh, heard once, and the modules switched on only the first time.
+        expect([ asked, afterSame, heard.mock.calls.length, copy().current(), registry.revision ])
+          .toStrictEqual([ [ 'weather', 'weather', 'weather' ], 0, 1, { content: { snow: 2 }, problem: null }, 1 ]);
+      });
+
+      it('reads no config at a refresh that no module has asked for', async () =>
+      {
+        // Arrange.
+        const { api, asked } = serverWith(WEATHER_ONLY);
+        const { activation } = await switchedOn(api);
+
+        // Act.
+        await activation.refresh();
+
+        // Assert.
+        expect(asked)
+          .toStrictEqual([]);
+      });
+
+      it('reads an asked-for config no more once the module asking for it switches off', async () =>
+      {
+        // Arrange: the config read, then J-Weather switched off.
+        const project = { list: WEATHER_ONLY };
+        const asked: string[] = [];
+        const api: ModuleSource = {
+          loadPluginList: async () => project.list,
+          loadPluginConfig: async (name: string) =>
+          {
+            asked.push(name);
+            return { name };
+          },
+        };
+        const { activation, registry, copy } = await switchedOn(api);
+        copy().request();
+        await settled();
+
+        // Act.
+        project.list = WEATHER_ONLY.replace('"status":true', '"status":false');
+        await activation.refresh();
+
+        // Assert.
+        expect([ registry.isActive('weather'), asked ])
+          .toStrictEqual([ false, [ 'weather' ] ]);
+      });
+
+      it('keeps the read begun last, whichever answers first', async () =>
+      {
+        // Arrange: a server whose first answer waits to be let through, the config asked for, then a refresh begun.
+        let release: () => void = () => undefined;
+        const gate = new Promise<void>(resolve =>
+        {
+          release = resolve;
+        });
+        let reads = 0;
+        const api: ModuleSource = {
+          loadPluginList: async () => WEATHER_ONLY,
+          loadPluginConfig: async () =>
+          {
+            reads += 1;
+            const read = reads;
+            if (read === 1)
+            {
+              await gate;
+            }
+
+            return { read };
+          },
+        };
+        const { activation, copy } = await switchedOn(api);
+        copy().request();
+        await activation.refresh();
+
+        // Act: the first read let through after the second answered.
+        release();
+        await settled();
+
+        // Assert.
+        expect([ reads, copy().current() ])
+          .toStrictEqual([ 2, { content: { read: 2 }, problem: null } ]);
+      });
+    });
+
     it('keeps the modules as they were when a later read cannot read the plugin list', async () =>
     {
       // Arrange: a project switched on, whose list then fails.
@@ -473,6 +694,19 @@ describe('pluginModules', () =>
       // Assert.
       expect(known)
         .toStrictEqual([ true, false ]);
+    });
+
+    it('knows a config a module reads only on demand, as the shipped weather module reads J-Weather\'s', () =>
+    {
+      // Arrange: J-Weather's file, and a module reading the crafting config on demand.
+      const modules = [ { ...moduleNaming('crafting', 'J-Crafting'), onDemandConfigs: [ 'crafting' ] } ];
+
+      // Act.
+      const known = [ isModuleConfigFile('data/config.weather.json'), isModuleConfigFile('data/config.crafting.json', modules) ];
+
+      // Assert.
+      expect(known)
+        .toStrictEqual([ true, true ]);
     });
 
     it('knows an extension\'s config a module reads, whatever is enabled, as the shipped lighting module reads the curve', () =>

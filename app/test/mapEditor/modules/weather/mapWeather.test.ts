@@ -1,12 +1,12 @@
-import { Container, type Particle, type ParticleContainer, type Renderer } from 'pixi.js';
+import { Container, type Particle, type ParticleContainer, type WebGLRenderer } from 'pixi.js';
 import { describe, expect, it } from 'vitest';
 import type { ImageFolder } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { TextureImage, TextureSource, WorldRect } from '../../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import type { SkyWeather, WeatherFrame, WeatherStage } from '../../../../src/mapEditor/core/renderer/weatherLayer.ts';
 import { MapWeather, pictureName, weatherRectFor } from '../../../../src/mapEditor/modules/weather/mapWeather.ts';
+import type { WeatherConfigFile } from '../../../../src/mapEditor/modules/weather/weatherConfig.ts';
 import type { CanvasMaker } from '../../../../src/mapEditor/modules/weather/weatherPictures.ts';
-import type { WeatherConfigFile } from '../../../../src/mapEditor/modules/weather/weatherPresets.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
 /*
@@ -123,6 +123,12 @@ describe('MapWeather', () =>
   };
 
   /**
+   * A renderer that can already draw particle containers, as one made after the weather's code loaded can; nothing here
+   * draws with it.
+   */
+  const PIPED_RENDERER = { renderPipes: { particle: {} } } as unknown as WebGLRenderer;
+
+  /**
    * Builds what a frame hands the weather.
    * @param {MapDocument} document The map.
    * @param {{ frames?: number, animating?: boolean, view?: WorldRect, images?: TextureSource | null, sky?: SkyWeather | null }} options The rest.
@@ -132,7 +138,7 @@ describe('MapWeather', () =>
     document: MapDocument,
     options: { frames?: number; animating?: boolean; view?: WorldRect; images?: TextureSource | null; sky?: SkyWeather | null } = {}): WeatherFrame => ({
     document,
-    renderer: {} as Renderer,
+    renderer: PIPED_RENDERER,
     context: 1,
     clock: { frames: options.frames ?? 0, animating: options.animating ?? true },
     view: options.view ?? WINDOW,

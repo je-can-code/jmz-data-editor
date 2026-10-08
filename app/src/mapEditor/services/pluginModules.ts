@@ -1,7 +1,7 @@
 import { readPluginEntries, type PluginsJsEntry } from '../../services/plugins/PluginsJsReader.ts';
 import { MapEditorApiError, type MapEditorApi } from '../core/api/MapEditorApi.ts';
 import { jsonEquals, type JsonValue } from '../core/model/json.ts';
-import type { PluginModule } from '../core/modules/PluginModule.ts';
+import type { ConfigRead, OnDemandConfig, PluginModule } from '../core/modules/PluginModule.ts';
 import { configNamesOf, enabledPlugins, type PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import { jabsModule } from '../modules/jabs/jabsModule.ts';
 import { lightingModule } from '../modules/lighting/lightingModule.ts';
@@ -48,10 +48,29 @@ const problemOf = (error: Error): string =>
 };
 
 /**
+ * Reads one config file. A file the server cannot give, or a client that cannot read configs at all, reads as null,
+ * and why is kept, so the module can say so rather than quietly falling back. Never rejects.
+ * @param {ModuleSource} api The server.
+ * @param {string} name The config's name.
+ * @returns {Promise<ConfigRead>} What it holds, or null and why not.
+ */
+const readConfig = (api: ModuleSource, name: string): Promise<ConfigRead> =>
+{
+  if (api.loadPluginConfig === undefined)
+  {
+    return Promise.resolve({ content: null, problem: NO_CONFIG_READER });
+  }
+
+  return api.loadPluginConfig(name)
+    .then(content => ({ content, problem: null }))
+    .catch((error: Error) => ({ content: null, problem: problemOf(error) }));
+};
+
+/**
  * Reads the config files named by the modules that are about to switch on, and only theirs, an extension's only while
- * that extension is enabled too, so a project without a plugin is never asked for that plugin's config. A file the
- * server cannot give, or a client that cannot read configs at all, reads as null, and why is kept, so the module can say
- * so rather than quietly falling back.
+ * that extension is enabled too, so a project without a plugin is never asked for that plugin's config; one a module
+ * reads on demand is never read here. A file the server cannot give, or a client that cannot read configs at all, reads
+ * as null, and why is kept, so the module can say so rather than quietly falling back.
  * @param {ModuleSource} api The server.
  * @param {readonly PluginModule[]} modules The modules.
  * @param {readonly PluginsJsEntry[]} plugins The project's plugins.
@@ -63,27 +82,110 @@ const readModuleConfigs = async (
   plugins: readonly PluginsJsEntry[]): Promise<ModuleConfigs> =>
 {
   const enabled = enabledPlugins(plugins);
-  const names = new Set(modules
+  const names = [ ...new Set(modules
     .filter(pluginModule => pluginModule.plugins.every(name => enabled.has(name)))
-    .flatMap(pluginModule => configNamesOf(pluginModule, enabled)));
-  const read = async (name: string): Promise<{ name: string; content: JsonValue | null; problem: string | null }> =>
-  {
-    if (api.loadPluginConfig === undefined)
-    {
-      return { name, content: null, problem: NO_CONFIG_READER };
-    }
-
-    return api.loadPluginConfig(name)
-      .then(content => ({ name, content, problem: null }))
-      .catch((error: Error) => ({ name, content: null, problem: problemOf(error) }));
-  };
-
-  const reads = await Promise.all([ ...names ].map(read));
+    .flatMap(pluginModule => configNamesOf(pluginModule, enabled))) ];
+  const reads = await Promise.all(names.map(name => readConfig(api, name)));
   return {
-    contents: new Map(reads.map(each => [ each.name, each.content ])),
-    problems: new Map(reads.flatMap(each => (each.problem === null ? [] : [ [ each.name, each.problem ] as const ]))),
+    contents: new Map(reads.map((each, index) => [ names[index], each.content ])),
+    problems: new Map(reads.flatMap((each, index) => (each.problem === null ? [] : [ [ names[index], each.problem ] as const ]))),
   };
 };
+
+/**
+ * Reports whether two reads of a config found the same: the same content, and the same reason for none.
+ * @param {ConfigRead} left One read.
+ * @param {ConfigRead | undefined} right The other, or undefined for none yet.
+ * @returns {boolean} True when they found the same.
+ */
+const sameRead = (left: ConfigRead, right: ConfigRead | undefined): boolean =>
+{
+  return right !== undefined && left.problem === right.problem && jsonEquals(left.content, right.content);
+};
+
+/**
+ * The window's one copy of a config some module reads on demand: unread until a module asks for it, then read, and read
+ * again each time the modules' configs are, its listeners hearing each read that differs from the one before. A read
+ * begun after another is the one that counts, whichever answers first.
+ */
+class OnDemandConfigCopy implements OnDemandConfig
+{
+  #api: ModuleSource;
+
+  #name: string;
+
+  #read: ConfigRead | undefined = undefined;
+
+  #asked = false;
+
+  #reads = 0;
+
+  #listeners = new Set<() => void>();
+
+  /**
+   * @param {ModuleSource} api The server.
+   * @param {string} name The config's name.
+   */
+  constructor(api: ModuleSource, name: string)
+  {
+    this.#api = api;
+    this.#name = name;
+  }
+
+  current = (): ConfigRead | undefined =>
+  {
+    return this.#read;
+  };
+
+  request = (): void =>
+  {
+    if (this.#asked)
+    {
+      return;
+    }
+
+    // the read itself never fails, a config the server cannot give reading as null with why; a listener that throws is
+    // a fault in its module, left to surface rather than caught here.
+    this.#asked = true;
+    this.reread();
+  };
+
+  subscribe = (listener: () => void): (() => void) =>
+  {
+    this.#listeners.add(listener);
+    return () =>
+    {
+      this.#listeners.delete(listener);
+    };
+  };
+
+  /**
+   * Reads the config again, if a module ever asked for it, and tells the listeners when it differs from the last read.
+   * @returns {Promise<void>} Settles once read, at once for a config nobody asked for.
+   */
+  reread(): Promise<void>
+  {
+    if (this.#asked === false)
+    {
+      return Promise.resolve();
+    }
+
+    this.#reads += 1;
+    const read = this.#reads;
+    return readConfig(this.#api, this.#name)
+      .then(answer =>
+      {
+        // an answer to a read begun before a later one is old news, and the same as the last read is no news.
+        if (read !== this.#reads || sameRead(answer, this.#read))
+        {
+          return;
+        }
+
+        this.#read = answer;
+        this.#listeners.forEach(listener => listener());
+      });
+  }
+}
 
 /**
  * What one switching on was built from: js/plugins.js as read, and the configs read for it.
@@ -115,8 +217,8 @@ const sameInputs = (left: ModuleInputs, right: ModuleInputs): boolean =>
 };
 
 /**
- * Reports whether a changed file is a config one of the modules reads, an extension's included, so the modules should
- * read their configs again.
+ * Reports whether a changed file is a config one of the modules reads, an extension's or one read on demand included,
+ * so the modules should read their configs again.
  * @param {string} path The file, relative to the project root, as the change stream names it.
  * @param {readonly PluginModule[]} modules The modules; by default, the ones the editor ships.
  * @returns {boolean} True for a config some module names.
@@ -133,7 +235,7 @@ const isModuleConfigFile = (path: string, modules: readonly PluginModule[] = SHI
   return modules.some(pluginModule =>
   {
     const extensions = (pluginModule.extensionConfigs ?? []).map(config => config.name);
-    return [ ...(pluginModule.configs ?? []), ...extensions ].includes(name);
+    return [ ...(pluginModule.configs ?? []), ...extensions, ...(pluginModule.onDemandConfigs ?? []) ].includes(name);
   });
 };
 
@@ -144,6 +246,11 @@ const isModuleConfigFile = (path: string, modules: readonly PluginModule[] = SHI
  * that come while a read is running are answered by one more read after it, however many came. A refresh never
  * rejects: a list that cannot be read leaves the modules as they were, which before the first read is the core's kinds
  * on their own, as in a project without those plugins.
+ *
+ * A config a module reads on demand is never read by a refresh until the module has asked for it. The window keeps one
+ * copy of each, from one switch-on to the next, and once asked for it is read again at the end of every refresh, its
+ * listeners hearing a change without the modules switching on afresh, so a map with weather follows its config as it is
+ * tuned on disk while every other map in the window carries on undisturbed.
  */
 class ModuleActivation
 {
@@ -156,6 +263,8 @@ class ModuleActivation
   #queue: Promise<void> = Promise.resolve();
 
   #waiting = false;
+
+  #onDemand = new Map<string, OnDemandConfigCopy>();
 
   /**
    * @param {ModuleSource} api The server.
@@ -190,7 +299,7 @@ class ModuleActivation
 
   /**
    * Reads the plugin list and the configs, and switches the modules on when either differs from what they were last
-   * switched on from.
+   * switched on from; then reads again every config a module has asked for on demand.
    * @returns {Promise<void>} Settles once done, or once the list has proved unreadable.
    */
   #read(): Promise<void>
@@ -200,15 +309,38 @@ class ModuleActivation
       {
         const plugins = readPluginEntries(list);
         const read: ModuleInputs = { list, configs: await readModuleConfigs(this.#api, SHIPPED_MODULES, plugins) };
-        if (this.#applied !== null && sameInputs(this.#applied, read))
+        if (this.#applied === null || sameInputs(this.#applied, read) === false)
         {
-          return;
+          this.#applied = read;
+          this.#registry.activate(SHIPPED_MODULES, plugins, read.configs.contents, read.configs.problems, name => this.#onDemandCopy(name));
         }
 
-        this.#applied = read;
-        this.#registry.activate(SHIPPED_MODULES, plugins, read.configs.contents, read.configs.problems);
+        // only a module that is on reads its on-demand configs, as only those switching on read their others.
+        const wanted = new Set(SHIPPED_MODULES
+          .filter(pluginModule => this.#registry.isActive(pluginModule.id))
+          .flatMap(pluginModule => pluginModule.onDemandConfigs ?? []));
+        const copies = [ ...this.#onDemand ].filter(([ name ]) => wanted.has(name));
+        await Promise.all(copies.map(([ , copy ]) => copy.reread()));
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * Finds the window's copy of a config read on demand, making it, unread, the first time any module names it.
+   * @param {string} name The config's name.
+   * @returns {OnDemandConfigCopy} The copy.
+   */
+  #onDemandCopy(name: string): OnDemandConfigCopy
+  {
+    const known = this.#onDemand.get(name);
+    if (known !== undefined)
+    {
+      return known;
+    }
+
+    const copy = new OnDemandConfigCopy(this.#api, name);
+    this.#onDemand.set(name, copy);
+    return copy;
   }
 }
 

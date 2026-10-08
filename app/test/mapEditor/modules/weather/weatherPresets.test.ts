@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import { layersFor, weatherConfigFrom, type WeatherConfigFile } from '../../../../src/mapEditor/modules/weather/weatherPresets.ts';
+import type { WeatherConfigFile } from '../../../../src/mapEditor/modules/weather/weatherConfig.ts';
+import { layersFor } from '../../../../src/mapEditor/modules/weather/weatherPresets.ts';
 
 /*
  * A look is turned into the layers that draw it exactly as WeatherPresets#layersFor turns it, so every number the editor
@@ -14,7 +14,7 @@ import { layersFor, weatherConfigFrom, type WeatherConfigFile } from '../../../.
  *
  * A look the config does not know (names are matched exactly, case and all), a strength its ladder lacks, and a name
  * every object holds by birth draw nothing, with the reason; a layer naming a motion the config lacks draws nothing
- * either, its density zero. A config without a table of motions and a table of looks cannot be drawn from at all.
+ * either, its density zero.
  */
 describe('weatherPresets', () =>
 {
@@ -191,32 +191,4 @@ describe('weatherPresets', () =>
     });
   });
 
-  describe('weatherConfigFrom', () =>
-  {
-    it('takes a config holding a table of motions and a table of looks as it is', () =>
-    {
-      // Arrange.
-      const served = config() as unknown as JsonValue;
-
-      // Act.
-      const read = weatherConfigFrom(served);
-
-      // Assert.
-      expect(read)
-        .toBe(served);
-    });
-
-    it('refuses no config, a config that is no table, and one missing its motions or its looks', () =>
-    {
-      // Arrange.
-      const served: (JsonValue | null)[] = [ null, [ 1 ], 'rain', { motions: {} }, { presets: {} }, { motions: [], presets: {} } ];
-
-      // Act.
-      const read = served.map(weatherConfigFrom);
-
-      // Assert.
-      expect(read)
-        .toStrictEqual([ null, null, null, null, null, null ]);
-    });
-  });
 });

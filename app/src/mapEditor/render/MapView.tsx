@@ -276,6 +276,9 @@ const MapView = (props: MapViewProps) =>
   // whether one offers a clock, its clock, and the kinds of state they let the preview set, what the preview chip calls
   // them.
   useSyncExternalStore(services.modules.subscribe, () => services.modules.revision);
+
+  // what the modules say over the map can change while they are on, such as a config read only once a map needed it.
+  useSyncExternalStore(services.modules.subscribeNotices, () => services.modules.noticesRevision);
   const switches = shownSwitches(services.modules.lightingLayers().length > 0, services.modules.weatherLayers().length > 0);
   const clockOffer = services.modules.clockOffer();
   const nouns = previewNouns(services.modules.previewKinds());

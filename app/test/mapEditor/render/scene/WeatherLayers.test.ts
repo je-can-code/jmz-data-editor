@@ -1,4 +1,4 @@
-import type { Container, Renderer } from 'pixi.js';
+import type { Container, WebGLRenderer } from 'pixi.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { WeatherFrame, WeatherLayerDefinition, WeatherStage } from '../../../../src/mapEditor/core/renderer/weatherLayer.ts';
@@ -78,7 +78,7 @@ const loggedLayer = (id: `${string}.${string}`, log: string[], moves = false) =>
  */
 const frame = (frames = 0, document = MapDocument.fromJson('map:7', buildMapJson())): WeatherFrame => ({
   document,
-  renderer: {} as Renderer,
+  renderer: {} as WebGLRenderer,
   context: 1,
   clock: { frames, animating: true },
   view: WHOLE_VIEW,

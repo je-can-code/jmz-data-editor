@@ -3,7 +3,15 @@ import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandC
 import { pluginCommandEntry } from '../../../../src/mapEditor/core/commands/pluginCommands.ts';
 import { createMapEvent, pageCommentText } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import type { EventKindDefinition, ModuleContext, PluginModule, PreviewKindDefinition } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
+import type {
+  EventKindDefinition,
+  LiveNotice,
+  ModuleContext,
+  ModuleNotice,
+  OnDemandConfig,
+  PluginModule,
+  PreviewKindDefinition,
+} from '../../../../src/mapEditor/core/modules/PluginModule.ts';
 import { configNamesOf, enabledPlugins, PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
@@ -20,7 +28,14 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  *
  * A module naming project config files gets each one as it was read before switching on, and null for one that was
  * not, with why it could not be read, and never another module's. An extension's config, which a module reads only while
- * the plugins the extension needs are enabled too, is handed over only then, after the module's own.
+ * the plugins the extension needs are enabled too, is handed over only then, after the module's own. A config a module
+ * reads only on demand is handed over as the window's copy, which nothing reads until the module asks for it; asking for
+ * one the module does not name is a mistake in the module and throws, and a registry given no copies hands over configs
+ * that are never read, as a window without a server has.
+ *
+ * What the modules say can change while they are on, as when a config read only on demand turns out to be broken: the
+ * views are shown everything said, in the order it was said, and told whenever that changes and only then, a change that
+ * says the same thing again included; a module switching off is no longer listened to.
  *
  * A module may offer the map views a clock; the first one offered among the active modules is the window's, and none is
  * offered once the modules offering it switch off.
@@ -337,6 +352,12 @@ describe('PluginModuleRegistry', () =>
         plugins: [],
         register: add => add.weatherLayer({ id: 'core.x', title: 'x', drawsOn: () => true, create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) }),
       },
+      {
+        id: 'k',
+        title: 'K',
+        plugins: [],
+        register: add => add.liveNotice({ id: 'core.x', current: () => null, subscribe: () => () => undefined }),
+      },
     ];
 
     // Act.
@@ -363,6 +384,197 @@ describe('PluginModuleRegistry', () =>
       .toThrow('i can only add preview kinds whose id starts with "i.", not quest.states');
     expect(failures[9])
       .toThrow('j can only add weather layers whose id starts with "j.", not core.x');
+    expect(failures[10])
+      .toThrow('k can only add notices whose id starts with "k.", not core.x');
+  });
+
+  describe('configs read on demand', () =>
+  {
+    /**
+     * A config a window holds, read as the test says, which nothing here ever asks the server for.
+     * @param {string} name The config's name.
+     * @returns {OnDemandConfig} The config.
+     */
+    const heldConfig = (name: string): OnDemandConfig => ({
+      current: () => ({ content: { name }, problem: null }),
+      request: () => undefined,
+      subscribe: () => () => undefined,
+    });
+
+    it('hands a module the window\'s copy of each config it reads on demand, by name, and refuses one it does not name', () =>
+    {
+      // Arrange: a module reading the weather config on demand, and the window's copies by name.
+      const register = vi.fn();
+      const weather: PluginModule = { id: 'weather', title: 'Weather', plugins: [ 'J-Weather' ], onDemandConfigs: [ 'weather' ], register };
+      const copies = new Map([ [ 'weather', heldConfig('weather') ], [ 'jabs', heldConfig('jabs') ] ]);
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      registry.activate([ weather ], [ plugin('j/weather/J-Weather', true) ], new Map(), new Map(), name => copies.get(name) as OnDemandConfig);
+
+      // Assert.
+      const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+      expect(context.onDemandConfig('weather'))
+        .toBe(copies.get('weather'));
+      expect(() => context.onDemandConfig('jabs'))
+        .toThrow('weather asked for the config jabs, which it does not name among those it reads on demand');
+    });
+
+    it('refuses every config to a module naming none to read on demand', () =>
+    {
+      // Arrange.
+      const register = vi.fn();
+      const plain: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register };
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      registry.activate([ plain ], [ plugin('j/abs/J-ABS', true) ]);
+
+      // Assert.
+      const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+      expect(() => context.onDemandConfig('jabs'))
+        .toThrow('jabs asked for the config jabs, which it does not name among those it reads on demand');
+    });
+
+    it('hands over configs that are never read when it is given no copies of them, as in a window without a server', () =>
+    {
+      // Arrange.
+      const register = vi.fn();
+      const weather: PluginModule = { id: 'weather', title: 'Weather', plugins: [ 'J-Weather' ], onDemandConfigs: [ 'weather' ], register };
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ weather ], [ plugin('j/weather/J-Weather', true) ]);
+      const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+      const config = context.onDemandConfig('weather');
+      const heard = vi.fn();
+
+      // Act: asked for, listened to, and the listening stopped.
+      config.request();
+      config.subscribe(heard)();
+
+      // Assert.
+      expect([ config.current(), heard.mock.calls.length ])
+        .toStrictEqual([ undefined, 0 ]);
+    });
+  });
+
+  describe('live notices', () =>
+  {
+    /**
+     * A notice a module gives that the test changes, telling its listeners each time, counting them.
+     * @param {string} id Its id.
+     * @returns {{ notice: LiveNotice, say: (said: ModuleNotice | null) => void, listening: () => number }} The notice,
+     * a change to it, and how many listen.
+     */
+    const changingNotice = (id: string) =>
+    {
+      const listeners = new Set<() => void>();
+      let said: ModuleNotice | null = null;
+      const notice: LiveNotice = {
+        id,
+        current: () => said,
+        subscribe: listener =>
+        {
+          listeners.add(listener);
+          return () =>
+          {
+            listeners.delete(listener);
+          };
+        },
+      };
+      const say = (next: ModuleNotice | null) =>
+      {
+        said = next;
+        listeners.forEach(listener => listener());
+      };
+      return { notice, say, listening: () => listeners.size };
+    };
+
+    /**
+     * A module saying a fixed notice, then a live one, while J-Weather is on.
+     * @param {LiveNotice} live The live one.
+     * @returns {PluginModule} The module.
+     */
+    const sayingModule = (live: LiveNotice): PluginModule => ({
+      id: 'weather',
+      title: 'Weather',
+      plugins: [ 'J-Weather' ],
+      register: add =>
+      {
+        add.notice({ id: 'weather.fixed', title: 'Fixed.', detail: 'Always said.' });
+        add.liveNotice(live);
+      },
+    });
+
+    it('says what a live notice says once it says something, after the notices said before it, and tells the views', () =>
+    {
+      // Arrange: switched on with the live notice saying nothing yet, and a view listening.
+      const changing = changingNotice('weather.config');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ sayingModule(changing.notice) ], [ plugin('j/weather/J-Weather', true) ]);
+      const before = [ registry.notices().map(notice => notice.id), registry.noticesRevision ];
+      const heard = vi.fn();
+      registry.subscribeNotices(heard);
+
+      // Act.
+      changing.say({ id: 'weather.config', title: 'Broken.', detail: 'Fix it.' });
+
+      // Assert: the views told once, the count moved on, and the activation's own count left as it was.
+      expect([ before, registry.notices().map(notice => notice.id), registry.noticesRevision, heard.mock.calls.length, registry.revision ])
+        .toStrictEqual([ [ [ 'weather.fixed' ], 1 ], [ 'weather.fixed', 'weather.config' ], 2, 1, 1 ]);
+    });
+
+    it('tells the views when a live notice says something else, and not when it says the same again', () =>
+    {
+      // Arrange: a live notice saying one thing.
+      const changing = changingNotice('weather.config');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ sayingModule(changing.notice) ], [ plugin('j/weather/J-Weather', true) ]);
+      changing.say({ id: 'weather.config', title: 'Broken.', detail: 'Missing.' });
+      const heard = vi.fn();
+      registry.subscribeNotices(heard);
+
+      // Act: the same again, then another detail.
+      changing.say({ id: 'weather.config', title: 'Broken.', detail: 'Missing.' });
+      const afterSame = heard.mock.calls.length;
+      changing.say({ id: 'weather.config', title: 'Broken.', detail: 'Not JSON.' });
+
+      // Assert.
+      expect([ afterSame, heard.mock.calls.length, registry.notices().map(notice => notice.detail) ])
+        .toStrictEqual([ 0, 1, [ 'Always said.', 'Not JSON.' ] ]);
+    });
+
+    it('tells the views of every activation, and stops telling one that stopped listening', () =>
+    {
+      // Arrange.
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      const heard = vi.fn();
+      const stop = registry.subscribeNotices(heard);
+
+      // Act.
+      registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', true) ]);
+      stop();
+      registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', false) ]);
+
+      // Assert.
+      expect([ heard.mock.calls.length, registry.noticesRevision ])
+        .toStrictEqual([ 1, 2 ]);
+    });
+
+    it('stops listening to the live notices of a module once it switches off', () =>
+    {
+      // Arrange: switched on, then off.
+      const changing = changingNotice('weather.config');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ sayingModule(changing.notice) ], [ plugin('j/weather/J-Weather', true) ]);
+      const whileOn = changing.listening();
+
+      // Act.
+      registry.activate([ sayingModule(changing.notice) ], [ plugin('j/weather/J-Weather', false) ]);
+
+      // Assert.
+      expect([ whileOn, changing.listening(), registry.notices() ])
+        .toStrictEqual([ 1, 0, [] ]);
+    });
   });
 
   describe('enabledPlugins', () =>

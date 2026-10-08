@@ -9,9 +9,11 @@ import type { WeatherLayerDefinition } from '../renderer/weatherLayer.ts';
 import type {
   ClockOffer,
   EventKindDefinition,
+  LiveNotice,
   MapPropertiesSection,
   ModuleContributions,
   ModuleNotice,
+  OnDemandConfig,
   PaletteEntry,
   PassabilityRule,
   PluginModule,
@@ -43,7 +45,11 @@ type Contributions = {
   weather: WeatherLayerDefinition[];
   catalogIds: string[];
   templateMaps: number[];
-  notices: ModuleNotice[];
+
+  /**
+   * Everything the modules say, in the order they said it: a fixed notice as one that never changes.
+   */
+  notices: LiveNotice[];
   clocks: ClockOffer[];
   mapProperties: MapPropertiesSection[];
   pageConditions: PageCondition[];
@@ -69,6 +75,43 @@ const noContributions = (): Contributions => ({
   pageConditions: [],
   previewKinds: [],
 });
+
+/**
+ * Holds a fixed notice as one that never changes, so everything the modules say is heard the same way.
+ * @param {ModuleNotice} notice What to say.
+ * @returns {LiveNotice} The notice, never changing.
+ */
+const fixedNotice = (notice: ModuleNotice): LiveNotice => ({
+  id: notice.id,
+  current: () => notice,
+  subscribe: () => () => undefined,
+});
+
+/**
+ * Where the modules' on-demand configs come from for a registry handed no source for them, as in a window with no
+ * server to read from: each stays unread whatever is asked of it, so a module drawing from one draws nothing.
+ * @returns {OnDemandConfig} A config that is never read.
+ */
+const unreadOnDemand = (): OnDemandConfig => ({
+  current: () => undefined,
+  request: () => undefined,
+  subscribe: () => () => undefined,
+});
+
+/**
+ * Reports whether two lists of notices say the same things, in the same order.
+ * @param {readonly ModuleNotice[]} left One list.
+ * @param {readonly ModuleNotice[]} right The other.
+ * @returns {boolean} True when they say the same.
+ */
+const sameNotices = (left: readonly ModuleNotice[], right: readonly ModuleNotice[]): boolean =>
+{
+  return left.length === right.length && left.every((notice, index) =>
+  {
+    const other = right[index];
+    return notice.id === other.id && notice.title === other.title && notice.detail === other.detail;
+  });
+};
 
 /**
  * Reads which plugins js/plugins.js enables, by file name: {@code J-ABS} for {@code j/abs/J-ABS}.
@@ -118,6 +161,20 @@ class PluginModuleRegistry
   #listeners = new Set<() => void>();
 
   /**
+   * What the modules say now, as last heard; asked of them only when they switch on and when one of them changes.
+   */
+  #shownNotices: readonly ModuleNotice[] = [];
+
+  #noticesRevision = 0;
+
+  #noticeListeners = new Set<() => void>();
+
+  /**
+   * Stops listening to what the active modules say, for their switching off.
+   */
+  #noticeStops: (() => void)[] = [];
+
+  /**
    * @param {CommandCatalog} catalog The catalog module command entries join.
    */
   constructor(catalog: CommandCatalog)
@@ -152,13 +209,16 @@ class PluginModuleRegistry
    * beforehand; a module naming one missing here gets null for it. Left out, none were read.
    * @param {ReadonlyMap<string, string>} problems Why each config that could not be read could not, by name. Left out,
    * none were read, so none failed.
+   * @param {(name: string) => OnDemandConfig} onDemand The window's copy of each config a module reads on demand, by
+   * name. Left out, every one stays unread.
    * @returns {ModuleActivation} Which modules are on, and what each of the others is missing.
    */
   activate(
     modules: readonly PluginModule[],
     plugins: readonly PluginsJsEntry[],
     configs: ReadonlyMap<string, JsonValue | null> = new Map(),
-    problems: ReadonlyMap<string, string> = new Map()): ModuleActivation
+    problems: ReadonlyMap<string, string> = new Map(),
+    onDemand: (name: string) => OnDemandConfig = unreadOnDemand): ModuleActivation
   {
     this.#deactivate();
 
@@ -184,13 +244,28 @@ class PluginModuleRegistry
       }));
       // a page's words read the conditions as they stand when asked, so those added by modules after this one count.
       const pageWords = (page: RmmzEventPage) => pageWordsOf(page, this.#contributions.pageConditions);
-      pluginModule.register(this.#contributionsFor(pluginModule), { plugins: enabled, configs: own, configProblems: ownProblems, pageWords });
+      const onDemandConfig = (name: string): OnDemandConfig =>
+      {
+        if ((pluginModule.onDemandConfigs ?? []).includes(name) === false)
+        {
+          throw new Error(`${pluginModule.id} asked for the config ${name}, which it does not name among those it reads on demand`);
+        }
+
+        return onDemand(name);
+      };
+      pluginModule.register(this.#contributionsFor(pluginModule), { plugins: enabled, configs: own, configProblems: ownProblems, onDemandConfig, pageWords });
       this.#active.push(pluginModule.id);
     });
 
-    // whatever shows kinds read before this activation may read differently now.
+    // what the modules say is heard now, and again whenever any of it changes.
+    this.#noticeStops = this.#contributions.notices.map(notice => notice.subscribe(() => this.#hearNotices()));
+    this.#shownNotices = this.#currentNotices();
+
+    // whatever shows kinds read before this activation may read differently now, and the notices may say otherwise.
     this.#revision += 1;
+    this.#noticesRevision += 1;
     this.#listeners.forEach(listener => listener());
+    this.#noticeListeners.forEach(listener => listener());
     return { active: [ ...this.#active ], inactive };
   }
 
@@ -303,14 +378,39 @@ class PluginModuleRegistry
   }
 
   /**
-   * Lists what the active modules say over every map view, in the order they said it; empty while none has anything to
-   * say.
+   * Lists what the active modules say over every map view, in the order they said it, as last heard; empty while none
+   * has anything to say.
    * @returns {readonly ModuleNotice[]} The notices.
    */
   notices(): readonly ModuleNotice[]
   {
-    return this.#contributions.notices;
+    return this.#shownNotices;
   }
+
+  /**
+   * Counts the times what the modules say may have changed: each activation, and each change a module's notice made to
+   * what is said, so a view showing the notices can tell it has something new to show.
+   * @returns {number} The count.
+   */
+  get noticesRevision(): number
+  {
+    return this.#noticesRevision;
+  }
+
+  /**
+   * Listens for what the modules say changing, as a view showing the notices does: once for each activation, and once
+   * for each change a module's notice makes to what is said while it is on.
+   * @param {() => void} listener Called after each change.
+   * @returns {() => void} Stops listening.
+   */
+  subscribeNotices = (listener: () => void): (() => void) =>
+  {
+    this.#noticeListeners.add(listener);
+    return () =>
+    {
+      this.#noticeListeners.delete(listener);
+    };
+  };
 
   /**
    * Finds the clock the active modules offer the map views: the first one offered, or none while no module offers one,
@@ -412,6 +512,11 @@ class PluginModuleRegistry
       notice: notice =>
       {
         requirePrefix(notice.id, 'notices');
+        this.#contributions.notices.push(fixedNotice(notice));
+      },
+      liveNotice: notice =>
+      {
+        requirePrefix(notice.id, 'notices');
         this.#contributions.notices.push(notice);
       },
       clock: offer =>
@@ -437,10 +542,41 @@ class PluginModuleRegistry
   }
 
   /**
-   * Takes back everything the modules contributed.
+   * Asks every active module's notices what they say now.
+   * @returns {ModuleNotice[]} What is said, in the order the modules said it.
+   */
+  #currentNotices(): ModuleNotice[]
+  {
+    return this.#contributions.notices.flatMap(notice =>
+    {
+      const said = notice.current();
+      return said === null ? [] : [ said ];
+    });
+  }
+
+  /**
+   * Hears a module's notice change, and tells the views only when what is said, all told, is no longer what they show.
+   */
+  #hearNotices(): void
+  {
+    const said = this.#currentNotices();
+    if (sameNotices(said, this.#shownNotices))
+    {
+      return;
+    }
+
+    this.#shownNotices = said;
+    this.#noticesRevision += 1;
+    this.#noticeListeners.forEach(listener => listener());
+  }
+
+  /**
+   * Takes back everything the modules contributed, and stops listening to what they say.
    */
   #deactivate(): void
   {
+    this.#noticeStops.forEach(stop => stop());
+    this.#noticeStops = [];
     this.#contributions.catalogIds.forEach(id => this.#catalog.unregister(id));
     this.#contributions = noContributions();
     this.#active = [];

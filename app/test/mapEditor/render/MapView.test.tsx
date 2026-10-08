@@ -319,6 +319,8 @@ describe('MapView', () =>
     lightingLayers: () => [],
     weatherLayers: () => [],
     notices: () => [],
+    subscribeNotices: () => () => undefined,
+    noticesRevision: 0,
     clockOffer: () => null,
     pageConditions: () => [],
     previewKinds: () => [],
@@ -663,6 +665,46 @@ describe('MapView', () =>
     // Assert: the map is drawing, so nothing says why it is not.
     expect([ screen.getByRole('status').textContent, screen.queryByTestId('map-draw-notice') ])
       .toStrictEqual([ 'Lights draw in white.The file is missing.', null ]);
+  });
+
+  it('says what a module comes to say while it is on, such as a config read only once a map needed it', () =>
+  {
+    // Arrange: modules saying nothing yet, which tell their listeners when that changes, and a map drawing.
+    const listeners = new Set<() => void>();
+    const said: { id: string; title: string; detail: string }[] = [];
+    const modules = {
+      ...NO_MODULES,
+      noticesRevision: 0,
+      notices: () => said,
+      subscribeNotices: (listener: () => void) =>
+      {
+        listeners.add(listener);
+        return () =>
+        {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    act(() => stand.renderers[0].announce('drawing'));
+    const before = screen.queryByRole('status');
+
+    // Act: the module comes to say something.
+    act(() =>
+    {
+      said.push({ id: 'weather.config', title: 'No weather is drawn until data/config.weather.json is fixed.', detail: 'It was not read.' });
+      modules.noticesRevision += 1;
+      listeners.forEach(listener => listener());
+    });
+
+    // Assert.
+    expect([ before, screen.getByRole('status').textContent ])
+      .toStrictEqual([ null, 'No weather is drawn until data/config.weather.json is fixed.It was not read.' ]);
   });
 
   it('says what the modules say beside why the map is not drawing', () =>

@@ -153,6 +153,69 @@ type MapPropertiesSection = {
 };
 
 /**
+ * One read of a project config file: what it holds, or null when the server could not give it, and why not.
+ */
+type ConfigRead = {
+  readonly content: JsonValue | null;
+
+  /**
+   * Why it could not be read, in the server's words where it gave any; null for a config read as it should be.
+   */
+  readonly problem: string | null;
+};
+
+/**
+ * A project config file a module reads only once it needs it, rather than before it switches on, such as J-Weather's,
+ * which only a map with weather needs: nothing is asked of the server until the module asks for it, and from then on it
+ * is read again whenever the module configs are, as when one changes on disk. Whoever listens hears each read that
+ * differs from the one before, so a module draws with the config as it stands without switching on afresh.
+ */
+type OnDemandConfig = {
+  /**
+   * The config as last read, the same read until another differs from it; undefined until it has been read once.
+   * @returns {ConfigRead | undefined} The read.
+   */
+  readonly current: () => ConfigRead | undefined;
+
+  /**
+   * Asks for the config to be read, unless it has been asked for already; the listeners hear once it arrives.
+   */
+  readonly request: () => void;
+
+  /**
+   * Listens for each read of the config that differs from the one before: the first, and each after a change.
+   * @param {() => void} listener Called after each such read.
+   * @returns {() => void} Stops listening.
+   */
+  readonly subscribe: (listener: () => void) => () => void;
+};
+
+/**
+ * Something a module says over every map view that can change while the module is on, such as why a config it read only
+ * once a map needed it cannot be drawn from: the views show what it says now, and hear when that changes.
+ */
+type LiveNotice = {
+  /**
+   * Unique, prefixed like event kinds; any notice it gives carries it too.
+   */
+  readonly id: string;
+
+  /**
+   * What it says now, or null while it has nothing to say. It is asked whenever its listeners hear of a change, and
+   * whenever the module switches on.
+   * @returns {ModuleNotice | null} The notice, or null.
+   */
+  readonly current: () => ModuleNotice | null;
+
+  /**
+   * Listens for what it says changing.
+   * @param {() => void} listener Called after each change.
+   * @returns {() => void} Stops listening.
+   */
+  readonly subscribe: (listener: () => void) => () => void;
+};
+
+/**
  * What a module receives when it switches on.
  */
 type ModuleContext = {
@@ -174,6 +237,16 @@ type ModuleContext = {
    * entry, so a module can say what is wrong rather than quietly falling back.
    */
   readonly configProblems: ReadonlyMap<string, string>;
+
+  /**
+   * One of the config files the module names in {@link PluginModule.onDemandConfigs}, by the name it gave, which is not
+   * read until the module asks for it. It is the window's one copy, kept from one switch-on to the next, so a config
+   * read once is never read again just because the modules switched on afresh. Asking for a config the module does not
+   * name there is a mistake in the module, and throws.
+   * @param {string} name The config's name.
+   * @returns {OnDemandConfig} The config.
+   */
+  readonly onDemandConfig: (name: string) => OnDemandConfig;
 
   /**
    * Words when an event page shows, as an author would say it: what its own conditions wait for, then what every page
@@ -324,6 +397,13 @@ type ModuleContributions = {
   notice(notice: ModuleNotice): void;
 
   /**
+   * Says something over every map view whenever the module has something to say, which can change while it is on, such
+   * as a config read only once a map needed it, which turned out to be one it cannot draw from.
+   * @param {LiveNotice} notice What it says, as it stands.
+   */
+  liveNotice(notice: LiveNotice): void;
+
+  /**
    * Offers the map views a clock, for as long as the module is on: the views show it, and the window's clock starts at
    * the time the offer gives. Should several modules offer one, the first to offer says where it starts and how the day
    * is named.
@@ -389,6 +469,14 @@ type PluginModule = {
   readonly extensionConfigs?: readonly ExtensionConfig[];
 
   /**
+   * The project config files it reads only once it needs them, by the name the server serves each under, rather than
+   * before it switches on: one a map without the plugin's work never needs, so opening such a map never waits on it or
+   * reads it at all. Each is read the first time the module asks through {@link ModuleContext.onDemandConfig}, and again
+   * whenever the module configs are read after that. Left out, it reads none.
+   */
+  readonly onDemandConfigs?: readonly string[];
+
+  /**
    * Adds the module's contributions.
    * @param {ModuleContributions} contributions Where to add them.
    * @param {ModuleContext} context The enabled plugins, the configs the module reads, and why any of them could not be
@@ -399,12 +487,15 @@ type PluginModule = {
 
 export type {
   ClockOffer,
+  ConfigRead,
   EventKindDefinition,
   ExtensionConfig,
+  LiveNotice,
   MapPropertiesSection,
   ModuleContext,
   ModuleContributions,
   ModuleNotice,
+  OnDemandConfig,
   PaletteEntry,
   PassabilityQuery,
   PassabilityRule,

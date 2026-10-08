@@ -1,4 +1,4 @@
-import type { Container, Renderer } from 'pixi.js';
+import type { Container, WebGLRenderer } from 'pixi.js';
 import type { JsonValue } from '../model/json.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { TextureSource, WorldRect } from './MapRenderer.ts';
@@ -51,7 +51,11 @@ type WeatherClock = {
  */
 type WeatherFrame = {
   readonly document: MapDocument;
-  readonly renderer: Renderer;
+
+  /**
+   * The view's pixi renderer, which in the editor always draws with WebGL.
+   */
+  readonly renderer: WebGLRenderer;
 
   /**
    * The view's GPU contexts, counted from 1: it goes up each time the graphics card gives the view its context back.
