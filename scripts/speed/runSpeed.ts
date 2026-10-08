@@ -12,11 +12,12 @@
  *
  * Every map in every run gets a fresh browser, so every open is cold. With --time, every map is opened at that hour of
  * the window's clock, from its first frame, so a map whose lights show only at night is measured with them on show;
- * left out, the clock stands where the game starts. With --sky, the weather is measured under a sky with that look and
- * strength, as J-Weather-Time hands one to J-Weather: an outdoor map naming no look of its own shows the sky's, and one
- * naming its own shows it at the sky's strength, so a heavy look can be put on a map that names none; each map's report
- * says what weather it drew and how many particles that came to at the view it opened with. Per map it measures, with
- * the game look and every overlay on:
+ * left out, the clock stands where the game starts. With --sky, the weather is measured under a sky in that condition at
+ * that strength, picked beside the clock as an author picks one, which the page draws as J-Weather-Time hands its sky to
+ * J-Weather: an outdoor map naming no look of its own shows the face the condition wears at the clock's hour and season,
+ * and one naming its own shows it at the sky's strength, so a heavy look can be put on a map that names none; each map's
+ * report says what weather it drew and how many particles that came to at the view it opened with. Per map it measures,
+ * with the game look and every overlay on:
  *   - the cold open: navigation start to the first frame that showed the map complete, sprites and parallax loaded;
  *   - five paths driven from the page's own frame clock: a pan at zoom 1, a zoom sweep from 2x out to the whole map
  *     and back, the whole map held on screen and drifting, the whole map held still while the window's clock sweeps
@@ -67,7 +68,7 @@ type Options = {
   seconds: number;
   maps: number[];
   time: string | undefined;
-  sky: { preset: string; intensity: string } | null;
+  sky: { condition: string; strength: string } | null;
   uiPort: number;
   apiPort: number;
   scratch: string;
@@ -178,7 +179,8 @@ type PageHooks = {
   paintState: () => { steps: number; redrawnFrames: number };
   enableEveryOverlay: () => void;
   weather: {
-    setSky: (sky: { preset: string; intensity: string } | null) => void;
+    pick: (sky: { condition: string; strength: string } | null) => void;
+    sky: () => { preset: string; intensity: string; type: string } | null;
     describe: () => ({ weather: { preset: string; intensity: string } | null; layers: { asset: string | null; stats: { count: number } }[] } | null)[];
   };
   openMap: (mapId: number) => Promise<{ ms: number }>;
@@ -205,7 +207,7 @@ const PATHS = [ 'pan', 'zoom', 'zoomedout', 'clock', 'slider' ];
 const TIME_OPTION = /^([01]?\d|2[0-3]):[0-5]\d$/u;
 
 /**
- * A sky as --sky takes it: a look's name, a colon, and its strength.
+ * A sky as --sky takes it: the name of a condition the sky can be in, a colon, and its strength.
  */
 const SKY_OPTION = /^([a-zA-Z][a-zA-Z0-9_-]*):(light|moderate|heavy)$/u;
 
@@ -281,7 +283,7 @@ const parseOptions = (argv: string[]): Options =>
   const skyMatch = sky === undefined ? null : SKY_OPTION.exec(sky);
   if (sky !== undefined && skyMatch === null)
   {
-    throw new Error(`--sky takes a look and its strength, such as snow:heavy, not ${sky}`);
+    throw new Error(`--sky takes a condition and its strength, such as rain:heavy, not ${sky}`);
   }
 
   return {
@@ -289,7 +291,7 @@ const parseOptions = (argv: string[]): Options =>
     seconds: Number(flags.get('seconds') ?? 5),
     maps: (flags.get('maps') ?? '102,361').split(',').map(Number),
     time,
-    sky: skyMatch === null ? null : { preset: skyMatch[1], intensity: skyMatch[2] },
+    sky: skyMatch === null ? null : { condition: skyMatch[1], strength: skyMatch[2] },
     uiPort: Number(flags.get('ui-port') ?? 18200),
     apiPort: Number(flags.get('api-port') ?? 18201),
     scratch: flags.get('scratch') ?? tmpdir(),
@@ -895,8 +897,14 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
     const coldOpenMs = timings['drawnAt'] ?? -1;
     await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.enableEveryOverlay());
 
-    // the sky asked for, if any, falls on the map before anything is measured, so every path draws it.
-    await page.evaluate(sky => (window as unknown as HookWindow).__jmzMapView.weather.setSky(sky), options.sky);
+    // the sky asked for, if any, is picked beside the clock and falls on the map before anything is measured, so every
+    // path draws it: the page reads the project's sky to work out its face, then draws it.
+    await page.evaluate(sky => (window as unknown as HookWindow).__jmzMapView.weather.pick(sky), options.sky);
+    if (options.sky !== null)
+    {
+      await page.waitForFunction(() => (window as unknown as HookWindow).__jmzMapView.weather.sky() !== null, null, { timeout: 15_000 });
+    }
+
     await page.waitForTimeout(1000);
     const weather = await page.evaluate(() =>
     {

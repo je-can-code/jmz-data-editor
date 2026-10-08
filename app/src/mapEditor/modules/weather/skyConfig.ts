@@ -161,7 +161,7 @@ const skyConfigFrom = (config: JsonValue | null): SkyConfig | null =>
     return null;
   }
 
-  const sky = config['sky'];
+  const { sky } = config;
   if (sky === undefined || isJsonObject(sky) === false)
   {
     return null;

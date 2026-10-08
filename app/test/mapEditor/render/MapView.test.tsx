@@ -15,6 +15,7 @@ import type { DocumentKey } from '../../../src/mapEditor/core/model/documentKeys
 import { createEventPage, createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
+import type { ConfigRead, OnDemandConfig } from '../../../src/mapEditor/core/modules/PluginModule.ts';
 import type { RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { marksOf, TILESET_MARKS_DOCUMENT } from '../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
 import { CommandCatalog } from '../../../src/mapEditor/core/commands/CommandCatalog.ts';
@@ -26,7 +27,7 @@ import { WindowPreview } from '../../../src/mapEditor/core/preview/WindowPreview
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { LightingLayerDefinition } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
 import type { LayerVisibility, MarkerClassifier, OverlaySet, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
-import type { WeatherLayerDefinition } from '../../../src/mapEditor/core/renderer/weatherLayer.ts';
+import type { SkyWeather, WeatherLayerDefinition } from '../../../src/mapEditor/core/renderer/weatherLayer.ts';
 import { WindowClock } from '../../../src/mapEditor/core/time/WindowClock.ts';
 import { SHIPPED_MODULES } from '../../../src/mapEditor/services/pluginModules.ts';
 import type { PluginsJsEntry } from '../../../src/services/plugins/PluginsJsReader.ts';
@@ -36,6 +37,7 @@ import { MapView, mapIdFromQuery } from '../../../src/mapEditor/render/MapView.t
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { buildMapJson } from '../support/fixtures.ts';
+import { CHEF_WEATHER_CONFIG } from '../support/skyFixtures.ts';
 
 /**
  * What the stand-in renderers and controllers record and answer: every renderer made, what each was asked to show
@@ -56,6 +58,7 @@ const stand = vi.hoisted(() => ({
     shown: (boolean | 'mount')[];
     times: number[];
     seasons: (number | null)[];
+    skies: (SkyWeather | null)[];
     previews: GamePreview[];
     announce: (state: string) => void;
     zoomTo: (zoom: number) => void;
@@ -84,6 +87,7 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       shown: [] as (boolean | 'mount')[],
       times: [] as number[],
       seasons: [] as (number | null)[],
+      skies: [] as (SkyWeather | null)[],
       previews: [] as GamePreview[],
       announce: (state: string) =>
       {
@@ -186,6 +190,11 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
     setSeason(season: number | null): void
     {
       this.record.seasons.push(season);
+    }
+
+    setWeatherSky(sky: SkyWeather | null): void
+    {
+      this.record.skies.push(sky);
     }
 
     setPageRule(rule: PageRule): void
@@ -293,6 +302,11 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * season from the start and every time either moves, wherever it was moved from, so every view of the window draws the
  * sky at the same hour and judges every page on the same date. With every module the editor ships on, the one clock is
  * J-TIME's, J-Lighting-Time casting its sky by it, and the bar shows one chip.
+ *
+ * Beside the clock, the bar shows the sky's weather only while a module offers a sky, which with the modules the editor
+ * ships means while J-Weather-Time is on with J-Weather and J-TIME: no sky is picked at first, since a new game's sky is
+ * random, and then no view's renderer is told any sky and nothing is read for it. Once one is picked, its config is
+ * asked for, and every view's renderer is told the sky at the clock's hour once it arrives.
  *
  * The renderer is handed the window's page rule from the start, and again whenever it changes, as the modules switch
  * on or the new game is read, so every event shows the page a fresh save would show at the clock's time; and the
@@ -1105,6 +1119,97 @@ describe('MapView', () =>
     // Assert.
     expect(stand.renderers.map(renderer => renderer.seasons))
       .toStrictEqual([ [ null, 1, 2 ], [ null, 1, 2 ] ]);
+  });
+
+  /**
+   * The modules the editor ships, switched on over J-TIME, J-Weather and J-Weather-Time, the game starting at 14:00 on
+   * 16 December 2026, with J-Weather's config read only once the test says, after something asked for it.
+   * @param {boolean} withSky Whether J-Weather-Time is on.
+   * @returns {{ modules: PluginModuleRegistry, arrive: () => void, asked: () => number }} The modules, the config's
+   * arrival, and how often it was asked for.
+   */
+  const weatherTimeModules = (withSky: boolean) =>
+  {
+    const plugin = (name: string, parameters: Record<string, string> = {}): PluginsJsEntry => ({ name, status: true, description: '', parameters });
+    const listeners = new Set<() => void>();
+    let read: ConfigRead | undefined;
+    let asked = 0;
+    const config: OnDemandConfig = {
+      current: () => read,
+      request: () =>
+      {
+        asked += 1;
+      },
+      subscribe: listener =>
+      {
+        listeners.add(listener);
+        return () =>
+        {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const modules = new PluginModuleRegistry(new CommandCatalog());
+    const time = plugin('j/time/J-TIME', { useRealTime: 'false', startingHour: '14', startingMinute: '0', startingDay: '16', startingMonth: '12', startingYear: '2026' });
+    const plugins = [ time, plugin('j/weather/J-Weather'), ...(withSky ? [ plugin('j/weather/ext/J-Weather-Time') ] : []) ];
+    modules.activate(SHIPPED_MODULES, plugins, new Map(), new Map(), () => config);
+    const arrive = () =>
+    {
+      read = { content: CHEF_WEATHER_CONFIG, problem: null };
+      listeners.forEach(listener => listener());
+    };
+    return { modules, arrive, asked: () => asked };
+  };
+
+  it('shows the sky beside the clock only while J-Weather-Time drives one, naming none picked', () =>
+  {
+    // Arrange: a window with J-Weather-Time on, and one with J-Weather and J-TIME alone.
+    const views = [ true, false ].map(withSky =>
+    {
+      const { modules } = weatherTimeModules(withSky);
+      return { ...served(), modules, pages: new WindowPageRule(modules) } as unknown as MapEditorServices;
+    });
+
+    // Act.
+    const chips = views.map(services =>
+    {
+      const { unmount } = render(
+        <MapEditorServicesProvider services={services}>
+          <MapView mapId={5}/>
+        </MapEditorServicesProvider>
+      );
+      const sky = screen.queryByTestId('map-sky')?.textContent ?? null;
+      unmount();
+      return sky;
+    });
+
+    // Assert.
+    expect(chips)
+      .toStrictEqual([ 'No sky weather', null ]);
+  });
+
+  it('hands every view the sky picked once its config is read, at the clock\'s hour, and nothing while none is picked', () =>
+  {
+    // Arrange: two views of a window with J-Weather-Time on, no sky picked.
+    const { modules, arrive, asked } = weatherTimeModules(true);
+    const services = { ...served(), modules, pages: new WindowPageRule(modules) } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+        <MapView mapId={6}/>
+      </MapEditorServicesProvider>
+    );
+    const unpicked = [ stand.renderers.map(renderer => [ ...renderer.skies ]), asked() ];
+
+    // Act: heavy rain picked, then the config read.
+    act(() => services.clock.chooseSky({ condition: 'rain', strength: 'heavy' }));
+    const beforeRead = stand.renderers.map(renderer => renderer.skies.length);
+    act(() => arrive());
+
+    // Assert.
+    const rain = { preset: 'rain', intensity: 'heavy', type: 'rain' };
+    expect([ unpicked, asked() > 0, beforeRead, stand.renderers.map(renderer => renderer.skies), screen.getAllByTestId('map-sky').map(chip => chip.textContent) ])
+      .toStrictEqual([ [ [ [], [] ], 0 ], true, [ 0, 0 ], [ [ rain ], [ rain ] ], [ 'rain · heavy', 'rain · heavy' ] ]);
   });
 
   it('hands every view the window\'s preview from the start and each time it changes, wherever it was changed', () =>

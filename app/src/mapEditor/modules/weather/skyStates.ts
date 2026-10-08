@@ -16,7 +16,7 @@ const SKY_LADDER: readonly string[] = [ 'light', 'moderate', 'heavy' ];
  * The strength the sky's walk starts from, its middle rung (SkyForecast.lastState), which the editor gives a condition
  * picked with no strength wanted.
  */
-const USUAL_STRENGTH = SKY_LADDER[1];
+const [ , USUAL_STRENGTH ] = SKY_LADDER;
 
 /**
  * The answer to how far one condition is from another when there is no route at all (SkyWalk.Unreachable).
@@ -86,7 +86,7 @@ const allowedIn = (sky: SkyConfig, seasonName: string): readonly string[] =>
  */
 const monthLeanOf = (sky: SkyConfig, month: number): Readonly<Record<string, number>> =>
 {
-  const months = sky.months;
+  const { months } = sky;
   if (months === undefined)
   {
     return {};

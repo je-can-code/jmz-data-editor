@@ -11,6 +11,7 @@ import type {
   OnDemandConfig,
   PluginModule,
   PreviewKindDefinition,
+  SkyOffer,
 } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
 import { configNamesOf, enabledPlugins, PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
@@ -38,7 +39,8 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * says the same thing again included; a module switching off is no longer listened to.
  *
  * A module may offer the map views a clock; the first one offered among the active modules is the window's, and none is
- * offered once the modules offering it switch off.
+ * offered once the modules offering it switch off. A sky is offered the same way, as J-Weather's module offers the one
+ * J-Weather-Time drives.
  *
  * A module may add conditions to the game's page rule, as J-TIME adds its hours, kept while it is on and taken back
  * when it switches off. Every module is handed words for a page, read from the page's own conditions and from every
@@ -662,6 +664,68 @@ describe('PluginModuleRegistry', () =>
       // Assert.
       expect(registry.clockOffer())
         .toBeNull();
+    });
+  });
+
+  describe('skyOffer', () =>
+  {
+    /**
+     * A sky that says only its own name, never read.
+     * @param {string} name What it says.
+     * @returns {SkyOffer} The sky.
+     */
+    const skyNamed = (name: string): SkyOffer => ({
+      config: { current: () => undefined, request: () => undefined, subscribe: () => () => undefined },
+      strengths: [],
+      conditionsAt: () => ({ conditions: [], problem: name }),
+      readingAt: () => ({ weather: null, words: name }),
+    });
+
+    /**
+     * A module offering a sky, once its plugin is on.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @param {SkyOffer} sky The sky.
+     * @returns {PluginModule} The module.
+     */
+    const skyModule = (id: string, pluginName: string, sky: SkyOffer): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: contributions => contributions.sky(sky),
+    });
+
+    it('offers the sky of the first module offering one, and none while no module does', () =>
+    {
+      // Arrange: two modules offering skies, and a registry where neither is on.
+      const first = skyNamed('first');
+      const modules = [ skyModule('weather', 'J-Weather', first), skyModule('storms', 'J-Storms', skyNamed('second')) ];
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      both.activate(modules, [ plugin('j/weather/J-Weather', true), plugin('j/weather/J-Storms', true) ]);
+      neither.activate(modules, [ plugin('j/weather/J-Weather', false) ]);
+
+      // Assert.
+      expect([ both.skyOffer() === first, neither.skyOffer() ])
+        .toStrictEqual([ true, null ]);
+    });
+
+    it('takes the sky back once the module offering it switches off', () =>
+    {
+      // Arrange: the module on.
+      const weather = skyModule('weather', 'J-Weather', skyNamed('sky'));
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ weather ], [ plugin('j/weather/J-Weather', true) ]);
+      const before = registry.skyOffer();
+
+      // Act.
+      registry.activate([ weather ], [ plugin('j/weather/J-Weather', false) ]);
+
+      // Assert.
+      expect([ before === null, registry.skyOffer() ])
+        .toStrictEqual([ false, null ]);
     });
   });
 
