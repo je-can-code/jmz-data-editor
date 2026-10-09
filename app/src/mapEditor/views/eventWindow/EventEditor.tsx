@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Box, Button, Divider, Snackbar, Stack, Typography } from '@mui/material';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../../core/blueprints/blueprints.ts';
+import { copiesLeftWords } from '../../core/blueprints/copiesLeft.ts';
 import type { DocumentHub } from '../../core/history/DocumentHub.ts';
 import { blueprintIdOfMap } from '../../core/model/documentKeys.ts';
 import {
@@ -45,7 +46,7 @@ import { useEventWindowKeys } from './useEventWindowKeys.ts';
  */
 type Notice = {
   readonly message: string;
-  readonly severity: 'error' | 'warning' | 'success';
+  readonly severity: 'error' | 'warning' | 'success' | 'info';
   readonly stuckStepId?: string;
 };
 
@@ -154,8 +155,15 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
   useHubChanges(hub);
   const { names } = useCommandListResources(api);
 
-  // a change to a blueprint whose files no longer hold what it would take back or put back stays where it is.
-  const router = useMemo(() => new HistoryRouter(hub, null, blueprintWriter === null ? null : (step, direction) => blueprintWriter.guard(step, direction)), [ hub, blueprintWriter ]);
+  // a change to a blueprint whose files no longer hold what it would take back or put back stays where it is, and one
+  // that moved leaving copies changed since as they stand names them, on their maps as the project names them.
+  const mapNames = names?.maps ?? null;
+  const router = useMemo(() => new HistoryRouter(
+    hub,
+    null,
+    blueprintWriter === null ? null : (step, direction) => blueprintWriter.guard(step, direction),
+    copiesLeftWords({ hub, mapName: mapId => mapNameOf(hub, mapId, mapNames) }),
+  ), [ hub, blueprintWriter, mapNames ]);
 
   // the graphic picker reads the server and the names the way the hand-built command editors do.
   const environment = useMemo<HandBuiltEditorEnvironment>(() => ({ api, headers: pluginHeaders, names: kind => namedRows(names, kind) }), [ api, pluginHeaders, names ]);
@@ -228,11 +236,18 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
   };
 
   /**
-   * Tells the author when an undo, a redo or a jump stopped short; an empty history says nothing.
+   * Tells the author when an undo, a redo or a jump stopped short, or moved leaving copies of a blueprint changed since as
+   * they stand; an empty history says nothing.
    * @param {HistoryOutcome} outcome What it came to.
    */
   const takeHistory = (outcome: HistoryOutcome) =>
   {
+    if (outcome.ok && outcome.message !== undefined)
+    {
+      setNotice({ message: outcome.message, severity: 'info' });
+      return;
+    }
+
     if (outcome.ok === false && outcome.nothing === false)
     {
       setNotice({ message: outcome.message, severity: 'warning', ...(outcome.stuckStepId === null ? {} : { stuckStepId: outcome.stuckStepId }) });

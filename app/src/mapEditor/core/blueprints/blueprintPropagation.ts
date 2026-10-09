@@ -192,10 +192,12 @@ const reachHeldMap = (
     transaction.fileVersion(key, onFile);
   }
 
-  // the map joins the step whenever the change reached it, in the map itself or in its file alone.
+  // the map joins the step whenever the change reached it, in the map itself or in its file alone, and its copies follow
+  // the blueprint, so undoing the step later leaves any of them changed since as they stand.
   if (changesNothing(plan) === false || onFile.length > 0)
   {
     transaction.join([ mapHistoryKey(mapId) ]);
+    transaction.markFollower(key);
   }
 };
 
@@ -260,6 +262,7 @@ const reachFile = (
   if (changesNothing(plan) === false)
   {
     transaction.join([ mapHistoryKey(mapId) ]);
+    transaction.markFollower(key);
   }
 };
 

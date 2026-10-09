@@ -529,6 +529,34 @@ class CopyMaps
   }
 
   /**
+   * Says how much of a patch a map's file would take now, as kept here (see DocumentHub's setFileFit): the patch whole
+   * when the file still holds what it replaces; of a tiles patch, the cells that do; null for none of it. A file not kept
+   * here, or a document that is no map, cannot be told, and takes the patch whole, for the write itself to check.
+   * @param {DocumentKey} key The document.
+   * @param {Patch} patch The patch, turned the way it would go into the file.
+   * @returns {Patch | null} What the file would take.
+   */
+  fileTakes(key: DocumentKey, patch: Patch): Patch | null
+  {
+    const parsed = parseDocumentKey(key);
+    const file = parsed.kind === 'map' ? this.#files.get(parsed.mapId) : undefined;
+    if (file === undefined)
+    {
+      return patch;
+    }
+
+    if (patch.kind !== 'tiles')
+    {
+      return fits(file, patch) ? patch : null;
+    }
+
+    const cells = patch.indices.flatMap((index, position) => (file.cells[index] === patch.before[position] ? [ position ] : []));
+    return cells.length === 0
+      ? null
+      : { kind: 'tiles', indices: cells.map(position => patch.indices[position]), before: cells.map(position => patch.before[position]), after: cells.map(position => patch.after[position]) };
+  }
+
+  /**
    * Finds a kept map whose file a blueprint's change could not move into the way {@link follow} would: its file holds no
    * way the change can reach it by, so something changed it on disk since. A map whose file is not kept here cannot be
    * told, and is not named; the write itself checks it.

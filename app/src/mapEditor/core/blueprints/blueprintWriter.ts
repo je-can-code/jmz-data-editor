@@ -46,12 +46,15 @@ type Blocked = {
 };
 
 /**
- * One move of a step the writer writes: the step, which way it moved, and what each map's file takes for it.
+ * One move of a step the writer writes: the step, or the part of it that moved, which way it moved, and what each map's
+ * file takes for it; and for an undo that left parts of the step, the part left on the maps held here, which those maps'
+ * files go on holding in the step's place.
  */
 type QueuedMove = {
   readonly step: HistoryStep;
   readonly direction: 'forward' | 'backward';
   readonly maps: ReadonlyMap<number, Patch[]>;
+  readonly left: HistoryStep | null;
 };
 
 /**
@@ -411,7 +414,8 @@ class BlueprintWriter
       return;
     }
 
-    // a move made elsewhere is that window's to write, and one taken back was never written; the files follow either.
+    // a move made elsewhere is that window's to write, and one taken back was never written; the files follow either. An
+    // undo or a redo that left parts of its step moves its part that moved alone, which is all the files take.
     const direction = event.type === 'undone' ? 'backward' : 'forward';
     const writes = event.source === 'local' && this.#takingBack === false;
     const maps = this.#maps.follow(step, direction, writes);
@@ -420,7 +424,8 @@ class BlueprintWriter
       return;
     }
 
-    this.#queue.push({ step, direction, maps });
+    const left = event.type !== 'committed' && event.split !== undefined ? event.split.left : null;
+    this.#queue.push({ step, direction, maps, left });
     if (event.type === 'committed')
     {
       this.#settle();
@@ -604,10 +609,14 @@ class BlueprintWriter
         return [];
       }
 
-      // the file's steps moved the way the act moves them, each in or out where the map has it.
+      // the file's steps moved the way the act moves them, each in or out where the map has it; an undo that left part of
+      // its step on the map leaves that part in the file too, in the step's place.
       const onFile = moves.filter(move => move.maps.has(mapId)).reduce((steps, move) =>
       {
-        const without = steps.filter(id => id !== move.step.id);
+        const left = move.direction === 'backward' && move.left !== null && move.left.entries.some(entry => entry.document === key)
+          ? [ move.left.id ]
+          : [];
+        const without = steps.flatMap(id => (id === move.step.id ? left : [ id ]));
         return move.direction === 'forward' ? [ ...without, move.step.id ] : without;
       }, [ ...hub.savedSteps(key) ]);
       const applied = idsOf(hub.appliedSteps(key));

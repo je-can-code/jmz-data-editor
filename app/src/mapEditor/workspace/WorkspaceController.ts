@@ -3,6 +3,7 @@ import { blueprintsKeptGuard } from '../core/blueprints/blueprintMoves.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../core/blueprints/blueprints.ts';
 import { BLUEPRINT_USES_DOCUMENT, usedCopiesOf } from '../core/blueprints/blueprintUses.ts';
 import { BlueprintUsesKeeper } from '../core/blueprints/blueprintUsesKeeper.ts';
+import { copiesLeftWords } from '../core/blueprints/copiesLeft.ts';
 import { installCloseGuard, type CloseTarget } from '../core/closeGuard.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
@@ -275,7 +276,8 @@ class WorkspaceController
     const { hub, blueprintCopies, blueprintWriter } = services;
     const usedCopies = { start: () => blueprintCopies.start(), countOf: (blueprintId: string) => usedCopiesOf(blueprintCopies, hub, blueprintId) };
     const blueprintsKept = blueprintsKeptGuard(hub, usedCopies, mapId => this.mapName(mapId));
-    this.router = new HistoryRouter(hub, this.tree, (step, direction) => blueprintsKept(step, direction) ?? blueprintWriter?.guard(step, direction) ?? null);
+    const leftWords = copiesLeftWords({ hub, mapName: mapId => this.mapName(mapId) });
+    this.router = new HistoryRouter(hub, this.tree, (step, direction) => blueprintsKept(step, direction) ?? blueprintWriter?.guard(step, direction) ?? null, leftWords);
 
     // a change to a blueprint that could not be written says why, as anything refused does.
     blueprintWriter?.onProblem((message, alarm) => this.notify(message, alarm ? 'alarm' : 'error'));
@@ -772,11 +774,18 @@ class WorkspaceController
   }
 
   /**
-   * Shows why a history could not move, unless it merely had nothing to move.
+   * Shows why a history could not move, unless it merely had nothing to move, and what a move left as it stands, when it
+   * left copies of a blueprint changed since.
    * @param {HistoryOutcome} outcome What an undo, redo or jump came to.
    */
   #report(outcome: HistoryOutcome): void
   {
+    if (outcome.ok && outcome.message !== undefined)
+    {
+      this.notify(outcome.message);
+      return;
+    }
+
     if (outcome.ok === false && outcome.nothing === false)
     {
       this.notify(outcome.message, outcome.alarm === true ? 'alarm' : 'error');

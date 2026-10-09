@@ -497,6 +497,49 @@ describe('CopyMaps', () =>
     });
   });
 
+  describe('fileTakes', () =>
+  {
+    it('says how much of a patch a kept file would take: a set whole or not at all, the cells of a tiles patch that fit', async () =>
+    {
+      // Arrange: map 3's file kept as read, its corner holding A5 tile 1 and its guard named Guard.
+      const window = await propagationWindow();
+      const corner = cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0);
+      const next = cellIndex(MAP_WIDTH, MAP_HEIGHT, 2, 1, 0);
+      const tiles = { kind: 'tiles' as const, indices: [ corner, next ], before: [ a5(1), a5(7) ], after: [ a5(9), a5(9) ] };
+
+      // Act.
+      const taken = [
+        window.maps.fileTakes('map:3', { kind: 'set', path: [ 'events', 5, 'name' ], before: 'Guard', after: 'Captain' }),
+        window.maps.fileTakes('map:3', { kind: 'set', path: [ 'events', 5, 'name' ], before: 'Captain', after: 'Guard' }),
+        window.maps.fileTakes('map:3', tiles),
+        window.maps.fileTakes('map:3', { ...tiles, before: [ a5(5), a5(7) ] }),
+      ];
+
+      // Assert.
+      expect(taken)
+        .toStrictEqual([
+          { kind: 'set', path: [ 'events', 5, 'name' ], before: 'Guard', after: 'Captain' },
+          null,
+          { kind: 'tiles', indices: [ corner ], before: [ a5(1) ], after: [ a5(9) ] },
+          null,
+        ]);
+    });
+
+    it('lets a file it does not keep, or a document that is no map, take a patch whole, for the write to check', async () =>
+    {
+      // Arrange: map 7 is kept by nobody.
+      const window = await propagationWindow();
+      const patch = { kind: 'set' as const, path: [ 'events', 5, 'name' ], before: 'Nobody', after: 'Captain' };
+
+      // Act.
+      const taken = [ window.maps.fileTakes('map:7', patch), window.maps.fileTakes('editor-data:blueprints', patch) ];
+
+      // Assert.
+      expect(taken)
+        .toStrictEqual([ patch, patch ]);
+    });
+  });
+
   describe('maps opened from a file this window wrote', () =>
   {
     it('forgets the file of a map opened from a file holding something other than the steps written through to it', async () =>

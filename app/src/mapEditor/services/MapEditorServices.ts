@@ -456,6 +456,9 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     templates: modules,
   });
   hub.addCommitCheck(blueprintPropagationCheck({ hub, maps: copyMaps, tags: () => modules.commentTags() }));
+
+  // undoing or redoing a blueprint's change leaves a copy on a map nobody has open as it stands once its file changed.
+  hub.setFileFit((key, patch) => copyMaps.fileTakes(key, patch));
   const writeChanges = api === null || api.writeBlueprintChanges === undefined
     ? null
     : api.writeBlueprintChanges.bind(api);

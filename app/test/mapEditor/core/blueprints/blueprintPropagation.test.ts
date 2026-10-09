@@ -33,9 +33,11 @@ import {
 /*
  * Every change to a blueprint reaches every copy of it, on every map, as one step: the copies' change is part of the very
  * step that changed the blueprint, whatever tool made it, so one undo takes back all of it, from the blueprint's tab or
- * from any map the step reached, and is refused, saying why, once a map it reached was changed there since. A map held in
- * the window takes the change in place, on top of its unsaved edits; a map held with unsaved edits has its file planned
- * apart, so the copies on disk follow by what the disk holds and never by the unsaved edits; a map nobody has open is
+ * from any map the step reached. Each copy is reached by the fields the change moved and no more, and the maps follow the
+ * step, so a copy, or a cell, changed there since keeps that change when the step is undone, the rest going back, and an
+ * edit to some other field of a copy is no hindrance at all; only the blueprint's own content refuses, saying why. A map
+ * held in the window takes the change in place, on top of its unsaved edits; a map held with unsaved edits has its file
+ * planned apart, so the copies on disk follow by what the disk holds and never by the unsaved edits; a map nobody has open is
  * planned against its file, and the step writes it through. The blueprints keep the blueprint's new content in the same
  * step. A map holding a plugin's patterns is never touched, whatever names it, and a change waits, refused with why, while
  * what it would be planned against is still being found or read. Edits to anything else pass untouched.
@@ -109,6 +111,19 @@ describe('blueprintPropagationCheck', () =>
           [ 'map:3' ],
           [ 'blueprint-map:k3x9q2mf', 'editor-data:blueprints', 'map:1', 'map:2', 'map:3' ],
         ]);
+    });
+
+    it('marks every map the change reached as following it, held or written through, and neither the blueprint nor the blueprints', async () =>
+    {
+      // Arrange: the action map held here too, which the change never reaches.
+      const window = await propagationWindow({ held: [ 1, 2, TEMPLATE_MAP ] });
+
+      // Act.
+      const step = paintBlueprint(window, [ [ 0, 0, a5(9) ] ]) as HistoryStep;
+
+      // Assert.
+      expect(step.followers)
+        .toStrictEqual([ 'map:1', 'map:2', 'map:3' ]);
     });
 
     it('repaints the maps held here in place, writes the map nobody has open through to its file, and keeps the blueprint', async () =>
@@ -298,21 +313,67 @@ describe('blueprintPropagationCheck', () =>
         .toStrictEqual([ true, a5(1), a5(1), a5(1), 0 ]);
     });
 
-    it('refuses an undo once a map the step reached was changed there since, naming the edit, and changes nothing', async () =>
+    it('takes the step back everywhere but a cell painted over on a map since, which keeps its paint, naming the edit', async () =>
     {
-      // Arrange: map 1's repainted cell painted again by hand.
+      // Arrange: two cells repainted; map 1's first one painted again by hand.
       const window = await propagationWindow();
-      paintBlueprint(window, [ [ 0, 0, a5(9) ] ]);
+      paintBlueprint(window, [ [ 0, 0, a5(9) ], [ 1, 0, a5(8) ] ]);
       const later = window.hub.edit('Paint by hand', [ mapHistoryKey(1) ], tx => tx.tiles('map:1', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), a5(15) ] ]));
 
       // Act.
       const undone = window.hub.undo(blueprintHistoryKey(BLUEPRINT));
 
-      // Assert.
-      expect([ undone, groundOf(mapIn(window, 2), 1, 1) ])
+      // Assert: on map 1 the cell painted by hand keeps its paint and its neighbour goes back; map 2 and the blueprint go
+      // back whole.
+      expect([
+        undone.ok && undone.left,
+        [ groundOf(mapIn(window, 1), 1, 1), groundOf(mapIn(window, 1), 2, 1), groundOf(mapIn(window, 2), 1, 1), groundOf(mapIn(window, 2), 2, 1) ],
+        [ window.blueprintMap.cells[blueprintCell(0, 0)], window.blueprintMap.cells[blueprintCell(1, 0)] ],
+      ])
         .toStrictEqual([
-          expect.objectContaining({ ok: false, reason: 'conflict', blockedBy: later, message: '"Paint by hand" later changed what "Paint" changed' }),
-          a5(9),
+          [ { document: 'map:1', patch: { kind: 'tiles', indices: [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0) ], before: [ a5(1) ], after: [ a5(9) ] }, by: later } ],
+          [ a5(15), a5(2), a5(1), a5(2) ],
+          [ a5(1), a5(2) ],
+        ]);
+    });
+
+    it('takes the step back everywhere but a copy\'s field changed by hand since, which keeps the hand\'s value', async () =>
+    {
+      // Arrange: the guard sped up in the blueprint, then map 1's guard sped up further by hand.
+      const window = await propagationWindow();
+      window.hub.edit('Speed up', [ blueprintHistoryKey(BLUEPRINT) ], tx => tx.set(window.blueprintKey, [ 'events', 1, 'pages', 0, 'moveSpeed' ], 4));
+      const later = window.hub.edit('Change movement (page 1)', [ eventHistoryKey(1, 5) ], tx => tx.set('map:1', [ 'events', 5, 'pages', 0, 'moveSpeed' ], 6));
+
+      // Act.
+      const undone = window.hub.undo(mapHistoryKey(2));
+
+      // Assert.
+      expect([ undone.ok && undone.left, eventOf(mapIn(window, 1), 5).pages[0].moveSpeed, eventOf(mapIn(window, 2), 5).pages[0].moveSpeed ])
+        .toStrictEqual([
+          [ { document: 'map:1', patch: { kind: 'set', path: [ 'events', 5, 'pages', 0, 'moveSpeed' ], before: 3, after: 4 }, by: later } ],
+          6,
+          3,
+        ]);
+    });
+
+    it('still refuses an undo from a map once the blueprint itself was changed since in the same place', async () =>
+    {
+      // Arrange: map 2's corner painted by hand, so the second stroke on the blueprint's corner reaches map 1 alone; then
+      // the hand paint undone, leaving the first stroke newest on map 2.
+      const window = await propagationWindow();
+      paintBlueprint(window, [ [ 0, 0, a5(9) ] ]);
+      window.hub.edit('Paint by hand', [ mapHistoryKey(2) ], tx => tx.tiles('map:2', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), a5(15) ] ]));
+      const again = window.hub.edit('Paint again', [ blueprintHistoryKey(BLUEPRINT) ], tx => tx.tiles(window.blueprintKey, [ [ blueprintCell(0, 0), a5(12) ] ]));
+      window.hub.undo(mapHistoryKey(2));
+
+      // Act.
+      const undone = window.hub.undo(mapHistoryKey(2));
+
+      // Assert: the blueprint's own cell keeps its own history, so the first stroke cannot come out from under the second.
+      expect([ undone, window.blueprintMap.cells[blueprintCell(0, 0)] ])
+        .toStrictEqual([
+          expect.objectContaining({ ok: false, reason: 'conflict', blockedBy: again, message: '"Paint again" later changed what "Paint" changed' }),
+          a5(12),
         ]);
     });
 

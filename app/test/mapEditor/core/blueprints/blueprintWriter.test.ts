@@ -35,9 +35,11 @@ import {
  * goes at once. Each map's file takes the change against what the file holds: a map held without unsaved edits takes the
  * very change it took in place, and reads as saved after; a map held with unsaved edits takes its file's own version,
  * which never carries those edits, and still reads as unsaved; a map nobody has open takes the change written through. A
- * map saved with the change in it gives it back on undo by the version it was saved with. An act the disk refuses writes
- * nothing, and the change, with everything made since, is taken back here so the window and the disk agree, and the author
- * hears why; one that cannot be taken back is an alarm, and stays unwritten. Moves made in another window are that
+ * map saved with the change in it gives it back on undo by the version it was saved with. An undo that left copies or cells
+ * changed since as they stand writes exactly what moved, a map nothing moved on not at all, and a map whose file then holds
+ * what it does reads as saved. An act the disk refuses writes nothing, and the change, with everything made since, is
+ * taken back here so the window and the disk agree, cells painted over by hand meanwhile keeping their paint, and the
+ * author hears why; one that cannot be taken back is an alarm, and stays unwritten. Moves made in another window are that
  * window's to write. Before an undo moves anything, a file changed on disk since is named.
  *
  * Maps 1, 2 and 3 each hold one placement of the blueprint at (1, 1) with its guard (5) and post (6). The window holds maps
@@ -284,6 +286,22 @@ describe('BlueprintWriter', () =>
 
   it('strands a change that cannot be taken back after its act failed, alarming the author, and counts it unwritten', async () =>
   {
+    // Arrange: map 1 let go of right after the change, before its act fails, so the change can no longer reach it.
+    const window = await writtenWindow();
+    window.failNextWrite(new Error('the disk is full'));
+    paintCorner(window, a5(9));
+    window.hub.release('map:1');
+
+    // Act.
+    await settle();
+
+    // Assert.
+    expect([ window.writer.hasUnwritten(), window.problems ])
+      .toStrictEqual([ true, [ { message: 'The change to the blueprint could not be written (the disk is full), and "Paint" could not be taken back: undo it by hand.', alarm: true } ] ]);
+  });
+
+  it('takes a change back past a cell painted over by hand before its act failed, the cell keeping its paint, with no alarm', async () =>
+  {
     // Arrange: the corner on map 1 painted by hand right after the change, before its act fails.
     const window = await writtenWindow();
     window.failNextWrite(new Error('the disk is full'));
@@ -293,9 +311,85 @@ describe('BlueprintWriter', () =>
     // Act.
     await settle();
 
+    // Assert: the blueprint and map 2 back as the disk holds them; map 1's corner keeps the hand's paint.
+    expect([ window.writer.hasUnwritten(), window.problems, groundOf(window.hub.map('map:1'), 1, 1), groundOf(window.hub.map('map:2'), 1, 1), window.blueprintMap.cells[0] ])
+      .toStrictEqual([ false, [ { message: 'The change to the blueprint could not be written, so it was taken back: the disk is full.', alarm: false } ], a5(15), a5(1), a5(1) ]);
+  });
+
+  /**
+   * Paints the blueprint's two top cells, as one stroke in its tab.
+   * @param {WrittenWindow} window The window.
+   * @returns {HistoryStep | null} The step.
+   */
+  const paintTopRow = (window: WrittenWindow): HistoryStep | null =>
+  {
+    return window.hub.edit('Paint', [ blueprintHistoryKey(BLUEPRINT) ], tx => tx.tiles(window.blueprintKey, [ [ cellIndex(2, 2, 0, 0, 0), a5(9) ], [ cellIndex(2, 2, 1, 0, 0), a5(8) ] ]));
+  };
+
+  /**
+   * Saves a held map the way a save does, without a server: its file takes what the map holds, and the map is noted saved
+   * as far as every step it holds.
+   * @param {WrittenWindow} window The window.
+   * @param {number} mapId The map.
+   */
+  const saveMap = (window: WrittenWindow, mapId: number): void =>
+  {
+    const key = mapDocumentKey(mapId);
+    window.disk.set(mapId, window.hub.map(key).toJson());
+    window.hub.noteSaved(key, window.hub.appliedSteps(key).map(step => step.id));
+  };
+
+  it('writes an undo that left a cell painted over since as exactly what moved, the map reading saved once its file holds it', async () =>
+  {
+    // Arrange: the top row written everywhere, then map 1's corner painted over by hand and saved.
+    const window = await writtenWindow();
+    paintTopRow(window);
+    await settle();
+    window.hub.edit('Paint by hand', [ mapHistoryKey(1) ], tx => tx.tiles('map:1', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), a5(15) ] ]));
+    saveMap(window, 1);
+
+    // Act.
+    window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
+    // Assert: map 1's file takes the other cell back alone, and holds what the map holds; map 2 and map 3 take both.
+    const act = window.acts[window.acts.length - 1];
+    expect([
+      act.maps.map(({ map, patches }) => [ map, patches ]),
+      [ 1, 2, 3 ].map(mapId => [ groundOf(window.disk.get(mapId) as RmmzMap, 1, 1), groundOf(window.disk.get(mapId) as RmmzMap, 2, 1) ]),
+      window.disk.get(1),
+      window.hub.dirtyKeys(),
+    ])
+      .toStrictEqual([
+        [
+          [ 1, [ { kind: 'tiles', indices: [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 2, 1, 0) ], before: [ a5(8) ], after: [ a5(2) ] } ] ],
+          [ 2, [ { kind: 'tiles', indices: [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), cellIndex(MAP_WIDTH, MAP_HEIGHT, 2, 1, 0) ], before: [ a5(9), a5(8) ], after: [ a5(1), a5(2) ] } ] ],
+          [ 3, [ { kind: 'tiles', indices: [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), cellIndex(MAP_WIDTH, MAP_HEIGHT, 2, 1, 0) ], before: [ a5(9), a5(8) ], after: [ a5(1), a5(2) ] } ] ],
+        ],
+        [ [ a5(15), a5(2) ], [ a5(1), a5(2) ], [ a5(1), a5(2) ] ],
+        window.hub.map('map:1').toJson(),
+        [],
+      ]);
+  });
+
+  it('writes nothing to a map whose every part of an undo was left, which keeps reading saved', async () =>
+  {
+    // Arrange: one cell written everywhere, then map 1's corner painted over by hand and saved.
+    const window = await writtenWindow();
+    paintCorner(window, a5(9));
+    await settle();
+    window.hub.edit('Paint by hand', [ mapHistoryKey(1) ], tx => tx.tiles('map:1', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), a5(15) ] ]));
+    saveMap(window, 1);
+    const fileBefore = structuredClone(window.disk.get(1));
+
+    // Act.
+    window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
     // Assert.
-    expect([ window.writer.hasUnwritten(), window.problems ])
-      .toStrictEqual([ true, [ { message: 'The change to the blueprint could not be written (the disk is full), and "Paint" could not be taken back: undo it by hand.', alarm: true } ] ]);
+    const act = window.acts[window.acts.length - 1];
+    expect([ act.maps.map(({ map }) => map), window.disk.get(1), window.hub.dirtyKeys() ])
+      .toStrictEqual([ [ 2, 3 ], fileBefore, [] ]);
   });
 
   /**
@@ -575,6 +669,30 @@ describe('BlueprintWriter', () =>
     // Assert.
     expect([ beforeChange, refusal ])
       .toStrictEqual([ null, 'Map 3 changed on disk since this change was written to it' ]);
+  });
+
+  it('undoes a change past a cell of a map nobody has open changed on disk since, which keeps the disk\'s tile', async () =>
+  {
+    // Arrange: the kept files tell the window what a file would take; map 3's corner repainted in MZ after the change.
+    const window = await writtenWindow();
+    window.hub.setFileFit((key, patch) => window.maps.fileTakes(key, patch));
+    paintTopRow(window);
+    await settle();
+    const changed = structuredClone(window.disk.get(3) as RmmzMap);
+    changed.data[cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0)] = a5(30);
+    window.disk.set(3, changed);
+    window.maps.fileChanged('data/Map003.json', false);
+    await settle();
+
+    // Act: the guard asked about what would move, as the window's history router asks it.
+    const check = window.hub.canUndo(blueprintHistoryKey(BLUEPRINT));
+    const refusal = check.ok ? window.writer.guard(check.step, 'backward') : 'not even planned';
+    const undone = window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
+    // Assert: the disk's tile left, by nothing this window recorded; the other cell back on map 3, and both on map 1.
+    expect([ refusal, undone.ok && undone.left?.map(part => [ part.document, part.by ]), [ 1, 3 ].map(mapId => [ groundOf(window.disk.get(mapId) as RmmzMap, 1, 1), groundOf(window.disk.get(mapId) as RmmzMap, 2, 1) ]), window.problems ])
+      .toStrictEqual([ null, [ [ 'map:3', null ] ], [ [ a5(1), a5(2) ], [ a5(30), a5(2) ] ], [] ]);
   });
 
   it('writes a rename of a blueprint, and its undo, to the blueprints, reaching no map', async () =>
