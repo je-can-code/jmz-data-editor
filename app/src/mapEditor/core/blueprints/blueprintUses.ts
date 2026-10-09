@@ -1,11 +1,18 @@
 import { BLUEPRINT_USES, saveEditorDocument, type EditorDataSaveOutcome } from '../editorData/editorData.ts';
-import type { DocumentHub } from '../history/DocumentHub.ts';
-import { blueprintHistoryKey } from '../history/historyKeys.ts';
-import type { HistoryStep } from '../history/HistoryStep.ts';
+import type { DocumentHub, HubEvent, HubSource } from '../history/DocumentHub.ts';
+import { blueprintHistoryKey, documentHistoryKey } from '../history/historyKeys.ts';
+import { documentsOfStep, type HistoryStep } from '../history/HistoryStep.ts';
 import type { Transaction } from '../history/Transaction.ts';
-import { editorDataDocumentKey, parseDocumentKey, type EditorDataDocumentKey } from '../model/documentKeys.ts';
+import {
+  editorDataDocumentKey,
+  mapDocumentKey,
+  parseDocumentKey,
+  type DocumentKey,
+  type EditorDataDocumentKey,
+} from '../model/documentKeys.ts';
 import type { EditorDocument } from '../model/EditorDocument.ts';
 import { isJsonObject, type JsonObject, type JsonValue } from '../model/json.ts';
+import { invertPatch } from '../model/patches.ts';
 import type { BlueprintCopyCount, BlueprintCopyCounter, BlueprintCopyCounts } from './blueprintCopies.ts';
 import { isBlueprintId } from './blueprintLink.ts';
 
@@ -414,12 +421,238 @@ const saveBlueprintUses = (hub: DocumentHub): Promise<EditorDataSaveOutcome> =>
 };
 
 /**
+ * Reads the id of the map a document is.
+ * @param {DocumentKey} key The document.
+ * @returns {number | null} The map's id, or null for a document that is no map.
+ */
+const mapIdOf = (key: DocumentKey): number | null =>
+{
+  const parsed = parseDocumentKey(key);
+  return parsed.kind === 'map'
+    ? parsed.mapId
+    : null;
+};
+
+/**
+ * Follows, for each map the window holds, its placements as its file on disk holds them, so that throwing the map's
+ * edits away, by taking the version on disk over them, takes its part of the record back with them: otherwise a
+ * placement the thrown-away edits made would stay recorded, no longer where it was, and one they took away would be
+ * lost from the record while the map still holds its tiles.
+ *
+ * While a map holds nothing unsaved, its part of the record is exactly its file's, every step that changed both having
+ * been saved, or undone. While it holds unsaved edits, its file's part stays as it last was, but for a change made to the
+ * record alone, such as a placement forgotten, which is the author's choice about the record whatever becomes of the
+ * map's edits. A map whose file's part cannot be told, as one whose edits went on while its save was on its way, or one
+ * another window handed over with unsaved edits, is left as it is when its edits are thrown away.
+ */
+class PlacementsOnDisk
+{
+  #hub: DocumentHub;
+
+  /**
+   * Each held map's placements as its file holds them, by map id; a map missing here is one this window cannot tell
+   * them for.
+   */
+  #onDisk = new Map<number, BlueprintSpot[]>();
+
+  /**
+   * @param {DocumentHub} hub The window's documents.
+   */
+  constructor(hub: DocumentHub)
+  {
+    this.#hub = hub;
+    this.#refresh();
+  }
+
+  /**
+   * Hears one event of the window's documents, and answers a map's edits being thrown away by bringing its part of the
+   * record back to its file's.
+   * @param {HubEvent} event The event.
+   * @returns {boolean} True when the record changed for a map whose edits were thrown away, so it must be written.
+   */
+  heard(event: HubEvent): boolean
+  {
+    // a map whose edits are being thrown away already holds none, while its part of the record still holds them, until
+    // the word that it was reloaded comes, so nothing heard before then reads its part.
+    let restored = false;
+    switch (event.type)
+    {
+      case 'reloaded':
+        restored = this.#restore(event.document);
+        break;
+      case 'released':
+      case 'saved':
+        this.#letGo(event.document);
+        break;
+      case 'adopted':
+        this.#adopted(event.document, event.source);
+        break;
+      case 'committed':
+      case 'redone':
+        this.#mirror(event.step, 'forward');
+        break;
+      case 'undone':
+        this.#mirror(event.step, 'backward');
+        break;
+      default:
+        return false;
+    }
+
+    this.#refresh();
+    return restored;
+  }
+
+  /**
+   * Takes every map holding nothing unsaved at its word: its part of the record is its file's.
+   */
+  #refresh(): void
+  {
+    const uses = readableUses(this.#hub);
+    if (uses === null)
+    {
+      return;
+    }
+
+    this.#hub.documentKeys().forEach(key =>
+    {
+      const mapId = mapIdOf(key);
+      if (mapId !== null && this.#hub.isDirty(key) === false)
+      {
+        this.#onDisk.set(mapId, spotsOnMap(uses, mapId));
+      }
+    });
+  }
+
+  /**
+   * Forgets what a map's file holds once the window lets the map go, or once it is saved: a map saved clean is read
+   * afresh straight after, and one whose edits went on while the save was on its way cannot be told any more.
+   * @param {DocumentKey} key The document let go of, or saved.
+   */
+  #letGo(key: DocumentKey): void
+  {
+    const mapId = mapIdOf(key);
+    if (mapId !== null)
+    {
+      this.#onDisk.delete(mapId);
+    }
+  }
+
+  /**
+   * Takes the record arriving from disk as what every held map's file holds, for a map with unsaved edits too, since no
+   * edit could have changed its part of a record the window did not hold yet. A record handed over by another window
+   * may hold that window's unsaved edits, so only maps holding none are taken from it.
+   * @param {DocumentKey} key The document adopted.
+   * @param {HubSource} source Whether it came from disk, or from another window.
+   */
+  #adopted(key: DocumentKey, source: HubSource): void
+  {
+    const uses = readableUses(this.#hub);
+    if (key !== BLUEPRINT_USES_DOCUMENT || source === 'remote' || uses === null)
+    {
+      return;
+    }
+
+    this.#hub.documentKeys().forEach(held =>
+    {
+      const mapId = mapIdOf(held);
+      if (mapId !== null && this.#onDisk.has(mapId) === false)
+      {
+        this.#onDisk.set(mapId, spotsOnMap(uses, mapId));
+      }
+    });
+  }
+
+  /**
+   * Carries onto the file's part of each map holding unsaved edits a change a step made to its part of the record
+   * without touching the map, such as a placement forgotten, or put back by an undo: whatever becomes of the map's
+   * edits, that change stands. A step that also changed the map is one of its edits, and is left to them.
+   * @param {HistoryStep} step The step that moved.
+   * @param {'forward' | 'backward'} direction Whether it went in, made or redone, or came out, undone.
+   */
+  #mirror(step: HistoryStep, direction: 'forward' | 'backward'): void
+  {
+    const patches = step.entries.filter(entry => entry.document === BLUEPRINT_USES_DOCUMENT).map(entry => entry.patch);
+    const uses = readableUses(this.#hub);
+    if (patches.length === 0 || uses === null)
+    {
+      return;
+    }
+
+    // the record as it was before the step moved: a step that went in is taken back out, one that came out put back in.
+    const moved = direction === 'forward'
+      ? patches
+      : [ ...patches ].reverse().map(invertPatch);
+    const before = uses.toJsonWithout(moved);
+    let earlier: PlacedSpot[];
+    try
+    {
+      earlier = readUses(isJsonObject(before) ? before['data'] : undefined);
+    }
+    catch
+    {
+      return;
+    }
+
+    const touched = documentsOfStep(step);
+    [ ...this.#onDisk ].forEach(([ mapId, onDisk ]) =>
+    {
+      const key = mapDocumentKey(mapId);
+      if (touched.includes(key) || this.#hub.isDirty(key) === false)
+      {
+        return;
+      }
+
+      // only what the step changed is carried over, so every other difference between the two stays as it was.
+      const was = earlier.filter(spot => spot.mapId === mapId);
+      const now = spotsOnMap(uses, mapId);
+      const removed = was.filter(spot => now.some(each => sameSpot(each, spot)) === false);
+      const added = now.filter(spot => was.some(each => sameSpot(each, spot)) === false);
+      if (removed.length > 0 || added.length > 0)
+      {
+        this.#onDisk.set(mapId, [ ...onDisk.filter(spot => removed.some(each => sameSpot(each, spot)) === false), ...added ]);
+      }
+    });
+  }
+
+  /**
+   * Brings a map's part of the record back to its file's once the window has thrown the map's edits away, as a step
+   * nothing can undo, since nothing can take back the edits thrown away with it either. A map whose file's part cannot
+   * be told is left as it is.
+   * @param {DocumentKey} key The document whose edits were thrown away.
+   * @returns {boolean} True when its part of the record changed.
+   */
+  #restore(key: DocumentKey): boolean
+  {
+    const mapId = mapIdOf(key);
+    const onDisk = mapId === null ? undefined : this.#onDisk.get(mapId);
+    if (mapId === null || onDisk === undefined || readableUses(this.#hub) === null)
+    {
+      return false;
+    }
+
+    const step = this.#hub.edit(`Load the version of Map ${mapId} on disk`, [ documentHistoryKey(BLUEPRINT_USES_DOCUMENT) ], tx =>
+    {
+      changeMapSpots(tx, this.#hub, mapId, () => onDisk);
+    });
+    if (step === null)
+    {
+      return false;
+    }
+
+    this.#hub.forgetStep(step.id);
+    return true;
+  }
+}
+
+/**
  * Keeps the record on disk in step with the maps it describes: it is written whenever a map's file or the map tree's is
  * written, from this window or another, so what the record says of the maps on disk is what they hold. A placement, a
  * resize or a move of tiles changes the record in the same step as the map, and stays unsaved with the map until the map
- * is saved; the map tree writes its changes at once, the record with them. A record waiting for the author's choice about
- * changes made elsewhere is held back, and the author hears why, as they do when a write fails. One write at a time: a
- * save heard while one is on its way writes once more after it.
+ * is saved; the map tree writes its changes at once, the record with them. A map whose edits are thrown away, its version
+ * on disk taken over them, has its part of the record brought back to its file's and written at once (see
+ * {@link PlacementsOnDisk}). A record waiting for the author's choice about changes made elsewhere is held back, and the
+ * author hears why, as they do when a write fails. One write at a time: a save heard while one is on its way writes once
+ * more after it.
  * @param {DocumentHub} hub The window's documents.
  * @param {(message: string) => void} onProblem Tells the author why the record was not written.
  * @returns {() => void} Stops keeping it.
@@ -428,6 +661,7 @@ const keepUsesWithMaps = (hub: DocumentHub, onProblem: (message: string) => void
 {
   let writing = false;
   let again = false;
+  const onDisk = new PlacementsOnDisk(hub);
 
   /**
    * Writes the record once it has anything unsaved, or once more after the write on its way.
@@ -473,8 +707,9 @@ const keepUsesWithMaps = (hub: DocumentHub, onProblem: (message: string) => void
 
   return hub.subscribe(event =>
   {
+    const restored = onDisk.heard(event);
     const kind = event.type === 'saved' ? parseDocumentKey(event.document).kind : null;
-    if (kind === 'map' || kind === 'mapinfos')
+    if (restored || kind === 'map' || kind === 'mapinfos')
     {
       write();
     }
