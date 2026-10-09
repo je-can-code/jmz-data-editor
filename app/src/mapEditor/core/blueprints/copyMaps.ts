@@ -240,6 +240,22 @@ class CopyMaps
   #through = new Map<number, HistoryStep[]>();
 
   /**
+   * For each map, how many times its file has been saved whole since this window began keeping maps: a save writes the
+   * map as it stands, so from then on the file takes every change to a blueprint, and gives it back, by the map's own
+   * patches.
+   */
+  #saves = new Map<number, number>();
+
+  /**
+   * For each map and change to a blueprint whose way into the map's file the kept file showed, keyed {@code mapId:stepId}:
+   * the map's count of saves when the file took the change by its file version (see HistoryStep's fileVersions), or -1
+   * when it took the map's own patches. Until the map is saved again, the file gives the change back, and takes it again,
+   * the same way; once saved, by the map's own patches. Both ways can fit a file at once, as an empty version always does,
+   * so which one went in is kept rather than guessed again.
+   */
+  #ways = new Map<string, number>();
+
+  /**
    * For each map, how many of this window's writes to its file have not landed yet, waiting or on their way: a read of the
    * file meanwhile could miss any of them.
    */
@@ -463,11 +479,11 @@ class CopyMaps
   /**
    * Moves the kept files through a blueprint's change made, undone or redone, here or in another window, exactly as
    * whoever writes it to disk writes it, and says what each map's file takes. A map's file takes what the step recorded
-   * for it in place of the map's own patches (see HistoryStep's fileVersions), or else the map's own patches, whichever
-   * the file holds to start from: the map's own, once the map was saved with the step in it. A kept file neither fits is
-   * no longer known, and is read again once needed. When this window writes the change, each map it reaches counts one
-   * more write on its way (see {@link landed}); a map nobody here holds keeps the changes this window wrote through to it,
-   * for it to take up once opened here.
+   * for it in place of the map's own patches (see HistoryStep's fileVersions), or else the map's own patches: the way the
+   * file took the change before, until the map is saved whole, and the map's own from then on (see {@link #waysFor}). A
+   * kept file the way does not fit is no longer known, and is read again once needed. When this window writes the change,
+   * each map it reaches counts one more write on its way (see {@link landed}); a map nobody here holds keeps the changes
+   * this window wrote through to it, for it to take up once opened here.
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Made or redone, or undone.
    * @param {boolean} writes True when this window writes the change to disk, false when another window does, or when it
@@ -485,20 +501,21 @@ class CopyMaps
 
     mapsChangedBy(step).forEach(mapId =>
     {
-      const ways = waysToFile(step, mapDocumentKey(mapId)).map(patches => (direction === 'forward' ? patches : takenOut(patches)));
+      const ways = this.#waysFor(mapId, step, direction);
       const file = this.#files.get(mapId);
-      const way = file === undefined ? ways[0] : ways.find(patches => patches.every(patch => fits(file, patch)));
+      const way = file === undefined ? ways[0] : ways.find(each => each.patches.every(patch => fits(file, patch)));
       if (way === undefined)
       {
-        // the file holds neither way: it is no longer known, and the write the first way makes will say so.
+        // the file holds no way the step can take: it is no longer known, and the write the likeliest way makes will say so.
         this.#forget(mapId);
-        taken.set(mapId, ways[0]);
+        taken.set(mapId, ways[0].patches);
       }
       else
       {
-        way.forEach(patch => file?.apply(patch));
+        way.patches.forEach(patch => file?.apply(patch));
+        this.#noteWay(mapId, step, way, file !== undefined);
         this.#noteThrough(mapId, step, direction);
-        taken.set(mapId, way);
+        taken.set(mapId, way.patches);
       }
 
       if (writes)
@@ -512,8 +529,8 @@ class CopyMaps
   }
 
   /**
-   * Finds a kept map whose file a blueprint's change could not move into the way {@link follow} would: its file holds
-   * neither way the change reaches it, so something changed it on disk since. A map whose file is not kept here cannot be
+   * Finds a kept map whose file a blueprint's change could not move into the way {@link follow} would: its file holds no
+   * way the change can reach it by, so something changed it on disk since. A map whose file is not kept here cannot be
    * told, and is not named; the write itself checks it.
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Redone, or undone.
@@ -529,10 +546,55 @@ class CopyMaps
     const found = mapsChangedBy(step).find(mapId =>
     {
       const file = this.#files.get(mapId);
-      const ways = waysToFile(step, mapDocumentKey(mapId)).map(patches => (direction === 'forward' ? patches : takenOut(patches)));
-      return file !== undefined && ways.some(patches => patches.every(patch => fits(file, patch))) === false;
+      return file !== undefined && this.#waysFor(mapId, step, direction).some(way => way.patches.every(patch => fits(file, patch))) === false;
     });
     return found ?? null;
+  }
+
+  /**
+   * Lists the ways a step can reach a map's file, each turned the way the step moves, the likeliest first (see
+   * waysToFile). Once the kept file has shown which way the file took the step, that way alone: the file version while the
+   * map has not been saved whole since, and the map's own patches after, since a save writes the map as it stands. Both
+   * can fit a file at once, as an empty version always does, so the first that fits is no proof of which went in.
+   * @param {number} mapId The map.
+   * @param {HistoryStep} step The step.
+   * @param {'forward' | 'backward'} direction Made or redone, or undone.
+   * @returns {{ patches: Patch[], version: boolean }[]} The ways, each with whether it is the file version; never empty.
+   */
+  #waysFor(mapId: number, step: HistoryStep, direction: 'forward' | 'backward'): { readonly patches: Patch[]; readonly version: boolean }[]
+  {
+    const ways = waysToFile(step, mapDocumentKey(mapId)).map((patches, index, all) => ({
+      patches: direction === 'forward' ? patches : takenOut(patches),
+      version: all.length > 1 && index === 0,
+    }));
+    const took = this.#ways.get(`${mapId}:${step.id}`);
+    if (ways.length < 2 || took === undefined)
+    {
+      return ways;
+    }
+
+    // a file saved whole since it took the version holds the map as it stood, and follows the map's own patches.
+    const byVersion = took === (this.#saves.get(mapId) ?? 0);
+    return ways.filter(way => way.version === byVersion);
+  }
+
+  /**
+   * Notes which way a map's kept file took a step, when the step has two (see {@link #waysFor}) and the kept file showed
+   * it; a file not kept shows nothing.
+   * @param {number} mapId The map.
+   * @param {HistoryStep} step The step.
+   * @param {{ version: boolean }} way The way it took.
+   * @param {boolean} shown True when the kept file showed the way, fitting it.
+   */
+  #noteWay(mapId: number, step: HistoryStep, way: { readonly version: boolean }, shown: boolean): void
+  {
+    const key = mapDocumentKey(mapId);
+    if (shown === false || step.fileVersions === undefined || step.fileVersions.some(each => each.document === key) === false)
+    {
+      return;
+    }
+
+    this.#ways.set(`${mapId}:${step.id}`, way.version ? (this.#saves.get(mapId) ?? 0) : -1);
   }
 
   /**
@@ -774,14 +836,21 @@ class CopyMaps
   /**
    * Keeps a map's file as a save left it: the map as it stood at the steps the file now holds, which is the map with every
    * step applied since taken back out, when the save's steps are where the map's applied steps start. Otherwise the file
-   * is no longer known.
+   * is no longer known. Either way the file holds the map as it stood, so from now on it takes every change to a blueprint
+   * by the map's own patches (see {@link #waysFor}).
    * @param {DocumentKey} key The document saved.
    * @param {readonly string[]} marker The steps its file holds.
    */
   #saved(key: DocumentKey, marker: readonly string[]): void
   {
     const parsed = parseDocumentKey(key);
-    if (parsed.kind !== 'map' || this.#files.has(parsed.mapId) === false || this.#hub.has(key) === false)
+    if (parsed.kind !== 'map')
+    {
+      return;
+    }
+
+    this.#saves.set(parsed.mapId, (this.#saves.get(parsed.mapId) ?? 0) + 1);
+    if (this.#files.has(parsed.mapId) === false || this.#hub.has(key) === false)
     {
       return;
     }

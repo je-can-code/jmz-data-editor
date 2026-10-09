@@ -1,21 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { MapEditorApiError } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { withBlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { isWrittenAtOnce } from '../../../../src/mapEditor/core/blueprints/blueprintWriter.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { blueprintHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { HistoryStep } from '../../../../src/mapEditor/core/history/HistoryStep.ts';
 import { mapDocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
+import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { operationFor } from '../../../../src/mapEditor/core/sync/SyncPeer.ts';
 import { cellIndex } from '../../../../src/mapEditor/core/tiles/tileGrid.ts';
+import { mapWithEvents } from '../../support/eventFixtures.ts';
 import {
   a5,
   BLUEPRINT,
   campMap,
   eventOf,
   groundOf,
+  guardPage,
   MAP_HEIGHT,
   MAP_WIDTH,
   settle,
@@ -148,6 +152,110 @@ describe('BlueprintWriter', () =>
     // Assert: the file holds the map exactly as it now stands, its own painting included, and the map reads as saved.
     expect([ window.disk.get(2), window.hub.isDirty('map:2'), window.problems ])
       .toStrictEqual([ window.hub.committedContent('map:2'), false, [] ]);
+  });
+
+  /**
+   * Holds map 4, a plain map on disk, with a copy of the blueprint's guard (event 2, speed 3) put on it and not saved, so
+   * its file holds no copy at all.
+   * @param {WrittenWindow} window The window.
+   * @returns {Promise<void>} Settles once the window has read map 4's file.
+   */
+  const holdUnsavedCopy = async (window: WrittenWindow): Promise<void> =>
+  {
+    const plain: RmmzMap = { ...mapWithEvents(MAP_WIDTH, MAP_HEIGHT, [ null, [ 3, 3 ], null ]), tilesetId: 4 };
+    window.disk.set(4, structuredClone(plain));
+    window.hub.adopt('map:4', structuredClone(plain) as unknown as JsonValue);
+    const guard: RmmzMapEvent = {
+      ...createMapEvent(2, 4, 4),
+      name: 'Guard',
+      pages: [ guardPage(3) ],
+      note: withBlueprintLink('', { blueprintId: BLUEPRINT, eventId: 1, differences: [] }),
+    };
+    window.hub.edit('Copy', [ mapHistoryKey(4) ], tx => tx.set('map:4', [ 'events', 2 ], guard as unknown as JsonValue));
+    await settle();
+  };
+
+  /**
+   * Sets the speed of the blueprint's guard, as its window does.
+   * @param {WrittenWindow} window The window.
+   * @param {number} speed The new speed.
+   * @returns {HistoryStep | null} The step.
+   */
+  const speedGuard = (window: WrittenWindow, speed: number): HistoryStep | null =>
+  {
+    return window.hub.edit('Speed', [ blueprintHistoryKey(BLUEPRINT) ], tx => tx.set(window.blueprintKey, [ 'events', 1, 'pages', 0, 'moveSpeed' ], speed));
+  };
+
+  /**
+   * Reads the speed of map 4's copy of the guard, in the window and on disk.
+   * @param {WrittenWindow} window The window.
+   * @returns {[ number, number ]} The speed in the window, then on disk.
+   */
+  const copySpeeds = (window: WrittenWindow): [ number, number ] =>
+  {
+    const held = window.hub.map('map:4').events[2] as RmmzMapEvent;
+    const onDisk = (window.disk.get(4) as RmmzMap).events[2] as RmmzMapEvent;
+    return [ held.pages[0].moveSpeed, onDisk.pages[0].moveSpeed ];
+  };
+
+  it('gives a change back by the version its file took while the map is not saved since, writing nothing to a file that took none', async () =>
+  {
+    // Arrange: the guard sped up while map 4's copy was unsaved, so its file took none of the change.
+    const window = await writtenWindow();
+    await holdUnsavedCopy(window);
+    speedGuard(window, 4);
+    await settle();
+    const acts = window.acts.length;
+
+    // Act.
+    window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
+    // Assert: the undo wrote the camps but not map 4, whose file still holds no copy, and map 4 still reads unsaved.
+    expect([ window.acts.slice(acts).map(act => act.maps.map(each => each.map)), (window.disk.get(4) as RmmzMap).events[2], window.hub.isDirty('map:4') ])
+      .toStrictEqual([ [ [ 1, 2, 3 ] ], null, true ]);
+  });
+
+  it('gives a change back by the map\'s own patches once the map is saved with it in, though its file first took none of it', async () =>
+  {
+    // Arrange: the guard sped up while map 4's copy was unsaved, then map 4 saved whole, its copy at the new speed.
+    const window = await writtenWindow();
+    await holdUnsavedCopy(window);
+    speedGuard(window, 4);
+    await settle();
+    window.disk.set(4, window.hub.committedContent('map:4') as unknown as RmmzMap);
+    window.hub.noteSaved('map:4', window.hub.appliedSteps('map:4').map(step => step.id));
+    const saved = copySpeeds(window);
+
+    // Act.
+    window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
+    // Assert: the copy on disk goes back with the copy on the map, and map 4 reads as saved because its file holds it.
+    expect([ saved, copySpeeds(window), window.hub.isDirty('map:4'), window.problems ])
+      .toStrictEqual([ [ 4, 4 ], [ 3, 3 ], false, [] ]);
+  });
+
+  it('puts a change back by the map\'s own patches when redone after the map was saved', async () =>
+  {
+    // Arrange: as above, the change given back after map 4 was saved with it in.
+    const window = await writtenWindow();
+    await holdUnsavedCopy(window);
+    speedGuard(window, 4);
+    await settle();
+    window.disk.set(4, window.hub.committedContent('map:4') as unknown as RmmzMap);
+    window.hub.noteSaved('map:4', window.hub.appliedSteps('map:4').map(step => step.id));
+    window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+    const undone = copySpeeds(window);
+
+    // Act.
+    window.hub.redo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
+    // Assert: the redo's act writes map 4 too, its copy back at the new speed on the map and on disk.
+    expect([ undone, window.acts[window.acts.length - 1].maps.map(each => each.map), copySpeeds(window), window.hub.isDirty('map:4'), window.problems ])
+      .toStrictEqual([ [ 3, 3 ], [ 1, 2, 3, 4 ], [ 4, 4 ], false, [] ]);
   });
 
   it('writes nothing when the disk refuses an act, takes the change back here, and says why', async () =>
