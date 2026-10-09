@@ -296,6 +296,46 @@ describe('BlueprintWriter', () =>
       .toStrictEqual([ true, [ { message: 'The change to the blueprint could not be written (the disk is full), and "Paint" could not be taken back: undo it by hand.', alarm: true } ] ]);
   });
 
+  it('takes a change back, writing nothing, when the blueprints wait for a choice about changes made elsewhere by the time it goes', async () =>
+  {
+    // Arrange: the blueprints' file changed elsewhere while the stroke settles.
+    const window = await writtenWindow();
+    const original = [ 1, 2, 3 ].map(mapId => structuredClone(window.disk.get(mapId)));
+    paintCorner(window, a5(9));
+    window.hub.flagConflict(BLUEPRINTS_DOCUMENT, { kind: 'disk', content: { schemaVersion: 1, data: { blueprints: {} } } });
+
+    // Act.
+    await settle();
+
+    // Assert: no copy reached its file without the blueprint, and the change is back out of the window.
+    expect([ window.acts.length, [ 1, 2, 3 ].map(mapId => window.disk.get(mapId)), groundOf(window.hub.map('map:1'), 1, 1), window.hub.history(blueprintHistoryKey(BLUEPRINT)).position, window.writer.hasUnwritten(), window.problems ])
+      .toStrictEqual([
+        0,
+        original,
+        a5(1),
+        0,
+        false,
+        [ { message: 'The change to the blueprint could not be written, so it was taken back: the blueprints are waiting for a choice about changes made elsewhere.', alarm: false } ],
+      ]);
+  });
+
+  it('refuses to move a change to a blueprint while the blueprints wait for a choice about changes made elsewhere', async () =>
+  {
+    // Arrange: a change written, then the blueprints' file changed elsewhere.
+    const window = await writtenWindow();
+    const step = paintCorner(window, a5(9)) as HistoryStep;
+    await settle();
+    const beforeChoice = window.writer.guard(step, 'backward');
+    window.hub.flagConflict(BLUEPRINTS_DOCUMENT, { kind: 'disk', content: { schemaVersion: 1, data: { blueprints: {} } } });
+
+    // Act.
+    const refusal = window.writer.guard(step, 'backward');
+
+    // Assert.
+    expect([ beforeChoice, refusal ])
+      .toStrictEqual([ null, 'the blueprints are waiting for a choice about changes made elsewhere' ]);
+  });
+
   it('writes whatever is waiting when asked, without waiting for the moment, and settles once it lands', async () =>
   {
     // Arrange: a writer that waits a long while.

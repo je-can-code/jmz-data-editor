@@ -13,6 +13,19 @@ import { isBlueprintChange, type CopyMaps } from './copyMaps.ts';
 const SETTLE_MS = 250;
 
 /**
+ * Why a change reaching copies is not written while the blueprints wait for a choice about changes made elsewhere:
+ * writing the blueprints would put this window's over the other copy, and writing the copies alone would part them from
+ * their blueprint on disk.
+ */
+const BLUEPRINTS_WAITING = 'the blueprints are waiting for a choice about changes made elsewhere';
+
+/**
+ * Why a change reaching copies is not written by a window not holding the blueprints: its copies would reach their files
+ * without the blueprint.
+ */
+const BLUEPRINTS_NOT_HELD = 'the blueprints aren\'t open in this window';
+
+/**
  * One move of a step the writer writes: the step, which way it moved, and what each map's file takes for it.
  */
 type QueuedMove = {
@@ -133,7 +146,9 @@ const sameIds = (left: readonly string[], right: readonly string[]): boolean =>
  * every patch checked by the server first, so a map's unsaved edits never reach its file, and a file changed on disk
  * since, which no patch fits, refuses the whole act, writing nothing. Then the changes in that act, and any made since,
  * are taken back here, newest first, so the window and the disk agree again, and the author hears why; one that cannot be
- * taken back is an alarm, and the window counts it unwritten from then on.
+ * taken back is an alarm, and the window counts it unwritten from then on. A change reaching copies never goes without
+ * the blueprints: while they wait for a choice about changes made elsewhere, its act is taken back the same way, and
+ * undoing or redoing one is refused (see {@link guard}).
  *
  * Once an act lands, the blueprints and every blueprint open as a map read as saved as far as the act wrote them, and so
  * does each map held here whose file the act left holding exactly the steps the map holds.
@@ -268,15 +283,21 @@ class BlueprintWriter
   }
 
   /**
-   * Says why a step must not move now, for a reason beyond the window's own histories: a map file it reaches holds what
-   * neither way of writing it there fits, changed on disk since. Asked by every undo, redo and history jump before it moves
-   * anything (see HistoryRouter's guard).
+   * Says why a step must not move now, for a reason beyond the window's own histories: a change reaching copies while the
+   * blueprints wait for a choice about changes made elsewhere, since its copies would reach their files without the
+   * blueprint; or a map file it reaches holding what no way of writing it there fits, changed on disk since. Asked by every
+   * undo, redo and history jump before it moves anything (see HistoryRouter's guard).
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Redo or undo.
    * @returns {string | null} Why, with no full stop of its own, or null when nothing stands in its way.
    */
   guard(step: HistoryStep, direction: 'forward' | 'backward'): string | null
   {
+    if (isBlueprintChange(step) && this.#writesBlueprints() === false)
+    {
+      return this.#hub.has(BLUEPRINTS_DOCUMENT) ? BLUEPRINTS_WAITING : BLUEPRINTS_NOT_HELD;
+    }
+
     const mapId = this.#maps.misfit(step, direction);
     return mapId === null
       ? null
@@ -354,7 +375,9 @@ class BlueprintWriter
   }
 
   /**
-   * Sends everything waiting as one act, unless one is on its way, which sends the rest once it lands.
+   * Sends everything waiting as one act, unless one is on its way, which sends the rest once it lands. An act holding a
+   * change reaching copies is never sent without the blueprints, which would part the copies from their blueprint on disk:
+   * while the blueprints cannot be written, it fails as a refused act does, its changes taken back.
    */
   #send(): void
   {
@@ -366,6 +389,11 @@ class BlueprintWriter
     const moves = this.#queue;
     this.#queue = [];
     const write = this.#actOf(moves);
+    if (write.blueprints === undefined && moves.some(move => isBlueprintChange(move.step)))
+    {
+      this.#failed(moves, new Error(this.#hub.has(BLUEPRINTS_DOCUMENT) ? BLUEPRINTS_WAITING : BLUEPRINTS_NOT_HELD));
+      return;
+    }
 
     // blueprints waiting for a choice are written nowhere, and an act holding nothing else has nothing to write.
     if (write.blueprints === undefined && this.#hub.has(BLUEPRINTS_DOCUMENT))
