@@ -42,9 +42,10 @@ type CopyChangeOptions = {
   /**
    * The ids the copies of the blueprint's events placed with this copy have on its map, by the ids the blueprint knows
    * them by, as placing them rewired every command naming one of them (see rewireGroupReferences): a command of the
-   * blueprint's naming one of these is read as naming its copy. Left out, the copy alone is known, which is enough for any
-   * command naming the event itself by its id; a command naming another of the blueprint's events then names it by the
-   * blueprint's id, which the copy's own command does not, so such a copy's command list reads as its own choice.
+   * blueprint's naming one of these is read as naming its copy. The copy itself is always known, which is enough for any
+   * command naming the event by its own id. Left out, it is the only one known: a command naming another of the
+   * blueprint's events then names it by the blueprint's id, which the copy's own command does not, so such a copy's
+   * command list reads as its own choice and stays.
    */
   readonly references?: ReadonlyMap<number, number>;
 };
@@ -504,7 +505,8 @@ const plannedCopy = (
   options: CopyChangeOptions,
 ): CopyChange =>
 {
-  const references = options.references ?? new Map([ [ change.before.id, copy.id ] ]);
+  // the copy is always its own blueprint event's copy, whatever else of its group is known.
+  const references = new Map([ ...options.references ?? [], [ change.before.id, copy.id ] ]);
   const before = rewireGroupReferences(change.before, references);
   const after = rewireGroupReferences(change.after, references);
   const held = fieldLinksOf(link);

@@ -211,9 +211,10 @@ describe('blueprintFields', () =>
 
       // Act.
       const fields = eventFields(lit, []);
+      const [ first ] = (fieldAt(fields, 'p1.commands') as Field).value as JsonValue[];
 
       // Assert.
-      expect([ fields.length, (fieldAt(fields, 'p1.commands')?.value as JsonValue[])[0] ])
+      expect([ fields.length, first ])
         .toStrictEqual([ 15, { code: 108, indent: 0, parameters: [ '<light:[4]>' ] } ]);
     });
   });

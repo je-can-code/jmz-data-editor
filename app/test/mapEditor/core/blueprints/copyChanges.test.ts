@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { withBlueprintLink, type BlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
+import type { CommentTagDefinition } from '../../../../src/mapEditor/core/blueprints/blueprintFields.ts';
+import { LINK_MISREAD, withBlueprintLink, type BlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import { planCopyChange, type CopyChange, type CopyChangeOptions } from '../../../../src/mapEditor/core/blueprints/copyChanges.ts';
 import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import { cloneJson, type JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
@@ -34,8 +35,8 @@ import { command, event, page, text } from '../../support/eventKindFixtures.ts';
  * so has one whose note cannot lose or take its link cleanly, or whose light cannot take a value; each is reported with
  * why, and changes nothing. A change adding pages or taking them away says how they pair: a page added goes to every
  * copy as the blueprint has it, a page taken away goes from each with what its link kept of it, and the link's values
- * move with their pages. A change saying nothing of it, or saying it wrongly, or a plan asked of an event that is not a
- * copy of the changed event, is a mistake, and throws.
+ * move with their pages. A change saying nothing of it, or saying it wrongly, a plan asked of an event that is not a copy
+ * of the changed event, or a module reading its tag wrongly, is a mistake, and throws rather than pass for drift.
  */
 describe('planCopyChange', () =>
 {
@@ -117,7 +118,7 @@ describe('planCopyChange', () =>
    */
   const withAdded = (source: RmmzMapEvent, commands: RmmzEventCommand[]): RmmzMapEvent =>
   {
-    const { list } = source.pages[0];
+    const [ { list } ] = source.pages;
     return withPage(source, { list: [ ...list.slice(0, -1), ...commands, ...list.slice(-1) ] });
   };
 
@@ -571,19 +572,20 @@ describe('planCopyChange', () =>
 
     it('keeps the list of a copy naming another of its group unless told where that one stands, and follows once told', () =>
     {
-      // Arrange: a route set on event 6 of the blueprint, whose copy placed beside this one is 13.
+      // Arrange: routes set on the event itself and on event 6 of the blueprint, whose copy placed beside this one is 13;
+      // the group as told names event 6 alone, the copy itself being always known.
       const route = { list: [ { code: 1 }, { code: 0 } ], repeat: false, skippable: false, wait: true };
-      const before = goblin([ command(205, [ 6, route ]) ]);
+      const before = goblin([ command(205, [ 5, route ]), command(205, [ 6, route ]) ]);
       const after = withAdded(before, text([ 'Grr!' ]));
-      const copy = copyOf(goblin([ command(205, [ 13, route ]) ]));
+      const copy = copyOf(goblin([ command(205, [ 12, route ]), command(205, [ 13, route ]) ]));
 
       // Act.
       const unknown = plan(before, after, copy);
-      const told = changedTo(planCopyChange({ before, after }, copy, { ...OPTIONS, references: new Map([ [ 5, 12 ], [ 6, 13 ] ]) }));
+      const told = changedTo(planCopyChange({ before, after }, copy, { ...OPTIONS, references: new Map([ [ 6, 13 ] ]) }));
 
       // Assert.
       expect([ unknown, told.event.pages[0].list.map(each => each.parameters[0]) ])
-        .toStrictEqual([ { kind: 'stays' }, [ 13, '', 'Grr!', undefined ] ]);
+        .toStrictEqual([ { kind: 'stays' }, [ 12, 13, '', 'Grr!', undefined ] ]);
     });
   });
 
@@ -866,6 +868,39 @@ describe('planCopyChange', () =>
       // Assert.
       expect(outcome)
         .toStrictEqual({ kind: 'drifted', reason: `in its note, ${OTHER_TAGS_MISREAD}` });
+    });
+
+    it('reports a copy as drifted when the note it would follow to cannot take its link, and changes nothing', () =>
+    {
+      // Arrange: the blueprint's note left with a tag never closed, which would swallow the link after it.
+      const before = { ...goblin(), note: 'Goblin' };
+      const after = { ...before, note: 'Goblin <tag: never closed' };
+
+      // Act.
+      const outcome = plan(before, after, copyOf(before));
+
+      // Assert.
+      expect(outcome)
+        .toStrictEqual({ kind: 'drifted', reason: `in its note, ${LINK_MISREAD}` });
+    });
+
+    it('lets a module\'s own mistake through loudly rather than reporting the copy as drifted', () =>
+    {
+      // Arrange: a module reading two lines of a page under one key.
+      const twice: CommentTagDefinition = {
+        id: 'test.twice',
+        read: read => read.list.slice(0, 2).map((_each, listIndex) => ({ listIndex, key: 'same', fields: [] })),
+        write: words => words,
+      };
+      const before = goblin();
+      const after = withPage(before, { trigger: 3 });
+
+      // Act.
+      const planned = () => planCopyChange({ before, after }, copyOf(before), { tags: [ twice ] });
+
+      // Assert.
+      expect(planned)
+        .toThrow('test.twice read a tag line as same at 1, which another reads, or which names a field no link could hold');
     });
 
     it('refuses an event that is no copy, a copy of another event, and a change to two events', () =>

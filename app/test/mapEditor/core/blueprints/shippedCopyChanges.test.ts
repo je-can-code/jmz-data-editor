@@ -146,7 +146,7 @@ const furtherReach = (text: string): string =>
  */
 const blueprintChange = (before: RmmzMapEvent): RmmzMapEvent =>
 {
-  const { moveSpeed, trigger } = before.pages[0];
+  const [ { moveSpeed, trigger } ] = before.pages;
   const firstPage = withPage(before, 0, page => withComment({ ...page, moveSpeed: moveSpeed === 6 ? 5 : moveSpeed + 1, trigger: (trigger + 1) % 5 }));
   const lit = withFirstLight(firstPage, text => withColor(furtherReach(text), '#123456', PLUGIN_DEFAULTS));
   const last = before.pages.length - 1;
@@ -199,7 +199,7 @@ describe.skipIf(project === null)('copy changes on the shipped maps', () =>
     // trigger, the frequency, the command list and the light's reach.
     const cases = events.map(({ mapId, event }) =>
     {
-      const { moveSpeed, moveFrequency, trigger } = event.pages[0];
+      const [ { moveSpeed, moveFrequency, trigger } ] = event.pages;
       const own = withFirstLight(withPage({ ...event, name: `${event.name} (own)` }, 0, page => ({ ...page, moveSpeed: moveSpeed >= 4 ? moveSpeed - 2 : moveSpeed + 2 })), text => withColor(text, '#abcdef', PLUGIN_DEFAULTS));
       const changed = withPage(event, 0, page => withComment({ ...page, trigger: (trigger + 1) % 5, moveFrequency: moveFrequency === 5 ? 4 : moveFrequency + 1 }));
       const after = withFirstLight(changed, furtherReach);
@@ -228,7 +228,7 @@ describe.skipIf(project === null)('copy changes on the shipped maps', () =>
     // Arrange: every event's copy kept 2 faster than its blueprint; the blueprint goes to the top speed, then the bottom.
     const cases = events.map(({ mapId, event }) =>
     {
-      const { moveSpeed } = event.pages[0];
+      const [ { moveSpeed } ] = event.pages;
       const own = withPage(event, 0, page => ({ ...page, moveSpeed: Math.min(moveSpeed + 2, 6) }));
       const top = withPage(event, 0, page => ({ ...page, moveSpeed: 6 }));
       const bottom = withPage(event, 0, page => ({ ...page, moveSpeed: 1 }));
