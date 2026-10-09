@@ -494,6 +494,27 @@ class WorkspaceController
   }
 
   /**
+   * Closes every tab of a blueprint deleted on disk, lets go of the blueprint opened as a map, and says why when a tab was
+   * open: nothing is left to show, and an undo here cannot bring back what the disk took away. What the workspace does
+   * when the window's blueprint tabs hand one over (see BlueprintMapFollower's onDeletedOnDisk).
+   * @param {string} blueprintId The blueprint.
+   * @param {string} name Its last name, or nothing when it was never known.
+   */
+  closeBlueprintDeletedOnDisk(blueprintId: string, name: string): void
+  {
+    const mapId = blueprintMapId(blueprintId);
+    const tabs = this.#dockview === null
+      ? []
+      : this.#dockview.panels.filter(panel => panel.api.component === PANEL_COMPONENTS.map && isMapPanelParams(panel.params) && panel.params.mapId === mapId);
+    tabs.forEach(tab => tab.api.close());
+    this.services.hub.release(mapDocumentKey(mapId));
+    if (tabs.length > 0)
+    {
+      this.notify(name === '' ? 'A blueprint was deleted on disk, so its tab was closed.' : `"${name}" was deleted on disk, so its tab was closed.`);
+    }
+  }
+
+  /**
    * Shows one event of a map, as a click on it in the events list asks: it becomes the selection, and every view of its
    * map centres on it at the zoom that view has. When no view of the map is on screen, one hidden behind another tab
    * comes to the front first, unless it shares a group with the panel asking, which would put the list itself out of

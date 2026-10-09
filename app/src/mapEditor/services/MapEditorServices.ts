@@ -3,6 +3,7 @@ import { pageWindowShell, type WindowShell } from '../../core/infrastructure/she
 import { apiDocumentStore } from '../core/api/apiDocumentStore.ts';
 import { HttpMapEditorApi, type MapEditorApi } from '../core/api/MapEditorApi.ts';
 import { BlueprintCopyCounter } from '../core/blueprints/blueprintCopies.ts';
+import { BlueprintMapFollower, keepBlueprintMap } from '../core/blueprints/blueprintMapFollower.ts';
 import { holdBlueprintMap } from '../core/blueprints/blueprintMaps.ts';
 import { blueprintPropagationCheck } from '../core/blueprints/blueprintPropagation.ts';
 import { BLUEPRINTS_DOCUMENT } from '../core/blueprints/blueprints.ts';
@@ -135,6 +136,14 @@ type MapEditorServices = {
   readonly blueprintWriter: BlueprintWriter | null;
 
   /**
+   * Keeps every blueprint opened as a map here in step with the blueprints when they change other than through it: a
+   * version found on disk, or the author taking the version on disk over their own. A tab with nothing unwritten follows;
+   * one holding changes not yet written waits for the author's choice; one whose blueprint was deleted on disk is handed to
+   * whoever shows it, to close.
+   */
+  readonly blueprintMaps: BlueprintMapFollower;
+
+  /**
    * The time of day the window shows, and the season: one clock for every map view in it, torn-out windows included. It
    * starts at the game's own starting time once a plugin module offering a clock switches on, and keeps the hour the
    * author picks; it stays in the season the game starts in until the author picks another, which moves the date every
@@ -180,7 +189,9 @@ type MapEditorServices = {
 
   /**
    * Settles a document's conflict the way the person chose: keep this window's copy, or take the other one (the
-   * file on disk, or another window's copy).
+   * file on disk, or another window's copy). A blueprint's tab kept over a version of its blueprint found on disk makes
+   * the blueprint what the tab shows, written like any change to the blueprints; taking the version on disk lays the tab
+   * out afresh from it.
    * @param {DocumentKey} key The document.
    * @param {'mine' | 'theirs'} choice Which copy to keep.
    * @returns {boolean} True when there was a conflict to settle that way.
@@ -452,6 +463,9 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     ? null
     : new BlueprintWriter({ hub, maps: copyMaps, write: writeChanges });
 
+  // a blueprint's tab follows the blueprints when they change other than through it, so it never writes an older one back.
+  const blueprintMaps = new BlueprintMapFollower(hub);
+
   /**
    * Brings the clock and the preview back as this project last left them on this machine, and keeps them in step with
    * every other window from then on, once the server says which project it serves. Without a server, a project, or a
@@ -501,6 +515,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     blueprintCopies,
     copyMaps,
     blueprintWriter,
+    blueprintMaps,
     clock,
     pages,
     preview,
@@ -529,6 +544,13 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
       {
         hub.reload(key, conflict.content);
         return true;
+      }
+
+      // a blueprint's tab kept over the version on disk makes the blueprint what it shows; one that can't be is not settled.
+      const parsed = parseDocumentKey(key);
+      if (parsed.kind === 'blueprint-map' && keepBlueprintMap(hub, blueprintMaps, parsed.blueprintId) === false)
+      {
+        return false;
       }
 
       hub.clearConflict(key);
@@ -616,9 +638,11 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
 
       stops.push(() => blueprintCopies.stop());
 
-      // a blueprint opened as a map here gathers the maps its copies stand on from now on.
+      // a blueprint opened as a map here gathers the maps its copies stand on from now on, and follows the blueprints.
       copyMaps.start();
       stops.push(() => copyMaps.stop());
+      blueprintMaps.start();
+      stops.push(() => blueprintMaps.stop());
       if (blueprintWriter !== null)
       {
         stops.push(() => blueprintWriter.stop());

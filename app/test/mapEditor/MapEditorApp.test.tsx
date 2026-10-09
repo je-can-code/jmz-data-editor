@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { WindowShell, type OpenBrowserWindow } from '../../src/core/infrastructure/shell/WindowShell.ts';
+import { holdBlueprintMap } from '../../src/mapEditor/core/blueprints/blueprintMaps.ts';
 import { CommandCatalog } from '../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { CommandEditorRegistry } from '../../src/mapEditor/core/commands/CommandEditorRegistry.ts';
 import { registerBuiltInCommands } from '../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
@@ -19,7 +20,9 @@ import type { MapEditorServices } from '../../src/mapEditor/services/MapEditorSe
 import { MapEditorServicesProvider, useMapEditorServices } from '../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { documentLabel } from '../../src/mapEditor/views/documentLabels.ts';
 import type { MapEditorView } from '../../src/mapEditor/views/mapEditorViews.ts';
+import { holdBlueprints } from './support/blueprintFixtures.ts';
 import { buildMapJson } from './support/fixtures.ts';
+import { stampOf } from './support/stampFixtures.ts';
 
 // the workspace lays itself out with a docking engine a test page cannot measure; its own tests cover it.
 vi.mock('../../src/mapEditor/workspace/Workspace.tsx', () => ({
@@ -230,6 +233,24 @@ describe('MapEditorApp', () =>
         'Map 1 was removed from disk while it had unsaved edits here.Keep my edits',
         'Map 2 changed on disk while it had unsaved edits here.Keep my editsLoad the version on disk',
       ]);
+  });
+
+  it('names a blueprint\'s tab waiting for a choice by the blueprint\'s own name', () =>
+  {
+    // Arrange: the camp open as a map.
+    const { hub } = renderApp({ kind: 'workspace' });
+    act(() =>
+    {
+      holdBlueprints(hub, { k3x9q2mf: { name: 'Goblin camp', stamp: stampOf({ width: 2 }) } });
+      holdBlueprintMap(hub, 'k3x9q2mf');
+    });
+
+    // Act.
+    act(() => hub.flagConflict('blueprint-map:k3x9q2mf', { kind: 'disk', content: hub.committedContent('blueprint-map:k3x9q2mf') }));
+
+    // Assert.
+    expect(screen.getByTestId('document-conflict').textContent)
+      .toBe('"Goblin camp" changed on disk while it had unsaved edits here.Keep my editsLoad the version on disk');
   });
 
   it('names every kind of document in the author\'s words', () =>

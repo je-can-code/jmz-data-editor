@@ -53,11 +53,12 @@ type ConflictWording = {
  * disk offers no version to take, only keeping this window's.
  * @param {DocumentKey} key The document.
  * @param {DocumentConflict} conflict The conflict.
+ * @param {string} name What to call the document, where more is known of it than its key says, such as a blueprint's
+ * own name; its label by default.
  * @returns {ConflictWording} The words.
  */
-const describeConflict = (key: DocumentKey, conflict: DocumentConflict): ConflictWording =>
+const describeConflict = (key: DocumentKey, conflict: DocumentConflict, name = documentLabel(key)): ConflictWording =>
 {
-  const name = documentLabel(key);
   if (conflict.kind === 'window')
   {
     return {

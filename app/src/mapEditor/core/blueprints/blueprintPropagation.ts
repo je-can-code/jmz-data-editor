@@ -6,10 +6,11 @@ import type { TilesetsDocument } from '../model/JsonDocument.ts';
 import { jsonEquals, type JsonValue } from '../model/json.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { Patch } from '../model/patches.ts';
+import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
 import type { Stamp } from '../stamps/stamp.ts';
 import { TilesetMode } from '../tiles/autotileShapes.ts';
 import type { CommentTagDefinition } from './blueprintFields.ts';
-import { blueprintStampOf } from './blueprintMaps.ts';
+import { blueprintStampOf, type BlueprintContent } from './blueprintMaps.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn, savedBlueprintOf } from './blueprints.ts';
 import { blueprintChangesIn, type BlueprintStepChange } from './blueprintSteps.ts';
 import { readableUses, spotsOnMap, type BlueprintSpot } from './blueprintUses.ts';
@@ -54,6 +55,18 @@ const ONE_BLUEPRINT_AT_A_TIME = 'Change one blueprint at a time.';
 const BLUEPRINTS_CONFLICTED = 'The blueprints are waiting for a choice about changes made elsewhere, so a blueprint can\'t change until then.';
 
 /**
+ * Why a blueprint's tab takes no change while it waits for a choice between its own changes, not yet written, and the
+ * version of the blueprint found on disk (see BlueprintMapFollower).
+ */
+const BLUEPRINT_MAP_CONFLICTED = 'This blueprint changed on disk while a change to it here was not yet written, so it can\'t change until you choose which to keep.';
+
+/**
+ * Why a blueprint's tab takes no change while it shows the blueprint otherwise than the blueprints keep it: its next edit
+ * would write the older blueprint back over the newer one.
+ */
+const BLUEPRINT_MAP_STALE = 'This blueprint changed since its tab showed it, so it can\'t change here; close its tab and open it again.';
+
+/**
  * Reads a tileset's mode from the window's tilesets: the autotile shapes read it.
  * @param {DocumentHub} hub The window's documents.
  * @param {number} tilesetId The tileset.
@@ -68,6 +81,37 @@ const modeOf = (hub: DocumentHub, tilesetId: number): number =>
 
   const tileset = (hub.document(TILESETS_KEY) as TilesetsDocument).tileset(tilesetId);
   return tileset === null ? TilesetMode.area : tileset.mode;
+};
+
+/**
+ * Lists events in id order, whatever order they came in.
+ * @param {readonly RmmzMapEvent[]} events The events.
+ * @returns {RmmzMapEvent[]} The same events, by id.
+ */
+const eventsById = (events: readonly RmmzMapEvent[]): RmmzMapEvent[] =>
+{
+  return [ ...events ].sort((left, right) => left.id - right.id);
+};
+
+/**
+ * Reports whether a blueprint's tab, just before an edit, showed its blueprint as the blueprints keep it: the same size
+ * and tileset, the same values on the layers it carries, and the same events, whatever order the stamp lists them in.
+ * @param {MapDocument} map The tab.
+ * @param {BlueprintContent} before What the tab showed just before the edit.
+ * @param {Stamp} stamp The blueprint's stamp as the blueprints keep it.
+ * @returns {boolean} True when it did.
+ */
+const showedBlueprint = (map: MapDocument, before: BlueprintContent, stamp: Stamp): boolean =>
+{
+  if (map.width !== stamp.width || map.height !== stamp.height || map.tilesetId !== stamp.tilesetId)
+  {
+    return false;
+  }
+
+  const tilesMatch = before.tiles === null || stamp.tiles === null
+    ? before.tiles === stamp.tiles
+    : jsonEquals(before.tiles.layers, stamp.tiles.layers) && jsonEquals(before.tiles.values, stamp.tiles.values);
+  return tilesMatch && jsonEquals(eventsById(before.events), eventsById(stamp.events));
 };
 
 /**
@@ -212,8 +256,11 @@ const reachFile = (
  * are, and noted for the where-used list.
  *
  * A change waits, refused with why, while what it would be planned against is not known yet: the plugins, the copies'
- * count, a map it reaches; and while the blueprints wait for a choice about changes made elsewhere. A window not holding
- * the blueprints refuses it; so does a step changing two blueprints at once. Every other edit passes untouched.
+ * count, a map it reaches; while the blueprints wait for a choice about changes made elsewhere; and while the blueprint's
+ * tab waits for a choice about a version of it found on disk (see BlueprintMapFollower). A window not holding the
+ * blueprints refuses it; so does a step changing two blueprints at once; and so does a tab that showed the blueprint
+ * otherwise than the blueprints keep it, since its edit would write the older blueprint back over the newer one. Every
+ * other edit passes untouched.
  * @param {PropagationContext} context The window's documents, its maps a change may reach, and the modules' tags.
  * @returns {CommitCheck} The check.
  */
@@ -244,22 +291,35 @@ const blueprintPropagationCheck = (context: PropagationContext): CommitCheck =>
       return ONE_BLUEPRINT_AT_A_TIME;
     }
 
+    // a tab waiting for a choice about a version of its blueprint found on disk takes nothing until the author chooses.
     const [ change ] = changes;
+    const tab = blueprintMapKey(change.blueprintId);
+    if (hub.isConflicted(tab))
+    {
+      return BLUEPRINT_MAP_CONFLICTED;
+    }
+
     const waiting = maps.readiness(change.blueprintId);
     if (waiting !== null)
     {
       return waiting;
     }
 
-    // the blueprints keep the blueprint as its map now stands, in the same step.
     const blueprint = blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), change.blueprintId);
     if (blueprint === null)
     {
       throw new Error(`the blueprints hold no blueprint ${change.blueprintId}, which a step changed`);
     }
 
+    // a tab showing the blueprint otherwise than the blueprints keep it would write the older one back over the newer.
     const { stamp } = blueprint;
-    const now = blueprintStampOf(hub.map(blueprintMapKey(change.blueprintId)), stamp, modeOf(hub, stamp.tilesetId));
+    if (showedBlueprint(hub.map(tab), change.before, stamp) === false)
+    {
+      return BLUEPRINT_MAP_STALE;
+    }
+
+    // the blueprints keep the blueprint as its map now stands, in the same step.
+    const now = blueprintStampOf(hub.map(tab), stamp, modeOf(hub, stamp.tilesetId));
     transaction.set(BLUEPRINTS_DOCUMENT, [ 'data', 'blueprints', change.blueprintId, 'stamp' ], savedBlueprintOf(blueprint.name, now)['stamp']);
     transaction.join([ blueprintHistoryKey(change.blueprintId) ]);
 
@@ -279,5 +339,13 @@ const blueprintPropagationCheck = (context: PropagationContext): CommitCheck =>
   };
 };
 
-export { BLUEPRINTS_CONFLICTED, BLUEPRINTS_NOT_HELD, blueprintPropagationCheck, modeOf, ONE_BLUEPRINT_AT_A_TIME };
+export {
+  BLUEPRINT_MAP_CONFLICTED,
+  BLUEPRINT_MAP_STALE,
+  BLUEPRINTS_CONFLICTED,
+  BLUEPRINTS_NOT_HELD,
+  blueprintPropagationCheck,
+  modeOf,
+  ONE_BLUEPRINT_AT_A_TIME,
+};
 export type { PropagationContext };

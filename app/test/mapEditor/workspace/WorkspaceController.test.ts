@@ -1194,6 +1194,55 @@ describe('WorkspaceController', () =>
         ]);
     });
 
+    it('closes every tab of a blueprint deleted on disk, lets go of it, and says so', async () =>
+    {
+      // Arrange: the camp open in two views, beside map 1.
+      const { controller, hub, mapId } = await withCamp();
+      const dock = buildDock([
+        { id: 'blueprint-k3x9q2mf', component: 'map', params: { mapId }, group: MAIN },
+        { id: 'blueprint-k3x9q2mf-2', component: 'map', params: { mapId }, group: TORN },
+        { id: 'map-1', component: 'map', params: { mapId: 1 }, group: MAIN },
+      ]);
+      controller.attach(dock.api);
+
+      // Act.
+      controller.closeBlueprintDeletedOnDisk('k3x9q2mf', 'Goblin camp');
+
+      // Assert.
+      expect([ dock.closed, hub.has('blueprint-map:k3x9q2mf'), hub.has('map:1'), controller.getState().notice?.text ])
+        .toStrictEqual([ [ 'blueprint-k3x9q2mf', 'blueprint-k3x9q2mf-2' ], false, true, '"Goblin camp" was deleted on disk, so its tab was closed.' ]);
+    });
+
+    it('says a blueprint deleted on disk whose name was never known is a blueprint', async () =>
+    {
+      // Arrange.
+      const { controller, mapId } = await withCamp();
+      const dock = buildDock([ { id: 'blueprint-k3x9q2mf', component: 'map', params: { mapId }, group: MAIN } ]);
+      controller.attach(dock.api);
+
+      // Act.
+      controller.closeBlueprintDeletedOnDisk('k3x9q2mf', '');
+
+      // Assert.
+      expect(controller.getState().notice?.text)
+        .toBe('A blueprint was deleted on disk, so its tab was closed.');
+    });
+
+    it('lets go of a blueprint deleted on disk with no tab open quietly, closing nothing', async () =>
+    {
+      // Arrange: the camp held, its tab closed.
+      const { controller, hub } = await withCamp();
+      const dock = buildDock([ { id: 'map-1', component: 'map', params: { mapId: 1 }, group: MAIN } ]);
+      controller.attach(dock.api);
+
+      // Act.
+      controller.closeBlueprintDeletedOnDisk('k3x9q2mf', 'Goblin camp');
+
+      // Assert.
+      expect([ dock.closed, hub.has('blueprint-map:k3x9q2mf'), controller.getState().notice ])
+        .toStrictEqual([ [], false, null ]);
+    });
+
     it('says why a blueprint whose id no map id can spell does not open, opening nothing', async () =>
     {
       // Arrange: an id one character too long, as only a hand-edited blueprints file holds.

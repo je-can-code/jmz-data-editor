@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { holdBlueprintMap } from '../../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
-import { BLUEPRINTS_NOT_HELD, ONE_BLUEPRINT_AT_A_TIME } from '../../../../src/mapEditor/core/blueprints/blueprintPropagation.ts';
+import {
+  BLUEPRINT_MAP_CONFLICTED,
+  BLUEPRINT_MAP_STALE,
+  BLUEPRINTS_NOT_HELD,
+  ONE_BLUEPRINT_AT_A_TIME,
+} from '../../../../src/mapEditor/core/blueprints/blueprintPropagation.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn, savedBlueprintOf } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { CopyMaps } from '../../../../src/mapEditor/core/blueprints/copyMaps.ts';
 import { blueprintHistoryKey, eventHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
@@ -417,6 +422,55 @@ describe('blueprintPropagationCheck', () =>
       // Assert.
       expect([ step, refusals ])
         .toStrictEqual([ null, [ ONE_BLUEPRINT_AT_A_TIME ] ]);
+    });
+
+    it('refuses a change in a tab waiting for a choice about a version of its blueprint found on disk', async () =>
+    {
+      // Arrange: the tab flagged against a version of the camp found on disk.
+      const window = await propagationWindow();
+      window.hub.flagConflict(window.blueprintKey, { kind: 'disk', content: window.hub.committedContent(window.blueprintKey) });
+      const refusals: string[] = [];
+      window.hub.subscribe(event => (event.type === 'refused' ? refusals.push(event.message) : undefined));
+
+      // Act.
+      const step = paintBlueprint(window, [ [ 0, 0, a5(9) ] ]);
+
+      // Assert.
+      expect([ step, refusals, groundOf(mapIn(window, 1), 1, 1) ])
+        .toStrictEqual([ null, [ BLUEPRINT_MAP_CONFLICTED ], a5(1) ]);
+    });
+
+    it('refuses a change in a tab showing its blueprint otherwise than the blueprints keep it, which would put the older one back', async () =>
+    {
+      // Arrange: the blueprints' camp changed under its tab, which nothing here laid out afresh.
+      const window = await propagationWindow();
+      const newer = { ...campStamp(), tiles: { layers: [ 0 ], values: [ a5(1), a5(20), a5(3), a5(4) ], calledFor: [ -1, -1, -1, -1 ] } };
+      window.hub.edit('Change elsewhere', [ blueprintHistoryKey(BLUEPRINT) ], tx => tx.set(BLUEPRINTS_DOCUMENT, [ 'data', 'blueprints', BLUEPRINT, 'stamp' ], savedBlueprintOf('Camp', newer)['stamp']));
+      const refusals: string[] = [];
+      window.hub.subscribe(event => (event.type === 'refused' ? refusals.push(event.message) : undefined));
+
+      // Act.
+      const step = paintBlueprint(window, [ [ 0, 0, a5(9) ] ]);
+
+      // Assert: the blueprints keep the newer camp.
+      expect([ step, refusals, blueprintIn(window.hub.document(BLUEPRINTS_DOCUMENT), BLUEPRINT)?.stamp.tiles?.values ])
+        .toStrictEqual([ null, [ BLUEPRINT_MAP_STALE ], [ a5(1), a5(20), a5(3), a5(4) ] ]);
+    });
+
+    it('lets a change through in a tab showing its blueprint as the blueprints keep it, whatever order the blueprint lists its events in', async () =>
+    {
+      // Arrange: the camp's events kept in the other order, as a file written by hand may keep them.
+      const window = await propagationWindow();
+      const stamp = campStamp();
+      const reordered = { ...stamp, events: [ ...stamp.events ].reverse() };
+      window.hub.edit('Reorder elsewhere', [ blueprintHistoryKey(BLUEPRINT) ], tx => tx.set(BLUEPRINTS_DOCUMENT, [ 'data', 'blueprints', BLUEPRINT, 'stamp' ], savedBlueprintOf('Camp', reordered)['stamp']));
+
+      // Act.
+      const step = paintBlueprint(window, [ [ 0, 0, a5(9) ] ]);
+
+      // Assert.
+      expect([ step?.label, groundOf(mapIn(window, 1), 1, 1) ])
+        .toStrictEqual([ 'Paint', a5(9) ]);
     });
 
     it('lets an edit to anything but a blueprint through untouched', async () =>

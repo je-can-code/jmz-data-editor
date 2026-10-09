@@ -312,6 +312,31 @@ describe('MapPanel', () =>
         .toStrictEqual([ [ true, true ], 1, 'Goblin camp *', true ]);
     });
 
+    it('says when the blueprint waits for a choice about a version of it found on disk, or about the blueprints, and not otherwise', async () =>
+    {
+      // Arrange: the camp open in the panel.
+      const { controller, hub } = buildBlueprintWorkspace();
+      const { api } = buildPanel();
+      render(panelFor(controller, api, { mapId: blueprintMapId('k3x9q2mf') }));
+      await screen.findByTestId('map-view');
+      const before = screen.queryByTestId('blueprint-waiting');
+
+      // Act: the blueprints wait for a choice, then the tab itself does too.
+      act(() =>
+      {
+        hub.flagConflict(BLUEPRINTS_DOCUMENT, { kind: 'disk', content: null });
+      });
+      const blueprintsWait = screen.getByTestId('blueprint-waiting').textContent;
+      act(() =>
+      {
+        hub.flagConflict('blueprint-map:k3x9q2mf', { kind: 'disk', content: null });
+      });
+
+      // Assert.
+      expect([ before, blueprintsWait, screen.getByTestId('blueprint-waiting').textContent ])
+        .toStrictEqual([ null, 'Blueprints changed elsewhere: choose below', 'Changed on disk: choose below which to keep' ]);
+    });
+
     it('says the blueprint was deleted, and shows it again once an undo in its history brings it back', async () =>
     {
       // Arrange: the camp open in the panel.

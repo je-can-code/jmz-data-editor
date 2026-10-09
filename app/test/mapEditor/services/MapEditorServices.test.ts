@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WindowShell } from '../../../src/core/infrastructure/shell/WindowShell.ts';
+import { blueprintMapContent } from '../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
 import { BLUEPRINTS_DOCUMENT } from '../../../src/mapEditor/core/blueprints/blueprints.ts';
 import type { CloseTarget } from '../../../src/mapEditor/core/closeGuard.ts';
 import { BUILT_IN_ENTRIES } from '../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
-import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintHistoryKey, mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import { blueprintMapId } from '../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
@@ -714,6 +715,167 @@ describe('MapEditorServices', () =>
       const order = requests.map(request => request.url).filter(url => url.endsWith('/api/blueprint-changes') || url.endsWith('/api/maps/1'));
       expect(order)
         .toStrictEqual([ 'http://api/api/blueprint-changes', 'http://api/api/maps/1' ]);
+      services.stop();
+    });
+
+    /**
+     * The blueprints a version of their file found on disk holds: the camp's goblin renamed Orc there.
+     * @returns {JsonValue} The blueprints document, in its stored form.
+     */
+    const orcOnDisk = (): JsonValue => storedBlueprints({
+      k3x9q2mf: { name: 'Camp', stamp: stampOf({ width: 2, events: [ { ...createMapEvent(4, 1, 0), name: 'Orc' } ] }) },
+    }) as JsonValue;
+
+    /**
+     * Reads the camp's one event as its tab shows it: its name and column.
+     * @param {MapEditorServices} services The window.
+     * @returns {[ string, number ] | null} The name and column, or null when it shows none.
+     */
+    const goblinInTab = (services: MapEditorServices): [ string, number ] | null =>
+    {
+      const event = services.hub.document('blueprint-map:k3x9q2mf').valueAt([ 'events', 4 ]) as unknown as RmmzMapEvent | null;
+      return event === null ? null : [ event.name, event.x ];
+    };
+
+    it('lays its tab out afresh from a version of the blueprints found on disk, and writes the next edit on top of it', async () =>
+    {
+      // Arrange: the camp open, then its file changed on disk, the goblin renamed there.
+      const network = new MemoryChannelNetwork();
+      const editorData: Record<string, JsonValue> = { blueprints: blueprintsOnDisk() };
+      const { environment, requests, sources } = buildEnvironment(network, 'window-a', 'http://api', editorData);
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, services, 'k3x9q2mf');
+      editorData['blueprints'] = orcOnDisk();
+
+      // Act: the change reaches the window, then the event is moved in the tab.
+      sources[0].emitChange({ path: 'jmz-editor/blueprints.json', kind: 'write', client: '' });
+      await pump(network, vi.waitFor(() =>
+      {
+        expect(goblinInTab(services))
+          .toStrictEqual([ 'Orc', 1 ]);
+      }, { timeout: 2000 }));
+      services.hub.edit('Move event', [ mapHistoryKey(blueprintMapId('k3x9q2mf')) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+      await services.blueprintWriter?.whenWritten();
+
+      // Assert: one act, writing the orc moved, so the name found on disk stayed.
+      const acts = requests.filter(request => request.url.endsWith('/api/blueprint-changes')).map(request => JSON.parse(request.body as string) as { blueprints: { data: { blueprints: Record<string, { stamp: { events: RmmzMapEvent[] } }> } } });
+      expect(acts.map(act => act.blueprints.data.blueprints['k3x9q2mf'].stamp.events.map(event => [ event.name, event.x ])))
+        .toStrictEqual([ [ [ 'Orc', 0 ] ] ]);
+      services.stop();
+    });
+
+    /**
+     * A window with the camp open and its goblin moved in the tab, the move not yet written, when the blueprints' file
+     * changes on disk, the goblin renamed Orc there: the window waits for the author's choice about the blueprints.
+     * @returns {Promise<object>} The window, what it asked of the server, and what its tab and writer showed while waiting.
+     */
+    const movedWhenDiskChanged = async () =>
+    {
+      const network = new MemoryChannelNetwork();
+      const editorData: Record<string, JsonValue> = { blueprints: blueprintsOnDisk() };
+      const { environment, requests, sources } = buildEnvironment(network, 'window-a', 'http://api', editorData);
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, services, 'k3x9q2mf');
+      services.hub.edit('Move event', [ mapHistoryKey(blueprintMapId('k3x9q2mf')) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+      editorData['blueprints'] = orcOnDisk();
+      sources[0].emitChange({ path: 'jmz-editor/blueprints.json', kind: 'write', client: '' });
+      await pump(network, vi.waitFor(() =>
+      {
+        expect(services.hub.isConflicted(BLUEPRINTS_DOCUMENT))
+          .toBe(true);
+      }, { timeout: 2000 }));
+      const acts = () => requests.filter(request => request.url.endsWith('/api/blueprint-changes'))
+        .map(request => (JSON.parse(request.body as string) as { blueprints: { data: { blueprints: Record<string, { stamp: { events: RmmzMapEvent[] } }> } } }).blueprints.data.blueprints['k3x9q2mf'].stamp.events.map(event => [ event.name, event.x ]));
+      const waiting = [ goblinInTab(services), services.blueprintWriter?.hasUnwritten(), acts() ];
+      return { services, acts, waiting };
+    };
+
+    it('takes back a change in its tab not yet written when the blueprints change on disk, and writes it once the author keeps theirs', async () =>
+    {
+      // Arrange: the move waiting for the author's choice.
+      const { services, acts, waiting } = await movedWhenDiskChanged();
+
+      // Act: the author keeps their own version.
+      services.resolveConflict(BLUEPRINTS_DOCUMENT, 'mine');
+      await services.blueprintWriter?.whenWritten();
+
+      // Assert: nothing was written while it waited; kept, the move came back and was written.
+      expect([ waiting, goblinInTab(services), acts() ])
+        .toStrictEqual([ [ [ 'Goblin', 1 ], true, [] ], [ 'Goblin', 0 ], [ [ [ 'Goblin', 0 ] ] ] ]);
+      services.stop();
+    });
+
+    it('drops a change in its tab not yet written once the author takes the version of the blueprints on disk, the tab following it', async () =>
+    {
+      // Arrange: the move waiting for the author's choice.
+      const { services, acts, waiting } = await movedWhenDiskChanged();
+
+      // Act: the author takes the version on disk.
+      services.resolveConflict(BLUEPRINTS_DOCUMENT, 'theirs');
+      await services.blueprintWriter?.whenWritten();
+
+      // Assert.
+      expect([ waiting, goblinInTab(services), services.blueprintWriter?.hasUnwritten(), acts() ])
+        .toStrictEqual([ [ [ 'Goblin', 1 ], true, [] ], [ 'Orc', 1 ], false, [] ]);
+      services.stop();
+    });
+
+    it('settles its tab\'s wait for a choice by keeping the tab as it is, the blueprints then holding it', async () =>
+    {
+      // Arrange: the camp's tab waiting for a choice about a version of it found on disk.
+      const network = new MemoryChannelNetwork();
+      const services = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      services.hub.flagConflict('blueprint-map:k3x9q2mf', { kind: 'disk', content: blueprintMapContent(stampOf({ width: 2, events: [ { ...createMapEvent(4, 1, 0), name: 'Orc' } ] })) as unknown as JsonValue });
+
+      // Act.
+      const settled = services.resolveConflict('blueprint-map:k3x9q2mf', 'mine');
+
+      // Assert: the tab keeps its goblin, and waits no longer.
+      expect([ settled, goblinInTab(services), services.hub.isConflicted('blueprint-map:k3x9q2mf') ])
+        .toStrictEqual([ true, [ 'Goblin', 1 ], false ]);
+      services.stop();
+    });
+
+    it('settles its tab\'s wait for a choice by laying it out from the version on disk the author takes', async () =>
+    {
+      // Arrange: the camp's tab waiting for a choice about a version of it found on disk.
+      const network = new MemoryChannelNetwork();
+      const services = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      services.hub.flagConflict('blueprint-map:k3x9q2mf', { kind: 'disk', content: blueprintMapContent(stampOf({ width: 2, events: [ { ...createMapEvent(4, 1, 0), name: 'Orc' } ] })) as unknown as JsonValue });
+
+      // Act.
+      const settled = services.resolveConflict('blueprint-map:k3x9q2mf', 'theirs');
+
+      // Assert.
+      expect([ settled, goblinInTab(services), services.hub.isConflicted('blueprint-map:k3x9q2mf') ])
+        .toStrictEqual([ true, [ 'Orc', 1 ], false ]);
+      services.stop();
+    });
+
+    it('leaves its tab waiting when the author keeps a version of a blueprint the blueprints no longer hold', async () =>
+    {
+      // Arrange: the camp's tab waiting for a choice, the camp since taken out of the blueprints.
+      const network = new MemoryChannelNetwork();
+      const services = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      services.hub.flagConflict('blueprint-map:k3x9q2mf', { kind: 'disk', content: null });
+      services.hub.edit('Delete', [ blueprintHistoryKey('k3x9q2mf') ], tx => tx.set(BLUEPRINTS_DOCUMENT, [ 'data', 'blueprints', 'k3x9q2mf' ], undefined));
+
+      // Act.
+      const settled = services.resolveConflict('blueprint-map:k3x9q2mf', 'mine');
+
+      // Assert.
+      expect([ settled, services.hub.isConflicted('blueprint-map:k3x9q2mf') ])
+        .toStrictEqual([ false, true ]);
       services.stop();
     });
 

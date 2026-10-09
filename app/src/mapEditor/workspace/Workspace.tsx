@@ -175,6 +175,9 @@ const Workspace = () =>
   // closing asks first while placements of blueprints have not reached the disk, as it does for unsaved edits.
   useEffect(() => controller.guardClose(window), [ controller ]);
 
+  // a blueprint deleted on disk closes its tabs, with a note.
+  useEffect(() => controller.services.blueprintMaps.onDeletedOnDisk((blueprintId, name) => controller.closeBlueprintDeletedOnDisk(blueprintId, name)), [ controller ]);
+
   // a layout still waiting to be written is written as the page goes.
   useEffect(() =>
   {

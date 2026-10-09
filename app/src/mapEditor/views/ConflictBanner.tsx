@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Button, Stack } from '@mui/material';
+import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../core/blueprints/blueprints.ts';
 import type { DocumentConflict, DocumentHub } from '../core/history/DocumentHub.ts';
-import type { DocumentKey } from '../core/model/documentKeys.ts';
+import { parseDocumentKey, type DocumentKey } from '../core/model/documentKeys.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
-import { describeConflict } from './documentLabels.ts';
+import { describeConflict, documentLabel } from './documentLabels.ts';
 
 /**
  * One conflicted document and its conflict.
@@ -23,6 +24,33 @@ const listConflicts = (hub: DocumentHub): ConflictRow[] =>
   return hub.documentKeys()
     .map(document => ({ document, conflict: hub.conflict(document) }))
     .filter((row): row is ConflictRow => row.conflict !== null);
+};
+
+/**
+ * Names a conflicted document for the author: a blueprint opened as a map by the blueprint's own name, quoted, while the
+ * blueprints still hold it in a form that can be read; anything else by its label.
+ * @param {DocumentHub} hub The window's documents.
+ * @param {DocumentKey} key The document.
+ * @returns {string} The name.
+ */
+const conflictName = (hub: DocumentHub, key: DocumentKey): string =>
+{
+  const parsed = parseDocumentKey(key);
+  if (parsed.kind !== 'blueprint-map' || hub.has(BLUEPRINTS_DOCUMENT) === false)
+  {
+    return documentLabel(key);
+  }
+
+  // a hand-edited file can hold something there no blueprint can be read from, which is named by its label instead.
+  try
+  {
+    const blueprint = blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), parsed.blueprintId);
+    return blueprint === null ? documentLabel(key) : `"${blueprint.name}"`;
+  }
+  catch
+  {
+    return documentLabel(key);
+  }
 };
 
 /**
@@ -47,7 +75,7 @@ const ConflictBanner = () =>
     <Stack spacing={1} sx={{ position: 'fixed', left: 16, right: 16, bottom: 16, zIndex: 'snackbar' }}>
       {conflicts.map(({ document, conflict }) =>
       {
-        const wording = describeConflict(document, conflict);
+        const wording = describeConflict(document, conflict, conflictName(hub, document));
         return (
           <Alert
             key={document}

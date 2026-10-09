@@ -3,6 +3,8 @@ import { Box, Button, Chip, CircularProgress, Divider, IconButton, Stack, Toolti
 import Palette from '@mui/icons-material/Palette';
 import PaletteOutlined from '@mui/icons-material/PaletteOutlined';
 import type { IDockviewPanelProps } from 'dockview-react';
+import { BLUEPRINTS_DOCUMENT } from '../../core/blueprints/blueprints.ts';
+import type { DocumentHub } from '../../core/history/DocumentHub.ts';
 import { isBlueprintMapId, mapDocumentKey, TILESETS_KEY } from '../../core/model/documentKeys.ts';
 import type { RmmzTileset } from '../../core/model/rmmzTypes.ts';
 import type { WindowPaint } from '../../core/tools/WindowPaint.ts';
@@ -35,8 +37,34 @@ type PaletteToggle = {
 };
 
 /**
+ * Says what a blueprint's tab waits for, when it waits: the author's choice between its own changes and a version of the
+ * blueprint found on disk, or their choice about the blueprints themselves, changed elsewhere while a change to one was
+ * being written. Nothing of the blueprint is written meanwhile, and the choice is offered at the foot of the window.
+ * @param {Pick<DocumentHub, 'isConflicted'>} hub The window's documents.
+ * @param {number} mapId The map, or the id a blueprint opened as a map takes.
+ * @returns {string | null} The words, or null for a map, or a blueprint waiting for nothing.
+ */
+const blueprintWaitWords = (hub: Pick<DocumentHub, 'isConflicted'>, mapId: number): string | null =>
+{
+  if (isBlueprintMapId(mapId) === false)
+  {
+    return null;
+  }
+
+  if (hub.isConflicted(mapDocumentKey(mapId)))
+  {
+    return 'Changed on disk: choose below which to keep';
+  }
+
+  return hub.isConflicted(BLUEPRINTS_DOCUMENT)
+    ? 'Blueprints changed elsewhere: choose below'
+    : null;
+};
+
+/**
  * The strip across the top of a map panel: the map's name and size, its tileset, and what is going on with it, and, in
- * a torn-out window, the toggle for the map's own palette. A blueprint opened as a map says it is one.
+ * a torn-out window, the toggle for the map's own palette. A blueprint opened as a map says it is one, and what it waits
+ * for when it waits for the author's choice (see {@link blueprintWaitWords}).
  * @param {{ mapId: number, held: HeldMap, focusEventId: number | null, palette: PaletteToggle | null }} props The map,
  * what is known about it, the event picked out, and the palette's toggle, or null in the main window.
  * @returns {React.JSX.Element} The strip.
@@ -46,6 +74,7 @@ const MapStatus = (props: { mapId: number; held: HeldMap; focusEventId: number |
   const { mapId, held, focusEventId, palette } = props;
   const { hub } = useWorkspace().services;
   const { name, map, dirty } = held;
+  const waiting = blueprintWaitWords(hub, mapId);
   const tileset = map !== null && hub.has(TILESETS_KEY)
     ? (hub.document(TILESETS_KEY).valueAt([ map.tilesetId ]) as RmmzTileset | null | undefined) ?? null
     : null;
@@ -71,6 +100,7 @@ const MapStatus = (props: { mapId: number; held: HeldMap; focusEventId: number |
         {size}
       </Typography>
       {dirty && <Chip size={'small'} label={'Unsaved'} color={'warning'} variant={'outlined'}/>}
+      {waiting !== null && <Chip size={'small'} label={waiting} color={'warning'} data-testid={'blueprint-waiting'}/>}
       {focusEventId !== null && <Chip size={'small'} label={`Event ${focusEventId} picked`} color={'secondary'} variant={'outlined'}/>}
     </Stack>
   );
