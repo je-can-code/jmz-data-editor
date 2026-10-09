@@ -347,6 +347,7 @@ func TestMergeBlueprintUsesNeverWritesOverWhatItCannotRead(t *testing.T) {
 		fragment string
 	}{
 		{name: "not JSON", file: `{"schemaVersion":2,`, body: `{"schemaVersion":2,"maps":{"7":null}}`, fragment: "is not JSON"},
+		{name: "an empty file", file: ``, body: `{"schemaVersion":2,"maps":{"7":{"aa22":[{"x":0,"y":0}]}}}`, fragment: "is not JSON"},
 		{name: "a list", file: `[]`, body: `{"schemaVersion":2,"maps":{"7":null}}`, fragment: "is not a record of placements"},
 		{name: "no version", file: `{"data":{"maps":{}}}`, body: `{"schemaVersion":2,"maps":{"7":null}}`, fragment: "is not a record of placements"},
 		{name: "maps as a list", file: `{"schemaVersion":2,"data":{"maps":[]}}`, body: `{"schemaVersion":2,"maps":{"7":null}}`, fragment: "is not a record of placements"},
