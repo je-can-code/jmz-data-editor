@@ -3,6 +3,8 @@ import { pageWindowShell, type WindowShell } from '../../core/infrastructure/she
 import { apiDocumentStore } from '../core/api/apiDocumentStore.ts';
 import { HttpMapEditorApi, type MapEditorApi } from '../core/api/MapEditorApi.ts';
 import { BlueprintCopyCounter } from '../core/blueprints/blueprintCopies.ts';
+import { holdBlueprintMap } from '../core/blueprints/blueprintMaps.ts';
+import { BLUEPRINTS_DOCUMENT } from '../core/blueprints/blueprints.ts';
 import { installCloseGuard, unsavedOnlyHere, type CloseTarget } from '../core/closeGuard.ts';
 import { registerBuiltInCommands } from '../core/commands/builtin/builtInCommands.ts';
 import { CommandCatalog } from '../core/commands/CommandCatalog.ts';
@@ -10,7 +12,7 @@ import { CommandEditorRegistry } from '../core/commands/CommandEditorRegistry.ts
 import type { PluginHeaderStore } from '../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { DocumentHub } from '../core/history/DocumentHub.ts';
 import type { LocationPicks } from '../core/locations/LocationPicks.ts';
-import { projectPathForDocument, SYSTEM_KEY, type DocumentKey } from '../core/model/documentKeys.ts';
+import { parseDocumentKey, projectPathForDocument, SYSTEM_KEY, type DocumentKey } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
 import { WindowPageRule } from '../core/pageRule/WindowPageRule.ts';
@@ -150,7 +152,9 @@ type MapEditorServices = {
    * Holds a document: the live copy from another window when one holds it, the file otherwise. It first gives
    * the other windows time to answer this window's hello, so a window that has just opened never mistakes
    * "nobody answered yet" for "nobody holds it" and loads a file that is missing another window's edits; a window
-   * holding the document that answers ends that wait at once, so its copy is asked for straight away.
+   * holding the document that answers ends that wait at once, so its copy is asked for straight away. A blueprint
+   * opened as a map has no file: with no other window holding it, it is laid out afresh from the blueprints, which are
+   * held first.
    * @param {DocumentKey} key The document.
    * @returns {Promise<EditorDocument>} The document.
    */
@@ -357,6 +361,49 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   };
 
   /**
+   * Holds a document (see {@link MapEditorServices.openDocument}).
+   * @param {DocumentKey} key The document.
+   * @returns {Promise<EditorDocument>} The document.
+   */
+  const openDocument = async (key: DocumentKey): Promise<EditorDocument> =>
+  {
+    if (hub.has(key) === false)
+    {
+      // another window's copy may hold unsaved edits the file lacks, so its answer is waited for first; once a window
+      // holding the document has answered, there is nobody else worth waiting for.
+      await sync.whenHeldOrDiscovered(key);
+    }
+
+    if (hub.has(key))
+    {
+      return hub.document(key);
+    }
+
+    const snapshot = sync.holders(key).length > 0
+      ? await sync.requestSnapshot(key)
+      : null;
+    if (hub.has(key))
+    {
+      return hub.document(key);
+    }
+
+    if (snapshot !== null)
+    {
+      return hub.adoptSnapshot(snapshot);
+    }
+
+    // a blueprint opened as a map has no file of its own: nobody else holding it, it is laid out from the blueprints.
+    const parsed = parseDocumentKey(key);
+    if (parsed.kind === 'blueprint-map')
+    {
+      await openDocument(BLUEPRINTS_DOCUMENT);
+      return holdBlueprintMap(hub, parsed.blueprintId);
+    }
+
+    return hub.load(key);
+  };
+
+  /**
    * Brings the clock and the preview back as this project last left them on this machine, and keeps them in step with
    * every other window from then on, once the server says which project it serves. Without a server, a project, or a
    * place to remember them, they are this window's alone.
@@ -407,32 +454,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     pages,
     preview,
     loadCommandResources: commandEditing.load,
-    openDocument: async (key: DocumentKey) =>
-    {
-      if (hub.has(key) === false)
-      {
-        // another window's copy may hold unsaved edits the file lacks, so its answer is waited for first; once a window
-        // holding the document has answered, there is nobody else worth waiting for.
-        await sync.whenHeldOrDiscovered(key);
-      }
-
-      if (hub.has(key))
-      {
-        return hub.document(key);
-      }
-
-      const snapshot = sync.holders(key).length > 0
-        ? await sync.requestSnapshot(key)
-        : null;
-      if (hub.has(key))
-      {
-        return hub.document(key);
-      }
-
-      return snapshot === null
-        ? hub.load(key)
-        : hub.adoptSnapshot(snapshot);
-    },
+    openDocument,
     resolveConflict: (key: DocumentKey, choice: 'mine' | 'theirs') =>
     {
       const conflict = hub.conflict(key);

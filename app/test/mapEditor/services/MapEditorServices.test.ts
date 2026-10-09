@@ -1,15 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WindowShell } from '../../../src/core/infrastructure/shell/WindowShell.ts';
+import { BLUEPRINTS_DOCUMENT } from '../../../src/mapEditor/core/blueprints/blueprints.ts';
 import type { CloseTarget } from '../../../src/mapEditor/core/closeGuard.ts';
 import { BUILT_IN_ENTRIES } from '../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintMapId } from '../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
+import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
+import type { RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import type { ViewStore } from '../../../src/mapEditor/core/preview/RememberedView.ts';
 import { renameEntry } from '../../../src/mapEditor/core/system/systemNames.ts';
 import { createMapEditorServices, type MapEditorEnvironment } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { projectNamesOf } from '../../../src/mapEditor/views/commandList/commandListResources.ts';
+import { storedBlueprints } from '../support/blueprintFixtures.ts';
 import { buildMapJson } from '../support/fixtures.ts';
+import { stampOf } from '../support/stampFixtures.ts';
 import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../support/standIns.ts';
 
 /*
@@ -63,9 +69,16 @@ describe('MapEditorServices', () =>
    * @param {MemoryChannelNetwork} network The channel network.
    * @param {string} clientId The window's id.
    * @param {string | null} apiBase The server, or null for none.
+   * @param {Readonly<Record<string, JsonValue>>} editorData The editor-only documents the server holds, by name, in their
+   * stored form; every other read answers the map file.
    * @returns {object} The environment and the stand-ins behind it.
    */
-  const buildEnvironment = (network: MemoryChannelNetwork, clientId: string, apiBase: string | null = 'http://api') =>
+  const buildEnvironment = (
+    network: MemoryChannelNetwork,
+    clientId: string,
+    apiBase: string | null = 'http://api',
+    editorData: Readonly<Record<string, JsonValue>> = {},
+  ) =>
   {
     const sources: FakeEventSource[] = [];
     let files = buildMapJson();
@@ -77,7 +90,10 @@ describe('MapEditorServices', () =>
         return new Response(null, { status: 204 });
       }
 
-      return envelope(files);
+      const name = /\/api\/editor-data\/([a-z0-9-]+)$/u.exec(request.url)?.[1];
+      return name !== undefined && Object.hasOwn(editorData, name)
+        ? envelope(editorData[name])
+        : envelope(files);
     });
     const window = buildWindowTarget();
     const environment: MapEditorEnvironment = {
@@ -549,6 +565,79 @@ describe('MapEditorServices', () =>
     expect([ document.toJson(), again === document ])
       .toStrictEqual([ buildMapJson(), true ]);
     services.stop();
+  });
+
+  describe('opening a blueprint as a map', () =>
+  {
+    /**
+     * The blueprints the server holds: the camp, two cells wide, with a goblin standing in it.
+     * @returns {JsonValue} The blueprints document, in its stored form.
+     */
+    const blueprintsOnDisk = (): JsonValue => storedBlueprints({
+      k3x9q2mf: { name: 'Camp', stamp: stampOf({ width: 2, events: [ { ...createMapEvent(4, 1, 0), name: 'Goblin' } ] }) },
+    }) as JsonValue;
+
+    it('lays it out from the blueprints, held first, when no other window holds it, and never asks for a file of it', async () =>
+    {
+      // Arrange.
+      const network = new MemoryChannelNetwork();
+      const { environment, requests } = buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() });
+      const services = createMapEditorServices(environment);
+      services.start();
+
+      // Act.
+      const document = await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+
+      // Assert.
+      const goblin = document.valueAt([ 'events', 4 ]) as unknown as RmmzMapEvent | null;
+      expect([
+        goblin === null ? null : [ goblin.name, goblin.x, goblin.y ],
+        services.hub.has(BLUEPRINTS_DOCUMENT),
+        services.hub.isDirty('blueprint-map:k3x9q2mf'),
+        requests.filter(request => request.url.includes('/api/maps/')).length,
+      ])
+        .toStrictEqual([ [ 'Goblin', 1, 0 ], true, false, 0 ]);
+      services.stop();
+    });
+
+    it('takes the live copy from the window holding it, changes and all, rather than laying it out afresh', async () =>
+    {
+      // Arrange: the first window holds the camp with the goblin moved, unsaved.
+      const network = new MemoryChannelNetwork();
+      const first = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      first.start();
+      await pump(network, first.openDocument('blueprint-map:k3x9q2mf'));
+      first.hub.edit('Move event', [ mapHistoryKey(blueprintMapId('k3x9q2mf')) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+      network.flush();
+      const second = createMapEditorServices(buildEnvironment(network, 'window-b', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      second.start();
+
+      // Act.
+      const document = await pump(network, second.openDocument('blueprint-map:k3x9q2mf'));
+
+      // Assert.
+      const goblin = document.valueAt([ 'events', 4 ]) as unknown as RmmzMapEvent | null;
+      expect([ goblin === null ? null : goblin.x, second.hub.isDirty('blueprint-map:k3x9q2mf') ])
+        .toStrictEqual([ 0, true ]);
+      first.stop();
+      second.stop();
+    });
+
+    it('refuses a blueprint the blueprints no longer hold, in words for the author', async () =>
+    {
+      // Arrange.
+      const network = new MemoryChannelNetwork();
+      const services = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      services.start();
+
+      // Act.
+      const opening = pump(network, services.openDocument('blueprint-map:aaaa'));
+
+      // Assert.
+      await expect(opening)
+        .rejects.toThrow('That blueprint is no longer there.');
+      services.stop();
+    });
   });
 
   it('gives a window that opened a moment ago the live copy, not the stale file, before anyone has answered it', async () =>

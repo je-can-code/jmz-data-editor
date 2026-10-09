@@ -239,5 +239,5 @@ const saveBlueprints = (hub: DocumentHub): Promise<EditorDataSaveOutcome> =>
   return saveEditorDocument(hub, BLUEPRINTS_DOCUMENT, 'blueprints');
 };
 
-export { copiesKeepIt, deleteBlueprint, renameBlueprint, saveBlueprint, saveBlueprints };
+export { BLUEPRINT_GONE, copiesKeepIt, deleteBlueprint, renameBlueprint, saveBlueprint, saveBlueprints };
 export type { BlueprintOutcome };
