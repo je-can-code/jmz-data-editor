@@ -2,6 +2,7 @@ import { rewireGroupReferences } from '../events/eventReferences.ts';
 import { cloneJson, jsonEquals, type JsonValue } from '../model/json.ts';
 import type { RmmzEventCommand, RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
 import {
+  lineFieldName,
   listLessTags,
   ownNoteOf,
   PAGE_FIELDS,
@@ -71,7 +72,7 @@ type PageTrio = {
 
 /**
  * What a copy's page comes to: the page, and what the link keeps now of each number field the change moved or took away,
- * by its name on the page (speed, or light1.radius), null for nothing.
+ * by its name on the page (speed, light1.radius, or moveSpeed), null for nothing.
  */
 type PagePlan = {
   readonly page: RmmzEventPage;
@@ -255,7 +256,7 @@ const plannedOwnFields = (pages: PageTrio, held: HeldLinks, links: Map<string, F
 };
 
 /**
- * Finds the line on a page a module's tag line pairs with: the same tag, under the same key.
+ * Finds the line on a page a tag line pairs with: the same tag, under the same key.
  * @param {readonly PageTagLine[]} lines The page's tag lines.
  * @param {PageTagLine} line The line to pair.
  * @returns {PageTagLine | null} Its pair, or null when the page has none.
@@ -267,8 +268,8 @@ const pairOf = (lines: readonly PageTagLine[], line: PageTagLine): PageTagLine |
 
 /**
  * Builds the command list a copy takes when it follows its blueprint's new one: the blueprint's list as it now stands,
- * but for each module tag line the copy has a pair of, which keeps the copy's own text, since its fields are fields of
- * their own, each followed one by one after.
+ * but for each tag line the copy has a pair of, which keeps the copy's own text, since its fields are fields of their
+ * own, each followed one by one after.
  * @param {PageTrio} pages The blueprint's page after the change, and the copy's.
  * @param {readonly PageTagLine[]} afterLines The tag lines on the blueprint's page after the change.
  * @param {readonly PageTagLine[]} copyLines The tag lines on the copy's page.
@@ -309,8 +310,8 @@ const writtenField = (line: PageTagLine, text: string, field: string, value: Jso
 };
 
 /**
- * Plans the fields of one module tag line the change moved, writing each the copy no longer holds into the copy's line in
- * place, and noting the link of each number.
+ * Plans the fields of one tag line the change moved, writing each the copy no longer holds into the copy's line in place,
+ * and noting the link of each number.
  * @param {{ before: PageTagLine, after: PageTagLine, copy: PageTagLine }} lines The line on the blueprint's page before
  * the change and after it, and its pair on the copy's page as it now stands.
  * @param {string} text The copy's line as it now stands.
@@ -335,7 +336,7 @@ const plannedTagLine = (
       return written;
     }
 
-    const name = `${lines.before.key}.${field.name}`;
+    const name = lineFieldName(lines.before.key, field.name);
     const planned = plannedField(now.kind, { before: field.value, after: now.value, copy: copy.value }, held(name));
     if (planned.link !== undefined)
     {
@@ -349,11 +350,11 @@ const plannedTagLine = (
 };
 
 /**
- * Plans a page's command list, which is one choice less every module tag on it, whose fields are each a field of their
- * own. A copy whose list, less its tags, is still the blueprint's old one follows it to the new one, keeping its own tag
- * lines' text; a list of the copy's own stays. Either way each field of a tag the change moved is then followed on the
- * copy's own line, wherever the copy has the line; a tag line the change took away takes the link of its fields with it
- * once the copy no longer has the line.
+ * Plans a page's command list, which is one choice less every tag line on it, each line's fields being fields of their
+ * own, whether a module reads the line or it is a choice holding the whole line. A copy whose list, less its tags, is
+ * still the blueprint's old one follows it to the new one, keeping its own tag lines' text; a list of the copy's own
+ * stays. Either way each field of a tag line the change moved is then followed on the copy's own line, wherever the copy
+ * has the line; a tag line the change took away takes the link of its fields with it once the copy no longer has the line.
  * @param {PageTrio} pages The blueprint's page before and after the change, and the copy's.
  * @param {readonly CommentTagDefinition[]} tags The tags the active modules read.
  * @param {HeldLinks} held What the copy's link keeps of each number field on the page.
@@ -384,7 +385,7 @@ const plannedList = (
     const copy = pairOf(lines, line);
     if (after === null && copy === null)
     {
-      line.fields.filter(field => field.kind.kind === 'number').forEach(field => links.set(`${line.key}.${field.name}`, null));
+      line.fields.filter(field => field.kind.kind === 'number').forEach(field => links.set(lineFieldName(line.key, field.name), null));
     }
 
     if (after === null || copy === null)
@@ -404,7 +405,7 @@ const plannedList = (
 };
 
 /**
- * Plans one of a copy's pages: its own fields, then its command list and the fields of every module tag on it.
+ * Plans one of a copy's pages: its own fields, then its command list and the fields of every tag line on it.
  * @param {PageTrio} pages The blueprint's page before and after the change, and the copy's.
  * @param {readonly CommentTagDefinition[]} tags The tags the active modules read.
  * @param {HeldLinks} held What the copy's link keeps of each number field on the page.
@@ -545,8 +546,10 @@ const plannedCopy = (
  * - a number the change moved follows by what the copy's link keeps of it: the blueprint's new value moved by the offset,
  *   or the pin, held to the field's range, the offset kept whole however far it was held; a copy no longer holding what
  *   its link says has the link read afresh from what it holds first, and the link keeps what it comes to;
- * - a page's command list, less every module tag, is one choice; each module tag's fields are fields of their own, written
- *   into the copy's own line in place; a tag no module reads is part of the command list, and never a number.
+ * - a page's command list, less every tag line, is one choice; each tag line's fields are fields of their own, written
+ *   into the copy's own line in place, wherever on the page the line sits: a module's tag as the module reads it, and a tag
+ *   no module reads as one choice holding the whole line, keyed by its tag and its place among that tag's lines, so a copy
+ *   changing one tag line by hand keeps following every other, and a tag no module reads is never a number.
  *
  * Where the copy stands is never linked. The copy's id and position, and every key of every object, stay where the copy
  * has them, so a plan writes back only what it changed.

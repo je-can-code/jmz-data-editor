@@ -21,11 +21,13 @@ import { command, event, page, text } from '../../support/eventKindFixtures.ts';
  *   what its link says was changed somewhere else, and its offset or pin is read afresh from what it holds first.
  * - A choice follows when the copy still holds the blueprint's old value, and otherwise is the copy's override, and stays,
  *   until the blueprint comes round to it, when the copy is in line again and follows from there.
- * - The command list, less every module tag, is one choice; a tag no module reads, such as an enemy's id, is part of it,
- *   so it never moves by an offset. A light's reach, colour, intensity and effect are fields of their own, written into
- *   the copy's own line in place, whether the copy follows the blueprint's list or keeps its own, and lights pair by their
- *   place on the page. A light the blueprint adds reaches a copy that follows its list; one it takes away goes from such a
- *   copy, with what the link kept of it.
+ * - The command list, less every tag line, is one choice. Every tag line is a field of its own, written into the copy's
+ *   own line in place, whether the copy follows the blueprint's list or keeps its own, wherever the line sits: on one
+ *   comment's lines or spread over several. A light's reach, colour, intensity and effect are fields, and lights pair by
+ *   their place on the page. A tag no module reads, such as an enemy's id, is one choice holding the whole line, keyed by
+ *   its tag and its place among that tag's lines, so it never moves by an offset, and a copy changing one tag line by hand
+ *   still follows every other. A tag line the blueprint adds reaches a copy that follows its list; one it takes away goes
+ *   from such a copy, with what the link kept of it.
  * - The name and the note's own text are choices, the link written after the note's text; a note whose text and link
  *   both stand is left byte for byte.
  * - A command of the blueprint's naming its own event by id names the copy, and one naming another event of its group
@@ -61,6 +63,13 @@ describe('planCopyChange', () =>
    * @returns {RmmzEventCommand} The command.
    */
   const comment = (words: string): RmmzEventCommand => command(108, [ words ]);
+
+  /**
+   * Builds a later line of a comment, which MZ writes under the comment's first.
+   * @param {string} words The line's text.
+   * @returns {RmmzEventCommand} The command.
+   */
+  const later = (words: string): RmmzEventCommand => command(408, [ words ]);
 
   /**
    * The blueprint's goblin, event 5: a battler of enemy 12 carrying a torch, who growls, at speed and frequency 3.
@@ -521,7 +530,7 @@ describe('planCopyChange', () =>
         .toStrictEqual({ kind: 'stays' });
     });
 
-    it('never moves an enemy\'s id by an offset: a tag no module reads is part of the list, one choice', () =>
+    it('never moves an enemy\'s id by an offset: a tag no module reads is one choice, holding the whole line', () =>
     {
       // Arrange: the blueprint turns from enemy 12 to 13 and brightens its torch; one copy fights as 12, one as 14.
       const before = goblin();
@@ -758,6 +767,103 @@ describe('planCopyChange', () =>
           kind: 'drifted',
           reason: 'on page 1, this light already has four values written, the most the game reads; remove the one it ignores in the event window, then try again',
         });
+    });
+  });
+
+  describe('tag lines no module reads', () =>
+  {
+    /**
+     * The blueprint's battler, event 5, its tags read by no module: its enemy, then its move speed and level on the same
+     * comment's later lines, then its motion in a comment of its own, before it growls.
+     * @returns {RmmzMapEvent} The event.
+     */
+    const battler = (): RmmzMapEvent => goblin([
+      comment('<enemyId:12>'),
+      later('<moveSpeed:4.0>'),
+      later('<level:7>'),
+      comment('<motion:[stretch]>'),
+      ...text([ 'Grr.' ]),
+    ]);
+
+    it('follows every other tag line of a copy whose one tag line was changed by hand, on its comment or another', () =>
+    {
+      // Arrange: one copy in line, and one whose move speed was raised by hand; the blueprint's level, beside the move
+      // speed on one comment, goes from 7 to 9, and its motion, in another comment, changes.
+      const before = battler();
+      const after = withLine(withLine(before, 2, '<level:9>'), 3, '<motion:[breathe]>');
+      const copies = [ copyOf(before), copyOf(withLine(before, 1, '<moveSpeed:5.0>')) ];
+
+      // Act.
+      const planned = copies.map(copy => changedTo(plan(before, after, copy)));
+
+      // Assert: both copies take the level and the motion; the tuned one keeps its own speed, and neither link changes.
+      expect(planned.map(({ event: copied, link }) => [ [ 0, 1, 2, 3 ].map(index => lineOf(copied, index)), link ]))
+        .toStrictEqual([
+          [ [ '<enemyId:12>', '<moveSpeed:4.0>', '<level:9>', '<motion:[breathe]>' ], LINK ],
+          [ [ '<enemyId:12>', '<moveSpeed:5.0>', '<level:9>', '<motion:[breathe]>' ], LINK ],
+        ]);
+    });
+
+    it('keeps a tag line the copy changed by hand when the blueprint changes it too, never moving a number in it', () =>
+    {
+      // Arrange: a copy at level 8 floating where the blueprint stretches; the blueprint goes to level 9 and breathes.
+      const before = battler();
+      const after = withLine(withLine(before, 2, '<level:9>'), 3, '<motion:[breathe]>');
+      const copy = copyOf(withLine(withLine(before, 2, '<level:8>'), 3, '<motion:[float]>'));
+
+      // Act.
+      const outcome = plan(before, after, copy);
+
+      // Assert: both are the copy's own, and its level is never moved by the blueprint's 2.
+      expect(outcome)
+        .toStrictEqual({ kind: 'stays' });
+    });
+
+    it('pairs a tag the page repeats by its place among that tag\'s lines, so a change to the second reaches the copy\'s second', () =>
+    {
+      // Arrange: two motions around the enemy; the copy's first is its own; the blueprint changes its second.
+      const before = goblin([ comment('<motion:[float]>'), later('<enemyId:12>'), comment('<motion:[breathe]>') ]);
+      const after = withLine(before, 2, '<motion:[stretch]>');
+      const copy = copyOf(withLine(before, 0, '<motion:[swing]>'));
+
+      // Act.
+      const { event: copied } = changedTo(plan(before, after, copy));
+
+      // Assert.
+      expect([ 0, 1, 2 ].map(index => lineOf(copied, index)))
+        .toStrictEqual([ '<motion:[swing]>', '<enemyId:12>', '<motion:[stretch]>' ]);
+    });
+
+    it('gives a copy following the blueprint\'s list a tag line the blueprint adds, and takes one it takes away', () =>
+    {
+      // Arrange: the copy's speed raised by hand; the blueprint drops its level and adds a trait after its motion.
+      const before = battler();
+      const listAfter = before.pages[0].list.filter((_each, index) => index !== 2);
+      const after = withPage(before, { list: [ ...listAfter.slice(0, 3), later('<aiTrait:careful>'), ...listAfter.slice(3) ] });
+      const copy = copyOf(withLine(before, 1, '<moveSpeed:5.0>'));
+
+      // Act.
+      const { event: copied } = changedTo(plan(before, after, copy));
+
+      // Assert: the blueprint's list, but for the copy's own speed.
+      const expected = after.pages[0].list.map((each, index) => (index === 1 ? { ...each, parameters: [ '<moveSpeed:5.0>' ] } : each));
+      expect(copied.pages[0].list)
+        .toStrictEqual(expected);
+    });
+
+    it('follows each tag line the blueprint changes on a copy whose list is its own, the list kept', () =>
+    {
+      // Arrange: a copy that says something else; the blueprint growls twice now, at level 9.
+      const before = battler();
+      const after = withAdded(withLine(before, 2, '<level:9>'), text([ 'Grr!' ]));
+      const copy = copyOf(withLine(before, 5, 'Hmph.'));
+
+      // Act.
+      const { event: copied } = changedTo(plan(before, after, copy));
+
+      // Assert: the copy's own list, its level followed.
+      expect(copied.pages[0].list)
+        .toStrictEqual(withLine(copy, 2, '<level:9>').pages[0].list);
     });
   });
 
