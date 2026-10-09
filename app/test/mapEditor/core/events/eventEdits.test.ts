@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { BLUEPRINT_EVENTS_ADDED, BLUEPRINT_EVENTS_REMOVED } from '../../../../src/mapEditor/core/blueprints/blueprintShape.ts';
 import { createEvent, deleteEvents, duplicateEvents } from '../../../../src/mapEditor/core/events/eventEdits.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
-import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel.ts';
+import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { openedBlueprint } from '../../support/blueprintFixtures.ts';
 import { hubWithMaps, mapFileOf, mapWithEvents, spotsOf } from '../../support/eventFixtures.ts';
 import { command } from '../../support/eventKindFixtures.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
  * Creating, deleting and duplicating events are single steps in the map's history, so one undo takes any of them back
@@ -337,6 +340,64 @@ describe('eventEdits', () =>
       // Assert.
       expect(mapFileOf(hub, 1))
         .toStrictEqual(source());
+    });
+  });
+
+  /*
+   * A blueprint opened as a map keeps the events it was saved with: removing one would delete events on every map, and a
+   * new one would have to appear on every map holding a copy. So every way of adding or removing one there is refused
+   * before anything changes, saying why, and nothing else about the refusals of a map changes. The blueprint is 4 by 3,
+   * with events 1 and 3 where the fixture map has them.
+   */
+  describe('in a blueprint opened as a map', () =>
+  {
+    /**
+     * Opens the blueprint fixture: the fixture map's events, as a blueprint of events alone.
+     * @returns {ReturnType<typeof openedBlueprint>} The window and the blueprint's map.
+     */
+    const openCamp = () => openedBlueprint('k3x9q2mf', stampOf({
+      width: 4,
+      height: 3,
+      events: [ createMapEvent(1, 0, 0), createMapEvent(3, 2, 1) ],
+    }));
+
+    it('refuses a new event, a delete and a duplicate, each saying why, changing nothing and recording nothing', () =>
+    {
+      // Arrange.
+      const { hub, map, mapId } = openCamp();
+      const before = map.toJson();
+
+      // Act.
+      const outcomes = [
+        createEvent(hub, mapId, { x: 3, y: 2 }),
+        deleteEvents(hub, mapId, [ 3 ]),
+        duplicateEvents(hub, mapId, [ 1 ], null),
+      ];
+
+      // Assert.
+      expect([ outcomes, map.toJson(), hub.history(mapHistoryKey(mapId)).rows ])
+        .toStrictEqual([
+          [
+            { ok: false, message: BLUEPRINT_EVENTS_ADDED },
+            { ok: false, message: BLUEPRINT_EVENTS_REMOVED },
+            { ok: false, message: BLUEPRINT_EVENTS_ADDED },
+          ],
+          before,
+          [],
+        ]);
+    });
+
+    it('still records nothing, refusing nothing, for a delete or a duplicate of events the blueprint does not hold', () =>
+    {
+      // Arrange: slot 2 is empty, and 9 is beyond the list.
+      const { hub, mapId } = openCamp();
+
+      // Act.
+      const outcomes = [ deleteEvents(hub, mapId, [ 2, 9 ]), duplicateEvents(hub, mapId, [ 9 ], null) ];
+
+      // Assert.
+      expect(outcomes)
+        .toStrictEqual([ { ok: true, step: null, eventIds: [] }, { ok: true, step: null, eventIds: [] } ]);
     });
   });
 });

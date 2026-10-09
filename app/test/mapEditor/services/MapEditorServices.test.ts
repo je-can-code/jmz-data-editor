@@ -623,6 +623,27 @@ describe('MapEditorServices', () =>
       second.stop();
     });
 
+    it('keeps a blueprint it opens to its size and its events, refusing a change to either, and letting its events move', async () =>
+    {
+      // Arrange.
+      const network = new MemoryChannelNetwork();
+      const services = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      const refusals: string[] = [];
+      services.hub.subscribe(event => (event.type === 'refused' ? refusals.push(event.message) : undefined));
+      const history = mapHistoryKey(blueprintMapId('k3x9q2mf'));
+
+      // Act.
+      const moved = services.hub.edit('Move event', [ history ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+      const removed = services.hub.edit('Delete event', [ history ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4 ], null));
+
+      // Assert.
+      expect([ moved?.label, removed, refusals ])
+        .toStrictEqual([ 'Move event', null, [ 'Events can\'t be removed from a blueprint: removing one would delete events on every map.' ] ]);
+      services.stop();
+    });
+
     it('refuses a blueprint the blueprints no longer hold, in words for the author', async () =>
     {
       // Arrange.

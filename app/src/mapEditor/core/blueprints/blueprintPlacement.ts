@@ -1,5 +1,5 @@
 import type { DocumentHub } from '../history/DocumentHub.ts';
-import { mapDocumentKey } from '../model/documentKeys.ts';
+import { isBlueprintMapId, mapDocumentKey } from '../model/documentKeys.ts';
 import type { TemplateMap } from '../modules/PluginModuleRegistry.ts';
 import { commitStampPlan, planStamp, type StampOutcome, type StampPlacement } from '../stamps/stampPlacement.ts';
 import { withBlueprintLink } from './blueprintLink.ts';
@@ -41,11 +41,18 @@ const pluginsUnreadable = (problem: string): string =>
 };
 
 /**
+ * Why a blueprint opened as a map takes no copy of a blueprint: what it holds is its own, and a copy inside it would be
+ * copied again with every placement of it.
+ */
+const BLUEPRINT_HOLDS_NO_COPIES = 'a blueprint holds no copies of blueprints';
+
+/**
  * Builds the gate that keeps links off every map whose events a plugin copies while the game runs, notes and all, such
  * as J-ABS's action map (Map002 in Chef Adventure, named by J-ABS's Action Map Id). Nothing in the game reads an event's
  * note on any other map, which is why the note is where a copy's link lives; on those maps the plugin reads it, so a link
  * there is never written. Until the plugin modules have switched on, which maps those are is not known, so no map takes
- * a link: while the plugin list is still being read, and for as long as it cannot be, which the gate says, with why.
+ * a link: while the plugin list is still being read, and for as long as it cannot be, which the gate says, with why. A
+ * blueprint opened as a map never takes one either (see {@link BLUEPRINT_HOLDS_NO_COPIES}).
  * @param {TemplateMapSource} modules The window's plugin modules.
  * @returns {LinkGate} The gate.
  */
@@ -53,6 +60,11 @@ const linkGateFor = (modules: TemplateMapSource): LinkGate =>
 {
   return (mapId: number) =>
   {
+    if (isBlueprintMapId(mapId))
+    {
+      return BLUEPRINT_HOLDS_NO_COPIES;
+    }
+
     if (modules.revision === 0)
     {
       return modules.listProblem === null

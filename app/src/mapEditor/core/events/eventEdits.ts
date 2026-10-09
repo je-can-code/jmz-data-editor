@@ -1,8 +1,9 @@
 import { blueprintLinkOf } from '../blueprints/blueprintLink.ts';
+import { BLUEPRINT_EVENTS_ADDED, BLUEPRINT_EVENTS_REMOVED } from '../blueprints/blueprintShape.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { mapHistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
-import { mapDocumentKey } from '../model/documentKeys.ts';
+import { isBlueprintMapId, mapDocumentKey } from '../model/documentKeys.ts';
 import { createMapEvent } from '../model/eventModel.ts';
 import { cloneJson } from '../model/json.ts';
 import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
@@ -33,6 +34,7 @@ type EventEditOutcome =
  * list, never an empty slot a delete left, since whatever still names that id (a self switch in a save, a command in
  * another event) would otherwise reach the new event; and it starts with one fresh page. A tile holding an event
  * already, or a spot off the map, is refused: MZ never stacks two events on one tile, and none of the shipped maps do.
+ * So is any new event in a blueprint opened as a map, whose events are fixed (see blueprintShape).
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map.
  * @param {MapCell} cell Where the event goes.
@@ -40,6 +42,11 @@ type EventEditOutcome =
  */
 const createEvent = (hub: DocumentHub, mapId: number, cell: MapCell): EventEditOutcome =>
 {
+  if (isBlueprintMapId(mapId))
+  {
+    return { ok: false, message: BLUEPRINT_EVENTS_ADDED };
+  }
+
   const key = mapDocumentKey(mapId);
   const map = hub.map(key);
   if (isOnMap(cell, map) === false)
@@ -63,12 +70,13 @@ const createEvent = (hub: DocumentHub, mapId: number, cell: MapCell): EventEditO
 
 /**
  * Removes events from a map as one step in its history, which one undo brings back whole. Each emptied slot stays in
- * the list, as MZ leaves it. Ids the map does not hold are passed over, and removing nothing records nothing.
+ * the list, as MZ leaves it. Ids the map does not hold are passed over, and removing nothing records nothing. Removing
+ * any from a blueprint opened as a map is refused, since its events are fixed (see blueprintShape).
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map.
  * @param {readonly number[]} eventIds The events.
  * @param {string} verb What the history panel calls the step: "Delete", or "Cut" when the events went to the clipboard.
- * @returns {EventEditOutcome} The step, with nothing left to select.
+ * @returns {EventEditOutcome} The step, with nothing left to select, or why it was refused.
  */
 const deleteEvents = (hub: DocumentHub, mapId: number, eventIds: readonly number[], verb = 'Delete'): EventEditOutcome =>
 {
@@ -78,6 +86,11 @@ const deleteEvents = (hub: DocumentHub, mapId: number, eventIds: readonly number
   if (held.length === 0)
   {
     return { ok: true, step: null, eventIds: [] };
+  }
+
+  if (isBlueprintMapId(mapId))
+  {
+    return { ok: false, message: BLUEPRINT_EVENTS_REMOVED };
   }
 
   const step = hub.edit(`${verb} ${eventsPhrase(held.length)}`, [ mapHistoryKey(mapId) ], tx =>
@@ -132,13 +145,14 @@ const planDuplicate = (map: EventMap, events: readonly RmmzMapEvent[], shift: Ma
  * commands naming each other name the copies, while the originals keep theirs. A duplicate is no copy to the clipboard
  * and no stamp: it places the copies at once and leaves the Stamps panel as it was. A duplicate of a copy of a blueprint
  * is a copy too, its note keeping the link, so on a map that may hold no link a selection holding one is refused whole,
- * as placing a blueprint or a stamp carrying its copies there is.
+ * as placing a blueprint or a stamp carrying its copies there is. A duplicate in a blueprint opened as a map is refused
+ * too, since its events are fixed (see blueprintShape).
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map.
  * @param {readonly number[]} eventIds The events.
  * @param {string | null} linkRefusal Why the map may hold no copy of a blueprint, or null when it may.
  * @returns {EventEditOutcome} The step and the copies, which take the selection, or why there was no room, or why
- * copies of a blueprint cannot go there.
+ * copies of a blueprint cannot go there, or why a blueprint takes no new event.
  */
 const duplicateEvents = (hub: DocumentHub, mapId: number, eventIds: readonly number[], linkRefusal: string | null): EventEditOutcome =>
 {
@@ -148,6 +162,11 @@ const duplicateEvents = (hub: DocumentHub, mapId: number, eventIds: readonly num
   if (held.length === 0)
   {
     return { ok: true, step: null, eventIds: [] };
+  }
+
+  if (isBlueprintMapId(mapId))
+  {
+    return { ok: false, message: BLUEPRINT_EVENTS_ADDED };
   }
 
   // copies of a blueprint stay off a map that may hold no link, however they would get there.

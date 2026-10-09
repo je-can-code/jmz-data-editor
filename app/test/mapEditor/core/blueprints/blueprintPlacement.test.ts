@@ -3,6 +3,7 @@ import { linkGateFor, placeBlueprint } from '../../../../src/mapEditor/core/blue
 import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { checkPlacement } from '../../../../src/mapEditor/core/blueprints/placementMatch.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintMapId } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { resizeMap } from '../../../../src/mapEditor/core/properties/mapPropertyEdits.ts';
@@ -163,6 +164,21 @@ describe('linkGateFor', () =>
     // Assert.
     expect(reasons)
       .toStrictEqual([ 'this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it', null ]);
+  });
+
+  it('keeps a blueprint opened as a map from holding a link, whatever the plugin modules say, and lets every map hold one', () =>
+  {
+    // Arrange: the modules switched on, naming no map, and still being read.
+    const switchedOn = linkGateFor({ revision: 1, listProblem: null, templateMapOf: () => null });
+    const reading = linkGateFor({ revision: 0, listProblem: null, templateMapOf: () => null });
+    const camp = blueprintMapId('k3x9q2mf');
+
+    // Act.
+    const reasons = [ switchedOn(camp), switchedOn(3), reading(camp) ];
+
+    // Assert.
+    expect(reasons)
+      .toStrictEqual([ 'a blueprint holds no copies of blueprints', null, 'a blueprint holds no copies of blueprints' ]);
   });
 
   it('keeps a map a plugin copies events from from holding a link, saying what it holds, and lets every other hold one', () =>

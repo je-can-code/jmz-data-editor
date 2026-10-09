@@ -1,8 +1,12 @@
+import { holdBlueprintMap } from '../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
 import { BLUEPRINTS_DOCUMENT, savedBlueprintOf } from '../../../src/mapEditor/core/blueprints/blueprints.ts';
+import { blueprintShapeCheck } from '../../../src/mapEditor/core/blueprints/blueprintShape.ts';
 import { BLUEPRINT_USES } from '../../../src/mapEditor/core/editorData/editorData.ts';
 import { BLUEPRINT_USES_DOCUMENT, mapEntryOf, type PlacedSpot } from '../../../src/mapEditor/core/blueprints/blueprintUses.ts';
-import type { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
+import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
+import { blueprintMapId } from '../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonObject, JsonValue } from '../../../src/mapEditor/core/model/json.ts';
+import type { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import type { Stamp } from '../../../src/mapEditor/core/stamps/stamp.ts';
 
 /**
@@ -75,5 +79,31 @@ const drawsFor = (ids: readonly string[]): (() => number) =>
   };
 };
 
-export { drawsFor, holdBlueprints, holdBlueprintUses, storedBlueprints, storedUses };
-export type { BlueprintSeed };
+/**
+ * A window with a blueprint open as a map, as the workspace holds one: the blueprints, holding the blueprint given beside
+ * any others, the blueprint laid out as its map, and the window's check that keeps every blueprint to what it may change.
+ */
+type OpenedBlueprint = {
+  readonly hub: DocumentHub;
+  readonly map: MapDocument;
+  readonly mapId: number;
+};
+
+/**
+ * Builds a window with one blueprint open as a map (see {@link OpenedBlueprint}).
+ * @param {string} blueprintId The blueprint's id.
+ * @param {Stamp} stamp Its stamp.
+ * @param {BlueprintSeed} others Every other blueprint the window's blueprints hold, by id.
+ * @returns {OpenedBlueprint} The window, the map and the map id it takes.
+ */
+const openedBlueprint = (blueprintId: string, stamp: Stamp, others: BlueprintSeed = {}): OpenedBlueprint =>
+{
+  const hub = new DocumentHub({ clientId: 'window-a' });
+  hub.addCommitCheck(blueprintShapeCheck(hub));
+  holdBlueprints(hub, { ...others, [blueprintId]: { name: 'Camp', stamp } });
+  const map = holdBlueprintMap(hub, blueprintId);
+  return { hub, map, mapId: blueprintMapId(blueprintId) };
+};
+
+export { drawsFor, holdBlueprints, holdBlueprintUses, openedBlueprint, storedBlueprints, storedUses };
+export type { BlueprintSeed, OpenedBlueprint };

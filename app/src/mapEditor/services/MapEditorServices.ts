@@ -5,6 +5,7 @@ import { HttpMapEditorApi, type MapEditorApi } from '../core/api/MapEditorApi.ts
 import { BlueprintCopyCounter } from '../core/blueprints/blueprintCopies.ts';
 import { holdBlueprintMap } from '../core/blueprints/blueprintMaps.ts';
 import { BLUEPRINTS_DOCUMENT } from '../core/blueprints/blueprints.ts';
+import { blueprintShapeCheck } from '../core/blueprints/blueprintShape.ts';
 import { installCloseGuard, unsavedOnlyHere, type CloseTarget } from '../core/closeGuard.ts';
 import { registerBuiltInCommands } from '../core/commands/builtin/builtInCommands.ts';
 import { CommandCatalog } from '../core/commands/CommandCatalog.ts';
@@ -296,6 +297,9 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     : new HttpMapEditorApi({ apiBase: environment.apiBase, clientId, fetch: environment.fetch });
   const hub = new DocumentHub({ clientId, store: api === null ? undefined : apiDocumentStore(api) });
   const sync = new SyncPeer({ hub, channel: environment.openChannel(CHANNEL_NAMES.sync) });
+
+  // a blueprint opened as a map keeps its size and its events whatever tool edits it, in this window and every other.
+  hub.addCommitCheck(blueprintShapeCheck(hub));
   const catalog = new CommandCatalog();
   registerBuiltInCommands(catalog);
   const commandEditors = new CommandEditorRegistry();

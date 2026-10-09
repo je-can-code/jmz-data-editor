@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import { BLUEPRINT_EVENTS_ADDED, BLUEPRINT_EVENTS_REMOVED } from '../../../../src/mapEditor/core/blueprints/blueprintShape.ts';
 import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { captureAreaStamp, captureEventsStamp, type Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
 import { cutStampSource, placeStamp, planStamp, type StampPlacement } from '../../../../src/mapEditor/core/stamps/stampPlacement.ts';
 import { shapedTileAt, TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes.ts';
 import { gridReader } from '../../../../src/mapEditor/core/tiles/tileGrid.ts';
 import { autotileShape, makeAutotileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
-import { holdBlueprints, holdBlueprintUses, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
+import { holdBlueprints, holdBlueprintUses, openedBlueprint, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
 import { hubWithMaps, mapFileOf, spotsOf } from '../../support/eventFixtures.ts';
 import { command } from '../../support/eventKindFixtures.ts';
 import { stampOf, tiledMap } from '../../support/stampFixtures.ts';
@@ -699,5 +701,59 @@ describe('placements a stamp carries', () =>
     // Assert.
     expect([ outcome.ok && outcome.step?.entries.every(entry => entry.document === 'map:2'), outcome.ok && outcome.notes, hub.has(BLUEPRINT_USES_DOCUMENT) ])
       .toStrictEqual([ true, [ 'The stamp\'s tiles held copies of blueprints, which went down as plain tiles, since where blueprints are placed can\'t be read.' ], false ]);
+  });
+});
+
+/*
+ * A blueprint opened as a map takes a stamp's tiles as any map does, but none of its events: its events are fixed, so a
+ * stamp placing any there, or a cut taking any away, is refused whole, saying why, and the blueprint stays as it was. The
+ * blueprint is 3 by 3, every layer carried, plain ground, with one event at its centre.
+ */
+describe('stamps in a blueprint opened as a map', () =>
+{
+  /**
+   * Opens the blueprint fixture.
+   * @returns {ReturnType<typeof openedBlueprint>} The window and the blueprint's map.
+   */
+  const openCamp = () => openedBlueprint('k3x9q2mf', stampOf({
+    width: 3,
+    height: 3,
+    tiles: { layers: [ 0, 1, 2, 3, 4, 5 ], values: new Array(54).fill(0).fill(1536, 0, 9), calledFor: new Array(54).fill(-1) },
+    events: [ createMapEvent(1, 1, 1) ],
+  }));
+
+  it('refuses a stamp placing any event there, whole, and places one of tiles alone as one step in the blueprint\'s history', () =>
+  {
+    // Arrange: a stamp of one event, and a stamp of one tree on layer 4 alone.
+    const { hub, map, mapId } = openCamp();
+    const before = map.toJson();
+    const tree = stampOf({ events: [], tiles: { layers: [ 3 ], values: [ TREE ], calledFor: [ -1 ] } });
+
+    // Act.
+    const refused = placeStamp(hub, mapId, stampOf(), at(0, 0), 'Paste');
+    const refusedFile = map.toJson();
+    const placed = placeStamp(hub, mapId, tree, at(2, 2), 'Stamp');
+
+    // Assert.
+    expect([ refused, refusedFile, placed.ok && placed.step?.histories, map.cellAt(2, 2, 3) ])
+      .toStrictEqual([ { ok: false, message: BLUEPRINT_EVENTS_ADDED }, before, [ 'blueprint:k3x9q2mf' ], TREE ]);
+  });
+
+  it('refuses a cut taking the event out, changing nothing, and cuts tiles alone', () =>
+  {
+    // Arrange: the whole blueprint, event and all, and its top row of ground alone.
+    const { hub, map, mapId } = openCamp();
+    const before = map.toJson();
+    const whole = captureAreaStamp(map, { x: 0, y: 0, width: 3, height: 3 }, 'auto', TilesetMode.area, 'window-a:7') as Stamp;
+    const topRow = captureAreaStamp(map, { x: 0, y: 0, width: 3, height: 1 }, 0, TilesetMode.area, 'window-a:8') as Stamp;
+
+    // Act.
+    const refused = cutStampSource(hub, mapId, whole, TilesetMode.area);
+    const refusedFile = map.toJson();
+    const cut = cutStampSource(hub, mapId, topRow, TilesetMode.area);
+
+    // Assert.
+    expect([ refused, refusedFile, cut.ok && cut.step?.label, [ 0, 1, 2 ].map(x => map.cellAt(x, 0, 0)), map.event(1) !== null ])
+      .toStrictEqual([ { ok: false, message: BLUEPRINT_EVENTS_REMOVED }, before, 'Cut 3 by 1 tiles', [ 0, 0, 0 ], true ]);
   });
 });

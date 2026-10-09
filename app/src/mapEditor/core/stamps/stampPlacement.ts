@@ -1,12 +1,13 @@
 import { blueprintLinkOf, withoutBlueprintLink } from '../blueprints/blueprintLink.ts';
 import { liveBlueprintsIn, type LiveBlueprint } from '../blueprints/blueprints.ts';
+import { BLUEPRINT_EVENTS_ADDED, BLUEPRINT_EVENTS_REMOVED } from '../blueprints/blueprintShape.ts';
 import { forgetSpots, placedOn, readableUses, recordSpots, type BlueprintSpot } from '../blueprints/blueprintUses.ts';
 import { blockedCells, eventCellsOf, isOnMap, newEventIds, type EventMap } from '../events/eventPlacement.ts';
 import { rewireGroupReferences } from '../events/eventReferences.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { mapHistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
-import { mapDocumentKey } from '../model/documentKeys.ts';
+import { isBlueprintMapId, mapDocumentKey } from '../model/documentKeys.ts';
 import { cloneJson } from '../model/json.ts';
 import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
 import type { MapCell } from '../renderer/camera.ts';
@@ -416,7 +417,9 @@ const commitStampPlan = (hub: DocumentHub, mapId: number, plan: Extract<StampPla
  * Places a stamp on a map as one step in its history, as {@link planStamp} works it out, from this map or any other,
  * telling copies of blueprints the window's blueprints no longer hold from copies of those still there. The step is
  * named for what went down, after the verb: "Stamp 20 by 15 tiles and 3 events", "Paste event". Placements its tiles
- * hold go down plain in a window holding no record of placements it can read, and the author is told.
+ * hold go down plain in a window holding no record of placements it can read, and the author is told. A blueprint opened
+ * as a map takes a stamp's tiles but none of its events, since its events are fixed, so a stamp placing any there is
+ * refused whole.
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map.
  * @param {Stamp} stamp The stamp.
@@ -433,6 +436,11 @@ const placeStamp = (hub: DocumentHub, mapId: number, stamp: Stamp, placement: St
     return plan;
   }
 
+  if (plan.events.length > 0 && isBlueprintMapId(mapId))
+  {
+    return { ok: false, message: BLUEPRINT_EVENTS_ADDED };
+  }
+
   const outcome = commitStampPlan(hub, mapId, plan, `${verb} ${contentsPhrase(plan.tilesPlaced ? stamp : null, plan.events.length)}`);
 
   // a placement the tiles hold goes down plain while the window holds no record it can read to keep it in, which the
@@ -446,17 +454,23 @@ const placeStamp = (hub: DocumentHub, mapId: number, stamp: Stamp, placement: St
  * Takes away, as one step in the map's history, what a stamp was just captured from: the events it copied, wherever
  * they stand now, and, for a stamp of tiles, every layer it carries emptied over the cells it was copied from, with the
  * autotiles around the hole reshaped, and the placements of blueprints it holds whole forgotten there, since they now
- * travel with the stamp and are recorded again wherever it is pasted. What a cut does once its stamp is safely kept.
+ * travel with the stamp and are recorded again wherever it is pasted. What a cut does once its stamp is safely kept. A
+ * cut taking events out of a blueprint opened as a map is refused, since its events are fixed; the stamp stays kept.
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map the stamp was captured from.
  * @param {Stamp} stamp The stamp, just captured from that map.
  * @param {number} mode The map's tileset mode.
- * @returns {StampOutcome} The step, with nothing left to select.
+ * @returns {StampOutcome} The step, with nothing left to select, or why it was refused.
  */
 const cutStampSource = (hub: DocumentHub, mapId: number, stamp: Stamp, mode: number): StampOutcome =>
 {
   const key = mapDocumentKey(mapId);
   const map = hub.map(key);
+  if (isBlueprintMapId(mapId) && eventCellsOf(map, stamp.events.map(event => event.id)).length > 0)
+  {
+    return { ok: false, message: BLUEPRINT_EVENTS_REMOVED };
+  }
+
   const writes: CellChange[] = [];
   const { tiles, origin, width, height } = stamp;
   const { x: left, y: top } = origin;
