@@ -1,5 +1,6 @@
 import type { EventNote } from '../blueprints/blueprintCopies.ts';
 import type { BlueprintUsesMerge } from '../blueprints/blueprintUsesWriter.ts';
+import type { Patch } from '../model/patches.ts';
 import type { CommandUsageCounts } from '../commandList/commandUsage.ts';
 import type { DatabaseNamesJson } from '../commandList/databaseNames.ts';
 import { isEditorDataName } from '../model/documentKeys.ts';
@@ -24,6 +25,17 @@ type AudioFolder = 'bgm' | 'bgs' | 'me' | 'se';
  * save causes, so a window can tell its own saves from anyone else's.
  */
 const CLIENT_HEADER = 'X-Jmz-Client';
+
+/**
+ * One change to a blueprint as it is written to disk, made, undone or redone (PUT /api/blueprint-changes): the blueprints
+ * given whole, when they change, and the patches each map file the change reached takes, in the order they go, each map
+ * named once. With {@code check} set, nothing is written; every patch is only tried against its file.
+ */
+type BlueprintWrite = {
+  readonly check?: boolean;
+  readonly blueprints?: JsonValue;
+  readonly maps: readonly { readonly map: number; readonly patches: readonly Patch[] }[];
+};
 
 /**
  * Every call the map editor makes to the server, behind one seam so tests can stand in for it. Nothing in the
@@ -203,6 +215,17 @@ interface MapEditorApi
    * @returns {Promise<void>} Settles once written.
    */
   mergeBlueprintUses(merge: BlueprintUsesMerge): Promise<void>;
+
+  /**
+   * Writes one change to a blueprint in one act: the blueprints given whole, and the patches every map file the change
+   * reached takes, each map's applied to its file as it stands and checked first against what the file holds where it
+   * lands. Nothing is written unless every one fits: a map changed on disk since is refused with a 409 naming it. With
+   * {@code check} set, every patch is tried and nothing is written. Optional, so a client that cannot write them still
+   * serves everything else; a blueprint's changes then reach no file.
+   * @param {BlueprintWrite} write What to write.
+   * @returns {Promise<void>} Settles once written, or checked.
+   */
+  writeBlueprintChanges?(write: BlueprintWrite): Promise<void>;
 
   /**
    * Builds the address of the server's file-change stream.
@@ -583,6 +606,11 @@ class HttpMapEditorApi implements MapEditorApi
     return this.#put('/api/editor-data/blueprint-uses/maps', merge);
   }
 
+  async writeBlueprintChanges(write: BlueprintWrite): Promise<void>
+  {
+    return this.#put('/api/blueprint-changes', write);
+  }
+
   fileChangesUrl(): string
   {
     return `${this.#base}/api/file-changes`;
@@ -712,4 +740,4 @@ class HttpMapEditorApi implements MapEditorApi
 }
 
 export { CLIENT_HEADER, HttpMapEditorApi, MapEditorApiError };
-export type { AudioFolder, HttpMapEditorApiOptions, ImageFolder, MapEditorApi };
+export type { AudioFolder, BlueprintWrite, HttpMapEditorApiOptions, ImageFolder, MapEditorApi };

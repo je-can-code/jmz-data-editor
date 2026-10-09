@@ -1,4 +1,5 @@
-import { MapEditorApiError } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { MapEditorApiError, type BlueprintWrite } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { BlueprintWriter } from '../../../src/mapEditor/core/blueprints/blueprintWriter.ts';
 import { BlueprintCopyCounter, type EventNote } from '../../../src/mapEditor/core/blueprints/blueprintCopies.ts';
 import { withBlueprintLink } from '../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import { holdBlueprintMap } from '../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
@@ -11,7 +12,7 @@ import { blueprintMapKey, mapDocumentKey, type DocumentKey } from '../../../src/
 import type { EditorDocument } from '../../../src/mapEditor/core/model/EditorDocument.ts';
 import { createEventPage, createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
-import type { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
+import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzEventPage, RmmzMap, RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { Stamp } from '../../../src/mapEditor/core/stamps/stamp.ts';
 import { cellIndex } from '../../../src/mapEditor/core/tiles/tileGrid.ts';
@@ -240,6 +241,74 @@ const propagationWindow = async (setUp: PropagationSetUp = {}): Promise<Propagat
   return { hub, maps, counter, disk, blueprintMap, blueprintKey: blueprintMapKey(BLUEPRINT), reads, opened, releaseReads };
 };
 
+/**
+ * A propagation window that writes every change to its disk, through a stand-in for the server that applies each act as
+ * the real one does: every map's patches checked against its file as it stands, nothing written unless all fit.
+ */
+type WrittenWindow = PropagationWindow & {
+  readonly writer: BlueprintWriter;
+  readonly acts: BlueprintWrite[];
+  readonly problems: { readonly message: string; readonly alarm: boolean }[];
+  readonly blueprintsOnDisk: () => JsonValue | null;
+  readonly failNextWrite: (error: Error) => void;
+};
+
+/**
+ * Builds a propagation window that writes every change to its disk (see {@link WrittenWindow}), an act going out as soon
+ * as the task making the change is over.
+ * @param {PropagationSetUp} setUp What the window is built with.
+ * @returns {Promise<WrittenWindow>} The window.
+ */
+const writtenWindow = async (setUp: PropagationSetUp = {}): Promise<WrittenWindow> =>
+{
+  const window = await propagationWindow(setUp);
+  const acts: BlueprintWrite[] = [];
+  const problems: { message: string; alarm: boolean }[] = [];
+  let blueprints: JsonValue | null = null;
+  let failure: Error | null = null;
+  const write = async (act: BlueprintWrite): Promise<void> =>
+  {
+    acts.push(structuredClone(act) as BlueprintWrite);
+    if (failure !== null)
+    {
+      const error = failure;
+      failure = null;
+      throw error;
+    }
+
+    // every map is checked before any is written, as the server does.
+    const staged = act.maps.map(({ map, patches }) =>
+    {
+      const file = MapDocument.fromJson(mapDocumentKey(map), structuredClone(window.disk.get(map) as RmmzMap));
+      try
+      {
+        patches.forEach(patch => file.apply(patch));
+      }
+      catch (error)
+      {
+        throw new MapEditorApiError('PUT /api/blueprint-changes answered 409', 409, `Map ${String(map).padStart(3, '0')} no longer holds what the change replaced: ${(error as Error).message}`);
+      }
+
+      return [ map, file.toJson() ] as const;
+    });
+    staged.forEach(([ map, file ]) => window.disk.set(map, file));
+    blueprints = act.blueprints ?? blueprints;
+  };
+
+  const writer = new BlueprintWriter({ hub: window.hub, maps: window.maps, write, onProblem: (message, alarm) => problems.push({ message, alarm }), settleMs: 0 });
+  return {
+    ...window,
+    writer,
+    acts,
+    problems,
+    blueprintsOnDisk: () => blueprints,
+    failNextWrite: (error: Error) =>
+    {
+      failure = error;
+    },
+  };
+};
+
 export {
   a5,
   BLUEPRINT,
@@ -254,5 +323,6 @@ export {
   propagationWindow,
   settle,
   TEMPLATE_MAP,
+  writtenWindow,
 };
-export type { PropagationSetUp, PropagationWindow };
+export type { PropagationSetUp, PropagationWindow, WrittenWindow };

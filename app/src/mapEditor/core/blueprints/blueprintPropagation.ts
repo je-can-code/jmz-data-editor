@@ -48,6 +48,12 @@ const BLUEPRINTS_NOT_HELD = 'The blueprints aren\'t open in this window, so a bl
 const ONE_BLUEPRINT_AT_A_TIME = 'Change one blueprint at a time.';
 
 /**
+ * Why a blueprint's change waits while the blueprints wait for a choice about changes made elsewhere: writing the change
+ * would put this window's blueprints over the other copy before the author chose.
+ */
+const BLUEPRINTS_CONFLICTED = 'The blueprints are waiting for a choice about changes made elsewhere, so a blueprint can\'t change until then.';
+
+/**
  * Reads a tileset's mode from the window's tilesets: the autotile shapes read it.
  * @param {DocumentHub} hub The window's documents.
  * @param {number} tilesetId The tileset.
@@ -114,24 +120,43 @@ const reachHeldMap = (
   maps.noteDrift(mapId, copiesReached(change, map), plan.drifted);
   const own = patchesFor(map, plan);
   own.forEach(patch => transaction.apply(key, patch));
-  if (changesNothing(plan) === false)
+
+  // a map without unsaved edits holds what its file does, which takes the very same patches.
+  const onFile = hub.isDirty(key) ? fileVersionOf(context, reach) : own;
+  if (jsonEquals(onFile as unknown as JsonValue, own as unknown as JsonValue) === false)
+  {
+    transaction.fileVersion(key, onFile);
+  }
+
+  // the map joins the step whenever the change reached it, in the map itself or in its file alone.
+  if (changesNothing(plan) === false || onFile.length > 0)
   {
     transaction.join([ mapHistoryKey(mapId) ]);
   }
+};
 
-  // a map without unsaved edits holds what its file does, which takes the very same patches.
-  if (hub.isDirty(key) === false)
-  {
-    return;
-  }
-
+/**
+ * Plans what the file of a map held here with unsaved edits takes for a change, apart from the map: against the file as
+ * it stands, with the placements the file holds.
+ * @param {PropagationContext} context What the check reads with.
+ * @param {{ change: BlueprintStepChange, stamp: Stamp, mapId: number }} reach The change, the blueprint's stamp before
+ * it, and the map.
+ * @returns {Patch[]} The patches the file takes, in the order they go.
+ */
+const fileVersionOf = (
+  context: PropagationContext,
+  reach: { readonly change: BlueprintStepChange; readonly stamp: Stamp; readonly mapId: number },
+): Patch[] =>
+{
+  const { hub, maps } = context;
+  const { change, stamp, mapId } = reach;
   const file = maps.file(mapId);
   if (file === null)
   {
     throw new Error(`the file of Map ${mapId} is not known, though the change was let through`);
   }
 
-  const onFile = patchesFor(file, planCopiesOnMap({
+  return patchesFor(file, planCopiesOnMap({
     change,
     stamp,
     ground: file,
@@ -139,10 +164,6 @@ const reachHeldMap = (
     mode: modeOf(hub, file.tilesetId),
     tags: context.tags(),
   }));
-  if (jsonEquals(onFile as unknown as JsonValue, own as unknown as JsonValue) === false)
-  {
-    transaction.fileVersion(key, onFile);
-  }
 };
 
 /**
@@ -191,8 +212,8 @@ const reachFile = (
  * are, and noted for the where-used list.
  *
  * A change waits, refused with why, while what it would be planned against is not known yet: the plugins, the copies'
- * count, a map it reaches. A window not holding the blueprints refuses it; so does a step changing two blueprints at once.
- * Every other edit passes untouched.
+ * count, a map it reaches; and while the blueprints wait for a choice about changes made elsewhere. A window not holding
+ * the blueprints refuses it; so does a step changing two blueprints at once. Every other edit passes untouched.
  * @param {PropagationContext} context The window's documents, its maps a change may reach, and the modules' tags.
  * @returns {CommitCheck} The check.
  */
@@ -210,6 +231,11 @@ const blueprintPropagationCheck = (context: PropagationContext): CommitCheck =>
     if (hub.has(BLUEPRINTS_DOCUMENT) === false)
     {
       return BLUEPRINTS_NOT_HELD;
+    }
+
+    if (hub.isConflicted(BLUEPRINTS_DOCUMENT))
+    {
+      return BLUEPRINTS_CONFLICTED;
     }
 
     const changes = blueprintChangesIn(hub, transaction.entries);
@@ -253,5 +279,5 @@ const blueprintPropagationCheck = (context: PropagationContext): CommitCheck =>
   };
 };
 
-export { BLUEPRINTS_NOT_HELD, blueprintPropagationCheck, modeOf, ONE_BLUEPRINT_AT_A_TIME };
+export { BLUEPRINTS_CONFLICTED, BLUEPRINTS_NOT_HELD, blueprintPropagationCheck, modeOf, ONE_BLUEPRINT_AT_A_TIME };
 export type { PropagationContext };

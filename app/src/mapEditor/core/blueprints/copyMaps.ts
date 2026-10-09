@@ -159,13 +159,16 @@ const isBlueprintChange = (step: HistoryStep): boolean =>
 };
 
 /**
- * Lists the maps a step changes, by id: real maps alone, never a blueprint opened as a map.
+ * Lists the maps whose files a step changes, by id: every real map it changes, and every one whose file alone it changes
+ * (see HistoryStep's fileVersions), as a map whose only copy on disk was painted over in the map itself; never a blueprint
+ * opened as a map.
  * @param {HistoryStep} step The step.
  * @returns {number[]} The maps' ids.
  */
 const mapsChangedBy = (step: HistoryStep): number[] =>
 {
-  return documentsOfStep(step).flatMap(key =>
+  const keys = [ ...documentsOfStep(step), ...(step.fileVersions ?? []).map(version => version.document) ];
+  return [ ...new Set(keys) ].flatMap(key =>
   {
     const parsed = parseDocumentKey(key);
     return parsed.kind === 'map' ? [ parsed.mapId ] : [];
@@ -489,6 +492,30 @@ class CopyMaps
     });
 
     return taken;
+  }
+
+  /**
+   * Finds a kept map whose file a blueprint's change could not move into the way {@link follow} would: its file holds
+   * neither way the change reaches it, so something changed it on disk since. A map whose file is not kept here cannot be
+   * told, and is not named; the write itself checks it.
+   * @param {HistoryStep} step The step.
+   * @param {'forward' | 'backward'} direction Redone, or undone.
+   * @returns {number | null} The first such map's id, or null when every kept file fits.
+   */
+  misfit(step: HistoryStep, direction: 'forward' | 'backward'): number | null
+  {
+    if (isBlueprintChange(step) === false)
+    {
+      return null;
+    }
+
+    const found = mapsChangedBy(step).find(mapId =>
+    {
+      const file = this.#files.get(mapId);
+      const ways = waysToFile(step, mapDocumentKey(mapId)).map(patches => (direction === 'forward' ? patches : takenOut(patches)));
+      return file !== undefined && ways.some(patches => patches.every(patch => fits(file, patch))) === false;
+    });
+    return found ?? null;
   }
 
   /**
