@@ -245,7 +245,7 @@ const changeGraphic = async (window: FoothillsWindow): Promise<HistoryStep> =>
   holdBlueprintMap(hub, BLUEPRINT);
   await settle();
 
-  const image = eventOf(hub.map(blueprintMapKey(BLUEPRINT)), 21).pages[0].image;
+  const [ { image } ] = eventOf(hub.map(blueprintMapKey(BLUEPRINT)), 21).pages;
   const changed = setPageImage(hub, { mapId: blueprintMapId(BLUEPRINT), eventId: 21 }, 0, { ...image, characterIndex: 5 });
   await settle();
   return (changed.ok ? changed.step : null) as HistoryStep;
@@ -275,7 +275,7 @@ const raiseSpeed = (window: FoothillsWindow): HistoryStep =>
  */
 const changeCopyGraphic = (window: FoothillsWindow, eventId: number): HistoryStep =>
 {
-  const image = eventOf(window.hub.map(mapDocumentKey(MAP_ID)), eventId).pages[0].image;
+  const [ { image } ] = eventOf(window.hub.map(mapDocumentKey(MAP_ID)), eventId).pages;
   const changed = setPageImage(window.hub, { mapId: MAP_ID, eventId }, 0, { ...image, characterIndex: 3 });
   return (changed.ok ? changed.step : null) as HistoryStep;
 };
