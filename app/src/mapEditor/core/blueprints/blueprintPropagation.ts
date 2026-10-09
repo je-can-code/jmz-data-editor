@@ -15,6 +15,7 @@ import { BLUEPRINTS_DOCUMENT, blueprintIn, savedBlueprintOf } from './blueprints
 import { blueprintChangesIn, type BlueprintStepChange } from './blueprintSteps.ts';
 import { readableUses, spotsOnMap, type BlueprintSpot } from './blueprintUses.ts';
 import type { CopyMaps } from './copyMaps.ts';
+import { copyPatches } from './copyPatches.ts';
 import { changesNothing, copiesOf, planCopiesOnMap, type MapCopyPlan } from './copyPlans.ts';
 
 /**
@@ -115,8 +116,27 @@ const showedBlueprint = (map: MapDocument, before: BlueprintContent, stamp: Stam
 };
 
 /**
- * Builds the patches that make a plan on a map or its file: its cells first, then each copy's event, each against what
- * stands there now.
+ * Finds a copy a plan changes, as the map or its file holds it now.
+ * @param {MapDocument} map The map, or its file.
+ * @param {number} eventId The copy.
+ * @returns {RmmzMapEvent} The copy.
+ * @throws {Error} When the map holds no such event, since a plan only ever changes the copies it found there.
+ */
+const copyOn = (map: MapDocument, eventId: number): RmmzMapEvent =>
+{
+  const copy = map.event(eventId);
+  if (copy === null)
+  {
+    throw new Error(`Map ${map.mapId} holds no event ${eventId}, though a change was planned for it there`);
+  }
+
+  return copy;
+};
+
+/**
+ * Builds the patches that make a plan on a map or its file: the cells it changes first, then the fields of each copy it
+ * changes, each against what stands there now and as narrow as the field (see copyPatches), so taking the change back
+ * later asks only whether those very fields, or those very cells, were changed since.
  * @param {MapDocument} map The map, or its file.
  * @param {MapCopyPlan} plan The plan.
  * @returns {Patch[]} The patches, in the order they go.
@@ -124,7 +144,7 @@ const showedBlueprint = (map: MapDocument, before: BlueprintContent, stamp: Stam
 const patchesFor = (map: MapDocument, plan: MapCopyPlan): Patch[] =>
 {
   const tiles = plan.tiles.length === 0 ? [] : [ map.tilesPatch(plan.tiles) ];
-  return [ ...tiles, ...plan.events.map(event => map.placeEventPatch(event)) ];
+  return [ ...tiles, ...plan.events.flatMap(event => copyPatches(copyOn(map, event.id), event)) ];
 };
 
 /**

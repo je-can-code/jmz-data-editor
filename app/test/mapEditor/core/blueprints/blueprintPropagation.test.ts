@@ -246,6 +246,44 @@ describe('blueprintPropagationCheck', () =>
         .toStrictEqual([ true, [ a5(1), a5(1), a5(1) ], true, a5(9), a5(9) ]);
     });
 
+    it('reaches each copy by the fields the change moved, never by the whole copy', async () =>
+    {
+      // Arrange.
+      const window = await propagationWindow();
+
+      // Act.
+      const step = window.hub.edit('Speed up', [ blueprintHistoryKey(BLUEPRINT) ], tx => tx.set(window.blueprintKey, [ 'events', 1, 'pages', 0, 'moveSpeed' ], 4)) as HistoryStep;
+
+      // Assert: the guards change their speed alone, on the maps held here and on map 3's file alike; the posts not at all.
+      expect(step.entries.filter(entry => entry.document.startsWith('map:')).map(entry => [ entry.document, entry.patch ]))
+        .toStrictEqual([ 'map:1', 'map:2', 'map:3' ].map(map => [ map, { kind: 'set', path: [ 'events', 5, 'pages', 0, 'moveSpeed' ], before: 3, after: 4 } ]));
+    });
+
+    it('takes the step back from the map and from the blueprint around a later edit to another field of a copy', async () =>
+    {
+      // Arrange: the guard sped up in the blueprint, then map 1's guard given a comment in its own event window.
+      const mapWindow = await propagationWindow();
+      const blueprintWindow = await propagationWindow();
+      const later = [ mapWindow, blueprintWindow ].map(window =>
+      {
+        window.hub.edit('Speed up', [ blueprintHistoryKey(BLUEPRINT) ], tx => tx.set(window.blueprintKey, [ 'events', 1, 'pages', 0, 'moveSpeed' ], 4));
+        return window.hub.edit('Edit Comment', [ eventHistoryKey(1, 5) ], tx => tx.splice('map:1', [ 'events', 5, 'pages', 0, 'list' ], 0, 0, [ { code: 108, indent: 0, parameters: [ '<moveSpeed:5.2>' ] } ]));
+      });
+
+      // Act.
+      const undone = [ mapWindow.hub.undo(mapHistoryKey(1)), blueprintWindow.hub.undo(blueprintHistoryKey(BLUEPRINT)) ];
+
+      // Assert: both guards slow again in each window, the comment still on map 1's guard, and still undoable in its window.
+      expect([ mapWindow, blueprintWindow ].map((window, index) => [
+        undone[index].ok,
+        eventOf(mapIn(window, 1), 5).pages[0].moveSpeed,
+        eventOf(mapIn(window, 2), 5).pages[0].moveSpeed,
+        eventOf(mapIn(window, 1), 5).pages[0].list[0].parameters,
+        window.hub.canUndo(eventHistoryKey(1, 5)).ok && window.hub.history(eventHistoryKey(1, 5)).rows[0].id === later[index]?.id,
+      ]))
+        .toStrictEqual([ [ true, 3, 3, [ '<moveSpeed:5.2>' ], true ], [ true, 3, 3, [ '<moveSpeed:5.2>' ], true ] ]);
+    });
+
     it('takes back the whole step from any map it reached', async () =>
     {
       // Arrange.
