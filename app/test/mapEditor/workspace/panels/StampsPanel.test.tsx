@@ -15,7 +15,7 @@ import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
 import { StampHistory } from '../../../../src/mapEditor/core/stamps/StampHistory.ts';
 import { WindowPaints } from '../../../../src/mapEditor/core/tools/WindowPaint.ts';
@@ -677,9 +677,12 @@ describe('StampsPanel: blueprints', () =>
  * Forgetting is a step in the blueprint's own history, written at once. A record that cannot be read says so, and shows
  * no blueprint, since none could be placed with no record to write into.
  *
- * The camp (aa22) is two objects side by side on layer 4. It is placed on map 3, held here, at 1, 0, where its objects
- * stand, and at 0, 1, where they do not; on map 7, which only the disk holds, with its objects there; and on map 8, which
- * is gone. On disk, event 5 on map 9 is a copy of its first event.
+ * Each copy a change to the blueprint no longer reaches says why under the map's copies: one whose map shows it drifted,
+ * and one the last change to the blueprint found it could not reach.
+ *
+ * The camp (aa22) is two objects side by side on layer 4, and a guard of one page. It is placed on map 3, held here, at
+ * 1, 0, where its objects stand, and at 0, 1, where they do not; on map 7, which only the disk holds, with its objects
+ * there; and on map 8, which is gone. On disk, event 5 on map 9, which is gone too, is a copy of its guard.
  */
 describe('StampsPanel: where a blueprint is used', () =>
 {
@@ -702,17 +705,28 @@ describe('StampsPanel: where a blueprint is used', () =>
   };
 
   /**
-   * The camp's stamp: its two objects, on layer 4 alone.
+   * The camp's stamp: its two objects, on layer 4 alone, and its guard, event 1, of one page.
    */
-  const CAMP = stampOf({ width: 2, tiles: { layers: [ 3 ], values: [ 10, 11 ], calledFor: [ -1, -1 ] }, events: [] });
+  const CAMP = stampOf({ width: 2, tiles: { layers: [ 3 ], values: [ 10, 11 ], calledFor: [ -1, -1 ] }, events: [ { ...createMapEvent(1, 0, 0), name: 'Guard' } ] });
+
+  /**
+   * What the where-used fixture may hold beyond the camp: copies of its guard standing on map 7, from event 1 on, and
+   * why the last change to the camp could not reach a copy, when it could not.
+   */
+  type UsesExtras = {
+    readonly copiesOnMap7?: readonly RmmzMapEvent[];
+    readonly driftOf?: (mapId: number, eventId: number) => string | null;
+  };
 
   /**
    * Renders the panel with the camp, its placements, and the maps as the fixture says, its card's list showing.
    * @param {readonly PlacedSpot[]} uses The placements the record holds.
+   * @param {UsesExtras} extras Copies on map 7, and the reasons the last change gave, when the test has any.
    * @returns {Promise<object>} The window's documents, the controller, what was saved, and what the dock was asked.
    */
-  const renderUses = async (uses: readonly PlacedSpot[]) =>
+  const renderUses = async (uses: readonly PlacedSpot[], extras: UsesExtras = {}) =>
   {
+    const { copiesOnMap7 = [], driftOf = () => null } = extras;
     const saved: DocumentKey[] = [];
     const hub = new DocumentHub({
       clientId: 'window-a',
@@ -724,7 +738,8 @@ describe('StampsPanel: where a blueprint is used', () =>
             throw new MapEditorApiError(`GET /api/maps/${key} answered 404`, 404);
           }
 
-          return mapWithObjects(4, 4, [ [ 2, 2, 10 ], [ 3, 2, 11 ] ]) as unknown as JsonValue;
+          const file = mapWithObjects(4, 4, [ [ 2, 2, 10 ], [ 3, 2, 11 ] ]);
+          return { ...file, events: [ null, ...copiesOnMap7 ] } as unknown as JsonValue;
         },
         save: async key =>
         {
@@ -735,7 +750,10 @@ describe('StampsPanel: where a blueprint is used', () =>
     hub.adopt('map:3', mapWithObjects(4, 3, [ [ 1, 0, 10 ], [ 2, 0, 11 ] ]) as unknown as JsonValue);
     holdBlueprints(hub, { aa22: { name: 'Goblin camp', stamp: CAMP } });
     holdBlueprintUses(hub, uses);
-    const notes = [ { mapId: 9, eventId: 5, note: '<blueprint:[aa22, 1]>' } ];
+    const notes = [
+      { mapId: 9, eventId: 5, note: '<blueprint:[aa22, 1]>' },
+      ...copiesOnMap7.map(copy => ({ mapId: 7, eventId: copy.id, note: copy.note })),
+    ];
     const blueprintCopies = new BlueprintCopyCounter({ hub, readNotes: async () => notes });
     const sync = { whenHeldOrDiscovered: async () => undefined, holders: () => [], requestSnapshot: async () => null };
     const server = new UsesServer(storedUses(uses));
@@ -746,6 +764,7 @@ describe('StampsPanel: where a blueprint is used', () =>
       stamps: new StampHistory('window-a'),
       paints: new WindowPaints(window),
       blueprintCopies,
+      copyMaps: { driftOf },
       openDocument: async (key: DocumentKey) => hub.document(key),
     } as unknown as MapEditorServices;
     const controller = new WorkspaceController(services);
@@ -818,6 +837,34 @@ describe('StampsPanel: where a blueprint is used', () =>
           'Map 9Event 5',
         ],
         'true',
+      ]);
+  });
+
+  it('says under a map\'s copies which ones a change to the blueprint no longer reaches, and why', async () =>
+  {
+    // Arrange: on map 7, a copy of the guard with a page more than the guard (1), one the last change could not reach
+    // (2), and one that follows (3).
+    const copyOfGuard = (eventId: number, pages: number): RmmzMapEvent =>
+    {
+      const event = createMapEvent(eventId, eventId - 1, 0);
+      return { ...event, note: '<blueprint:[aa22, 1]>', pages: Array.from({ length: pages }, () => event.pages[0]) };
+    };
+    const copiesOnMap7 = [ copyOfGuard(1, 2), copyOfGuard(2, 1), copyOfGuard(3, 1) ];
+    const driftOf = (mapId: number, eventId: number) => (mapId === 7 && eventId === 2 ? 'on page 1, its tag line cannot take the sight it must follow to' : null);
+
+    // Act.
+    await renderUses(PLACED, { copiesOnMap7, driftOf });
+
+    // Assert: the copy that follows says nothing more.
+    expect([ listed()[1], screen.getAllByTestId('copy-drifted').map(line => line.textContent) ])
+      .toStrictEqual([
+        'Map 7Placed at 2, 2Event 1Event 2Event 3'
+        + 'Event 1 no longer follows its blueprint: it has 2 pages and its blueprint has 1 page.'
+        + 'Event 2 no longer follows its blueprint: on page 1, its tag line cannot take the sight it must follow to.',
+        [
+          'Event 1 no longer follows its blueprint: it has 2 pages and its blueprint has 1 page.',
+          'Event 2 no longer follows its blueprint: on page 1, its tag line cannot take the sight it must follow to.',
+        ],
       ]);
   });
 

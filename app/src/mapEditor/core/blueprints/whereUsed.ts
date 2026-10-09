@@ -2,8 +2,12 @@ import { MapEditorApiError } from '../api/MapEditorApi.ts';
 import type { MapCell } from '../renderer/camera.ts';
 import type { Stamp } from '../stamps/stamp.ts';
 import type { BlueprintCopy } from './blueprintCopies.ts';
+import { ownNoteOf } from './blueprintFields.ts';
+import { blueprintLinkOf } from './blueprintLink.ts';
 import { cellsPlaced, type PlacedPart, type PlacedSpot } from './blueprintUses.ts';
-import { checkPlacement, placementProblem, type PlacementGround } from './placementMatch.ts';
+import { pagesWords } from './copyChanges.ts';
+import type { CopyGround } from './copyPlans.ts';
+import { checkPlacement, placementProblem } from './placementMatch.ts';
 
 /**
  * One placement in the where-used list: the cell its corner was put down at, and the part of its blueprint it put down
@@ -22,14 +26,24 @@ type MapUse = {
 };
 
 /**
- * What a look at a map a placement stands on came to: still on its way; the map, to check the placement against; gone,
- * deleted outside the editor; or not to be read, with why.
+ * What a look at a map a blueprint is used on came to: still on its way; the map, its tiles and its events, to check each
+ * placement and copy against; gone, deleted outside the editor; or not to be read, with why.
  */
 type LookedMap =
   | { readonly kind: 'looking' }
-  | { readonly kind: 'looked'; readonly ground: PlacementGround }
+  | { readonly kind: 'looked'; readonly ground: CopyGround }
   | { readonly kind: 'gone' }
   | { readonly kind: 'unreadable'; readonly message: string };
+
+/**
+ * Where one copy of a blueprint's events stands, for the where-used list: still being checked; following its blueprint;
+ * drifted too far for a change to reach, with why, in words for the author; or not to be told, with why.
+ */
+type CopyStanding =
+  | { readonly kind: 'checking' }
+  | { readonly kind: 'following' }
+  | { readonly kind: 'drifted'; readonly reason: string }
+  | { readonly kind: 'unknown'; readonly reason: string };
 
 /**
  * Where one placement stands, for the where-used list: still being checked; where the record says; no longer there, with
@@ -114,6 +128,62 @@ const standingOf = (looked: LookedMap | undefined, spot: UsedSpot, stamp: Stamp)
 };
 
 /**
+ * Works out where one copy of a blueprint's events stands, from a look at its map: drifted when no change can reach it as
+ * it stands (its page count is not its blueprint event's, the blueprint keeps no such event, or its note would read
+ * otherwise without its link), or when the last change to the blueprint could not reach it, for the reason it gave; and
+ * following otherwise. A copy no longer on its map as a copy of this blueprint stands nowhere it can be told.
+ * @param {LookedMap | undefined} looked The look at the copy's map, or undefined before one was asked for.
+ * @param {number} eventId The copy's id on its map.
+ * @param {Stamp} stamp The blueprint's stamp.
+ * @param {string} blueprintId The blueprint's id.
+ * @param {string | null} lastReason Why the last change to the blueprint could not reach the copy, or null when it did.
+ * @returns {CopyStanding} Where it stands.
+ */
+const copyStandingOf = (looked: LookedMap | undefined, eventId: number, stamp: Stamp, blueprintId: string, lastReason: string | null): CopyStanding =>
+{
+  if (looked === undefined || looked.kind === 'looking')
+  {
+    return { kind: 'checking' };
+  }
+
+  if (looked.kind !== 'looked')
+  {
+    return { kind: 'unknown', reason: looked.kind === 'gone' ? 'the map is gone' : `the map could not be read (${looked.message})` };
+  }
+
+  const copy = looked.ground.events[eventId] ?? null;
+  const link = copy === null ? null : blueprintLinkOf(copy.note);
+  if (copy === null || link === null || link.blueprintId !== blueprintId)
+  {
+    return { kind: 'unknown', reason: 'it is no longer a copy of this blueprint' };
+  }
+
+  const source = stamp.events.find(event => event.id === link.eventId) ?? null;
+  if (source === null)
+  {
+    return { kind: 'drifted', reason: 'its blueprint keeps no such event any more' };
+  }
+
+  if (copy.pages.length !== source.pages.length)
+  {
+    return { kind: 'drifted', reason: `it has ${pagesWords(copy.pages.length)} and its blueprint has ${pagesWords(source.pages.length)}` };
+  }
+
+  try
+  {
+    ownNoteOf(copy);
+  }
+  catch (error)
+  {
+    return { kind: 'drifted', reason: `in its note, ${(error as Error).message}` };
+  }
+
+  return lastReason === null
+    ? { kind: 'following' }
+    : { kind: 'drifted', reason: lastReason };
+};
+
+/**
  * Finds the cell to centre on to show a placement: the middle of the cells its tiles went down on, as near as a cell can
  * be, so one hanging over the map's edge is shown by the part on the map.
  * @param {UsedSpot} spot Where its top-left corner sits, and its part placed.
@@ -126,5 +196,5 @@ const placementMiddle = (spot: UsedSpot, size: { readonly width: number; readonl
   return { x: cells.x + Math.floor(cells.width / 2), y: cells.y + Math.floor(cells.height / 2) };
 };
 
-export { lookFailure, placementMiddle, standingOf, whereUsed };
-export type { LookedMap, MapUse, PlacementStanding, UsedSpot };
+export { copyStandingOf, lookFailure, placementMiddle, standingOf, whereUsed };
+export type { CopyStanding, LookedMap, MapUse, PlacementStanding, UsedSpot };

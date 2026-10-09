@@ -3,7 +3,7 @@ import { Box, Button, Stack, Typography } from '@mui/material';
 import type { BlueprintCopy } from '../../core/blueprints/blueprintCopies.ts';
 import type { Blueprint } from '../../core/blueprints/blueprints.ts';
 import type { PlacedSpot } from '../../core/blueprints/blueprintUses.ts';
-import { lookFailure, placementMiddle, standingOf, whereUsed, type LookedMap } from '../../core/blueprints/whereUsed.ts';
+import { copyStandingOf, lookFailure, placementMiddle, standingOf, whereUsed, type LookedMap } from '../../core/blueprints/whereUsed.ts';
 import { MAP_INFOS_KEY, mapDocumentKey } from '../../core/model/documentKeys.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
 import { lookAtDocument } from '../../core/sync/lookAtDocument.ts';
@@ -15,10 +15,10 @@ import { useHubVersion, useWorkspace } from '../workspaceHooks.tsx';
 const PLACE_BUTTON = { fontSize: 12, py: 0, px: 0.5, minWidth: 0, textTransform: 'none' } as const;
 
 /**
- * Looks at every map the placements stand on, for checking each placement against its blueprint: a map the window holds
- * is read as it stands, unsaved edits and all, every time anything changes; any other is looked at without being held
- * (another window's copy, or the file), each time the list opens and each time the maps it lists change. A map the tree
- * no longer lists is gone, with nothing to look at.
+ * Looks at every map the blueprint is used on, for checking each placement and each copy against it: a map the window
+ * holds is read as it stands, unsaved edits and all, every time anything changes; any other is looked at without being
+ * held (another window's copy, or the file), each time the list opens and each time the maps it lists change. A map the
+ * tree no longer lists is gone, with nothing to look at.
  * @param {readonly number[]} mapIds The maps.
  * @returns {ReadonlyMap<number, LookedMap>} What each look came to, by map id; a map not looked at yet is missing.
  */
@@ -127,10 +127,52 @@ const PlacementRow = (props: {
 };
 
 /**
+ * The copies of a blueprint's events on one map, each a button that opens the map at it; and under them, each copy a
+ * change to the blueprint no longer reaches, saying why.
+ * @param {object} props The map, its copies by id, the blueprint, and the look at the map.
+ * @returns {React.JSX.Element} The rows.
+ */
+const CopyRows = (props: {
+  readonly mapId: number;
+  readonly eventIds: readonly number[];
+  readonly blueprint: Blueprint;
+  readonly looked: LookedMap | undefined;
+}) =>
+{
+  const { mapId, eventIds, blueprint, looked } = props;
+  const controller = useWorkspace();
+  const { copyMaps } = controller.services;
+
+  // a copy drifts by what it holds, which the look shows, or by what the last change to its blueprint found.
+  const drifted = eventIds.flatMap(eventId =>
+  {
+    const standing = copyStandingOf(looked, eventId, blueprint.stamp, blueprint.id, copyMaps.driftOf(mapId, eventId));
+    return standing.kind === 'drifted' ? [ { eventId, reason: standing.reason } ] : [];
+  });
+
+  return (
+    <>
+      <Stack direction={'row'} flexWrap={'wrap'} sx={{ pl: 1 }}>
+        {eventIds.map(eventId => (
+          <Button key={eventId} size={'small'} sx={PLACE_BUTTON} onClick={() => controller.openMap(mapId, { focusEventId: eventId })}>
+            {`Event ${eventId}`}
+          </Button>
+        ))}
+      </Stack>
+      {drifted.map(({ eventId, reason }) => (
+        <Typography key={eventId} variant={'caption'} color={'warning.main'} data-testid={'copy-drifted'} sx={{ display: 'block', pl: 1.5 }}>
+          {`Event ${eventId} no longer follows its blueprint: ${reason}.`}
+        </Typography>
+      ))}
+    </>
+  );
+};
+
+/**
  * Where one blueprint is used, map by map: each placement of its tiles, at the cell its corner was put down at, checked
- * against the blueprint, so one no longer where it was says why and can be forgotten; and each copy of its events. A
- * click on either opens the map there. The placements come from the record of where blueprints are placed, the copies
- * from the maps' notes.
+ * against the blueprint, so one no longer where it was says why and can be forgotten; and each copy of its events, so one
+ * a change no longer reaches says why. A click on either opens the map there. The placements come from the record of
+ * where blueprints are placed, the copies from the maps' notes.
  * @param {object} props The blueprint, its placements and its event copies, whether those are still being counted, and
  * what forgetting a placement does.
  * @returns {React.JSX.Element} The list.
@@ -146,7 +188,7 @@ const BlueprintWhereUsed = (props: {
   const { blueprint, spots, copies, counting, onForget } = props;
   const controller = useWorkspace();
   const uses = whereUsed(spots, copies);
-  const looked = useLookedMaps(uses.filter(use => use.spots.length > 0).map(use => use.mapId));
+  const looked = useLookedMaps(uses.map(use => use.mapId));
 
   return (
     <Stack spacing={0.5} sx={{ px: 0.75, pb: 0.75 }} data-testid={'blueprint-where-used'}>
@@ -170,13 +212,7 @@ const BlueprintWhereUsed = (props: {
             />
           ))}
           {use.eventIds.length > 0 && (
-            <Stack direction={'row'} flexWrap={'wrap'} sx={{ pl: 1 }}>
-              {use.eventIds.map(eventId => (
-                <Button key={eventId} size={'small'} sx={PLACE_BUTTON} onClick={() => controller.openMap(use.mapId, { focusEventId: eventId })}>
-                  {`Event ${eventId}`}
-                </Button>
-              ))}
-            </Stack>
+            <CopyRows mapId={use.mapId} eventIds={use.eventIds} blueprint={blueprint} looked={looked.get(use.mapId)} />
           )}
         </Box>
       ))}
