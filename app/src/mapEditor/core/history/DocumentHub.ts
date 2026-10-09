@@ -99,10 +99,12 @@ type HubSource = 'local' | 'remote';
  * listen here. Every operation event carries the operation's id and the heads it was made against, which is
  * what other windows check before repeating it. A save names the window that wrote the file, this one's own id for
  * a save made or found here. A change to the file of a document kept alongside others is handed on as it was read,
- * with nothing done to the document, for whoever keeps it to merge.
+ * with nothing done to the document, for whoever keeps it to merge. An edit the window's commit checks refused is
+ * announced with why, once it is put back, so whoever shows the author things can say so; nothing else happened.
  */
 type HubEvent =
   | { readonly type: 'committed'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
+  | { readonly type: 'refused'; readonly label: string; readonly histories: readonly HistoryKey[]; readonly message: string }
   | { readonly type: 'undone'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
   | { readonly type: 'redone'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
   | { readonly type: 'forgotten'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
@@ -126,6 +128,15 @@ type HubEvent =
  * Hears every hub event.
  */
 type HubListener = (event: HubEvent) => void;
+
+/**
+ * Looks over an edit made in this window just before it becomes a step: says why it must not, in words for the author,
+ * or null to let it through. The edit is still open, every patch of it in its document, so a check reads each document
+ * as the edit leaves it, and the edit's own patches from its entries. A check may add patches of its own to it, which
+ * then become part of the same step, and of what a later check reads. It is asked of every edit the window makes,
+ * whatever its history, and never of another window's, which its own checks looked over.
+ */
+type CommitCheck = (transaction: Transaction) => string | null;
 
 /**
  * An operation made in another window, to be repeated here. {@code bases} holds the head of each touched
@@ -406,6 +417,10 @@ const carriedStepFinder = (snapshot: DocumentSnapshot): (id: string) => HistoryS
  * A step that fails is refused before anything is applied, naming the edit in the way, and a redone step becomes
  * the newest done step in every history it belongs to.
  *
+ * Every edit made in this window passes the window's commit checks before it becomes a step (see {@link addCommitCheck}):
+ * one they refuse is put back whole, recorded in no history, and announced with why. That is how a document with rules
+ * of its own beyond any patch's, such as a blueprint opened as a map, keeps to them whatever tool edits it.
+ *
  * Saving writes a document's committed content and records which steps the file now reflects; it never touches
  * history, so undo after a save works, and undoing back to the saved state makes the document clean again.
  *
@@ -465,6 +480,11 @@ class DocumentHub
 
   #listeners = new Set<HubListener>();
 
+  /**
+   * What every edit made here passes before it becomes a step, in the order they were added.
+   */
+  #checks: CommitCheck[] = [];
+
   #transaction: Transaction | null = null;
 
   #queue: RemoteOperation[] = [];
@@ -479,8 +499,10 @@ class DocumentHub
 
   #host: TransactionHost = {
     document: (key: DocumentKey) => this.document(key),
+    review: (transaction: Transaction) => this.#review(transaction),
     finish: (transaction: Transaction, entries: readonly StepEntry[]) => this.#finish(transaction, entries),
     abandon: () => this.#abandon(),
+    refuse: (transaction: Transaction, message: string) => this.#refuse(transaction, message),
   };
 
   /**
@@ -837,6 +859,59 @@ class DocumentHub
     return transaction.isOpen
       ? transaction.commit()
       : null;
+  }
+
+  /**
+   * Adds a check every edit made in this window passes before it becomes a step (see {@link CommitCheck}). An edit the
+   * first refusing check refuses is put back whole, recorded in no history, and announced as {@code refused} with the
+   * check's words; the checks after it are not asked. One that changed nothing is never asked about.
+   * @param {CommitCheck} check The check.
+   * @returns {() => void} Takes the check away again.
+   */
+  addCommitCheck(check: CommitCheck): () => void
+  {
+    this.#checks = [ ...this.#checks, check ];
+    return () =>
+    {
+      this.#checks = this.#checks.filter(each => each !== check);
+    };
+  }
+
+  /**
+   * Asks every check about a finished edit, in order, until one refuses it.
+   * @param {Transaction} transaction The edit, still open.
+   * @returns {string | null} Why it is refused, or null when every check lets it through.
+   */
+  #review(transaction: Transaction): string | null
+  {
+    // an edit that changed nothing becomes no step, so there is nothing to refuse.
+    if (transaction.entries.length === 0)
+    {
+      return null;
+    }
+
+    for (const check of this.#checks)
+    {
+      const refusal = check(transaction);
+      if (refusal !== null)
+      {
+        return refusal;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Forgets an edit a check refused, its patches already put back, and says why.
+   * @param {Transaction} transaction The edit.
+   * @param {string} message Why it was refused.
+   */
+  #refuse(transaction: Transaction, message: string): void
+  {
+    this.#transaction = null;
+    this.#emit({ type: 'refused', label: transaction.label, histories: [ ...transaction.histories ], message });
+    this.#drainQueue();
   }
 
   /**
@@ -2110,6 +2185,7 @@ class DocumentHub
 
 export { diskOperationId, DocumentHub };
 export type {
+  CommitCheck,
   DocumentConflict,
   DocumentHubOptions,
   DocumentSnapshot,

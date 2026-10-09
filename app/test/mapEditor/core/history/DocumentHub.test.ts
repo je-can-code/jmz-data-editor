@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   diskOperationId,
   DocumentHub,
+  type CommitCheck,
   type DocumentSnapshot,
   type DocumentStore,
   type HubEvent,
@@ -421,6 +422,203 @@ describe('DocumentHub', () =>
       // Assert.
       expect(run)
         .toThrow(/has no tiles/u);
+    });
+  });
+
+  /*
+   * A window's commit checks are how a document with rules beyond any patch's keeps to them, whatever tool edits it: a
+   * blueprint opened as a map keeps its size and its events however it is painted or edited. So an edit a check refuses
+   * must leave no trace (every document as it was, no step in any history, nothing unsaved, the hub free for the next
+   * edit), and the author must hear why. A check reads the edit as it leaves the documents, and may add to it, which is
+   * how a change can be carried further as part of the same step. Only this window's own edits are asked about.
+   */
+  describe('commit checks', () =>
+  {
+    /**
+     * A check refusing any edit that changes map 2, in the words given, and letting every other through.
+     * @param {string} words Why it refuses.
+     * @returns {CommitCheck} The check.
+     */
+    const keepsMapB = (words: string): CommitCheck => transaction =>
+    {
+      return transaction.entries.some(entry => entry.document === MAP_B) ? words : null;
+    };
+
+    it('puts back an edit a check refuses, recording nothing anywhere, and says why', () =>
+    {
+      // Arrange: an edit to both maps, which the check refuses for touching map 2.
+      const hub = buildHub();
+      hub.addCommitCheck(keepsMapB('map 2 stays as it is'));
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+      const before = { ...stateOf(hub, [ mapHistoryKey(1), mapHistoryKey(2) ]), revisions: null };
+
+      // Act.
+      const step = hub.edit('Rename both', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.set(MAP_A, [ 'displayName' ], 'Harbor');
+        tx.set(MAP_B, [ 'displayName' ], 'Harbor too');
+      });
+
+      // Assert.
+      expect([ step, { ...stateOf(hub, [ mapHistoryKey(1), mapHistoryKey(2) ]), revisions: null }, events ])
+        .toStrictEqual([
+          null,
+          before,
+          [ { type: 'refused', label: 'Rename both', histories: [ 'map:1', 'map:2' ], message: 'map 2 stays as it is' } ],
+        ]);
+    });
+
+    it('lets through an edit every check passes, and takes the next edit after one it refused', () =>
+    {
+      // Arrange: a refused edit to map 2 first.
+      const hub = buildHub();
+      hub.addCommitCheck(keepsMapB('map 2 stays as it is'));
+      hub.edit('Rename B', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+
+      // Act.
+      const step = hub.edit('Rename A', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect([ step?.label, fileOf(hub, MAP_A).displayName, fileOf(hub, MAP_B).displayName, hub.history(mapHistoryKey(2)).rows ])
+        .toStrictEqual([ 'Rename A', 'Harbor', 'Test Town', [] ]);
+    });
+
+    it('asks the checks in the order they were added, stopping at the first that refuses', () =>
+    {
+      // Arrange: one passing, then two refusing.
+      const hub = buildHub();
+      const asked: string[] = [];
+      hub.addCommitCheck(() =>
+      {
+        asked.push('first');
+        return null;
+      });
+      hub.addCommitCheck(() =>
+      {
+        asked.push('second');
+        return 'the second says no';
+      });
+      hub.addCommitCheck(() =>
+      {
+        asked.push('third');
+        return 'the third says no';
+      });
+      const refusals: string[] = [];
+      hub.subscribe(event => (event.type === 'refused' ? refusals.push(event.message) : undefined));
+
+      // Act.
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect([ asked, refusals ])
+        .toStrictEqual([ [ 'first', 'second' ], [ 'the second says no' ] ]);
+    });
+
+    it('shows a check the edit as it leaves the documents, and keeps what the check adds as part of the same step', () =>
+    {
+      // Arrange: a check that names map 2 after map 1 as part of every edit renaming map 1.
+      const hub = buildHub();
+      const seen: unknown[] = [];
+      hub.addCommitCheck(transaction =>
+      {
+        seen.push(hub.document(MAP_A).valueAt([ 'displayName' ]), transaction.entries.length);
+        transaction.set(MAP_B, [ 'displayName' ], `After ${String(hub.document(MAP_A).valueAt([ 'displayName' ]))}`);
+        return null;
+      });
+
+      // Act.
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      const named = fileOf(hub, MAP_B).displayName;
+      hub.undo(mapHistoryKey(1));
+
+      // Assert: one step held both, and one undo took both back.
+      expect([ seen, step.entries.map(entry => entry.document), named, fileOf(hub, MAP_A).displayName, fileOf(hub, MAP_B).displayName ])
+        .toStrictEqual([ [ 'Harbor', 1 ], [ MAP_A, MAP_B ], 'After Harbor', 'Test Town', 'Test Town' ]);
+    });
+
+    it('never asks about an edit that changed nothing', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      const check = vi.fn(() => 'never');
+      hub.addCommitCheck(check);
+
+      // Act.
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Test Town'));
+
+      // Assert.
+      expect([ step, check.mock.calls.length ])
+        .toStrictEqual([ null, 0 ]);
+    });
+
+    it('refuses a transaction opened with begin at its commit, putting back everything it showed', () =>
+    {
+      // Arrange: a stroke over map 2, which shows as it goes.
+      const hub = buildHub();
+      hub.addCommitCheck(keepsMapB('map 2 stays as it is'));
+      const before = fileOf(hub, MAP_B);
+      const stroke = hub.begin('Paint', [ mapHistoryKey(2) ]);
+      stroke.tiles(MAP_B, [ [ 0, 900 ] ]);
+      const [ midStroke ] = hub.map('map:2').cells;
+
+      // Act.
+      const step = stroke.commit();
+
+      // Assert: the hub takes another edit at once.
+      expect([ midStroke, step, fileOf(hub, MAP_B), stroke.isOpen, hub.begin('Next', [ mapHistoryKey(1) ]).isOpen ])
+        .toStrictEqual([ 900, null, before, false, true ]);
+    });
+
+    it('puts the edit back when a check fails outright, the failure going on up, and takes the next edit', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      const remove = hub.addCommitCheck(() =>
+      {
+        throw new Error('the check broke');
+      });
+
+      // Act.
+      const run = () => hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect(run)
+        .toThrow('the check broke');
+      remove();
+      expect([ fileOf(hub, MAP_A).displayName, hub.history(mapHistoryKey(1)).rows, hub.edit('Again', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'x'))?.label ])
+        .toStrictEqual([ 'Test Town', [], 'Again' ]);
+    });
+
+    it('stops asking a check once it is taken away', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      const remove = hub.addCommitCheck(keepsMapB('map 2 stays as it is'));
+
+      // Act.
+      remove();
+      const step = hub.edit('Rename B', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect([ step?.label, fileOf(hub, MAP_B).displayName ])
+        .toStrictEqual([ 'Rename B', 'Harbor' ]);
+    });
+
+    it('never asks about another window\'s edit, which that window\'s own checks looked over', () =>
+    {
+      // Arrange: the second window refuses edits to map 2, the first does not.
+      const first = buildHub(undefined, 'window-a');
+      const second = buildHub(undefined, 'window-b');
+      second.addCommitCheck(keepsMapB('map 2 stays as it is'));
+      mirror(first, second);
+
+      // Act.
+      first.edit('Rename B', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect([ fileOf(second, MAP_B).displayName, second.history(mapHistoryKey(2)).rows.map(row => row.label) ])
+        .toStrictEqual([ 'Harbor', [ 'Rename B' ] ]);
     });
   });
 

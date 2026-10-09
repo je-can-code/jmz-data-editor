@@ -19,6 +19,14 @@ type TransactionHost = {
   document(key: DocumentKey): EditorDocument;
 
   /**
+   * Looks a finished edit over just before it becomes a step, while it is still open: says why it must not become one,
+   * in words for the author, or null to let it through.
+   * @param {Transaction} transaction The transaction, its patches applied.
+   * @returns {string | null} Why it is refused, or null.
+   */
+  review(transaction: Transaction): string | null;
+
+  /**
    * Records the finished transaction as one step.
    * @param {Transaction} transaction The transaction.
    * @param {readonly StepEntry[]} entries Its patches, already applied.
@@ -31,11 +39,19 @@ type TransactionHost = {
    * @param {Transaction} transaction The transaction.
    */
   abandon(transaction: Transaction): void;
+
+  /**
+   * Forgets a transaction its review refused, once every patch it applied has been put back, and says why.
+   * @param {Transaction} transaction The transaction.
+   * @param {string} message Why it was refused, in words for the author.
+   */
+  refuse(transaction: Transaction, message: string): void;
 };
 
 /**
  * An edit in progress: patches applied live as they are added, so a brush stroke or a dragged slider shows at
- * once, and recorded as one named step when committed. Cancelling puts everything back.
+ * once, and recorded as one named step when committed. Cancelling puts everything back, and so does a commit the
+ * window's checks refuse (see DocumentHub's addCommitCheck), which then records nothing.
  *
  * Patches may land on several documents; the step then belongs to every history the transaction names, and
  * undoes as one step from any of them.
@@ -211,13 +227,33 @@ class Transaction
   }
 
   /**
-   * Finishes the edit as one step in every history it names.
-   * @returns {HistoryStep | null} The step, or null when nothing changed.
+   * Finishes the edit as one step in every history it names, once the window's checks have looked it over while it
+   * is still open. An edit they refuse is put back whole and recorded nowhere, and the hub says why; one whose check
+   * fails outright is put back too, and the failure goes on up.
+   * @returns {HistoryStep | null} The step, or null when nothing changed or the edit was refused.
    */
   commit(): HistoryStep | null
   {
     this.#requireOpen();
+    let refusal: string | null = null;
+    try
+    {
+      refusal = this.#host.review(this);
+    }
+    catch (error)
+    {
+      this.cancel();
+      throw error;
+    }
+
     this.#open = false;
+    if (refusal !== null)
+    {
+      this.#reverse();
+      this.#host.refuse(this, refusal);
+      return null;
+    }
+
     return this.#host.finish(this, this.#entries);
   }
 
@@ -228,14 +264,20 @@ class Transaction
   {
     this.#requireOpen();
     this.#open = false;
+    this.#reverse();
+    this.#host.abandon(this);
+  }
 
+  /**
+   * Puts back every patch applied so far.
+   */
+  #reverse(): void
+  {
     // reverse newest first, so each inverse finds exactly what its patch left.
     [ ...this.#entries ].reverse().forEach(entry =>
     {
       this.#host.document(entry.document).apply(invertPatch(entry.patch));
     });
-
-    this.#host.abandon(this);
   }
 
   /**
