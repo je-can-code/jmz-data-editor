@@ -5,13 +5,16 @@ import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import type { DockviewApi } from 'dockview-react';
+import { MapEditorApiError } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { BlueprintCopyCounter, type EventNote } from '../../../../src/mapEditor/core/blueprints/blueprintCopies.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintsOf } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
-import { BLUEPRINT_USES_DOCUMENT, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
+import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
+import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
 import { StampHistory } from '../../../../src/mapEditor/core/stamps/StampHistory.ts';
 import { WindowPaints } from '../../../../src/mapEditor/core/tools/WindowPaint.ts';
@@ -21,6 +24,7 @@ import { StampsPanel } from '../../../../src/mapEditor/workspace/panels/StampsPa
 import { WorkspaceController } from '../../../../src/mapEditor/workspace/WorkspaceController.ts';
 import { WorkspaceProvider } from '../../../../src/mapEditor/workspace/workspaceHooks.tsx';
 import { holdBlueprints, holdBlueprintUses, storedBlueprints, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
+import { mapWithEvents } from '../../support/eventFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
@@ -627,6 +631,248 @@ describe('StampsPanel: blueprints', () =>
 
     // Assert.
     expect([ screen.getByText('The blueprints could not be read: editor-data:blueprints is not on disk') !== null, screen.queryByRole('button', { name: 'Save as blueprint' }) ])
+      .toStrictEqual([ true, null ]);
+  });
+});
+
+/*
+ * Where each blueprint is used, which its card shows on asking, stretched across the panel: map by map, each placement of
+ * its tiles at the cell its corner went down at, checked against the blueprint, so one no longer where it was says why,
+ * in plain words, and can be forgotten; and each copy of its events. A click on either opens the map there. A placement
+ * counts as one copy of the blueprint, as each copy of one of its events does, on the card and in a refused delete.
+ * Forgetting is a step in the blueprint's own history, written at once. A record that cannot be read says so, and shows
+ * no blueprint, since none could be placed with no record to write into.
+ *
+ * The camp (aa22) is two objects side by side on layer 4. It is placed on map 3, held here, at 1, 0, where its objects
+ * stand, and at 0, 1, where they do not; on map 7, which only the disk holds, with its objects there; and on map 8, which
+ * is gone. On disk, event 5 on map 9 is a copy of its first event.
+ */
+describe('StampsPanel: where a blueprint is used', () =>
+{
+  /**
+   * Builds a map file of a size with objects on layer 4.
+   * @param {number} width The width.
+   * @param {number} height The height.
+   * @param {readonly [ number, number, number ][]} objects Each object's column, row and tile.
+   * @returns {RmmzMap} The file.
+   */
+  const mapWithObjects = (width: number, height: number, objects: readonly [ number, number, number ][]): RmmzMap =>
+  {
+    const file = mapWithEvents(width, height, [ null ]);
+    objects.forEach(([ x, y, tileId ]) =>
+    {
+      file.data[(3 * height + y) * width + x] = tileId;
+    });
+
+    return file;
+  };
+
+  /**
+   * The camp's stamp: its two objects, on layer 4 alone.
+   */
+  const CAMP = stampOf({ width: 2, tiles: { layers: [ 3 ], values: [ 10, 11 ], calledFor: [ -1, -1 ] }, events: [] });
+
+  /**
+   * Renders the panel with the camp, its placements, and the maps as the fixture says, its card's list showing.
+   * @param {readonly PlacedSpot[]} uses The placements the record holds.
+   * @returns {Promise<object>} The window's documents, the controller, what was saved, and what the dock was asked.
+   */
+  const renderUses = async (uses: readonly PlacedSpot[]) =>
+  {
+    const saved: DocumentKey[] = [];
+    const hub = new DocumentHub({
+      clientId: 'window-a',
+      store: {
+        load: async key =>
+        {
+          if (key !== 'map:7')
+          {
+            throw new MapEditorApiError(`GET /api/maps/${key} answered 404`, 404);
+          }
+
+          return mapWithObjects(4, 4, [ [ 2, 2, 10 ], [ 3, 2, 11 ] ]) as unknown as JsonValue;
+        },
+        save: async key =>
+        {
+          saved.push(key);
+        },
+      },
+    });
+    hub.adopt('map:3', mapWithObjects(4, 3, [ [ 1, 0, 10 ], [ 2, 0, 11 ] ]) as unknown as JsonValue);
+    holdBlueprints(hub, { aa22: { name: 'Goblin camp', stamp: CAMP } });
+    holdBlueprintUses(hub, uses);
+    const notes = [ { mapId: 9, eventId: 5, note: '<blueprint:[aa22, 1]>' } ];
+    const blueprintCopies = new BlueprintCopyCounter({ hub, readNotes: async () => notes });
+    const sync = { whenHeldOrDiscovered: async () => undefined, holders: () => [], requestSnapshot: async () => null };
+    const services = {
+      hub,
+      sync,
+      api: { loadImage: vi.fn(async () => null) },
+      stamps: new StampHistory('window-a'),
+      paints: new WindowPaints(window),
+      blueprintCopies,
+      openDocument: async (key: DocumentKey) => hub.document(key),
+    } as unknown as MapEditorServices;
+    const controller = new WorkspaceController(services);
+    const added: string[] = [];
+    const dock = {
+      panels: [],
+      getPanel: () => undefined,
+      addPanel: (options: { id: string }) =>
+      {
+        added.push(options.id);
+        return null;
+      },
+    };
+    controller.attach(dock as unknown as DockviewApi);
+    render(
+      <MapEditorServicesProvider services={services}>
+        <WorkspaceProvider controller={controller}>
+          <StampsPanel/>
+        </WorkspaceProvider>
+      </MapEditorServicesProvider>
+    );
+    await act(async () =>
+    {
+      await blueprintCopies.settled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Where used' }));
+    await act(async () =>
+    {
+      await new Promise(resolve =>
+      {
+        setTimeout(resolve, 0);
+      });
+    });
+    return { hub, controller, saved, added };
+  };
+
+  /**
+   * The camp's four placements.
+   */
+  const PLACED: readonly PlacedSpot[] = [
+    { blueprintId: 'aa22', mapId: 3, x: 1, y: 0 },
+    { blueprintId: 'aa22', mapId: 3, x: 0, y: 1 },
+    { blueprintId: 'aa22', mapId: 7, x: 2, y: 2 },
+    { blueprintId: 'aa22', mapId: 8, x: 0, y: 0 },
+  ];
+
+  /**
+   * Reads what the list says, map by map.
+   * @returns {string[]} Each map's words.
+   */
+  const listed = (): string[] =>
+  {
+    return screen.queryAllByTestId('where-used-map').map(map => map.textContent ?? '');
+  };
+
+  it('lists where the blueprint is used map by map, each placement checked against it, and each copy of its events', async () =>
+  {
+    // Arrange: nothing beyond the fixture.
+
+    // Act.
+    await renderUses(PLACED);
+
+    // Assert: a placement in place says nothing more; one no longer there says why, and offers to forget it.
+    expect([ listed(), screen.getByRole('button', { name: 'Where used' }).getAttribute('aria-expanded') ])
+      .toStrictEqual([
+        [
+          'Map 3Placed at 1, 0Placed at 0, 1No longer where it was: none of the tiles there match the blueprint any more.Forget',
+          'Map 7Placed at 2, 2',
+          'Map 8Placed at 0, 0No longer where it was: the map is gone.Forget',
+          'Map 9Event 5',
+        ],
+        'true',
+      ]);
+  });
+
+  it('counts each placement as a copy, and refuses to delete a blueprint still placed, in the words the refusal uses', async () =>
+  {
+    // Arrange.
+    const { controller } = await renderUses(PLACED);
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    // Assert.
+    expect([ screen.getByTestId('blueprint-copies').textContent, controller.getState().notice?.text ])
+      .toStrictEqual([
+        '5 copies on 4 maps',
+        '"Goblin camp" still has 5 copies, on Map 3 (2), Map 7 (1), Map 8 (1) and Map 9 (1), so it can\'t be deleted.',
+      ]);
+  });
+
+  it('forgets a placement no longer where it was as a step in the blueprint\'s history, writing the record at once', async () =>
+  {
+    // Arrange.
+    const { hub, controller, saved } = await renderUses(PLACED);
+
+    // Act: the placement on map 8, whose map is gone.
+    fireEvent.click(within(screen.getAllByTestId('where-used-map')[2]).getByRole('button', { name: 'Forget' }));
+    await act(async () =>
+    {
+      await Promise.resolve();
+    });
+
+    // Assert.
+    expect([ usesOf(hub.document(BLUEPRINT_USES_DOCUMENT)).map(spot => spot.mapId), saved, controller.getState().activeHistory, controller.getState().notice?.text ])
+      .toStrictEqual([ [ 3, 3, 7 ], [ BLUEPRINT_USES_DOCUMENT ], 'blueprint:aa22', 'Forgot a copy of "Goblin camp" on Map 8.' ]);
+  });
+
+  it('opens the map at a placement\'s middle, or at a copy of its events, when either is clicked', async () =>
+  {
+    // Arrange.
+    const { controller, added } = await renderUses(PLACED);
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Placed at 2, 2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Event 5' }));
+
+    // Assert: the camp is two wide, so its middle is a cell to the right of its corner.
+    expect([ added, controller.getState().cellFocus[7]?.cell, controller.getState().eventFocus[9]?.eventId ])
+      .toStrictEqual([ [ 'map-7', 'map-9' ], { x: 3, y: 2 }, 5 ]);
+  });
+
+  it('says a blueprint used nowhere is not placed yet, and hides the list on asking again', async () =>
+  {
+    // Arrange: no placements, and an event copy no longer on disk.
+    await renderUses([]);
+    const unplaced = screen.getByTestId('blueprint-where-used').textContent;
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Where used' }));
+
+    // Assert: the copy of its events on map 9 still lists.
+    expect([ unplaced, screen.queryByTestId('blueprint-where-used') ])
+      .toStrictEqual([ 'Map 9Event 5', null ]);
+  });
+
+  it('says where blueprints are placed could not be read, showing no blueprint', () =>
+  {
+    // Arrange: a record holding a list where its maps should be.
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    holdBlueprints(hub, { aa22: { name: 'Goblin camp', stamp: CAMP } });
+    hub.adopt(BLUEPRINT_USES_DOCUMENT, { schemaVersion: 1, data: { maps: [] } });
+    const services = {
+      hub,
+      api: {},
+      stamps: new StampHistory('window-a'),
+      paints: new WindowPaints(window),
+      blueprintCopies: new BlueprintCopyCounter({ hub, readNotes: null }),
+      openDocument: async (key: DocumentKey) => hub.document(key),
+    } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <WorkspaceProvider controller={new WorkspaceController(services)}>
+          <StampsPanel/>
+        </WorkspaceProvider>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert.
+    expect([ screen.queryByText('Where blueprints are placed could not be read: the saved blueprint placements are not a record of placements') !== null, screen.queryByTestId('blueprint-card') ])
       .toStrictEqual([ true, null ]);
   });
 });

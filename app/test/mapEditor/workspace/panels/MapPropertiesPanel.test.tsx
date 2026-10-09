@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { MapEditorApiError, type MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
@@ -18,14 +19,18 @@ import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEd
 import { MapPropertiesPanel } from '../../../../src/mapEditor/workspace/panels/MapPropertiesPanel.tsx';
 import { WorkspaceController } from '../../../../src/mapEditor/workspace/WorkspaceController.ts';
 import { WorkspaceProvider } from '../../../../src/mapEditor/workspace/workspaceHooks.tsx';
+import { holdBlueprints, holdBlueprintUses } from '../../support/blueprintFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 import { buildTreeRows } from '../../support/treeFixtures.ts';
 
 /*
  * A resize moves the map's tiles and events, and never touches another map, so every transfer landing on the map
  * keeps naming the old tile numbers. The resize form owes the author the list of those transfers before the resize
  * is made: each one whose tile the anchor moves or cuts off, from the maps on disk and from the maps open here as
- * they stand, and none when every landing tile stays put. While the list is being checked, the resize waits.
+ * they stand, and none when every landing tile stays put. While the list is being checked, the resize waits. It warns
+ * too of every copy of a blueprint the new size would leave wholly outside, and the record of where blueprints are
+ * placed moves with the map.
  *
  * The sections the plugin modules add, such as J-Lighting's darkness, show once the modules switch on, which can be
  * after the panel first drew, and sit just above the note they write into; while no module adds one, there are none.
@@ -41,12 +46,17 @@ describe('MapPropertiesPanel', () =>
    * plugin modules not yet switched on.
    * @param {() => Promise<MapArrival[]>} loadArrivals What the server answers.
    * @param {string} note The cave's note.
+   * @param {readonly PlacedSpot[]} placed Placements of a blueprint two cells wide (aa22), which the window holds with
+   * the record of them.
    * @returns {Promise<object>} The hub, and the window's plugin modules.
    */
-  const renderCave = async (loadArrivals: () => Promise<MapArrival[]>, note = '') =>
+  const renderCave = async (loadArrivals: () => Promise<MapArrival[]>, note = '', placed: readonly PlacedSpot[] = []) =>
   {
     const hub = new DocumentHub({ clientId: 'window-a' });
     hub.adopt('map:5', { ...buildMapJson(), note } as unknown as JsonValue);
+    const lanterns = stampOf({ width: 2, tiles: { layers: [ 3 ], values: [ 10, 10 ], calledFor: [ -1, -1 ] }, events: [] });
+    holdBlueprints(hub, { aa22: { name: 'Lanterns', stamp: lanterns } });
+    holdBlueprintUses(hub, placed);
     const openDocument = async (key: DocumentKey) =>
     {
       const content = key === MAP_INFOS_KEY ? buildTreeRows() : [ null ];
@@ -142,6 +152,29 @@ describe('MapPropertiesPanel', () =>
     // Assert.
     expect(await screen.findByText('The transfers landing on this map could not be checked: GET /api/maps/5/arrivals answered 500: Map002.json cannot be read'))
       .toBeInTheDocument();
+  });
+
+  it('warns which copies of blueprints a resize would leave outside, before it is made, and moves the record with the map', async () =>
+  {
+    // Arrange: a pair of lanterns placed on the cave at 2, 1, hanging past its right edge, and another at 0, 0.
+    const { hub } = await renderCave(async () => [], '', [ { blueprintId: 'aa22', mapId: 5, x: 2, y: 1 }, { blueprintId: 'aa22', mapId: 5, x: 0, y: 0 } ]);
+
+    // Act: two wide keeping the top left, which leaves the pair at 2, 1 wholly outside; then keeping the right edge,
+    // which leaves part of each on the map, and made.
+    fireEvent.change(screen.getByLabelText('Width'), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Top left' }));
+    const leftKept = screen.queryByTestId('resize-placements')?.textContent;
+    fireEvent.click(screen.getByRole('radio', { name: 'Right' }));
+    const rightKept = screen.queryByTestId('resize-placements');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Resize' }))
+      .toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Resize' }));
+    await waitFor(() => expect(hub.map('map:5').width)
+      .toBe(2));
+
+    // Assert: the pair that was at 0, 0 hangs a cell past the new left edge.
+    expect([ leftKept, rightKept, usesOf(hub.document(BLUEPRINT_USES_DOCUMENT)).map(spot => [ spot.x, spot.y ]) ])
+      .toStrictEqual([ '1 blueprint copy lies outside the new size and will be removed.', null, [ [ -1, 0 ], [ 1, 1 ] ] ]);
   });
 
   it('shows the sections plugin modules add once they switch on, just above the note they write into', async () =>

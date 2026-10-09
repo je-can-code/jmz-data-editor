@@ -2,13 +2,22 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DockviewApi, IDockviewPanel } from 'dockview-react';
 import { MapEditorApiError, type MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { apiDocumentStore } from '../../../src/mapEditor/core/api/apiDocumentStore.ts';
+import { saveBlueprint } from '../../../src/mapEditor/core/blueprints/blueprintEdits.ts';
+import { BLUEPRINTS_DOCUMENT } from '../../../src/mapEditor/core/blueprints/blueprints.ts';
+import {
+  BLUEPRINT_USES_DOCUMENT,
+  forgetSpots,
+  readUses,
+  recordSpots,
+  usesOf,
+} from '../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { DocumentHub, type DocumentStore } from '../../../src/mapEditor/core/history/DocumentHub.ts';
-import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintHistoryKey, mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapInfo } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { TREE_ROOT, WorkspaceController } from '../../../src/mapEditor/workspace/WorkspaceController.ts';
-import { holdBlueprints } from '../support/blueprintFixtures.ts';
+import { drawsFor, holdBlueprints, storedBlueprints, storedUses } from '../support/blueprintFixtures.ts';
 import { buildMapJson } from '../support/fixtures.ts';
 import { stampOf } from '../support/stampFixtures.ts';
 import { buildTreeRows } from '../support/treeFixtures.ts';
@@ -101,10 +110,13 @@ describe('WorkspaceController', () =>
   };
 
   /**
-   * A controller over a hub holding two maps, the tree on an in-memory server, and a store recording saves.
+   * A controller over a hub holding two maps, the tree on an in-memory server, and a store recording saves. The server
+   * keeps editor-only documents only when given some, which it then hands over and keeps as they are written; without,
+   * it has no route for them, and asking for one fails.
+   * @param {Record<string, JsonValue> | null} editorData The editor-only documents on the server, by name, or null for none.
    * @returns {object} The controller, the hub, the server's files and the saves.
    */
-  const buildController = () =>
+  const buildController = (editorData: Record<string, JsonValue> | null = null) =>
   {
     const maps = new Map<number, RmmzMap>([ 1, 2, 3, 5, 6 ].map(id => [ id, { ...buildMapJson(), displayName: `file ${id}` } ]));
     const state = { infos: buildTreeRows() as (RmmzMapInfo | null)[] };
@@ -142,6 +154,15 @@ describe('WorkspaceController', () =>
       {
         state.infos = structuredClone([ ...infos ]);
       },
+      ...(editorData === null
+        ? {}
+        : {
+          loadEditorData: async (name: string) => structuredClone(editorData[name] ?? null),
+          saveEditorData: async (name: string, document: JsonValue) =>
+          {
+            editorData[name] = structuredClone(document);
+          },
+        }),
     } as unknown as MapEditorApi;
     const saves: string[] = [];
     const store: DocumentStore = {
@@ -160,7 +181,10 @@ describe('WorkspaceController', () =>
     const hub = new DocumentHub({ clientId: 'window-a', store });
     hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
     hub.adopt('map:2', buildMapJson() as unknown as JsonValue);
-    const services = { hub, api, openDocument: (key: string) => hub.load(key as never) } as unknown as MapEditorServices;
+
+    // no event anywhere is a copy of a blueprint, counted at once.
+    const blueprintCopies = { start: () => undefined, countOf: () => ({ total: 0, maps: [] }) };
+    const services = { hub, api, blueprintCopies, openDocument: (key: string) => hub.load(key as never) } as unknown as MapEditorServices;
     return { controller: new WorkspaceController(services), hub, api, maps, state, saves };
   };
 
@@ -314,6 +338,25 @@ describe('WorkspaceController', () =>
           { eventId: 5, request: 3 },
           { 40: { eventId: 2, request: 1 }, 12: { eventId: 5, request: 3 } },
         ]);
+    });
+
+    it('makes every ask for a cell a new one, centring there again when asked again, and leaves the events asked for alone', () =>
+    {
+      // Arrange: map 12 open, and asked for at an event.
+      const { controller } = buildController();
+      const dock = buildDock([ { id: 'map-12', component: 'map', params: { mapId: 12 }, group: MAIN } ]);
+      controller.attach(dock.api);
+      controller.openMap(12, { focusEventId: 5 });
+
+      // Act: the middle of a placement asked for twice, then a plain open.
+      controller.openMap(12, { focusCell: { x: 3, y: 4 } });
+      const { 12: first } = controller.getState().cellFocus;
+      controller.openMap(12, { focusCell: { x: 3, y: 4 } });
+      controller.openMap(12, { focusCell: null });
+
+      // Assert.
+      expect([ first, controller.getState().cellFocus, controller.getState().eventFocus, dock.added ])
+        .toStrictEqual([ { cell: { x: 3, y: 4 }, request: 2 }, { 12: { cell: { x: 3, y: 4 }, request: 3 } }, { 12: { eventId: 5, request: 1 } }, [] ]);
     });
 
     it('opens a new map as a tab in the centre, not where the last map focused sits, and never in a torn-out window', () =>
@@ -810,6 +853,130 @@ describe('WorkspaceController', () =>
     // Assert.
     expect([ afterStale, controller.getState().notice ])
       .toStrictEqual([ 'second', null ]);
+  });
+
+  /*
+   * The workspace holds the blueprints and the record of where they are placed from the moment it opens, since every
+   * edit moving a placement changes the record only while the window holds it; a tree change waits until they are asked
+   * for, so a map deleted or copied the moment the window opens takes its placements with it. The record is written
+   * whenever a map or the tree is, and Save all, which writes it too, tells what it saved in maps. No undo takes away a
+   * blueprint whose tiles are still placed, in the words a delete of it is refused in.
+   *
+   * On the server, the camp (aa22) is placed on the cave (5), at 4, 0.
+   */
+  describe('blueprint placements', () =>
+  {
+    /**
+     * The editor-only documents on the server: no blueprints yet, and the camp's placement on the cave.
+     * @returns {Record<string, JsonValue>} The documents, by name.
+     */
+    const onServer = (): Record<string, JsonValue> => ({ 'blueprints': storedBlueprints(), 'blueprint-uses': storedUses([ { blueprintId: 'aa22', mapId: 5, x: 4, y: 0 } ]) });
+
+    it('holds the blueprints and the record from the start, and neither in a window with no server', async () =>
+    {
+      // Arrange.
+      const { controller, hub } = buildController(onServer());
+      const serverlessHub = new DocumentHub({ clientId: 'window-b' });
+      const serverless = new WorkspaceController({ hub: serverlessHub, api: null } as unknown as MapEditorServices);
+
+      // Act.
+      await Promise.all([ controller.whenPlacementsHeld(), serverless.whenPlacementsHeld() ]);
+
+      // Assert.
+      expect([ hub.has(BLUEPRINTS_DOCUMENT), hub.has(BLUEPRINT_USES_DOCUMENT), serverlessHub.documentKeys() ])
+        .toStrictEqual([ true, true, [] ]);
+    });
+
+    it('waits for the record before a tree change, so a map deleted at once takes its placements with it', async () =>
+    {
+      // Arrange.
+      const { controller, hub } = buildController(onServer());
+
+      // Act.
+      await controller.deleteMaps([ 5 ]);
+
+      // Assert.
+      expect([ hub.has('mapinfos'), usesOf(hub.document(BLUEPRINT_USES_DOCUMENT)) ])
+        .toStrictEqual([ true, [] ]);
+    });
+
+    it('copies a map to the clipboard with its placements, once the record is held', async () =>
+    {
+      // Arrange.
+      const { controller } = buildController(onServer());
+
+      // Act.
+      await controller.copyMaps([ 5 ]);
+
+      // Assert.
+      const { clipboard } = controller.getState();
+      expect(clipboard?.kind === 'copy' && clipboard.copies.map(copy => copy.spots))
+        .toStrictEqual([ [ { blueprintId: 'aa22', x: 4, y: 0 } ] ]);
+    });
+
+    it('writes the record whenever a map is written, the window\'s own save of the map included', async () =>
+    {
+      // Arrange: the camp placed on map 1 too, unsaved.
+      const documents = onServer();
+      const { controller, hub, saves } = buildController(documents);
+      await controller.whenPlacementsHeld();
+      hub.edit('Place', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set('map:1', [ 'displayName' ], 'Camped');
+        recordSpots(tx, hub, 1, [ { blueprintId: 'aa22', x: 0, y: 0 } ]);
+      });
+
+      // Act.
+      await hub.save('map:1');
+      await new Promise(resolve =>
+      {
+        setTimeout(resolve, 0);
+      });
+
+      // Assert.
+      expect([ saves, hub.isDirty(BLUEPRINT_USES_DOCUMENT), readUses((documents['blueprint-uses'] as { data: JsonValue }).data) ])
+        .toStrictEqual([
+          [ 'map:1', BLUEPRINT_USES_DOCUMENT ],
+          false,
+          [ { blueprintId: 'aa22', x: 0, y: 0, mapId: 1 }, { blueprintId: 'aa22', x: 4, y: 0, mapId: 5 } ],
+        ]);
+    });
+
+    it('tells what Save all saved in maps, the record it writes along with them counted as none', async () =>
+    {
+      // Arrange: the record unsaved alone, from an undone forget, then with map 1 unsaved too.
+      const { controller, hub } = buildController(onServer());
+      await controller.whenPlacementsHeld();
+      hub.edit('Forget', [ BLUEPRINT_USES_DOCUMENT ], tx => forgetSpots(tx, hub, 5, [ { blueprintId: 'aa22', x: 4, y: 0 } ]));
+
+      // Act.
+      await controller.saveAll();
+      const alone = controller.getState().notice?.text;
+      hub.edit('Forget again', [ BLUEPRINT_USES_DOCUMENT ], tx => recordSpots(tx, hub, 5, [ { blueprintId: 'aa22', x: 4, y: 0 } ]));
+      hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+      await controller.saveAll();
+
+      // Assert.
+      expect([ alone, controller.getState().notice?.text, hub.isDirty(BLUEPRINT_USES_DOCUMENT) ])
+        .toStrictEqual([ 'Everything is saved.', 'Saved 1 map.', false ]);
+    });
+
+    it('refuses to undo a blueprint\'s save while its tiles are still placed, in the words a delete of it is refused in', async () =>
+    {
+      // Arrange: the roost (k3x9q2mf) saved here, as the step undo would take back, and placed on the cave already.
+      const documents = { ...onServer(), 'blueprint-uses': storedUses([ { blueprintId: 'k3x9q2mf', mapId: 5, x: 1, y: 1 } ]) };
+      const { controller, hub } = buildController(documents);
+      await controller.whenPlacementsHeld();
+      saveBlueprint(hub, stampOf(), 'Bat roost', drawsFor([ 'k3x9q2mf' ]));
+      controller.focusHistory(blueprintHistoryKey('k3x9q2mf'));
+
+      // Act.
+      await controller.undo();
+
+      // Assert.
+      expect([ controller.getState().notice?.text, controller.blueprintName('k3x9q2mf') ])
+        .toStrictEqual([ '"Save blueprint "Bat roost"" cannot be undone: "Bat roost" still has 1 copy, on Map 5 (1), so it can\'t be deleted.', 'Bat roost' ]);
+    });
   });
 
   describe('the event selection', () =>

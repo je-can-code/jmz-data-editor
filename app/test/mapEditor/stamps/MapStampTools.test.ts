@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BLUEPRINT_USES_DOCUMENT, usesOf } from '../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { EventSelection } from '../../../src/mapEditor/core/events/EventSelection.ts';
 import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import type { Camera } from '../../../src/mapEditor/core/renderer/camera.ts';
@@ -14,7 +15,7 @@ import { makeAutotileId } from '../../../src/mapEditor/core/tiles/tileIds.ts';
 import { PaintState } from '../../../src/mapEditor/core/tools/PaintState.ts';
 import { MapStampTools } from '../../../src/mapEditor/stamps/MapStampTools.ts';
 import { fill } from '../core/tiles/support/tileGridBuilder.ts';
-import { holdBlueprints, type BlueprintSeed } from '../support/blueprintFixtures.ts';
+import { holdBlueprints, holdBlueprintUses, type BlueprintSeed } from '../support/blueprintFixtures.ts';
 import { hubWithMaps, mapFileOf, spotsOf } from '../support/eventFixtures.ts';
 import { stampOf, tiledMap } from '../support/stampFixtures.ts';
 
@@ -31,7 +32,9 @@ import { stampOf, tiledMap } from '../support/stampFixtures.ts';
  * anything is in hand. The menu's actions do the same through the clipboard API, a stamp kept even where the clipboard
  * cannot be written or read; and the author hears what a placement left out, and why one was refused. A paste carrying
  * copies of blueprints, in a window not holding the blueprints yet, opens them first, so a copy of one no longer there
- * goes down plain; blueprints that cannot be opened leave every link as it is.
+ * goes down plain; blueprints that cannot be opened leave every link as it is. The placements of blueprints an area holds
+ * whole travel in its stamp: a cut takes them off the map's record with the tiles, and a paste records them again where
+ * the stamp lands.
  *
  * The view is at zoom 1 with the map's corner at the view's, so a tile is 48 pixels. The 6x4 map holds grass at 0, 0 to
  * 1, 0, event 1 at 0, 0, event 2 at 1, 0 and event 3 at 4, 2.
@@ -285,6 +288,32 @@ describe('MapStampTools', () =>
       // Assert.
       expect([ cut.event.defaultPrevented, hub.history(mapHistoryKey(1)).rows.length ])
         .toStrictEqual([ false, 0 ]);
+    });
+
+    it('carries a placement of a blueprint the area holds whole away with the cut, and records it again where it is pasted', () =>
+    {
+      // Arrange: the grass at 0, 0 placed as a blueprint (aa22, 2 by 1), the select tool holding it, the pointer at 2, 3.
+      const { hub, host, canvas, painting, state } = setUp();
+      const values = [ 0, 0 ];
+      holdBlueprints(hub, { aa22: { name: 'Grass strip', stamp: stampOf({ width: 2, tiles: { layers: [ 0 ], values, calledFor: [ -1, -1 ] }, events: [] }) } });
+      holdBlueprintUses(hub, [ { blueprintId: 'aa22', mapId: 1, x: 0, y: 0 } ]);
+      painting.setTool('select');
+      state.area = { x: 0, y: 0, width: 2, height: 1 };
+      host.focus();
+      pointAt(canvas, { x: 2, y: 3 });
+
+      // Act.
+      const cut = clipboardEvent('cut');
+      const afterCut = usesOf(hub.document(BLUEPRINT_USES_DOCUMENT));
+      clipboardEvent('paste', cut.written());
+
+      // Assert: the stamp on the clipboard carries the placement from its corner.
+      expect([ decodeStampClipboard(cut.written())?.spots, afterCut, usesOf(hub.document(BLUEPRINT_USES_DOCUMENT)) ])
+        .toStrictEqual([
+          [ { blueprintId: 'aa22', x: 0, y: 0, width: 2, height: 1 } ],
+          [],
+          [ { blueprintId: 'aa22', x: 2, y: 3, mapId: 1 } ],
+        ]);
     });
   });
 
