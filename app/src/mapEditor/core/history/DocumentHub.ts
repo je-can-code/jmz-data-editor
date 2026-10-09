@@ -10,12 +10,24 @@ import { homeDocumentOf, outsideChangeHistories, type HistoryKey } from './histo
 import {
   documentsOfStep,
   documentsTouchedBy,
+  isFollowerOf,
   writesThrough,
   type DocumentHeads,
   type HistoryStep,
   type StepEntry,
 } from './HistoryStep.ts';
 import { patchInterference, type Interference } from './patchInterference.ts';
+import {
+  filePart,
+  heldPart,
+  leftPartsOf,
+  movesWhole,
+  movingStep,
+  type EditOnDocument,
+  type EntryPart,
+  type FileFit,
+  type LeftPart,
+} from './stepParts.ts';
 import { Transaction, type TransactionHost } from './Transaction.ts';
 
 /**
@@ -81,9 +93,21 @@ type HistoryFailure =
   };
 
 /**
- * The answer to an undo or redo: the step it acted on, or why it could not.
+ * The answer to an undo or redo: the step it acted on, or why it could not. A step whose patches on documents following
+ * its change (see HistoryStep's followers) were changed since moves without those parts: {@code step} is then the part
+ * that moves, by the step's own id, and {@code left} names every part left as it stands, each with the edit in its way.
  */
-type HistoryCheck = { readonly ok: true; readonly step: HistoryStep } | HistoryFailure;
+type HistoryCheck = { readonly ok: true; readonly step: HistoryStep; readonly left?: readonly LeftPart[] } | HistoryFailure;
+
+/**
+ * What became of a step an undo or a redo left parts of, as the move announces it and other windows repeat it: the part
+ * left on documents this window holds, as a step of its own, still applied and forgotten after an undo, so every later
+ * check still sees its patches, and gone after a redo, never having gone back; null when every part left was on a file
+ * alone.
+ */
+type StepSplit = {
+  readonly left: HistoryStep | null;
+};
 
 /**
  * The answer to a jump through the history panel.
@@ -103,13 +127,29 @@ type HubSource = 'local' | 'remote';
  * with nothing done to the document, for whoever keeps it to merge. An edit the window's commit checks refused is
  * announced with why, once it is put back, so whoever shows the author things can say so; nothing else happened. Steps
  * a document opened from its file takes up, having written that file before it was opened, are announced as attached.
+ * An undo or a redo that left parts of its step as they stand carries the part that moved as its step, and says what
+ * became of the rest ({@code split}).
  */
 type HubEvent =
   | { readonly type: 'committed'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
   | { readonly type: 'refused'; readonly label: string; readonly histories: readonly HistoryKey[]; readonly message: string }
   | { readonly type: 'attached'; readonly document: DocumentKey; readonly stepIds: readonly string[] }
-  | { readonly type: 'undone'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
-  | { readonly type: 'redone'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
+  | {
+    readonly type: 'undone';
+    readonly step: HistoryStep;
+    readonly bases: DocumentHeads;
+    readonly opId: string;
+    readonly source: HubSource;
+    readonly split?: StepSplit;
+  }
+  | {
+    readonly type: 'redone';
+    readonly step: HistoryStep;
+    readonly bases: DocumentHeads;
+    readonly opId: string;
+    readonly source: HubSource;
+    readonly split?: StepSplit;
+  }
   | { readonly type: 'forgotten'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
   | { readonly type: 'discarded'; readonly stepIds: readonly string[] }
   | {
@@ -146,12 +186,28 @@ type CommitCheck = (transaction: Transaction) => string | null;
 
 /**
  * An operation made in another window, to be repeated here. {@code bases} holds the head of each touched
- * document just before the operation, so a window whose copy went elsewhere can tell and sort it out.
+ * document just before the operation, so a window whose copy went elsewhere can tell and sort it out. An undo or a redo
+ * that left parts of its step carries the part that moved and what became of the rest ({@code split}), so this window
+ * moves and leaves exactly what that one did.
  */
 type RemoteOperation =
   | { readonly type: 'commit'; readonly origin: string; readonly opId: string; readonly step: HistoryStep; readonly bases: DocumentHeads }
-  | { readonly type: 'undo'; readonly origin: string; readonly opId: string; readonly stepId: string; readonly bases: DocumentHeads }
-  | { readonly type: 'redo'; readonly origin: string; readonly opId: string; readonly stepId: string; readonly bases: DocumentHeads }
+  | {
+    readonly type: 'undo';
+    readonly origin: string;
+    readonly opId: string;
+    readonly stepId: string;
+    readonly bases: DocumentHeads;
+    readonly split?: StepSplit & { readonly step: HistoryStep };
+  }
+  | {
+    readonly type: 'redo';
+    readonly origin: string;
+    readonly opId: string;
+    readonly stepId: string;
+    readonly bases: DocumentHeads;
+    readonly split?: StepSplit & { readonly step: HistoryStep };
+  }
   | { readonly type: 'forget'; readonly origin: string; readonly opId: string; readonly stepId: string; readonly bases: DocumentHeads }
   | { readonly type: 'saved'; readonly origin: string; readonly document: DocumentKey; readonly marker: readonly string[] };
 
@@ -434,6 +490,15 @@ const carriedStepFinder = (snapshot: DocumentSnapshot): (id: string) => HistoryS
  * A step that fails is refused before anything is applied, naming the edit in the way, and a redone step becomes
  * the newest done step in every history it belongs to.
  *
+ * A step whose patches on some documents follow its own change rather than being made for their own sake (see
+ * HistoryStep's followers), as a blueprint's change reaching its copies does, is never refused for an edit in the way
+ * there. Its patches there move wherever nothing is in their way, under the same rule, cell by cell for tiles, and the
+ * rest are left as they stand: a copy changed by hand since the change keeps that change, as a cell painted over by hand
+ * keeps its paint when the change is made. The step then moves as the part that moved, by its own id, in every history it
+ * belongs to; after an undo the part left stays applied as a forgotten step of its own, in the step's place, so every
+ * later check still sees its patches, and after a redo it is gone, never having gone back. Its other documents, the
+ * blueprint's own, keep the rule whole: an edit in the way there refuses the step.
+ *
  * Every edit made in this window passes the window's commit checks before it becomes a step (see {@link addCommitCheck}):
  * one they refuse is put back whole, recorded in no history, and announced with why. That is how a document with rules
  * of its own beyond any patch's, such as a blueprint opened as a map, keeps to them whatever tool edits it, and how a
@@ -507,6 +572,12 @@ class DocumentHub
    * What every edit made here passes before it becomes a step, in the order they were added.
    */
   #checks: CommitCheck[] = [];
+
+  /**
+   * What tells how much of a patch the file of a document no window here holds would take now, or null for no way to
+   * tell (see {@link setFileFit}).
+   */
+  #fileFit: FileFit | null = null;
 
   #transaction: Transaction | null = null;
 
@@ -976,6 +1047,18 @@ class DocumentHub
   }
 
   /**
+   * Gives the hub a way to tell how much of a patch the file of a document no window here holds would take now: the
+   * window's kept copies of the maps a blueprint's change wrote through. An undo or a redo of a step following its change
+   * onto such a document (see HistoryStep's followers) then moves its patches there only as far as the file takes them,
+   * leaving what was changed on disk since. Without one, they all move, and whoever writes them checks the file.
+   * @param {FileFit | null} fit The way to tell, or null for none.
+   */
+  setFileFit(fit: FileFit | null): void
+  {
+    this.#fileFit = fit;
+  }
+
+  /**
    * Asks every check about a finished edit, in order, until one refuses it.
    * @param {Transaction} transaction The edit, still open.
    * @returns {string | null} Why it is refused, or null when every check lets it through.
@@ -1027,9 +1110,9 @@ class DocumentHub
       return null;
     }
 
-    // whole files, documents written through and files differing from their documents ride along only on the steps that
-    // have them, so every other step keeps its exact shape.
-    const { files, through, fileVersions } = transaction;
+    // whole files, documents written through, files differing from their documents and documents following the step's
+    // change ride along only on the steps that have them, so every other step keeps its exact shape.
+    const { files, through, fileVersions, followers } = transaction;
     const step: HistoryStep = {
       id: this.#nextId(),
       label: transaction.label,
@@ -1038,6 +1121,7 @@ class DocumentHub
       ...(files.length > 0 ? { files: [ ...files ] } : {}),
       ...(through.length > 0 ? { through: [ ...through ] } : {}),
       ...(fileVersions.length > 0 ? { fileVersions: [ ...fileVersions ] } : {}),
+      ...(followers.length > 0 ? { followers: [ ...followers ] } : {}),
       origin: this.clientId,
       at: this.#now(),
     };
@@ -1078,9 +1162,11 @@ class DocumentHub
    * Reports whether an undo in a history can happen: it has a step to undo, this window holds every document that
    * step touches and each records the step as applied, and no edit applied after it changed the same data, moved
    * where it sits, or would be moved by taking it out. A refusal here names the edit in the way before anything is
-   * tried; only a change that nothing recorded explains is found by trying.
+   * tried; only a change that nothing recorded explains is found by trying. On a document following the step's change,
+   * such an edit leaves the patch in its way as it stands instead (see {@link HistoryCheck}). Nothing changes here.
    * @param {HistoryKey} key The history.
-   * @returns {HistoryCheck} The step it would undo, or why it cannot.
+   * @returns {HistoryCheck} The step it would undo, or the part of it that would move and what it would leave, or why it
+   * cannot.
    */
   canUndo(key: HistoryKey): HistoryCheck
   {
@@ -1092,16 +1178,18 @@ class DocumentHub
 
     const held = this.#checkHeld(step);
     return held.ok
-      ? this.#checkLaterEdits(step)
+      ? this.#planMove(step, 'backward')
       : held;
   }
 
   /**
    * Reports whether a redo in a history can happen: it has a step to redo, this window holds every document that
    * step touches, and no edit made or undone since its undo changed the same data, moved where it sits, or would be
-   * moved by its return. A refusal here names the edit in the way before anything is tried.
+   * moved by its return. A refusal here names the edit in the way before anything is tried. On a document following the
+   * step's change, such an edit leaves the patch in its way out instead (see {@link HistoryCheck}). Nothing changes here.
    * @param {HistoryKey} key The history.
-   * @returns {HistoryCheck} The step it would redo, or why it cannot.
+   * @returns {HistoryCheck} The step it would redo, or the part of it that would move and what it would leave, or why it
+   * cannot.
    */
   canRedo(key: HistoryKey): HistoryCheck
   {
@@ -1113,7 +1201,7 @@ class DocumentHub
 
     const held = this.#checkHeld(step);
     return held.ok
-      ? this.#checkMovesSinceUndo(step)
+      ? this.#planMove(step, 'forward')
       : held;
   }
 
@@ -1226,8 +1314,11 @@ class DocumentHub
       return check;
     }
 
+    // a step leaving parts of itself moves as the part that moves, but the operation is on the whole step, everywhere it
+    // touched, since the part left is part of what every window holding those documents must repeat.
     const { step } = check;
-    const bases = this.#headsOf(step);
+    const whole = this.#steps.get(step.id) as HistoryStep;
+    const bases = this.#headsOf(whole);
     const failed = this.#applyEntries(step, direction);
     if (failed !== null)
     {
@@ -1235,19 +1326,26 @@ class DocumentHub
       return { ok: false, reason: 'conflict', step, blockedBy: null, message: failed.message };
     }
 
+    const split = check.left === undefined ? undefined : { left: this.#leftStepOf(whole, check.left) };
+    if (split !== undefined)
+    {
+      this.#split(whole, step, split.left, direction);
+    }
+
     const opId = this.#nextId();
-    this.#settleMove(step, direction, opId);
-    this.#emit({ type: direction === 'backward' ? 'undone' : 'redone', step, bases, opId, source: 'local' });
+    this.#settleMove(step, direction, opId, whole);
+    this.#emit({ type: direction === 'backward' ? 'undone' : 'redone', step, bases, opId, source: 'local', ...(split === undefined ? {} : { split }) });
     return check;
   }
 
   /**
    * Records a step's move in every held history and document once its patches have moved.
-   * @param {HistoryStep} step The step.
+   * @param {HistoryStep} step The step, or the part of it that moved.
    * @param {'forward' | 'backward'} direction Redo or undo.
    * @param {string} opId The operation's id, for the lineage.
+   * @param {HistoryStep} whole The step whole, whose documents the operation is logged on.
    */
-  #settleMove(step: HistoryStep, direction: 'forward' | 'backward', opId: string): void
+  #settleMove(step: HistoryStep, direction: 'forward' | 'backward', opId: string, whole: HistoryStep = step): void
   {
     if (direction === 'backward')
     {
@@ -1260,7 +1358,144 @@ class DocumentHub
       this.#markApplied(step);
     }
 
-    this.#extendLineage(step, opId);
+    this.#extendLineage(whole, opId);
+  }
+
+  /**
+   * Plans a move of a step this window holds every document of, but for those it writes through: the step whole, when
+   * nothing is in its way; or, for a step whose patches follow its change onto some documents (see HistoryStep's
+   * followers), the part of it that moves, by its own id, and every part left, when something is in the way there. An edit
+   * in its way on any of its other documents refuses it, as it would any step, and so does a document not recording it.
+   * @param {HistoryStep} step The step.
+   * @param {'forward' | 'backward'} direction Redo or undo.
+   * @returns {HistoryCheck} The step or the part of it that moves, with the parts left, or why it cannot move.
+   */
+  #planMove(step: HistoryStep, direction: 'forward' | 'backward'): HistoryCheck
+  {
+    const checked = direction === 'backward'
+      ? this.#checkLaterEdits(step)
+      : this.#checkMovesSinceUndo(step);
+    if (checked.ok === false || step.followers === undefined)
+    {
+      return checked;
+    }
+
+    const parts = this.#partsOf(step, direction);
+    const left = leftPartsOf(parts);
+    return left.length === 0
+      ? checked
+      : { ok: true, step: movingStep(step, parts), left };
+  }
+
+  /**
+   * Works out what a move of a step comes to on each of its patches: whole on a document that does not follow its
+   * change, whose edits in the way the move's check refuses; on a document held here that does, as far as no edit in the
+   * way changed what the patch changes; and on one written through that no window here holds, as far as its file would
+   * take the patch now (see {@link setFileFit}).
+   * @param {HistoryStep} step The step, its documents held but for those it writes through.
+   * @param {'forward' | 'backward'} direction Redo or undo.
+   * @returns {EntryPart[]} What the move comes to on each patch, in the step's order.
+   */
+  #partsOf(step: HistoryStep, direction: 'forward' | 'backward'): EntryPart[]
+  {
+    const edits = new Map<DocumentKey, EditOnDocument[]>();
+    return step.entries.map(({ document, patch }) =>
+    {
+      if (isFollowerOf(step, document) === false)
+      {
+        return movesWhole(document, patch);
+      }
+
+      if (this.has(document) === false)
+      {
+        return filePart(document, patch, direction, this.#fileFit);
+      }
+
+      // the edits in the way on one document are the same for every patch there.
+      if (edits.has(document) === false)
+      {
+        edits.set(document, this.#editsInTheWay(step, document, direction));
+      }
+
+      return heldPart(document, patch, edits.get(document) as EditOnDocument[], direction);
+    });
+  }
+
+  /**
+   * Lists the edits a move of a step must pass on one held document, newest first, each with its patches there: for an
+   * undo, those applied after it, forgotten ones included; for a redo, those that went in or came out since its undo, an
+   * undo and a redo of the same edit cancelling out.
+   * @param {HistoryStep} step The step, which the document records (see {@link #checkLaterEdits}).
+   * @param {DocumentKey} key The document.
+   * @param {'forward' | 'backward'} direction Redo or undo.
+   * @returns {EditOnDocument[]} The edits.
+   */
+  #editsInTheWay(step: HistoryStep, key: DocumentKey, direction: 'forward' | 'backward'): EditOnDocument[]
+  {
+    // the move's check has already found the step recorded on the document, in whichever list it reads.
+    const recorded = (direction === 'backward' ? this.#applied.get(key) : this.#moves.get(key)) as HistoryStep[];
+    const since = recorded.slice(recorded.findLastIndex(each => each.id === step.id) + 1);
+    const edits = direction === 'backward'
+      ? since.reverse()
+      : stepsTurnedOverBy(since);
+    return edits.map(edit => ({ step: edit, patches: patchesOn(edit, key) }));
+  }
+
+  /**
+   * Builds the step a move leaves of another, from its parts left on the documents this window holds: a step of its own,
+   * named as the whole was, in no history. Parts left on a file alone need no step here, since no document here holds them.
+   * @param {HistoryStep} whole The step whole.
+   * @param {readonly LeftPart[]} left Every part the move leaves.
+   * @returns {HistoryStep | null} The step, or null when every part left is on a file alone.
+   */
+  #leftStepOf(whole: HistoryStep, left: readonly LeftPart[]): HistoryStep | null
+  {
+    const entries = left.filter(part => this.has(part.document)).map(({ document, patch }) => ({ document, patch }));
+    return entries.length === 0
+      ? null
+      : { id: this.#nextId(), label: whole.label, histories: [], entries, origin: this.clientId, at: whole.at };
+  }
+
+  /**
+   * Puts the part of a step that moves in the whole step's place, once its patches have moved, and keeps what became of
+   * the part left (see {@link HistoryCheck}): every history and the registry hold the moving part by the step's own id;
+   * after an undo the part left stays applied, as a forgotten step, where the whole step was, and a file known to hold the
+   * whole step on a document it no longer moves on holds the part left instead; and every earlier move of the whole step
+   * reads as the moving part and the part left moving together, so a later redo of any step is checked against both.
+   * @param {HistoryStep} whole The step whole.
+   * @param {HistoryStep} moving The part that moves.
+   * @param {HistoryStep | null} left The part left on documents held here, or null for none.
+   * @param {'forward' | 'backward'} direction Redo or undo.
+   */
+  #split(whole: HistoryStep, moving: HistoryStep, left: HistoryStep | null, direction: 'forward' | 'backward'): void
+  {
+    this.#steps.set(whole.id, moving);
+    this.#histories.forEach(history => history.replace(moving));
+    documentsOfStep(whole).filter(key => this.has(key)).forEach(key =>
+    {
+      const movesHere = moving.entries.some(entry => entry.document === key);
+      const leftHere = left !== null && left.entries.some(entry => entry.document === key);
+      const parts = [ ...(movesHere ? [ moving ] : []), ...(leftHere ? [ left as HistoryStep ] : []) ];
+      if (direction === 'backward')
+      {
+        // the part left goes in just before the moving part, which the move then takes out; a document not recording the
+        // step, as another window's copy may not, has nothing in its place to put either in.
+        const applied = this.#applied.get(key) as HistoryStep[];
+        const at = applied.findLastIndex(each => each.id === whole.id);
+        if (at >= 0)
+        {
+          applied.splice(at, 1, ...[ ...parts ].reverse());
+        }
+
+        const saved = this.#saved.get(key) as string[];
+        if (movesHere === false && leftHere)
+        {
+          this.#saved.set(key, saved.map(id => (id === whole.id ? (left as HistoryStep).id : id)));
+        }
+      }
+
+      this.#moves.set(key, (this.#moves.get(key) as HistoryStep[]).flatMap(each => (each.id === whole.id ? parts : [ each ])));
+    });
   }
 
   /**
@@ -1284,7 +1519,9 @@ class DocumentHub
    * named. Order among these edits is the order their patches went into the document, whatever history holds them.
    * A document that does not record the step as applied is refused as untracked: its copy came from somewhere that
    * never had the step (a map closed and opened again from disk), so nothing there can be checked. A document the step
-   * writes through that no window here holds is left to whoever writes the step, which checks its file.
+   * writes through that no window here holds is left to whoever writes the step, which checks its file. A document
+   * following the step's change is only checked for recording it, since an edit in the way there leaves a part of the
+   * step rather than refusing it (see {@link #planMove}).
    * @param {HistoryStep} step The step, applied.
    * @returns {HistoryCheck} The step, or the edit in its way.
    */
@@ -1299,6 +1536,12 @@ class DocumentHub
       {
         const message = `this window cannot tell what changed in ${key} after "${step.label}"`;
         return { ok: false, reason: 'untracked', step, blockedBy: null, message };
+      }
+
+      // on a document following the step's change, an edit in the way leaves the patch it is in the way of instead.
+      if (isFollowerOf(step, key))
+      {
+        continue;
       }
 
       for (const edit of applied.slice(appliedAt + 1).reverse())
@@ -1322,7 +1565,9 @@ class DocumentHub
    * rest changed its data, moved it, or would be moved by its return; otherwise the newest such edit on the first
    * document that has one is named. A document whose record does not reach back to the undo is refused as untracked,
    * since nothing there can be checked. A document the step writes through that no window here holds is left to whoever
-   * writes the step, which checks its file.
+   * writes the step, which checks its file. A document following the step's change is only checked for reaching back to
+   * the undo, since an edit in the way there leaves a part of the step out rather than refusing it (see
+   * {@link #planMove}).
    * @param {HistoryStep} step The step, undone.
    * @returns {HistoryCheck} The step, or the edit in its way.
    */
@@ -1338,6 +1583,12 @@ class DocumentHub
       {
         const message = `this window cannot tell what changed in ${key} since "${step.label}" was undone`;
         return { ok: false, reason: 'untracked', step, blockedBy: null, message };
+      }
+
+      // on a document following the step's change, an edit in the way leaves the patch it is in the way of out instead.
+      if (isFollowerOf(step, key))
+      {
+        continue;
       }
 
       for (const edit of stepsTurnedOverBy(moves.slice(undoneAt + 1)))
@@ -1906,7 +2157,8 @@ class DocumentHub
 
   /**
    * Repeats another window's undo or redo, but only when this window's copy is where that window's was: at the
-   * same heads, with the step applied (for an undo) or not (for a redo).
+   * same heads, with the step applied (for an undo) or not (for a redo). A move that left parts of its step there moves
+   * exactly the part that moved there, and keeps what became of the rest the same way (see {@link #split}).
    * @param {Extract<RemoteOperation, { type: 'undo' | 'redo' }>} operation The operation.
    */
   #applyRemoteMove(operation: Extract<RemoteOperation, { type: 'undo' | 'redo' }>): void
@@ -1914,22 +2166,36 @@ class DocumentHub
     const direction = operation.type === 'undo'
       ? 'backward'
       : 'forward';
-    const step = this.#knownStep(operation.stepId, operation.bases, operation.origin);
-    if (step === null)
+    const whole = this.#knownStep(operation.stepId, operation.bases, operation.origin);
+    if (whole === null)
     {
       return;
     }
 
-    const held = documentsTouchedBy(step).filter(key => this.has(key));
-    const inPlace = this.#isApplied(step) === (direction === 'backward');
-    if (inPlace === false || this.#staleAmong(held, operation.bases, step).length > 0 || this.#applyEntries(step, direction) !== null)
+    const step = operation.split?.step ?? whole;
+    const held = documentsTouchedBy(whole).filter(key => this.has(key));
+    const inPlace = this.#isApplied(whole) === (direction === 'backward');
+    if (inPlace === false || this.#staleAmong(held, operation.bases, whole).length > 0 || this.#applyEntries(step, direction) !== null)
     {
       this.#reportOutOfSync(held, operation.origin);
       return;
     }
 
-    this.#settleMove(step, direction, operation.opId);
-    this.#emit({ type: operation.type === 'undo' ? 'undone' : 'redone', step, bases: operation.bases, opId: operation.opId, source: 'remote' });
+    const split = operation.split === undefined ? undefined : { left: operation.split.left };
+    if (split !== undefined)
+    {
+      this.#split(whole, step, split.left, direction);
+    }
+
+    this.#settleMove(step, direction, operation.opId, whole);
+    this.#emit({
+      type: operation.type === 'undo' ? 'undone' : 'redone',
+      step,
+      bases: operation.bases,
+      opId: operation.opId,
+      source: 'remote',
+      ...(split === undefined ? {} : { split }),
+    });
   }
 
   /**
@@ -2327,4 +2593,5 @@ export type {
   HubSource,
   JumpResult,
   RemoteOperation,
+  StepSplit,
 };

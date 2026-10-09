@@ -108,6 +108,15 @@ type HistoryStep = {
   readonly fileVersions?: readonly FileVersion[];
 
   /**
+   * The documents whose patches follow the step's own change rather than being made for their own sake, present only on a
+   * step that has any: the maps a blueprint's change reached, whose copies follow their blueprint. Undoing or redoing the
+   * step moves each of its patches on these only where nothing changed the same data since, and leaves the rest as they
+   * stand rather than refusing, the way a cell painted over by hand keeps its paint when the change is made: a copy changed
+   * since keeps that change. Every other document the step changes moves with it whole, or refuses it.
+   */
+  readonly followers?: readonly DocumentKey[];
+
+  /**
    * The client id of the window that made the step.
    */
   readonly origin: string;
@@ -156,5 +165,16 @@ const writesThrough = (step: HistoryStep, key: DocumentKey): boolean =>
   return step.through !== undefined && step.through.includes(key);
 };
 
-export { documentsOfStep, documentsTouchedBy, writesThrough };
+/**
+ * Reports whether a document follows a step's own change (see {@link HistoryStep.followers}).
+ * @param {HistoryStep} step The step.
+ * @param {DocumentKey} key The document.
+ * @returns {boolean} True when the step's patches on it may be left where something changed them since.
+ */
+const isFollowerOf = (step: HistoryStep, key: DocumentKey): boolean =>
+{
+  return step.followers !== undefined && step.followers.includes(key);
+};
+
+export { documentsOfStep, documentsTouchedBy, isFollowerOf, writesThrough };
 export type { DocumentHeads, FileEffect, FileVersion, HistoryStep, StepEntry };

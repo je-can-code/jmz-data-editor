@@ -87,9 +87,12 @@ const operationFor = (event: HubEvent, origin: string): RemoteOperation | null =
     case 'committed':
       return { type: 'commit', origin, opId: event.opId, step: event.step, bases: event.bases };
     case 'undone':
-      return { type: 'undo', origin, opId: event.opId, stepId: event.step.id, bases: event.bases };
     case 'redone':
-      return { type: 'redo', origin, opId: event.opId, stepId: event.step.id, bases: event.bases };
+    {
+      // a move that left parts of its step carries the part that moved, so every window moves and leaves the same.
+      const split = event.split === undefined ? {} : { split: { step: event.step, left: event.split.left } };
+      return { type: event.type === 'undone' ? 'undo' : 'redo', origin, opId: event.opId, stepId: event.step.id, bases: event.bases, ...split };
+    }
     case 'forgotten':
       return { type: 'forget', origin, opId: event.opId, stepId: event.step.id, bases: event.bases };
     case 'saved':

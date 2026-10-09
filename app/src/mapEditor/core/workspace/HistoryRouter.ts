@@ -1,6 +1,7 @@
 import type { DocumentHub, HistoryCheck, HistoryFailure } from '../history/DocumentHub.ts';
 import { TREE_HISTORY_KEY, type HistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
+import type { LeftPart } from '../history/stepParts.ts';
 import type { MapTreeService, TreeOutcome } from '../tree/MapTreeService.ts';
 import { documentLabel } from '../../views/documentLabels.ts';
 
@@ -8,10 +9,11 @@ import { documentLabel } from '../../views/documentLabels.ts';
  * What an undo, a redo or a history jump came to. {@code nothing} marks the quiet failure (there was no step that
  * way), which a keypress should not nag about; {@code stuckStepId} names a step a later edit blocks, which the
  * history panel offers to forget so the person can go on past it; {@code alarm} marks a tree step whose failed
- * write could not be put back, which must stay on screen until the person dismisses it.
+ * write could not be put back, which must stay on screen until the person dismisses it. A move that left parts of its
+ * step as they stand, copies of a blueprint changed since, carries what to tell the author about them ({@code message}).
  */
 type HistoryOutcome =
-  | { readonly ok: true }
+  | { readonly ok: true; readonly message?: string }
   | { readonly ok: false; readonly nothing: boolean; readonly message: string; readonly stuckStepId: string | null; readonly alarm?: true };
 
 /**
@@ -25,6 +27,12 @@ type Direction = 'backward' | 'forward';
  * move, whatever its history, just before it moves, so it must change nothing.
  */
 type MoveGuard = (step: HistoryStep, direction: Direction) => string | null;
+
+/**
+ * Words what a move left of its step for the author (see DocumentHub's HistoryCheck): which copies, on which maps, and
+ * where the change in each one's way can be undone from.
+ */
+type LeftWords = (step: HistoryStep, left: readonly LeftPart[], direction: Direction) => string;
 
 /**
  * Words the hub's refusal for the author.
@@ -84,7 +92,11 @@ const fromTreeOutcome = (outcome: TreeOutcome): HistoryOutcome =>
  *
  * A step the hub would move may still be refused by the window's guard, for what moving it would do beyond the hub's
  * knowing: an undo that would take away a blueprint its copies still name. Such a refusal is worded and reported as one a
- * later edit blocks, the step named as stuck, and a jump stops at it as it stops at any step that cannot move.
+ * later edit blocks, the step named as stuck, and a jump stops at it as it stops at any step that cannot move. The guard
+ * is asked about what would move: of a step that would leave parts of itself, the part that moves.
+ *
+ * A move that leaves parts of its step, a blueprint's change leaving copies changed since as they stand, has moved all
+ * the same, and the author hears what it left, in the words the window gives.
  */
 class HistoryRouter
 {
@@ -94,16 +106,20 @@ class HistoryRouter
 
   #guard: MoveGuard | null;
 
+  #leftWords: LeftWords | null;
+
   /**
    * @param {DocumentHub} hub The window's documents and histories.
    * @param {MapTreeService | null} tree The tree service, or null when the window has no server to write through.
    * @param {MoveGuard | null} guard What every step the hub would move must also pass, or null for nothing more.
+   * @param {LeftWords | null} leftWords Words what a move left of its step, or null to say nothing of it.
    */
-  constructor(hub: DocumentHub, tree: MapTreeService | null, guard: MoveGuard | null = null)
+  constructor(hub: DocumentHub, tree: MapTreeService | null, guard: MoveGuard | null = null, leftWords: LeftWords | null = null)
   {
     this.#hub = hub;
     this.#tree = tree;
     this.#guard = guard;
+    this.#leftWords = leftWords;
   }
 
   /**
@@ -202,21 +218,29 @@ class HistoryRouter
     const moved = direction === 'backward'
       ? this.#hub.undo(key)
       : this.#hub.redo(key);
-    return moved.ok
+    if (moved.ok === false)
+    {
+      return fromHubFailure(moved, direction);
+    }
+
+    // a move that left parts of its step says which, where the window can word them.
+    return moved.left === undefined || this.#leftWords === null
       ? { ok: true }
-      : fromHubFailure(moved, direction);
+      : { ok: true, message: this.#leftWords(moved.step, moved.left, direction) };
   }
 
   /**
    * Moves a hub history to just after one of its steps one undo or redo at a time, each through the same checks as a
    * keypress's, so the jump stops at the first step that cannot move, the guard's refusals included, having moved every
-   * step before it. Nothing else can move the history between two of its moves, as they follow one another at once.
+   * step before it. Nothing else can move the history between two of its moves, as they follow one another at once. What
+   * the last move to leave parts of its step left is what the author hears.
    * @param {HistoryKey} key The history.
    * @param {string | null} stepId The step to end on, or null for before the first.
    * @returns {HistoryOutcome} What it came to; a step the history does not hold is nothing to jump to.
    */
   #jumpOnHub(key: HistoryKey, stepId: string | null): HistoryOutcome
   {
+    let told: string | null = null;
     for (;;)
     {
       // the rows list the steps done, oldest first, then those undone, next to redo first, so the history stands just
@@ -231,7 +255,7 @@ class HistoryRouter
       const target = index + 1;
       if (position === target)
       {
-        return { ok: true };
+        return told === null ? { ok: true } : { ok: true, message: told };
       }
 
       const direction: Direction = position > target ? 'backward' : 'forward';
@@ -243,6 +267,8 @@ class HistoryRouter
       {
         return moved;
       }
+
+      told = moved.message ?? told;
     }
   }
 
@@ -262,4 +288,4 @@ class HistoryRouter
 }
 
 export { HistoryRouter };
-export type { Direction as HistoryDirection, HistoryOutcome, MoveGuard };
+export type { Direction as HistoryDirection, HistoryOutcome, LeftWords, MoveGuard };

@@ -18,6 +18,9 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * named as stuck, and nothing moves. The guard is asked only about steps the hub would move, so the hub's own refusals
  * keep their words. A jump moves one undo or redo at a time through the same checks, stopping at the first step that
  * cannot move, having moved those before it.
+ *
+ * A step that leaves parts of itself as they stand, a blueprint's change leaving copies changed since, moves all the
+ * same: the guard is asked about the part that would move, and the author is told what was left, in the window's words.
  */
 describe('HistoryRouter', () =>
 {
@@ -310,6 +313,80 @@ describe('HistoryRouter', () =>
         [ 'First forward', 'Second forward' ],
         { ok: false, nothing: true, message: 'Nothing to undo.', stuckStepId: null },
       ]);
+  });
+
+  /**
+   * A hub holding two maps, with a step renaming both maps' doors that marks both maps as following it, as a blueprint's
+   * change does, and map 1's door renamed again by hand since, so undoing the step leaves map 1's door as it stands.
+   * @returns {DocumentHub} The hub.
+   */
+  const buildLeavingHub = (): DocumentHub =>
+  {
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
+    hub.adopt('map:2', buildMapJson() as unknown as JsonValue);
+    hub.edit('Rename doors', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+    {
+      tx.set('map:1', [ 'events', 1, 'name' ], 'Gate');
+      tx.set('map:2', [ 'events', 1, 'name' ], 'Gate');
+      tx.markFollower('map:1');
+      tx.markFollower('map:2');
+    });
+    hub.edit('Rename by hand', [ 'event:1:1' ], tx => tx.set('map:1', [ 'events', 1, 'name' ], 'Front door'));
+    return hub;
+  };
+
+  it('moves a step that leaves parts of itself, and tells the author what it left, in the window\'s words', async () =>
+  {
+    // Arrange.
+    const hub = buildLeavingHub();
+    const told: unknown[] = [];
+    const router = new HistoryRouter(hub, null, null, (step, left, direction) =>
+    {
+      told.push([ step.entries.map(entry => entry.document), left.map(part => part.document), direction ]);
+      return 'Undone, except on 1 copy changed since.';
+    });
+
+    // Act.
+    const outcome = await router.undo(mapHistoryKey(2));
+
+    // Assert.
+    expect([ outcome, told, hub.map('map:2').event(1)?.name, hub.map('map:1').event(1)?.name ])
+      .toStrictEqual([ { ok: true, message: 'Undone, except on 1 copy changed since.' }, [ [ [ 'map:2' ], [ 'map:1' ], 'backward' ] ], 'Door', 'Front door' ]);
+  });
+
+  it('asks its guard about the part of a step that would move, not the whole of it', async () =>
+  {
+    // Arrange.
+    const hub = buildLeavingHub();
+    const asked: string[][] = [];
+    const router = new HistoryRouter(hub, null, step =>
+    {
+      asked.push(step.entries.map(entry => entry.document));
+      return null;
+    });
+
+    // Act.
+    const outcome = await router.undo(mapHistoryKey(2));
+
+    // Assert: with no words given, the move is told as any other.
+    expect([ outcome, asked ])
+      .toStrictEqual([ { ok: true }, [ [ 'map:2' ] ] ]);
+  });
+
+  it('tells what the last move of a jump to leave parts of its step left', async () =>
+  {
+    // Arrange: a plain step on map 2 after the step that leaves parts.
+    const hub = buildLeavingHub();
+    hub.edit('Note', [ mapHistoryKey(2) ], tx => tx.set('map:2', [ 'note' ], 'later'));
+    const router = new HistoryRouter(hub, null, null, (_step, left) => `left ${left.length}`);
+
+    // Act.
+    const outcome = await router.jumpTo(mapHistoryKey(2), null);
+
+    // Assert.
+    expect([ outcome, hub.history(mapHistoryKey(2)).position ])
+      .toStrictEqual([ { ok: true, message: 'left 1' }, 0 ]);
   });
 
   it('refuses to move the tree without a tree service', async () =>

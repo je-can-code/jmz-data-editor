@@ -87,6 +87,11 @@ class Transaction
    */
   #through = new Set<DocumentKey>();
 
+  /**
+   * The documents marked as following the step's own change (see {@link markFollower}).
+   */
+  #followers = new Set<DocumentKey>();
+
   #open = true;
 
   /**
@@ -154,6 +159,31 @@ class Transaction
   get fileVersions(): readonly FileVersion[]
   {
     return [ ...this.#fileVersions ].map(([ document, patches ]) => ({ document, patches: [ ...patches ] }));
+  }
+
+  /**
+   * The documents marked as following the step's own change, in the order each was first marked (see
+   * {@link markFollower}).
+   * @returns {readonly DocumentKey[]} The documents.
+   */
+  get followers(): readonly DocumentKey[]
+  {
+    return [ ...this.#followers ];
+  }
+
+  /**
+   * Marks a document as following the step's own change rather than changed for its own sake, as a map does whose copies a
+   * blueprint's change reached (see HistoryStep's followers): an undo or a redo of the step later moves each of its
+   * patches there only where nothing changed the same data since, and leaves the rest as they stand. A document marked
+   * already is not marked twice.
+   * @param {DocumentKey} document The document, held here or written through.
+   * @returns {Transaction} This transaction, for chaining.
+   */
+  markFollower(document: DocumentKey): this
+  {
+    this.#requireOpen();
+    this.#followers.add(document);
+    return this;
   }
 
   /**

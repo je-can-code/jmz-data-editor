@@ -15,7 +15,9 @@ import { MemoryChannelNetwork } from '../../support/standIns.ts';
  * without them choosing to.
  *
  * Every step, undo, redo, forget and save made in one window is repeated in the other, so both copies and both
- * histories stay equal, and a window opening a document takes the live copy from whoever holds it.
+ * histories stay equal, and a window opening a document takes the live copy from whoever holds it. An undo or a redo
+ * that left parts of its step as they stand, as a blueprint's change leaves copies changed since, leaves the very same
+ * parts in the other window.
  *
  * When two copies are found to differ, their lineages decide. A copy that is only behind takes the other, which
  * holds everything it did, and a window offered a copy older than its own hands its own back, since that may be
@@ -186,6 +188,47 @@ describe('SyncPeer', () =>
           first.hub.history(mapHistoryKey(1)),
           first.hub.history(eventHistoryKey(1, 3)),
           first.hub.lineage(MAP),
+          false,
+        ]);
+    });
+
+    it('repeats an undo and a redo that left parts of a step as they stand exactly as they were made, in the other window', async () =>
+    {
+      // Arrange: a step renaming the map's door and chest that the map follows, as a blueprint's copies do; the door then
+      // renamed by hand in the other window.
+      const { network, first, second } = await buildPair();
+      first.hub.edit('Rename both', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set(MAP, [ 'events', 1, 'name' ], 'Gate');
+        tx.set(MAP, [ 'events', 3, 'name' ], 'Crate');
+        tx.markFollower(MAP);
+      });
+      network.flush();
+      second.hub.edit('Rename door', [ eventHistoryKey(1, 1) ], tx => tx.set(MAP, [ 'events', 1, 'name' ], 'Front door'));
+      network.flush();
+
+      // Act: undone, leaving the door; the chest renamed by hand; redone, leaving the chest.
+      first.hub.undo(mapHistoryKey(1));
+      network.flush();
+      second.hub.edit('Rename chest', [ eventHistoryKey(1, 3) ], tx => tx.set(MAP, [ 'events', 3, 'name' ], 'Box'));
+      network.flush();
+      first.hub.redo(mapHistoryKey(1));
+      network.flush();
+
+      // Assert.
+      const names = (hub: DocumentHub) => [ 1, 3 ].map(id => hub.map(MAP).event(id)?.name);
+      expect([
+        names(second.hub),
+        second.hub.history(mapHistoryKey(1)),
+        second.hub.lineage(MAP),
+        second.hub.appliedSteps(MAP).map(step => step.id),
+        first.hub.isConflicted(MAP) || second.hub.isConflicted(MAP),
+      ])
+        .toStrictEqual([
+          [ 'Front door', 'Box' ],
+          first.hub.history(mapHistoryKey(1)),
+          first.hub.lineage(MAP),
+          first.hub.appliedSteps(MAP).map(step => step.id),
           false,
         ]);
     });
