@@ -23,7 +23,7 @@ import (
 // is refused before anything touches the disk, a file that is not a
 // record is never written over, nor is one a newer editor wrote, and an older record is raised to the
 // merge's version with nothing else of it moved. The write reaches the change stream as the saving
-// window's.
+// window's. And the merge is the record's only way to disk: the editor-data route refuses it whole.
 
 // usesPath is where the record lives in a project.
 const usesPath = "jmz-editor/blueprint-uses.json"
@@ -424,6 +424,50 @@ func TestMergeBlueprintUsesRefusesWhatIsNotAMerge(t *testing.T) {
 			if current.read(t, usesPath) != before {
 				t.Error("a refused merge still changed the record")
 			}
+		})
+	}
+}
+
+// TestEditorDataRefusesTheRecordWhole covers the editor-data route's whole-document save, which the
+// record never takes: put whole, as the editor once saved it, it is refused with a 405 naming the merge
+// route, before anything touches the disk, whether the project holds a record or none. The blueprints,
+// a document beside it, still save whole.
+func TestEditorDataRefusesTheRecordWhole(t *testing.T) {
+	cases := []struct {
+		name   string
+		record string
+	}{
+		{name: "over a record", record: recordOnDisk},
+		{name: "where there is none", record: ""},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange.
+			current := newProject(t)
+			before := ""
+			if testCase.record != "" {
+				writeRecord(t, current, indented(t, testCase.record))
+				before = current.read(t, usesPath)
+			}
+
+			// Act.
+			refused := current.call(t, http.MethodPut, "/api/editor-data/blueprint-uses", `{"schemaVersion":2,"data":{"maps":{"7":{"aa22":[{"x":0,"y":0}]}}}}`)
+			saved := current.call(t, http.MethodPut, "/api/editor-data/blueprints", `{"schemaVersion":1,"data":{"blueprints":{}}}`)
+
+			// Assert- refused, saying where the record goes instead, the record as it was, and the blueprints saved.
+			assertStatus(t, refused, http.StatusMethodNotAllowed)
+			assertBodyContains(t, refused, "PUT /api/editor-data/blueprint-uses/maps")
+			if refused.Header().Get("Allow") != http.MethodGet {
+				t.Errorf("the refusal allows %q", refused.Header().Get("Allow"))
+			}
+			if current.exists(usesPath) && current.read(t, usesPath) != before {
+				t.Error("a refused whole save still wrote the record")
+			}
+			if current.exists(usesPath) != (testCase.record != "") {
+				t.Error("a refused whole save made a record, or lost one")
+			}
+			assertStatus(t, saved, http.StatusNoContent)
 		})
 	}
 }

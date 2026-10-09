@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"jmz-data-editor/server/internal/blueprintuses"
 	"jmz-data-editor/server/internal/mzjson"
 	"jmz-data-editor/server/internal/store"
 )
@@ -56,8 +57,12 @@ func LoadEditorData(responseWriter http.ResponseWriter, httpRequest *http.Reques
 // body is a single well-formed JSON document. They are written indented, the way JSON.stringify(doc,
 // null, 2) writes, so a change to one reads as a small diff in the game's history, and since the
 // layout depends only on the content, saving an unchanged document reproduces its file. The write takes
-// the lock every write of the editor's own files takes, so it never lands between a merge reading the
-// record of where blueprints are placed and writing it back.
+// the lock every write of the editor's own files takes, so no two writes of one file ever interleave.
+//
+// The record of where blueprints are placed is refused with a 405, before the body is read: it
+// describes the maps on disk, a map at a time, so it is only ever merged into a map at a time (see
+// MergeBlueprintUses), and a whole copy written here would put every other window's part over what
+// that window saved, and carry placements no map's file holds.
 func SaveEditorData(announcer WriteAnnouncer) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
 		projectPath, pathErr := GetProjectPath()
@@ -69,6 +74,11 @@ func SaveEditorData(announcer WriteAnnouncer) http.HandlerFunc {
 		key := httpRequest.PathValue("key")
 		if editorDataKey.MatchString(key) == false {
 			http.Error(responseWriter, "key must be lowercase letters, digits and hyphens", http.StatusBadRequest)
+			return
+		}
+		if key == blueprintuses.Key {
+			responseWriter.Header().Set("Allow", http.MethodGet)
+			http.Error(responseWriter, blueprintuses.File+" is never written whole: each map's placements are merged through PUT /api/editor-data/"+blueprintuses.Key+"/maps", http.StatusMethodNotAllowed)
 			return
 		}
 

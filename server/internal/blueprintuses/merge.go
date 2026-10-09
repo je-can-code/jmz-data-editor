@@ -35,8 +35,12 @@ import (
 	"jmz-data-editor/server/internal/mzjson"
 )
 
+// Key is the record's name among the editor's own documents, which it is read by and never written by
+// whole.
+const Key = "blueprint-uses"
+
 // File is where the record lives inside the project, relative to its root.
-const File = "jmz-editor/blueprint-uses.json"
+const File = "jmz-editor/" + Key + ".json"
 
 // mapKey is the shape of a map's key in the record: its id, written as the file writes numbers.
 var mapKey = regexp.MustCompile(`^[1-9][0-9]*$`)

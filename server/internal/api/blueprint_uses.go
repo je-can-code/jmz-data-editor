@@ -21,8 +21,8 @@ import (
 // The record describes the maps on disk, so the map editor writes a map's part of it only with that
 // map's file, and only that part: never another map's placements, saved or not. Two windows saving two
 // maps at the same moment therefore both land, since each merge reads the file and writes it back as
-// one step, under the lock every write of the editor's own files takes, the whole-document save of the
-// editor-data route included.
+// one step, under the lock every write of the editor's own files takes. This is the record's only way
+// to disk: the editor-data route's whole-document save refuses it (see SaveEditorData).
 //
 // A body that is not a merge is refused with a 400 naming what is wrong, before anything touches the
 // disk. A file that is not a record of placements is never written over (500), and neither is one an
