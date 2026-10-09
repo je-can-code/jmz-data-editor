@@ -1,4 +1,3 @@
-import { saveEditorDocument, type EditorDataSaveOutcome } from '../editorData/editorData.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { blueprintHistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
@@ -226,18 +225,5 @@ const deleteBlueprint = (
   return { ok: true, step, blueprint: null };
 };
 
-/**
- * Writes the blueprints to disk, as every edit to them does at once, so every window and every later session has them:
- * nothing when nothing is unsaved, and nothing while they wait for the author's choice about changes made elsewhere,
- * which writing them would put this copy over (see {@link saveEditorDocument}).
- * @param {DocumentHub} hub The window's documents; the blueprints document must be held.
- * @returns {Promise<EditorDataSaveOutcome>} Settles once the file is written, or at once when there is nothing to write
- * or the write is held back; rejects when the write itself fails.
- */
-const saveBlueprints = (hub: DocumentHub): Promise<EditorDataSaveOutcome> =>
-{
-  return saveEditorDocument(hub, BLUEPRINTS_DOCUMENT, 'blueprints');
-};
-
-export { BLUEPRINT_GONE, copiesKeepIt, deleteBlueprint, renameBlueprint, saveBlueprint, saveBlueprints };
+export { BLUEPRINT_GONE, copiesKeepIt, deleteBlueprint, renameBlueprint, saveBlueprint };
 export type { BlueprintOutcome };

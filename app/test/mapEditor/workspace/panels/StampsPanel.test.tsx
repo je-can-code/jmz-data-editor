@@ -8,6 +8,7 @@ import '@testing-library/jest-dom/vitest';
 import type { DockviewApi } from 'dockview-react';
 import { MapEditorApiError } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { BlueprintCopyCounter, type EventNote } from '../../../../src/mapEditor/core/blueprints/blueprintCopies.ts';
+import { BlueprintWriter } from '../../../../src/mapEditor/core/blueprints/blueprintWriter.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintsOf } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
@@ -249,27 +250,30 @@ describe('StampsPanel: blueprints', () =>
   {
     const { readNotes = async () => [], open = 'held', failSaves = false, uses = [] } = source;
     const saved: DocumentKey[] = [];
-    const hub = new DocumentHub({
-      clientId: 'window-a',
-      store: {
-        load: async () => null,
-        save: async key =>
-        {
-          if (failSaves)
-          {
-            throw new Error('the disk is full');
-          }
-
-          saved.push(key);
-        },
-      },
-    });
+    const hub = new DocumentHub({ clientId: 'window-a', store: { load: async () => null, save: async () => undefined } });
     if (open === 'held')
     {
       holdBlueprints(hub, blueprints);
       holdBlueprintUses(hub, uses);
     }
 
+    // every edit to the blueprints reaches disk through the window's writer, which writes them whole.
+    const blueprintWriter = new BlueprintWriter({
+      hub,
+      maps: { follow: () => new Map(), landed: () => undefined, misfit: () => null },
+      write: async write =>
+      {
+        if (failSaves)
+        {
+          throw new Error('the disk is full');
+        }
+
+        if (write.blueprints !== undefined)
+        {
+          saved.push(BLUEPRINTS_DOCUMENT);
+        }
+      },
+    });
     const stamps = new StampHistory('window-a');
     const paints = new WindowPaints(window);
     const blueprintCopies = new BlueprintCopyCounter({ hub, readNotes });
@@ -279,6 +283,7 @@ describe('StampsPanel: blueprints', () =>
       stamps,
       paints,
       blueprintCopies,
+      blueprintWriter,
       openDocument: async (key: DocumentKey) =>
       {
         if (open === 'on-ask' && hub.has(key) === false && key === BLUEPRINTS_DOCUMENT)
@@ -307,7 +312,9 @@ describe('StampsPanel: blueprints', () =>
         </WorkspaceProvider>
       </MapEditorServicesProvider>
     );
-    return { hub, stamps, painting: paints.main.painting, controller, saved, blueprintCopies };
+    // whatever the panel set going settles once the copies are counted and every write asked for has landed.
+    const settling = { settled: () => blueprintCopies.settled().then(() => blueprintWriter.whenWritten()) };
+    return { hub, stamps, painting: paints.main.painting, controller, saved, blueprintCopies: settling };
   };
 
   /**
@@ -321,7 +328,7 @@ describe('StampsPanel: blueprints', () =>
    * @param {BlueprintCopyCounter} counter The window's counter.
    * @returns {Promise<void>} Settles once it has.
    */
-  const settle = async (counter: BlueprintCopyCounter): Promise<void> =>
+  const settle = async (counter: Pick<BlueprintCopyCounter, 'settled'>): Promise<void> =>
   {
     await act(async () =>
     {
@@ -528,7 +535,7 @@ describe('StampsPanel: blueprints', () =>
 
     // Assert.
     expect([ controller.getState().notice?.text, blueprintCards() ])
-      .toStrictEqual([ 'The blueprints could not be saved: the disk is full', [ 'Goblin campNo copies yet' ] ]);
+      .toStrictEqual([ 'The blueprints could not be saved: the disk is full. They are tried again with the next save.', [ 'Goblin campNo copies yet' ] ]);
   });
 
   it('writes nothing over blueprints waiting for a choice about changes made elsewhere, saying so and keeping the edit', async () =>

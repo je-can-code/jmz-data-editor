@@ -5,7 +5,6 @@ import {
   deleteBlueprint,
   renameBlueprint,
   saveBlueprint,
-  saveBlueprints,
   type BlueprintOutcome,
 } from '../../core/blueprints/blueprintEdits.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintsOf, type Blueprint } from '../../core/blueprints/blueprints.ts';
@@ -508,31 +507,10 @@ const DeleteConfirm = (props: { readonly name: string; readonly onDelete: () => 
 };
 
 /**
- * Writes the blueprints to disk once an edit to them has gone through, so every window and every later session has
- * them, as the "goes on top" marks are written; the history the edit joined stays where it is, and an undo leaves the
- * document unsaved until the next save. Blueprints waiting for a choice about changes made elsewhere are not written,
- * which the author hears, as is a write that fails.
- * @param {WorkspaceController} controller The workspace, for its documents and its notices.
- */
-const writeBlueprints = (controller: WorkspaceController) =>
-{
-  saveBlueprints(controller.services.hub)
-    .then(outcome =>
-    {
-      if (outcome.ok === false)
-      {
-        controller.notify(outcome.message, 'error');
-      }
-    })
-    .catch((error: unknown) =>
-    {
-      controller.notify(`The blueprints could not be saved: ${messageOf(error)}`, 'error');
-    });
-};
-
-/**
- * Settles an edit to the blueprints: a refusal is said, and a step taken is written to disk, its blueprint's history
- * becoming the one undo acts on, so the next undo takes it back, and the author hears what was done.
+ * Settles an edit to the blueprints: a refusal is said, and a step taken has its blueprint's history become the one undo
+ * acts on, so the next undo takes it back, and the author hears what was done. The step reaches disk by itself: the
+ * window's writer writes every change to the blueprints at once, as it does every undo and redo of one (see
+ * BlueprintWriter), and says so when it cannot.
  * @param {WorkspaceController} controller The workspace.
  * @param {BlueprintOutcome} outcome What the edit came to.
  * @param {string} blueprintId The blueprint edited.
@@ -548,7 +526,6 @@ const settleEdit = (controller: WorkspaceController, outcome: BlueprintOutcome, 
 
   if (outcome.step !== null)
   {
-    writeBlueprints(controller);
     controller.focusHistory(blueprintHistoryKey(blueprintId));
     controller.notify(done);
   }

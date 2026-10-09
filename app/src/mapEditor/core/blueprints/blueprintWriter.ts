@@ -79,6 +79,28 @@ const reasonOf = (error: unknown): string =>
 };
 
 /**
+ * Words what became of an act that failed, for the author, with whether it is an alarm: the changes reaching copies
+ * stranded, which the author must undo by hand; taken back; or, for an act holding none, the blueprints left to be written
+ * again.
+ * @param {boolean} reachedCopies Whether the act held a change reaching copies, which was taken back.
+ * @param {readonly HistoryStep[]} stranded The changes that could not be taken back.
+ * @param {string} reason Why the write failed.
+ * @returns {[ string, boolean ]} The words, and true for an alarm.
+ */
+const failureWords = (reachedCopies: boolean, stranded: readonly HistoryStep[], reason: string): [ string, boolean ] =>
+{
+  if (stranded.length > 0)
+  {
+    const labels = stranded.map(step => `"${step.label}"`).join(', ');
+    return [ `The change to the blueprint could not be written (${reason}), and ${labels} could not be taken back: undo it by hand.`, true ];
+  }
+
+  return reachedCopies
+    ? [ `The change to the blueprint could not be written, so it was taken back: ${reason}.`, false ]
+    : [ `The blueprints could not be saved: ${reason}. They are tried again with the next save.`, false ];
+};
+
+/**
  * Lists the ids of steps.
  * @param {readonly HistoryStep[]} steps The steps.
  * @returns {string[]} Their ids, in order.
@@ -160,6 +182,11 @@ class BlueprintWriter
    */
   #stranded = new Set<string>();
 
+  /**
+   * Counts the acts that failed, so a wait for everything to land ends at a failure rather than trying it forever.
+   */
+  #failures = 0;
+
   #unsubscribe: () => void;
 
   /**
@@ -225,13 +252,15 @@ class BlueprintWriter
 
   /**
    * Writes whatever is waiting now, without waiting for the moment a change waits, and settles once nothing is on its way:
-   * what a save does before anything else, so the blueprints and their copies are on disk when it reports.
-   * @returns {Promise<void>} Settles once every act asked for has landed or failed; never rejects.
+   * what a save does before anything else, so the blueprints and their copies are on disk when it reports. A write that
+   * fails meanwhile ends the wait, whatever it left waiting to be tried again.
+   * @returns {Promise<void>} Settles once every act asked for has landed, or one has failed; never rejects.
    */
   async whenWritten(): Promise<void>
   {
+    const failures = this.#failures;
     this.#flush();
-    while (this.#sending !== null || this.#queue.length > 0)
+    while ((this.#sending !== null || this.#queue.length > 0) && this.#failures === failures)
     {
       await this.#sent;
       this.#flush();
@@ -336,8 +365,21 @@ class BlueprintWriter
 
     const moves = this.#queue;
     this.#queue = [];
-    this.#sending = moves;
     const write = this.#actOf(moves);
+
+    // blueprints waiting for a choice are written nowhere, and an act holding nothing else has nothing to write.
+    if (write.blueprints === undefined && this.#hub.has(BLUEPRINTS_DOCUMENT))
+    {
+      this.#tell('The blueprints were not saved: they are waiting for a choice about changes made elsewhere.', false);
+    }
+
+    if (write.blueprints === undefined && write.maps.length === 0)
+    {
+      this.#maps.landed(this.#mapsOf(moves), true);
+      return;
+    }
+
+    this.#sending = moves;
     const saved = this.#savedOnLanding(moves);
     this.#sent = this.#write(write).then(
       () =>
@@ -430,24 +472,30 @@ class BlueprintWriter
   }
 
   /**
-   * Takes back an act that failed, and every move made since, newest first, so the window agrees with the disk again, and
-   * says why. The files the act would have written are no longer known here. A move that cannot be taken back, a later
-   * edit standing in its way, is stranded, which the author is alarmed about, since the disk lacks it.
+   * Answers an act that failed. Every change to a blueprint in it, and every one made since, is taken back here, newest
+   * first, since the disk holds none of them and its copies must not part from it: the window then agrees with the disk
+   * again. The files the act would have written are no longer known here. A change that cannot be taken back, a later edit
+   * standing in its way, is stranded, which the author is alarmed about, since the disk lacks it. Any other change to the
+   * blueprints, a rename, say, reaching no copy, is kept, waiting to be written with the next act or the next save; the
+   * author hears why it was not written.
    * @param {readonly QueuedMove[]} moves The act's moves, oldest first.
    * @param {unknown} error Why it failed.
    */
   #failed(moves: readonly QueuedMove[], error: unknown): void
   {
+    this.#failures += 1;
     this.#cancelTimer();
     const since = this.#queue;
-    this.#queue = [];
+    const all = [ ...moves, ...since ];
+    const linked = all.filter(move => isBlueprintChange(move.step));
+    this.#queue = all.filter(move => isBlueprintChange(move.step) === false);
     this.#maps.landed(this.#mapsOf(moves), false);
 
     this.#takingBack = true;
     const stranded: HistoryStep[] = [];
     try
     {
-      [ ...moves, ...since ].reverse().forEach(move =>
+      [ ...linked ].reverse().forEach(move =>
       {
         if (this.#takeBack(move) === false)
         {
@@ -462,15 +510,7 @@ class BlueprintWriter
 
     this.#maps.landed(this.#mapsOf(since), true);
     stranded.forEach(step => this.#stranded.add(step.id));
-    const reason = reasonOf(error);
-    if (stranded.length > 0)
-    {
-      const labels = stranded.map(step => `"${step.label}"`).join(', ');
-      this.#tell(`The change to the blueprint could not be written (${reason}), and ${labels} could not be taken back: undo it by hand.`, true);
-      return;
-    }
-
-    this.#tell(`The change to the blueprint could not be written, so it was taken back: ${reason}.`, false);
+    this.#tell(...failureWords(linked.length > 0, stranded, reasonOf(error)));
   }
 
   /**
