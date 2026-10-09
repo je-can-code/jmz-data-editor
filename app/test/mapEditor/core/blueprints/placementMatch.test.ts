@@ -291,6 +291,23 @@ describe('checkPlacement', () =>
       .toStrictEqual([ { kind: 'shifted', by: { x: 1, y: 0 }, matched: 8, compared: 16 }, { kind: 'in-place', matched: 8, compared: 16 } ]);
   });
 
+  it('takes no slide when as many tiles read slid as in place, and a slide when exactly half of all it changes read slid', () =>
+  {
+    // Arrange: seven objects over grass, so a slide a tile right changes six of them; on one map the first three slid
+    // that way and the last three stayed, three each; on the other the first three slid and the last three were painted
+    // over, three of the six reading slid.
+    const stamp = pieceOf(rowMap(7, ROW.slice(0, 7)), { x: 0, y: 0, width: 7, height: 1 });
+    const tied = rowMap(7, [ 0, 10, 11, 12, 14, 15, 16 ]);
+    const half = rowMap(7, [ 0, 10, 11, 12, 20, 20, 20 ]);
+
+    // Act.
+    const checks = [ tied, half ].map(map => checkPlacement(map, { x: 0, y: 0 }, stamp));
+
+    // Assert.
+    expect(checks)
+      .toStrictEqual([ { kind: 'in-place', matched: 10, compared: 14 }, { kind: 'shifted', by: { x: 1, y: 0 }, matched: 7, compared: 14 } ]);
+  });
+
   it('looks for a slide two tiles every way and no further', () =>
   {
     // Arrange: eight objects over no ground, slid two tiles left, or three.
