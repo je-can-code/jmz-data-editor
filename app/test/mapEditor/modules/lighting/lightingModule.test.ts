@@ -152,6 +152,9 @@ vi.mock('pixi.js', async importOriginal =>
  * or J-Weather-Time is on; J-Weather's module says for itself that its plugin reads the sky (its own tests hold the one
  * setting the two make together). The section shows a colour of the dark the note names but the game cannot use as the
  * project's.
+ *
+ * And it reads a light's tag as fields a copy of a blueprint follows one by one (their own tests hold how), with the
+ * project's defaults, for as long as J-Lighting is enabled.
  */
 describe('lightingModule', () =>
 {
@@ -252,6 +255,22 @@ describe('lightingModule', () =>
       // Assert.
       expect(panel?.displayName)
         .toBe('QuickPanel(lighting.light)');
+    });
+
+    it('reads a light\'s tag as fields of a blueprint\'s copies while J-Lighting is enabled, with the project\'s defaults, and none while it is not', () =>
+    {
+      // Arrange: a lamp naming no colour, in a project whose lights default to red.
+      const lamp = page([ command(108, [ '<light:[2]>' ]) ]);
+      const configs = new Map([ [ 'lighting', served('#ff0000') ] ]);
+
+      // Act.
+      const enabled = registryWith(lighting(true), configs).commentTags();
+      const disabled = registryWith(lighting(false), configs).commentTags();
+
+      // Assert.
+      const [ tag ] = enabled;
+      expect([ enabled.map(each => each.id), tag.read(lamp)[0].fields.find(field => field.name === 'color')?.value, disabled ])
+        .toStrictEqual([ [ 'lighting.light' ], '#ff0000', [] ]);
     });
 
     it('leaves a glowing door the transfer it is', () =>

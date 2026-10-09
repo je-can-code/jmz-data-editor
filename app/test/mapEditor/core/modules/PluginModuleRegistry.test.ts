@@ -53,6 +53,10 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * A module may let the preview set a kind of state of its own, as J-OMNI-Quests lets it set where each quest stands,
  * named under its own id like everything else it adds, so it can never take over the switches, the variables or another
  * module's kind; listed while it is on, in the order the modules added them, and taken back when it switches off.
+ *
+ * A module may read tags of its own from an event page's comments as fields a blueprint's copies follow, as J-Lighting
+ * reads its lights, named under its own id; listed while it is on, in the order the modules added them, and taken back
+ * when it switches off.
  */
 describe('PluginModuleRegistry', () =>
 {
@@ -381,6 +385,7 @@ describe('PluginModuleRegistry', () =>
         register: add => add.liveNotice({ id: 'core.x', current: () => null, subscribe: () => () => undefined }),
       },
       { id: 'l', title: 'L', plugins: [], register: add => add.skyReader({ id: 'lighting.sky', follows: 'x', does: 'x' }) },
+      { id: 'm', title: 'M', plugins: [], register: add => add.commentTag({ id: 'lighting.light', read: () => [], write: text => text }) },
     ];
 
     // Act.
@@ -411,6 +416,8 @@ describe('PluginModuleRegistry', () =>
       .toThrow('k can only add notices whose id starts with "k.", not core.x');
     expect(failures[11])
       .toThrow('l can only add sky readers whose id starts with "l.", not lighting.sky');
+    expect(failures[12])
+      .toThrow('m can only add comment tags whose id starts with "m.", not lighting.light');
   });
 
   describe('configs read on demand', () =>
@@ -925,6 +932,54 @@ describe('PluginModuleRegistry', () =>
 
       // Assert.
       expect([ listed, registry.previewKinds() ])
+        .toStrictEqual([ 1, [] ]);
+    });
+  });
+
+  describe('commentTags', () =>
+  {
+    /**
+     * A module reading one tag of its own from comments as fields, once its plugin is on.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @returns {PluginModule} The module.
+     */
+    const tagging = (id: string, pluginName: string): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: contributions => contributions.commentTag({ id: `${id}.tag`, read: () => [], write: text => text }),
+    });
+
+    it('lists the comment tags of the active modules in the order they added them, and none while they are off', () =>
+    {
+      // Arrange: two modules reading tags, and a registry where neither is on.
+      const modules = [ tagging('lighting', 'J-Lighting'), tagging('jabs', 'J-ABS') ];
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      both.activate(modules, [ plugin('j/lighting/J-Lighting', true), plugin('j/abs/J-ABS', true) ]);
+      neither.activate(modules, [ plugin('j/lighting/J-Lighting', false) ]);
+
+      // Assert.
+      expect([ both.commentTags().map(tag => tag.id), neither.commentTags() ])
+        .toStrictEqual([ [ 'lighting.tag', 'jabs.tag' ], [] ]);
+    });
+
+    it('takes a module\'s comment tags back once it switches off', () =>
+    {
+      // Arrange: the module on.
+      const lighting = tagging('lighting', 'J-Lighting');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', true) ]);
+      const listed = registry.commentTags().length;
+
+      // Act.
+      registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', false) ]);
+
+      // Assert.
+      expect([ listed, registry.commentTags() ])
         .toStrictEqual([ 1, [] ]);
     });
   });
