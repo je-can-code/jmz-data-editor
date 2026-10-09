@@ -1,4 +1,5 @@
 import { pluginBasename, type PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.ts';
+import type { CommentTagDefinition } from '../blueprints/blueprintFields.ts';
 import type { CommandCatalog } from '../commands/CommandCatalog.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
@@ -72,6 +73,7 @@ type Contributions = {
   skyReaders: SkyReader[];
   pageConditions: PageCondition[];
   previewKinds: PreviewKindDefinition[];
+  commentTags: CommentTagDefinition[];
 };
 
 /**
@@ -94,6 +96,7 @@ const noContributions = (): Contributions => ({
   skyReaders: [],
   pageConditions: [],
   previewKinds: [],
+  commentTags: [],
 });
 
 /**
@@ -164,8 +167,9 @@ const configNamesOf = (pluginModule: PluginModule, enabled: ReadonlyMap<string, 
  * Holds the event kinds, palette entries, passability rules, overlays, lighting layers, weather layers and command
  * entries the editor knows, the maps whose events are a plugin's patterns, what the modules say over every map view, the
  * clock and the sky they offer, the sections they add to Map Properties and the plugins they say read a map's sky, the
- * conditions they add to the game's page rule and the kinds of state they let the preview set: the core's kinds, always,
- * and each plugin module's contributions while its plugins are enabled.
+ * conditions they add to the game's page rule, the kinds of state they let the preview set and the comment tags they read
+ * as fields of a blueprint's copies: the core's kinds, always, and each plugin module's contributions while its plugins are
+ * enabled.
  */
 class PluginModuleRegistry
 {
@@ -537,6 +541,16 @@ class PluginModuleRegistry
   }
 
   /**
+   * Lists the tags the active modules read from an event page's comments as fields of a blueprint's copies, in the order
+   * they added them; empty while none adds one, when a page's command list, every tag on it included, is one choice.
+   * @returns {readonly CommentTagDefinition[]} The tags.
+   */
+  commentTags(): readonly CommentTagDefinition[]
+  {
+    return this.#contributions.commentTags;
+  }
+
+  /**
    * Builds the contribution sink one module registers through, which holds it to its own id prefix.
    * @param {PluginModule} pluginModule The module.
    * @returns {ModuleContributions} The sink.
@@ -629,6 +643,11 @@ class PluginModuleRegistry
       {
         requirePrefix(kind.id, 'preview kinds');
         this.#contributions.previewKinds.push(kind);
+      },
+      commentTag: tag =>
+      {
+        requirePrefix(tag.id, 'comment tags');
+        this.#contributions.commentTags.push(tag);
       },
     };
   }

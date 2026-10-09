@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import type { PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.ts';
+import type { CommentTagDefinition } from '../blueprints/blueprintFields.ts';
 import type { CommandCatalogEntry } from '../commands/catalogTypes.ts';
 import type { EventMarkerSymbol } from '../eventKinds/eventMarkers.ts';
 import type { MapDocumentKey } from '../model/documentKeys.ts';
@@ -602,6 +603,16 @@ type ModuleContributions = {
    * @param {PreviewKindDefinition} kind The kind.
    */
   previewKind(kind: PreviewKindDefinition): void;
+
+  /**
+   * Reads one of the module's tags in an event page's comments as fields, for as long as the module is on, as J-Lighting
+   * reads its light's reach, colour, intensity and effect: a copy of a blueprint then follows each field one by one, a
+   * number by an offset or a pin held to its range and a choice unless the copy overrides it, rather than as part of the
+   * page's command list, which is one choice. A tag no module reads stays part of the command list, so it never moves by
+   * an offset.
+   * @param {CommentTagDefinition} tag The tag.
+   */
+  commentTag(tag: CommentTagDefinition): void;
 };
 
 /**
