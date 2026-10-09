@@ -170,7 +170,7 @@ const listWithin = (value: JsonValue | undefined, rest: PatchPath): JsonValue[] 
  * Follows one patch of a step through an event's pages: a splice of the list takes pages out and puts pages in; a set of a
  * place in the list puts one on its end or takes the last off, or replaces one in its place, which still continues it; a
  * set of the whole list, or of the event, replaces the list (see {@link replaceAll}); and anything deeper changes a page
- * where it stands, which every page after it still continues.
+ * where it stands, and the page still continues itself. A patch reaching another event, or the tiles, changes nothing here.
  * @param {PageTrail} trail The pages followed so far.
  * @param {PatchPath} pagesPath Where the event's page list sits.
  * @param {Patch} patch The patch.

@@ -287,6 +287,31 @@ describe('MapPanel', () =>
         .toStrictEqual([ [ 'Goblin camp', true, true ], `Map ${mapId}`, 'Goblin camp *', true ]);
     });
 
+    it('keeps the blueprint\'s unsaved changes held when its panel closes, so opening it again shows them', async () =>
+    {
+      // Arrange: the camp open in a panel, its event moved.
+      const { controller, hub } = buildBlueprintWorkspace();
+      const { api } = buildPanel();
+      const mapId = blueprintMapId('k3x9q2mf');
+      const { unmount } = render(panelFor(controller, api, { mapId }));
+      await screen.findByTestId('map-view');
+      act(() =>
+      {
+        hub.edit('Move event', [ mapHistoryKey(mapId) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 1, 'x' ], 1));
+      });
+
+      // Act: the panel closes, and the blueprint opens again in another.
+      unmount();
+      const closed = [ hub.has('blueprint-map:k3x9q2mf'), hub.isDirty('blueprint-map:k3x9q2mf') ];
+      const again = buildPanel();
+      render(panelFor(controller, again.api, { mapId }));
+      await screen.findByTestId('map-view');
+
+      // Assert.
+      expect([ closed, hub.map('blueprint-map:k3x9q2mf').event(1)?.x, vi.mocked(again.api.setTitle).mock.calls.at(-1)?.[0], screen.getByText('Unsaved') !== null ])
+        .toStrictEqual([ [ true, true ], 1, 'Goblin camp *', true ]);
+    });
+
     it('says the blueprint was deleted, and shows it again once an undo in its history brings it back', async () =>
     {
       // Arrange: the camp open in the panel.

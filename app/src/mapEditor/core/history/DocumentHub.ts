@@ -133,8 +133,9 @@ type HubListener = (event: HubEvent) => void;
  * Looks over an edit made in this window just before it becomes a step: says why it must not, in words for the author,
  * or null to let it through. The edit is still open, every patch of it in its document, so a check reads each document
  * as the edit leaves it, and the edit's own patches from its entries. A check may add patches of its own to it, which
- * then become part of the same step, and of what a later check reads. It is asked of every edit the window makes,
- * whatever its history, and never of another window's, which its own checks looked over.
+ * then become part of the same step, and of what a later check reads; the step is still recorded in the histories the
+ * edit named when it began, and in no other. It is asked of every edit the window makes, whatever its history, and never
+ * of another window's, which its own checks looked over.
  */
 type CommitCheck = (transaction: Transaction) => string | null;
 
