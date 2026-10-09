@@ -800,7 +800,8 @@ class CopyMaps
   }
 
   /**
-   * Forgets the file kept for a map document let go of, thrown back to its file, or found changed on disk.
+   * Forgets the file kept for a map document let go of, thrown back to its file, or found changed on disk, and gathers
+   * again, so a map a change reaches is known afresh before the next change asks for it.
    * @param {DocumentKey} key The document.
    */
   #forgetDocument(key: DocumentKey): void
@@ -809,6 +810,7 @@ class CopyMaps
     if (parsed.kind === 'map')
     {
       this.#forget(parsed.mapId);
+      this.gather();
     }
   }
 
