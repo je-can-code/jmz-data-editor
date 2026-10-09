@@ -30,11 +30,17 @@ type stagedFile struct {
 	temp   string
 }
 
+// pushFolder makes the renames in a folder durable once every file of an act has taken its name; a variable so a test can
+// see that nothing is pushed before the last rename.
+var pushFolder = syncFolder
+
 // WriteFilesAtomic replaces several files as near to one act as files allow: every new content is written to a temporary
 // file beside its target and pushed to the disk first, and only once all of them are there does each take its target's
-// name, one rename straight after another. A failure before the renames leaves every file exactly as it was, and none of
-// the temporary files behind; the renames themselves cannot fail for want of space, since the bytes are already on the
-// disk. A file whose folder does not exist yet gets it. A replaced file keeps its permissions, a new one gets 0644.
+// name, one rename straight after another with nothing between them, and only then is each folder pushed to the disk,
+// once, so a crash can find the files parted for no longer than the renames take. A failure before the renames leaves
+// every file exactly as it was, and none of the temporary files behind; the renames themselves cannot fail for want of
+// space, since the bytes are already on the disk. A file whose folder does not exist yet gets it. A replaced file keeps
+// its permissions, a new one gets 0644.
 func WriteFilesAtomic(files []FileWrite) error {
 	staged := []stagedFile{}
 	discard := func() {
@@ -52,7 +58,7 @@ func WriteFilesAtomic(files []FileWrite) error {
 		staged = append(staged, stagedFile{target: file.Path, temp: temp})
 	}
 
-	// every new content is on the disk, so the files change one rename after another.
+	// every new content is on the disk, so the files change one rename straight after another.
 	var renameErr error
 	for index, file := range staged {
 		if err := os.Rename(file.temp, file.target); err != nil {
@@ -62,7 +68,16 @@ func WriteFilesAtomic(files []FileWrite) error {
 			}
 			break
 		}
-		syncFolder(filepath.Dir(file.target))
+	}
+
+	// only then is each folder pushed to the disk, once, since a push between two renames would hold them apart.
+	pushed := map[string]bool{}
+	for _, file := range staged {
+		folder := filepath.Dir(file.target)
+		if pushed[folder] == false {
+			pushed[folder] = true
+			pushFolder(folder)
+		}
 	}
 
 	return renameErr

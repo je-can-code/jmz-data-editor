@@ -9,9 +9,10 @@ import (
 
 // WriteFilesAtomic owes a change to a blueprint what WriteFileAtomic owes a save, across every file the change reaches:
 // either every file takes its new bytes, or, when anything goes wrong before the renames, every file keeps its old ones,
-// with no temporary file left behind anywhere, so the blueprint and its copies on disk never part. A folder the first
-// file of its kind goes into is made, and each file keeps the permissions it had. WithEveryWriteLock holds both write
-// locks while its work runs, and hands back what the work says.
+// with no temporary file left behind anywhere, so the blueprint and its copies on disk never part. The renames follow one
+// another with nothing between them, every folder pushed to the disk once only after the last, so a crash has as little
+// time as files allow to find them parted. A folder the first file of its kind goes into is made, and each file keeps the
+// permissions it had. WithEveryWriteLock holds both write locks while its work runs, and hands back what the work says.
 
 // TestWriteFilesAtomicReplacesEveryFile covers the ordinary act, a new folder included.
 func TestWriteFilesAtomicReplacesEveryFile(t *testing.T) {
@@ -37,6 +38,55 @@ func TestWriteFilesAtomicReplacesEveryFile(t *testing.T) {
 	assertFileHolds(t, blueprintsPath, "blueprints")
 	assertFolderHoldsOnly(t, filepath.Join(root, "data"), "Map001.json")
 	assertFolderHoldsOnly(t, filepath.Join(root, "jmz-editor"), "blueprints.json")
+}
+
+// TestWriteFilesAtomicRenamesEveryFileBeforePushingAnyFolder covers the gap between the first rename and the last: no
+// folder is pushed to the disk until every file holds its new bytes, and each folder is pushed once.
+func TestWriteFilesAtomicRenamesEveryFileBeforePushingAnyFolder(t *testing.T) {
+	// Arrange: two maps in one folder and the blueprints in another, and a push that notes what every file held then.
+	root := t.TempDir()
+	files := []FileWrite{
+		{Path: filepath.Join(root, "data", "Map001.json"), Content: []byte("new map 1")},
+		{Path: filepath.Join(root, "data", "Map002.json"), Content: []byte("new map 2")},
+		{Path: filepath.Join(root, "jmz-editor", "blueprints.json"), Content: []byte("new blueprints")},
+	}
+	for _, file := range files[:2] {
+		if err := os.MkdirAll(filepath.Dir(file.Path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file.Path, []byte("old"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pushed := []string{}
+	heldThen := []bool{}
+	original := pushFolder
+	t.Cleanup(func() { pushFolder = original })
+	pushFolder = func(folder string) {
+		pushed = append(pushed, folder)
+		every := true
+		for _, file := range files {
+			held, err := os.ReadFile(file.Path)
+			every = every && err == nil && string(held) == string(file.Content)
+		}
+		heldThen = append(heldThen, every)
+		original(folder)
+	}
+
+	// Act.
+	err := WriteFilesAtomic(files)
+
+	// Assert.
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := []string{filepath.Join(root, "data"), filepath.Join(root, "jmz-editor")}
+	if len(pushed) != len(expected) || pushed[0] != expected[0] || pushed[1] != expected[1] {
+		t.Errorf("pushed %v, expected %v", pushed, expected)
+	}
+	if len(heldThen) != 2 || heldThen[0] == false || heldThen[1] == false {
+		t.Errorf("a folder was pushed before every file held its new bytes: %v", heldThen)
+	}
 }
 
 // TestWriteFilesAtomicLeavesEveryFileWhenOneCannotBeStaged covers a failure before the renames: the files staged first
