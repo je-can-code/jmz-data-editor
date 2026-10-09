@@ -425,6 +425,36 @@ describe('DocumentHub, steps whose copies follow their change', () =>
         ]);
     });
 
+    it('redoes a change that left every patch on a map nobody here holds, never asking for that map to be open', () =>
+    {
+      // Arrange: map 2 written through and in the change's histories, as propagation joins it; its file, changed on disk,
+      // takes none of the change back, so the undo leaves all of map 2.
+      const hub = buildHub({ holdsB: false });
+      hub.setFileFit((key, patch) => (key === MAP_B ? null : patch));
+      hub.edit('Raise guard sight', [ BLUEPRINT_HISTORY, mapHistoryKey(1) ], tx =>
+      {
+        tx.set(BLUEPRINTS, [ 'data', 'blueprints', 0, 'sight' ], 5);
+        tx.set(MAP_A, [ 'events', 1, 'name' ], 'Guard (sight 5)');
+        tx.writeThrough(MAP_B, { kind: 'set', path: [ 'events', 1, 'name' ], before: 'Door', after: 'Guard (sight 5)' });
+        tx.join([ mapHistoryKey(2) ]);
+        [ MAP_A, MAP_B ].forEach(key => tx.markFollower(key));
+      });
+      const undone = hub.undo(BLUEPRINT_HISTORY);
+
+      // Act.
+      const redone = hub.redo(BLUEPRINT_HISTORY);
+
+      // Assert: the undo left map 2 alone; the redo puts the change back here, still naming map 2 as written through.
+      expect([ leftOf(undone), redone.ok, redone.ok && redone.step.through, eventOf(hub, MAP_A, 1).name, sightOf(hub) ])
+        .toStrictEqual([
+          [ { document: MAP_B, patch: { kind: 'set', path: [ 'events', 1, 'name' ], before: 'Door', after: 'Guard (sight 5)' }, by: null } ],
+          true,
+          [ MAP_B ],
+          'Guard (sight 5)',
+          5,
+        ]);
+    });
+
     it('moves every patch on a map nobody here holds when there is no way to tell what its file takes', () =>
     {
       // Arrange.

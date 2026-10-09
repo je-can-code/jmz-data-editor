@@ -246,8 +246,10 @@ const fileVersionMoving = (version: FileVersion, left: readonly Patch[]): FileVe
 };
 
 /**
- * Builds the step that moves when parts of a step are left: the same step, by its id, with the parts that move alone,
- * every file it reaches taking only those, and none it no longer changes named as written through.
+ * Builds the step that moves when parts of a step are left: the same step, by its id, with the parts that move alone, and
+ * every file it reaches taking only those. It still names every document it writes through, even one it no longer changes:
+ * its histories still live there, and a step naming a history on a document is moved only by a window holding that
+ * document unless the step writes it through, so dropping the name would refuse every later move until that map was open.
  * @param {HistoryStep} step The step whole.
  * @param {readonly EntryPart[]} parts What the move comes to on each of its patches, in their order.
  * @returns {HistoryStep} The step that moves.
@@ -255,14 +257,12 @@ const fileVersionMoving = (version: FileVersion, left: readonly Patch[]): FileVe
 const movingStep = (step: HistoryStep, parts: readonly EntryPart[]): HistoryStep =>
 {
   const entries: StepEntry[] = parts.flatMap(part => (part.moving === null ? [] : [ { document: part.document, patch: part.moving } ]));
-  const { through: _through, fileVersions: _fileVersions, ...rest } = step;
-  const through = (step.through ?? []).filter(key => entries.some(entry => entry.document === key));
+  const { fileVersions: _fileVersions, ...rest } = step;
   const leftOn = (key: DocumentKey): Patch[] => parts.flatMap(part => (part.document === key && part.left !== null ? [ part.left ] : []));
   const fileVersions = step.fileVersions?.map(version => fileVersionMoving(version, leftOn(version.document)));
   return {
     ...rest,
     entries,
-    ...(through.length > 0 ? { through } : {}),
     ...(fileVersions === undefined ? {} : { fileVersions }),
   };
 };

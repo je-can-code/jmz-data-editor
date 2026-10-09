@@ -18,8 +18,9 @@ import type { Patch, SetPatch, TilesPatch } from '../../../../src/mapEditor/core
  * data where it left it; a tiles patch is decided cell by cell, since a cell painted over by hand is the one to keep, and a
  * resize gives every cell a new place, so none moves. A file nobody holds is asked what it would take, and without a way
  * to ask, everything moves for the write to check. The step that moves keeps the step's id and narrows only what it
- * reaches: its entries, the documents it writes through, and what each file differing from its document takes, which
- * keeps whatever reaches the same data as a part left.
+ * reaches: its entries, and what each file differing from its document takes, which keeps whatever reaches the same data
+ * as a part left. It still names every document it writes through, one it no longer changes included, since its histories
+ * still live there and naming it is what lets the step move without that map open.
  */
 describe('stepParts', () =>
 {
@@ -204,9 +205,9 @@ describe('stepParts', () =>
       at: 5,
     });
 
-    it('narrows the step to what moves, keeping its id and every file version, and lists what was left', () =>
+    it('narrows the step to what moves, keeping its id, every file version and every document written through, and lists what was left', () =>
     {
-      // Arrange: map 1's door and cell 2 left, and map 3's door, which leaves nothing written through.
+      // Arrange: map 1's door and cell 2 left, and map 3's door, which leaves nothing moving on map 3.
       const step = stepWhole();
       const by = editOf([], 'hand').step;
       const parts = [
@@ -221,7 +222,7 @@ describe('stepParts', () =>
       const left = leftPartsOf(parts);
 
       // Assert: the file keeps the splice of the event list holding the door, and cell 2; it gives back event 4's name, the
-      // door's pages, which the door's name never reaches, cell 5 and the resize.
+      // door's pages, which the door's name never reaches, cell 5 and the resize. Map 3 is still named as written through.
       expect([ moving, left ])
         .toStrictEqual([
           {
@@ -229,6 +230,7 @@ describe('stepParts', () =>
             label: 'Change',
             histories: [ 'blueprint:k3x9q2mf', 'map:1' ],
             entries: [ { document: 'editor-data:blueprints', patch: nameSet(9) }, { document: 'map:1', patch: cells([ 1 ]) } ],
+            through: [ 'map:3' ],
             fileVersions: [
               {
                 document: 'map:1',
