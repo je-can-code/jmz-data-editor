@@ -812,8 +812,10 @@ describe('MapTreeService', () =>
   /*
    * The record of where blueprints are placed follows the maps the tree creates and removes, in the tree's own step, so
    * one undo puts the record back with the files: a map deleted takes its placements with it, a copy of a map holds the
-   * placements it was copied with, and a brand new map holds none, whatever an id it takes was left holding. A window
-   * holding no record leaves it alone.
+   * placements it was copied with, and a brand new map holds none, whatever an id it takes was left holding. A copy's
+   * placements come from where its file does: the window's own for a map it holds, and the record's file for a map read
+   * from disk, so another window's unsaved placements never reach a file that lacks their tiles. A window holding no
+   * record leaves it alone.
    *
    * The camp (aa22) is placed on the town (2), the inn (3) and the cave (5).
    */
@@ -927,18 +929,20 @@ describe('MapTreeService', () =>
 
     /**
      * A tree service whose window holds the record of the camp's placements, beside any others given, as the record's file
-     * on a server holds them too, kept by a keeper the tree writes the placements of its maps through.
+     * on a server holds them too, kept by a keeper the tree writes the placements of its maps through. Placements held
+     * unsaved are in the window's record and not the file's, as another window's unsaved placements are.
      * @param {readonly PlacedSpot[]} others More placements.
+     * @param {readonly PlacedSpot[]} unsaved Placements the window's record holds and the file does not.
      * @returns {object} The service, the hub, the disk, the record's server, its keeper, and what the author heard.
      */
-    const keptService = (others: readonly PlacedSpot[] = []) =>
+    const keptService = (others: readonly PlacedSpot[] = [], unsaved: readonly PlacedSpot[] = []) =>
     {
       const disk = buildDisk();
       const hub = new DocumentHub({ clientId: 'window-a', store: apiDocumentStore(disk.api), now: () => 1000 });
       const server = new UsesServer(storedUses([ ...CAMPS, ...others ]));
       const problems: string[] = [];
       const keeper = new BlueprintUsesKeeper({ hub, api: server.api, holders: () => [], onProblem: message => problems.push(message) });
-      holdBlueprintUses(hub, [ ...CAMPS, ...others ]);
+      holdBlueprintUses(hub, [ ...CAMPS, ...others, ...unsaved ]);
       const service = new MapTreeService({ hub, api: disk.api, openDocument: key => hub.load(key), placements: keeper });
       return { service, hub, server, keeper, problems, ...disk };
     };
@@ -999,6 +1003,69 @@ describe('MapTreeService', () =>
       // Assert.
       expect([ afterDuplicate, onDisk(server) ])
         .toStrictEqual([ [ '2: 1,1', '3: 0,2', '4: 4,0', '5: 4,0' ], [ '2: 1,1', '3: 0,2', '5: 4,0' ] ]);
+    });
+
+    it('gives a duplicate of a map read from disk the placements its file was saved with, never another window\'s unsaved ones', async () =>
+    {
+      // Arrange: a placement on the cave that only the window's record holds, unsaved in another window; this window does
+      // not hold the cave, so its duplicate is made from the cave's file on disk.
+      const { service, hub, server, keeper } = keptService([], [ { blueprintId: 'aa22', mapId: 5, x: 7, y: 7 } ]);
+
+      // Act: the cave duplicated as map 4.
+      succeeded(await service.duplicate([ 5 ]));
+      await keeper.whenWritten();
+
+      // Assert: the copy holds the cave's placement on disk alone, in the window and on disk.
+      expect([ placedOn(hub), onDisk(server) ])
+        .toStrictEqual([ [ '2: 1,1', '3: 0,2', '4: 4,0', '5: 4,0', '5: 7,7' ], [ '2: 1,1', '3: 0,2', '4: 4,0', '5: 4,0' ] ]);
+    });
+
+    it('gives a duplicate of a map held here its placements as they stand, unsaved ones included, as its file is', async () =>
+    {
+      // Arrange: the cave held here, with a placement made since it was opened.
+      const { service, hub, server, keeper } = keptService();
+      await hub.load('map:5');
+      hub.edit('Place', [ mapHistoryKey(5) ], tx =>
+      {
+        tx.set('map:5', [ 'note' ], 'camped');
+        recordSpots(tx, hub, 5, [ { blueprintId: 'aa22', x: 7, y: 7 } ]);
+      });
+
+      // Act: the cave duplicated as map 4.
+      succeeded(await service.duplicate([ 5 ]));
+      await keeper.whenWritten();
+
+      // Assert: the copy, written from the held cave, holds both placements, on disk too; the cave's own stays unsaved.
+      expect(onDisk(server))
+        .toStrictEqual([ '2: 1,1', '3: 0,2', '4: 4,0', '4: 7,7', '5: 4,0' ]);
+    });
+
+    it('gives a duplicate of a map read from disk the placements the window holds while the record\'s file cannot be read', async () =>
+    {
+      // Arrange: a placement on the cave only the window's record holds, and the record's file unreadable.
+      const { service, hub, server, keeper } = keptService([], [ { blueprintId: 'aa22', mapId: 5, x: 7, y: 7 } ]);
+      server.stored = 'broken';
+
+      // Act.
+      succeeded(await service.duplicate([ 5 ]));
+      await keeper.whenWritten();
+
+      // Assert: the copy takes the window's placements, the nearest there is, and the file is left as it was.
+      expect([ placedOn(hub), server.stored ])
+        .toStrictEqual([ [ '2: 1,1', '3: 0,2', '4: 4,0', '4: 7,7', '5: 4,0', '5: 7,7' ], 'broken' ]);
+    });
+
+    it('copies a map read from disk to the clipboard with the placements its file was saved with', async () =>
+    {
+      // Arrange: a placement on the cave that only the window's record holds, unsaved in another window.
+      const { service } = keptService([], [ { blueprintId: 'aa22', mapId: 5, x: 7, y: 7 } ]);
+
+      // Act.
+      const copied = await service.copy([ 5 ]);
+
+      // Assert.
+      expect(copied.ok && copied.copies.map(copy => copy.spots))
+        .toStrictEqual([ [ { blueprintId: 'aa22', x: 4, y: 0 } ] ]);
     });
 
     it('gives a brand new map no placements on disk either, whatever its id was left holding there', async () =>

@@ -455,7 +455,8 @@ class MapTreeService
       try
       {
         const contents = await this.#filesOf(mapIds);
-        return { ok: true as const, copies: copyMaps(this.rows(), mapIds, contents, this.#spotsOf(mapIds)) };
+        const spots = await this.#spotsOf(mapIds);
+        return { ok: true as const, copies: copyMaps(this.rows(), mapIds, contents, spots) };
       }
       catch (error)
       {
@@ -490,7 +491,7 @@ class MapTreeService
     return this.#run(async () =>
     {
       const contents = await this.#filesOf(mapIds);
-      const spots = this.#spotsOf(mapIds);
+      const spots = await this.#spotsOf(mapIds);
       const sources = [ ...contents.entries() ].map(([ mapId, content ]) => ({ mapId, content, spots: spots.get(mapId) ?? [] }));
       const base = this.rows();
       const plan = await this.#withFreeIds(skip => planDuplicate(base, sources, skip));
@@ -1274,17 +1275,33 @@ class MapTreeService
   }
 
   /**
-   * Reads the placements of blueprints the record holds for several maps, as they stand now.
+   * Reads the placements of blueprints for several maps as their files stand for this window, the way {@link #fileOf}
+   * reads the files: a map held here with those the record holds for it now, unsaved ones included, and any other map,
+   * whose file is read from disk, with those the record's file holds for it, since another window's unsaved placements on
+   * it are in the record here but not in that file. While the record's file cannot be read, the record here stands in.
    * @param {readonly number[]} mapIds The maps.
-   * @returns {Map<number, BlueprintSpot[]>} Each map's placements, by map id; none while the window holds no record it can
-   * read.
+   * @returns {Promise<Map<number, BlueprintSpot[]>>} Each map's placements, by map id; none while the window holds no
+   * record it can read.
    */
-  #spotsOf(mapIds: readonly number[]): Map<number, BlueprintSpot[]>
+  async #spotsOf(mapIds: readonly number[]): Promise<Map<number, BlueprintSpot[]>>
   {
     const uses = readableUses(this.#hub);
-    return uses === null
-      ? new Map()
-      : new Map(mapIds.map(mapId => [ mapId, spotsOnMap(uses, mapId) ]));
+    if (uses === null)
+    {
+      return new Map();
+    }
+
+    // the record's file is read only when some map's file is.
+    const fromDisk = mapIds.some(mapId => this.#hub.has(mapDocumentKey(mapId)) === false) && this.#placements !== null
+      ? await this.#placements.placementsOnDisk()
+      : null;
+    return new Map(mapIds.map(mapId =>
+    {
+      const spots = fromDisk === null || this.#hub.has(mapDocumentKey(mapId))
+        ? spotsOnMap(uses, mapId)
+        : [ ...fromDisk.get(mapId) ?? [] ];
+      return [ mapId, spots ];
+    }));
   }
 
   /**
