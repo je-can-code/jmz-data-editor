@@ -12,11 +12,13 @@ import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { operationFor } from '../../../../src/mapEditor/core/sync/SyncPeer.ts';
 import { cellIndex } from '../../../../src/mapEditor/core/tiles/tileGrid.ts';
+import { storedBlueprints } from '../../support/blueprintFixtures.ts';
 import { mapWithEvents } from '../../support/eventFixtures.ts';
 import {
   a5,
   BLUEPRINT,
   campMap,
+  campStamp,
   eventOf,
   groundOf,
   guardPage,
@@ -296,26 +298,143 @@ describe('BlueprintWriter', () =>
       .toStrictEqual([ true, [ { message: 'The change to the blueprint could not be written (the disk is full), and "Paint" could not be taken back: undo it by hand.', alarm: true } ] ]);
   });
 
-  it('takes a change back, writing nothing, when the blueprints wait for a choice about changes made elsewhere by the time it goes', async () =>
+  /**
+   * The blueprints as a version of their file found on disk holds them: the camp renamed Fort, its stamp as it started.
+   * @returns {JsonValue} The blueprints, in their stored form.
+   */
+  const renamedOnDisk = (): JsonValue => storedBlueprints({ [BLUEPRINT]: { name: 'Fort', stamp: campStamp() } }) as JsonValue;
+
+  /**
+   * Has the blueprints wait for a choice about a version of their file found on disk, as a change to it reaching the window
+   * while a change here is unwritten does.
+   * @param {WrittenWindow} window The window.
+   */
+  const blueprintsChangeOnDisk = (window: WrittenWindow): void =>
   {
-    // Arrange: the blueprints' file changed elsewhere while the stroke settles.
+    window.hub.flagConflict(BLUEPRINTS_DOCUMENT, { kind: 'disk', content: renamedOnDisk() });
+  };
+
+  /**
+   * The words the author reads when a change waits for their choice about the blueprints.
+   */
+  const WAITS = 'The blueprints changed elsewhere before this change to one was written, so it waits: keeping your version brings it back and writes it, taking the other drops it.';
+
+  it('takes a change back the moment the blueprints start waiting for a choice, writing nothing, and keeps it waiting for that choice', async () =>
+  {
+    // Arrange: a stroke waiting for the run of strokes to settle.
     const window = await writtenWindow();
     const original = [ 1, 2, 3 ].map(mapId => structuredClone(window.disk.get(mapId)));
     paintCorner(window, a5(9));
-    window.hub.flagConflict(BLUEPRINTS_DOCUMENT, { kind: 'disk', content: { schemaVersion: 1, data: { blueprints: {} } } });
 
-    // Act.
+    // Act: the blueprints' file changes on disk before the stroke is written.
+    blueprintsChangeOnDisk(window);
+    const atOnce = groundOf(window.hub.map('map:1'), 1, 1);
     await settle();
 
-    // Assert: no copy reached its file without the blueprint, and the change is back out of the window.
-    expect([ window.acts.length, [ 1, 2, 3 ].map(mapId => window.disk.get(mapId)), groundOf(window.hub.map('map:1'), 1, 1), window.hub.history(blueprintHistoryKey(BLUEPRINT)).position, window.writer.hasUnwritten(), window.problems ])
+    // Assert: no copy reached its file without the blueprint, the change is out of the window, and it still waits.
+    expect([ atOnce, window.acts.length, [ 1, 2, 3 ].map(mapId => window.disk.get(mapId)), window.hub.history(blueprintHistoryKey(BLUEPRINT)).position, window.writer.hasUnwritten(), window.problems ])
+      .toStrictEqual([ a5(1), 0, original, 0, true, [ { message: WAITS, alarm: false } ] ]);
+  });
+
+  it('makes a waiting change again, and writes it, once the author keeps this window\'s version of the blueprints', async () =>
+  {
+    // Arrange: a stroke taken back to wait, the blueprints having changed on disk before it was written.
+    const window = await writtenWindow();
+    paintCorner(window, a5(9));
+    blueprintsChangeOnDisk(window);
+    await settle();
+
+    // Act: keeping this window's version, as the banner's choice does.
+    window.hub.clearConflict(BLUEPRINTS_DOCUMENT);
+    await settle();
+
+    // Assert: the stroke is back, and on disk with every copy, the blueprints holding it.
+    const written = window.blueprintsOnDisk() as { data: { blueprints: Record<string, { stamp: { tiles: { values: number[] } } }> } };
+    expect([ window.acts.length, [ 1, 2, 3 ].map(mapId => cornerOnDisk(window, mapId)), written.data.blueprints[BLUEPRINT].stamp.tiles.values[0], window.hub.history(blueprintHistoryKey(BLUEPRINT)).position, window.writer.hasUnwritten() ])
+      .toStrictEqual([ 1, [ a5(9), a5(9), a5(9) ], a5(9), 1, false ]);
+  });
+
+  it('drops a waiting change once the author takes the version of the blueprints on disk, writing nothing of it', async () =>
+  {
+    // Arrange: a stroke taken back to wait, the blueprints having changed on disk before it was written.
+    const window = await writtenWindow();
+    paintCorner(window, a5(9));
+    blueprintsChangeOnDisk(window);
+    await settle();
+
+    // Act: taking the version on disk, as the banner's other choice does.
+    window.hub.reload(BLUEPRINTS_DOCUMENT, renamedOnDisk());
+    await settle();
+
+    // Assert.
+    expect([ window.acts.length, [ 1, 2, 3 ].map(mapId => cornerOnDisk(window, mapId)), groundOf(window.hub.map('map:1'), 1, 1), window.writer.hasUnwritten() ])
+      .toStrictEqual([ 0, [ a5(1), a5(1), a5(1) ], a5(1), false ]);
+  });
+
+  it('waits for a stroke under way to end before taking a refused change back, sending nothing meanwhile', async () =>
+  {
+    // Arrange: a change whose act the disk refuses while a stroke on map 2, far from the copy, is under way.
+    const window = await writtenWindow();
+    window.failNextWrite(new Error('the disk is full'));
+    paintCorner(window, a5(9));
+    const stroke = window.hub.begin('Stroke', [ mapHistoryKey(2) ]);
+    stroke.tiles('map:2', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 8, 8, 0), a5(20) ] ]);
+    await settle();
+    const midStroke = [ groundOf(window.hub.map('map:1'), 1, 1), window.acts.length, window.writer.hasUnwritten(), window.problems.length ];
+
+    // Act: the stroke ends.
+    stroke.commit();
+    await new Promise(resolve =>
+    {
+      setTimeout(resolve, 80);
+    });
+
+    // Assert: nothing moved under the stroke; once it ended the change went back, and the author heard why.
+    expect([ midStroke, groundOf(window.hub.map('map:1'), 1, 1), window.acts.length, window.writer.hasUnwritten(), window.problems ])
       .toStrictEqual([
-        0,
-        original,
+        [ a5(9), 1, true, 0 ],
         a5(1),
-        0,
+        1,
         false,
-        [ { message: 'The change to the blueprint could not be written, so it was taken back: the blueprints are waiting for a choice about changes made elsewhere.', alarm: false } ],
+        [ { message: 'The change to the blueprint could not be written, so it was taken back: the disk is full.', alarm: false } ],
+      ]);
+  });
+
+  it('writes nothing when the blueprints change only by a version of their file found on disk, which it holds already', async () =>
+  {
+    // Arrange.
+    const window = await writtenWindow();
+
+    // Act: the window takes a version found on disk, as it does while nothing here is unwritten.
+    const taken = window.hub.applyOutsideContent(BLUEPRINTS_DOCUMENT, renamedOnDisk());
+    await settle();
+
+    // Assert.
+    expect([ taken, window.acts.length, window.writer.hasUnwritten() ])
+      .toStrictEqual([ 'recorded', 0, false ]);
+  });
+
+  it('refuses to move a change to a blueprint whose tab waits for a choice about a version found on disk, and never writes one', async () =>
+  {
+    // Arrange: a stroke written, then its tab flagged waiting for a choice about a version of the camp found on disk.
+    const window = await writtenWindow();
+    const step = paintCorner(window, a5(9)) as HistoryStep;
+    await settle();
+    window.hub.flagConflict(window.blueprintKey, { kind: 'disk', content: window.hub.committedContent(window.blueprintKey) });
+
+    // Act: the guard asked, and an undo made past it, as nothing but the window's history router ever should.
+    const refusal = window.writer.guard(step, 'backward');
+    window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
+    // Assert: the undo went nowhere near the disk and came back, and the author heard why.
+    expect([ refusal, window.acts.length, [ 1, 2, 3 ].map(mapId => cornerOnDisk(window, mapId)), groundOf(window.hub.map('map:1'), 1, 1), window.problems ])
+      .toStrictEqual([
+        'this blueprint changed on disk while a change to it here was not yet written, and waits for a choice',
+        1,
+        [ a5(9), a5(9), a5(9) ],
+        a5(9),
+        [ { message: 'The change to the blueprint could not be written, so it was taken back: this blueprint changed on disk while a change to it here was not yet written, and waits for a choice.', alarm: false } ],
       ]);
   });
 

@@ -26,6 +26,26 @@ const BLUEPRINTS_WAITING = 'the blueprints are waiting for a choice about change
 const BLUEPRINTS_NOT_HELD = 'the blueprints aren\'t open in this window';
 
 /**
+ * Why a change to a blueprint is not written while its tab waits for a choice between its own changes and the version of
+ * the blueprint found on disk (see BlueprintMapFollower).
+ */
+const BLUEPRINT_MAP_WAITING = 'this blueprint changed on disk while a change to it here was not yet written, and waits for a choice';
+
+/**
+ * How long taking changes back waits before looking again while an edit is open, in milliseconds: nothing may move the
+ * documents under a stroke under way.
+ */
+const EDIT_WAIT_MS = 25;
+
+/**
+ * Why an act cannot be written now, and whether its changes reaching copies wait for the author's choice once taken back.
+ */
+type Blocked = {
+  readonly reason: string;
+  readonly awaits: boolean;
+};
+
+/**
  * One move of a step the writer writes: the step, which way it moved, and what each map's file takes for it.
  */
 type QueuedMove = {
@@ -93,14 +113,15 @@ const reasonOf = (error: unknown): string =>
 
 /**
  * Words what became of an act that failed, for the author, with whether it is an alarm: the changes reaching copies
- * stranded, which the author must undo by hand; taken back; or, for an act holding none, the blueprints left to be written
- * again.
+ * stranded, which the author must undo by hand; taken back to wait for the author's choice about the blueprints; taken
+ * back; or, for an act holding none, the blueprints left to be written again.
  * @param {boolean} reachedCopies Whether the act held a change reaching copies, which was taken back.
  * @param {readonly HistoryStep[]} stranded The changes that could not be taken back.
  * @param {string} reason Why the write failed.
+ * @param {boolean} awaits Whether the changes taken back wait for the author's choice about the blueprints.
  * @returns {[ string, boolean ]} The words, and true for an alarm.
  */
-const failureWords = (reachedCopies: boolean, stranded: readonly HistoryStep[], reason: string): [ string, boolean ] =>
+const failureWords = (reachedCopies: boolean, stranded: readonly HistoryStep[], reason: string, awaits: boolean): [ string, boolean ] =>
 {
   if (stranded.length > 0)
   {
@@ -108,9 +129,24 @@ const failureWords = (reachedCopies: boolean, stranded: readonly HistoryStep[], 
     return [ `The change to the blueprint could not be written (${reason}), and ${labels} could not be taken back: undo it by hand.`, true ];
   }
 
+  if (reachedCopies && awaits)
+  {
+    return [ 'The blueprints changed elsewhere before this change to one was written, so it waits: keeping your version brings it back and writes it, taking the other drops it.', false ];
+  }
+
   return reachedCopies
     ? [ `The change to the blueprint could not be written, so it was taken back: ${reason}.`, false ]
     : [ `The blueprints could not be saved: ${reason}. They are tried again with the next save.`, false ];
+};
+
+/**
+ * Lists the blueprints opened as maps a step changes, by their keys.
+ * @param {HistoryStep} step The step.
+ * @returns {DocumentKey[]} The keys.
+ */
+const blueprintMapsOf = (step: HistoryStep): DocumentKey[] =>
+{
+  return [ ...new Set(step.entries.map(entry => entry.document)) ].filter(key => parseDocumentKey(key).kind === 'blueprint-map');
 };
 
 /**
@@ -146,9 +182,16 @@ const sameIds = (left: readonly string[], right: readonly string[]): boolean =>
  * every patch checked by the server first, so a map's unsaved edits never reach its file, and a file changed on disk
  * since, which no patch fits, refuses the whole act, writing nothing. Then the changes in that act, and any made since,
  * are taken back here, newest first, so the window and the disk agree again, and the author hears why; one that cannot be
- * taken back is an alarm, and the window counts it unwritten from then on. A change reaching copies never goes without
- * the blueprints: while they wait for a choice about changes made elsewhere, its act is taken back the same way, and
- * undoing or redoing one is refused (see {@link guard}).
+ * taken back is an alarm, and the window counts it unwritten from then on. Taking back waits for any edit under way to
+ * end, since nothing may move the documents under a stroke, and nothing is sent meanwhile.
+ *
+ * A change reaching copies never goes without the blueprints. While they wait for a choice about changes made elsewhere,
+ * its act is taken back the moment they start waiting, and the change waits too: keeping this window's version makes it
+ * again and writes it, and taking the other drops it. Undoing or redoing one meanwhile is refused (see {@link guard}),
+ * and so is writing a change to a blueprint whose tab waits for a choice about a version of it found on disk.
+ *
+ * An act holding the blueprints alone, when nothing in them is unwritten, writes nothing: the file holds them already, a
+ * version found there, say, and writing it again could only lay it out afresh, or put it over a newer one.
  *
  * Once an act lands, the blueprints and every blueprint open as a map read as saved as far as the act wrote them, and so
  * does each map held here whose file the act left holding exactly the steps the map holds.
@@ -188,10 +231,31 @@ class BlueprintWriter
   #timer: ReturnType<typeof setTimeout> | null = null;
 
   /**
-   * True while an act's failure is being answered: its moves are taken back, which are written nowhere, and nothing is
-   * sent meanwhile, since the blueprints still hold the changes being taken back.
+   * True from the moment an act fails, or must be taken back, until its changes are back out, a wait for an edit under
+   * way to end included: nothing is sent meanwhile, since the blueprints still hold the changes going back.
+   */
+  #answering = false;
+
+  /**
+   * The wait for an edit under way to end before a failure is answered, or null when there is none.
+   */
+  #answerTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * The wait for an edit under way to end before the changes that waited for a choice are made again, or null.
+   */
+  #remakeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * True while moves are being taken back, which are written nowhere.
    */
   #takingBack = false;
+
+  /**
+   * Changes to blueprints taken back because the blueprints waited for a choice about changes made elsewhere, oldest
+   * first, each as it had moved: made again once the author keeps this window's version, gone once they take the other.
+   */
+  #awaiting: QueuedMove[] = [];
 
   /**
    * Steps that could neither be written nor taken back, which the window holds and the disk does not.
@@ -254,16 +318,26 @@ class BlueprintWriter
   {
     this.#unsubscribe();
     this.#cancelTimer();
+    [ this.#answerTimer, this.#remakeTimer ].forEach(timer =>
+    {
+      if (timer !== null)
+      {
+        clearTimeout(timer);
+      }
+    });
+    this.#answerTimer = null;
+    this.#remakeTimer = null;
   }
 
   /**
-   * Reports whether anything moved here has not reached the disk: waiting, on its way, or stranded after a failed write
-   * that could not be taken back. Closing the window now would lose it.
+   * Reports whether anything moved here has not reached the disk: waiting, on its way, being taken back, waiting for the
+   * author's choice about the blueprints, or stranded after a failed write that could not be taken back. Closing the
+   * window now would lose it.
    * @returns {boolean} True when something is unwritten.
    */
   hasUnwritten(): boolean
   {
-    return this.#queue.length > 0 || this.#sending !== null || this.#stranded.size > 0;
+    return this.#queue.length > 0 || this.#sending !== null || this.#answering || this.#awaiting.length > 0 || this.#stranded.size > 0;
   }
 
   /**
@@ -285,18 +359,20 @@ class BlueprintWriter
 
   /**
    * Says why a step must not move now, for a reason beyond the window's own histories: a change reaching copies while the
-   * blueprints wait for a choice about changes made elsewhere, since its copies would reach their files without the
-   * blueprint; or a map file it reaches holding what no way of writing it there fits, changed on disk since. Asked by every
-   * undo, redo and history jump before it moves anything (see HistoryRouter's guard).
+   * blueprints wait for a choice about changes made elsewhere, or while the tab of the blueprint it changes waits for one
+   * about a version of it found on disk, since its copies would reach their files without the blueprint, or the tab's
+   * blueprint would go over the newer one; or a map file it reaches holding what no way of writing it there fits, changed
+   * on disk since. Asked by every undo, redo and history jump before it moves anything (see HistoryRouter's guard).
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Redo or undo.
    * @returns {string | null} Why, with no full stop of its own, or null when nothing stands in its way.
    */
   guard(step: HistoryStep, direction: 'forward' | 'backward'): string | null
   {
-    if (isBlueprintChange(step) && this.#writesBlueprints() === false)
+    const blocked = isBlueprintChange(step) ? this.#blockedBy([ step ]) : null;
+    if (blocked !== null)
     {
-      return this.#hub.has(BLUEPRINTS_DOCUMENT) ? BLUEPRINTS_WAITING : BLUEPRINTS_NOT_HELD;
+      return blocked.reason;
     }
 
     const mapId = this.#maps.misfit(step, direction);
@@ -306,11 +382,25 @@ class BlueprintWriter
   }
 
   /**
-   * Hears one event of the window's documents: a step written at once made, undone or redone, here or elsewhere.
+   * Hears one event of the window's documents: a step written at once made, undone or redone, here or elsewhere; the
+   * blueprints, or a blueprint's tab, starting to wait for a choice, which takes back whatever waits to be written; and
+   * the blueprints' choice made, which makes again what waited for it.
    * @param {HubEvent} event The event.
    */
   #heard(event: HubEvent): void
   {
+    if (event.type === 'conflicted' && (event.document === BLUEPRINTS_DOCUMENT || parseDocumentKey(event.document).kind === 'blueprint-map'))
+    {
+      this.#flush();
+      return;
+    }
+
+    if (event.type === 'conflict-cleared' && event.document === BLUEPRINTS_DOCUMENT)
+    {
+      this.#remake();
+      return;
+    }
+
     if (event.type !== 'committed' && event.type !== 'undone' && event.type !== 'redone')
     {
       return;
@@ -377,33 +467,37 @@ class BlueprintWriter
 
   /**
    * Sends everything waiting as one act, unless one is on its way, which sends the rest once it lands. An act holding a
-   * change reaching copies is never sent without the blueprints, which would part the copies from their blueprint on disk:
-   * while the blueprints cannot be written, it fails as a refused act does, its changes taken back.
+   * change reaching copies is never sent without the blueprints, which would part the copies from their blueprint on disk,
+   * nor while its blueprint's tab waits for a choice: it fails as a refused act does, its changes taken back (see
+   * {@link #blockedBy}). An act holding the blueprints alone writes nothing when nothing in them is unwritten.
    */
   #send(): void
   {
     // while a failure is being answered the blueprints still hold the changes going back, so nothing is sent until then.
-    if (this.#sending !== null || this.#takingBack || this.#queue.length === 0)
+    if (this.#sending !== null || this.#answering || this.#queue.length === 0)
     {
       return;
     }
 
     const moves = this.#queue;
     this.#queue = [];
-    const write = this.#actOf(moves);
-    if (write.blueprints === undefined && moves.some(move => isBlueprintChange(move.step)))
+    const blocked = this.#blockedBy(moves.map(move => move.step));
+    if (blocked !== null)
     {
-      this.#failed(moves, new Error(this.#hub.has(BLUEPRINTS_DOCUMENT) ? BLUEPRINTS_WAITING : BLUEPRINTS_NOT_HELD));
+      this.#failed(moves, new Error(blocked.reason), blocked.awaits);
       return;
     }
 
-    // blueprints waiting for a choice are written nowhere, and an act holding nothing else has nothing to write.
+    // blueprints waiting for a choice are written nowhere.
+    const write = this.#actOf(moves);
     if (write.blueprints === undefined && this.#hub.has(BLUEPRINTS_DOCUMENT))
     {
       this.#tell('The blueprints were not saved: they are waiting for a choice about changes made elsewhere.', false);
     }
 
-    if (write.blueprints === undefined && write.maps.length === 0)
+    // an act reaching no map has the blueprints alone to write, which the file holds already while nothing in them is
+    // unwritten: a version found there, say, which writing again could only lay out afresh, or put over a newer one.
+    if (write.maps.length === 0 && (write.blueprints === undefined || this.#hub.isDirty(BLUEPRINTS_DOCUMENT) === false))
     {
       this.#maps.landed(this.#mapsOf(moves), true);
       return;
@@ -450,6 +544,39 @@ class BlueprintWriter
   #writesBlueprints(): boolean
   {
     return this.#hub.has(BLUEPRINTS_DOCUMENT) && this.#hub.isConflicted(BLUEPRINTS_DOCUMENT) === false;
+  }
+
+  /**
+   * Says why steps holding a change reaching copies cannot be written now, and whether, once taken back, that change waits
+   * for the author's choice: a window not holding the blueprints, whose copies would reach their files without them;
+   * blueprints waiting for a choice about changes made elsewhere, which writing would put this window's over, so the change
+   * waits for that choice; or the tab of a blueprint one changes waiting for a choice about a version of it found on disk,
+   * which writing would put the older blueprint over. Steps reaching no copy are never held back here.
+   * @param {readonly HistoryStep[]} steps The steps.
+   * @returns {Blocked | null} Why, or null when they can be written.
+   */
+  #blockedBy(steps: readonly HistoryStep[]): Blocked | null
+  {
+    const linked = steps.filter(isBlueprintChange);
+    if (linked.length === 0)
+    {
+      return null;
+    }
+
+    if (this.#hub.has(BLUEPRINTS_DOCUMENT) === false)
+    {
+      return { reason: BLUEPRINTS_NOT_HELD, awaits: false };
+    }
+
+    if (this.#hub.isConflicted(BLUEPRINTS_DOCUMENT))
+    {
+      return { reason: BLUEPRINTS_WAITING, awaits: true };
+    }
+
+    const waiting = linked.some(step => blueprintMapsOf(step).some(key => this.#hub.isConflicted(key)));
+    return waiting
+      ? { reason: BLUEPRINT_MAP_WAITING, awaits: false }
+      : null;
   }
 
   /**
@@ -507,28 +634,60 @@ class BlueprintWriter
    * again. The files the act would have written are no longer known here. A change that cannot be taken back, a later edit
    * standing in its way, is stranded, which the author is alarmed about, since the disk lacks it. Any other change to the
    * blueprints, a rename, say, reaching no copy, is kept, waiting to be written with the next act or the next save; the
-   * author hears why it was not written.
+   * author hears why it was not written. Nothing is sent from the moment it fails until the changes are back out, and the
+   * taking back waits for any edit under way to end (see {@link #answer}).
    * @param {readonly QueuedMove[]} moves The act's moves, oldest first.
    * @param {unknown} error Why it failed.
+   * @param {boolean} awaits Whether the changes taken back wait for the author's choice about the blueprints.
    */
-  #failed(moves: readonly QueuedMove[], error: unknown): void
+  #failed(moves: readonly QueuedMove[], error: unknown, awaits = false): void
   {
     this.#failures += 1;
     this.#cancelTimer();
+    this.#answering = true;
+    this.#answer(moves, error, awaits);
+  }
+
+  /**
+   * Takes back a failed act's changes reaching copies, and every one made since, once no edit is open, as
+   * {@link #failed} describes: nothing may move the documents under a stroke under way, so while one is, this looks again a
+   * moment later, every change made meanwhile joining those taken back. Those that wait for the author's choice are kept,
+   * in the order they were made.
+   * @param {readonly QueuedMove[]} moves The act's moves, oldest first.
+   * @param {unknown} error Why it failed.
+   * @param {boolean} awaits Whether the changes taken back wait for the author's choice about the blueprints.
+   */
+  #answer(moves: readonly QueuedMove[], error: unknown, awaits: boolean): void
+  {
+    if (this.#hub.isEditing())
+    {
+      this.#answerTimer = setTimeout(() =>
+      {
+        this.#answerTimer = null;
+        this.#answer(moves, error, awaits);
+      }, EDIT_WAIT_MS);
+      return;
+    }
+
     const since = this.#queue;
     const all = [ ...moves, ...since ];
     const linked = all.filter(move => isBlueprintChange(move.step));
     this.#queue = all.filter(move => isBlueprintChange(move.step) === false);
 
-    // nothing is sent until the changes are back out, even by whatever letting go of the files sets off.
+    // moves heard while taking back are the taking back itself, written nowhere.
     this.#takingBack = true;
     const stranded: HistoryStep[] = [];
+    const takenBack: QueuedMove[] = [];
     try
     {
       this.#maps.landed(this.#mapsOf(moves), false);
       [ ...linked ].reverse().forEach(move =>
       {
-        if (this.#takeBack(move) === false)
+        if (this.#takeBack(move))
+        {
+          takenBack.unshift(move);
+        }
+        else
         {
           stranded.push(move.step);
         }
@@ -537,11 +696,83 @@ class BlueprintWriter
     finally
     {
       this.#takingBack = false;
+      this.#answering = false;
     }
 
     this.#maps.landed(this.#mapsOf(since), true);
     stranded.forEach(step => this.#stranded.add(step.id));
-    this.#tell(...failureWords(linked.length > 0, stranded, reasonOf(error)));
+    if (awaits)
+    {
+      this.#awaiting.push(...takenBack);
+    }
+
+    this.#tell(...failureWords(linked.length > 0, stranded, reasonOf(error), awaits));
+  }
+
+  /**
+   * Makes again every change that waited for the author's choice about the blueprints, now it is made, oldest first, each
+   * the way it had moved, so it is written at once. One no history holds any more went with the author taking the other
+   * version, and is simply gone; one that can no longer move, something since standing in its way, is named to the
+   * author. Waits for any edit under way to end first.
+   */
+  #remake(): void
+  {
+    if (this.#awaiting.length === 0)
+    {
+      return;
+    }
+
+    if (this.#hub.isEditing())
+    {
+      if (this.#remakeTimer === null)
+      {
+        this.#remakeTimer = setTimeout(() =>
+        {
+          this.#remakeTimer = null;
+          this.#remake();
+        }, EDIT_WAIT_MS);
+      }
+      return;
+    }
+
+    const awaiting = this.#awaiting;
+    this.#awaiting = [];
+    const refused = awaiting.filter(move => this.#moveAgain(move) === 'refused').map(move => `"${move.step.label}"`);
+    if (refused.length > 0)
+    {
+      this.#tell(`${refused.join(', ')} could not be made again: something changed since stands in its way.`, false);
+    }
+  }
+
+  /**
+   * Makes one change taken back to wait move again the way it had: a change made or redone is redone, one undone is undone
+   * again, from a history where it is the next to move that way.
+   * @param {QueuedMove} move The move as it was before it was taken back.
+   * @returns {'moved' | 'gone' | 'refused'} Moved; gone, no history holding it any more; or refused.
+   */
+  #moveAgain(move: QueuedMove): 'moved' | 'gone' | 'refused'
+  {
+    const hub = this.#hub;
+    const { step, direction } = move;
+    const listed = step.histories.filter(key => hub.history(key).rows.some(row => row.id === step.id));
+    if (listed.length === 0)
+    {
+      return 'gone';
+    }
+
+    const history = listed.find(key =>
+    {
+      const { rows, position } = hub.history(key);
+      const next = direction === 'forward' ? rows[position] : rows[position - 1];
+      return next !== undefined && next.id === step.id;
+    });
+    if (history === undefined)
+    {
+      return 'refused';
+    }
+
+    const moved = direction === 'forward' ? hub.redo(history) : hub.undo(history);
+    return moved.ok ? 'moved' : 'refused';
   }
 
   /**

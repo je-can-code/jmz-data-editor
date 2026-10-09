@@ -274,6 +274,17 @@ const outsideStepId = (key: DocumentKey, head: string, content: JsonValue): stri
 };
 
 /**
+ * Reports whether a step is a version of a document's file found on disk, taken by a clean document (see
+ * {@link outsideStepId}), rather than an edit made in a window.
+ * @param {HistoryStep} step The step.
+ * @returns {boolean} True for a version found on disk.
+ */
+const isOutsideStep = (step: HistoryStep): boolean =>
+{
+  return step.id.startsWith('outside:');
+};
+
+/**
  * Lists a step's patches on one document, in the order they were applied.
  * @param {HistoryStep} step The step.
  * @param {DocumentKey} key The document.
@@ -882,6 +893,16 @@ class DocumentHub
   //endregion documents
 
   //region editing
+
+  /**
+   * Reports whether an edit is open in this window, a stroke under way, say: until it ends, nothing but its own patches
+   * may move the documents, so undo, redo, a reload or letting go of a document all wait for it.
+   * @returns {boolean} True while an edit is open.
+   */
+  isEditing(): boolean
+  {
+    return this.#transaction !== null;
+  }
 
   /**
    * Opens a transaction: patches added to it apply at once, and it becomes one step when committed. Only one
@@ -2291,7 +2312,7 @@ class DocumentHub
   //endregion internals
 }
 
-export { diskOperationId, DocumentHub };
+export { diskOperationId, DocumentHub, isOutsideStep };
 export type {
   CommitCheck,
   DocumentConflict,

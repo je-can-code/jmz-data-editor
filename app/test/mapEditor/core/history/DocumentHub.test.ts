@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   diskOperationId,
   DocumentHub,
+  isOutsideStep,
   type CommitCheck,
   type DocumentSnapshot,
   type DocumentStore,
@@ -313,6 +314,26 @@ describe('DocumentHub', () =>
       // Assert.
       expect([ fileOf(hub, MAP_A).displayName, fileOf(hub, MAP_B).displayName, hub.isDirty(MAP_A), hub.isDirty(MAP_B) ])
         .toStrictEqual([ 'Harbor', 'Test Town', true, false ]);
+    });
+
+    it('says an edit is open from the moment it begins until it is committed or cancelled', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      const idle = hub.isEditing();
+
+      // Act.
+      const committed = hub.begin('Rename map', [ mapHistoryKey(1) ]);
+      const whileCommitting = hub.isEditing();
+      committed.set(MAP_A, [ 'displayName' ], 'Harbor').commit();
+      const afterCommit = hub.isEditing();
+      const cancelled = hub.begin('Rename map', [ mapHistoryKey(1) ]);
+      const whileCancelling = hub.isEditing();
+      cancelled.cancel();
+
+      // Assert.
+      expect([ idle, whileCommitting, afterCommit, whileCancelling, hub.isEditing() ])
+        .toStrictEqual([ false, true, false, true, false ]);
     });
 
     it('records nothing for an edit that changes nothing', () =>
@@ -2030,6 +2051,20 @@ describe('DocumentHub', () =>
         .toStrictEqual([ 'recorded', 'Changed in MZ', [ 'Rename', 'Externally modified' ], false, 1 ]);
       expect([ hub.lineage(MAP_A).length, hub.lineage(MAP_A)[0], rowsOf(hub, mapHistoryKey(2)), fileOf(hub, MAP_B).displayName ])
         .toStrictEqual([ 3, diskOperationId(buildMapJson() as unknown as JsonValue), [], 'Test Town' ]);
+    });
+
+    it('tells the step a version found on disk is recorded as from every step made in a window', async () =>
+    {
+      // Arrange: the rename made here, then the file's version taken.
+      const { hub } = await buildChangedOutside();
+      await hub.handleExternalChange(MAP_A);
+
+      // Act.
+      const told = hub.appliedSteps(MAP_A).map(step => [ step.label, isOutsideStep(step) ]);
+
+      // Assert.
+      expect(told)
+        .toStrictEqual([ [ 'Rename', false ], [ 'Externally modified', true ] ]);
     });
 
     it('undoes the step to the version the editor had, as an unsaved edit, and redoes it to the file\'s version, saved again', async () =>
