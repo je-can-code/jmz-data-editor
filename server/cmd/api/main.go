@@ -230,6 +230,10 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	// file as it stands, so two windows saving two maps at once both land.
 	mux.HandleFunc("PUT /api/editor-data/blueprint-uses/maps", api.MergeBlueprintUses(changes))
 
+	// a change to a blueprint reaches the blueprints and every map holding a copy of it in one act, each map's file
+	// taking its patches as it stands, so the blueprint and its copies on disk never part.
+	mux.HandleFunc("PUT /api/blueprint-changes", api.WriteBlueprintChanges(changes))
+
 	// the party a new game seats, for showing each event's page as a fresh save would.
 	mux.HandleFunc("GET /api/new-game", api.LoadNewGame)
 

@@ -91,6 +91,7 @@ func TestOtherSitesPagesAreRefused(t *testing.T) {
 		{name: "a map save", method: http.MethodPut, target: "/api/maps/1", body: mapFixture},
 		{name: "a common events save", method: http.MethodPut, target: "/api/common-events", body: commonEventsFixture},
 		{name: "a merge of blueprint placements", method: http.MethodPut, target: "/api/editor-data/blueprint-uses/maps", body: `{"schemaVersion":2,"maps":{"1":{"aa22":[{"x":0,"y":0}]}}}`},
+		{name: "a change to a blueprint and its copies", method: http.MethodPut, target: "/api/blueprint-changes", body: cellarChange},
 		{name: "a form posting to a database route", method: http.MethodPost, target: "/api/system", body: `{}`, header: []string{"Content-Type", "text/plain"}},
 		{name: "a preflight", method: http.MethodOptions, target: "/api/maps/1", header: []string{"Access-Control-Request-Method", "PUT"}},
 	}
