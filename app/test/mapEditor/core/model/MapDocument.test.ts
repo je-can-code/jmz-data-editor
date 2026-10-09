@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { blueprintMapId } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { DocumentChange } from '../../../../src/mapEditor/core/model/EditorDocument.ts';
 import { invertPatch, PatchConflictError, type Patch } from '../../../../src/mapEditor/core/model/patches.ts';
@@ -145,6 +146,22 @@ describe('MapDocument', () =>
       // Assert.
       expect(facts)
         .toStrictEqual([ 7, 3, 2, 4 ]);
+    });
+
+    it('reports, for a blueprint opened as a map, the id below zero that names the blueprint', () =>
+    {
+      // Arrange: the camp's map beside one of another blueprint whose id differs by a character.
+      const camp = MapDocument.fromJson('blueprint-map:k3x9q2mf', buildMapJson());
+      const other = MapDocument.fromJson('blueprint-map:k3x9q2mg', buildMapJson());
+
+      // Act.
+      const ids = [ camp.mapId, other.mapId ];
+
+      // Assert.
+      expect(ids)
+        .toStrictEqual([ blueprintMapId('k3x9q2mf'), blueprintMapId('k3x9q2mg') ]);
+      expect(ids[0])
+        .not.toBe(ids[1]);
     });
 
     it('addresses cells in RMMZ order: layer, then row, then column', () =>

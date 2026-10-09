@@ -6,8 +6,8 @@ import { MapDocument } from './MapDocument.ts';
 import type { RmmzMap } from './rmmzTypes.ts';
 
 /**
- * Builds the right kind of document for a key from its file content: a {@link MapDocument} for a map, and a
- * JSON document for everything else.
+ * Builds the right kind of document for a key from its file content: a {@link MapDocument} for a map, and for a
+ * blueprint opened as a map, whose content is a map file built from its stamp; and a JSON document for everything else.
  * @param {DocumentKey} key The document key.
  * @param {JsonValue} content The file's content.
  * @returns {EditorDocument} The document.
@@ -18,6 +18,7 @@ const createDocument = (key: DocumentKey, content: JsonValue): EditorDocument =>
   switch (parsed.kind)
   {
     case 'map':
+    case 'blueprint-map':
       return MapDocument.fromJson(key as MapDocumentKey, content as unknown as RmmzMap);
     case 'mapinfos':
       return new MapInfosDocument(key, content);

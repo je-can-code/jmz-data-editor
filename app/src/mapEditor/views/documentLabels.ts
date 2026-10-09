@@ -12,7 +12,8 @@ const EDITOR_DATA_LABELS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Names a document the way the author thinks of it.
+ * Names a document the way the author thinks of it. A blueprint opened as a map is named for what it is; its own name
+ * lives in the blueprints, which a label read from the key alone cannot reach.
  * @param {DocumentKey} key The document.
  * @returns {string} Its name, such as "Map 12" or "The map tree".
  */
@@ -23,6 +24,8 @@ const documentLabel = (key: DocumentKey): string =>
   {
     case 'map':
       return `Map ${parsed.mapId}`;
+    case 'blueprint-map':
+      return 'A blueprint';
     case 'mapinfos':
       return 'The map tree';
     case 'tilesets':

@@ -239,6 +239,7 @@ describe('MapEditorApp', () =>
     // Act.
     const labels = [
       'map:12',
+      'blueprint-map:k3x9q2mf',
       'mapinfos',
       'tilesets',
       'common-events',
@@ -254,6 +255,7 @@ describe('MapEditorApp', () =>
     expect(labels)
       .toStrictEqual([
         'Map 12',
+        'A blueprint',
         'The map tree',
         'The tilesets',
         'The common events',

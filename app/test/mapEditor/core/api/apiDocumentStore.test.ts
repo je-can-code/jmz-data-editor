@@ -133,4 +133,22 @@ describe('apiDocumentStore', () =>
     await expect(attempts[1])
       .rejects.toThrow('the editor keeps no document called secrets');
   });
+
+  it('refuses to load or save a blueprint opened as a map, calling nothing, since no file of its own backs it', async () =>
+  {
+    // Arrange.
+    const api = buildApi();
+    const store = apiDocumentStore(api);
+
+    // Act.
+    const attempts = [ store.load('blueprint-map:k3x9q2mf'), store.save('blueprint-map:k3x9q2mf', { any: 'thing' }) ];
+
+    // Assert.
+    await expect(attempts[0])
+      .rejects.toThrow('no file of its own');
+    await expect(attempts[1])
+      .rejects.toThrow('no file of its own');
+    expect([ vi.mocked(api.loadMap).mock.calls, vi.mocked(api.saveMap).mock.calls, vi.mocked(api.saveEditorData).mock.calls ])
+      .toStrictEqual([ [], [], [] ]);
+  });
 });
