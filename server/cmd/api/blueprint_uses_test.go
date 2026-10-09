@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"jmz-data-editor/server/internal/mzjson"
 	"jmz-data-editor/server/internal/watch"
@@ -17,8 +18,9 @@ import (
 // map's part of it only with that map's file, and only that part. The merge route owes it this: the
 // maps a merge names change exactly as named, whole or one placement at a time, and every other map,
 // saved by another window a moment before or not, stays exactly as the file holds it. Two windows
-// merging two maps at once both land. A record read back and merged unchanged is written back byte for
-// byte. A body that is not a merge is refused before anything touches the disk, a file that is not a
+// merging two maps at once both land. A record read back and merged unchanged is left byte for byte,
+// never written again, and a merge with nothing to record starts no record. A body that is not a merge
+// is refused before anything touches the disk, a file that is not a
 // record is never written over, nor is one a newer editor wrote, and an older record is raised to the
 // merge's version with nothing else of it moved. The write reaches the change stream as the saving
 // window's.
@@ -161,6 +163,63 @@ func TestMergeBlueprintUsesStartsTheRecord(t *testing.T) {
 	expected := indented(t, `{"schemaVersion":2,"data":{"maps":{"16":{"aa22":[{"x":1,"y":3}]}}}}`)
 	if written := current.read(t, usesPath); written != expected {
 		t.Errorf("the merge wrote:\n%s\nexpected:\n%s", written, expected)
+	}
+}
+
+// TestMergeBlueprintUsesStartsNoRecordForNothing covers a project that places no blueprints: a map saved
+// with no placements, and a placement taken out of a map no record names, start no record, and no folder
+// for one.
+func TestMergeBlueprintUsesStartsNoRecordForNothing(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "a map saved with none", body: `{"schemaVersion":2,"maps":{"16":null}}`},
+		{name: "a placement taken out of nothing", body: `{"schemaVersion":2,"remove":[{"map":16,"blueprint":"aa22","x":1,"y":3}]}`},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange.
+			current := newProject(t)
+
+			// Act.
+			response := current.call(t, http.MethodPut, usesRoute, testCase.body)
+
+			// Assert.
+			assertStatus(t, response, http.StatusNoContent)
+			if current.exists("jmz-editor") {
+				t.Error("a merge with nothing to record made the record's folder")
+			}
+		})
+	}
+}
+
+// TestMergeBlueprintUsesLeavesAnUnchangedRecordUntouched covers a map saved with the placements the file
+// already holds for it: the editor sends them with every save, and a merge that changes nothing never
+// writes the file again.
+func TestMergeBlueprintUsesLeavesAnUnchangedRecordUntouched(t *testing.T) {
+	// Arrange- the record as the editor wrote it, its time set well back.
+	current := projectWithRecord(t, recordOnDisk)
+	path := filepath.Join(current.root, filepath.FromSlash(usesPath))
+	then := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := os.Chtimes(path, then, then); err != nil {
+		t.Fatal(err)
+	}
+	before := current.read(t, usesPath)
+
+	// Act- map 16 given whole exactly as the file holds it, and map 7, which it does not hold, given none.
+	body := `{"schemaVersion":2,"maps":{"16":{"aa22":[{"x":1,"y":3},{"x":12,"y":3}],"k3x9q2mf":[{"x":4,"y":7}]},"7":null}}`
+	response := current.call(t, http.MethodPut, usesRoute, body)
+
+	// Assert.
+	assertStatus(t, response, http.StatusNoContent)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.read(t, usesPath) != before || info.ModTime().Equal(then) == false {
+		t.Errorf("a merge changing nothing wrote the record again, at %v", info.ModTime())
 	}
 }
 

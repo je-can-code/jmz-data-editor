@@ -17,7 +17,8 @@ var fileUpdateLock sync.Mutex
 // takes: the file is read, update works out what to write from what it holds, and that is written
 // atomically. update is handed the file's bytes, or nil when there is no file, so a file holding
 // nothing and a missing one are never mistaken for each other. An error from update leaves the file
-// exactly as it was, and comes back as it is.
+// exactly as it was, and comes back as it is, and so does an update handing back nil, which has
+// nothing to write: the file, or its absence, stays as it is, and nothing is announced.
 //
 // The folder appears with the first file written into it. beforeWrite, when given, is handed the
 // exact bytes just before they land, as SaveInMzLayout hands them, so the change they cause can carry
@@ -36,7 +37,7 @@ func UpdateFile(path string, update func(current []byte) ([]byte, error), before
 	}
 
 	content, err := update(current)
-	if err != nil {
+	if err != nil || content == nil {
 		return err
 	}
 

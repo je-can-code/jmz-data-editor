@@ -49,14 +49,15 @@ const sortedEntry = (entry: JsonObject): JsonObject =>
 /**
  * Merges one merge into the record as a file holds it, the way the server does (see the server's blueprintuses
  * package): the maps given whole first, then the placements taken out, then those put in; every map named nowhere left
- * exactly as it was, and the record raised to the merge's version.
+ * exactly as it was, and the record raised to the merge's version. A project with no record is given none while the
+ * merge leaves nothing to record.
  * @param {JsonValue | null} stored The record as the file holds it, or null for none yet.
  * @param {BlueprintUsesMerge} merge The merge.
- * @returns {JsonObject} The record as the file holds it after.
+ * @returns {JsonObject | null} The record as the file holds it after, or null while there is still no file.
  * @throws {MapEditorApiError} A 500 for a file that is no record of placements, and a 409 for a record of a newer
  * version than the merge's.
  */
-const mergeInto = (stored: JsonValue | null, merge: BlueprintUsesMerge): JsonObject =>
+const mergeInto = (stored: JsonValue | null, merge: BlueprintUsesMerge): JsonObject | null =>
 {
   const readable = stored === null
     || (isJsonObject(stored) && isJsonObject(stored['data']) && isJsonObject(stored['data']['maps']));
@@ -119,6 +120,12 @@ const mergeInto = (stored: JsonValue | null, merge: BlueprintUsesMerge): JsonObj
       || ((left as JsonObject)['x'] as number) - ((right as JsonObject)['x'] as number));
     maps[String(placement.map)] = sortedEntry({ ...entry, [placement.blueprint]: spots });
   });
+
+  // no file is started to hold nothing.
+  if (stored === null && Object.keys(maps).length === 0)
+  {
+    return null;
+  }
 
   record.schemaVersion = merge.schemaVersion;
   return record as unknown as JsonObject;

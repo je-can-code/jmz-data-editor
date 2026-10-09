@@ -1,7 +1,7 @@
 import { MapEditorApiError, type MapEditorApi } from '../api/MapEditorApi.ts';
 import { BLUEPRINT_USES } from '../editorData/editorData.ts';
 import type { JsonObject } from '../model/json.ts';
-import { mapEntryOf, sameSpot, sameSpots, type BlueprintSpot, type PlacedPart } from './blueprintUses.ts';
+import { mapEntryOf, sameSpot, type BlueprintSpot, type PlacedPart } from './blueprintUses.ts';
 
 /**
  * One placement named on its own in a merge: its map, its blueprint and its corner, and, for one put in, its part placed
@@ -271,19 +271,15 @@ class BlueprintUsesWriter
   }
 
   /**
-   * Writes a map's placements whole, as a save of the map or the map tree writes them; nothing when the file already
-   * holds exactly these and nothing else is owed.
+   * Writes a map's placements whole, as a save of the map or the map tree writes them. They are sent even when this
+   * window knows the file to hold exactly these already: another window holding the record may have written the map's
+   * part since, which this window never hears of, so only the file can tell, and the server writes nothing when the merge
+   * leaves the record as it was.
    * @param {number} mapId The map.
    * @param {readonly BlueprintSpot[]} spots Its placements.
    */
   writeWhole(mapId: number, spots: readonly BlueprintSpot[]): void
   {
-    const onFile = this.#onDisk?.get(mapId) ?? [];
-    if (this.owes(mapId) === false && this.#onDisk !== null && sameSpots(onFile, spots))
-    {
-      return;
-    }
-
     this.#owe(mapId, { kind: 'whole', spots: [ ...spots ] });
   }
 

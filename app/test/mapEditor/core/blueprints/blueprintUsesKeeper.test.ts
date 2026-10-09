@@ -204,20 +204,24 @@ describe('BlueprintUsesKeeper', () =>
         ]);
     });
 
-    it('writes nothing when the saved map\'s placements are what the file already holds', async () =>
+    it('sends the saved map\'s placements as they stand though the file holds them already, leaving the file as it was', async () =>
     {
       // Arrange: map 16 renamed, its placements untouched.
       const server = new UsesServer(storedUses(ON_DISK));
       const { hub, keeper } = windowOver(server);
+      const before = structuredClone(server.stored);
       hub.edit('Rename', [ mapHistoryKey(16) ], tx => tx.set('map:16', [ 'displayName' ], 'Harbor'));
 
       // Act.
       await hub.save('map:16');
       await keeper.whenWritten();
 
-      // Assert.
-      expect(server.merges)
-        .toStrictEqual([]);
+      // Assert: only the file can tell whether another window wrote map 16 since, so its placements went, changing nothing.
+      expect([ server.merges, server.stored ])
+        .toStrictEqual([
+          [ { schemaVersion: 2, maps: { 16: { aa22: [ { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] } } } ],
+          before,
+        ]);
     });
 
     it('works out what a file another window saved holds from that save\'s own steps, one undone here since included', async () =>
@@ -335,9 +339,9 @@ describe('BlueprintUsesKeeper', () =>
       keeper.stop();
       await keeper.whenWritten();
 
-      // Assert: nothing ever named map 3, which the disk holds as it did.
-      expect([ server.merges, server.entryOf(3), hub.isDirty('map:3') ])
-        .toStrictEqual([ [], { aa22: [ { x: -1, y: 0, placed: { x: 1, y: 0, width: 2, height: 3 } } ] }, true ]);
+      // Assert: the one merge, map 16's save, named map 16 alone and never map 3, which the disk holds as it did.
+      expect([ server.merges.map(merge => [ Object.keys(merge.maps ?? {}), merge.remove, merge.add ]), server.entryOf(3), hub.isDirty('map:3') ])
+        .toStrictEqual([ [ [ [ '16' ], undefined, undefined ] ], { aa22: [ { x: -1, y: 0, placed: { x: 1, y: 0, width: 2, height: 3 } } ] }, true ]);
     });
   });
 
@@ -370,6 +374,54 @@ describe('BlueprintUsesKeeper', () =>
           { aa22: [ { x: 0, y: 0 }, { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] },
           { aa22: [ { x: -1, y: 0, placed: { x: 1, y: 0, width: 2, height: 3 } }, { x: 5, y: 0 } ] },
         ]);
+    });
+
+    it('writes a map\'s save though another window wrote that map\'s placements since this one last read the file', async () =>
+    {
+      // Arrange: two windows sharing their edits, each holding the record; window b places the camp on map 16 and saves
+      // it, which writes the placement, and window a, which read the file before, undoes the placement.
+      const server = new UsesServer(storedUses(ON_DISK));
+      const windowA = windowOver(server, { clientId: 'window-a', holders: [ 'window-b' ] });
+      const windowB = windowOver(server, { clientId: 'window-b', holders: [ 'window-a' ] });
+      mirror(windowA.hub, windowB.hub);
+      mirror(windowB.hub, windowA.hub);
+      place(windowB.hub, 16, 0);
+      await windowB.hub.save('map:16');
+      await windowB.keeper.whenWritten();
+      const afterB = server.entryOf(16);
+      windowA.hub.undo(mapHistoryKey(16));
+
+      // Act: window a saves map 16 without the placement.
+      await windowA.hub.save('map:16');
+      await Promise.all([ windowA.keeper.whenWritten(), windowB.keeper.whenWritten() ]);
+
+      // Assert: the record on disk holds what map 16's file now holds, the placement gone again.
+      expect([ afterB, server.entryOf(16) ])
+        .toStrictEqual([
+          { aa22: [ { x: 0, y: 0 }, { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] },
+          { aa22: [ { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] },
+        ]);
+    });
+
+    it('takes a map the tree took away off the disk though another window wrote its placements since this one last read', async () =>
+    {
+      // Arrange: map 16 holds nothing on disk; window b places the camp on it and saves it, and window a, which read the
+      // file before, has heard nothing of map 16's file since.
+      const server = new UsesServer(storedUses(ON_DISK.filter(spot => spot.mapId !== 16)));
+      const windowA = windowOver(server, { clientId: 'window-a', holders: [ 'window-b' ] });
+      const windowB = windowOver(server, { clientId: 'window-b', holders: [ 'window-a' ] });
+      place(windowB.hub, 16, 0);
+      await windowB.hub.save('map:16');
+      await windowB.keeper.whenWritten();
+      const afterB = server.entryOf(16);
+
+      // Act: window a's tree takes map 16's file away.
+      windowA.keeper.writeMaps(new Map([ [ 16, [] ] ]));
+      await windowA.keeper.whenWritten();
+
+      // Assert: the record on disk no longer names the map whose file is gone.
+      expect([ afterB, server.entryOf(16) ])
+        .toStrictEqual([ { aa22: [ { x: 0, y: 0 } ] }, undefined ]);
     });
   });
 
@@ -550,15 +602,15 @@ describe('BlueprintUsesKeeper', () =>
       {
         setTimeout(resolve, 0);
       });
-
-      // Act: map 16 renamed and saved, its placements those the move left.
-      hub.edit('Rename', [ mapHistoryKey(16) ], tx => tx.set('map:16', [ 'displayName' ], 'Harbor'));
-      await hub.save('map:16');
+      const file = hub.snapshot('map:16').content;
       await keeper.whenWritten();
 
-      // Assert: judged against the newer file, which already holds what map 16 holds, nothing was written.
-      expect([ heldOn(hub, 16), older.merges ])
-        .toStrictEqual([ [ 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@5,7' ], [] ]);
+      // Act: map 16's version on disk taken, which takes its placements back to what the record's file is known to hold.
+      hub.reload('map:16', file);
+
+      // Assert: judged against the newer file, the roost stays where the move put it.
+      expect(heldOn(hub, 16))
+        .toStrictEqual([ 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@5,7' ]);
     });
 
     it('follows nothing while the file holds no record of placements, and judges the next change from it', () =>
@@ -730,7 +782,7 @@ describe('BlueprintUsesKeeper', () =>
 
   describe('a project with no record yet', () =>
   {
-    it('reads no file as a record holding nothing, so a save of a map with no placements writes nothing', async () =>
+    it('starts no file for a save of a map with no placements, and the first placement saved starts it', async () =>
     {
       // Arrange: the record already held when the keeper starts, so it reads the file for itself, and there is none.
       const server = new UsesServer();
@@ -742,15 +794,19 @@ describe('BlueprintUsesKeeper', () =>
       {
         setTimeout(resolve, 0);
       });
-
-      // Act.
       hub.edit('Rename', [ mapHistoryKey(16) ], tx => tx.set('map:16', [ 'displayName' ], 'Harbor'));
       await hub.save('map:16');
       await keeper.whenWritten();
+      const afterRename = server.stored;
 
-      // Assert: still no file.
-      expect([ server.merges, server.stored ])
-        .toStrictEqual([ [], null ]);
+      // Act.
+      place(hub, 16, 0);
+      await hub.save('map:16');
+      await keeper.whenWritten();
+
+      // Assert: no file for the rename, which had nothing to record, and one for the placement.
+      expect([ afterRename, server.stored ])
+        .toStrictEqual([ null, { schemaVersion: 2, data: { maps: { 16: { aa22: [ { x: 0, y: 0 } ] } } } } ]);
     });
   });
 
