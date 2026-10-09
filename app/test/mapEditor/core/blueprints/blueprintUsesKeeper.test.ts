@@ -83,21 +83,21 @@ const mapStore = () =>
 };
 
 /**
- * Opens a window over a server: maps 3 and 16 and the blueprints held, and the record taken up as the server's file holds
- * it, kept by a keeper from the start.
+ * Opens a window over a server: maps 3 and 16, or the maps given, and the blueprints held, and the record taken up as the
+ * server's file holds it, kept by a keeper from the start.
  * @param {UsesServer} server The server.
- * @param {object} options The window's id, the other windows holding the record, and where its maps are written.
+ * @param {object} options The window's id, the other windows holding the record or any map, where its maps are written,
+ * and which maps it holds.
  * @returns {{ hub: DocumentHub, keeper: BlueprintUsesKeeper, problems: string[] }} The window's documents, its keeper, and
  * what the author heard.
  */
 const windowOver = (
   server: UsesServer,
-  options: { clientId?: string; holders?: readonly string[]; store?: DocumentStore } = {},
+  options: { clientId?: string; holders?: readonly string[]; store?: DocumentStore; maps?: readonly number[] } = {},
 ) =>
 {
   const hub = new DocumentHub({ clientId: options.clientId ?? 'window-a', store: options.store ?? mapStore().store });
-  hub.adopt('map:3', buildMapJson() as unknown as JsonValue);
-  hub.adopt('map:16', buildMapJson() as unknown as JsonValue);
+  (options.maps ?? [ 3, 16 ]).forEach(mapId => hub.adopt(`map:${mapId}`, buildMapJson() as unknown as JsonValue));
   holdBlueprints(hub);
   const problems: string[] = [];
   const keeper = new BlueprintUsesKeeper({
@@ -483,6 +483,80 @@ describe('BlueprintUsesKeeper', () =>
           [ { schemaVersion: 2, remove: [ { map: 16, blueprint: 'aa22', x: 0, y: 0 } ] } ],
           { aa22: [ { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] },
           [ 'aa22@0,0', 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ],
+        ]);
+    });
+
+    it('keeps a placement only another window holds unsaved off the disk when a window not holding its map undoes forgetting it', async () =>
+    {
+      // Arrange: window a holds map 16 and places the camp on it, unsaved; window b holds the record but not map 16, and
+      // forgets that placement from the where-used list.
+      const server = new UsesServer(storedUses(ON_DISK));
+      const windowA = windowOver(server, { clientId: 'window-a', holders: [ 'window-b' ] });
+      const windowB = windowOver(server, { clientId: 'window-b', holders: [ 'window-a' ], maps: [ 3 ] });
+      mirror(windowA.hub, windowB.hub);
+      mirror(windowB.hub, windowA.hub);
+      place(windowA.hub, 16, 0);
+      forgetPlacement(windowB.hub, { id: 'aa22', name: 'Goblin camp' }, { blueprintId: 'aa22', mapId: 16, x: 0, y: 0 });
+
+      // Act: window b undoes the forgetting.
+      windowB.hub.undo(blueprintHistoryKey('aa22'));
+      await Promise.all([ windowA.keeper.whenWritten(), windowB.keeper.whenWritten() ]);
+
+      // Assert: map 16's file never held the placement, and neither does the record on disk, though both windows do.
+      expect([ server.entryOf(16), heldOn(windowA.hub, 16), heldOn(windowB.hub, 16) ])
+        .toStrictEqual([
+          { aa22: [ { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] },
+          [ 'aa22@0,0', 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ],
+          [ 'aa22@0,0', 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ],
+        ]);
+    });
+
+    it('puts a placement another window saved back on disk when a window not holding its map undoes forgetting it', async () =>
+    {
+      // Arrange: window a places the camp on map 16 and saves it; window b, which does not hold map 16, forgets it, which
+      // takes it off the disk.
+      const server = new UsesServer(storedUses(ON_DISK));
+      const windowA = windowOver(server, { clientId: 'window-a', holders: [ 'window-b' ] });
+      const windowB = windowOver(server, { clientId: 'window-b', holders: [ 'window-a' ], maps: [ 3 ] });
+      mirror(windowA.hub, windowB.hub);
+      mirror(windowB.hub, windowA.hub);
+      place(windowA.hub, 16, 0);
+      await windowA.hub.save('map:16');
+      await windowA.keeper.whenWritten();
+      forgetPlacement(windowB.hub, { id: 'aa22', name: 'Goblin camp' }, { blueprintId: 'aa22', mapId: 16, x: 0, y: 0 });
+      await windowB.keeper.whenWritten();
+      const afterForgetting = server.entryOf(16);
+
+      // Act: window b undoes the forgetting.
+      windowB.hub.undo(blueprintHistoryKey('aa22'));
+      await Promise.all([ windowA.keeper.whenWritten(), windowB.keeper.whenWritten() ]);
+
+      // Assert: off the disk once forgotten, and back once window a, whose map 16 file holds it, heard the undo.
+      expect([ afterForgetting, server.entryOf(16) ])
+        .toStrictEqual([
+          { aa22: [ { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] },
+          { aa22: [ { x: 0, y: 0 }, { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] },
+        ]);
+    });
+
+    it('puts a forgotten placement back on disk from a window not holding its map when no window holds it', async () =>
+    {
+      // Arrange: the only window holds the record but not map 16, and forgets a placement the disk holds there.
+      const server = new UsesServer(storedUses(ON_DISK));
+      const { hub, keeper } = windowOver(server, { maps: [ 3 ] });
+      forgetPlacement(hub, { id: 'aa22', name: 'Goblin camp' }, { blueprintId: 'aa22', mapId: 16, x: 12, y: 3 });
+      await keeper.whenWritten();
+      const afterForgetting = server.entryOf(16);
+
+      // Act.
+      hub.undo(blueprintHistoryKey('aa22'));
+      await keeper.whenWritten();
+
+      // Assert.
+      expect([ afterForgetting, server.entryOf(16) ])
+        .toStrictEqual([
+          { aa22: [ { x: 1, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] },
+          { aa22: [ { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] },
         ]);
     });
 
