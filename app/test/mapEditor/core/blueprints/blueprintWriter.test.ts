@@ -262,7 +262,7 @@ describe('BlueprintWriter', () =>
   {
     // Arrange.
     const window = await writtenWindow();
-    window.failNextWrite(new MapEditorApiError('PUT /api/blueprint-changes answered 409', 409, 'Map 003 no longer holds what the change replaced: cell 13 no longer holds tile 1537'));
+    window.failNextWrite(new MapEditorApiError('PUT /api/blueprint-changes answered 409', 409, 'Map 003 no longer holds what the change replaced: the tile at 1, 1 on layer 1 changed'));
 
     // Act.
     paintCorner(window, a5(9));
@@ -276,7 +276,7 @@ describe('BlueprintWriter', () =>
         0,
         a5(1),
         false,
-        [ { message: 'The change to the blueprint could not be written, so it was taken back: Map 003 no longer holds what the change replaced: cell 13 no longer holds tile 1537.', alarm: false } ],
+        [ { message: 'The change to the blueprint could not be written, so it was taken back: Map 003 no longer holds what the change replaced: the tile at 1, 1 on layer 1 changed.', alarm: false } ],
       ]);
   });
 

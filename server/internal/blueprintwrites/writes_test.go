@@ -152,26 +152,41 @@ func TestApplyToMapTakesAChangeBackByteForByte(t *testing.T) {
 }
 
 func TestApplyToMapRefusesAFileNoLongerHoldingWhatAPatchReplaces(t *testing.T) {
-	cases := map[string]string{
-		"a cell painted since":       `{"kind":"tiles","indices":[0],"before":[1540],"after":[1545]}`,
-		"a cell past the data":       `{"kind":"tiles","indices":[6],"before":[0],"after":[1545]}`,
-		"an event renamed since":     `{"kind":"set","path":["events",1],"before":` + guardAs("Sentry", 3) + `,"after":` + guardAs("Captain", 3) + `}`,
-		"an event that is not there": `{"kind":"set","path":["events",5],"before":` + guardAs("Guard", 3) + `,"after":` + guardAs("Captain", 3) + `}`,
-		"a path through a value":     `{"kind":"set","path":["note","inner"],"before":"x","after":"y"}`,
+	// the cellar with its guard deleted, as MZ leaves a deleted event: null in its slot.
+	guardAt := strings.Index(cellarMap, `{"id":1,`)
+	deleted := cellarMap[:guardAt] + "null" + cellarMap[strings.Index(cellarMap, "}\n]")+1:]
+	cases := map[string]struct {
+		file     string
+		patch    string
+		expected string
+	}{
+		"a cell painted since":       {file: cellarMap, patch: `{"kind":"tiles","indices":[0],"before":[1540],"after":[1545]}`, expected: "the tile at 0, 0 on layer 1 changed"},
+		"a cell on the third layer":  {file: cellarMap, patch: `{"kind":"tiles","indices":[2],"before":[7],"after":[1545]}`, expected: "the tile at 0, 0 on layer 3 changed"},
+		"a shadow":                   {file: cellarMap, patch: `{"kind":"tiles","indices":[4],"before":[7],"after":[0]}`, expected: "the tile at 0, 0 on the shadows changed"},
+		"a region":                   {file: cellarMap, patch: `{"kind":"tiles","indices":[5],"before":[7],"after":[0]}`, expected: "the tile at 0, 0 on the regions changed"},
+		"a map of no size":           {file: `{"data":[0],"events":[]}`, patch: `{"kind":"tiles","indices":[0],"before":[7],"after":[0]}`, expected: "one of its tiles changed"},
+		"a cell past the data":       {file: cellarMap, patch: `{"kind":"tiles","indices":[6],"before":[0],"after":[1545]}`, expected: "it is not the size it was"},
+		"no tiles at all":            {file: `{"events":[]}`, patch: `{"kind":"tiles","indices":[0],"before":[0],"after":[1]}`, expected: "it holds no tiles"},
+		"an event renamed since":     {file: cellarMap, patch: `{"kind":"set","path":["events",1],"before":` + guardAs("Sentry", 3) + `,"after":` + guardAs("Captain", 3) + `}`, expected: "event 1 changed"},
+		"an event deleted since":     {file: deleted, patch: `{"kind":"set","path":["events",1],"before":` + guardAs("Guard", 3) + `,"after":` + guardAs("Captain", 3) + `}`, expected: "event 1 is gone"},
+		"an event that is not there": {file: cellarMap, patch: `{"kind":"set","path":["events",5],"before":` + guardAs("Guard", 3) + `,"after":` + guardAs("Captain", 3) + `}`, expected: "event 5 is gone"},
+		"a page of a gone event":     {file: cellarMap, patch: `{"kind":"set","path":["events",5,"pages",0],"before":{},"after":{}}`, expected: "event 5 is gone"},
+		"the events as a whole":      {file: cellarMap, patch: `{"kind":"set","path":["events"],"before":[],"after":[]}`, expected: "its events changed"},
+		"a path through a value":     {file: cellarMap, patch: `{"kind":"set","path":["note","inner"],"before":"x","after":"y"}`, expected: "its map settings changed"},
 	}
 
-	for name, patch := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
 			// Arrange.
-			patches := patchesOf(t, `{"maps":[{"map":7,"patches":[`+patch+`]}]}`)
+			patches := patchesOf(t, `{"maps":[{"map":7,"patches":[`+testCase.patch+`]}]}`)
 
 			// Act.
-			_, err := ApplyToMap(7, []byte(cellarMap), patches)
+			_, err := ApplyToMap(7, []byte(testCase.file), patches)
 
-			// Assert.
+			// Assert: the refusal names the map, and says what changed in words an author knows the map by.
 			var mismatch MismatchError
-			if errors.As(err, &mismatch) == false || mismatch.MapID != 7 || strings.HasPrefix(err.Error(), "Map 007 no longer holds what the change replaced") == false {
-				t.Errorf("expected a refusal naming map 7, got %v", err)
+			if errors.As(err, &mismatch) == false || mismatch.MapID != 7 || err.Error() != "Map 007 no longer holds what the change replaced: "+testCase.expected {
+				t.Errorf("expected a refusal naming map 7 and %q, got %v", testCase.expected, err)
 			}
 		})
 	}

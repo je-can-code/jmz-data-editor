@@ -266,16 +266,16 @@ func ApplyToMap(mapID int, file []byte, patches []Patch) ([]byte, error) {
 func applyTiles(mapID int, root *mzjson.Value, patch Patch) error {
 	data := root.Member("data")
 	if data == nil || data.Kind != mzjson.Array {
-		return MismatchError{MapID: mapID, reason: "it holds no tile data"}
+		return MismatchError{MapID: mapID, reason: "it holds no tiles"}
 	}
 
 	for position, index := range patch.Indices {
 		if index < 0 || index >= len(data.Items) {
-			return MismatchError{MapID: mapID, reason: fmt.Sprintf("cell %d is outside its tile data", index)}
+			return MismatchError{MapID: mapID, reason: "it is not the size it was"}
 		}
 		held, ok := wholeNumber(data.Items[index])
 		if ok == false || held != patch.Before[position] {
-			return MismatchError{MapID: mapID, reason: fmt.Sprintf("cell %d no longer holds tile %d", index, patch.Before[position])}
+			return MismatchError{MapID: mapID, reason: describeCell(root, index) + " changed"}
 		}
 	}
 
@@ -293,14 +293,18 @@ func applySet(mapID int, root *mzjson.Value, patch Patch) error {
 	for _, step := range patch.Path[:len(patch.Path)-1] {
 		parent = childAt(parent, step)
 		if parent == nil {
-			return MismatchError{MapID: mapID, reason: "it holds nothing at " + describePath(patch.Path)}
+			return MismatchError{MapID: mapID, reason: spotWords(patch.Path, true)}
 		}
 	}
 
+	// an event deleted in MZ leaves null in its slot, which is as gone as a slot that is not there.
 	last := patch.Path[len(patch.Path)-1]
 	held := childAt(parent, last)
-	if held == nil || sameValue(held, patch.Was) == false {
-		return MismatchError{MapID: mapID, reason: describePath(patch.Path) + " no longer holds what the change replaced"}
+	if held == nil || (held.Kind == mzjson.Null && patch.Was.Kind != mzjson.Null) {
+		return MismatchError{MapID: mapID, reason: spotWords(patch.Path, true)}
+	}
+	if sameValue(held, patch.Was) == false {
+		return MismatchError{MapID: mapID, reason: spotWords(patch.Path, false)}
 	}
 
 	becomes := cloneValue(patch.Becomes)
@@ -400,6 +404,48 @@ func requireWholeMap(laid []byte) error {
 	}
 
 	return mzjson.RequireEveryKey(value, typeOfMap)
+}
+
+// describeCell words one cell of a map's tile data the way an author finds it, for a refusal the author reads: its column
+// and row, then its layer as the layer strip names it, the four tile layers by number from 1, then the shadows and the
+// regions. A map whose size cannot be read gives no place to name.
+func describeCell(root *mzjson.Value, index int) string {
+	width, widthOk := wholeNumber(root.Member("width"))
+	height, heightOk := wholeNumber(root.Member("height"))
+	if widthOk == false || heightOk == false || width < 1 || height < 1 {
+		return "one of its tiles"
+	}
+
+	plane := width * height
+	inLayer := index % plane
+	layer := "layer " + strconv.Itoa(index/plane+1)
+	switch index / plane {
+	case 4:
+		layer = "the shadows"
+	case 5:
+		layer = "the regions"
+	}
+
+	return fmt.Sprintf("the tile at %d, %d on %s", inLayer%width, inLayer/width, layer)
+}
+
+// spotWords words what a set patch found where it lands, the way an author knows a map, for a refusal the author reads:
+// the event a path into the event list reaches, by its id, gone or changed; the events as a whole; or else the map's own
+// settings, changed.
+func spotWords(path []PathSegment, gone bool) string {
+	inEvents := path[0].IsIndex == false && path[0].Key == "events"
+	if inEvents && len(path) >= 2 && path[1].IsIndex {
+		if gone {
+			return fmt.Sprintf("event %d is gone", path[1].Index)
+		}
+		return fmt.Sprintf("event %d changed", path[1].Index)
+	}
+
+	if inEvents {
+		return "its events changed"
+	}
+
+	return "its map settings changed"
 }
 
 // describePath words a path the way the editor's patches spell it, its steps joined with slashes.
