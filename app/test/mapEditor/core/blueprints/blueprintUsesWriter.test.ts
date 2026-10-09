@@ -212,6 +212,27 @@ describe('BlueprintUsesWriter', () =>
       ]);
   });
 
+  it('says why a merge failed in the words of what failed it, whatever that was', async () =>
+  {
+    // Arrange: a merge failed by an error the server gave no words for, and one by something that is no error at all.
+    const { server, writer, problems } = build();
+    server.failNext = new MapEditorApiError('PUT /api/editor-data/blueprint-uses/maps answered 502', 502);
+    writer.writeWhole(16, [ ROOST ]);
+    await writer.whenWritten();
+    server.failNext = 'the server went away' as unknown as Error;
+
+    // Act.
+    writer.writeWhole(3, [ CUT ]);
+    await writer.whenWritten();
+
+    // Assert.
+    expect(problems)
+      .toStrictEqual([
+        'The blueprint placements could not be saved: PUT /api/editor-data/blueprint-uses/maps answered 502. They are tried again with the next save.',
+        'The blueprint placements could not be saved: the server went away. They are tried again with the next save.',
+      ]);
+  });
+
   it('gives a failed merge back beneath what was asked for since, the newer winning', async () =>
   {
     // Arrange: a merge held, then failed, after a newer write of the same map was asked for.
@@ -241,12 +262,12 @@ describe('BlueprintUsesWriter', () =>
     writer.writeRemoved(16, [ CAMP ]);
 
     // Act.
-    const intended = writer.intended(16);
+    const intended = [ writer.intended(16), writer.intended(3) ];
     writer.learn(null);
 
-    // Assert.
+    // Assert: map 3, which the file does not hold and nothing is owed for, holds nothing.
     expect([ intended, writer.intended(16), writer.onDisk ])
-      .toStrictEqual([ [ ROOST ], null, null ]);
+      .toStrictEqual([ [ [ ROOST ], [] ], null, null ]);
   });
 
   it('takes nothing out or in when given nothing', () =>

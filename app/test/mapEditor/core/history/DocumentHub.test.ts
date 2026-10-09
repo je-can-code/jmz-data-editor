@@ -2792,6 +2792,24 @@ describe('DocumentHub', () =>
         ]);
     });
 
+    it('finds a step a held history lists, done or undone, and nothing for one no history lists any more', () =>
+    {
+      // Arrange: a rename done, one undone, and one forgotten.
+      const hub = buildHub();
+      const done = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      const forgotten = hub.edit('Retitle', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Cave')) as HistoryStep;
+      hub.forgetStep(forgotten.id);
+      const undone = hub.edit('Note', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'undone')) as HistoryStep;
+      hub.undo(mapHistoryKey(1));
+
+      // Act.
+      const found = [ done, undone, forgotten ].map(step => hub.knownStep(step.id));
+
+      // Assert.
+      expect(found)
+        .toStrictEqual([ done, undone, null ]);
+    });
+
     it('lists the steps a document holds and those its file holds, and none for a document not held', async () =>
     {
       // Arrange: a saved rename, an unsaved one, and one undone.

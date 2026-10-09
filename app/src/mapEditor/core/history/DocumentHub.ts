@@ -581,6 +581,16 @@ class DocumentHub
   }
 
   /**
+   * Finds a step some history this window holds lists, done or undone.
+   * @param {string} stepId The step.
+   * @returns {HistoryStep | null} The step, or null when no held history lists it.
+   */
+  knownStep(stepId: string): HistoryStep | null
+  {
+    return this.#steps.get(stepId) ?? null;
+  }
+
+  /**
    * Lists the steps whose patches a held document holds, in the order they went in: steps undone are not among them,
    * and steps forgotten, or dropped from every history, are, since their patches are still there.
    * @param {DocumentKey} key The document.

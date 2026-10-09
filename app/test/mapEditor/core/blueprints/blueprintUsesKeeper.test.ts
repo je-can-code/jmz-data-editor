@@ -260,6 +260,33 @@ describe('BlueprintUsesKeeper', () =>
         .toStrictEqual([ 'placed at 0', { aa22: [ { x: 0, y: 0 }, { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] } ]);
     });
 
+    it('replays a step a save holds from the history that lists it, in a map taken over from another window', async () =>
+    {
+      // Arrange: window b places on map 16 and undoes it, its redo kept; window c takes over map 16 and the record from it,
+      // having heard nothing of the placement itself.
+      const server = new UsesServer(storedUses(ON_DISK));
+      const windowB = windowOver(server, { clientId: 'window-b' });
+      const placed = place(windowB.hub, 16, 0);
+      windowB.hub.undo(mapHistoryKey(16));
+      const hub = new DocumentHub({ clientId: 'window-c', store: mapStore().store });
+      const keeper = new BlueprintUsesKeeper({ hub, api: server.api, holders: () => [], onProblem: () => undefined });
+      hub.adoptSnapshot(windowB.hub.snapshot('map:16'));
+      hub.adoptSnapshot(windowB.hub.snapshot(BLUEPRINT_USES_DOCUMENT));
+      await keeper.whenWritten();
+      await new Promise(resolve =>
+      {
+        setTimeout(resolve, 0);
+      });
+
+      // Act: an event window's save of the map as it stood with the placement in.
+      hub.applyRemote({ type: 'saved', origin: 'window-e', document: 'map:16', marker: [ placed.id ] });
+      await keeper.whenWritten();
+
+      // Assert.
+      expect(server.entryOf(16))
+        .toStrictEqual({ aa22: [ { x: 0, y: 0 }, { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] });
+    });
+
     it('leaves a save made by another window holding the record to that window', async () =>
     {
       // Arrange: window b holds the record too.
@@ -491,6 +518,49 @@ describe('BlueprintUsesKeeper', () =>
         .toStrictEqual([ [], [ 'aa22@2,2' ] ]);
     });
 
+    it('makes no change at all when the file changed only for maps holding unsaved placements', () =>
+    {
+      // Arrange: an unsaved placement on map 16, and the record's lineage before the change.
+      const server = new UsesServer(storedUses(ON_DISK));
+      const { hub } = windowOver(server);
+      place(hub, 16, 0);
+      const lineage = [ ...hub.lineage(BLUEPRINT_USES_DOCUMENT) ];
+
+      // Act: the file changed for map 16 alone, its roost moved.
+      hub.applyOutsideContent(BLUEPRINT_USES_DOCUMENT, storedUses(ON_DISK.map(spot => (spot.blueprintId === 'k3x9q2mf' ? { ...spot, x: 5 } : spot))));
+
+      // Assert.
+      expect([ hub.lineage(BLUEPRINT_USES_DOCUMENT), heldOn(hub, 16) ])
+        .toStrictEqual([ lineage, [ 'aa22@0,0', 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ] ]);
+    });
+
+    it('never takes a read of the file landing after a newer change was heard over that change', async () =>
+    {
+      // Arrange: window b's record holds the roost moved; window c takes it over, which sends its keeper to read the file,
+      // which the read finds as it was before the move; before the read lands, the move is heard on disk.
+      const moved = storedUses(ON_DISK.map(spot => (spot.blueprintId === 'k3x9q2mf' ? { ...spot, x: 5 } : spot)));
+      const older = new UsesServer(storedUses(ON_DISK));
+      const windowB = windowOver(new UsesServer(moved), { clientId: 'window-b' });
+      const hub = new DocumentHub({ clientId: 'window-c', store: mapStore().store });
+      hub.adopt('map:16', buildMapJson() as unknown as JsonValue);
+      const keeper = new BlueprintUsesKeeper({ hub, api: older.api, holders: () => [], onProblem: () => undefined });
+      hub.adoptSnapshot(windowB.hub.snapshot(BLUEPRINT_USES_DOCUMENT));
+      hub.applyOutsideContent(BLUEPRINT_USES_DOCUMENT, moved);
+      await new Promise(resolve =>
+      {
+        setTimeout(resolve, 0);
+      });
+
+      // Act: map 16 renamed and saved, its placements those the move left.
+      hub.edit('Rename', [ mapHistoryKey(16) ], tx => tx.set('map:16', [ 'displayName' ], 'Harbor'));
+      await hub.save('map:16');
+      await keeper.whenWritten();
+
+      // Assert: judged against the newer file, which already holds what map 16 holds, nothing was written.
+      expect([ heldOn(hub, 16), older.merges ])
+        .toStrictEqual([ [ 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@5,7' ], [] ]);
+    });
+
     it('follows nothing while the file holds no record of placements, and judges the next change from it', () =>
     {
       // Arrange.
@@ -567,6 +637,25 @@ describe('BlueprintUsesKeeper', () =>
         .toStrictEqual([ 'aa22@1,3', 'k3x9q2mf@4,7' ]);
     });
 
+    it('makes no change for a map whose placements are what the file holds, nor for a document that is no map', () =>
+    {
+      // Arrange: map 16 renamed alone, and the tilesets held.
+      const server = new UsesServer(storedUses(ON_DISK));
+      const { hub } = windowOver(server);
+      hub.adopt('tilesets', [ null ]);
+      const file = hub.snapshot('map:16').content;
+      hub.edit('Rename', [ mapHistoryKey(16) ], tx => tx.set('map:16', [ 'displayName' ], 'Harbor'));
+      const lineage = [ ...hub.lineage(BLUEPRINT_USES_DOCUMENT) ];
+
+      // Act.
+      hub.reload('map:16', file);
+      hub.reload('tilesets', [ null ]);
+
+      // Assert.
+      expect(hub.lineage(BLUEPRINT_USES_DOCUMENT))
+        .toStrictEqual(lineage);
+    });
+
     it('leaves the map\'s placements as they are while what the record\'s file holds is not known', () =>
     {
       // Arrange: the file turned into something that is no record, then a placement.
@@ -636,6 +725,32 @@ describe('BlueprintUsesKeeper', () =>
       // Assert: the placement is written, the file having been read rather than taken from b's copy, which held it already.
       expect(server.entryOf(16))
         .toStrictEqual({ aa22: [ { x: 0, y: 0 }, { x: 1, y: 3 }, { x: 12, y: 3 } ], k3x9q2mf: [ { x: 4, y: 7 } ] });
+    });
+  });
+
+  describe('a project with no record yet', () =>
+  {
+    it('reads no file as a record holding nothing, so a save of a map with no placements writes nothing', async () =>
+    {
+      // Arrange: the record already held when the keeper starts, so it reads the file for itself, and there is none.
+      const server = new UsesServer();
+      const hub = new DocumentHub({ clientId: 'window-a', store: mapStore().store });
+      hub.adopt('map:16', buildMapJson() as unknown as JsonValue);
+      hub.adopt(BLUEPRINT_USES_DOCUMENT, storedUses());
+      const keeper = new BlueprintUsesKeeper({ hub, api: server.api, holders: () => [], onProblem: () => undefined });
+      await new Promise(resolve =>
+      {
+        setTimeout(resolve, 0);
+      });
+
+      // Act.
+      hub.edit('Rename', [ mapHistoryKey(16) ], tx => tx.set('map:16', [ 'displayName' ], 'Harbor'));
+      await hub.save('map:16');
+      await keeper.whenWritten();
+
+      // Assert: still no file.
+      expect([ server.merges, server.stored ])
+        .toStrictEqual([ [], null ]);
     });
   });
 

@@ -105,7 +105,8 @@ describe('readUses', () =>
   it('refuses anything that is not a record of placements, naming where', () =>
   {
     // Arrange: no record at all, a list of maps, a map key that is no map's id, a map's entry that is a list, a
-    // blueprint's id no blueprint could have, placements that are not a list, and a cell with a fraction in it.
+    // blueprint's id no blueprint could have, placements that are not a list, a cell with a fraction in it, and a cell
+    // that is no cell at all.
     const broken: JsonValue[] = [
       'nothing',
       { maps: [] },
@@ -114,6 +115,7 @@ describe('readUses', () =>
       { maps: { 16: { 'No-Id': [] } } },
       { maps: { 16: { aa22: { x: 1, y: 2 } } } },
       { maps: { 16: { aa22: [ { x: 1.5, y: 2 } ] } } },
+      { maps: { 16: { aa22: [ 7 ] } } },
     ];
 
     // Act.
@@ -136,6 +138,7 @@ describe('readUses', () =>
         'the saved blueprint placements are not a record of placements',
         'the saved blueprint placements are not a record of placements',
         'the saved blueprint placements hold something under "0" that is not a placement',
+        'the saved blueprint placements hold something under map 16 that is not a placement',
         'the saved blueprint placements hold something under map 16 that is not a placement',
         'the saved blueprint placements hold something under map 16 that is not a placement',
         'the saved blueprint placements hold something under map 16 that is not a placement',
@@ -518,8 +521,8 @@ describe('the part placed', () =>
 
   it('refuses a part placed that is no rectangle inside the blueprint', () =>
   {
-    // Arrange: a part with a side missing, one of nothing, and one starting before the blueprint.
-    const parts: JsonValue[] = [ { x: 0, y: 0, width: 2 }, { x: 0, y: 0, width: 0, height: 2 }, { x: -1, y: 0, width: 1, height: 1 } ];
+    // Arrange: a part with a side missing, one of nothing, one starting before the blueprint, and one that is no part.
+    const parts: JsonValue[] = [ { x: 0, y: 0, width: 2 }, { x: 0, y: 0, width: 0, height: 2 }, { x: -1, y: 0, width: 1, height: 1 }, 'all of it' ];
 
     // Act.
     const messages = parts.map(placed =>
@@ -617,14 +620,14 @@ describe('placementsByMap and spotsOfEntry', () =>
 
   it('refuses a stored record that is not a record of placements', () =>
   {
-    // Arrange: a record with no data.
+    // Arrange: a record with no data, and something that is no record at all.
 
     // Act.
-    const read = () => placementsByMap({ schemaVersion: 2 });
+    const reads = [ () => placementsByMap({ schemaVersion: 2 }), () => placementsByMap('broken') ];
 
     // Assert.
-    expect(read)
-      .toThrow('the saved blueprint placements are not a record of placements');
+    reads.forEach(read => expect(read)
+      .toThrow('the saved blueprint placements are not a record of placements'));
   });
 
   it('reads one map\'s entry, and none for a map with no entry', () =>

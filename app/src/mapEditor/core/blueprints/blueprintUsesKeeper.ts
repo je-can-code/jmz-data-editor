@@ -330,8 +330,9 @@ class BlueprintUsesKeeper
       const removed = from.filter(spot => to.some(each => samePlacement(each, spot)) === false);
       const added = to.filter(spot => from.some(each => samePlacement(each, spot)) === false);
 
-      // what the map's file holds is its placements as of its saved steps; one put back that the file lacks stays off.
-      const saved = this.#partAsOf(change.mapId, this.#hub.savedSteps(mapDocumentKey(change.mapId)));
+      // what the map's file holds is its placements as of its saved steps, worked out from what the step just left; one
+      // put back that the file lacks stays off, and one that cannot be told goes back, the record never short of a file.
+      const saved = this.#partAsOf(change.mapId, this.#hub.savedSteps(mapDocumentKey(change.mapId)), to);
       const onFile = added.filter(spot => saved === null || saved.some(each => samePlacement(each, spot)));
       this.#writer.writeRemoved(change.mapId, removed);
       this.#writer.writeAdded(change.mapId, onFile);
@@ -362,32 +363,27 @@ class BlueprintUsesKeeper
 
     // a step the file holds that this window cannot replay leaves the placements as they stand, which is the nearest.
     const { mapId } = parsed;
-    const part = this.#partAsOf(mapId, marker) ?? spotsOnMap(uses, mapId);
-    this.#writer.writeWhole(mapId, part);
+    const current = spotsOnMap(uses, mapId);
+    this.#writer.writeWhole(mapId, this.#partAsOf(mapId, marker, current) ?? current);
   }
 
   /**
-   * Works out a map's placements as of some of its steps, as a file holding those steps would have them: the placements as
+   * Works out a map's placements as of some of its steps, as a file holding those steps would have them: its placements as
    * they stand here, with every step applied since that state taken back out, newest first, and every step the state holds
-   * that is undone here put back, oldest first. A map this window does not hold has no steps here, and stands as it is.
+   * that is undone here put back, oldest first. A step no longer applied is found in the histories that list it, or among
+   * the steps heard of, which keeps one no history lists any more. A map this window does not hold has no steps here, and
+   * stands as it is.
    * @param {number} mapId The map.
    * @param {readonly string[]} marker The steps, oldest first.
-   * @returns {BlueprintSpot[] | null} The placements; null when the window holds no record it can read, or when a step
-   * the state holds is unknown here.
+   * @param {readonly BlueprintSpot[]} current The map's placements as they stand here.
+   * @returns {BlueprintSpot[] | null} The placements; null when a step the state holds is unknown here.
    */
-  #partAsOf(mapId: number, marker: readonly string[]): BlueprintSpot[] | null
+  #partAsOf(mapId: number, marker: readonly string[], current: readonly BlueprintSpot[]): BlueprintSpot[] | null
   {
-    const uses = readableUses(this.#hub);
-    if (uses === null)
-    {
-      return null;
-    }
-
-    const current = spotsOnMap(uses, mapId);
     const key = mapDocumentKey(mapId);
     if (this.#hub.has(key) === false)
     {
-      return current;
+      return [ ...current ];
     }
 
     // the steps the map and the state share from the start need nothing done.
@@ -399,11 +395,11 @@ class BlueprintUsesKeeper
     }
 
     const changeOn = (changes: readonly MapPartChange[]): MapPartChange | undefined => changes.find(change => change.mapId === mapId);
-    let part = applied.slice(shared).reverse().reduce((spots, step) => moveThrough(spots, changeOn(partChangesOf(step)), 'backward'), current);
+    let part = applied.slice(shared).reverse().reduce((spots, step) => moveThrough(spots, changeOn(partChangesOf(step)), 'backward'), [ ...current ]);
     for (const stepId of marker.slice(shared))
     {
-      const step = applied.find(each => each.id === stepId);
-      const changes = step === undefined ? this.#changes.get(stepId) : partChangesOf(step);
+      const step = applied.find(each => each.id === stepId) ?? this.#hub.knownStep(stepId);
+      const changes = step === null ? this.#changes.get(stepId) : partChangesOf(step);
       if (changes === undefined)
       {
         return null;
