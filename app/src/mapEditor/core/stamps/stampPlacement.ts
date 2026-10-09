@@ -1,6 +1,6 @@
 import { blueprintLinkOf, withoutBlueprintLink } from '../blueprints/blueprintLink.ts';
 import { liveBlueprintsIn, type LiveBlueprint } from '../blueprints/blueprints.ts';
-import { forgetSpots, readableUses, recordSpots, type BlueprintSpot } from '../blueprints/blueprintUses.ts';
+import { forgetSpots, placedOn, readableUses, recordSpots, type BlueprintSpot } from '../blueprints/blueprintUses.ts';
 import { blockedCells, eventCellsOf, isOnMap, newEventIds, type EventMap } from '../events/eventPlacement.ts';
 import { rewireGroupReferences } from '../events/eventReferences.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
@@ -218,9 +218,10 @@ const withDeadLinksOut = (events: readonly RmmzMapEvent[], liveBlueprint: LiveBl
 
 /**
  * Works out the placements of blueprints a stamp's tiles record where they land, once its tiles are placed: each one its
- * tiles hold, moved to where the stamp's corner lands, as long as some of it lands on the map. One of a blueprint no
- * longer there, deleted or its save undone, goes down plain, as a copy of its events does; while the window does not
- * hold the blueprints, none can be told gone, and each is recorded as it is.
+ * tiles hold, moved to where the stamp's corner lands, as long as some of it lands on the map, keeping as its part placed
+ * the cells the map holds there, since the stamp's tiles past the edge are dropped. One of a blueprint no longer there,
+ * deleted or its save undone, goes down plain, as a copy of its events does; while the window does not hold the
+ * blueprints, none can be told gone, and each is recorded as it is.
  * @param {Stamp} stamp The stamp, whose tiles are placed.
  * @param {MapCell} at Where its corner lands.
  * @param {TileGrid} map The map, for its size.
@@ -237,10 +238,11 @@ const landingSpots = (
 {
   const spots: BlueprintSpot[] = [];
   let dead = 0;
-  (stamp.spots ?? []).forEach(({ blueprintId, x, y, width, height }) =>
+  (stamp.spots ?? []).forEach(({ blueprintId, x, y, width, height, placed }) =>
   {
-    const landed = { x: at.x + x, y: at.y + y };
-    if (clipRect({ ...landed, width, height }, map.width, map.height) === null)
+    const corner = { blueprintId, x: at.x + x, y: at.y + y };
+    const landed = placedOn(placed === undefined ? corner : { ...corner, placed }, { width, height }, map);
+    if (landed === null)
     {
       return;
     }
@@ -251,7 +253,7 @@ const landingSpots = (
       return;
     }
 
-    spots.push({ blueprintId, ...landed });
+    spots.push(landed);
   });
 
   return { spots, dead };

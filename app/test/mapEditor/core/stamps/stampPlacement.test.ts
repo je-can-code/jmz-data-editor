@@ -597,7 +597,7 @@ describe('placements a stamp carries', () =>
       ]);
   });
 
-  it('records a placement hanging past the map\'s edge, and leaves out one landing wholly past it', () =>
+  it('records a placement hanging past the map\'s edge with the part of it that went down, and leaves out one landing wholly past it', () =>
   {
     // Arrange: a stamp of two placements, its tiles a row of three with the block's two thirds and the sign beyond them.
     const hub = windowWithPlacements();
@@ -610,12 +610,34 @@ describe('placements a stamp carries', () =>
       spots: [ { blueprintId: 'aa22', x: -1, y: 0, width: 3, height: 3 }, { blueprintId: 'bb33', x: 2, y: 0, width: 1, height: 1 } ],
     });
 
-    // Act: placed with its corner on the map's last column, so the sign lands past the right edge.
+    // Act: placed with its corner on the map's last column, so the block's last column and the sign land past the right
+    // edge.
     placeStamp(hub, 2, stamp, at(7, 0), 'Paste');
 
     // Assert.
     expect(recorded(hub).filter(spot => spot.mapId === 2))
-      .toStrictEqual([ { blueprintId: 'aa22', x: 6, y: 0, mapId: 2 } ]);
+      .toStrictEqual([ { blueprintId: 'aa22', x: 6, y: 0, placed: { x: 0, y: 0, width: 2, height: 3 }, mapId: 2 } ]);
+  });
+
+  it('keeps a carried placement\'s part where it lands, never giving it back cells cut off where it was copied', () =>
+  {
+    // Arrange: the block copied while hanging past the left edge, its first column left off, onto the middle of map 2.
+    const hub = windowWithPlacements();
+    const values = [ 0, 0 ];
+    const stamp = stampOf({
+      width: 2,
+      height: 1,
+      tiles: { layers: [ 0 ], values, calledFor: [ -1, -1 ] },
+      events: [],
+      spots: [ { blueprintId: 'aa22', x: -1, y: 0, width: 3, height: 3, placed: { x: 1, y: 0, width: 2, height: 3 } } ],
+    });
+
+    // Act.
+    placeStamp(hub, 2, stamp, at(3, 0), 'Paste');
+
+    // Assert: the part it carried, though the whole block would fit where it landed.
+    expect(recorded(hub).filter(spot => spot.mapId === 2))
+      .toStrictEqual([ { blueprintId: 'aa22', x: 2, y: 0, placed: { x: 1, y: 0, width: 2, height: 3 }, mapId: 2 } ]);
   });
 
   it('puts a placement of a blueprint no longer there down plain, saying so, and records each as it is while none can be told gone', () =>

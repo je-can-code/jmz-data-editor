@@ -10,7 +10,8 @@ import { blankGrid, put } from '../tiles/support/tileGridBuilder.ts';
  * by row, and each copy of its events by id. Each placement stands somewhere: still being checked until its map has been
  * looked at; in place, or no longer where it was, with why, by the match check once it has; no longer where it was when
  * its map is gone, a file the server no longer has; and not to be told, with why, when the map could not be read for any
- * other reason, which says nothing about whether it is there. A click shows a placement at its middle.
+ * other reason, which says nothing about whether it is there. A placement the map's edge cut off keeps the part it put
+ * down, is checked by it, and is shown by it: a click shows a placement at the middle of what it put down.
  */
 
 /**
@@ -65,6 +66,22 @@ describe('whereUsed', () =>
         { mapId: 16, spots: [ { x: 30, y: 0 }, { x: 2, y: 4 }, { x: 9, y: 4 } ], eventIds: [ 7, 12 ] },
         { mapId: 20, spots: [], eventIds: [ 5 ] },
       ]);
+  });
+
+  it('keeps the part placed of a placement the map\'s edge cut off, and none for one placed whole', () =>
+  {
+    // Arrange.
+    const spots = [
+      { blueprintId: 'aa22', mapId: 3, x: -1, y: 0, placed: { x: 1, y: 0, width: 1, height: 1 } },
+      { blueprintId: 'aa22', mapId: 3, x: 2, y: 0 },
+    ];
+
+    // Act.
+    const uses = whereUsed(spots, []);
+
+    // Assert.
+    expect(uses)
+      .toStrictEqual([ { mapId: 3, spots: [ { x: -1, y: 0, placed: { x: 1, y: 0, width: 1, height: 1 } }, { x: 2, y: 0 } ], eventIds: [] } ]);
   });
 
   it('lists nothing for a blueprint used nowhere', () =>
@@ -134,6 +151,23 @@ describe('standingOf', () =>
       ]);
   });
 
+  it('checks a placement the map\'s edge cut off by the part it put down, whatever lies where the rest would be', () =>
+  {
+    // Arrange: the signpost's first cell, its object, put down on the map's last column; the map then grown, an object
+    // painted where the cut cell would be.
+    const ground = mapWithSign(3);
+    const grown = { ...blankGrid(6, 1), tilesetId: 4 };
+    put(grown, 3, 0, 3, 10);
+    put(grown, 4, 0, 3, 99);
+
+    // Act.
+    const standings = [ ground, grown ].map(each => standingOf({ kind: 'looked', ground: each }, { x: 3, y: 0, placed: { x: 0, y: 0, width: 1, height: 1 } }, SIGNPOST));
+
+    // Assert.
+    expect(standings)
+      .toStrictEqual([ { kind: 'in-place' }, { kind: 'in-place' } ]);
+  });
+
   it('takes a placement on a map that is gone for no longer where it was, and one on a map not to be read for unknown', () =>
   {
     // Arrange.
@@ -164,5 +198,18 @@ describe('placementMiddle', () =>
     // Assert.
     expect(middles)
       .toStrictEqual([ { x: 11, y: 1 }, { x: 12, y: 0 } ]);
+  });
+
+  it('finds the middle of the part a placement cut off by the edge put down, which is what the map shows of it', () =>
+  {
+    // Arrange: a 4 by 3 blueprint whose corner is two columns past the map's left edge, its last two columns placed.
+    const spot = { x: -2, y: 0, placed: { x: 2, y: 0, width: 2, height: 3 } };
+
+    // Act.
+    const middle = placementMiddle(spot, { width: 4, height: 3 });
+
+    // Assert.
+    expect(middle)
+      .toStrictEqual({ x: 1, y: 1 });
   });
 });

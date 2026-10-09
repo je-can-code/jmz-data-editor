@@ -143,8 +143,33 @@ const readEvents = (value: unknown, width: number, height: number): RmmzMapEvent
 };
 
 /**
+ * Reports whether a value is the part of a blueprint a placement put down: absent, for one put down whole, or a rectangle
+ * inside the blueprint, at least one tile each way.
+ * @param {unknown} value The value.
+ * @param {number} spanWidth The blueprint's width.
+ * @param {number} spanHeight The blueprint's height.
+ * @returns {boolean} True when it is.
+ */
+const isPlacedPart = (value: unknown, spanWidth: number, spanHeight: number): boolean =>
+{
+  if (value === undefined)
+  {
+    return true;
+  }
+
+  if (isJsonObject(value) === false)
+  {
+    return false;
+  }
+
+  const { x, y, width, height } = value;
+  return isWholeBetween(x, 0, spanWidth - 1) && isWholeBetween(y, 0, spanHeight - 1)
+    && isWholeBetween(width, 1, spanWidth - (x as number)) && isWholeBetween(height, 1, spanHeight - (y as number));
+};
+
+/**
  * Reports whether a value has the shape of a placement a stamp's tiles hold: a blueprint's id, a cell, and a size, the
- * placement reaching into the stamp.
+ * placement reaching into the stamp, and the part of the blueprint it put down when that was not the whole.
  * @param {unknown} value The value.
  * @param {number} width The stamp's width.
  * @param {number} height The stamp's height.
@@ -157,10 +182,11 @@ const isStampSpot = (value: unknown, width: number, height: number): value is St
     return false;
   }
 
-  const { blueprintId, x, y, width: spanWidth, height: spanHeight } = value;
+  const { blueprintId, x, y, width: spanWidth, height: spanHeight, placed } = value;
   return typeof blueprintId === 'string' && isBlueprintId(blueprintId)
     && isWholeBetween(spanWidth, 1) && isWholeBetween(spanHeight, 1)
-    && isWholeBetween(x, 1 - (spanWidth as number), width - 1) && isWholeBetween(y, 1 - (spanHeight as number), height - 1);
+    && isWholeBetween(x, 1 - (spanWidth as number), width - 1) && isWholeBetween(y, 1 - (spanHeight as number), height - 1)
+    && isPlacedPart(placed, spanWidth as number, spanHeight as number);
 };
 
 /**
@@ -179,8 +205,16 @@ const readSpots = (value: unknown, width: number, height: number): StampSpot[] |
     return undefined;
   }
 
+  // each is built field by field, so nothing a spot does not hold comes along, and its part only when it has one.
   return Array.isArray(value) && value.length > 0 && value.every(spot => isStampSpot(spot, width, height))
-    ? (value as unknown as StampSpot[]).map(({ blueprintId, x, y, width: spanWidth, height: spanHeight }) => ({ blueprintId, x, y, width: spanWidth, height: spanHeight }))
+    ? (value as unknown as StampSpot[]).map(({ blueprintId, x, y, width: spanWidth, height: spanHeight, placed }) => ({
+      blueprintId,
+      x,
+      y,
+      width: spanWidth,
+      height: spanHeight,
+      ...(placed === undefined ? {} : { placed: { x: placed.x, y: placed.y, width: placed.width, height: placed.height } }),
+    }))
     : null;
 };
 

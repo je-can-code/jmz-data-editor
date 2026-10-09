@@ -1,3 +1,4 @@
+import type { PlacedPart } from '../blueprints/blueprintUses.ts';
 import { spansWithin, type PlacementSpan } from '../blueprints/placementSpans.ts';
 import { boundsOf } from '../events/eventPlacement.ts';
 import { cloneJson } from '../model/json.ts';
@@ -41,8 +42,9 @@ type StampTiles = {
 
 /**
  * A placement of a blueprint's tiles that a stamp's tiles hold whole: the blueprint, the cell its top-left corner sits
- * at, counted from the stamp's own corner, and how far it reaches. It may start past the stamp's top or left edge, as a
- * placement hanging over the map's edge does.
+ * at, counted from the stamp's own corner, and how far its blueprint reaches; and, for one the map's edge cut off, the
+ * part of the blueprint it put down, which is all of it the stamp holds. It may start past the stamp's top or left edge,
+ * as a placement hanging over the map's edge does.
  */
 type StampSpot = {
   readonly blueprintId: string;
@@ -50,6 +52,7 @@ type StampSpot = {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+  readonly placed?: PlacedPart;
 };
 
 /**
@@ -230,14 +233,15 @@ const captureAreaStamp = (
     })
     : [];
 
-  // each placement held whole is kept from the stamp's corner, which is where the piece came from.
+  // each placement held whole is kept from the stamp's corner, which is where the piece came from, with its part placed.
   const origin = { x: source.x, y: source.y };
-  const spots = spansWithin(spans, source, layers, map).map(({ blueprintId, x, y, width, height }) => ({
+  const spots = spansWithin(spans, source, layers, map).map(({ blueprintId, x, y, width, height, placed }) => ({
     blueprintId,
     x: x - origin.x,
     y: y - origin.y,
     width,
     height,
+    ...(placed === undefined ? {} : { placed }),
   }));
   const stamp: Stamp = {
     id,

@@ -4,12 +4,13 @@ import type { MapCell } from '../renderer/camera.ts';
 import type { CellRect } from '../renderer/MapRenderer.ts';
 import { clipRect } from '../tools/geometry.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn, type Blueprint } from './blueprints.ts';
-import { changeMapSpots, readableUses, sameSpot, spotsOnMap, type BlueprintSpot } from './blueprintUses.ts';
+import { cellsPlaced, changeMapSpots, placedOn, readableUses, sameSpot, spotsOnMap, type BlueprintSpot } from './blueprintUses.ts';
 import { comparedLayers } from './placementMatch.ts';
 
 /**
- * A placement the record holds, with what its blueprint says of it: the cells it spans from its spot, and the layers its
- * tiles are compared on, which are the layers that make it what it is.
+ * A placement the record holds, with what its blueprint says of it: its blueprint's size, which with its spot and its part
+ * placed says the cells its tiles went down on, and the layers its tiles are compared on, which are the layers that make
+ * it what it is.
  */
 type PlacementSpan = BlueprintSpot & {
   readonly width: number;
@@ -78,15 +79,15 @@ const spansOnMap = (hub: Pick<DocumentHub, 'has' | 'document'>, mapId: number): 
 };
 
 /**
- * Finds the part of a placement on a map of a size.
+ * Finds the cells of a placement on a map of a size: of the cells its tiles went down on, those the map holds.
  * @param {PlacementSpan} span The placement.
  * @param {number} width The map's width.
  * @param {number} height The map's height.
- * @returns {CellRect | null} The part on the map, or null when none of it is.
+ * @returns {CellRect | null} The cells on the map, or null when none of them is.
  */
 const spanOnMap = (span: PlacementSpan, width: number, height: number): CellRect | null =>
 {
-  return clipRect(span, width, height);
+  return clipRect(cellsPlaced(span, span), width, height);
 };
 
 /**
@@ -129,13 +130,35 @@ const spansWithin = (
 };
 
 /**
+ * Works out what one placement holds once a resize has moved its corner: of the cells it held, those the new size keeps,
+ * when its blueprint says how far it reaches; or, when nothing can tell, the placement as it was while its corner may
+ * still reach onto the map, and nothing once the corner lies past the new right or bottom edge.
+ * @param {BlueprintSpot} moved The placement, its corner moved with the tiles under it.
+ * @param {PlacementSpan | null} span How far it reaches, or null when nothing can tell.
+ * @param {{ width: number, height: number }} size The new size.
+ * @returns {BlueprintSpot | null} The placement as the resize leaves it, or null when it is left wholly outside.
+ */
+const resizedSpot = (moved: BlueprintSpot, span: PlacementSpan | null, size: { readonly width: number; readonly height: number }): BlueprintSpot | null =>
+{
+  if (span !== null)
+  {
+    return placedOn(moved, span, size);
+  }
+
+  return moved.x >= size.width || moved.y >= size.height
+    ? null
+    : moved;
+};
+
+/**
  * Works out a map's placements after a resize: every spot moves with the tiles under it, by the resize's offset, and a
- * placement whose blueprint says it lies wholly outside the new size goes, as an event left outside does, its tiles being
- * gone with the rest outside. A placement left partly on the map stays, its spot past the edge if need be, and is judged
- * from then on by the part still on the map. A placement whose size nothing can tell, its blueprint gone or not to be
- * read, is judged by its corner alone: a corner moved past the new right or bottom edge leaves the whole of it outside,
- * however large it is, so it goes too; a corner anywhere else may still reach onto the map, so it stays, in case its
- * blueprint comes back.
+ * placement whose tiles all lie outside the new size goes, as an event left outside does, its tiles being gone with the
+ * rest outside. A placement left partly on the map stays, its spot past the edge if need be, keeping as its part placed
+ * the cells the map still holds, so it is judged from then on by those alone, and growing the map again never brings
+ * back cells it lost. A placement whose size nothing can tell, its blueprint gone or not to be read, is judged by its
+ * corner alone: a corner moved past the new right or bottom edge leaves the whole of it outside, however large it is,
+ * so it goes too; a corner anywhere else may still reach onto the map, so it stays as it was, in case its blueprint
+ * comes back.
  * @param {readonly BlueprintSpot[]} spots The map's spots as they stand.
  * @param {readonly PlacementSpan[]} spans What the window can tell of how far each reaches.
  * @param {MapCell} offset How far the old map moves inside the new one.
@@ -154,17 +177,14 @@ const resizedSpots = (
   spots.forEach(spot =>
   {
     const moved = { ...spot, x: spot.x + offset.x, y: spot.y + offset.y };
-    const span = spans.find(each => sameSpot(each, spot)) ?? null;
-    const outside = span === null
-      ? moved.x >= size.width || moved.y >= size.height
-      : spanOnMap({ ...span, x: moved.x, y: moved.y }, size.width, size.height) === null;
-    if (outside)
+    const resized = resizedSpot(moved, spans.find(each => sameSpot(each, spot)) ?? null, size);
+    if (resized === null)
     {
       lost.push(spot);
       return;
     }
 
-    kept.push(moved);
+    kept.push(resized);
   });
 
   return { kept, lost };
@@ -174,7 +194,8 @@ const resizedSpots = (
  * Takes the placements a piece of a map carries along with it, inside the open transaction that puts the piece down
  * elsewhere on the same map, as the select tool's drag does: moved, each spot goes where the piece took its tiles; copied,
  * each is recorded again there too, the piece being as much a copy of its blueprint as the tiles it came from. A
- * placement the piece puts down wholly past the map's edge is left out, its tiles being dropped there.
+ * placement keeps as its part placed the cells the map holds where it lands, since the piece's tiles past the map's edge
+ * are dropped, and one put down wholly past the edge is left out.
  * @param {Transaction} tx The open transaction.
  * @param {Pick<DocumentHub, 'has' | 'document'>} hub The window's documents.
  * @param {number} mapId The map.
@@ -199,9 +220,8 @@ const carrySpans = (
   }
 
   const landed = carried
-    .map(span => ({ ...span, x: span.x + by.x, y: span.y + by.y }))
-    .filter(span => spanOnMap(span, size.width, size.height) !== null)
-    .map(({ blueprintId, x, y }) => ({ blueprintId, x, y }));
+    .map(span => placedOn({ ...span, x: span.x + by.x, y: span.y + by.y }, span, size))
+    .filter((spot): spot is BlueprintSpot => spot !== null);
   changeMapSpots(tx, hub, mapId, spots => [
     ...(copy ? spots : spots.filter(spot => carried.some(each => sameSpot(each, spot)) === false)),
     ...landed,

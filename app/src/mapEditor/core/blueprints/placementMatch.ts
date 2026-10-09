@@ -4,6 +4,7 @@ import type { Stamp, StampTiles } from '../stamps/stamp.ts';
 import { cellIndex, TILE_LAYER_COUNT, type TileGrid } from '../tiles/tileGrid.ts';
 import { autotileKind, isAutotile } from '../tiles/tileIds.ts';
 import { clipRect } from '../tools/geometry.ts';
+import { cellsPlaced, type PlacedPart } from './blueprintUses.ts';
 
 /**
  * What a placement is checked against: a map's size, tileset and tile data, as a map document holds them.
@@ -15,7 +16,7 @@ type PlacementGround = TileGrid & { readonly tilesetId: number };
  *
  * - {@code in-place}: it still sits where the record says, with this many of the tiles compared matching the blueprint.
  * - {@code other-tileset}: the map is drawn with another tileset now, so its tile ids no longer draw the blueprint.
- * - {@code off-map}: none of it lies on the map any more.
+ * - {@code off-map}: none of the cells its tiles went down on lies on the map any more.
  * - {@code shifted}: its tiles match the blueprint better a little way off, by {@code by}, than where the record says, as
  *   when the map was shifted or resized from another edge outside the editor.
  * - {@code changed}: fewer than {@link MATCH_SHARE} of the tiles compared match the blueprint.
@@ -241,24 +242,27 @@ const slideOf = (ground: PlacementGround, spot: MapCell, stamp: Stamp, onMap: Ce
 /**
  * Checks that a placement still sits where the record says, before anything repaints it: a placement failing the check
  * is never repainted. The map must be drawn with the blueprint's tileset, and some of the placement must lie on it. Then
- * the part on the map is compared with the blueprint, on the layers {@link comparedLayers} names, an autotile by its kind
- * (its edges reshape with its neighbours) and every other tile exactly: a placement every compared tile matches sits
- * where it was; otherwise one whose tiles read better slid a little way off has slid (see {@link slideOf}), and one with
- * fewer than {@link MATCH_SHARE} of its compared tiles matching has changed past knowing. A part of the placement past
- * the map's edge is never compared, so one cut by a resize is judged by what is left.
+ * the cells its tiles went down on (see {@link cellsPlaced}) are compared with the blueprint, on the layers
+ * {@link comparedLayers} names, an autotile by its kind (its edges reshape with its neighbours) and every other tile
+ * exactly: a placement every compared tile matches sits where it was; otherwise one whose tiles read better slid a little
+ * way off has slid (see {@link slideOf}), and one with fewer than {@link MATCH_SHARE} of its compared tiles matching has
+ * changed past knowing. Only those cells are ever compared: the part of a blueprint the map's edge cut off when it went
+ * down, or a resize cut off since, was never put down, so a map grown back over it never changes what the check says.
+ * A placement recorded before it kept its part is judged by whatever of its whole blueprint the map holds.
  * @param {PlacementGround} ground The map, as it stands.
- * @param {MapCell} spot Where the record says the placement's top-left corner sits.
+ * @param {MapCell & { placed?: PlacedPart }} spot Where the record says the placement's top-left corner sits, and the part
+ * of its blueprint it put down when that was not the whole.
  * @param {Stamp} stamp The blueprint's stamp, as it was when the placement went down.
  * @returns {PlacementCheck} What the check came to.
  */
-const checkPlacement = (ground: PlacementGround, spot: MapCell, stamp: Stamp): PlacementCheck =>
+const checkPlacement = (ground: PlacementGround, spot: MapCell & { readonly placed?: PlacedPart }, stamp: Stamp): PlacementCheck =>
 {
   if (ground.tilesetId !== stamp.tilesetId)
   {
     return { kind: 'other-tileset' };
   }
 
-  const onMap = clipRect({ x: spot.x, y: spot.y, width: stamp.width, height: stamp.height }, ground.width, ground.height);
+  const onMap = clipRect(cellsPlaced(spot, stamp), ground.width, ground.height);
   if (onMap === null)
   {
     return { kind: 'off-map' };

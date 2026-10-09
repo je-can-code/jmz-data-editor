@@ -127,11 +127,26 @@ describe('stampClipboard', () =>
       .toStrictEqual(stamp);
   });
 
+  it('reads back the part of its blueprint a placement the map\'s edge cut off put down, and nothing else it holds', () =>
+  {
+    // Arrange: the 3 by 2 placement reaching in from the left, its first column cut off, with something more beside it.
+    const cut = { blueprintId: 'bb33', x: -2, y: 0, width: 3, height: 2, placed: { x: 1, y: 0, width: 2, height: 2 } };
+    const stamp = { ...captured(), spots: [ cut ] };
+
+    // Act.
+    const read = [ decodeStampClipboard(encodeStampClipboard(stamp)), decodeStampClipboard(withFields({ spots: [ { ...cut, shade: 3 } ] })) ];
+
+    // Assert.
+    expect(read.map(each => each?.spots))
+      .toStrictEqual([ [ cut ], [ cut ] ]);
+  });
+
   it('reads a stamp whose placements are not placements reaching into it as nothing', () =>
   {
     // Arrange: an empty list, a list of something else, a blueprint's id no blueprint could have, a size of nothing, a
-    // placement ending a cell short of the stamp's left edge and one starting past its right, and placements on a stamp
-    // with no tiles to hold them.
+    // placement ending a cell short of the stamp's left edge and one starting past its right, placements on a stamp with
+    // no tiles to hold them, and parts placed that are no part of the blueprint: none, starting before it, reaching past
+    // it, and not a rectangle at all.
     const spot = { blueprintId: 'aa22', x: 0, y: 0, width: 1, height: 1 };
     const texts = [
       withFields({ spots: [] }),
@@ -141,6 +156,10 @@ describe('stampClipboard', () =>
       withFields({ spots: [ { ...spot, x: -3, width: 3 } ] }),
       withFields({ spots: [ { ...spot, y: 2 } ] }),
       withFields({ tiles: null, spots: [ spot ] }),
+      withFields({ spots: [ { ...spot, placed: { x: 0, y: 0, width: 0, height: 1 } } ] }),
+      withFields({ spots: [ { ...spot, placed: { x: -1, y: 0, width: 1, height: 1 } } ] }),
+      withFields({ spots: [ { ...spot, placed: { x: 0, y: 0, width: 2, height: 1 } } ] }),
+      withFields({ spots: [ { ...spot, placed: 'all of it' } ] }),
     ];
 
     // Act.

@@ -6,6 +6,9 @@ import type { Transaction } from '../history/Transaction.ts';
 import { editorDataDocumentKey, type EditorDataDocumentKey } from '../model/documentKeys.ts';
 import type { EditorDocument } from '../model/EditorDocument.ts';
 import { isJsonObject, type JsonObject, type JsonValue } from '../model/json.ts';
+import type { MapCell } from '../renderer/camera.ts';
+import type { CellRect } from '../renderer/MapRenderer.ts';
+import { clipRect } from '../tools/geometry.ts';
 import type { BlueprintCopyCount, BlueprintCopyCounter, BlueprintCopyCounts } from './blueprintCopies.ts';
 import { isBlueprintId } from './blueprintLink.ts';
 
@@ -317,6 +320,51 @@ const samePlacement = (left: BlueprintSpot, right: BlueprintSpot): boolean =>
 };
 
 /**
+ * Finds the cells a placement's tiles went down on, counted on its map: the part of its blueprint it put down, from its
+ * corner, or the whole blueprint for one that went down whole. Cells the map no longer holds, since it shrank, are among
+ * them; nothing ever adds cells the edge once cut off, however the map grows.
+ * @param {MapCell & { placed?: PlacedPart }} spot The placement's corner, and its part placed when it has one.
+ * @param {{ width: number, height: number }} size The size of its blueprint.
+ * @returns {CellRect} The cells.
+ */
+const cellsPlaced = (spot: MapCell & { readonly placed?: PlacedPart }, size: { readonly width: number; readonly height: number }): CellRect =>
+{
+  const part = spot.placed ?? { x: 0, y: 0, width: size.width, height: size.height };
+  return { x: spot.x + part.x, y: spot.y + part.y, width: part.width, height: part.height };
+};
+
+/**
+ * Works out what a placement holds once its corner stands where the spot says, on a map of a size: of the cells it held,
+ * the ones the map holds there. Placing a blueprint over the map's edge, moving a piece of a map partly past it, and a
+ * resize that cuts a placement each leave it holding less; nothing gives it back cells it lost. A placement holding its
+ * whole blueprint keeps no part at all, as one recorded before parts were does.
+ * @param {BlueprintSpot} spot The placement, its corner where it now stands.
+ * @param {{ width: number, height: number }} size The size of its blueprint.
+ * @param {{ width: number, height: number }} map The map's size.
+ * @returns {BlueprintSpot | null} The placement with the part it holds, or null when none of it is on the map.
+ */
+const placedOn = (
+  spot: BlueprintSpot,
+  size: { readonly width: number; readonly height: number },
+  map: { readonly width: number; readonly height: number },
+): BlueprintSpot | null =>
+{
+  const onMap = clipRect(cellsPlaced(spot, size), map.width, map.height);
+  if (onMap === null)
+  {
+    return null;
+  }
+
+  // the part is counted from the blueprint's corner, which is the placement's own.
+  const { blueprintId, x, y } = spot;
+  const placed = { x: onMap.x - x, y: onMap.y - y, width: onMap.width, height: onMap.height };
+  const whole = placed.x === 0 && placed.y === 0 && placed.width === size.width && placed.height === size.height;
+  return whole
+    ? { blueprintId, x, y }
+    : { blueprintId, x, y, placed };
+};
+
+/**
  * Orders spots the way the record writes them: by blueprint id, then row by row.
  * @param {BlueprintSpot} left One spot.
  * @param {BlueprintSpot} right The other.
@@ -526,11 +574,13 @@ const forgetPlacement = (hub: DocumentHub, blueprint: { readonly id: string; rea
 
 export {
   BLUEPRINT_USES_DOCUMENT,
+  cellsPlaced,
   changeMapSpots,
   countsWithPlacements,
   forgetPlacement,
   forgetSpots,
   mapEntryOf,
+  placedOn,
   placementKey,
   placementsByMap,
   readableUses,

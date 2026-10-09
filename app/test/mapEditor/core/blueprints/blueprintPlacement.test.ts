@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { linkGateFor, placeBlueprint } from '../../../../src/mapEditor/core/blueprints/blueprintPlacement.ts';
 import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
+import { checkPlacement } from '../../../../src/mapEditor/core/blueprints/placementMatch.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { resizeMap } from '../../../../src/mapEditor/core/properties/mapPropertyEdits.ts';
 import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
 import type { StampPlacement } from '../../../../src/mapEditor/core/stamps/stampPlacement.ts';
 import { TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes.ts';
@@ -242,6 +244,28 @@ describe('placeBlueprint', () =>
     // Assert: the second step changed the map, and nothing in the record.
     expect([ again.ok && again.step?.entries.some(entry => entry.document === BLUEPRINT_USES_DOCUMENT), recorded(hub) ])
       .toStrictEqual([ false, [ { blueprintId: 'k3x9q2mf', x: 1, y: 0, mapId: 1 } ] ]);
+  });
+
+  it('records the part of it the map\'s edge cuts off, so the match check finds it where it was however the map grows', () =>
+  {
+    // Arrange: the camp placed with its corner on map 1's last column, its right cell past the edge.
+    const hub = windowWithCamp();
+    placeBlueprint(hub, 1, 'k3x9q2mf', at(3, 0));
+    const [ placed ] = recorded(hub);
+    const before = checkPlacement(hub.map('map:1'), placed, campStamp());
+
+    // Act: the map grown two columns to the right, which leaves the new cells empty.
+    resizeMap(hub, 1, 6, 3, 'top-left');
+    const [ afterGrowing ] = recorded(hub);
+
+    // Assert: the cut cell is never compared, before or after.
+    expect([ placed, before, afterGrowing, checkPlacement(hub.map('map:1'), afterGrowing, campStamp()) ])
+      .toStrictEqual([
+        { blueprintId: 'k3x9q2mf', x: 3, y: 0, placed: { x: 0, y: 0, width: 1, height: 1 }, mapId: 1 },
+        { kind: 'in-place', matched: 1, compared: 1 },
+        { blueprintId: 'k3x9q2mf', x: 3, y: 0, placed: { x: 0, y: 0, width: 1, height: 1 }, mapId: 1 },
+        { kind: 'in-place', matched: 1, compared: 1 },
+      ]);
   });
 
   it('links the events alone on a map of another tileset, saying so, and records no placement', () =>

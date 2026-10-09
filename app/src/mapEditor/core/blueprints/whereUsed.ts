@@ -2,8 +2,14 @@ import { MapEditorApiError } from '../api/MapEditorApi.ts';
 import type { MapCell } from '../renderer/camera.ts';
 import type { Stamp } from '../stamps/stamp.ts';
 import type { BlueprintCopy } from './blueprintCopies.ts';
-import type { PlacedSpot } from './blueprintUses.ts';
+import { cellsPlaced, type PlacedPart, type PlacedSpot } from './blueprintUses.ts';
 import { checkPlacement, placementProblem, type PlacementGround } from './placementMatch.ts';
+
+/**
+ * One placement in the where-used list: the cell its corner was put down at, and the part of its blueprint it put down
+ * when the map's edge cut some off.
+ */
+type UsedSpot = MapCell & { readonly placed?: PlacedPart };
 
 /**
  * Where one blueprint is used on one map: the spots its tiles were placed at, and the events on the map that are copies
@@ -11,7 +17,7 @@ import { checkPlacement, placementProblem, type PlacementGround } from './placem
  */
 type MapUse = {
   readonly mapId: number;
-  readonly spots: readonly MapCell[];
+  readonly spots: readonly UsedSpot[];
   readonly eventIds: readonly number[];
 };
 
@@ -37,8 +43,8 @@ type PlacementStanding =
   | { readonly kind: 'unknown'; readonly reason: string };
 
 /**
- * Lists where one blueprint is used, map by map: the spots its tiles were placed at, row by row, and the events copied
- * from its events, by id.
+ * Lists where one blueprint is used, map by map: the spots its tiles were placed at, row by row, each with its part
+ * placed when it has one, and the events copied from its events, by id.
  * @param {readonly PlacedSpot[]} spots The blueprint's placements.
  * @param {readonly BlueprintCopy[]} copies The blueprint's event copies.
  * @returns {MapUse[]} Every map it is used on, by map id.
@@ -51,7 +57,7 @@ const whereUsed = (spots: readonly PlacedSpot[], copies: readonly BlueprintCopy[
     spots: spots
       .filter(spot => spot.mapId === mapId)
       .sort((left, right) => left.y - right.y || left.x - right.x)
-      .map(({ x, y }) => ({ x, y })),
+      .map(({ x, y, placed }) => (placed === undefined ? { x, y } : { x, y, placed })),
     eventIds: copies
       .filter(copy => copy.mapId === mapId)
       .map(copy => copy.eventId)
@@ -77,13 +83,14 @@ const lookFailure = (error: unknown): LookedMap =>
 
 /**
  * Works out where one placement stands, from a look at its map: checked against its blueprint (see
- * {@link checkPlacement}) once the map is there to check, and no longer where it was when the map itself is gone.
+ * {@link checkPlacement}) once the map is there to check, by the cells its tiles went down on, and no longer where it was
+ * when the map itself is gone.
  * @param {LookedMap | undefined} looked The look at the placement's map, or undefined before one was asked for.
- * @param {MapCell} spot Where the record says the placement's top-left corner sits.
+ * @param {UsedSpot} spot Where the record says the placement's top-left corner sits, and its part placed.
  * @param {Stamp} stamp The blueprint's stamp.
  * @returns {PlacementStanding} Where it stands.
  */
-const standingOf = (looked: LookedMap | undefined, spot: MapCell, stamp: Stamp): PlacementStanding =>
+const standingOf = (looked: LookedMap | undefined, spot: UsedSpot, stamp: Stamp): PlacementStanding =>
 {
   if (looked === undefined || looked.kind === 'looking')
   {
@@ -107,15 +114,17 @@ const standingOf = (looked: LookedMap | undefined, spot: MapCell, stamp: Stamp):
 };
 
 /**
- * Finds the cell to centre on to show a placement: its middle, as near as a cell can be.
- * @param {MapCell} spot Where its top-left corner sits.
- * @param {{ width: number, height: number }} size How far it reaches.
+ * Finds the cell to centre on to show a placement: the middle of the cells its tiles went down on, as near as a cell can
+ * be, so one hanging over the map's edge is shown by the part on the map.
+ * @param {UsedSpot} spot Where its top-left corner sits, and its part placed.
+ * @param {{ width: number, height: number }} size How far its blueprint reaches.
  * @returns {MapCell} The cell.
  */
-const placementMiddle = (spot: MapCell, size: { readonly width: number; readonly height: number }): MapCell =>
+const placementMiddle = (spot: UsedSpot, size: { readonly width: number; readonly height: number }): MapCell =>
 {
-  return { x: spot.x + Math.floor(size.width / 2), y: spot.y + Math.floor(size.height / 2) };
+  const cells = cellsPlaced(spot, size);
+  return { x: cells.x + Math.floor(cells.width / 2), y: cells.y + Math.floor(cells.height / 2) };
 };
 
 export { lookFailure, placementMiddle, standingOf, whereUsed };
-export type { LookedMap, MapUse, PlacementStanding };
+export type { LookedMap, MapUse, PlacementStanding, UsedSpot };

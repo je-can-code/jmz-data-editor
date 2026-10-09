@@ -21,16 +21,19 @@ import { stampOf } from '../../support/stampFixtures.ts';
  * How far each placement reaches comes from its blueprint, and that is what says whether whatever moves tiles takes a
  * placement with it. The rules owed:
  *
- * - a placement's span is its blueprint's size from its spot, compared on its blueprint's tile layers; a placement of a
- *   blueprint the window does not hold, or one gone, or one of events alone, has no span, since nothing says how far it
- *   reaches, and so nothing ever moves it;
+ * - a placement's span is its blueprint's size from its spot, compared on its blueprint's tile layers, and the cells it
+ *   covers are those its tiles went down on: the part placed, for one the map's edge cut off; a placement of a blueprint
+ *   the window does not hold, or one gone, or one of events alone, has no span, since nothing says how far it reaches,
+ *   and so nothing ever moves it;
  * - a piece of the map lifted off carries a placement only when every one of its cells on the map lies within the piece
  *   and every layer it is compared on is carried; a placement only partly inside, or lifted without its layers, stays;
- * - a resize moves every spot with the tiles under it, and forgets a placement left wholly outside the new size, keeping
- *   one left partly on the map, its spot past the edge if need be; one whose size nothing can tell is judged by its
- *   corner, forgotten once that lies past the new right or bottom edge, where none of it can be left, and kept otherwise;
+ * - a resize moves every spot with the tiles under it, and forgets a placement whose cells all lie outside the new size,
+ *   keeping one left partly on the map, its spot past the edge if need be, with the cells left as its part placed, which
+ *   no later growth gives back; one whose size nothing can tell is judged by its corner, forgotten once that lies past the
+ *   new right or bottom edge, where none of it can be left, and kept otherwise;
  * - a piece moved takes its placements with it, and a piece copied records them again where it lands, leaving the
- *   originals; a placement landing wholly past the map's edge is left out.
+ *   originals, each keeping as its part the cells the map holds where it lands; one landing wholly past the map's edge
+ *   is left out.
  *
  * The camp (aa22) is 3 by 2, of ground and objects; the sign (bb33) is 1 by 1 and carries layer 4 alone; the bats
  * (k3x9q2mf) are events alone.
@@ -205,12 +208,43 @@ describe('resizedSpots', () =>
     // Act.
     const resized = resizedSpots(spots, [ camp(0, 0), camp(2, 3), camp(6, 5) ], { x: -4, y: 0 }, { width: 6, height: 8 });
 
-    // Assert.
+    // Assert: the camp hanging past the edge keeps its last column, the one the map still holds, as its part placed.
     expect(resized)
       .toStrictEqual({
-        kept: [ { blueprintId: 'aa22', x: -2, y: 3 }, { blueprintId: 'aa22', x: 2, y: 5 } ],
+        kept: [ { blueprintId: 'aa22', x: -2, y: 3, placed: { x: 2, y: 0, width: 1, height: 2 } }, { blueprintId: 'aa22', x: 2, y: 5 } ],
         lost: [ { blueprintId: 'aa22', x: 0, y: 0 } ],
       });
+  });
+
+  it('never gives a placement back the cells a resize cut off, however far the map grows again', () =>
+  {
+    // Arrange: the camp cut to its last column by a resize from the left, as above.
+    const [ cut ] = resizedSpots([ { blueprintId: 'aa22', x: 2, y: 3 } ], [ camp(2, 3) ], { x: -4, y: 0 }, { width: 6, height: 8 }).kept;
+    const span = { ...camp(cut.x, cut.y), ...cut };
+
+    // Act: the map grown back by four on the left, then by four more.
+    const grown = resizedSpots([ cut ], [ span ], { x: 4, y: 0 }, { width: 10, height: 8 }).kept;
+    const grownAgain = resizedSpots(grown, [ { ...span, ...grown[0] } ], { x: 4, y: 0 }, { width: 14, height: 8 }).kept;
+
+    // Assert.
+    expect([ grown, grownAgain ])
+      .toStrictEqual([
+        [ { blueprintId: 'aa22', x: 2, y: 3, placed: { x: 2, y: 0, width: 1, height: 2 } } ],
+        [ { blueprintId: 'aa22', x: 6, y: 3, placed: { x: 2, y: 0, width: 1, height: 2 } } ],
+      ]);
+  });
+
+  it('forgets a cut placement once the cells it put down all lie outside, though its whole blueprint would still reach in', () =>
+  {
+    // Arrange: the camp at 7, 0 holding its first column alone, then the map cut to 7 wide from the right.
+    const cut = { blueprintId: 'aa22', x: 7, y: 0, placed: { x: 0, y: 0, width: 1, height: 2 } };
+
+    // Act.
+    const resized = resizedSpots([ cut ], [ { ...camp(7, 0), ...cut } ], { x: 0, y: 0 }, { width: 7, height: 8 });
+
+    // Assert.
+    expect(resized)
+      .toStrictEqual({ kept: [], lost: [ cut ] });
   });
 
   it('keeps a placement whose size nothing can tell, moved, while its corner may still reach onto the map', () =>
@@ -290,5 +324,40 @@ describe('carrySpans', () =>
     // Assert.
     expect([ moved, none ])
       .toStrictEqual([ [], null ]);
+  });
+
+  it('keeps as a moved placement\'s part the cells the map holds where it lands, and no more once back on the map', () =>
+  {
+    // Arrange: the camp at 6, 2.
+    const hub = windowWith([ { blueprintId: 'aa22', mapId: 1, x: 6, y: 2 } ]);
+
+    // Act: moved two right, so its last column falls past the edge, then two left again.
+    hub.edit('Move tiles', [ mapHistoryKey(1) ], tx => carrySpans(tx, hub, 1, [ camp(6, 2) ], { x: 2, y: 0 }, SIZE, false));
+    const [ pastEdge ] = usesOf(hub.document(BLUEPRINT_USES_DOCUMENT));
+    const { mapId: _mapId, ...cut } = pastEdge;
+    hub.edit('Move tiles', [ mapHistoryKey(1) ], tx => carrySpans(tx, hub, 1, [ { ...camp(8, 2), ...cut } ], { x: -2, y: 0 }, SIZE, false));
+
+    // Assert: the column dropped past the edge never comes back.
+    expect([ pastEdge, usesOf(hub.document(BLUEPRINT_USES_DOCUMENT)) ])
+      .toStrictEqual([
+        { blueprintId: 'aa22', x: 8, y: 2, placed: { x: 0, y: 0, width: 2, height: 2 }, mapId: 1 },
+        [ { blueprintId: 'aa22', x: 6, y: 2, placed: { x: 0, y: 0, width: 2, height: 2 }, mapId: 1 } ],
+      ]);
+  });
+});
+
+describe('spanOnMap with a part placed', () =>
+{
+  it('finds a cut placement\'s cells on the map by its part, never the cells the edge cut off', () =>
+  {
+    // Arrange: the camp at 8, 0 holding its first two columns, on a map grown to 12 wide since.
+    const span = { ...camp(8, 0), placed: { x: 0, y: 0, width: 2, height: 2 } };
+
+    // Act.
+    const cells = [ spanOnMap(span, 12, 8), spanOnMap(camp(8, 0), 12, 8) ];
+
+    // Assert.
+    expect(cells)
+      .toStrictEqual([ { x: 8, y: 0, width: 2, height: 2 }, { x: 8, y: 0, width: 3, height: 2 } ]);
   });
 });

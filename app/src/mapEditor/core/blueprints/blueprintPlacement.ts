@@ -4,7 +4,7 @@ import type { TemplateMap } from '../modules/PluginModuleRegistry.ts';
 import { commitStampPlan, planStamp, type StampOutcome, type StampPlacement } from '../stamps/stampPlacement.ts';
 import { withBlueprintLink } from './blueprintLink.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from './blueprints.ts';
-import { readableUses } from './blueprintUses.ts';
+import { placedOn, readableUses } from './blueprintUses.ts';
 
 /**
  * Says why a map may hold no copy of a blueprint, or null when it may: what every placement on a map asks before it
@@ -80,9 +80,10 @@ const USES_UNREAD = 'Blueprints with tiles can\'t be placed until the record of 
  * {@link planStamp}), but every event placed carries a link in its note naming the blueprint and which of its events it
  * is a copy of. The link goes on a line of its own after whatever the note already says, and a note that would read any
  * other tag differently with it refuses the whole placement. When its tiles go down, the cell its corner lands on is
- * recorded as one of its placements, in the same step, so one undo takes the record back with the tiles; a blueprint of
- * events alone, or one whose tiles a map of another tileset leaves out, records nothing, its events' links being all
- * there is to find. The step is named for the blueprint.
+ * recorded as one of its placements, in the same step, so one undo takes the record back with the tiles, and when the
+ * map's edge cuts some of it off, the part that went down with it; a blueprint of events alone, or one whose tiles a map
+ * of another tileset leaves out, records nothing, its events' links being all there is to find. The step is named for
+ * the blueprint.
  *
  * Refused whole, changing nothing: a blueprint no longer there; a map that may hold no link, with its reason; tiles to
  * place while the window holds no record of placements it can read; and anything placing its stamp would refuse.
@@ -134,7 +135,10 @@ const placeBlueprint = (hub: DocumentHub, mapId: number, blueprintId: string, pl
     }
   }
 
-  const spots = plan.tilesPlaced ? [ { blueprintId, x: placement.at.x, y: placement.at.y } ] : [];
+  // a placement hanging over the map's edge keeps the part of the blueprint that went down, which is all the match
+  // check ever judges it by.
+  const spot = plan.tilesPlaced ? placedOn({ blueprintId, x: placement.at.x, y: placement.at.y }, stamp, hub.map(mapDocumentKey(mapId))) : null;
+  const spots = spot === null ? [] : [ spot ];
   return commitStampPlan(hub, mapId, { ...plan, events, spots }, `Place blueprint "${blueprint.name}"`);
 };
 

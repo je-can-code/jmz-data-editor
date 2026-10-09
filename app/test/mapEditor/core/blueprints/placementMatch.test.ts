@@ -18,10 +18,12 @@ import { blankGrid, fill, put } from '../tiles/support/tileGridBuilder.ts';
  * record says; a placement failing it is never repainted, so a map changed under the record outside the editor is
  * flagged rather than painted over.
  *
- * It owes its callers these rules. The map must be drawn with the blueprint's tileset, and some of the placement must lie
- * on it. Only the part on the map is compared, on the tile layers the blueprint carries (its shadows and regions only
+ * It owes its callers these rules. The map must be drawn with the blueprint's tileset, and some of the cells the
+ * placement's tiles went down on must lie on it. Only those cells are compared, the part of a blueprint the map's edge cut
+ * off never among them however the map grows, on the tile layers the blueprint carries (its shadows and regions only
  * when it carries no tile layer), an autotile matching by its kind, since its edges reshape with its neighbours, and
- * every other tile exactly. A cell empty on both sides says nothing; a tile on either side counts. A placement every
+ * every other tile exactly; a placement recorded before parts were kept is judged by whatever of its whole blueprint the
+ * map holds. A cell empty on both sides says nothing; a tile on either side counts. A placement every
  * compared tile of which matches is in place. Otherwise its tiles may have slid: an offset of up to two tiles every way
  * wins when at least three of the tiles it changes read as slid, more than read as in place, and at least half of all it
  * changes. Failing that, a placement is in place while at least half its compared tiles match, and has changed below.
@@ -187,6 +189,42 @@ describe('checkPlacement', () =>
     // Assert: one cell of grass and one object compared.
     expect(check)
       .toStrictEqual({ kind: 'in-place', matched: 2, compared: 2 });
+  });
+
+  it('judges a placement the edge cut off by the cells it put down alone, so the map growing that way never changes it', () =>
+  {
+    // Arrange: a blueprint of six objects over grass, placed at the map's last two columns, which hold its first two; then
+    // the map grown four columns to the right, the new cells empty, as a resize leaves them.
+    const stamp = pieceOf(rowMap(6, [ 10, 11, 12, 13, 14, 15 ]), { x: 0, y: 0, width: 6, height: 1 });
+    const before = rowMap(6, [ 0, 0, 0, 0, 10, 11 ]);
+    const grown = rowMap(10, [ 0, 0, 0, 0, 10, 11, 0, 0, 0, 0 ]);
+    [ 6, 7, 8, 9 ].forEach(x => put(grown, x, 0, 0, 0));
+    const cut = { x: 4, y: 0, placed: { x: 0, y: 0, width: 2, height: 1 } };
+
+    // Act: the cut placement before and after, and the same corner as a record from before parts were kept reads it.
+    const checks = [ checkPlacement(before, cut, stamp), checkPlacement(grown, cut, stamp), checkPlacement(grown, { x: 4, y: 0 }, stamp) ];
+
+    // Assert: only the whole-blueprint reading is thrown by the new, empty cells.
+    expect(checks)
+      .toStrictEqual([
+        { kind: 'in-place', matched: 4, compared: 4 },
+        { kind: 'in-place', matched: 4, compared: 4 },
+        { kind: 'changed', matched: 4, compared: 12 },
+      ]);
+  });
+
+  it('says a cut placement is off the map once the cells it put down are, whatever its whole blueprint would reach', () =>
+  {
+    // Arrange: the first two columns of a four-wide blueprint put down at 2, the map then cut to two wide.
+    const stamp = pieceOf(rowMap(4, [ 10, 11, 12, 13 ]), { x: 0, y: 0, width: 4, height: 1 });
+    const cut = { x: 2, y: 0, placed: { x: 0, y: 0, width: 2, height: 1 } };
+
+    // Act.
+    const check = checkPlacement(rowMap(2, [ 0, 0 ]), cut, stamp);
+
+    // Assert.
+    expect(check)
+      .toStrictEqual({ kind: 'off-map' });
   });
 
   it('compares nothing a cell holds on neither side, so a blueprint of one object is judged by that object', () =>

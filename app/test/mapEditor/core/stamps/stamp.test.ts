@@ -189,6 +189,20 @@ describe('captureAreaStamp', () =>
       .toStrictEqual([ { blueprintId: 'aa22', x: 1, y: 1, width: 3, height: 3 } ]);
   });
 
+  it('carries a placement the map\'s edge cut off with the part of it that went down', () =>
+  {
+    // Arrange: the block (aa22) hanging a column past the map's left edge, its first column cut off.
+    const map = tilesMap();
+    const spans = [ { blueprintId: 'aa22', x: -1, y: 1, width: 3, height: 3, layers: [ 0, 1, 2, 3 ], placed: { x: 1, y: 0, width: 2, height: 3 } } ];
+
+    // Act.
+    const stamp = captureAreaStamp(map, { x: 0, y: 0, width: 3, height: 4 }, 'auto', TilesetMode.area, 'window-a:9', spans) as Stamp;
+
+    // Assert.
+    expect(stamp.spots)
+      .toStrictEqual([ { blueprintId: 'aa22', x: -1, y: 1, width: 3, height: 3, placed: { x: 1, y: 0, width: 2, height: 3 } } ]);
+  });
+
   it('carries a placement only with every layer it is compared on, and has no placements at all when it carries none', () =>
   {
     // Arrange: the sign (bb33) of layer 4 alone, and the block (aa22) of every tile layer, both within the piece.
