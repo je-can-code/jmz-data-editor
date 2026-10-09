@@ -4,8 +4,11 @@ import { apiDocumentStore } from '../core/api/apiDocumentStore.ts';
 import { HttpMapEditorApi, type MapEditorApi } from '../core/api/MapEditorApi.ts';
 import { BlueprintCopyCounter } from '../core/blueprints/blueprintCopies.ts';
 import { holdBlueprintMap } from '../core/blueprints/blueprintMaps.ts';
+import { blueprintPropagationCheck } from '../core/blueprints/blueprintPropagation.ts';
 import { BLUEPRINTS_DOCUMENT } from '../core/blueprints/blueprints.ts';
 import { blueprintShapeCheck } from '../core/blueprints/blueprintShape.ts';
+import { BlueprintWriter } from '../core/blueprints/blueprintWriter.ts';
+import { CopyMaps } from '../core/blueprints/copyMaps.ts';
 import { installCloseGuard, unsavedOnlyHere, type CloseTarget } from '../core/closeGuard.ts';
 import { registerBuiltInCommands } from '../core/commands/builtin/builtInCommands.ts';
 import { CommandCatalog } from '../core/commands/CommandCatalog.ts';
@@ -114,9 +117,22 @@ type MapEditorServices = {
    * How many copies of each blueprint stand across the project, counted from the maps' notes: the maps this window holds
    * as they stand here, the maps only other windows hold as they stand there, unsaved copies and all, and the rest as the
    * server reads them on disk, read again whenever a map's file changes. Nothing is counted until the Blueprints section
-   * first asks, or an undo that would take a blueprint away does.
+   * first asks, or an undo that would take a blueprint away does, or a blueprint opens as a map here.
    */
   readonly blueprintCopies: BlueprintCopyCounter;
+
+  /**
+   * The maps a change to a blueprint open here may reach, as their files hold them: gathered whenever a blueprint opens as
+   * a map in this window, those another window holds brought in, those nobody holds read from disk. Every change to the
+   * blueprint is planned against them, and reaches every copy as part of the same step (see blueprintPropagationCheck).
+   */
+  readonly copyMaps: CopyMaps;
+
+  /**
+   * Writes every change to a blueprint made, undone or redone here to disk, the blueprints and every map it reached in one
+   * act, a moment after it is made; null in a window with no server to write through, whose changes reach no file.
+   */
+  readonly blueprintWriter: BlueprintWriter | null;
 
   /**
    * The time of day the window shows, and the season: one clock for every map view in it, torn-out windows included. It
@@ -176,8 +192,10 @@ type MapEditorServices = {
    * window's clock following the starting time a module offers, and the page rule reading what a new game starts with.
    * The switch and variable names follow System.json as it stands in whichever window renames them, and the clock and
    * the preview come back as this project last left them, kept in step with every other window from then on. Once the
-   * blueprints' copies are being counted, every map changed on disk has them counted again. When the page goes, it
-   * stops, which tells the other windows at once that this one no longer holds anything.
+   * blueprints' copies are being counted, every map changed on disk has them counted again. A blueprint opened as a map
+   * has the maps its copies stand on gathered, and a map file changed on disk among them read again; the window asks
+   * before closing while a change to a blueprint is still on its way to disk. When the page goes, it stops, which tells
+   * the other windows at once that this one no longer holds anything.
    */
   start(): void;
 
@@ -407,6 +425,25 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     return hub.load(key);
   };
 
+  // every change to a blueprint reaches every copy of it in the same step, planned against the maps it may reach, and is
+  // written to disk with them in one act; the check comes after the one keeping the blueprint to its shape.
+  const copyMaps = new CopyMaps({
+    hub,
+    copies: blueprintCopies,
+    holders: key => sync.holders(key),
+    onHoldingChange: listener => sync.onHoldingChange(listener),
+    openDocument,
+    readMap: api === null ? null : mapId => api.loadMap(mapId),
+    templates: modules,
+  });
+  hub.addCommitCheck(blueprintPropagationCheck({ hub, maps: copyMaps, tags: () => modules.commentTags() }));
+  const writeChanges = api === null || api.writeBlueprintChanges === undefined
+    ? null
+    : api.writeBlueprintChanges.bind(api);
+  const blueprintWriter = writeChanges === null
+    ? null
+    : new BlueprintWriter({ hub, maps: copyMaps, write: writeChanges });
+
   /**
    * Brings the clock and the preview back as this project last left them on this machine, and keeps them in step with
    * every other window from then on, once the server says which project it serves. Without a server, a project, or a
@@ -454,6 +491,8 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     paints,
     stamps,
     blueprintCopies,
+    copyMaps,
+    blueprintWriter,
     clock,
     pages,
     preview,
@@ -537,6 +576,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
           {
             router.route(change).catch(() => undefined);
             blueprintCopies.fileChanged(change.path);
+            copyMaps.fileChanged(change.path, change.client !== '' && sync.knowsClient(change.client));
             if (isModuleConfigFile(change.path))
             {
               activation?.refresh();
@@ -568,7 +608,16 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
 
       stops.push(() => blueprintCopies.stop());
 
-      stops.push(installCloseGuard(environment.closeTarget, () => unsavedOnlyHere(hub, sync).length > 0));
+      // a blueprint opened as a map here gathers the maps its copies stand on from now on.
+      copyMaps.start();
+      stops.push(() => copyMaps.stop());
+      if (blueprintWriter !== null)
+      {
+        stops.push(() => blueprintWriter.stop());
+      }
+
+      // a change to a blueprint still on its way to disk is as unsaved as an edit nobody else holds.
+      stops.push(installCloseGuard(environment.closeTarget, () => unsavedOnlyHere(hub, sync).length > 0 || blueprintWriter?.hasUnwritten() === true));
     },
     stop,
   };

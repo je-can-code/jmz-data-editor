@@ -270,11 +270,15 @@ class WorkspaceController
       ? null
       : new MapTreeService({ hub: services.hub, api, openDocument: key => services.openDocument(key), placements: this.placements });
 
-    // no undo, redo or jump takes away a blueprint whose copies still name it, its placed tiles among them.
-    const { hub, blueprintCopies } = services;
+    // no undo, redo or jump takes away a blueprint whose copies still name it, its placed tiles among them, nor moves a
+    // change to a blueprint whose files no longer hold what it would take back or put back.
+    const { hub, blueprintCopies, blueprintWriter } = services;
     const usedCopies = { start: () => blueprintCopies.start(), countOf: (blueprintId: string) => usedCopiesOf(blueprintCopies, hub, blueprintId) };
     const blueprintsKept = blueprintsKeptGuard(hub, usedCopies, mapId => this.mapName(mapId));
-    this.router = new HistoryRouter(hub, this.tree, blueprintsKept);
+    this.router = new HistoryRouter(hub, this.tree, (step, direction) => blueprintsKept(step, direction) ?? blueprintWriter?.guard(step, direction) ?? null);
+
+    // a change to a blueprint that could not be written says why, as anything refused does.
+    blueprintWriter?.onProblem((message, alarm) => this.notify(message, alarm ? 'alarm' : 'error'));
     this.layouts = new LayoutStore({ api: services.api });
     this.#placementsOpened = this.#holdPlacements();
 
@@ -678,16 +682,22 @@ class WorkspaceController
 
   /**
    * Saves every document holding unsaved edits, leaving any in conflict for the person to settle first. What was saved
-   * is told in maps: the blueprints after an undo are saved along with them but are not maps, and are not counted as any.
-   * The record of where blueprints are placed never holds unsaved edits of its own: each map's placements go to disk
-   * with that map. Placements a refused write left waiting are tried again too, and nothing is called saved until they
-   * land; when they cannot, the author has already heard why. A blueprint opened as a map has no file of its own, and
-   * its changes are not saved here: they stay open, unsaved, which the author hears.
-   * @returns {Promise<void>} Settles once every save has finished, the placements' writes included.
+   * is told in maps: the blueprints are saved along with them but are not maps, and are not counted as any. The record of
+   * where blueprints are placed never holds unsaved edits of its own: each map's placements go to disk with that map.
+   * Placements a refused write left waiting are tried again too, and nothing is called saved until they land; when they
+   * cannot, the author has already heard why.
+   *
+   * A blueprint is never saved by hand: every change to one is written at once, with every copy it reached, a moment after
+   * it is made (see BlueprintWriter). Saving waits for whatever of those is still on its way first, so a map holding a
+   * copy is saved over what the change wrote to it, never under it. A blueprint opened as a map that still holds changes
+   * after that is one whose change could not be written, which the author has heard about already; it is not called
+   * saved.
+   * @returns {Promise<void>} Settles once every save has finished, the placements' and the blueprints' writes included.
    */
   async saveAll(): Promise<void>
   {
-    const { hub } = this.services;
+    const { hub, blueprintWriter } = this.services;
+    await blueprintWriter?.whenWritten();
     const unsaved = hub.dirtyKeys();
     const blueprints = unsaved.filter(key => parseDocumentKey(key).kind === 'blueprint-map').length;
     const dirty = unsaved.filter(key => parseDocumentKey(key).kind !== 'blueprint-map');
@@ -733,7 +743,7 @@ class WorkspaceController
     const saved = maps === 1 ? 'Saved 1 map' : `Saved ${maps} maps`;
     if (blueprints > 0)
     {
-      this.notify(maps === 0 ? 'Changes to blueprints can\'t be saved yet; everything else is saved.' : `${saved}; changes to blueprints can't be saved yet.`);
+      this.notify(maps === 0 ? 'A change to a blueprint is not written yet; everything else is saved.' : `${saved}; a change to a blueprint is not written yet.`);
       return;
     }
 

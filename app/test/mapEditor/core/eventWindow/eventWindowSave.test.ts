@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BLUEPRINT_NOT_SAVED_MESSAGE, MAP_CONFLICT_MESSAGE, saveTargetMap } from '../../../../src/mapEditor/core/eventWindow/eventWindowSave.ts';
+import { BLUEPRINT_NOT_WRITTEN_MESSAGE, MAP_CONFLICT_MESSAGE, saveTargetMap } from '../../../../src/mapEditor/core/eventWindow/eventWindowSave.ts';
 import { renameEvent } from '../../../../src/mapEditor/core/eventWindow/eventWindowTarget.ts';
 import { setPageOption } from '../../../../src/mapEditor/core/eventWindow/pageSettings.ts';
 import { DocumentHub, type DocumentStore } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
@@ -92,22 +92,30 @@ describe('eventWindowSave', () =>
         .toStrictEqual([ 'disk full', true ]);
     });
 
-    it('writes nothing for an event of a blueprint, whose changes have no file of their own, and says so only when there are some', async () =>
+    it('saves an event of a blueprint by waiting for its changes to be written, saying so when one is not', async () =>
     {
-      // Arrange: the camp opened as a map, its event 1 renamed, beside a second camp left as it was.
-      const changed = openedBlueprint('k3x9q2mf', stampOf());
+      // Arrange: three camps opened as maps: one changed whose write lands, one changed in a window writing nothing, and
+      // one left as it was.
+      const written = openedBlueprint('k3x9q2mf', stampOf());
+      const unwritten = openedBlueprint('k3x9q2mf', stampOf());
       const clean = openedBlueprint('k3x9q2mf', stampOf());
-      renameEvent(changed.hub, { mapId: changed.mapId, eventId: 1 }, 'Guard');
+      renameEvent(written.hub, { mapId: written.mapId, eventId: 1 }, 'Guard');
+      renameEvent(unwritten.hub, { mapId: unwritten.mapId, eventId: 1 }, 'Guard');
+      const land = async () =>
+      {
+        written.hub.noteSaved(written.map.key, written.hub.appliedSteps(written.map.key).map(step => step.id));
+      };
 
       // Act.
       const outcomes = [
-        await saveTargetMap(changed.hub, { mapId: changed.mapId, eventId: 1 }),
-        await saveTargetMap(clean.hub, { mapId: clean.mapId, eventId: 1 }),
+        await saveTargetMap(written.hub, { mapId: written.mapId, eventId: 1 }, land),
+        await saveTargetMap(unwritten.hub, { mapId: unwritten.mapId, eventId: 1 }),
+        await saveTargetMap(clean.hub, { mapId: clean.mapId, eventId: 1 }, land),
       ];
 
-      // Assert: the change stays, unsaved.
-      expect([ outcomes, changed.hub.isDirty(changed.map.key), changed.map.event(1)?.name ])
-        .toStrictEqual([ [ { ok: false, message: BLUEPRINT_NOT_SAVED_MESSAGE }, { ok: true, saved: false } ], true, 'Guard' ]);
+      // Assert: the unwritten change stays, unsaved.
+      expect([ outcomes, written.hub.isDirty(written.map.key), unwritten.hub.isDirty(unwritten.map.key), unwritten.map.event(1)?.name ])
+        .toStrictEqual([ [ { ok: true, saved: true }, { ok: false, message: BLUEPRINT_NOT_WRITTEN_MESSAGE }, { ok: true, saved: false } ], false, true, 'Guard' ]);
     });
   });
 });

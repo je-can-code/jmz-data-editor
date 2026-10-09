@@ -11,7 +11,7 @@ import type { RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.t
 import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import type { ViewStore } from '../../../src/mapEditor/core/preview/RememberedView.ts';
 import { renameEntry } from '../../../src/mapEditor/core/system/systemNames.ts';
-import { createMapEditorServices, type MapEditorEnvironment } from '../../../src/mapEditor/services/MapEditorServices.ts';
+import { createMapEditorServices, type MapEditorEnvironment, type MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { projectNamesOf } from '../../../src/mapEditor/views/commandList/commandListResources.ts';
 import { storedBlueprints } from '../support/blueprintFixtures.ts';
 import { buildMapJson } from '../support/fixtures.ts';
@@ -84,10 +84,21 @@ describe('MapEditorServices', () =>
     let files = buildMapJson();
     const { fetch, requests } = stubFetch(request =>
     {
+      // a blueprint's change is written in an act of its own, which the map file never takes whole.
+      if (request.method === 'PUT' && request.url.endsWith('/api/blueprint-changes'))
+      {
+        return new Response(null, { status: 204 });
+      }
+
       if (request.method === 'PUT')
       {
         files = JSON.parse(request.body as string);
         return new Response(null, { status: 204 });
+      }
+
+      if (request.url.endsWith('/api/event-notes'))
+      {
+        return envelope({ notes: [] });
       }
 
       const name = /\/api\/editor-data\/([a-z0-9-]+)$/u.exec(request.url)?.[1];
@@ -159,6 +170,22 @@ describe('MapEditorServices', () =>
   {
     setTimeout(resolve, 0);
   });
+
+  /**
+   * Waits until a window can change a blueprint: its copies counted, the other windows heard from.
+   * @param {MemoryChannelNetwork} network The channel network.
+   * @param {MapEditorServices} services The window.
+   * @param {string} blueprintId The blueprint.
+   * @returns {Promise<void>} Settles once it can.
+   */
+  const whenBlueprintCanChange = async (network: MemoryChannelNetwork, services: MapEditorServices, blueprintId: string): Promise<void> =>
+  {
+    await pump(network, vi.waitFor(() =>
+    {
+      expect(services.copyMaps.readiness(blueprintId))
+        .toBeNull();
+    }, { timeout: 2000 }));
+  };
 
   /**
    * A window started on the network, holding the map it opened from the file, renamed and unsaved.
@@ -602,11 +629,12 @@ describe('MapEditorServices', () =>
 
     it('takes the live copy from the window holding it, changes and all, rather than laying it out afresh', async () =>
     {
-      // Arrange: the first window holds the camp with the goblin moved, unsaved.
+      // Arrange: the first window holds the camp with the goblin moved.
       const network = new MemoryChannelNetwork();
       const first = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
       first.start();
       await pump(network, first.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, first, 'k3x9q2mf');
       first.hub.edit('Move event', [ mapHistoryKey(blueprintMapId('k3x9q2mf')) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
       network.flush();
       const second = createMapEditorServices(buildEnvironment(network, 'window-b', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
@@ -615,10 +643,10 @@ describe('MapEditorServices', () =>
       // Act.
       const document = await pump(network, second.openDocument('blueprint-map:k3x9q2mf'));
 
-      // Assert.
+      // Assert: the move came with its history.
       const goblin = document.valueAt([ 'events', 4 ]) as unknown as RmmzMapEvent | null;
-      expect([ goblin === null ? null : goblin.x, second.hub.isDirty('blueprint-map:k3x9q2mf') ])
-        .toStrictEqual([ 0, true ]);
+      expect([ goblin === null ? null : goblin.x, second.hub.history(mapHistoryKey(blueprintMapId('k3x9q2mf'))).rows.map(row => row.label) ])
+        .toStrictEqual([ 0, [ 'Move event' ] ]);
       first.stop();
       second.stop();
     });
@@ -630,6 +658,7 @@ describe('MapEditorServices', () =>
       const services = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
       services.start();
       await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, services, 'k3x9q2mf');
       const refusals: string[] = [];
       services.hub.subscribe(event => (event.type === 'refused' ? refusals.push(event.message) : undefined));
       const history = mapHistoryKey(blueprintMapId('k3x9q2mf'));
@@ -644,25 +673,26 @@ describe('MapEditorServices', () =>
       services.stop();
     });
 
-    it('asks before the window closes while a blueprint holds unsaved changes, and not once they are undone', async () =>
+    it('asks before the window closes while a change to a blueprint is on its way to disk, and not once it has landed', async () =>
     {
       // Arrange: the camp opened, nothing changed yet.
       const network = new MemoryChannelNetwork();
-      const { environment, window } = buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() });
+      const { environment, window, requests } = buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() });
       const services = createMapEditorServices(environment);
       services.start();
       await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, services, 'k3x9q2mf');
       const history = mapHistoryKey(blueprintMapId('k3x9q2mf'));
       const untouched = window.fire('beforeunload');
 
       // Act.
       services.hub.edit('Move event', [ history ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
       const changed = window.fire('beforeunload');
-      services.hub.undo(history);
+      await services.blueprintWriter?.whenWritten();
 
-      // Assert.
-      expect([ untouched, changed, window.fire('beforeunload') ])
-        .toStrictEqual([ false, true, false ]);
+      // Assert: written in one act, after which nothing is left to lose.
+      expect([ untouched, changed, window.fire('beforeunload'), requests.filter(request => request.url.endsWith('/api/blueprint-changes')).length, services.hub.isDirty('blueprint-map:k3x9q2mf') ])
+        .toStrictEqual([ false, true, false, 1, false ]);
       services.stop();
     });
 

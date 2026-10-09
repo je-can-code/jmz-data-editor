@@ -143,13 +143,19 @@ const mapNameOf = (hub: DocumentHub, mapId: number, mapNames: readonly string[] 
 const EventEditor = (props: { readonly target: EventWindowTarget }) =>
 {
   const { target } = props;
-  const { hub, api, pluginHeaders } = useMapEditorServices();
+  const services = useMapEditorServices();
+  const { hub, api, pluginHeaders } = services;
+
+  // a window built without a writer, as a stand-in for one, writes no blueprint's change.
+  const blueprintWriter = services.blueprintWriter ?? null;
   const key = targetDocument(target);
   const history = targetHistory(target);
   useDocumentRevision(hub, key);
   useHubChanges(hub);
   const { names } = useCommandListResources(api);
-  const router = useMemo(() => new HistoryRouter(hub, null), [ hub ]);
+
+  // a change to a blueprint whose files no longer hold what it would take back or put back stays where it is.
+  const router = useMemo(() => new HistoryRouter(hub, null, blueprintWriter === null ? null : (step, direction) => blueprintWriter.guard(step, direction)), [ hub, blueprintWriter ]);
 
   // the graphic picker reads the server and the names the way the hand-built command editors do.
   const environment = useMemo<HandBuiltEditorEnvironment>(() => ({ api, headers: pluginHeaders, names: kind => namedRows(names, kind) }), [ api, pluginHeaders, names ]);
@@ -171,6 +177,9 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
       setNotice({ message: hubEvent.message, severity: 'warning' });
     }
   }), [ hub ]);
+
+  // a change to a blueprint that could not be written says why too.
+  useEffect(() => (blueprintWriter === null ? undefined : blueprintWriter.onProblem(message => setNotice({ message, severity: 'error' }))), [ blueprintWriter ]);
 
   // an event on the map means its map is held; the picker's tileset follows the map's own.
   const tileset = useTilesetRow(api, event === null ? 0 : hub.map(key).tilesetId);
@@ -232,7 +241,7 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
 
   /**
    * Saves the map, with whatever the author is typing; a map waiting for a choice about changes made elsewhere is held
-   * back, and says so.
+   * back, and says so. An event of a blueprint is written with its copies as it changes, so saving it waits for that.
    */
   const save = () =>
   {
@@ -243,7 +252,7 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
     }
 
     setSaving(true);
-    saveTargetMap(hub, target)
+    saveTargetMap(hub, target, blueprintWriter === null ? null : () => blueprintWriter.whenWritten())
       .then(outcome =>
       {
         if (outcome.ok === false)

@@ -70,6 +70,12 @@ const PLUGINS_UNREAD = 'This blueprint can\'t change until the project\'s plugin
 const COPIES_UNCOUNTED = 'This blueprint can\'t change until its copies have been found; try again in a moment.';
 
 /**
+ * Why a change to a blueprint is refused while its copies on disk cannot be counted: a copy nobody holds could be missed,
+ * and would then read as changed by hand.
+ */
+const COPIES_UNCOUNTABLE = 'This blueprint can\'t change while its copies on disk can\'t be counted.';
+
+/**
  * Says why a change to a blueprint waits for a map it reaches.
  * @param {number} mapId The map.
  * @returns {string} The words.
@@ -286,14 +292,14 @@ class CopyMaps
 
   /**
    * Starts keeping maps: whenever a blueprint opens as a map here, its copies are counted and their maps gathered, and
-   * again whenever the copies, the record or what other windows hold move on.
+   * again whenever the copies, the record or what other windows hold move on. Nothing is counted before a blueprint
+   * opens, so a window never editing one never asks the server for every map's notes.
    */
   start(): void
   {
     this.#stops.push(
       this.#hub.subscribe(event => this.#heard(event)),
       this.#onHoldingChange(() => this.gather()),
-      this.#copies.subscribe(() => this.gather()),
     );
     this.gather();
   }
@@ -340,27 +346,38 @@ class CopyMaps
   }
 
   /**
-   * Says why a change to a blueprint cannot be planned yet, or null when it can: the plugins are still being read; its
-   * copies are still being counted, here or in other windows; a map it reaches is still being brought in from another
-   * window, or read from disk; or a map it reaches waits for a choice about changes made on disk. Whatever is missing is
-   * asked for on the way.
+   * Says why a change to a blueprint cannot be planned yet, or null when it can: its copies are still being counted, here
+   * or in other windows, or cannot be counted at all though there is a disk holding some; the plugins are still being
+   * read, while some map holds a copy, since any of those could hold a plugin's patterns; a map it reaches is still being
+   * brought in from another window, or read from disk; or a map it reaches waits for a choice about changes made on disk.
+   * Whatever is missing is asked for on the way. A window with no disk counts what it holds, and reaches nothing else.
    * @param {string} blueprintId The blueprint.
    * @returns {string | null} Why it must wait, in words for the author, or null.
    */
   readiness(blueprintId: string): string | null
   {
-    if (this.#templates.revision === 0)
-    {
-      return PLUGINS_UNREAD;
-    }
-
-    if (this.#copies.getSnapshot().state === 'counting' || this.#copies.settledElsewhere() === false)
+    const { state } = this.#copies.getSnapshot();
+    if (state === 'counting' || this.#copies.settledElsewhere() === false)
     {
       this.#copies.start();
       return COPIES_UNCOUNTED;
     }
 
-    for (const mapId of this.mapsWithCopies(blueprintId))
+    if (state === 'unavailable' && this.#readMap !== null)
+    {
+      return COPIES_UNCOUNTABLE;
+    }
+
+    const mapIds = this.mapsWithCopies(blueprintId);
+    if (mapIds.length > 0 && this.#templates.revision === 0)
+    {
+      const problem = this.#templates.listProblem;
+      return problem === null
+        ? PLUGINS_UNREAD
+        : `This blueprint can't change while the project's plugin list can't be read (${problem}).`;
+    }
+
+    for (const mapId of mapIds)
     {
       const waiting = this.#mapWaits(mapId);
       if (waiting !== null)
@@ -561,10 +578,11 @@ class CopyMaps
       return;
     }
 
-    this.#copies.start();
+    // the first blueprint opened here starts the counting, and follows it from then on.
     if (this.#asked === false)
     {
       this.#asked = true;
+      this.#stops.push(this.#copies.subscribe(() => this.gather()));
       const planned: readonly DocumentKey[] = [ BLUEPRINTS_DOCUMENT, BLUEPRINT_USES_DOCUMENT, TILESETS_KEY ];
       planned.forEach(key => this.#openDocument(key).catch(() => undefined));
     }

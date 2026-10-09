@@ -1241,9 +1241,9 @@ describe('WorkspaceController', () =>
         ]);
     });
 
-    it('leaves a blueprint\'s changes unsaved on Save all, saying so, and saves the maps', async () =>
+    it('never saves a blueprint by hand on Save all, saying when a change to one is not written, and saves the maps', async () =>
     {
-      // Arrange: the camp's event moved, and map 1 renamed.
+      // Arrange: the camp's event moved in a window writing nothing, and map 1 renamed.
       const { controller, hub, saves, mapId } = await withCamp();
       hub.edit('Move event', [ mapHistoryKey(mapId) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 1, 'x' ], 1));
       hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
@@ -1256,11 +1256,47 @@ describe('WorkspaceController', () =>
       // Assert.
       expect([ withMap, controller.getState().notice?.text, saves, hub.dirtyKeys() ])
         .toStrictEqual([
-          'Saved 1 map; changes to blueprints can\'t be saved yet.',
-          'Changes to blueprints can\'t be saved yet; everything else is saved.',
+          'Saved 1 map; a change to a blueprint is not written yet.',
+          'A change to a blueprint is not written yet; everything else is saved.',
           [ 'map:1' ],
           [ 'blueprint-map:k3x9q2mf' ],
         ]);
+    });
+
+    it('waits on Save all for a blueprint\'s changes on their way to disk before saving any map, and hears its problems', async () =>
+    {
+      // Arrange: a writer whose act is on its way, and which has a problem to tell.
+      const order: string[] = [];
+      let land = () => undefined as void;
+      const listeners: ((message: string, alarm: boolean) => void)[] = [];
+      const blueprintWriter = {
+        whenWritten: () => new Promise<void>(resolve =>
+        {
+          land = () =>
+          {
+            order.push('written');
+            resolve();
+          };
+        }),
+        onProblem: (listener: (message: string, alarm: boolean) => void) => listeners.push(listener),
+        guard: () => null,
+      };
+      const built = buildController();
+      const services = { ...(built.controller.services as object), blueprintWriter } as unknown as MapEditorServices;
+      const controller = new WorkspaceController(services);
+      built.hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+      built.hub.subscribe(event => (event.type === 'saved' ? order.push(event.document) : undefined));
+
+      // Act.
+      const saving = controller.saveAll();
+      await Promise.resolve();
+      land();
+      await saving;
+      listeners.forEach(listener => listener('The change to the blueprint could not be written.', true));
+
+      // Assert.
+      expect([ order, controller.getState().notice ])
+        .toStrictEqual([ [ 'written', 'map:1' ], expect.objectContaining({ text: 'The change to the blueprint could not be written.', severity: 'alarm' }) ]);
     });
 
     it('says why an edit the window\'s checks refused was refused', async () =>

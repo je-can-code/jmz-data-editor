@@ -41,9 +41,10 @@ type BlueprintWriterOptions = {
   readonly write: (write: BlueprintWrite) => Promise<void>;
 
   /**
-   * Tells the author what went wrong: an error, or an alarm, which stays until dismissed.
+   * Tells the author what went wrong: an error, or an alarm, which stays until dismissed. Whatever shows the author things
+   * can also listen (see BlueprintWriter's onProblem).
    */
-  readonly onProblem: (message: string, alarm: boolean) => void;
+  readonly onProblem?: (message: string, alarm: boolean) => void;
 
   /**
    * How long to wait after a change is made before writing it, in milliseconds.
@@ -125,7 +126,10 @@ class BlueprintWriter
 
   #write: (write: BlueprintWrite) => Promise<void>;
 
-  #onProblem: (message: string, alarm: boolean) => void;
+  /**
+   * Everything listening for what goes wrong.
+   */
+  #problemListeners = new Set<(message: string, alarm: boolean) => void>();
 
   #settleMs: number;
 
@@ -167,9 +171,37 @@ class BlueprintWriter
     this.#hub = options.hub;
     this.#maps = options.maps;
     this.#write = options.write;
-    this.#onProblem = options.onProblem;
     this.#settleMs = options.settleMs ?? SETTLE_MS;
+    if (options.onProblem !== undefined)
+    {
+      this.#problemListeners.add(options.onProblem);
+    }
+
     this.#unsubscribe = this.#hub.subscribe(event => this.#heard(event));
+  }
+
+  /**
+   * Listens for what goes wrong writing, to tell the author: an error, or an alarm, which stays until dismissed.
+   * @param {(message: string, alarm: boolean) => void} listener Called with the words and whether it is an alarm.
+   * @returns {() => void} Stops listening.
+   */
+  onProblem(listener: (message: string, alarm: boolean) => void): () => void
+  {
+    this.#problemListeners.add(listener);
+    return () =>
+    {
+      this.#problemListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Tells everything listening what went wrong.
+   * @param {string} message The words.
+   * @param {boolean} alarm True for an alarm.
+   */
+  #tell(message: string, alarm: boolean): void
+  {
+    [ ...this.#problemListeners ].forEach(listener => listener(message, alarm));
   }
 
   /**
@@ -434,11 +466,11 @@ class BlueprintWriter
     if (stranded.length > 0)
     {
       const labels = stranded.map(step => `"${step.label}"`).join(', ');
-      this.#onProblem(`The change to the blueprint could not be written (${reason}), and ${labels} could not be taken back: undo it by hand.`, true);
+      this.#tell(`The change to the blueprint could not be written (${reason}), and ${labels} could not be taken back: undo it by hand.`, true);
       return;
     }
 
-    this.#onProblem(`The change to the blueprint could not be written, so it was taken back: ${reason}.`, false);
+    this.#tell(`The change to the blueprint could not be written, so it was taken back: ${reason}.`, false);
   }
 
   /**
