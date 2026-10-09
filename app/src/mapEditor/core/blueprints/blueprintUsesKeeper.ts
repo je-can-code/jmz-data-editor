@@ -244,6 +244,40 @@ class BlueprintUsesKeeper
   }
 
   /**
+   * Lists the maps held here whose placements as they stand are not those their files hold, where no other live window
+   * keeping the record holds the map too. Closing this window would leave nobody to write those placements: a window
+   * holding the map without the record, as an event window does, can still save the map's file, tiles and all, but the
+   * placements that go with them would never reach the record. A map whose file's steps cannot all be told here counts
+   * while it holds unsaved edits, since what it holds cannot be shown to be on disk.
+   * @returns {number[]} The maps' ids, in the order the window holds them; none while the window holds no record it can
+   * read.
+   */
+  placementsUnsavedOnlyHere(): number[]
+  {
+    const uses = readableUses(this.#hub);
+    if (uses === null)
+    {
+      return [];
+    }
+
+    return this.#hub.documentKeys().flatMap(key =>
+    {
+      // a map with no unsaved edits holds what its file does, and one another keeper holds is written by that keeper.
+      const parsed = parseDocumentKey(key);
+      if (parsed.kind !== 'map' || this.#hub.isDirty(key) === false || this.#keptElsewhere(key))
+      {
+        return [];
+      }
+
+      const current = spotsOnMap(uses, parsed.mapId);
+      const onFile = this.#partAsOf(parsed.mapId, this.#hub.savedSteps(key), current);
+      return onFile === null || sameSpots(current, onFile) === false
+        ? [ parsed.mapId ]
+        : [];
+    });
+  }
+
+  /**
    * Writes the placements of maps whose files the map tree just wrote or removed, as the tree's step leaves them: a map it
    * brings, with those it was made with, and one it takes away, with none.
    * @param {ReadonlyMap<number, readonly BlueprintSpot[]>} parts Each map's placements, by map id.

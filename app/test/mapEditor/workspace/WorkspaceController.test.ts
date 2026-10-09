@@ -118,9 +118,10 @@ describe('WorkspaceController', () =>
    * of where blueprints are placed merged into a map at a time; without, it has no route for them, and asking for one
    * fails, though merges are still taken, and listed.
    * @param {Record<string, JsonValue> | null} editorData The editor-only documents on the server, by name, or null for none.
+   * @param {(key: string) => readonly string[]} holders The other windows holding each document; none by default.
    * @returns {object} The controller, the hub, the server's files, the saves and the merges.
    */
-  const buildController = (editorData: Record<string, JsonValue> | null = null) =>
+  const buildController = (editorData: Record<string, JsonValue> | null = null, holders: (key: string) => readonly string[] = () => []) =>
   {
     const merges: BlueprintUsesMerge[] = [];
     const mergeBlueprintUses = async (merge: BlueprintUsesMerge) =>
@@ -196,9 +197,9 @@ describe('WorkspaceController', () =>
     hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
     hub.adopt('map:2', buildMapJson() as unknown as JsonValue);
 
-    // no event anywhere is a copy of a blueprint, counted at once, and no other window holds anything.
+    // no event anywhere is a copy of a blueprint, counted at once, and the other windows hold what the test says.
     const blueprintCopies = { start: () => undefined, countOf: () => ({ total: 0, maps: [] }) };
-    const sync = { holders: () => [] };
+    const sync = { holders };
     const services = { hub, api, sync, blueprintCopies, openDocument: (key: string) => hub.load(key as never) } as unknown as MapEditorServices;
     return { controller: new WorkspaceController(services), hub, api, maps, state, saves, merges };
   };
@@ -877,8 +878,9 @@ describe('WorkspaceController', () =>
    * written with that map, merged into the record on the server, and the tree writes those of the maps it brings or
    * takes away; the record itself never holds anything unsaved, so Save all never counts it. A placement write the server
    * refused is still unsaved work, though: the window asks before it closes while one waits, and Save all tries it again,
-   * calling everything saved only once it lands. No undo takes away a blueprint whose tiles are still placed, in the words
-   * a delete of it is refused in.
+   * calling everything saved only once it lands. So is a map's unsaved placements while only an event window shares the
+   * map, which could save its file but never the placements, so the window asks then too. No undo takes away a blueprint
+   * whose tiles are still placed, in the words a delete of it is refused in.
    *
    * On the server, the camp (aa22) is placed on the cave (5), at 4, 0.
    */
@@ -1058,6 +1060,26 @@ describe('WorkspaceController', () =>
       // Assert: no asking before, and asking now, though map 1 itself is saved.
       expect([ beforeAnything, window.closing(), hub.isDirty('map:1'), controller.getState().notice?.text ])
         .toStrictEqual([ false, true, false, REFUSED ]);
+    });
+
+    it('asks before the window closes while only an event window shares a map holding unsaved placements, and not once it is saved', async () =>
+    {
+      // Arrange: an event window holding map 1, and no other window holding the record; the window guarded, and the camp
+      // placed on map 1.
+      const { controller, hub } = buildController(onServer(), key => (key === 'map:1' ? [ 'window-e' ] : []));
+      await controller.whenPlacementsHeld();
+      const window = closingWindow();
+      controller.guardClose(window.target);
+      placeOnMapOne(hub);
+      const whileUnsaved = window.closing();
+
+      // Act: map 1 saved, its placements with it.
+      await hub.save('map:1');
+      await controller.placements?.whenWritten();
+
+      // Assert: asked while only the event window could have saved map 1, and not once its placements were written.
+      expect([ whileUnsaved, window.closing() ])
+        .toStrictEqual([ true, false ]);
     });
 
     it('tries a refused placement write again with Save all, though nothing else is unsaved, and says all is saved once it lands', async () =>

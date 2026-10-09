@@ -620,16 +620,20 @@ class WorkspaceController
   }
 
   /**
-   * Makes the window ask before it closes while placements of blueprints have not reached the disk: a write on its way,
-   * or one the server refused, waiting to be tried again with the next save. No document's unsaved mark shows them, since
-   * the record is never unsaved itself, and closing would lose them, as it would unsaved edits, which the window's own
-   * guard asks about.
+   * Makes the window ask before it closes while placements of blueprints would be lost with it, as unsaved edits are
+   * asked about by the window's own guard: a write on its way, or one the server refused, waiting to be tried again with
+   * the next save; or a map's unsaved placements that no other window keeping the record holds, though a window without
+   * the record may share the map, as an event window does, and save its file after this one has gone. No document's
+   * unsaved mark shows either, since the record is never unsaved itself, and the window's own guard lets a map shared
+   * with an event window go without asking.
    * @param {CloseTarget} target The window.
    * @returns {() => void} Removes the guard.
    */
   guardClose(target: CloseTarget): () => void
   {
-    return installCloseGuard(target, () => this.placements?.hasUnwritten() === true);
+    const { placements } = this;
+    return installCloseGuard(target, () => placements !== null
+      && (placements.hasUnwritten() || placements.placementsUnsavedOnlyHere().length > 0));
   }
 
   /**
