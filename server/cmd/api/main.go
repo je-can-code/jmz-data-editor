@@ -226,6 +226,10 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	mux.HandleFunc("GET /api/editor-data/{key}", api.LoadEditorData)
 	mux.HandleFunc("PUT /api/editor-data/{key}", api.SaveEditorData(changes))
 
+	// the record of where blueprints are placed is never written whole: each map's part is merged into the
+	// file as it stands, so two windows saving two maps at once both land.
+	mux.HandleFunc("PUT /api/editor-data/blueprint-uses/maps", api.MergeBlueprintUses(changes))
+
 	// the party a new game seats, for showing each event's page as a fresh save would.
 	mux.HandleFunc("GET /api/new-game", api.LoadNewGame)
 

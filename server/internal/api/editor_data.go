@@ -55,7 +55,9 @@ func LoadEditorData(responseWriter http.ResponseWriter, httpRequest *http.Reques
 // Nothing but the editor reads these, so there is no model to hold them to; the one check is that the
 // body is a single well-formed JSON document. They are written indented, the way JSON.stringify(doc,
 // null, 2) writes, so a change to one reads as a small diff in the game's history, and since the
-// layout depends only on the content, saving an unchanged document reproduces its file.
+// layout depends only on the content, saving an unchanged document reproduces its file. The write takes
+// the lock every write of the editor's own files takes, so it never lands between a merge reading the
+// record of where blueprints are placed and writing it back.
 func SaveEditorData(announcer WriteAnnouncer) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
 		projectPath, pathErr := GetProjectPath()
@@ -87,14 +89,18 @@ func SaveEditorData(announcer WriteAnnouncer) http.HandlerFunc {
 			return
 		}
 
-		// the folder appears with the first document saved into it.
+		// the folder appears with the first document saved into it, and the document replaces whatever the
+		// file held.
 		relativePath := editorDataFile(key)
 		fullPath := filepath.Join(projectPath, filepath.FromSlash(relativePath))
-		withdraw := announcer.Expect(relativePath, httpRequest.Header.Get(ClientHeader), content)
-		writeErr := os.MkdirAll(filepath.Dir(fullPath), 0755)
-		if writeErr == nil {
-			writeErr = store.WriteFileAtomic(fullPath, content)
+		withdraw := func() {}
+		announce := func(written []byte) {
+			withdraw = announcer.Expect(relativePath, httpRequest.Header.Get(ClientHeader), written)
 		}
+		replace := func(_ []byte) ([]byte, error) {
+			return content, nil
+		}
+		writeErr := store.UpdateFile(fullPath, replace, announce)
 		if writeErr != nil {
 			withdraw()
 			var res RestResponse[json.RawMessage]
