@@ -296,10 +296,10 @@ describe('copyPlans', () =>
       const plan = planOn();
 
       // Act.
-      const drifted = plan.drifted;
+      const { drifted, events } = plan;
 
       // Assert.
-      expect([ drifted, plan.events.some(event => event.id === 11) ])
+      expect([ drifted, events.some(event => event.id === 11) ])
         .toStrictEqual([ [ { eventId: 11, reason: 'it has 2 pages and its blueprint had 1 page' } ], false ]);
     });
 

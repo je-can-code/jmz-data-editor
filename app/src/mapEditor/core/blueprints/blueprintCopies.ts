@@ -357,6 +357,32 @@ class BlueprintCopyCounter
   }
 
   /**
+   * Lists the copies of one blueprint's events as the files on disk held them at the server's last reading, the maps this
+   * window or another holds included, unsaved edits left out: what a change to the blueprint must still reach in those
+   * files, where a map holding unsaved edits differs from them.
+   * @param {string} blueprintId The blueprint.
+   * @returns {BlueprintCopy[]} The copies, by map id, then event id; none before the first reading.
+   */
+  copiesOnDisk(blueprintId: string): BlueprintCopy[]
+  {
+    return [ ...this.#disk ?? [] ]
+      .flatMap(([ , copies ]) => copies)
+      .filter(copy => copy.blueprintId === blueprintId)
+      .sort((left, right) => left.mapId - right.mapId || left.eventId - right.eventId);
+  }
+
+  /**
+   * Reports whether what the other windows hold is settled enough to count from: they have all been heard from, no look
+   * at one of their maps is on its way, and every window still holding a map answered the last look at it. A window that
+   * has not started counting has heard nothing yet.
+   * @returns {boolean} True once it is.
+   */
+  settledElsewhere(): boolean
+  {
+    return this.#started && this.#elsewhereUnsettled() === false;
+  }
+
+  /**
    * Hears that a project file changed on disk: a map's file has the server's reading asked for again, once counting has
    * started. Any other file changes no copy.
    * @param {string} path The file, relative to the project root, as the change stream names it.
