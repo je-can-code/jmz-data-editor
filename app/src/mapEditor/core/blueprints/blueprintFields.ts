@@ -400,8 +400,8 @@ const decimalPlaces = (value: number): number =>
 };
 
 /**
- * Adds two numbers as the decimals they are written as, so a reach of 1.2 moved by 0.1 is 1.3, where adding them as
- * binary fractions makes 1.3000000000000003, which no author wrote and every offset worked out from it would carry on.
+ * Adds two numbers as the decimals they are written as, so a reach of 4.35 moved by 0.1 is 4.45, where adding them as
+ * binary fractions makes 4.449999999999999, which no author wrote and every offset worked out from it would carry on.
  * @param {number} left One number.
  * @param {number} right The other, negative to take away.
  * @returns {number} The sum, to the places of the more precise of the two.

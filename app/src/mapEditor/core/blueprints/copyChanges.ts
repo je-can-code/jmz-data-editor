@@ -52,7 +52,7 @@ type CopyChangeOptions = {
 /**
  * What a change to a blueprint's event comes to for one copy of it: nothing at all; the copy's new event, its note holding
  * its new link, with the link itself; or that the copy has drifted from its blueprint too far for the change to reach it,
- * and why, in words for the author, such as "it has 2 pages and its blueprint had 1".
+ * and why, in words for the author, such as "it has 2 pages and its blueprint had 1 page".
  */
 type CopyChange =
   | { readonly kind: 'stays' }
