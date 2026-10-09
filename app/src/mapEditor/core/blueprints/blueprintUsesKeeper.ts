@@ -225,6 +225,24 @@ class BlueprintUsesKeeper
   }
 
   /**
+   * Reports whether any map's placements have not reached the disk yet, on their way or refused and waiting to be tried
+   * again: work no document's unsaved mark shows, which closing the window now would lose.
+   * @returns {boolean} True when something is still unwritten.
+   */
+  hasUnwritten(): boolean
+  {
+    return this.#writer.hasUnwritten();
+  }
+
+  /**
+   * Tries again whatever placements a refused write left waiting, as a save does.
+   */
+  retry(): void
+  {
+    this.#writer.retry();
+  }
+
+  /**
    * Writes the placements of maps whose files the map tree just wrote or removed, as the tree's step leaves them: a map it
    * brings, with those it was made with, and one it takes away, with none.
    * @param {ReadonlyMap<number, readonly BlueprintSpot[]>} parts Each map's placements, by map id.

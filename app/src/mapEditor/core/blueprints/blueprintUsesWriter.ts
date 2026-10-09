@@ -183,7 +183,8 @@ const reasonOf = (error: unknown): string =>
  * One merge is on its way at a time. Whatever is asked for meanwhile waits, each map's owing gathered into one (see
  * {@link followedBy}), and goes in the next merge, so a map's placements are never written out of order. A merge that
  * fails gives its owing back, under anything owed since, and the author hears why; it is tried again with the next write
- * asked for, since nothing else would ever carry it to disk.
+ * asked for, or when a save asks for it to be ({@link retry}), since nothing else would ever carry it to disk, and until
+ * it lands the window counts it unwritten ({@link hasUnwritten}), so closing asks first.
  */
 class BlueprintUsesWriter
 {
@@ -251,6 +252,26 @@ class BlueprintUsesWriter
   owes(mapId: number): boolean
   {
     return this.#owed.has(mapId) || (this.#sending?.has(mapId) ?? false);
+  }
+
+  /**
+   * Reports whether anything asked for has not reached the disk yet: a merge on its way, or one waiting behind it, or one
+   * the server refused, which waits to be tried again. Closing the window now would lose it, since nothing else carries
+   * it to disk.
+   * @returns {boolean} True when something is still unwritten.
+   */
+  hasUnwritten(): boolean
+  {
+    return this.#owed.size > 0 || this.#sending !== null;
+  }
+
+  /**
+   * Tries again whatever a refused merge left owed, as any write asked for would; nothing while a merge is on its way,
+   * which sends the rest once it lands.
+   */
+  retry(): void
+  {
+    this.#send();
   }
 
   /**
