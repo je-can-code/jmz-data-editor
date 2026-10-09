@@ -80,16 +80,17 @@ const followedTile = (before: number, after: number, copy: number, layer: number
 };
 
 /**
- * Lists every value of a blueprint's tiles a change touched, layer by layer, row by row.
- * @param {StampTiles} before The blueprint's tiles before the change.
- * @param {StampTiles} after Its tiles after it.
+ * Lists every value of a blueprint's tiles a change touched, layer by layer, row by row. Only the layers and their values
+ * are read; the shapes a stamp remembers its autotiles were called for in are for placing it, and never reach a copy.
+ * @param {Pick<StampTiles, 'layers' | 'values'>} before The blueprint's tiles before the change.
+ * @param {Pick<StampTiles, 'layers' | 'values'>} after Its tiles after it.
  * @param {{ width: number, height: number }} size The blueprint's size, which both share.
  * @returns {BlueprintCellChange[]} The values that differ.
  * @throws {Error} When the two carry other layers, or other sizes, which no copy's cells pair with one by one.
  */
 const blueprintCellChanges = (
-  before: StampTiles,
-  after: StampTiles,
+  before: Pick<StampTiles, 'layers' | 'values'>,
+  after: Pick<StampTiles, 'layers' | 'values'>,
   size: { readonly width: number; readonly height: number },
 ): BlueprintCellChange[] =>
 {
