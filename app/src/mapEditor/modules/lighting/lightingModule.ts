@@ -4,6 +4,7 @@ import { quickPanelFor } from '../../views/quickPanel/QuickFieldsPanel.tsx';
 import { TIME_PLUGIN } from '../time/timeParameters.ts';
 import { mapAmbient, type AmbientSource } from './ambientTags.ts';
 import { effectStrength } from './lightEffects.ts';
+import { lightTagFields } from './lightFields.ts';
 import { ambientColorFrom, effectTuningsFrom, LIGHTING_CONFIG, lightDefaultsFrom, lightingConfigNotice } from './lightingConfig.ts';
 import { LIGHTING_TIME_CONFIG, lightingTimeConfigNotice, skyCurveFrom } from './lightingTimeConfig.ts';
 import { LightMask } from './lightMask.ts';
@@ -115,6 +116,10 @@ const registerSky = (contributions: ModuleContributions, context: ModuleContext)
  * note in place. While J-Lighting-Time is on, the module says its plugin reads whether a map has a sky, which it tints
  * and darkens by the hour; the sky setting then shows in the Lighting section, worded for every plugin the active
  * modules say reads it, J-Weather's among them, without this module ever asking which of them is on.
+ *
+ * A light's tag is read as fields of a blueprint's copies, too: each light's reach and intensity a number a copy holds by
+ * an offset or a pin, its colour and effect choices, read with the project's defaults and written back into a copy's own
+ * line by the panel's writers.
  */
 const lightingModule: PluginModule = {
   id: 'lighting',
@@ -144,6 +149,9 @@ const lightingModule: PluginModule = {
       marker: 'light',
       quickPanel: quickPanelFor(lightQuickModel(defaults, choosePage), LIGHT_KIND_ID, lightPanelOptions(defaults, choosePage, context.pageWords)),
     });
+
+    // a copy of a blueprint follows each light's reach, colour, intensity and effect as fields of their own.
+    contributions.commentTag(lightTagFields(defaults));
 
     // the dark goes in first, so the rings draw over it and stay in sight on the darkest map; the sky's darkness joins
     // the map's own in it while the sky follows the clock.
