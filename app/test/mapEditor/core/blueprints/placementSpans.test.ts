@@ -27,7 +27,8 @@ import { stampOf } from '../../support/stampFixtures.ts';
  * - a piece of the map lifted off carries a placement only when every one of its cells on the map lies within the piece
  *   and every layer it is compared on is carried; a placement only partly inside, or lifted without its layers, stays;
  * - a resize moves every spot with the tiles under it, and forgets a placement left wholly outside the new size, keeping
- *   one left partly on the map, its spot past the edge if need be, and one whose size nothing can tell;
+ *   one left partly on the map, its spot past the edge if need be; one whose size nothing can tell is judged by its
+ *   corner, forgotten once that lies past the new right or bottom edge, where none of it can be left, and kept otherwise;
  * - a piece moved takes its placements with it, and a piece copied records them again where it lands, leaving the
  *   originals; a placement landing wholly past the map's edge is left out.
  *
@@ -212,17 +213,39 @@ describe('resizedSpots', () =>
       });
   });
 
-  it('keeps a placement whose size nothing can tell, moved, wherever it lands', () =>
+  it('keeps a placement whose size nothing can tell, moved, while its corner may still reach onto the map', () =>
   {
-    // Arrange: a placement of a blueprint gone.
-    const spots = [ { blueprintId: 'zz99', x: 0, y: 0 } ];
+    // Arrange: placements of a blueprint gone, one moved far past the new left edge, one onto the new map's last cell.
+    const spots = [ { blueprintId: 'zz99', x: 0, y: 0 }, { blueprintId: 'zz99', x: 9, y: 7 } ];
 
     // Act.
     const resized = resizedSpots(spots, [], { x: -4, y: 0 }, { width: 6, height: 8 });
 
     // Assert.
     expect(resized)
-      .toStrictEqual({ kept: [ { blueprintId: 'zz99', x: -4, y: 0 } ], lost: [] });
+      .toStrictEqual({ kept: [ { blueprintId: 'zz99', x: -4, y: 0 }, { blueprintId: 'zz99', x: 5, y: 7 } ], lost: [] });
+  });
+
+  it('forgets a placement whose size nothing can tell once its corner lies past the new right or bottom edge', () =>
+  {
+    // Arrange: the map cut to 6 by 8 from the right and the bottom, so nothing moves; placements of a blueprint gone, with
+    // their corners one past the new right edge, one past the new bottom edge, and one on the map beside each.
+    const spots = [
+      { blueprintId: 'zz99', x: 6, y: 0 },
+      { blueprintId: 'zz99', x: 5, y: 0 },
+      { blueprintId: 'zz99', x: 0, y: 8 },
+      { blueprintId: 'zz99', x: 0, y: 7 },
+    ];
+
+    // Act.
+    const resized = resizedSpots(spots, [], { x: 0, y: 0 }, { width: 6, height: 8 });
+
+    // Assert.
+    expect(resized)
+      .toStrictEqual({
+        kept: [ { blueprintId: 'zz99', x: 5, y: 0 }, { blueprintId: 'zz99', x: 0, y: 7 } ],
+        lost: [ { blueprintId: 'zz99', x: 6, y: 0 }, { blueprintId: 'zz99', x: 0, y: 8 } ],
+      });
   });
 });
 

@@ -167,8 +167,9 @@ describe('mapPropertyEdits', () =>
   /*
    * A resize moves every placement of a blueprint recorded on the map with the tiles under it, by the anchor's shift, in
    * the same step; a placement left wholly outside the new size goes with the tiles there, and one left partly on the map
-   * stays, its spot past the edge if need be. One whose blueprint is gone, so nothing tells how far it reaches, stays,
-   * moved. No other map's placements move, and a window holding no record resizes as it always has.
+   * stays, its spot past the edge if need be. One whose blueprint is gone, so nothing tells how far it reaches, is judged
+   * by its corner: past the new right or bottom edge none of it can be left, and it goes; anywhere else it stays, moved.
+   * No other map's placements move, and a window holding no record resizes as it always has.
    *
    * Map 1 is 6 by 4, with the camp (aa22, 2 by 2) placed at 0, 0, 2, 1 and 4, 2; map 2 has the camp at 0, 0 too.
    */
@@ -263,17 +264,17 @@ describe('mapPropertyEdits', () =>
         .toStrictEqual([ 'aa22 -1,1', 'aa22 1,2' ]);
     });
 
-    it('keeps a placement whose blueprint is gone, moved, since nothing says how far it reaches', () =>
+    it('judges a placement whose blueprint is gone by its corner, forgetting it only once nothing of it can be left', () =>
     {
-      // Arrange: a placement of a blueprint no longer kept, far to the right.
-      const hub = placedHub([ { blueprintId: 'zz99', mapId: 1, x: 5, y: 0 } ]);
+      // Arrange: placements of a blueprint no longer kept, one far to the right and one low on the left.
+      const hub = placedHub([ { blueprintId: 'zz99', mapId: 1, x: 5, y: 0 }, { blueprintId: 'zz99', mapId: 1, x: 1, y: 3 } ]);
 
       // Act: cut to 2 wide keeping the left edge.
       resizeMap(hub, 1, 2, 4, 'top-left');
 
-      // Assert.
+      // Assert: the one whose corner now lies past the right edge is gone; the other, which may reach onto the map, stays.
       expect(cornersOn(hub, 1))
-        .toStrictEqual([ 'aa22 0,0', 'zz99 5,0' ]);
+        .toStrictEqual([ 'aa22 0,0', 'zz99 1,3' ]);
     });
 
     it('resizes as it always has in a window holding no record', () =>

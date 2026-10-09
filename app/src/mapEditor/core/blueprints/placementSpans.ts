@@ -132,7 +132,10 @@ const spansWithin = (
  * Works out a map's placements after a resize: every spot moves with the tiles under it, by the resize's offset, and a
  * placement whose blueprint says it lies wholly outside the new size goes, as an event left outside does, its tiles being
  * gone with the rest outside. A placement left partly on the map stays, its spot past the edge if need be, and is judged
- * from then on by the part still on the map. A placement whose size nothing can tell stays too.
+ * from then on by the part still on the map. A placement whose size nothing can tell, its blueprint gone or not to be
+ * read, is judged by its corner alone: a corner moved past the new right or bottom edge leaves the whole of it outside,
+ * however large it is, so it goes too; a corner anywhere else may still reach onto the map, so it stays, in case its
+ * blueprint comes back.
  * @param {readonly BlueprintSpot[]} spots The map's spots as they stand.
  * @param {readonly PlacementSpan[]} spans What the window can tell of how far each reaches.
  * @param {MapCell} offset How far the old map moves inside the new one.
@@ -152,7 +155,9 @@ const resizedSpots = (
   {
     const moved = { ...spot, x: spot.x + offset.x, y: spot.y + offset.y };
     const span = spans.find(each => sameSpot(each, spot)) ?? null;
-    const outside = span !== null && spanOnMap({ ...span, x: moved.x, y: moved.y }, size.width, size.height) === null;
+    const outside = span === null
+      ? moved.x >= size.width || moved.y >= size.height
+      : spanOnMap({ ...span, x: moved.x, y: moved.y }, size.width, size.height) === null;
     if (outside)
     {
       lost.push(spot);
