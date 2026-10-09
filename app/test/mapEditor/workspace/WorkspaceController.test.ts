@@ -11,6 +11,7 @@ import {
   recordSpots,
   usesOf,
 } from '../../../src/mapEditor/core/blueprints/blueprintUses.ts';
+import type { BlueprintUsesMerge } from '../../../src/mapEditor/core/blueprints/blueprintUsesWriter.ts';
 import { DocumentHub, type DocumentStore } from '../../../src/mapEditor/core/history/DocumentHub.ts';
 import { blueprintHistoryKey, mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
@@ -21,6 +22,7 @@ import { drawsFor, holdBlueprints, storedBlueprints, storedUses } from '../suppo
 import { buildMapJson } from '../support/fixtures.ts';
 import { stampOf } from '../support/stampFixtures.ts';
 import { buildTreeRows } from '../support/treeFixtures.ts';
+import { mergeInto } from '../support/usesServer.ts';
 
 /*
  * The workspace controller is what every panel acts through, and it owes them the shell's rules. Undo follows focus:
@@ -111,13 +113,23 @@ describe('WorkspaceController', () =>
 
   /**
    * A controller over a hub holding two maps, the tree on an in-memory server, and a store recording saves. The server
-   * keeps editor-only documents only when given some, which it then hands over and keeps as they are written; without,
-   * it has no route for them, and asking for one fails.
+   * keeps editor-only documents only when given some, which it then hands over and keeps as they are written, the record
+   * of where blueprints are placed merged into a map at a time; without, it has no route for them, and asking for one
+   * fails, though merges are still taken, and listed.
    * @param {Record<string, JsonValue> | null} editorData The editor-only documents on the server, by name, or null for none.
-   * @returns {object} The controller, the hub, the server's files and the saves.
+   * @returns {object} The controller, the hub, the server's files, the saves and the merges.
    */
   const buildController = (editorData: Record<string, JsonValue> | null = null) =>
   {
+    const merges: BlueprintUsesMerge[] = [];
+    const mergeBlueprintUses = async (merge: BlueprintUsesMerge) =>
+    {
+      merges.push(structuredClone(merge));
+      if (editorData !== null)
+      {
+        editorData['blueprint-uses'] = mergeInto(editorData['blueprint-uses'] ?? null, merge);
+      }
+    };
     const maps = new Map<number, RmmzMap>([ 1, 2, 3, 5, 6 ].map(id => [ id, { ...buildMapJson(), displayName: `file ${id}` } ]));
     const state = { infos: buildTreeRows() as (RmmzMapInfo | null)[] };
     const api = {
@@ -154,6 +166,7 @@ describe('WorkspaceController', () =>
       {
         state.infos = structuredClone([ ...infos ]);
       },
+      mergeBlueprintUses,
       ...(editorData === null
         ? {}
         : {
@@ -182,10 +195,11 @@ describe('WorkspaceController', () =>
     hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
     hub.adopt('map:2', buildMapJson() as unknown as JsonValue);
 
-    // no event anywhere is a copy of a blueprint, counted at once.
+    // no event anywhere is a copy of a blueprint, counted at once, and no other window holds anything.
     const blueprintCopies = { start: () => undefined, countOf: () => ({ total: 0, maps: [] }) };
-    const services = { hub, api, blueprintCopies, openDocument: (key: string) => hub.load(key as never) } as unknown as MapEditorServices;
-    return { controller: new WorkspaceController(services), hub, api, maps, state, saves };
+    const sync = { holders: () => [] };
+    const services = { hub, api, sync, blueprintCopies, openDocument: (key: string) => hub.load(key as never) } as unknown as MapEditorServices;
+    return { controller: new WorkspaceController(services), hub, api, maps, state, saves, merges };
   };
 
   const MAIN: FakeGroup = { id: 'main-maps', api: { location: { type: 'grid' } } };
@@ -858,8 +872,9 @@ describe('WorkspaceController', () =>
   /*
    * The workspace holds the blueprints and the record of where they are placed from the moment it opens, since every
    * edit moving a placement changes the record only while the window holds it; a tree change waits until they are asked
-   * for, so a map deleted or copied the moment the window opens takes its placements with it. The record is written
-   * whenever a map or the tree is, and Save all, which writes it too, tells what it saved in maps. No undo takes away a
+   * for, so a map deleted or copied the moment the window opens takes its placements with it. Each map's placements are
+   * written with that map, merged into the record on the server, and the tree writes those of the maps it brings or
+   * takes away; the record itself never holds anything unsaved, so Save all never counts it. No undo takes away a
    * blueprint whose tiles are still placed, in the words a delete of it is refused in.
    *
    * On the server, the camp (aa22) is placed on the cave (5), at 4, 0.
@@ -887,17 +902,19 @@ describe('WorkspaceController', () =>
         .toStrictEqual([ true, true, [] ]);
     });
 
-    it('waits for the record before a tree change, so a map deleted at once takes its placements with it', async () =>
+    it('waits for the record before a tree change, so a map deleted at once takes its placements with it, on disk too', async () =>
     {
       // Arrange.
-      const { controller, hub } = buildController(onServer());
+      const documents = onServer();
+      const { controller, hub } = buildController(documents);
 
       // Act.
       await controller.deleteMaps([ 5 ]);
+      await controller.placements?.whenWritten();
 
       // Assert.
-      expect([ hub.has('mapinfos'), usesOf(hub.document(BLUEPRINT_USES_DOCUMENT)) ])
-        .toStrictEqual([ true, [] ]);
+      expect([ hub.has('mapinfos'), usesOf(hub.document(BLUEPRINT_USES_DOCUMENT)), readUses((documents['blueprint-uses'] as { data: JsonValue }).data) ])
+        .toStrictEqual([ true, [], [] ]);
     });
 
     it('copies a map to the clipboard with its placements, once the record is held', async () =>
@@ -914,51 +931,47 @@ describe('WorkspaceController', () =>
         .toStrictEqual([ [ { blueprintId: 'aa22', x: 4, y: 0 } ] ]);
     });
 
-    it('writes the record whenever a map is written, the window\'s own save of the map included', async () =>
+    it('writes a map\'s placements, and no other map\'s, with the window\'s own save of the map', async () =>
     {
-      // Arrange: the camp placed on map 1 too, unsaved.
+      // Arrange: the camp placed on maps 1 and 2 too, unsaved.
       const documents = onServer();
-      const { controller, hub, saves } = buildController(documents);
+      const { controller, hub, saves, merges } = buildController(documents);
       await controller.whenPlacementsHeld();
-      hub.edit('Place', [ mapHistoryKey(1) ], tx =>
+      [ 1, 2 ].forEach(mapId => hub.edit('Place', [ mapHistoryKey(mapId) ], tx =>
       {
-        tx.set('map:1', [ 'displayName' ], 'Camped');
-        recordSpots(tx, hub, 1, [ { blueprintId: 'aa22', x: 0, y: 0 } ]);
-      });
+        tx.set(`map:${mapId}`, [ 'displayName' ], 'Camped');
+        recordSpots(tx, hub, mapId, [ { blueprintId: 'aa22', x: 0, y: 0 } ]);
+      }));
 
       // Act.
       await hub.save('map:1');
-      await new Promise(resolve =>
-      {
-        setTimeout(resolve, 0);
-      });
+      await controller.placements?.whenWritten();
 
-      // Assert.
-      expect([ saves, hub.isDirty(BLUEPRINT_USES_DOCUMENT), readUses((documents['blueprint-uses'] as { data: JsonValue }).data) ])
+      // Assert: the map saved through its own route, and its placements alone merged into the record.
+      expect([ saves, merges, readUses((documents['blueprint-uses'] as { data: JsonValue }).data) ])
         .toStrictEqual([
-          [ 'map:1', BLUEPRINT_USES_DOCUMENT ],
-          false,
+          [ 'map:1' ],
+          [ { schemaVersion: 2, maps: { 1: { aa22: [ { x: 0, y: 0 } ] } } } ],
           [ { blueprintId: 'aa22', x: 0, y: 0, mapId: 1 }, { blueprintId: 'aa22', x: 4, y: 0, mapId: 5 } ],
         ]);
     });
 
-    it('tells what Save all saved in maps, the record it writes along with them counted as none', async () =>
+    it('tells what Save all saved in maps, the record never among what it saves', async () =>
     {
-      // Arrange: the record unsaved alone, from an undone forget, then with map 1 unsaved too.
-      const { controller, hub } = buildController(onServer());
+      // Arrange: a placement forgotten, which goes to disk at once, then map 1 unsaved too.
+      const { controller, hub, saves } = buildController(onServer());
       await controller.whenPlacementsHeld();
       hub.edit('Forget', [ BLUEPRINT_USES_DOCUMENT ], tx => forgetSpots(tx, hub, 5, [ { blueprintId: 'aa22', x: 4, y: 0 } ]));
 
       // Act.
       await controller.saveAll();
       const alone = controller.getState().notice?.text;
-      hub.edit('Forget again', [ BLUEPRINT_USES_DOCUMENT ], tx => recordSpots(tx, hub, 5, [ { blueprintId: 'aa22', x: 4, y: 0 } ]));
       hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
       await controller.saveAll();
 
       // Assert.
-      expect([ alone, controller.getState().notice?.text, hub.isDirty(BLUEPRINT_USES_DOCUMENT) ])
-        .toStrictEqual([ 'Everything is saved.', 'Saved 1 map.', false ]);
+      expect([ alone, controller.getState().notice?.text, saves, hub.dirtyKeys() ])
+        .toStrictEqual([ 'Everything is saved.', 'Saved 1 map.', [ 'map:1' ], [] ]);
     });
 
     it('refuses to undo a blueprint\'s save while its tiles are still placed, in the words a delete of it is refused in', async () =>

@@ -121,7 +121,9 @@ const HEAD_EVENTS: ReadonlySet<HubEvent['type']> = new Set([
  * away. A copy that is only behind (its lineage a prefix of the other's) takes the other copy, which holds
  * everything it did. A copy that is ahead hands itself to the other window. Two copies that went different ways
  * are both kept: each window flags the document with the other's copy beside it, and the person chooses which
- * to keep ({@link resolveConflict}).
+ * to keep ({@link resolveConflict}). A document kept alongside others, such as the record of where blueprints are
+ * placed, is never flagged: the hub takes another window's edits to it whenever they fit, part by part, and its
+ * keeper settles the rest, so no choice over it ever stands to throw a step away.
  *
  * It also answers the questions the rest of the editor asks of other windows: whether a client id belongs to
  * the session (so the echo of its saves on the file-change stream can be ignored), which windows hold a

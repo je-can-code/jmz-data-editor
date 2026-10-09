@@ -1,17 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { apiDocumentStore } from '../../../../src/mapEditor/core/api/apiDocumentStore.ts';
 import { MapEditorApiError, type MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
-import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
+import {
+  BLUEPRINT_USES_DOCUMENT,
+  readUses,
+  recordSpots,
+  usesOf,
+  type PlacedSpot,
+} from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
+import { BlueprintUsesKeeper } from '../../../../src/mapEditor/core/blueprints/blueprintUsesKeeper.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { TREE_HISTORY_KEY, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import { MAP_INFOS_KEY } from '../../../../src/mapEditor/core/model/documentKeys.ts';
-import { jsonEquals } from '../../../../src/mapEditor/core/model/json.ts';
+import { jsonEquals, type JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapInfo } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { TREE_ROOT } from '../../../../src/mapEditor/core/tree/MapTreeModel.ts';
 import { MapTreeService, type TreeOutcome } from '../../../../src/mapEditor/core/tree/MapTreeService.ts';
-import { holdBlueprintUses } from '../../support/blueprintFixtures.ts';
+import { holdBlueprintUses, storedUses } from '../../support/blueprintFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 import { buildTreeRows } from '../../support/treeFixtures.ts';
+import { UsesServer } from '../../support/usesServer.ts';
 
 /*
  * The tree service is the map tree's one way in, and what it owes is simple to say: MapInfos.json and the map files
@@ -915,6 +923,116 @@ describe('MapTreeService', () =>
       // Assert.
       expect(removed.step?.entries.every(entry => entry.document === MAP_INFOS_KEY))
         .toBe(true);
+    });
+
+    /**
+     * A tree service whose window holds the record of the camp's placements, beside any others given, as the record's file
+     * on a server holds them too, kept by a keeper the tree writes the placements of its maps through.
+     * @param {readonly PlacedSpot[]} others More placements.
+     * @returns {object} The service, the hub, the disk, the record's server, its keeper, and what the author heard.
+     */
+    const keptService = (others: readonly PlacedSpot[] = []) =>
+    {
+      const disk = buildDisk();
+      const hub = new DocumentHub({ clientId: 'window-a', store: apiDocumentStore(disk.api), now: () => 1000 });
+      const server = new UsesServer(storedUses([ ...CAMPS, ...others ]));
+      const problems: string[] = [];
+      const keeper = new BlueprintUsesKeeper({ hub, api: server.api, holders: () => [], onProblem: message => problems.push(message) });
+      holdBlueprintUses(hub, [ ...CAMPS, ...others ]);
+      const service = new MapTreeService({ hub, api: disk.api, openDocument: key => hub.load(key), placements: keeper });
+      return { service, hub, server, keeper, problems, ...disk };
+    };
+
+    /**
+     * Reads the maps each placement the record's file holds stands on.
+     * @param {UsesServer} server The record's server.
+     * @returns {string[]} Each placement as "map: x,y".
+     */
+    const onDisk = (server: UsesServer): string[] =>
+    {
+      return readUses((server.stored as { data: JsonValue }).data).map(spot => `${spot.mapId}: ${spot.x},${spot.y}`);
+    };
+
+    it('takes a deleted branch\'s placements off the disk, and an undo puts back the ones its files were saved with', async () =>
+    {
+      // Arrange: the town held with a placement made since it was opened, which its file does not hold.
+      const { service, hub, server, keeper, problems } = keptService();
+      await hub.load('map:2');
+      hub.edit('Place', [ mapHistoryKey(2) ], tx =>
+      {
+        tx.set('map:2', [ 'note' ], 'camped');
+        recordSpots(tx, hub, 2, [ { blueprintId: 'aa22', x: 9, y: 9 } ]);
+      });
+
+      // Act.
+      succeeded(await service.remove([ 2 ]));
+      await keeper.whenWritten();
+      const afterDelete = onDisk(server);
+      succeeded(await service.undo());
+      await keeper.whenWritten();
+      const afterUndo = [ onDisk(server), placedOn(hub) ];
+      succeeded(await service.redo());
+      await keeper.whenWritten();
+
+      // Assert: the unsaved placement comes back with the town's copy, unsaved, and never reaches the disk.
+      expect([ afterDelete, afterUndo, onDisk(server), problems ])
+        .toStrictEqual([
+          [ '5: 4,0' ],
+          [ [ '2: 1,1', '3: 0,2', '5: 4,0' ], [ '2: 1,1', '2: 9,9', '3: 0,2', '5: 4,0' ] ],
+          [ '5: 4,0' ],
+          [],
+        ]);
+    });
+
+    it('writes a duplicate\'s placements with its file, and takes them away again with an undo', async () =>
+    {
+      // Arrange.
+      const { service, server, keeper } = keptService();
+
+      // Act: the cave duplicated as map 4, then the duplicate undone.
+      succeeded(await service.duplicate([ 5 ]));
+      await keeper.whenWritten();
+      const afterDuplicate = onDisk(server);
+      succeeded(await service.undo());
+      await keeper.whenWritten();
+
+      // Assert.
+      expect([ afterDuplicate, onDisk(server) ])
+        .toStrictEqual([ [ '2: 1,1', '3: 0,2', '4: 4,0', '5: 4,0' ], [ '2: 1,1', '3: 0,2', '5: 4,0' ] ]);
+    });
+
+    it('gives a brand new map no placements on disk either, whatever its id was left holding there', async () =>
+    {
+      // Arrange: placements left on disk under the free id 4.
+      const { service, server, keeper } = keptService([ { blueprintId: 'aa22', mapId: 4, x: 3, y: 3 } ]);
+
+      // Act.
+      succeeded(await service.create(TREE_ROOT));
+      await keeper.whenWritten();
+
+      // Assert.
+      expect([ onDisk(server), server.merges ])
+        .toStrictEqual([ [ '2: 1,1', '3: 0,2', '5: 4,0' ], [ { schemaVersion: 2, maps: { 4: null } } ] ]);
+    });
+
+    it('leaves a deleted map\'s placements on disk alone when an undo cannot tell what the disk held for it', async () =>
+    {
+      // Arrange: the record's file unreadable when the cave is deleted, then readable again.
+      const { service, server, keeper } = keptService();
+      const readable = server.stored;
+      server.stored = 'broken';
+
+      // Act.
+      succeeded(await service.remove([ 5 ]));
+      await keeper.whenWritten();
+      server.stored = readable;
+      const merged = server.merges.length;
+      succeeded(await service.undo());
+      await keeper.whenWritten();
+
+      // Assert: the delete took the cave's placements out, and the undo, knowing nothing, wrote nothing more.
+      expect([ merged, server.merges.length ])
+        .toStrictEqual([ 1, 1 ]);
     });
   });
 

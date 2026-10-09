@@ -23,9 +23,10 @@ import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/Ma
 import { StampsPanel } from '../../../../src/mapEditor/workspace/panels/StampsPanel.tsx';
 import { WorkspaceController } from '../../../../src/mapEditor/workspace/WorkspaceController.ts';
 import { WorkspaceProvider } from '../../../../src/mapEditor/workspace/workspaceHooks.tsx';
-import { holdBlueprints, holdBlueprintUses, storedBlueprints, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
+import { holdBlueprints, holdBlueprintUses, storedBlueprints, storedUses, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
 import { mapWithEvents } from '../../support/eventFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
+import { UsesServer } from '../../support/usesServer.ts';
 
 /*
  * The Stamps panel lists every stamp copied in the window this session, newest first, each with a picture and what it
@@ -704,10 +705,11 @@ describe('StampsPanel: where a blueprint is used', () =>
     const notes = [ { mapId: 9, eventId: 5, note: '<blueprint:[aa22, 1]>' } ];
     const blueprintCopies = new BlueprintCopyCounter({ hub, readNotes: async () => notes });
     const sync = { whenHeldOrDiscovered: async () => undefined, holders: () => [], requestSnapshot: async () => null };
+    const server = new UsesServer(storedUses(uses));
     const services = {
       hub,
       sync,
-      api: { loadImage: vi.fn(async () => null) },
+      api: { loadImage: vi.fn(async () => null), ...server.api },
       stamps: new StampHistory('window-a'),
       paints: new WindowPaints(window),
       blueprintCopies,
@@ -744,7 +746,7 @@ describe('StampsPanel: where a blueprint is used', () =>
         setTimeout(resolve, 0);
       });
     });
-    return { hub, controller, saved, added };
+    return { hub, controller, saved, added, server };
   };
 
   /**
@@ -802,21 +804,33 @@ describe('StampsPanel: where a blueprint is used', () =>
       ]);
   });
 
-  it('forgets a placement no longer where it was as a step in the blueprint\'s history, writing the record at once', async () =>
+  it('forgets a placement no longer where it was as a step in the blueprint\'s history, taking it off the disk at once', async () =>
   {
     // Arrange.
-    const { hub, controller, saved } = await renderUses(PLACED);
+    const { hub, controller, saved, server } = await renderUses(PLACED);
 
     // Act: the placement on map 8, whose map is gone.
     fireEvent.click(within(screen.getAllByTestId('where-used-map')[2]).getByRole('button', { name: 'Forget' }));
     await act(async () =>
     {
-      await Promise.resolve();
+      await controller.placements?.whenWritten();
     });
 
-    // Assert.
-    expect([ usesOf(hub.document(BLUEPRINT_USES_DOCUMENT)).map(spot => spot.mapId), saved, controller.getState().activeHistory, controller.getState().notice?.text ])
-      .toStrictEqual([ [ 3, 3, 7 ], [ BLUEPRINT_USES_DOCUMENT ], 'blueprint:aa22', 'Forgot a copy of "Goblin camp" on Map 8.' ]);
+    // Assert: that one placement merged out of the record on disk, and nothing saved whole.
+    expect([
+      usesOf(hub.document(BLUEPRINT_USES_DOCUMENT)).map(spot => spot.mapId),
+      server.merges,
+      saved,
+      controller.getState().activeHistory,
+      controller.getState().notice?.text,
+    ])
+      .toStrictEqual([
+        [ 3, 3, 7 ],
+        [ { schemaVersion: 2, remove: [ { map: 8, blueprint: 'aa22', x: 0, y: 0 } ] } ],
+        [],
+        'blueprint:aa22',
+        'Forgot a copy of "Goblin camp" on Map 8.',
+      ]);
   });
 
   it('opens the map at a placement\'s middle, or at a copy of its events, when either is clicked', async () =>

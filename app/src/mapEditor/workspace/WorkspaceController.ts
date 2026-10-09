@@ -1,7 +1,8 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
 import { blueprintsKeptGuard } from '../core/blueprints/blueprintMoves.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../core/blueprints/blueprints.ts';
-import { BLUEPRINT_USES_DOCUMENT, keepUsesWithMaps, usedCopiesOf } from '../core/blueprints/blueprintUses.ts';
+import { BLUEPRINT_USES_DOCUMENT, usedCopiesOf } from '../core/blueprints/blueprintUses.ts';
+import { BlueprintUsesKeeper } from '../core/blueprints/blueprintUsesKeeper.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
 import type { MapCell } from '../core/renderer/camera.ts';
@@ -164,6 +165,12 @@ class WorkspaceController
 {
   readonly services: MapEditorServices;
 
+  /**
+   * Keeps the record of where blueprints are placed on disk in step with the maps, a map's placements written with its
+   * file (see BlueprintUsesKeeper); none in a window with no server.
+   */
+  readonly placements: BlueprintUsesKeeper | null;
+
   readonly tree: MapTreeService | null;
 
   readonly router: HistoryRouter;
@@ -239,9 +246,21 @@ class WorkspaceController
   constructor(services: MapEditorServices)
   {
     this.services = services;
-    this.tree = services.api === null
+
+    // the placements are kept from the moment the workspace opens, before the record is held, so the keeper learns what
+    // its file holds from the very read that brings it in.
+    const { api } = services;
+    this.placements = api === null
       ? null
-      : new MapTreeService({ hub: services.hub, api: services.api, openDocument: key => services.openDocument(key) });
+      : new BlueprintUsesKeeper({
+        hub: services.hub,
+        api,
+        holders: key => services.sync.holders(key),
+        onProblem: message => this.notify(message, 'error'),
+      });
+    this.tree = api === null
+      ? null
+      : new MapTreeService({ hub: services.hub, api, openDocument: key => services.openDocument(key), placements: this.placements });
 
     // no undo, redo or jump takes away a blueprint whose copies still name it, its placed tiles among them.
     const { hub, blueprintCopies } = services;
@@ -264,22 +283,21 @@ class WorkspaceController
   }
 
   /**
-   * Holds the blueprints and the record of where they are placed from the moment the workspace opens, and keeps the
-   * record's file written with the maps from then on (see keepUsesWithMaps). Every edit that moves a placement with its
-   * tiles changes the record only while the window holds it, and reads how far each placement reaches from the
-   * blueprints, so both are held before the first such edit. One that cannot be read says why in the Blueprints section,
-   * which asks for both too. A window with no server holds neither.
+   * Holds the blueprints and the record of where they are placed from the moment the workspace opens; the record's file
+   * is kept in step with the maps from then on (see {@link placements}). Every edit that moves a placement with its tiles
+   * changes the record only while the window holds it, and reads how far each placement reaches from the blueprints, so
+   * both are held before the first such edit. One that cannot be read says why in the Blueprints section, which asks for
+   * both too. A window with no server holds neither.
    * @returns {Promise<void>} Settles once both have been asked for, held or not; never rejects.
    */
   #holdPlacements(): Promise<void>
   {
-    const { api, hub } = this.services;
+    const { api } = this.services;
     if (api === null)
     {
       return Promise.resolve();
     }
 
-    keepUsesWithMaps(hub, message => this.notify(message, 'error'));
     const asked = [ BLUEPRINTS_DOCUMENT, BLUEPRINT_USES_DOCUMENT ].map(key => Promise.resolve()
       .then(() => this.services.openDocument(key))
       .then(() => undefined, () => undefined));
@@ -602,8 +620,9 @@ class WorkspaceController
 
   /**
    * Saves every document holding unsaved edits, leaving any in conflict for the person to settle first. What was saved
-   * is told in maps: the record of where blueprints are placed, or the blueprints after an undo, are saved along with
-   * them but are not maps, and are not counted as any.
+   * is told in maps: the blueprints after an undo are saved along with them but are not maps, and are not counted as any.
+   * The record of where blueprints are placed never holds unsaved edits of its own: each map's placements go to disk
+   * with that map.
    * @returns {Promise<void>} Settles once every save has finished.
    */
   async saveAll(): Promise<void>

@@ -1,4 +1,5 @@
 import type { EventNote } from '../blueprints/blueprintCopies.ts';
+import type { BlueprintUsesMerge } from '../blueprints/blueprintUsesWriter.ts';
 import type { CommandUsageCounts } from '../commandList/commandUsage.ts';
 import type { DatabaseNamesJson } from '../commandList/databaseNames.ts';
 import { isEditorDataName } from '../model/documentKeys.ts';
@@ -192,6 +193,16 @@ interface MapEditorApi
    * @returns {Promise<void>} Settles once written.
    */
   saveEditorData(key: string, document: JsonValue): Promise<void>;
+
+  /**
+   * Merges some maps' placements of blueprints into the record of where blueprints are placed, as it stands on disk at
+   * that moment, every map the merge does not name staying exactly as the file holds it: the record is never written
+   * whole, so two windows saving two maps at once both land. The server refuses a record of a newer shape with a 409,
+   * and never writes over a file that is not a record of placements.
+   * @param {BlueprintUsesMerge} merge What to merge.
+   * @returns {Promise<void>} Settles once written.
+   */
+  mergeBlueprintUses(merge: BlueprintUsesMerge): Promise<void>;
 
   /**
    * Builds the address of the server's file-change stream.
@@ -565,6 +576,11 @@ class HttpMapEditorApi implements MapEditorApi
   async saveEditorData(key: string, document: JsonValue): Promise<void>
   {
     return this.#put(`/api/editor-data/${requireEditorDataKey(key)}`, document);
+  }
+
+  async mergeBlueprintUses(merge: BlueprintUsesMerge): Promise<void>
+  {
+    return this.#put('/api/editor-data/blueprint-uses/maps', merge);
   }
 
   fileChangesUrl(): string

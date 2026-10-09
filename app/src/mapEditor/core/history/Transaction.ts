@@ -178,15 +178,22 @@ class Transaction
    * @param {DocumentKey} document The document the file backs, such as a map's.
    * @param {JsonValue | null} before The file's content before the step, or null when there was no file.
    * @param {JsonValue | null} after The file's content after the step, or null when the step removes it.
-   * @param {{ before?: string, after?: string, beforeHeld?: DocumentSnapshot }} sides The file's exact text on either
-   * side, where it was read, and the copy the window held before the step, where it held one.
+   * @param {object} sides The file's exact text on either side, where it was read; the copy the window held before the
+   * step, where it held one; and a map's placements of blueprints on either side, as the record on disk holds them, where
+   * they are known.
    * @returns {Transaction} This transaction, for chaining.
    */
   file(
     document: DocumentKey,
     before: JsonValue | null,
     after: JsonValue | null,
-    sides: { before?: string; after?: string; beforeHeld?: DocumentSnapshot } = {},
+    sides: {
+      before?: string;
+      after?: string;
+      beforeHeld?: DocumentSnapshot;
+      beforePlacements?: JsonValue;
+      afterPlacements?: JsonValue;
+    } = {},
   ): this
   {
     this.#requireOpen();
@@ -197,6 +204,8 @@ class Transaction
       ...(sides.before === undefined ? {} : { beforeText: sides.before }),
       ...(sides.after === undefined ? {} : { afterText: sides.after }),
       ...(sides.beforeHeld === undefined ? {} : { beforeHeld: cloneJson(sides.beforeHeld) }),
+      ...(sides.beforePlacements === undefined ? {} : { beforePlacements: cloneJson(sides.beforePlacements) }),
+      ...(sides.afterPlacements === undefined ? {} : { afterPlacements: cloneJson(sides.afterPlacements) }),
     });
     return this;
   }

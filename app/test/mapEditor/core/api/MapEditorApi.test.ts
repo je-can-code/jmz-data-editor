@@ -338,6 +338,21 @@ describe('HttpMapEditorApi', () =>
         ]);
     });
 
+    it('puts a merge of blueprint placements to the record\'s own route, with this window\'s id, never to the whole record\'s', async () =>
+    {
+      // Arrange: one map's placements, and a placement forgotten on another.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+      const merge = { schemaVersion: 2, maps: { 16: { aa22: [ { x: 1, y: 3 } ] } }, remove: [ { map: 3, blueprint: 'aa22', x: -1, y: 0 } ] };
+
+      // Act.
+      await api.mergeBlueprintUses(merge);
+
+      // Assert.
+      const [ request ] = requests;
+      expect([ request.method, request.url, request.headers['x-jmz-client'], JSON.parse(request.body as string) ])
+        .toStrictEqual([ 'PUT', `${BASE}/api/editor-data/blueprint-uses/maps`, 'window-7', merge ]);
+    });
+
     it('puts the common events with this window\'s id, as its other saves, so the change comes back as its own', async () =>
     {
       // Arrange.

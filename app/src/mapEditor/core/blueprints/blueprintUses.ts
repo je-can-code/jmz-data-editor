@@ -1,31 +1,25 @@
-import { BLUEPRINT_USES, saveEditorDocument, type EditorDataSaveOutcome } from '../editorData/editorData.ts';
-import type { DocumentHub, HubEvent, HubSource } from '../history/DocumentHub.ts';
-import { blueprintHistoryKey, documentHistoryKey } from '../history/historyKeys.ts';
-import { documentsOfStep, type HistoryStep } from '../history/HistoryStep.ts';
+import { BLUEPRINT_USES } from '../editorData/editorData.ts';
+import type { DocumentHub } from '../history/DocumentHub.ts';
+import { blueprintHistoryKey } from '../history/historyKeys.ts';
+import type { HistoryStep } from '../history/HistoryStep.ts';
 import type { Transaction } from '../history/Transaction.ts';
-import {
-  editorDataDocumentKey,
-  mapDocumentKey,
-  parseDocumentKey,
-  type DocumentKey,
-  type EditorDataDocumentKey,
-} from '../model/documentKeys.ts';
+import { editorDataDocumentKey, type EditorDataDocumentKey } from '../model/documentKeys.ts';
 import type { EditorDocument } from '../model/EditorDocument.ts';
 import { isJsonObject, type JsonObject, type JsonValue } from '../model/json.ts';
-import { invertPatch } from '../model/patches.ts';
 import type { BlueprintCopyCount, BlueprintCopyCounter, BlueprintCopyCounts } from './blueprintCopies.ts';
 import { isBlueprintId } from './blueprintLink.ts';
 
 /**
  * The record of where blueprints are placed: {@code <project>/jmz-editor/blueprint-uses.json}, held in its stored form, the
  * record under {@code data} beside the shape's version. Per map, by id, and per blueprint on it, by its id, every cell a
- * placement of the blueprint's tiles had its top-left corner put down at:
+ * placement of the blueprint's tiles had its top-left corner put down at, and for a placement cut off by the map's edge,
+ * the part of the blueprint that went down, counted from the blueprint's own corner:
  *
  * <pre>
  * {
  *   "maps": {
  *     "16": {
- *       "k3x9q2mf": [ { "x": 4, "y": 7 }, { "x": 12, "y": 3 } ]
+ *       "k3x9q2mf": [ { "x": 4, "y": 7 }, { "x": 18, "y": 3, "placed": { "x": 0, "y": 0, "width": 2, "height": 6 } } ]
  *     },
  *     "102": {
  *       "k3x9q2mf": [ { "x": 40, "y": 41 } ]
@@ -36,22 +30,38 @@ import { isBlueprintId } from './blueprintLink.ts';
  *
  * A placement's tiles carry nothing saying which blueprint they came from, so this is the only way back to them, and it
  * holds nothing more than that: how many placements there are falls out of it, and how big each is comes from its
- * blueprint. A placement's events are never here; each one's note already names its blueprint, and travels with it.
+ * blueprint. A placement's events are never here; each one's note already names its blueprint, and travels with it. A
+ * record written before placements said the part placed reads as every placement whole.
  *
  * Each map's placements are written whole, in one order (blueprints by id, then each one's placements row by row), so the
  * file reads the same whoever wrote it, and an edit to one map's placements never moves another's: undoing a placement on
- * one map is never held up by a placement on another since.
+ * one map is never held up by a placement on another since. The record describes the maps on disk, so it is kept
+ * alongside them (see editorData's keptAlongside): a map's part reaches the disk only with that map's own file, merged into
+ * the record there, which is the keeper's work (see blueprintUsesKeeper.ts).
  */
 const BLUEPRINT_USES_DOCUMENT: EditorDataDocumentKey = editorDataDocumentKey(BLUEPRINT_USES.name);
 
 /**
+ * The part of a blueprint one placement put down, counted from the blueprint's own top-left corner: all of it but what the
+ * map's edge cut off.
+ */
+type PlacedPart = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+/**
  * One placement of a blueprint's tiles on a map: the blueprint, and the cell its top-left corner was put down at, which
- * may lie past the map's top or left edge when the placement hangs over it.
+ * may lie past the map's top or left edge when the placement hangs over it; and, for a placement the map's edge cut off,
+ * the part that went down. A placement without one went down whole, or was recorded before the part was.
  */
 type BlueprintSpot = {
   readonly blueprintId: string;
   readonly x: number;
   readonly y: number;
+  readonly placed?: PlacedPart;
 };
 
 /**
@@ -65,11 +75,6 @@ type PlacedSpot = BlueprintSpot & { readonly mapId: number };
 const MAP_KEY_PATTERN = /^[1-9][0-9]*$/u;
 
 /**
- * What the author calls the record, in the plural, in what saving it says.
- */
-const USES_WORDS = 'blueprint placements';
-
-/**
  * Says a record does not hold what a record holds, naming where.
  * @param {string} where Where, such as "map 16".
  * @returns {Error} The error.
@@ -77,6 +82,33 @@ const USES_WORDS = 'blueprint placements';
 const unreadable = (where: string): Error =>
 {
   return new Error(`the saved blueprint placements hold something under ${where} that is not a placement`);
+};
+
+/**
+ * Reads the part of a blueprint a placement put down: a rectangle inside the blueprint, from its corner, at least one tile
+ * each way.
+ * @param {string} mapKey The map's key in the record, for the error.
+ * @param {JsonValue} saved What the placement keeps under {@code placed}.
+ * @returns {PlacedPart} The part.
+ * @throws {Error} When it is not such a rectangle.
+ */
+const readPlacedPart = (mapKey: string, saved: JsonValue): PlacedPart =>
+{
+  const values = isJsonObject(saved)
+    ? [ saved['x'], saved['y'], saved['width'], saved['height'] ]
+    : [];
+  if (values.length !== 4 || values.every(value => Number.isInteger(value)) === false)
+  {
+    throw unreadable(`map ${mapKey}`);
+  }
+
+  const [ x, y, width, height ] = values as number[];
+  if (x < 0 || y < 0 || width < 1 || height < 1)
+  {
+    throw unreadable(`map ${mapKey}`);
+  }
+
+  return { x, y, width, height };
 };
 
 /**
@@ -103,7 +135,11 @@ const readSpotList = (mapKey: string, blueprintId: string, saved: JsonValue): Bl
       throw unreadable(`map ${mapKey}`);
     }
 
-    return { blueprintId, x: x as number, y: y as number };
+    // a placement keeps its part only when the map's edge cut some of it off.
+    const { placed } = cell as JsonObject;
+    return placed === undefined
+      ? { blueprintId, x: x as number, y: y as number }
+      : { blueprintId, x: x as number, y: y as number, placed: readPlacedPart(mapKey, placed) };
   });
 };
 
@@ -152,6 +188,24 @@ const readUses = (data: JsonValue | undefined): PlacedSpot[] =>
 };
 
 /**
+ * Reads every map's placements out of the record in its stored form, as its file holds it: what the record's keeper keeps
+ * of the file on disk.
+ * @param {JsonValue} stored The record, its version and its data.
+ * @returns {Map<number, BlueprintSpot[]>} Each map's placements, by map id; a map with none is left out.
+ * @throws {Error} When it is not a record of placements.
+ */
+const placementsByMap = (stored: JsonValue): Map<number, BlueprintSpot[]> =>
+{
+  const byMap = new Map<number, BlueprintSpot[]>();
+  readUses(isJsonObject(stored) ? stored['data'] : undefined).forEach(({ mapId, ...spot }) =>
+  {
+    byMap.set(mapId, [ ...byMap.get(mapId) ?? [], spot ]);
+  });
+
+  return byMap;
+};
+
+/**
  * Finds the record a window holds, when it is one: what every edit keeping placements in step reads and writes. A window
  * not holding it, or holding a file that is not a record of placements, leaves the record as it is, and the Blueprints
  * section says why it could not be read.
@@ -189,6 +243,19 @@ const usesOf = (document: EditorDocument): PlacedSpot[] =>
 };
 
 /**
+ * Reads the placements one map's entry holds, as the record keeps it.
+ * @param {number} mapId The map.
+ * @param {JsonValue | undefined} entry The entry, or undefined for a map with none.
+ * @returns {BlueprintSpot[]} The placements, none for a map with no entry.
+ */
+const spotsOfEntry = (mapId: number, entry: JsonValue | undefined): BlueprintSpot[] =>
+{
+  return entry === undefined
+    ? []
+    : readMapEntry(String(mapId), entry);
+};
+
+/**
  * Lists the placements the record holds on one map.
  * @param {EditorDocument} document The record, in its stored form.
  * @param {number} mapId The map.
@@ -196,10 +263,7 @@ const usesOf = (document: EditorDocument): PlacedSpot[] =>
  */
 const spotsOnMap = (document: EditorDocument, mapId: number): BlueprintSpot[] =>
 {
-  const entry = document.valueAt([ 'data', 'maps', String(mapId) ]);
-  return entry === undefined
-    ? []
-    : readMapEntry(String(mapId), entry);
+  return spotsOfEntry(mapId, document.valueAt([ 'data', 'maps', String(mapId) ]));
 };
 
 /**
@@ -216,7 +280,8 @@ const spotsOfBlueprint = (document: EditorDocument, blueprintId: string): Placed
 };
 
 /**
- * Reports whether two spots are one placement: the same blueprint at the same cell.
+ * Reports whether two spots are one placement: the same blueprint at the same cell, whatever part of it went down, since
+ * the same blueprint put down twice at one cell is one placement, the second painting over the first.
  * @param {BlueprintSpot} left One spot.
  * @param {BlueprintSpot} right The other.
  * @returns {boolean} True when they are the same.
@@ -224,6 +289,31 @@ const spotsOfBlueprint = (document: EditorDocument, blueprintId: string): Placed
 const sameSpot = (left: BlueprintSpot, right: BlueprintSpot): boolean =>
 {
   return left.blueprintId === right.blueprintId && left.x === right.x && left.y === right.y;
+};
+
+/**
+ * Names a spot whole, its part placed included, so two spots read the same exactly when the record would write them the
+ * same: what tells a placement changed from one left as it was.
+ * @param {BlueprintSpot} spot The spot.
+ * @returns {string} The name, such as {@code aa22@4,7} or {@code aa22@-1,0:1,0,2x3}.
+ */
+const placementKey = (spot: BlueprintSpot): string =>
+{
+  const { blueprintId, x, y, placed } = spot;
+  return placed === undefined
+    ? `${blueprintId}@${x},${y}`
+    : `${blueprintId}@${x},${y}:${placed.x},${placed.y},${placed.width}x${placed.height}`;
+};
+
+/**
+ * Reports whether two spots are written the same, their parts placed included.
+ * @param {BlueprintSpot} left One spot.
+ * @param {BlueprintSpot} right The other.
+ * @returns {boolean} True when they are.
+ */
+const samePlacement = (left: BlueprintSpot, right: BlueprintSpot): boolean =>
+{
+  return placementKey(left) === placementKey(right);
 };
 
 /**
@@ -243,6 +333,19 @@ const recordOrder = (left: BlueprintSpot, right: BlueprintSpot): number =>
 };
 
 /**
+ * Writes one spot as the record keeps it: its corner, and its part placed when it has one.
+ * @param {BlueprintSpot} spot The spot.
+ * @returns {JsonObject} The spot as written.
+ */
+const spotJson = (spot: BlueprintSpot): JsonObject =>
+{
+  const { x, y, placed } = spot;
+  return placed === undefined
+    ? { x, y }
+    : { x, y, placed: { x: placed.x, y: placed.y, width: placed.width, height: placed.height } };
+};
+
+/**
  * Builds one map's entry from its spots: each blueprint under its id, its spots row by row, each spot once, since the same
  * blueprint put down twice at one cell is one placement, the second painting over the first.
  * @param {readonly BlueprintSpot[]} spots The map's spots, in any order.
@@ -257,13 +360,24 @@ const mapEntryOf = (spots: readonly BlueprintSpot[]): JsonObject | undefined =>
   }
 
   const entry: JsonObject = {};
-  [ ...distinct ].sort(recordOrder).forEach(({ blueprintId, x, y }) =>
+  [ ...distinct ].sort(recordOrder).forEach(spot =>
   {
-    const kept = (entry[blueprintId] ?? []) as JsonValue[];
-    entry[blueprintId] = [ ...kept, { x, y } ];
+    const kept = (entry[spot.blueprintId] ?? []) as JsonValue[];
+    entry[spot.blueprintId] = [ ...kept, spotJson(spot) ];
   });
 
   return entry;
+};
+
+/**
+ * Reports whether two lists of a map's spots are written the same: the same placements, whatever order they come in.
+ * @param {readonly BlueprintSpot[]} left One list.
+ * @param {readonly BlueprintSpot[]} right The other.
+ * @returns {boolean} True when the record would write both alike.
+ */
+const sameSpots = (left: readonly BlueprintSpot[], right: readonly BlueprintSpot[]): boolean =>
+{
+  return JSON.stringify(mapEntryOf(left) ?? null) === JSON.stringify(mapEntryOf(right) ?? null);
 };
 
 /**
@@ -291,7 +405,8 @@ const changeMapSpots = (
 };
 
 /**
- * Adds placements to a map's record inside an open transaction; one already recorded is recorded once.
+ * Adds placements to a map's record inside an open transaction. One put down at a cell already recorded takes the place of
+ * the one there, painting over it as it does, and its part placed with it.
  * @param {Transaction} tx The open transaction.
  * @param {Pick<DocumentHub, 'has' | 'document'>} hub The window's documents.
  * @param {number} mapId The map.
@@ -301,7 +416,7 @@ const recordSpots = (tx: Transaction, hub: Pick<DocumentHub, 'has' | 'document'>
 {
   if (added.length > 0)
   {
-    changeMapSpots(tx, hub, mapId, spots => [ ...spots, ...added ]);
+    changeMapSpots(tx, hub, mapId, spots => [ ...spots.filter(spot => added.some(each => sameSpot(each, spot)) === false), ...added ]);
   }
 };
 
@@ -394,7 +509,8 @@ const usedCopiesOf = (
 /**
  * Forgets one placement of a blueprint, as one step in the blueprint's own history: what the author does once a placement
  * is no longer where it was, and is not coming back, so nothing will ever repaint it and it no longer keeps the blueprint
- * from being deleted. The map's tiles are left as they are. A placement the record no longer holds changes nothing.
+ * from being deleted. The map's tiles are left as they are. A placement the record no longer holds changes nothing. The
+ * record's keeper takes it off the disk at once, and nothing else of its map with it.
  * @param {DocumentHub} hub The window's documents; the blueprints and the record must be held.
  * @param {{ id: string, name: string }} blueprint The blueprint, by its id and its name.
  * @param {PlacedSpot} spot The placement.
@@ -408,330 +524,26 @@ const forgetPlacement = (hub: DocumentHub, blueprint: { readonly id: string; rea
   });
 };
 
-/**
- * Writes the record to disk: nothing when nothing is unsaved, and nothing while it waits for the author's choice about
- * changes made elsewhere, which writing it would put this copy over (see {@link saveEditorDocument}).
- * @param {DocumentHub} hub The window's documents; the record must be held.
- * @returns {Promise<EditorDataSaveOutcome>} Settles once the file is written, or at once when there is nothing to write or
- * the write is held back; rejects when the write itself fails.
- */
-const saveBlueprintUses = (hub: DocumentHub): Promise<EditorDataSaveOutcome> =>
-{
-  return saveEditorDocument(hub, BLUEPRINT_USES_DOCUMENT, USES_WORDS);
-};
-
-/**
- * Reads the id of the map a document is.
- * @param {DocumentKey} key The document.
- * @returns {number | null} The map's id, or null for a document that is no map.
- */
-const mapIdOf = (key: DocumentKey): number | null =>
-{
-  const parsed = parseDocumentKey(key);
-  return parsed.kind === 'map'
-    ? parsed.mapId
-    : null;
-};
-
-/**
- * Follows, for each map the window holds, its placements as its file on disk holds them, so that throwing the map's
- * edits away, by taking the version on disk over them, takes its part of the record back with them: otherwise a
- * placement the thrown-away edits made would stay recorded, no longer where it was, and one they took away would be
- * lost from the record while the map still holds its tiles.
- *
- * While a map holds nothing unsaved, its part of the record is exactly its file's, every step that changed both having
- * been saved, or undone. While it holds unsaved edits, its file's part stays as it last was, but for a change made to the
- * record alone, such as a placement forgotten, which is the author's choice about the record whatever becomes of the
- * map's edits. A map whose file's part cannot be told, as one whose edits went on while its save was on its way, or one
- * another window handed over with unsaved edits, is left as it is when its edits are thrown away.
- */
-class PlacementsOnDisk
-{
-  #hub: DocumentHub;
-
-  /**
-   * Each held map's placements as its file holds them, by map id; a map missing here is one this window cannot tell
-   * them for.
-   */
-  #onDisk = new Map<number, BlueprintSpot[]>();
-
-  /**
-   * @param {DocumentHub} hub The window's documents.
-   */
-  constructor(hub: DocumentHub)
-  {
-    this.#hub = hub;
-    this.#refresh();
-  }
-
-  /**
-   * Hears one event of the window's documents, and answers a map's edits being thrown away by bringing its part of the
-   * record back to its file's.
-   * @param {HubEvent} event The event.
-   * @returns {boolean} True when the record changed for a map whose edits were thrown away, so it must be written.
-   */
-  heard(event: HubEvent): boolean
-  {
-    // a map whose edits are being thrown away already holds none, while its part of the record still holds them, until
-    // the word that it was reloaded comes, so nothing heard before then reads its part.
-    let restored = false;
-    switch (event.type)
-    {
-      case 'reloaded':
-        restored = this.#restore(event.document);
-        break;
-      case 'released':
-      case 'saved':
-        this.#letGo(event.document);
-        break;
-      case 'adopted':
-        this.#adopted(event.document, event.source);
-        break;
-      case 'committed':
-      case 'redone':
-        this.#mirror(event.step, 'forward');
-        break;
-      case 'undone':
-        this.#mirror(event.step, 'backward');
-        break;
-      default:
-        return false;
-    }
-
-    this.#refresh();
-    return restored;
-  }
-
-  /**
-   * Takes every map holding nothing unsaved at its word: its part of the record is its file's.
-   */
-  #refresh(): void
-  {
-    const uses = readableUses(this.#hub);
-    if (uses === null)
-    {
-      return;
-    }
-
-    this.#hub.documentKeys().forEach(key =>
-    {
-      const mapId = mapIdOf(key);
-      if (mapId !== null && this.#hub.isDirty(key) === false)
-      {
-        this.#onDisk.set(mapId, spotsOnMap(uses, mapId));
-      }
-    });
-  }
-
-  /**
-   * Forgets what a map's file holds once the window lets the map go, or once it is saved: a map saved clean is read
-   * afresh straight after, and one whose edits went on while the save was on its way cannot be told any more.
-   * @param {DocumentKey} key The document let go of, or saved.
-   */
-  #letGo(key: DocumentKey): void
-  {
-    const mapId = mapIdOf(key);
-    if (mapId !== null)
-    {
-      this.#onDisk.delete(mapId);
-    }
-  }
-
-  /**
-   * Takes the record arriving from disk as what every held map's file holds, for a map with unsaved edits too, since no
-   * edit could have changed its part of a record the window did not hold yet. A record handed over by another window
-   * may hold that window's unsaved edits, so only maps holding none are taken from it.
-   * @param {DocumentKey} key The document adopted.
-   * @param {HubSource} source Whether it came from disk, or from another window.
-   */
-  #adopted(key: DocumentKey, source: HubSource): void
-  {
-    const uses = readableUses(this.#hub);
-    if (key !== BLUEPRINT_USES_DOCUMENT || source === 'remote' || uses === null)
-    {
-      return;
-    }
-
-    this.#hub.documentKeys().forEach(held =>
-    {
-      const mapId = mapIdOf(held);
-      if (mapId !== null && this.#onDisk.has(mapId) === false)
-      {
-        this.#onDisk.set(mapId, spotsOnMap(uses, mapId));
-      }
-    });
-  }
-
-  /**
-   * Carries onto the file's part of each map holding unsaved edits a change a step made to its part of the record
-   * without touching the map, such as a placement forgotten, or put back by an undo: whatever becomes of the map's
-   * edits, that change stands. A step that also changed the map is one of its edits, and is left to them.
-   * @param {HistoryStep} step The step that moved.
-   * @param {'forward' | 'backward'} direction Whether it went in, made or redone, or came out, undone.
-   */
-  #mirror(step: HistoryStep, direction: 'forward' | 'backward'): void
-  {
-    const patches = step.entries.filter(entry => entry.document === BLUEPRINT_USES_DOCUMENT).map(entry => entry.patch);
-    const uses = readableUses(this.#hub);
-    if (patches.length === 0 || uses === null)
-    {
-      return;
-    }
-
-    // the record as it was before the step moved: a step that went in is taken back out, one that came out put back in.
-    const moved = direction === 'forward'
-      ? patches
-      : [ ...patches ].reverse().map(invertPatch);
-    const before = uses.toJsonWithout(moved);
-    let earlier: PlacedSpot[];
-    try
-    {
-      earlier = readUses(isJsonObject(before) ? before['data'] : undefined);
-    }
-    catch
-    {
-      return;
-    }
-
-    const touched = documentsOfStep(step);
-    [ ...this.#onDisk ].forEach(([ mapId, onDisk ]) =>
-    {
-      const key = mapDocumentKey(mapId);
-      if (touched.includes(key) || this.#hub.isDirty(key) === false)
-      {
-        return;
-      }
-
-      // only what the step changed is carried over, so every other difference between the two stays as it was.
-      const was = earlier.filter(spot => spot.mapId === mapId);
-      const now = spotsOnMap(uses, mapId);
-      const removed = was.filter(spot => now.some(each => sameSpot(each, spot)) === false);
-      const added = now.filter(spot => was.some(each => sameSpot(each, spot)) === false);
-      if (removed.length > 0 || added.length > 0)
-      {
-        this.#onDisk.set(mapId, [ ...onDisk.filter(spot => removed.some(each => sameSpot(each, spot)) === false), ...added ]);
-      }
-    });
-  }
-
-  /**
-   * Brings a map's part of the record back to its file's once the window has thrown the map's edits away, as a step
-   * nothing can undo, since nothing can take back the edits thrown away with it either. A map whose file's part cannot
-   * be told is left as it is.
-   * @param {DocumentKey} key The document whose edits were thrown away.
-   * @returns {boolean} True when its part of the record changed.
-   */
-  #restore(key: DocumentKey): boolean
-  {
-    const mapId = mapIdOf(key);
-    const onDisk = mapId === null ? undefined : this.#onDisk.get(mapId);
-    if (mapId === null || onDisk === undefined || readableUses(this.#hub) === null)
-    {
-      return false;
-    }
-
-    const step = this.#hub.edit(`Load the version of Map ${mapId} on disk`, [ documentHistoryKey(BLUEPRINT_USES_DOCUMENT) ], tx =>
-    {
-      changeMapSpots(tx, this.#hub, mapId, () => onDisk);
-    });
-    if (step === null)
-    {
-      return false;
-    }
-
-    this.#hub.forgetStep(step.id);
-    return true;
-  }
-}
-
-/**
- * Keeps the record on disk in step with the maps it describes: it is written whenever a map's file or the map tree's is
- * written, from this window or another, so what the record says of the maps on disk is what they hold. A placement, a
- * resize or a move of tiles changes the record in the same step as the map, and stays unsaved with the map until the map
- * is saved; the map tree writes its changes at once, the record with them. A map whose edits are thrown away, its version
- * on disk taken over them, has its part of the record brought back to its file's and written at once (see
- * {@link PlacementsOnDisk}). A record waiting for the author's choice about changes made elsewhere is held back, and the
- * author hears why, as they do when a write fails. One write at a time: a save heard while one is on its way writes once
- * more after it.
- * @param {DocumentHub} hub The window's documents.
- * @param {(message: string) => void} onProblem Tells the author why the record was not written.
- * @returns {() => void} Stops keeping it.
- */
-const keepUsesWithMaps = (hub: DocumentHub, onProblem: (message: string) => void): (() => void) =>
-{
-  let writing = false;
-  let again = false;
-  const onDisk = new PlacementsOnDisk(hub);
-
-  /**
-   * Writes the record once it has anything unsaved, or once more after the write on its way.
-   */
-  const write = (): void =>
-  {
-    if (writing)
-    {
-      again = true;
-      return;
-    }
-
-    if (hub.has(BLUEPRINT_USES_DOCUMENT) === false || hub.isDirty(BLUEPRINT_USES_DOCUMENT) === false)
-    {
-      return;
-    }
-
-    writing = true;
-    saveBlueprintUses(hub)
-      .then(
-        outcome =>
-        {
-          if (outcome.ok === false)
-          {
-            onProblem(outcome.message);
-          }
-        },
-        (error: unknown) =>
-        {
-          onProblem(`The ${USES_WORDS} could not be saved: ${error instanceof Error ? error.message : String(error)}`);
-        },
-      )
-      .finally(() =>
-      {
-        writing = false;
-        if (again)
-        {
-          again = false;
-          write();
-        }
-      });
-  };
-
-  return hub.subscribe(event =>
-  {
-    const restored = onDisk.heard(event);
-    const kind = event.type === 'saved' ? parseDocumentKey(event.document).kind : null;
-    if (restored || kind === 'map' || kind === 'mapinfos')
-    {
-      write();
-    }
-  });
-};
-
 export {
   BLUEPRINT_USES_DOCUMENT,
   changeMapSpots,
   countsWithPlacements,
   forgetPlacement,
   forgetSpots,
-  keepUsesWithMaps,
   mapEntryOf,
+  placementKey,
+  placementsByMap,
   readableUses,
   readUses,
   recordSpots,
   sameSpot,
-  saveBlueprintUses,
+  samePlacement,
+  sameSpots,
+  spotJson,
   spotsOfBlueprint,
+  spotsOfEntry,
   spotsOnMap,
   usedCopiesOf,
   usesOf,
 };
-export type { BlueprintSpot, PlacedSpot };
+export type { BlueprintSpot, PlacedPart, PlacedSpot };

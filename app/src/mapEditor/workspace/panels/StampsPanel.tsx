@@ -13,7 +13,6 @@ import {
   BLUEPRINT_USES_DOCUMENT,
   countsWithPlacements,
   forgetPlacement,
-  saveBlueprintUses,
   usedCopiesOf,
   usesOf,
   type PlacedSpot,
@@ -551,28 +550,6 @@ const settleEdit = (controller: WorkspaceController, outcome: BlueprintOutcome, 
 };
 
 /**
- * Writes the record of where blueprints are placed to disk once a placement was forgotten from the panel, which changes
- * no map, so no map's save would write it; an undo leaves it unsaved until the maps are next saved. A record waiting for
- * a choice about changes made elsewhere is not written, which the author hears, as is a write that fails.
- * @param {WorkspaceController} controller The workspace, for its documents and its notices.
- */
-const writePlacements = (controller: WorkspaceController) =>
-{
-  saveBlueprintUses(controller.services.hub)
-    .then(outcome =>
-    {
-      if (outcome.ok === false)
-      {
-        controller.notify(outcome.message, 'error');
-      }
-    })
-    .catch((error: unknown) =>
-    {
-      controller.notify(`The blueprint placements could not be saved: ${messageOf(error)}`, 'error');
-    });
-};
-
-/**
  * The panel's blueprints, by name, each with its picture and how many copies of it stand across every map, a placement
  * of its tiles counting as one copy, as each copy of one of its events does: clicking one takes it up as the brush, so
  * each click on a map places copies linked to it, and clicking it again, or Esc, puts it down. Each can be renamed in
@@ -663,7 +640,7 @@ const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; r
 
   /**
    * Forgets a placement no longer where it was, as one step in its blueprint's history, which becomes the one undo acts
-   * on, and writes the record at once.
+   * on; the workspace's keeper of the record takes it off the disk at once, and nothing else of its map.
    * @param {Blueprint} blueprint The blueprint.
    * @param {PlacedSpot} spot The placement.
    */
@@ -674,7 +651,6 @@ const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; r
       return;
     }
 
-    writePlacements(controller);
     controller.focusHistory(blueprintHistoryKey(blueprint.id));
     controller.notify(`Forgot a copy of "${blueprint.name}" on ${controller.mapName(spot.mapId)}.`);
   };

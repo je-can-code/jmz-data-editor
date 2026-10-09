@@ -1,6 +1,6 @@
 import type { MapEditorApi } from '../api/MapEditorApi.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
-import { editorDataDocumentKey, type EditorDataDocumentKey } from '../model/documentKeys.ts';
+import { editorDataDocumentKey, parseDocumentKey, type DocumentKey, type EditorDataDocumentKey } from '../model/documentKeys.ts';
 import { isJsonObject, type JsonObject, type JsonValue } from '../model/json.ts';
 
 /**
@@ -23,6 +23,14 @@ type EditorDataDefinition = {
    * What a project that has never saved one starts with.
    */
   readonly createEmpty: () => JsonObject;
+
+  /**
+   * Whether it is kept alongside other documents rather than saved whole: state the editor saves a part at a time,
+   * each part with the document it describes, so it has no unsaved edits of its own, is never written as a whole,
+   * and never waits for a choice between two copies (see DocumentHub). The record of where blueprints are placed is
+   * one; the rest are documents the author edits as a whole.
+   */
+  readonly keptAlongside: boolean;
 };
 
 /**
@@ -45,25 +53,28 @@ type EditorDataSaveOutcome =
  * Blueprints: saved stamps whose copies stay linked, so changing one changes them all. Keyed by each blueprint's id,
  * which never changes, so every blueprint's edits address it alone (see core/blueprints/blueprints.ts).
  */
-const BLUEPRINTS: EditorDataDefinition = { name: 'blueprints', schemaVersion: 1, createEmpty: () => ({ blueprints: {} }) };
+const BLUEPRINTS: EditorDataDefinition = { name: 'blueprints', schemaVersion: 1, createEmpty: () => ({ blueprints: {} }), keptAlongside: false };
 
 /**
  * Where blueprints are placed: per map, per blueprint, the cell each placement of the blueprint's tiles was put down at,
- * so the editor can find every placement again (see core/blueprints/blueprintUses.ts). A placement's events need no
- * entry here; each one's note already names its blueprint.
+ * and for one cut off by the map's edge the part that went down, so the editor can find every placement again (see
+ * core/blueprints/blueprintUses.ts). A placement's events need no entry here; each one's note already names its
+ * blueprint. It describes the maps on disk, so it is kept alongside them: each map's part is written with that map's
+ * file, merged into the record as it stands on disk, and never the record whole. Version 2 added the part placed; a
+ * record of version 1 reads as every placement whole.
  */
-const BLUEPRINT_USES: EditorDataDefinition = { name: 'blueprint-uses', schemaVersion: 1, createEmpty: () => ({ maps: {} }) };
+const BLUEPRINT_USES: EditorDataDefinition = { name: 'blueprint-uses', schemaVersion: 2, createEmpty: () => ({ maps: {} }), keptAlongside: true };
 
 /**
  * "Goes on top" marks: per tileset, the tiles that lay over the ground instead of replacing it. Keyed by
  * tileset id; the layering package shapes the entries.
  */
-const TILESET_MARKS: EditorDataDefinition = { name: 'tileset-marks', schemaVersion: 1, createEmpty: () => ({ tilesets: {} }) };
+const TILESET_MARKS: EditorDataDefinition = { name: 'tileset-marks', schemaVersion: 1, createEmpty: () => ({ tilesets: {} }), keptAlongside: false };
 
 /**
  * Saved workspace layouts: which panels are where. Keyed by layout name; the workspace package shapes them.
  */
-const LAYOUTS: EditorDataDefinition = { name: 'layouts', schemaVersion: 1, createEmpty: () => ({ layouts: {} }) };
+const LAYOUTS: EditorDataDefinition = { name: 'layouts', schemaVersion: 1, createEmpty: () => ({ layouts: {} }), keptAlongside: false };
 
 /**
  * Every editor-only document the map editor knows.
@@ -88,6 +99,18 @@ const emptyEditorData = (definition: EditorDataDefinition): StoredEditorData =>
 const editorDataDefinition = (name: string): EditorDataDefinition | null =>
 {
   return EDITOR_DATA_DEFINITIONS.find(definition => definition.name === name) ?? null;
+};
+
+/**
+ * Reports whether a document is kept alongside others rather than saved whole (see
+ * {@link EditorDataDefinition.keptAlongside}).
+ * @param {DocumentKey} key The document.
+ * @returns {boolean} True for an editor-only document kept alongside others; false for every other document.
+ */
+const isKeptAlongside = (key: DocumentKey): boolean =>
+{
+  const parsed = parseDocumentKey(key);
+  return parsed.kind === 'editor-data' && editorDataDefinition(parsed.name)?.keptAlongside === true;
 };
 
 /**
@@ -200,6 +223,7 @@ export {
   EditorDataClient,
   editorDataDefinition,
   emptyEditorData,
+  isKeptAlongside,
   LAYOUTS,
   requireReadable,
   saveEditorDocument,

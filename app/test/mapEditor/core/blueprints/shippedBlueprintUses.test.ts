@@ -6,11 +6,11 @@ import { placeBlueprint } from '../../../../src/mapEditor/core/blueprints/bluepr
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import {
   BLUEPRINT_USES_DOCUMENT,
-  keepUsesWithMaps,
   readUses,
   usesOf,
   type PlacedSpot,
 } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
+import { BlueprintUsesKeeper } from '../../../../src/mapEditor/core/blueprints/blueprintUsesKeeper.ts';
 import { checkPlacement } from '../../../../src/mapEditor/core/blueprints/placementMatch.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
@@ -27,6 +27,7 @@ import { TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes
 import { MapTreeService } from '../../../../src/mapEditor/core/tree/MapTreeService.ts';
 import { locateGameProject, readDataFile } from '../../../support/gameProject.ts';
 import { drawsFor } from '../../support/blueprintFixtures.ts';
+import { UsesServer } from '../../support/usesServer.ts';
 
 /*
  * The record of where blueprints are placed, held against the maps the game ships: every file read once from the game
@@ -37,8 +38,9 @@ import { drawsFor } from '../../support/blueprintFixtures.ts';
  * back. A resize, kept
  * at each of the nine anchors, moves the placement on the map with the tiles under it, where the match check still finds
  * it. Deleting a map through the tree drops its placements, and undoing the delete brings them back; duplicating one
- * gives the copy its own. The record, written to disk with the maps and never before, reads back the same in a window
- * opening it afresh. And a placement whose map is shifted a column on disk fails the match check, where it passed before.
+ * gives the copy its own. The record, written to disk a map at a time with the maps and never before, reads back the same
+ * in a window opening it afresh. And a placement whose map is shifted a column on disk fails the match check, where it
+ * passed before.
  *
  * It runs against the project JMZ_PROJECT_ROOT names, or the sibling checkout, and skips when neither is there.
  */
@@ -71,12 +73,13 @@ const SHIFTS: Readonly<Record<ResizeAnchor, readonly [ number, number ]>> = {
 };
 
 /**
- * A copy of the game's files held in memory: the map tree, every map named, and the editor-only documents, which start
- * out as none.
+ * A copy of the game's files held in memory: the map tree, every map named, the editor-only documents, which start out as
+ * none, and the record of where blueprints are placed, which starts out as none and is only ever merged into.
  */
 type Mirror = {
   readonly maps: Map<number, RmmzMap>;
   readonly editorData: Map<string, JsonValue>;
+  readonly uses: UsesServer;
   infos: (RmmzMapInfo | null)[];
 };
 
@@ -99,13 +102,14 @@ const mirrorOfGame = (): Mirror =>
   return {
     maps: new Map([ SOURCE, ...TARGETS ].map(mapId => [ mapId, readMap(mapId) ])),
     editorData: new Map(),
+    uses: new UsesServer(),
     infos: readDataFile(project as string, 'MapInfos.json') as (RmmzMapInfo | null)[],
   };
 };
 
 /**
- * Stands the server up over a mirror: maps, the map tree and editor-only documents read from it and written to it, and
- * nothing else.
+ * Stands the server up over a mirror: maps, the map tree and editor-only documents read from it and written to it, the
+ * record of where blueprints are placed merged into a map at a time, and nothing else.
  * @param {Mirror} mirror The mirror.
  * @returns {MapEditorApi} The server.
  */
@@ -145,30 +149,34 @@ const serverOver = (mirror: Mirror): MapEditorApi =>
     {
       mirror.infos = structuredClone([ ...infos ]);
     },
-    loadEditorData: async (name: string) => structuredClone(mirror.editorData.get(name) ?? null),
+    loadEditorData: async (name: string) => (name === 'blueprint-uses'
+      ? mirror.uses.api.loadEditorData(name)
+      : structuredClone(mirror.editorData.get(name) ?? null)),
     saveEditorData: async (name: string, document: JsonValue) =>
     {
       mirror.editorData.set(name, structuredClone(document));
     },
+    mergeBlueprintUses: mirror.uses.api.mergeBlueprintUses,
   } as unknown as MapEditorApi;
 };
 
 /**
  * Opens a window over a mirror holding the source, the targets, the blueprints and the record, as the workspace does,
- * the record written with the maps from then on.
+ * the record kept with the maps from the start.
  * @param {Mirror} mirror The mirror.
- * @returns {Promise<{ hub: DocumentHub, problems: string[] }>} The window's documents, and anything writing the record
- * had to say.
+ * @returns {Promise<{ hub: DocumentHub, keeper: BlueprintUsesKeeper, problems: string[] }>} The window's documents, the
+ * record's keeper, and anything writing the record had to say.
  */
-const windowOver = async (mirror: Mirror): Promise<{ hub: DocumentHub; problems: string[] }> =>
+const windowOver = async (mirror: Mirror): Promise<{ hub: DocumentHub; keeper: BlueprintUsesKeeper; problems: string[] }> =>
 {
-  const hub = new DocumentHub({ clientId: 'window-a', store: apiDocumentStore(serverOver(mirror)) });
+  const api = serverOver(mirror);
+  const hub = new DocumentHub({ clientId: 'window-a', store: apiDocumentStore(api) });
+  const problems: string[] = [];
+  const keeper = new BlueprintUsesKeeper({ hub, api, holders: () => [], onProblem: message => problems.push(message) });
   await Promise.all([ SOURCE, ...TARGETS ].map(mapId => hub.load(mapDocumentKey(mapId))));
   await hub.load(BLUEPRINTS_DOCUMENT);
   await hub.load(BLUEPRINT_USES_DOCUMENT);
-  const problems: string[] = [];
-  keepUsesWithMaps(hub, message => problems.push(message));
-  return { hub, problems };
+  return { hub, keeper, problems };
 };
 
 /**
@@ -297,16 +305,7 @@ const recorded = (hub: DocumentHub): PlacedSpot[] => usesOf(hub.document(BLUEPRI
  * @param {Mirror} mirror The mirror.
  * @returns {PlacedSpot[]} The placements.
  */
-const onDisk = (mirror: Mirror): PlacedSpot[] => readUses((mirror.editorData.get('blueprint-uses') as { data: JsonValue }).data);
-
-/**
- * Waits for every write on its way to land.
- * @returns {Promise<void>} Settles once they have.
- */
-const writesLand = (): Promise<void> => new Promise(resolve =>
-{
-  setTimeout(resolve, 0);
-});
+const onDisk = (mirror: Mirror): PlacedSpot[] => readUses((mirror.uses.stored as { data: JsonValue }).data);
 
 describe.skipIf(project === null)('blueprint placements on the shipped maps', () =>
 {
@@ -352,42 +351,52 @@ describe.skipIf(project === null)('blueprint placements on the shipped maps', ()
   {
     // Arrange: the camp on all three targets, the maps saved.
     const mirror = mirrorOfGame();
-    const { hub, problems } = await windowOver(mirror);
+    const { hub, keeper, problems } = await windowOver(mirror);
     const placed = placeOnTargets(hub, saveCamp(hub));
     await Promise.all(TARGETS.map(mapId => hub.save(mapDocumentKey(mapId))));
-    const tree = new MapTreeService({ hub, api: serverOver(mirror), openDocument: key => hub.load(key) });
+    const tree = new MapTreeService({ hub, api: serverOver(mirror), openDocument: key => hub.load(key), placements: keeper });
 
     // Act: the second target deleted, then undone; then the third duplicated.
     const removed = await tree.remove([ TARGETS[1] ]);
-    const afterDelete = recorded(hub);
+    await keeper.whenWritten();
+    const afterDelete = [ recorded(hub), onDisk(mirror) ];
     await tree.undo();
-    const afterUndo = recorded(hub);
+    await keeper.whenWritten();
+    const afterUndo = [ recorded(hub), onDisk(mirror) ];
     const duplicated = await tree.duplicate([ TARGETS[2] ]);
     const copyId = duplicated.ok ? duplicated.selection[0] : 0;
-    await writesLand();
+    await keeper.whenWritten();
 
-    // Assert: the duplicate's placement is the third's, on the copy; and the record reached the mirror's disk with the tree.
+    // Assert: the duplicate's placement is the third's, on the copy; and the record on the mirror's disk followed the tree.
     expect([ removed.ok, afterDelete, afterUndo, recorded(hub).filter(spot => spot.mapId === copyId), onDisk(mirror), problems ])
-      .toStrictEqual([ true, [ placed[0], placed[2] ], placed, [ { ...placed[2], mapId: copyId } ], recorded(hub), [] ]);
+      .toStrictEqual([
+        true,
+        [ [ placed[0], placed[2] ], [ placed[0], placed[2] ] ],
+        [ placed, placed ],
+        [ { ...placed[2], mapId: copyId } ],
+        recorded(hub),
+        [],
+      ]);
   });
 
   it('reads the same record back from disk in a window opening it afresh, written with the maps and never before', async () =>
   {
     // Arrange.
     const mirror = mirrorOfGame();
-    const { hub, problems } = await windowOver(mirror);
+    const { hub, keeper, problems } = await windowOver(mirror);
     placeOnTargets(hub, saveCamp(hub));
-    const beforeSaving = mirror.editorData.has('blueprint-uses');
+    const beforeSaving = mirror.uses.stored;
 
-    // Act: the maps saved, which writes the record with them; then a fresh window opens it.
+    // Act: the maps saved, which writes each one's placements with it; then a fresh window opens the record.
     await Promise.all(TARGETS.map(mapId => hub.save(mapDocumentKey(mapId))));
-    await writesLand();
+    await keeper.whenWritten();
     const fresh = new DocumentHub({ clientId: 'window-b', store: apiDocumentStore(serverOver(mirror)) });
     await fresh.load(BLUEPRINT_USES_DOCUMENT);
 
-    // Assert.
-    expect([ beforeSaving, recorded(fresh), recorded(fresh).length, hub.isDirty(BLUEPRINT_USES_DOCUMENT), problems ])
-      .toStrictEqual([ false, recorded(hub), 3, false, [] ]);
+    // Assert: each map named once across the merges, and no other.
+    const named = mirror.uses.merges.flatMap(merge => Object.keys(merge.maps ?? {})).map(Number).sort((left, right) => left - right);
+    expect([ beforeSaving, recorded(fresh), recorded(fresh).length, named, problems ])
+      .toStrictEqual([ null, recorded(hub), 3, [ ...TARGETS ], [] ]);
   });
 
   it('fails the match check once the placement\'s map is shifted a column on disk, as MZ shifts it, having passed before', async () =>

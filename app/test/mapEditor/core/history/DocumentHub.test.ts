@@ -2586,4 +2586,229 @@ describe('DocumentHub', () =>
         .toStrictEqual([ 2, 1, false ]);
     });
   });
+
+  /*
+   * A document kept alongside others, such as the record of where blueprints are placed, is state saved a part at a
+   * time with the documents it describes. It moves with their steps like any document, but it never reads as unsaved
+   * and is never saved whole, a change to its file is handed on rather than taken or flagged, it is never flagged at
+   * all, and another window's step goes into it whenever its patches fit, whatever its head.
+   */
+  describe('documents kept alongside others', () =>
+  {
+    const USES: DocumentKey = 'editor-data:blueprint-uses';
+
+    /**
+     * A hub holding both fixture maps and an empty record of placements.
+     * @param {DocumentStore} store Optional store.
+     * @param {string} clientId The window's id.
+     * @returns {DocumentHub} The hub.
+     */
+    const buildRecordHub = (store?: DocumentStore, clientId = 'window-a'): DocumentHub =>
+    {
+      const hub = buildHub(store, clientId);
+      hub.adopt(USES, { schemaVersion: 2, data: { maps: {} } });
+      return hub;
+    };
+
+    /**
+     * Paints map 1 or 2 and records a placement on it in the same step, as placing a blueprint does.
+     * @param {DocumentHub} hub The hub.
+     * @param {1 | 2} mapId The map.
+     * @param {number} x The placement's column.
+     * @returns {HistoryStep} The step.
+     */
+    const place = (hub: DocumentHub, mapId: 1 | 2, x: number): HistoryStep => hub.edit('Place', [ mapHistoryKey(mapId) ], tx =>
+    {
+      tx.set(`map:${mapId}`, [ 'note' ], `placed at ${x}`);
+      tx.set(USES, [ 'data', 'maps', String(mapId) ], { aa22: [ { x, y: 0 } ] });
+    }) as HistoryStep;
+
+    it('never reads as unsaved, while the map its step changed does', () =>
+    {
+      // Arrange.
+      const hub = buildRecordHub();
+
+      // Act.
+      place(hub, 1, 3);
+
+      // Assert.
+      expect([ hub.isDirty(USES), hub.isDirty(MAP_A), hub.dirtyKeys() ])
+        .toStrictEqual([ false, true, [ MAP_A ] ]);
+    });
+
+    it('refuses to be saved whole, writing nothing', async () =>
+    {
+      // Arrange.
+      const { store, saves } = buildStore();
+      const hub = buildRecordHub(store);
+      place(hub, 1, 3);
+
+      // Act.
+      const save = hub.save(USES);
+
+      // Assert.
+      await expect(save)
+        .rejects.toThrow('editor-data:blueprint-uses is kept alongside the documents it describes, and is never saved whole');
+      expect(saves)
+        .toStrictEqual([]);
+    });
+
+    it('hands a change to its file on as it was read, taking nothing and flagging nothing', () =>
+    {
+      // Arrange: a placement here the file lacks, then the file changed elsewhere, and then removed.
+      const hub = buildRecordHub();
+      place(hub, 1, 3);
+      const before = hub.document(USES).toJson();
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+      const changed = { schemaVersion: 2, data: { maps: { 2: { bb11: [ { x: 0, y: 0 } ] } } } };
+
+      // Act.
+      const results = [ hub.applyOutsideContent(USES, changed), hub.applyOutsideContent(USES, null, true) ];
+
+      // Assert.
+      expect([ results, events, hub.document(USES).toJson(), hub.isConflicted(USES) ])
+        .toStrictEqual([
+          [ 'kept', 'kept' ],
+          [
+            { type: 'outside', document: USES, content: changed, recheck: false },
+            { type: 'outside', document: USES, content: null, recheck: true },
+          ],
+          before,
+          false,
+        ]);
+    });
+
+    it('is never flagged in conflict, while any other document is', () =>
+    {
+      // Arrange.
+      const hub = buildRecordHub();
+
+      // Act.
+      hub.flagConflict(USES, { kind: 'disk', content: null });
+      hub.flagConflict(MAP_A, { kind: 'disk', content: null });
+
+      // Assert.
+      expect([ hub.isConflicted(USES), hub.isConflicted(MAP_A) ])
+        .toStrictEqual([ false, true ]);
+    });
+
+    it('takes steps made on different parts at the same moment in two windows in both, in either order', () =>
+    {
+      // Arrange: each window places on its own map before hearing the other.
+      const windowA = buildRecordHub(undefined, 'window-a');
+      const windowB = buildRecordHub(undefined, 'window-b');
+      const fromA: RemoteOperation[] = [];
+      const fromB: RemoteOperation[] = [];
+      windowA.subscribe(event => fromA.push(operationFor(event, 'window-a') as RemoteOperation));
+      windowB.subscribe(event => fromB.push(operationFor(event, 'window-b') as RemoteOperation));
+      place(windowA, 1, 3);
+      place(windowB, 2, 5);
+      const events: HubEvent[] = [];
+      windowA.subscribe(event => events.push(event));
+      windowB.subscribe(event => events.push(event));
+
+      // Act.
+      windowA.applyRemote(structuredClone(fromB[0]));
+      windowB.applyRemote(structuredClone(fromA[0]));
+
+      // Assert: both placements in both windows, each map's own step in its own history, and nothing out of step.
+      const expected = { schemaVersion: 2, data: { maps: { 1: { aa22: [ { x: 3, y: 0 } ] }, 2: { aa22: [ { x: 5, y: 0 } ] } } } };
+      expect([
+        windowA.document(USES).toJson(),
+        windowB.document(USES).toJson(),
+        fileOf(windowA, MAP_B).note,
+        events.map(event => event.type),
+      ])
+        .toStrictEqual([ expected, expected, 'placed at 5', [ 'committed', 'committed' ] ]);
+    });
+
+    it('refuses another window\'s step whose patch on it does not fit, changing nothing anywhere', () =>
+    {
+      // Arrange: both windows place on map 1 before hearing each other.
+      const windowA = buildRecordHub(undefined, 'window-a');
+      const windowB = buildRecordHub(undefined, 'window-b');
+      const fromB: RemoteOperation[] = [];
+      windowB.subscribe(event => fromB.push(operationFor(event, 'window-b') as RemoteOperation));
+      place(windowA, 1, 3);
+      place(windowB, 1, 5);
+      const before = [ windowA.document(USES).toJson(), fileOf(windowA, MAP_A) ];
+      const events: HubEvent[] = [];
+      windowA.subscribe(event => events.push(event));
+
+      // Act.
+      windowA.applyRemote(structuredClone(fromB[0]));
+
+      // Assert.
+      expect([ [ windowA.document(USES).toJson(), fileOf(windowA, MAP_A) ], events ])
+        .toStrictEqual([ before, [ { type: 'out-of-sync', documents: [ MAP_A, USES ], origin: 'window-b' } ] ]);
+    });
+
+    it('still holds every other document to its head', () =>
+    {
+      // Arrange: map 1 moved on in this window alone, then another window's step on map 1 and the record.
+      const windowA = buildRecordHub(undefined, 'window-a');
+      const windowB = buildRecordHub(undefined, 'window-b');
+      const fromB: RemoteOperation[] = [];
+      windowB.subscribe(event => fromB.push(operationFor(event, 'window-b') as RemoteOperation));
+      windowA.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      place(windowB, 1, 5);
+      const events: HubEvent[] = [];
+      windowA.subscribe(event => events.push(event));
+
+      // Act.
+      windowA.applyRemote(structuredClone(fromB[0]));
+
+      // Assert.
+      expect([ windowA.document(USES).toJson(), events ])
+        .toStrictEqual([ { schemaVersion: 2, data: { maps: {} } }, [ { type: 'out-of-sync', documents: [ MAP_A, USES ], origin: 'window-b' } ] ]);
+    });
+  });
+
+  /*
+   * A save names the window that wrote the file, so whoever writes what goes with that file knows whether that window
+   * wrote it already; and the steps a document holds, and those its file holds, can be read.
+   */
+  describe('saves and the steps behind them', () =>
+  {
+    it('names this window for its own save, and the saving window for another window\'s', async () =>
+    {
+      // Arrange.
+      const { store } = buildStore();
+      const hub = buildHub(store);
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+
+      // Act.
+      await hub.save(MAP_A);
+      hub.applyRemote({ type: 'saved', origin: 'window-b', document: MAP_A, marker: [ step.id ] });
+
+      // Assert.
+      expect(events)
+        .toStrictEqual([
+          { type: 'saved', document: MAP_A, marker: [ step.id ], source: 'local', origin: 'window-a' },
+          { type: 'saved', document: MAP_A, marker: [ step.id ], source: 'remote', origin: 'window-b' },
+        ]);
+    });
+
+    it('lists the steps a document holds and those its file holds, and none for a document not held', async () =>
+    {
+      // Arrange: a saved rename, an unsaved one, and one undone.
+      const { store } = buildStore();
+      const hub = buildHub(store);
+      const saved = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      await hub.save(MAP_A);
+      const unsaved = hub.edit('Retitle', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'unsaved')) as HistoryStep;
+      hub.edit('Undone', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'undone'));
+      hub.undo(mapHistoryKey(1));
+
+      // Act.
+      const lists = [ hub.appliedSteps(MAP_A).map(step => step.id), hub.savedSteps(MAP_A), hub.appliedSteps('map:9'), hub.savedSteps('map:9') ];
+
+      // Assert.
+      expect(lists)
+        .toStrictEqual([ [ saved.id, unsaved.id ], [ saved.id ], [], [] ]);
+    });
+  });
 });

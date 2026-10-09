@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import {
+  BLUEPRINT_USES,
   BLUEPRINTS,
   EDITOR_DATA_DEFINITIONS,
   EditorDataClient,
   editorDataDefinition,
+  isKeptAlongside,
   LAYOUTS,
   saveEditorDocument,
   TILESET_MARKS,
@@ -41,6 +43,29 @@ describe('editorData', () =>
     // Assert.
     expect(names)
       .toStrictEqual([ [ 'blueprints', true ], [ 'blueprint-uses', true ], [ 'tileset-marks', true ], [ 'layouts', true ] ]);
+  });
+
+  it('keeps the record of where blueprints are placed alongside the maps, and no other document', () =>
+  {
+    // Arrange: every editor-only document, a map, and a name the editor does not know.
+    const keys = [ ...EDITOR_DATA_DEFINITIONS.map(definition => EditorDataClient.documentKey(definition)), 'map:16' as const, editorDataDocumentKey('misc') ];
+
+    // Act.
+    const kept = keys.map(key => [ key, isKeptAlongside(key) ]);
+
+    // Assert.
+    expect([ kept, BLUEPRINT_USES.schemaVersion ])
+      .toStrictEqual([
+        [
+          [ 'editor-data:blueprints', false ],
+          [ 'editor-data:blueprint-uses', true ],
+          [ 'editor-data:tileset-marks', false ],
+          [ 'editor-data:layouts', false ],
+          [ 'map:16', false ],
+          [ 'editor-data:misc', false ],
+        ],
+        2,
+      ]);
   });
 
   it('finds a definition by name, and nothing for an unknown one', () =>

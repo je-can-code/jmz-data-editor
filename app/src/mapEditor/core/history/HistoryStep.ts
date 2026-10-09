@@ -29,6 +29,10 @@ type StepEntry = {
  * unsaved edits included ({@code beforeHeld}). The file is what the disk had; the held copy is what the author was
  * working on. Putting the file back then brings that copy back too, so undoing the delete of a map being edited
  * returns it with its own undo history, and with its unsaved edits still unsaved rather than written to disk.
+ *
+ * Either side of a map's file may also carry its placements of blueprints as the record on disk holds them beside that
+ * file ({@code beforePlacements}, {@code afterPlacements}): its entry in the record, or null for none. They go to disk
+ * whenever the file does, so the record describes the maps on disk; a side that does not say leaves the record alone.
  */
 type FileEffect = {
   readonly document: DocumentKey;
@@ -37,6 +41,8 @@ type FileEffect = {
   readonly beforeText?: string;
   readonly afterText?: string;
   readonly beforeHeld?: DocumentSnapshot;
+  readonly beforePlacements?: JsonValue;
+  readonly afterPlacements?: JsonValue;
 };
 
 /**

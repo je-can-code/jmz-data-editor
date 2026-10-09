@@ -1,3 +1,4 @@
+import { isKeptAlongside } from '../editorData/editorData.ts';
 import { createDocument } from '../model/createDocument.ts';
 import type { DocumentKey, MapDocumentKey } from '../model/documentKeys.ts';
 import type { EditorDocument } from '../model/EditorDocument.ts';
@@ -96,7 +97,9 @@ type HubSource = 'local' | 'remote';
 /**
  * Everything the hub announces. The history panel, dirty markers, conflict banners and cross-window sync all
  * listen here. Every operation event carries the operation's id and the heads it was made against, which is
- * what other windows check before repeating it.
+ * what other windows check before repeating it. A save names the window that wrote the file, this one's own id for
+ * a save made or found here. A change to the file of a document kept alongside others is handed on as it was read,
+ * with nothing done to the document, for whoever keeps it to merge.
  */
 type HubEvent =
   | { readonly type: 'committed'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
@@ -104,7 +107,14 @@ type HubEvent =
   | { readonly type: 'redone'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
   | { readonly type: 'forgotten'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
   | { readonly type: 'discarded'; readonly stepIds: readonly string[] }
-  | { readonly type: 'saved'; readonly document: DocumentKey; readonly marker: readonly string[]; readonly source: HubSource }
+  | {
+    readonly type: 'saved';
+    readonly document: DocumentKey;
+    readonly marker: readonly string[];
+    readonly source: HubSource;
+    readonly origin: string;
+  }
+  | { readonly type: 'outside'; readonly document: DocumentKey; readonly content: JsonValue | null; readonly recheck: boolean }
   | { readonly type: 'adopted'; readonly document: DocumentKey; readonly source: HubSource }
   | { readonly type: 'released'; readonly document: DocumentKey }
   | { readonly type: 'reloaded'; readonly document: DocumentKey }
@@ -162,8 +172,10 @@ type DocumentSnapshot = {
  *   {@link OUTSIDE_CHANGE_LABEL}, and the document stays saved.
  * - {@code conflicted}: the window holds unsaved edits, so it kept them and flagged the document; or the file was
  *   removed, or changed into something no patch can reach, which is left for the person to choose too.
+ * - {@code kept}: the document is kept alongside others, so the file's content was handed on, as an {@code outside}
+ *   event, to whoever keeps it, and nothing was done to it here.
  */
-type ExternalChangeResult = 'ignored' | 'unchanged' | 'recorded' | 'conflicted';
+type ExternalChangeResult = 'ignored' | 'unchanged' | 'recorded' | 'conflicted' | 'kept';
 
 /**
  * Options for a hub.
@@ -405,6 +417,16 @@ const carriedStepFinder = (snapshot: DocumentSnapshot): (id: string) => HistoryS
  * Every operation on a document is logged by id in its lineage. Other windows holding the same documents repeat
  * this window's operations through {@link applyRemote}, and check each against the head of their own lineage, so
  * a copy that went elsewhere is always noticed and never silently written over.
+ *
+ * A document kept alongside others (see editorData's keptAlongside), such as the record of where blueprints are
+ * placed, is state saved a part at a time with the documents it describes, never a document the person edits as a
+ * whole. It is edited, undone and redone like any other, in the same steps as the documents it follows, but it has
+ * no unsaved edits of its own and is never saved here; its keeper writes each part with the document that part
+ * describes. A change to its file is handed to the keeper as an {@code outside} event rather than taken or flagged,
+ * and it is never flagged at all, so no choice between two copies of it ever stands to throw away a step another
+ * document's history holds. Another window's operation goes into it whenever its patches fit, whatever its head:
+ * every edit of it addresses one part, so edits made at the same moment in two windows to different parts land in
+ * both, in either order, and only two edits to the same part, which their own documents refuse too, stay apart.
  */
 class DocumentHub
 {
@@ -446,6 +468,12 @@ class DocumentHub
   #transaction: Transaction | null = null;
 
   #queue: RemoteOperation[] = [];
+
+  /**
+   * Changes to the files of documents kept alongside others that arrived while an edit was open, handed on once it
+   * finishes, since their keepers answer them with edits of their own.
+   */
+  #heldOutside: Extract<HubEvent, { type: 'outside' }>[] = [];
 
   #counter = 0;
 
@@ -550,6 +578,28 @@ class DocumentHub
   version(key: DocumentKey): number
   {
     return this.#lineage.get(key)?.length ?? -1;
+  }
+
+  /**
+   * Lists the steps whose patches a held document holds, in the order they went in: steps undone are not among them,
+   * and steps forgotten, or dropped from every history, are, since their patches are still there.
+   * @param {DocumentKey} key The document.
+   * @returns {readonly HistoryStep[]} The steps; none when the document is not held.
+   */
+  appliedSteps(key: DocumentKey): readonly HistoryStep[]
+  {
+    return [ ...this.#applied.get(key) ?? [] ];
+  }
+
+  /**
+   * Lists the steps a held document's file holds, as far as this window knows: the steps applied when it was last
+   * saved, here or in another window, or found on disk; none since it was loaded or reloaded from its file.
+   * @param {DocumentKey} key The document.
+   * @returns {readonly string[]} The steps' ids, oldest first; none when the document is not held.
+   */
+  savedSteps(key: DocumentKey): readonly string[]
+  {
+    return [ ...this.#saved.get(key) ?? [] ];
   }
 
   /**
@@ -1122,15 +1172,19 @@ class DocumentHub
   //region saving
 
   /**
-   * Reports whether a document holds edits its file does not.
+   * Reports whether a document holds edits its file does not. A document kept alongside others never does: each of
+   * its parts is unsaved exactly while the document that part describes is, and is saved with it.
    * @param {DocumentKey} key The document.
-   * @returns {boolean} True when unsaved; false when clean or not held.
+   * @returns {boolean} True when unsaved; false when clean, not held, or kept alongside others.
    */
   isDirty(key: DocumentKey): boolean
   {
     const applied = this.#applied.get(key);
     const saved = this.#saved.get(key);
-    return applied !== undefined && saved !== undefined && sameSequence(applied.map(step => step.id), saved) === false;
+    return isKeptAlongside(key) === false
+      && applied !== undefined
+      && saved !== undefined
+      && sameSequence(applied.map(step => step.id), saved) === false;
   }
 
   /**
@@ -1145,12 +1199,19 @@ class DocumentHub
   /**
    * Writes a document's committed content to its file; an edit still open is left out, since the file must match
    * the steps it is marked as reflecting. History is untouched: undo still works afterwards, and undoing back to
-   * this point makes the document clean again. Edits made while the write is in flight stay unsaved.
+   * this point makes the document clean again. Edits made while the write is in flight stay unsaved. A document
+   * kept alongside others is refused, since writing it whole would carry every other document's unsaved part of it
+   * to disk: its keeper writes it a part at a time.
    * @param {DocumentKey} key The document.
    * @returns {Promise<void>} Settles once the file is written.
    */
   async save(key: DocumentKey): Promise<void>
   {
+    if (isKeptAlongside(key))
+    {
+      throw new Error(`${key} is kept alongside the documents it describes, and is never saved whole`);
+    }
+
     const store = this.#requireStore();
     const content = this.#committedContent(key);
     const marker = (this.#applied.get(key) ?? []).map(step => step.id);
@@ -1158,7 +1219,7 @@ class DocumentHub
     await store.save(key, content);
     if (this.has(key))
     {
-      this.#markSaved(key, marker, 'local');
+      this.#markSaved(key, marker, 'local', this.clientId);
     }
   }
 
@@ -1167,11 +1228,12 @@ class DocumentHub
    * @param {DocumentKey} key The document.
    * @param {readonly string[]} marker The applied steps at the moment of the save.
    * @param {HubSource} source Whether the save happened here or in another window.
+   * @param {string} origin The window that wrote the file, or found it holding these steps.
    */
-  #markSaved(key: DocumentKey, marker: readonly string[], source: HubSource): void
+  #markSaved(key: DocumentKey, marker: readonly string[], source: HubSource, origin: string): void
   {
     this.#saved.set(key, [ ...marker ]);
-    this.#emit({ type: 'saved', document: key, marker: [ ...marker ], source });
+    this.#emit({ type: 'saved', document: key, marker: [ ...marker ], source, origin });
   }
 
   //endregion saving
@@ -1199,13 +1261,15 @@ class DocumentHub
   }
 
   /**
-   * Flags a held document as in conflict, keeping everything it holds and the other copy beside it.
+   * Flags a held document as in conflict, keeping everything it holds and the other copy beside it. A document kept
+   * alongside others is never flagged: either choice would throw away one copy whole, and with it the parts other
+   * documents' steps put there, while its keeper merges what differs a part at a time instead.
    * @param {DocumentKey} key The document.
    * @param {DocumentConflict} conflict The other copy, and where it came from.
    */
   flagConflict(key: DocumentKey, conflict: DocumentConflict): void
   {
-    if (this.has(key) === false)
+    if (this.has(key) === false || isKeptAlongside(key))
     {
       return;
     }
@@ -1278,6 +1342,11 @@ class DocumentHub
    * A document with unsaved edits keeps them and is flagged with the file's content beside it, so nothing is merged
    * into work the person has not saved, and nothing is thrown away without them choosing to. So is a removed file,
    * and a file whose whole value changed kind, which no patch can say.
+   *
+   * A document kept alongside others is none of these: its file holds each part as the document that part describes
+   * was last saved, so it differs from the copy here wherever any of those holds unsaved edits. The content is handed
+   * on as an {@code outside} event, untouched, for its keeper to merge a part at a time; while an edit is open it waits
+   * until the edit finishes, since the keeper merges with edits of its own.
    * @param {DocumentKey} key The document.
    * @param {JsonValue | null} content The file's content, or null when the file was removed.
    * @param {boolean} recheck True when the file was re-read because the change stream came back, not because it
@@ -1289,6 +1358,21 @@ class DocumentHub
     if (this.has(key) === false || (recheck && this.isDirty(key)))
     {
       return 'ignored';
+    }
+
+    if (isKeptAlongside(key))
+    {
+      const event = { type: 'outside', document: key, content, recheck } as const;
+      if (this.#transaction === null)
+      {
+        this.#emit(event);
+      }
+      else
+      {
+        this.#heldOutside.push(event);
+      }
+
+      return 'kept';
     }
 
     // the document's content is the only copy left of a removed file, so nothing is taken over it.
@@ -1429,7 +1513,7 @@ class DocumentHub
     // every held document keeps its saved list; one already holding these steps needs no word to anyone.
     if (sameSequence(this.#saved.get(key) as string[], marker) === false)
     {
-      this.#markSaved(key, marker, 'local');
+      this.#markSaved(key, marker, 'local', this.clientId);
     }
   }
 
@@ -1471,7 +1555,7 @@ class DocumentHub
     this.#markApplied(step);
     this.#extendLineage(step, step.id);
     this.#emit({ type: 'committed', step, bases, opId: step.id, source: 'local' });
-    this.#markSaved(key, (this.#applied.get(key) as HistoryStep[]).map(each => each.id), 'local');
+    this.#markSaved(key, (this.#applied.get(key) as HistoryStep[]).map(each => each.id), 'local', this.clientId);
     this.#clearDiskConflict(key);
     return step;
   }
@@ -1579,7 +1663,7 @@ class DocumentHub
       return;
     }
 
-    this.#markSaved(key, marker, 'remote');
+    this.#markSaved(key, marker, 'remote', origin);
   }
 
   /**
@@ -1686,14 +1770,17 @@ class DocumentHub
   }
 
   /**
-   * Lists the held documents whose head differs from the one an operation was made against.
+   * Lists the held documents whose head differs from the one an operation was made against. A document kept
+   * alongside others is never among them: the operation goes into it whenever its patches fit, since each of its
+   * edits addresses one part, and edits to different parts made at the same moment in two windows each fit in the
+   * other, whatever order they arrive in.
    * @param {readonly DocumentKey[]} held The held documents the operation touches.
    * @param {DocumentHeads} bases The heads it was made against.
    * @returns {DocumentKey[]} The documents that went elsewhere.
    */
   #staleAmong(held: readonly DocumentKey[], bases: DocumentHeads): DocumentKey[]
   {
-    return held.filter(key => this.head(key) !== bases[key]);
+    return held.filter(key => isKeptAlongside(key) === false && this.head(key) !== bases[key]);
   }
 
   /**
@@ -1959,13 +2046,19 @@ class DocumentHub
   }
 
   /**
-   * Replays remote operations that waited for a local edit to finish.
+   * Replays remote operations that waited for a local edit to finish, then hands on the changes to kept documents' files
+   * that waited too, in the order they came. A keeper answering one opens an edit of its own, after which nothing is left
+   * waiting, so every one is handed on.
    */
   #drainQueue(): void
   {
     const queued = this.#queue;
     this.#queue = [];
     queued.forEach(operation => this.applyRemote(operation));
+
+    const held = this.#heldOutside;
+    this.#heldOutside = [];
+    held.forEach(event => this.#emit(event));
   }
 
   /**

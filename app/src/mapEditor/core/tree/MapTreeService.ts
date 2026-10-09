@@ -1,5 +1,6 @@
 import { MapEditorApiError, type MapEditorApi } from '../api/MapEditorApi.ts';
-import { changeMapSpots, readableUses, spotsOnMap, type BlueprintSpot } from '../blueprints/blueprintUses.ts';
+import { changeMapSpots, mapEntryOf, readableUses, spotsOfEntry, spotsOnMap, type BlueprintSpot } from '../blueprints/blueprintUses.ts';
+import type { BlueprintUsesKeeper } from '../blueprints/blueprintUsesKeeper.ts';
 import type { DocumentHub, DocumentSnapshot, HistoryFailure } from '../history/DocumentHub.ts';
 import { TREE_HISTORY_KEY } from '../history/historyKeys.ts';
 import type { FileEffect, HistoryStep } from '../history/HistoryStep.ts';
@@ -43,12 +44,20 @@ type CopyOutcome =
   | { readonly ok: false; readonly message: string };
 
 /**
- * A map file as a delete finds it on disk: its content, and its exact text when that is known to be the same file.
+ * A map file as a delete finds it on disk: its content, its exact text when that is known to be the same file, and its
+ * placements of blueprints as the record on disk holds them beside it, its entry or null for none, when they are known.
  */
 type CapturedFile = {
   readonly content: RmmzMap | null;
   readonly text: string | undefined;
+  readonly placements?: JsonValue;
 };
+
+/**
+ * What the tree asks of whoever keeps the record of where blueprints are placed: what the record's file holds, read
+ * afresh, and to write the placements of the maps whose files a step brought or took away.
+ */
+type TreePlacements = Pick<BlueprintUsesKeeper, 'placementsOnDisk' | 'writeMaps'>;
 
 /**
  * How far a step's write-through got: the step once it exists, the files it wrote and removed, whether its rows
@@ -129,6 +138,12 @@ type MapTreeServiceOptions = {
    * @returns {Promise<EditorDocument>} The document.
    */
   readonly openDocument: (key: DocumentKey) => Promise<EditorDocument>;
+
+  /**
+   * Whoever keeps the record of where blueprints are placed, which a step writes the placements of the maps it brings or
+   * takes away through; left out, or null, no step writes any.
+   */
+  readonly placements?: TreePlacements | null;
 };
 
 /**
@@ -301,6 +316,11 @@ const failedWrite = (label: string, error: unknown, problems: readonly string[],
  * the step again once the disk recovers finishes the job, keeping any file that already holds what the step brings.
  *
  * Operations queue one behind another, since each one reads the tree, waits on the server, then records its step.
+ *
+ * Once a step's write-through has finished, the placements of blueprints of every map whose file it brought or took
+ * away go to the record on disk as the step left them (see {@link FileEffect}): a map it brings with the placements it
+ * was made with, a deleted map coming back with the placements the record held for it when it went, and a map it takes
+ * away with none. A write-through that failed and was put back leaves the record as it was.
  */
 class MapTreeService
 {
@@ -310,16 +330,20 @@ class MapTreeService
 
   #openDocument: (key: DocumentKey) => Promise<EditorDocument>;
 
+  #placements: TreePlacements | null;
+
   #queue: Promise<unknown> = Promise.resolve();
 
   /**
-   * @param {MapTreeServiceOptions} options The hub, the server and the window's way of holding documents.
+   * @param {MapTreeServiceOptions} options The hub, the server, the window's way of holding documents, and whoever keeps
+   * the record of where blueprints are placed.
    */
   constructor(options: MapTreeServiceOptions)
   {
     this.#hub = options.hub;
     this.#api = options.api;
     this.#openDocument = options.openDocument;
+    this.#placements = options.placements ?? null;
   }
 
   /**
@@ -391,8 +415,9 @@ class MapTreeService
 
   /**
    * Deletes maps with their branches, files and all, as one step whose undo writes every file back exactly as the
-   * disk had it. A map this window holds goes with its copy, so the undo also brings it back as it was being edited:
-   * its own undo history returns, and unsaved edits come back unsaved.
+   * disk had it, and their placements of blueprints back into the record as the record on disk held them. A map this
+   * window holds goes with its copy, so the undo also brings it back as it was being edited: its own undo history
+   * returns, and unsaved edits come back unsaved, its unsaved placements among them.
    * @param {readonly number[]} mapIds The maps.
    * @returns {Promise<TreeOutcome>} The step.
    */
@@ -402,10 +427,15 @@ class MapTreeService
     {
       const base = this.rows();
       const plan = planDelete(base, mapIds);
+      const onDisk = this.#placements === null
+        ? null
+        : await this.#placements.placementsOnDisk();
       const files = new Map<number, CapturedFile>();
       for (const mapId of plan.removed)
       {
-        files.set(mapId, await this.#capture(mapId));
+        // a record that could not be read says nothing of what the maps held, and an undo leaves it as it finds it.
+        const captured = await this.#capture(mapId);
+        files.set(mapId, onDisk === null ? captured : { ...captured, placements: mapEntryOf(onDisk.get(mapId) ?? []) ?? null });
       }
 
       return this.#commit(base, plan, files);
@@ -577,6 +607,8 @@ class MapTreeService
           before: file.beforeText,
           after: file.afterText,
           beforeHeld: held.get(file.document),
+          beforePlacements: file.beforePlacements,
+          afterPlacements: file.afterPlacements,
         }));
         plan.created.forEach(({ mapId, spots }) => changeMapSpots(tx, this.#hub, mapId, () => spots));
         plan.removed.forEach(mapId => changeMapSpots(tx, this.#hub, mapId, () => []));
@@ -590,7 +622,6 @@ class MapTreeService
       progress.rowsMoved = true;
       this.#releaseLeaving(files, 'forward', progress);
       await this.#settle(files, 'forward', progress);
-      return { ok: true, step, selection: plan.selection };
     }
     catch (error)
     {
@@ -612,6 +643,11 @@ class MapTreeService
         ? { ok: false, message: error.message }
         : failedWrite(plan.label, error, problems, step !== null && problems.length > 0);
     }
+
+    // the files are where the step leaves them, so their placements follow them to disk; the record's own writes are
+    // never part of the write-through, and a problem writing them is said without taking the step back.
+    this.#writePlacements(files, 'forward');
+    return { ok: true, step: progress.step, selection: plan.selection };
   }
 
   /**
@@ -671,6 +707,8 @@ class MapTreeService
         : failedWrite(step.label, error, problems, true);
     }
 
+    // the files are where the step leaves them, so their placements follow them to disk.
+    this.#writePlacements(files, direction);
     const arriving = files.filter(file => this.#arriving(file, direction) !== null);
     return { ok: true, step, selection: arriving.map(file => mapIdOf(file.document)) };
   }
@@ -799,22 +837,65 @@ class MapTreeService
    */
   #fileEffects(plan: TreePlan, removedFiles: ReadonlyMap<number, CapturedFile>): FileEffect[]
   {
-    const created: FileEffect[] = plan.created.map(({ mapId, content }) => ({
+    // a new map's file holds exactly the placements it was made with, a brand new one none.
+    const created: FileEffect[] = plan.created.map(({ mapId, content, spots }) => ({
       document: mapDocumentKey(mapId),
       before: null,
       after: content as unknown as JsonValue,
+      afterPlacements: mapEntryOf(spots) ?? null,
     }));
 
     // a map listed with no file behind it leaves nothing to write back.
     const removed = plan.removed.flatMap((mapId): FileEffect[] =>
     {
       const file = removedFiles.get(mapId);
-      return file === undefined || file.content === null
-        ? []
-        : [ { document: mapDocumentKey(mapId), before: file.content as unknown as JsonValue, after: null, ...(file.text === undefined ? {} : { beforeText: file.text }) } ];
+      if (file === undefined || file.content === null)
+      {
+        return [];
+      }
+
+      return [ {
+        document: mapDocumentKey(mapId),
+        before: file.content as unknown as JsonValue,
+        after: null,
+        ...(file.text === undefined ? {} : { beforeText: file.text }),
+        ...(file.placements === undefined ? {} : { beforePlacements: file.placements }),
+      } ];
     });
 
     return [ ...created, ...removed ];
+  }
+
+  /**
+   * Writes the placements of blueprints of every map whose file a step just brought or took away, as the step leaves
+   * them: a map it brings takes those its side of the step carries, and one it takes away takes none. A side carrying
+   * none, as a delete made while the record could not be read does, leaves the map's placements on disk as they are.
+   * @param {readonly FileEffect[]} files The step's files.
+   * @param {'backward' | 'forward'} direction Which way the step moved.
+   */
+  #writePlacements(files: readonly FileEffect[], direction: 'backward' | 'forward'): void
+  {
+    if (this.#placements === null)
+    {
+      return;
+    }
+
+    const parts = new Map<number, readonly BlueprintSpot[]>();
+    files.forEach(file =>
+    {
+      const mapId = mapIdOf(file.document);
+      const placements = direction === 'forward' ? file.afterPlacements : file.beforePlacements;
+      if (this.#arriving(file, direction) === null)
+      {
+        parts.set(mapId, []);
+      }
+      else if (placements !== undefined)
+      {
+        parts.set(mapId, spotsOfEntry(mapId, placements === null ? undefined : placements));
+      }
+    });
+
+    this.#placements.writeMaps(parts);
   }
 
   /**

@@ -1,4 +1,5 @@
 import { BLUEPRINTS_DOCUMENT, savedBlueprintOf } from '../../../src/mapEditor/core/blueprints/blueprints.ts';
+import { BLUEPRINT_USES } from '../../../src/mapEditor/core/editorData/editorData.ts';
 import { BLUEPRINT_USES_DOCUMENT, mapEntryOf, type PlacedSpot } from '../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import type { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
 import type { JsonObject, JsonValue } from '../../../src/mapEditor/core/model/json.ts';
@@ -34,13 +35,14 @@ const holdBlueprints = (hub: DocumentHub, blueprints: BlueprintSeed = {}): void 
  * Builds the stored form of a record of where blueprints are placed, holding the placements given, each map's written
  * as the editor writes it, as the editor-data route serves it.
  * @param {readonly PlacedSpot[]} spots The placements.
+ * @param {number} schemaVersion The version of the record's shape it is stamped with; the one this editor writes by default.
  * @returns {JsonObject} The record, version and all.
  */
-const storedUses = (spots: readonly PlacedSpot[] = []): JsonObject =>
+const storedUses = (spots: readonly PlacedSpot[] = [], schemaVersion = BLUEPRINT_USES.schemaVersion): JsonObject =>
 {
   const mapIds = [ ...new Set(spots.map(spot => spot.mapId)) ];
   const maps = Object.fromEntries(mapIds.map(mapId => [ String(mapId), mapEntryOf(spots.filter(spot => spot.mapId === mapId)) as JsonObject ]));
-  return { schemaVersion: 1, data: { maps } };
+  return { schemaVersion, data: { maps } };
 };
 
 /**

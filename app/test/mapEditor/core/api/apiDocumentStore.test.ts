@@ -35,6 +35,7 @@ describe('apiDocumentStore', () =>
     loadPluginList: vi.fn(async () => ''),
     loadEditorData: vi.fn(async (key: string) => (key === 'layouts' ? { schemaVersion: 1, data: { layouts: { main: 1 } } } : null)),
     saveEditorData: vi.fn(async () => undefined),
+    mergeBlueprintUses: vi.fn(async () => undefined),
     fileChangesUrl: vi.fn(() => ''),
     loadCommonEvents: vi.fn(async () => [ null, 'common events' ] as never),
     saveCommonEvents: vi.fn(async () => undefined),

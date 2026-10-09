@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { BlueprintCopyCounts } from '../../../../src/mapEditor/core/blueprints/blueprintCopies.ts';
 import {
   BLUEPRINT_USES_DOCUMENT,
@@ -6,14 +6,17 @@ import {
   countsWithPlacements,
   forgetPlacement,
   forgetSpots,
-  keepUsesWithMaps,
   mapEntryOf,
+  placementKey,
+  placementsByMap,
   readableUses,
   readUses,
   recordSpots,
+  samePlacement,
   sameSpot,
-  saveBlueprintUses,
+  sameSpots,
   spotsOfBlueprint,
+  spotsOfEntry,
   spotsOnMap,
   usedCopiesOf,
   usesOf,
@@ -21,7 +24,6 @@ import {
 } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { DocumentHub, type DocumentStore } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { blueprintHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
-import { MAP_INFOS_KEY, TILESETS_KEY, type DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { holdBlueprints, holdBlueprintUses, storedUses } from '../../support/blueprintFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
@@ -31,21 +33,21 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * no link of their own. It owes its callers these rules.
  *
  * Reading: per map, by id, and per blueprint on it, every cell a placement's corner was put down at, which may lie past
- * the map's top or left edge. Anything that is not such a record is refused loudly rather than read as no placements,
- * since writing over it would lose it; a window holding no record it can read changes nothing in it.
+ * the map's top or left edge, and for a placement the map's edge cut off, the part of the blueprint that went down. A
+ * record written before placements said their part reads as every placement whole. Anything that is not such a record is
+ * refused loudly rather than read as no placements, since writing over it would lose it; a window holding no record it
+ * can read changes nothing in it.
  *
  * Writing: each map's placements are written whole, in one order (blueprints by id, then row by row), each placement
- * once, and a map with none has no entry, so the file reads the same whoever wrote it, and an edit to one map's
- * placements never touches another's. A change is part of whatever step made it, and a change that changes nothing adds
- * nothing to the step.
+ * once, its part placed only when it has one, and a map with none has no entry, so the file reads the same whoever wrote
+ * it, and an edit to one map's placements never touches another's. A change is part of whatever step made it, and a
+ * change that changes nothing adds nothing to the step. A placement put down at a cell already recorded takes the place of
+ * the one there.
  *
  * Counting: a placement of a blueprint's tiles is one copy of it on its map, as each copy of one of its events is; with
  * no record to read, the count cannot be told. Forgetting a placement is a step in the blueprint's own history.
  *
- * Saving: the record goes to disk whenever a map's file or the map tree's is written, from this window or another, so it
- * describes the maps on disk; never over a file that changed elsewhere while it held unsaved edits, which the author hears.
- * A map whose edits are thrown away, its version on disk taken over them, takes its part of the record back to what its
- * file holds, and the record is written at once.
+ * Saving is the keeper's (see blueprintUsesKeeper.test.ts): the record is kept alongside the maps and never saved whole.
  */
 
 /**
@@ -491,401 +493,150 @@ describe('forgetPlacement', () =>
 });
 
 /*
- * Writing the record: what saveBlueprintUses writes by itself, and keepUsesWithMaps writing it whenever the maps or the
- * tree are written.
+ * A placement cut off by the map's edge keeps the part of its blueprint that went down, and the record reads and writes
+ * it; two placements are told apart by their corners, and written alike only when their parts are alike too.
  */
-describe('saving the record', () =>
+describe('the part placed', () =>
 {
   /**
-   * A store keeping every write, which fails when told to.
-   * @returns {{ store: DocumentStore, writes: DocumentKey[], fail: { now: boolean } }} The store, its writes, and the switch.
+   * The camp cut off at map 3's left edge: its corner a column past the edge, its first column left off.
    */
-  const recordingStore = () =>
-  {
-    const writes: DocumentKey[] = [];
-    const fail = { now: false };
-    const store: DocumentStore = {
-      load: async () => null,
-      save: async key =>
-      {
-        if (fail.now && key === BLUEPRINT_USES_DOCUMENT)
-        {
-          throw new Error('the disk is full');
-        }
+  const CUT: PlacedSpot = { blueprintId: 'aa22', mapId: 3, x: -1, y: 0, placed: { x: 1, y: 0, width: 2, height: 3 } };
 
-        writes.push(key);
-      },
-    };
-    return { store, writes, fail };
-  };
-
-  /**
-   * Places the camp at a cell on map 16, unsaved.
-   * @param {DocumentHub} hub The window's documents.
-   * @param {number} x The column.
-   */
-  const place = (hub: DocumentHub, x: number): void =>
+  it('reads the part a placement cut off by the edge put down, and every older placement as whole', () =>
   {
-    hub.edit('Place', [ mapHistoryKey(16) ], tx =>
+    // Arrange: one placement cut off, beside one written before placements said their part.
+    const data = { maps: { 3: { aa22: [ { x: -1, y: 0, placed: { x: 1, y: 0, width: 2, height: 3 } } ] }, 16: { aa22: [ { x: 1, y: 3 } ] } } };
+
+    // Act.
+    const spots = readUses(data);
+
+    // Assert.
+    expect(spots)
+      .toStrictEqual([ CUT, { blueprintId: 'aa22', x: 1, y: 3, mapId: 16 } ]);
+  });
+
+  it('refuses a part placed that is no rectangle inside the blueprint', () =>
+  {
+    // Arrange: a part with a side missing, one of nothing, and one starting before the blueprint.
+    const parts: JsonValue[] = [ { x: 0, y: 0, width: 2 }, { x: 0, y: 0, width: 0, height: 2 }, { x: -1, y: 0, width: 1, height: 1 } ];
+
+    // Act.
+    const messages = parts.map(placed =>
     {
-      tx.set('map:16', [ 'displayName' ], `placed at ${x}`);
-      recordSpots(tx, hub, 16, [ { blueprintId: 'aa22', x, y: 0 } ]);
-    });
-  };
-
-  /**
-   * Waits for every write on its way to land.
-   * @returns {Promise<void>} Settles once they have.
-   */
-  const writesLand = async (): Promise<void> =>
-  {
-    await new Promise(resolve =>
-    {
-      setTimeout(resolve, 0);
-    });
-  };
-
-  it('writes the record when it holds anything unsaved, and nothing when it does not', async () =>
-  {
-    // Arrange.
-    const { store, writes } = recordingStore();
-    const hub = windowWith(SPOTS, store);
-    const clean = await saveBlueprintUses(hub);
-    place(hub, 0);
-
-    // Act.
-    const dirty = await saveBlueprintUses(hub);
-
-    // Assert.
-    expect([ clean, dirty, writes, hub.isDirty(BLUEPRINT_USES_DOCUMENT) ])
-      .toStrictEqual([ { ok: true, saved: false }, { ok: true, saved: true }, [ BLUEPRINT_USES_DOCUMENT ], false ]);
-  });
-
-  it('holds back a record waiting for a choice about changes made elsewhere, saying so', async () =>
-  {
-    // Arrange.
-    const { store, writes } = recordingStore();
-    const hub = windowWith(SPOTS, store);
-    place(hub, 0);
-    hub.flagConflict(BLUEPRINT_USES_DOCUMENT, { kind: 'disk', content: null });
-
-    // Act.
-    const outcome = await saveBlueprintUses(hub);
-
-    // Assert.
-    expect([ outcome, writes ])
-      .toStrictEqual([ { ok: false, message: 'The blueprint placements were not saved: they are waiting for a choice about changes made elsewhere.' }, [] ]);
-  });
-
-  it('writes the record whenever a map or the tree is written, here or in another window, and for nothing else', async () =>
-  {
-    // Arrange: the tree and the tilesets held too.
-    const { store, writes } = recordingStore();
-    const hub = windowWith(SPOTS, store);
-    hub.adopt(MAP_INFOS_KEY, [ null ]);
-    hub.adopt(TILESETS_KEY, [ null ]);
-    const problems: string[] = [];
-    keepUsesWithMaps(hub, message => problems.push(message));
-    const written = (): number => writes.filter(key => key === BLUEPRINT_USES_DOCUMENT).length;
-
-    // Act: the tilesets saved with the record unsaved, then map 16, then the tree, then another window's save of map 16.
-    place(hub, 0);
-    await hub.save(TILESETS_KEY);
-    await writesLand();
-    const afterTilesets = written();
-    await hub.save('map:16');
-    await writesLand();
-    const afterMap = written();
-    place(hub, 2);
-    hub.edit('Rename', [ 'tree' ], tx => tx.set(MAP_INFOS_KEY, [ 0 ], 'tree'));
-    await hub.save(MAP_INFOS_KEY);
-    await writesLand();
-    const afterTree = written();
-    place(hub, 4);
-    hub.applyRemote({ type: 'saved', origin: 'window-b', document: 'map:16', marker: hub.snapshot('map:16').applied });
-    await writesLand();
-
-    // Assert.
-    expect([ afterTilesets, afterMap, afterTree, written(), hub.isDirty(BLUEPRINT_USES_DOCUMENT), problems ])
-      .toStrictEqual([ 0, 1, 2, 3, false, [] ]);
-  });
-
-  it('writes once more after a write on its way when another map is saved meanwhile', async () =>
-  {
-    // Arrange: a store whose first write of the record waits until let go.
-    const writes: DocumentKey[] = [];
-    let release = (): void => undefined;
-    const store: DocumentStore = {
-      load: async () => null,
-      save: key =>
+      try
       {
-        writes.push(key);
-        return key === BLUEPRINT_USES_DOCUMENT && writes.filter(each => each === key).length === 1
-          ? new Promise<void>(resolve =>
-          {
-            release = resolve;
-          })
-          : Promise.resolve();
-      },
-    };
-    const hub = windowWith(SPOTS, store);
-    keepUsesWithMaps(hub, () => undefined);
-    place(hub, 0);
-    await hub.save('map:16');
-
-    // Act: another placement saved while the first write waits, then the first write let go.
-    place(hub, 2);
-    await hub.save('map:16');
-    const whileWaiting = writes.filter(key => key === BLUEPRINT_USES_DOCUMENT).length;
-    release();
-    await writesLand();
+        readUses({ maps: { 3: { aa22: [ { x: 0, y: 0, placed } ] } } });
+        return 'read';
+      }
+      catch (error)
+      {
+        return (error as Error).message;
+      }
+    });
 
     // Assert.
-    expect([ whileWaiting, writes.filter(key => key === BLUEPRINT_USES_DOCUMENT).length, hub.isDirty(BLUEPRINT_USES_DOCUMENT) ])
-      .toStrictEqual([ 1, 2, false ]);
+    expect(messages)
+      .toStrictEqual(parts.map(() => 'the saved blueprint placements hold something under map 3 that is not a placement'));
   });
 
-  it('tells the author when the record is held back, or cannot be written, and stops when asked', async () =>
+  it('writes the part placed after the corner, and nothing for a placement that went down whole', () =>
   {
-    // Arrange.
-    const { store, fail } = recordingStore();
-    const hub = windowWith(SPOTS, store);
-    const problems: string[] = [];
-    const stop = keepUsesWithMaps(hub, message => problems.push(message));
-
-    // Act: a write that fails, then one held back, then nothing heard once stopped.
-    fail.now = true;
-    place(hub, 0);
-    await hub.save('map:16');
-    await writesLand();
-    fail.now = false;
-    hub.flagConflict(BLUEPRINT_USES_DOCUMENT, { kind: 'disk', content: null });
-    place(hub, 2);
-    await hub.save('map:16');
-    await writesLand();
-    stop();
-    place(hub, 4);
-    await hub.save('map:16');
-    await writesLand();
-
-    // Assert.
-    expect(problems)
-      .toStrictEqual([
-        'The blueprint placements could not be saved: the disk is full',
-        'The blueprint placements were not saved: they are waiting for a choice about changes made elsewhere.',
-      ]);
-  });
-
-  it('writes nothing for a window holding no record', async () =>
-  {
-    // Arrange: a window holding map 16 alone.
-    const save = vi.fn(async (_key: DocumentKey, _content: JsonValue) => undefined);
-    const hub = new DocumentHub({ clientId: 'window-a', store: { load: async () => null, save } });
-    hub.adopt('map:16', buildMapJson() as unknown as JsonValue);
-    keepUsesWithMaps(hub, () => undefined);
-    hub.edit('Rename', [ mapHistoryKey(16) ], tx => tx.set('map:16', [ 'displayName' ], 'Harbor'));
+    // Arrange: nothing beyond the cut placement and a whole one.
 
     // Act.
-    await hub.save('map:16');
-    await writesLand();
+    const entry = mapEntryOf([ CUT, { blueprintId: 'aa22', x: 4, y: 4 } ]);
 
     // Assert.
-    expect(save.mock.calls.map(([ key ]) => key))
-      .toStrictEqual([ 'map:16' ]);
+    expect(JSON.stringify(entry))
+      .toBe('{"aa22":[{"x":-1,"y":0,"placed":{"x":1,"y":0,"width":2,"height":3}},{"x":4,"y":4}]}');
+  });
+
+  it('tells placements apart by corner, and their writing by corner and part alike', () =>
+  {
+    // Arrange: the cut placement beside itself whole, and beside itself cut further.
+    const whole = { blueprintId: 'aa22', x: -1, y: 0 };
+    const cutFurther = { ...whole, placed: { x: 1, y: 0, width: 1, height: 3 } };
+
+    // Act.
+    const compared = [ sameSpot(CUT, whole), samePlacement(CUT, whole), samePlacement(CUT, cutFurther), samePlacement(CUT, { ...CUT }) ];
+
+    // Assert.
+    expect([ compared, placementKey(CUT), placementKey(whole) ])
+      .toStrictEqual([ [ true, false, false, true ], 'aa22@-1,0:1,0,2x3', 'aa22@-1,0' ]);
+  });
+
+  it('reads two lists of a map\'s placements as alike whatever their order, and apart when one part differs', () =>
+  {
+    // Arrange.
+    const listed = [ CUT, { blueprintId: 'k3x9q2mf', x: 4, y: 7 } ];
+
+    // Act.
+    const alike = [
+      sameSpots(listed, [ ...listed ].reverse()),
+      sameSpots(listed, [ { ...CUT, placed: { x: 1, y: 0, width: 2, height: 2 } }, listed[1] ]),
+      sameSpots([], []),
+    ];
+
+    // Assert.
+    expect(alike)
+      .toStrictEqual([ true, false, true ]);
+  });
+
+  it('lets a placement put down at a recorded corner take the place of the one there, part and all', () =>
+  {
+    // Arrange: the cut camp recorded on map 3.
+    const hub = windowWith([ CUT ]);
+
+    // Act: the camp put down whole at the same corner, as it is once the map has grown.
+    hub.edit('Place', [ mapHistoryKey(16) ], tx => recordSpots(tx, hub, 3, [ { blueprintId: 'aa22', x: -1, y: 0 } ]));
+
+    // Assert.
+    expect(spotsOnMap(hub.document(BLUEPRINT_USES_DOCUMENT), 3))
+      .toStrictEqual([ { blueprintId: 'aa22', x: -1, y: 0 } ]);
   });
 });
 
-/*
- * Throwing a map's edits away, by taking its version on disk over them, takes its part of the record back to what its
- * file holds, and writes the record at once, as no undo can bring the edits back; every other map's part stays as it is,
- * a placement forgotten stays forgotten, and a map whose file's part cannot be told is left alone.
- */
-describe('throwing a map\'s edits away', () =>
+describe('placementsByMap and spotsOfEntry', () =>
 {
-  /**
-   * A store keeping every write, and the map's file as it was last written.
-   * @returns {{ store: DocumentStore, writes: DocumentKey[] }} The store and its writes.
-   */
-  const recordingStore = () =>
+  it('reads a stored record into each map\'s placements, by map id, a map with none left out', () =>
   {
-    const writes: DocumentKey[] = [];
-    const store: DocumentStore = {
-      load: async () => null,
-      save: async key =>
-      {
-        writes.push(key);
-      },
-    };
-    return { store, writes };
-  };
+    // Arrange.
+    const stored = storedUses(SPOTS, 1);
 
-  /**
-   * Places the camp at a cell on a map, with a change to the map, unsaved.
-   * @param {DocumentHub} hub The window's documents.
-   * @param {number} mapId The map.
-   * @param {number} x The column.
-   */
-  const place = (hub: DocumentHub, mapId: number, x: number): void =>
-  {
-    hub.edit('Place', [ mapHistoryKey(mapId) ], tx =>
-    {
-      tx.set(`map:${mapId}`, [ 'displayName' ], `placed at ${x}`);
-      recordSpots(tx, hub, mapId, [ { blueprintId: 'aa22', x, y: 0 } ]);
-    });
-  };
+    // Act.
+    const byMap = placementsByMap(stored);
 
-  /**
-   * Lists the placements the record holds on one map.
-   * @param {DocumentHub} hub The window's documents.
-   * @param {number} mapId The map.
-   * @returns {string[]} Each as its blueprint and cell.
-   */
-  const onMap = (hub: DocumentHub, mapId: number): string[] =>
-  {
-    return spotsOnMap(hub.document(BLUEPRINT_USES_DOCUMENT), mapId).map(spot => `${spot.blueprintId}@${spot.x},${spot.y}`);
-  };
-
-  /**
-   * Waits for every write on its way to land.
-   * @returns {Promise<void>} Settles once they have.
-   */
-  const writesLand = async (): Promise<void> =>
-  {
-    await new Promise(resolve =>
-    {
-      setTimeout(resolve, 0);
-    });
-  };
-
-  it('takes the map\'s part of the record back to its file\'s, written at once, every other map\'s staying as it is', async () =>
-  {
-    // Arrange: a window keeping the record, with map 3 held too; a placement on each map since they were opened.
-    const { store, writes } = recordingStore();
-    const hub = windowWith(SPOTS, store);
-    hub.adopt('map:3', buildMapJson() as unknown as JsonValue);
-    keepUsesWithMaps(hub, () => undefined);
-    const file = hub.snapshot('map:16').content;
-    place(hub, 16, 0);
-    place(hub, 3, 5);
-
-    // Act: map 16's version on disk taken over its edits.
-    hub.reload('map:16', file);
-    await writesLand();
-
-    // Assert: map 16 as its file holds it, map 3 still with its placement, the record written, and nothing to undo.
-    expect([ onMap(hub, 16), onMap(hub, 3), writes, hub.history(mapHistoryKey(16)).rows, hub.isDirty(BLUEPRINT_USES_DOCUMENT) ])
+    // Assert.
+    expect([ ...byMap ])
       .toStrictEqual([
-        [ 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ],
-        [ 'aa22@-1,0', 'aa22@5,0' ],
-        [ BLUEPRINT_USES_DOCUMENT ],
-        [],
-        false,
+        [ 3, [ { blueprintId: 'aa22', x: -1, y: 0 } ] ],
+        [ 16, [ { blueprintId: 'aa22', x: 1, y: 3 }, { blueprintId: 'aa22', x: 12, y: 3 }, { blueprintId: 'k3x9q2mf', x: 4, y: 7 } ] ],
       ]);
   });
 
-  it('brings back a placement the map\'s file holds, though an undo took it out and a later edit dropped its redo', async () =>
+  it('refuses a stored record that is not a record of placements', () =>
   {
-    // Arrange: a placement saved with the map, undone, and the map renamed since.
-    const { store } = recordingStore();
-    const hub = windowWith(SPOTS, store);
-    keepUsesWithMaps(hub, () => undefined);
-    place(hub, 16, 0);
-    await hub.save('map:16');
-    await writesLand();
-    const file = hub.snapshot('map:16').content;
-    hub.undo(mapHistoryKey(16));
-    hub.edit('Rename', [ mapHistoryKey(16) ], tx => tx.set('map:16', [ 'displayName' ], 'Harbor'));
+    // Arrange: a record with no data.
 
     // Act.
-    hub.reload('map:16', file);
+    const read = () => placementsByMap({ schemaVersion: 2 });
 
     // Assert.
-    expect(onMap(hub, 16))
-      .toStrictEqual([ 'aa22@0,0', 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ]);
+    expect(read)
+      .toThrow('the saved blueprint placements are not a record of placements');
   });
 
-  it('keeps a placement forgotten while the map held unsaved edits forgotten once they are thrown away', () =>
+  it('reads one map\'s entry, and none for a map with no entry', () =>
   {
-    // Arrange: a placement on map 16 since it was opened, then one of its recorded placements forgotten.
-    const hub = windowWith();
-    keepUsesWithMaps(hub, () => undefined);
-    const file = hub.snapshot('map:16').content;
-    place(hub, 16, 0);
-    forgetPlacement(hub, { id: 'aa22', name: 'Goblin camp' }, { blueprintId: 'aa22', mapId: 16, x: 12, y: 3 });
+    // Arrange.
+    const entry = { aa22: [ { x: 1, y: 3 } ] };
 
     // Act.
-    hub.reload('map:16', file);
+    const read = [ spotsOfEntry(16, entry), spotsOfEntry(16, undefined) ];
 
     // Assert.
-    expect(onMap(hub, 16))
-      .toStrictEqual([ 'aa22@1,3', 'k3x9q2mf@4,7' ]);
-  });
-
-  it('puts a placement forgotten while the map held unsaved edits back once the forgetting is undone', () =>
-  {
-    // Arrange: a placement on map 16 since it was opened, one of its recorded placements forgotten, and that undone.
-    const hub = windowWith();
-    keepUsesWithMaps(hub, () => undefined);
-    const file = hub.snapshot('map:16').content;
-    place(hub, 16, 0);
-    forgetPlacement(hub, { id: 'aa22', name: 'Goblin camp' }, { blueprintId: 'aa22', mapId: 16, x: 12, y: 3 });
-    hub.undo(blueprintHistoryKey('aa22'));
-
-    // Act.
-    hub.reload('map:16', file);
-
-    // Assert.
-    expect(onMap(hub, 16))
-      .toStrictEqual([ 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ]);
-  });
-
-  it('takes a record arriving from disk after the map as what the map\'s file holds, edits made before it or not', () =>
-  {
-    // Arrange: map 16 renamed before the record is held, then a placement once it is.
-    const hub = new DocumentHub({ clientId: 'window-a' });
-    holdBlueprints(hub);
-    hub.adopt('map:16', buildMapJson() as unknown as JsonValue);
-    keepUsesWithMaps(hub, () => undefined);
-    hub.edit('Rename', [ mapHistoryKey(16) ], tx => tx.set('map:16', [ 'displayName' ], 'Harbor'));
-    const file = buildMapJson() as unknown as JsonValue;
-    holdBlueprintUses(hub, SPOTS);
-    place(hub, 16, 0);
-
-    // Act.
-    hub.reload('map:16', file);
-
-    // Assert.
-    expect(onMap(hub, 16))
-      .toStrictEqual([ 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ]);
-  });
-
-  it('leaves the record as it is for a map whose edits went on while its save was on its way', async () =>
-  {
-    // Arrange: a store whose write of map 16 waits until let go, and a placement made while it waits.
-    let release = (): void => undefined;
-    const store: DocumentStore = {
-      load: async () => null,
-      save: key => (key === 'map:16'
-        ? new Promise<void>(resolve =>
-        {
-          release = resolve;
-        })
-        : Promise.resolve()),
-    };
-    const hub = windowWith(SPOTS, store);
-    keepUsesWithMaps(hub, () => undefined);
-    place(hub, 16, 0);
-    const saving = hub.save('map:16');
-    place(hub, 16, 2);
-    release();
-    await saving;
-    const file = hub.snapshot('map:16').content;
-
-    // Act.
-    hub.reload('map:16', file);
-
-    // Assert: both placements still recorded, since what the file holds cannot be told.
-    expect(onMap(hub, 16))
-      .toStrictEqual([ 'aa22@0,0', 'aa22@2,0', 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ]);
+    expect(read)
+      .toStrictEqual([ [ { blueprintId: 'aa22', x: 1, y: 3 } ], [] ]);
   });
 });
