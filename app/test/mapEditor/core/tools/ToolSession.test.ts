@@ -848,6 +848,31 @@ describe('ToolSession: the stamp', () =>
       .toEqual([ 'Blueprints can\'t go here', 'Stamp' ]);
   });
 
+  it('says so of a stamp whose tiles hold a placement of a blueprint, over a map that may hold no link, as the click refuses it', () =>
+  {
+    // Arrange: the dirt holding a placement of a blueprint, alone and beside one holding a placement of a blueprint the
+    // window no longer holds, each over a map that may hold no link.
+    const placed = { ...dirtWithEvent(), events: [], spots: [ { blueprintId: 'k3x9q2mf', x: 0, y: 0, width: 2, height: 1 } ] };
+    const live = stamping(placed, { refusal: 'its events are patterns' });
+    const gone = stamping(placed, { refusal: 'its events are patterns' });
+    holdBlueprints(gone.bench.hub);
+
+    // Act.
+    const labels = [ live, gone ].map(({ bench }) =>
+    {
+      bench.session.move(at(0, 1));
+      return bench.session.overlay().hoverLabel;
+    });
+    drag(live.bench.session, [ at(0, 1) ]);
+
+    // Assert.
+    expect([ labels, live.heard ])
+      .toEqual([
+        [ 'Blueprints can\'t go here', 'Stamp' ],
+        [ { ok: false, message: 'This stamp holds copies of blueprints, which can\'t go here: its events are patterns.' } ],
+      ]);
+  });
+
   it('places a plain stamp\'s copy of a blueprint no longer there as a plain event, over a map that may hold no link, saying so', () =>
   {
     // Arrange: the dirt's event a copy of a blueprint the window's blueprints no longer hold, over a map that may hold no

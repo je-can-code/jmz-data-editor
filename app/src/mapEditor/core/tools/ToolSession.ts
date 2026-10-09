@@ -757,8 +757,8 @@ class ToolSession
   /**
    * Works out the overlay while the stamp tool is in hand: the stamp's footprint with its corner under the pointer, its
    * tiles and events where a click would put them, and in red the tiles another event holds in their way. Over a map that
-   * may hold no copy of a blueprint, a blueprint in hand, or a stamp carrying copies of one, says so beside the footprint.
-   * With no stamp picked, only the cell under the pointer.
+   * may hold no copy of a blueprint, a blueprint in hand, or a stamp carrying copies of one, in its events or in tiles
+   * holding a placement, says so beside the footprint. With no stamp picked, only the cell under the pointer.
    * @param {MapDocument} map The map.
    * @param {ToolPointer} pointer The pointer and keys.
    * @param {MapCell} cell The cell under it.
@@ -773,13 +773,16 @@ class ToolSession
     }
 
     // a map that may hold no link says so before the click that would be refused; a copy of a blueprint gone goes down
-    // plain, so it is no copy here.
+    // plain, so it is no copy here, and tiles of another tileset are left out, placements and all.
     const live = liveBlueprintsIn(this.#host.hub);
-    const linked = blueprint !== null || stamp.events.some(event =>
+    const isLive = (blueprintId: string): boolean => live === null || live(blueprintId);
+    const linkedEvents = stamp.events.some(event =>
     {
       const link = blueprintLinkOf(event.note);
-      return link !== null && (live === null || live(link.blueprintId));
+      return link !== null && isLive(link.blueprintId);
     });
+    const placedTiles = stamp.tilesetId === map.tilesetId && (stamp.spots ?? []).some(spot => isLive(spot.blueprintId));
+    const linked = blueprint !== null || linkedEvents || placedTiles;
     const refused = linked && this.#host.linkRefusal(map.mapId) !== null;
     const preview = previewStamp(map, stamp, cell, pointer.shift ? 'exact' : 'auto');
     return {
