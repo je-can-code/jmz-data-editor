@@ -6,14 +6,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { MapEditorApiError, type MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { holdBlueprintMap } from '../../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
 import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
-import { MAP_INFOS_KEY, TILESETS_KEY, type DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
+import { blueprintMapId, MAP_INFOS_KEY, TILESETS_KEY, type DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { MapArrival } from '../../../../src/mapEditor/core/properties/arrivals.ts';
+import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
 import { lightingModule } from '../../../../src/mapEditor/modules/lighting/lightingModule.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapPropertiesPanel } from '../../../../src/mapEditor/workspace/panels/MapPropertiesPanel.tsx';
@@ -217,5 +219,89 @@ describe('MapPropertiesPanel', () =>
     // Assert.
     expect(screen.queryByTestId('map-section-lighting.map'))
       .toBeNull();
+  });
+
+  /*
+   * A blueprint keeps none of a map's settings, and its size and events are fixed for now, so its properties show what
+   * it holds instead of a map's form: the layers it keeps, its size with why it stays, and its events with why none is
+   * added or taken away. There is no Resize to press, and nothing there writes anything.
+   */
+  describe('for a blueprint opened as a map', () =>
+  {
+    /**
+     * Renders the properties panel on a blueprint open as a map, the one the properties show.
+     * @param {Stamp} stamp The blueprint's stamp.
+     * @returns {Promise<DocumentHub>} The window's documents.
+     */
+    const renderBlueprint = async (stamp: Stamp) =>
+    {
+      const hub = new DocumentHub({ clientId: 'window-a' });
+      holdBlueprints(hub, { k3x9q2mf: { name: 'Lantern row', stamp } });
+      holdBlueprintMap(hub, 'k3x9q2mf');
+      const openDocument = async (key: DocumentKey) =>
+      {
+        const content = key === MAP_INFOS_KEY ? buildTreeRows() : [ null, null, null, null, { id: 4, flags: [], mode: 1, name: 'Cave', note: '', tilesetNames: [] } ];
+        return hub.has(key) ? hub.document(key) : hub.adopt(key === MAP_INFOS_KEY ? MAP_INFOS_KEY : TILESETS_KEY, content as unknown as JsonValue);
+      };
+      const modules = new PluginModuleRegistry(new CommandCatalog());
+      const controller = new WorkspaceController({ hub, api: {}, openDocument, modules } as unknown as MapEditorServices);
+      render(
+        <WorkspaceProvider controller={controller}>
+          <MapPropertiesPanel/>
+        </WorkspaceProvider>
+      );
+
+      // the blueprint's panel taking focus makes it the one the properties show.
+      act(() => controller.panelActivated({ api: { component: 'map', location: { type: 'grid' } }, params: { mapId: blueprintMapId('k3x9q2mf') } } as never));
+      await screen.findByTestId('blueprint-properties');
+      return hub;
+    };
+
+    it('shows the layer a blueprint keeps, its size and its events, each with why it stays, and no map settings', async () =>
+    {
+      // Arrange: a row of lanterns on layer 4, two cells wide, with one event.
+      const lanterns = stampOf({ width: 2, tiles: { layers: [ 3 ], values: [ 10, 10 ], calledFor: [ -1, -1 ] } });
+
+      // Act.
+      await renderBlueprint(lanterns);
+
+      // Assert.
+      const section = screen.getByTestId('blueprint-properties');
+      expect([
+        section.textContent,
+        screen.queryByRole('button', { name: 'Resize' }),
+        screen.queryByLabelText('Display name'),
+      ])
+        .toStrictEqual([
+          'Lantern rowA blueprint drawn with Cave.TilesLayer 4 alone, 2 by 1.Size2 by 1A blueprint can\'t be resized: growing it would paint over cells its copies never owned.Events1 eventIts events can be moved and changed, but none added or removed: removing one would delete events on every map.',
+          null,
+          null,
+        ]);
+    });
+
+    it('says a blueprint of events alone keeps no tiles', async () =>
+    {
+      // Arrange: one event, two cells wide.
+
+      // Act.
+      await renderBlueprint(stampOf({ width: 2 }));
+
+      // Assert.
+      expect([ screen.queryByText('None: it holds events alone.') !== null, screen.queryByText('1 event') !== null ])
+        .toStrictEqual([ true, true ]);
+    });
+
+    it('says a blueprint of every layer keeps them all', async () =>
+    {
+      // Arrange: every layer, two cells wide, and no events.
+      const values = new Array<number>(12).fill(0);
+
+      // Act.
+      await renderBlueprint(stampOf({ width: 2, tiles: { layers: [ 0, 1, 2, 3, 4, 5 ], values, calledFor: values.map(() => -1) }, events: [] }));
+
+      // Assert.
+      expect([ screen.queryByText('Every layer, 2 by 1.') !== null, screen.queryByText('0 events') !== null ])
+        .toStrictEqual([ true, true ]);
+    });
   });
 });

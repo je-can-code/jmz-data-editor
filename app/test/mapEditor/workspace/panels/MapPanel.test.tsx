@@ -7,8 +7,11 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { IDockviewPanelProps } from 'dockview-react';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { holdBlueprintMap } from '../../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
+import { BLUEPRINTS_DOCUMENT } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
-import { MAP_INFOS_KEY, TILESETS_KEY, type DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
+import { blueprintHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintMapId, MAP_INFOS_KEY, TILESETS_KEY, type DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { TILESET_MARKS_DOCUMENT } from '../../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
 import { WindowPaints, type WindowPaint } from '../../../../src/mapEditor/core/tools/WindowPaint.ts';
@@ -18,7 +21,9 @@ import { MapPanel } from '../../../../src/mapEditor/workspace/panels/MapPanel.ts
 import { withWindowScope } from '../../../../src/mapEditor/workspace/windowScope.tsx';
 import { WorkspaceController } from '../../../../src/mapEditor/workspace/WorkspaceController.ts';
 import { WorkspaceProvider } from '../../../../src/mapEditor/workspace/workspaceHooks.tsx';
+import { holdBlueprints } from '../../support/blueprintFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 import { buildTreeRows } from '../../support/treeFixtures.ts';
 
 /**
@@ -222,5 +227,88 @@ describe('MapPanel', () =>
     // Assert: the dock carrying both the palette and the layers panel is gone outright while hidden, not just one of them.
     expect([ updates, whileHidden ])
       .toStrictEqual([ [ { paletteHidden: true }, { paletteHidden: undefined } ], [ null, true ] ]);
+  });
+
+  /*
+   * A blueprint opens in a map panel as the small map it lays out as, laid out from the blueprints when the window holds
+   * it nowhere yet. Its tab and its strip name it, the strip saying it is a blueprint, and both mark it unsaved once it
+   * changes. Deleted, the panel says so, and an undo in its history brings it back into the panel.
+   */
+  describe('showing a blueprint', () =>
+  {
+    /**
+     * A workspace holding the blueprints, the camp (k3x9q2mf) among them, whose map opens from them when first asked for.
+     * @returns {{ controller: WorkspaceController, hub: DocumentHub }} The workspace and its documents.
+     */
+    const buildBlueprintWorkspace = () =>
+    {
+      const hub = new DocumentHub({ clientId: 'window-a' });
+      holdBlueprints(hub, { k3x9q2mf: { name: 'Goblin camp', stamp: stampOf({ width: 2 }) } });
+      const tileset = { id: 4, flags: new Array<number>(8192).fill(0), mode: 1, name: 'Cave', note: '', tilesetNames: [ 'A1', 'A2', '', '', '', 'B', '', '', '' ] };
+      const contents: Partial<Record<DocumentKey, unknown>> = {
+        [MAP_INFOS_KEY]: buildTreeRows(),
+        [TILESETS_KEY]: [ null, null, null, null, tileset ],
+        [TILESET_MARKS_DOCUMENT]: { schemaVersion: 1, data: { tilesets: {} } },
+      };
+      const openDocument = async (key: DocumentKey) =>
+      {
+        if (key === 'blueprint-map:k3x9q2mf')
+        {
+          return holdBlueprintMap(hub, 'k3x9q2mf');
+        }
+
+        return hub.has(key) ? hub.document(key) : hub.adopt(key, contents[key] as JsonValue);
+      };
+      const api = { clientId: 'window-a', loadImage: async () => null, loadEditorData: async () => contents[TILESET_MARKS_DOCUMENT] } as unknown as MapEditorApi;
+      const paints = new WindowPaints(window);
+      paints.main.link();
+      const controller = new WorkspaceController({ hub, api, openDocument, paints, modules: { overlays: () => [] } } as unknown as MapEditorServices);
+      return { controller, hub };
+    };
+
+    it('opens the blueprint as a map named for it, marked a blueprint, and marked unsaved once it changes', async () =>
+    {
+      // Arrange.
+      const { controller, hub } = buildBlueprintWorkspace();
+      const { api } = buildPanel();
+      const mapId = blueprintMapId('k3x9q2mf');
+      render(panelFor(controller, api, { mapId }));
+      await screen.findByTestId('map-view');
+      const opened = [ vi.mocked(api.setTitle).mock.calls.at(-1)?.[0], screen.getByText('Goblin camp') !== null, screen.getByText('Blueprint') !== null ];
+
+      // Act.
+      act(() =>
+      {
+        hub.edit('Move event', [ mapHistoryKey(mapId) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 1, 'x' ], 1));
+      });
+
+      // Assert: the mock map view names the map it was handed.
+      expect([ opened, screen.getByTestId('map-view').textContent, vi.mocked(api.setTitle).mock.calls.at(-1)?.[0], screen.getByText('Unsaved') !== null ])
+        .toStrictEqual([ [ 'Goblin camp', true, true ], `Map ${mapId}`, 'Goblin camp *', true ]);
+    });
+
+    it('says the blueprint was deleted, and shows it again once an undo in its history brings it back', async () =>
+    {
+      // Arrange: the camp open in the panel.
+      const { controller, hub } = buildBlueprintWorkspace();
+      const { api } = buildPanel();
+      render(panelFor(controller, api, { mapId: blueprintMapId('k3x9q2mf') }));
+      await screen.findByTestId('map-view');
+
+      // Act: deleted, then the delete undone.
+      act(() =>
+      {
+        hub.edit('Delete blueprint', [ blueprintHistoryKey('k3x9q2mf') ], tx => tx.set(BLUEPRINTS_DOCUMENT, [ 'data', 'blueprints', 'k3x9q2mf' ], undefined));
+      });
+      const deleted = [ screen.getByText('This blueprint was deleted.') !== null, vi.mocked(api.setTitle).mock.calls.at(-1)?.[0] ];
+      act(() =>
+      {
+        hub.undo(blueprintHistoryKey('k3x9q2mf'));
+      });
+
+      // Assert.
+      expect([ deleted, await screen.findByTestId('map-view') !== null, vi.mocked(api.setTitle).mock.calls.at(-1)?.[0] ])
+        .toStrictEqual([ [ true, 'Blueprint (deleted)' ], true, 'Goblin camp' ]);
+    });
   });
 });

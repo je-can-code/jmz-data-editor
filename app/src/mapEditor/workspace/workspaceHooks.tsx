@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
+import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../core/blueprints/blueprints.ts';
 import type { SelectedEvents } from '../core/events/EventSelection.ts';
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
-import { MAP_INFOS_KEY, mapDocumentKey, parseDocumentKey, TILESETS_KEY } from '../core/model/documentKeys.ts';
+import { blueprintIdOfMap, MAP_INFOS_KEY, mapDocumentKey, parseDocumentKey, TILESETS_KEY } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { RmmzMapInfo, RmmzTileset } from '../core/model/rmmzTypes.ts';
@@ -175,22 +176,59 @@ const useMapTreeDocument = (): { tree: EditorDocument | null; failure: string | 
 };
 
 /**
- * What a panel knows about a map it shows: its row in the tree, the document once held, whether it has unsaved
- * edits, and why it could not be opened, if it could not.
+ * What a panel knows about a map it shows: its name, whether whatever lists it (the tree for a map, the blueprints for a
+ * blueprint opened as a map) no longer does, the document once held, whether it has unsaved edits, and why it could not
+ * be opened, if it could not.
  */
 type HeldMap = {
-  readonly row: RmmzMapInfo | null;
+  /**
+   * Its name: the tree's for a map, the blueprint's own for a blueprint opened as a map; null while it is not listed.
+   */
+  readonly name: string | null;
+
+  /**
+   * Whether it is not listed: a map the tree does not list, or a blueprint the blueprints, once held, no longer hold,
+   * deleted or its save undone. A blueprint is not gone while the blueprints are still being held.
+   */
+  readonly gone: boolean;
   readonly map: MapDocument | null;
   readonly dirty: boolean;
   readonly failure: string | null;
 };
 
 /**
+ * Where a map stands in whatever lists it: its name, and whether it is gone (see {@link HeldMap}).
+ * @param {DocumentHub} hub The window's documents.
+ * @param {EditorDocument | null} tree The map tree, or null while it is not held.
+ * @param {number} mapId The map, or the id a blueprint opened as a map takes.
+ * @returns {{ name: string | null, gone: boolean }} Its name and whether it is gone.
+ */
+const listingOf = (hub: DocumentHub, tree: EditorDocument | null, mapId: number): { name: string | null; gone: boolean } =>
+{
+  const blueprintId = blueprintIdOfMap(mapId);
+  if (blueprintId === null)
+  {
+    const row = (tree?.valueAt([ mapId ]) as RmmzMapInfo | null | undefined) ?? null;
+    return { name: row === null ? null : row.name, gone: row === null };
+  }
+
+  // a blueprint can only be told gone once the blueprints are held.
+  const blueprint = hub.has(BLUEPRINTS_DOCUMENT)
+    ? blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), blueprintId)
+    : undefined;
+  return { name: blueprint === undefined || blueprint === null ? null : blueprint.name, gone: blueprint === null };
+};
+
+/**
  * Holds a map for as long as the tree lists it. A delete lets the document go (the tree service releases it), and
  * an undo lists the map again, which holds it afresh from its restored file. A map that could not be opened is not
- * given up on: it is tried again whenever its row comes back or the tree's file settles, so a panel recovers the
+ * given up on: it is tried again whenever it is listed again or the tree's file settles, so a panel recovers the
  * moment its map appears.
- * @param {number | null} mapId The map, or null for none.
+ *
+ * A blueprint opened as a map is held the same way for as long as the blueprints hold it, laid out from them, or taken
+ * from another window that holds it with its changes. Its changes stay held in the window after its panel closes, as a
+ * map's do, so opening it again shows them. Deleted, or its save undone, it shows as gone, and an undo brings it back.
+ * @param {number | null} mapId The map, or the id a blueprint opened as a map takes, or null for none.
  * @returns {HeldMap} What the panel knows.
  */
 const useHeldMap = (mapId: number | null): HeldMap =>
@@ -203,15 +241,19 @@ const useHeldMap = (mapId: number | null): HeldMap =>
   useHubVersion(hub);
 
   const key = mapId === null ? null : mapDocumentKey(mapId);
-  const found = key === null ? null : tree?.valueAt([ mapId as number ]) as RmmzMapInfo | null | undefined;
-  const row = found ?? null;
-  const map = key !== null && row !== null && hub.has(key) ? hub.map(key) : null;
+  const { name, gone } = mapId === null ? { name: null, gone: true } : listingOf(hub, tree, mapId);
+  const map = key !== null && gone === false && hub.has(key) ? hub.map(key) : null;
+
+  // a blueprint that could not be opened is tried again whenever the blueprints change, a save undone being redone, say.
+  const blueprints = mapId !== null && blueprintIdOfMap(mapId) !== null && hub.has(BLUEPRINTS_DOCUMENT)
+    ? hub.document(BLUEPRINTS_DOCUMENT).revision
+    : -1;
 
   // a settle of the tree's file only matters here while the map is listed but not held, which is when it retries.
   useEffect(() =>
   {
     setFailure(null);
-    if (key === null || row === null || map !== null)
+    if (key === null || gone || map !== null)
     {
       return undefined;
     }
@@ -229,9 +271,9 @@ const useHeldMap = (mapId: number | null): HeldMap =>
     {
       live = false;
     };
-  }, [ controller, key, row, map, treeSettles ]);
+  }, [ controller, key, gone, map, treeSettles, blueprints ]);
 
-  return { row, map, dirty: key !== null && map !== null && hub.isDirty(key), failure };
+  return { name, gone, map, dirty: key !== null && map !== null && hub.isDirty(key), failure };
 };
 
 /**

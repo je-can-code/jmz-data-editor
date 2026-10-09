@@ -18,7 +18,14 @@ import {
   PANEL_COMPONENTS,
   type PanelDirection,
 } from '../core/workspace/panels.ts';
-import { MAP_INFOS_KEY, mapDocumentKey, parseDocumentKey } from '../core/model/documentKeys.ts';
+import {
+  blueprintIdOfMap,
+  blueprintMapId,
+  isMappableBlueprintId,
+  MAP_INFOS_KEY,
+  mapDocumentKey,
+  parseDocumentKey,
+} from '../core/model/documentKeys.ts';
 import type { RmmzMapInfo } from '../core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../services/MapEditorServices.ts';
 import { isStartPanel } from '../core/workspace/centre.ts';
@@ -271,13 +278,19 @@ class WorkspaceController
     this.#placementsOpened = this.#holdPlacements();
 
     // a map the window lets go of, such as one deleted from the tree, takes its selected events with it, so the
-    // selection only ever names a map this window holds.
+    // selection only ever names a map this window holds; and an edit the window's checks refused, such as one taking an
+    // event out of a blueprint, says why, whichever tool made it.
     services.hub.subscribe(event =>
     {
       const { mapId } = this.selection.get();
       if (event.type === 'released' && mapId !== null && event.document === mapDocumentKey(mapId))
       {
         this.selection.clear();
+      }
+
+      if (event.type === 'refused')
+      {
+        this.notify(event.message, 'error');
       }
     });
   }
@@ -455,6 +468,27 @@ class WorkspaceController
   }
 
   /**
+   * Opens a blueprint as a small map in a tab of its own, or brings forward the one already open, as the Blueprints
+   * section's Open asks: its tiles painted and its events edited as a map's are, its own history beside its save and
+   * renames. It opens wherever a map would. A blueprint whose id no map id can spell, which only a hand-edited blueprints
+   * file holds, is said rather than opened.
+   * @param {string} blueprintId The blueprint.
+   * @param {OpenMapOptions} options Where and how.
+   * @returns {IDockviewPanel | null} The panel showing it, or null before the dock is ready or for a blueprint that cannot
+   * open.
+   */
+  openBlueprint(blueprintId: string, options: OpenMapOptions = {}): IDockviewPanel | null
+  {
+    if (isMappableBlueprintId(blueprintId) === false)
+    {
+      this.notify(`"${this.blueprintName(blueprintId)}" can't be opened: its id in the blueprints file is too long.`, 'error');
+      return null;
+    }
+
+    return this.openMap(blueprintMapId(blueprintId), options);
+  }
+
+  /**
    * Shows one event of a map, as a click on it in the events list asks: it becomes the selection, and every view of its
    * map centres on it at the zoom that view has. When no view of the map is on screen, one hidden behind another tab
    * comes to the front first, unless it shares a group with the panel asking, which would put the list itself out of
@@ -530,12 +564,18 @@ class WorkspaceController
   }
 
   /**
-   * Reads a map's name from the tree, for titles.
-   * @param {number} mapId The map.
+   * Reads a map's name from the tree, for titles; for a blueprint opened as a map, the blueprint's own.
+   * @param {number} mapId The map, or the id a blueprint opened as a map takes.
    * @returns {string} Its name, or "Map N" while the tree is not held or lacks it.
    */
   mapName(mapId: number): string
   {
+    const blueprintId = blueprintIdOfMap(mapId);
+    if (blueprintId !== null)
+    {
+      return this.blueprintName(blueprintId);
+    }
+
     const { hub } = this.services;
     const row = hub.has(MAP_INFOS_KEY)
       ? (hub.document(MAP_INFOS_KEY).valueAt([ mapId ]) as RmmzMapInfo | null | undefined)
@@ -622,13 +662,16 @@ class WorkspaceController
    * Saves every document holding unsaved edits, leaving any in conflict for the person to settle first. What was saved
    * is told in maps: the blueprints after an undo are saved along with them but are not maps, and are not counted as any.
    * The record of where blueprints are placed never holds unsaved edits of its own: each map's placements go to disk
-   * with that map.
+   * with that map. A blueprint opened as a map has no file of its own, and its changes are not saved here: they stay
+   * open, unsaved, which the author hears.
    * @returns {Promise<void>} Settles once every save has finished.
    */
   async saveAll(): Promise<void>
   {
     const { hub } = this.services;
-    const dirty = hub.dirtyKeys();
+    const unsaved = hub.dirtyKeys();
+    const blueprints = unsaved.filter(key => parseDocumentKey(key).kind === 'blueprint-map').length;
+    const dirty = unsaved.filter(key => parseDocumentKey(key).kind !== 'blueprint-map');
     const ready = dirty.filter(key => hub.isConflicted(key) === false);
     const failed: string[] = [];
     for (const key of ready)
@@ -657,7 +700,14 @@ class WorkspaceController
     }
 
     const maps = ready.filter(key => parseDocumentKey(key).kind === 'map').length;
-    this.notify(maps === 0 ? 'Everything is saved.' : `Saved ${maps === 1 ? '1 map' : `${maps} maps`}.`);
+    const saved = maps === 1 ? 'Saved 1 map' : `Saved ${maps} maps`;
+    if (blueprints > 0)
+    {
+      this.notify(maps === 0 ? 'Changes to blueprints can\'t be saved yet; everything else is saved.' : `${saved}; changes to blueprints can't be saved yet.`);
+      return;
+    }
+
+    this.notify(maps === 0 ? 'Everything is saved.' : `${saved}.`);
   }
 
   /**

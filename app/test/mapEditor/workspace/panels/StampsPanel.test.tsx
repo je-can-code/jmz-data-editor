@@ -618,6 +618,32 @@ describe('StampsPanel: blueprints', () =>
       .toStrictEqual([ [ 'stamp', 'blueprint:aa22', { id: 'aa22', name: 'Goblin camp' }, 'true' ], 'pen', 'false' ]);
   });
 
+  it('opens a blueprint in a tab of its own from its card, taking up nothing as the brush', async () =>
+  {
+    // Arrange: the camp beside a lamp, the dock ready.
+    const { controller, painting, blueprintCopies } = renderWithBlueprints({ aa22: { name: 'Goblin camp', stamp: goblin() }, bb33: { name: 'Lamp', stamp: goblin() } });
+    await settle(blueprintCopies);
+    const added: string[] = [];
+    const dock = {
+      panels: [],
+      getPanel: () => undefined,
+      addPanel: (options: { id: string }) =>
+      {
+        added.push(options.id);
+        return null;
+      },
+    };
+    controller.attach(dock as unknown as DockviewApi);
+
+    // Act.
+    const [ camp ] = screen.getAllByTestId('blueprint');
+    fireEvent.click(within(camp).getByRole('button', { name: 'Open' }));
+
+    // Assert.
+    expect([ added, painting.settings.tool ])
+      .toStrictEqual([ [ 'blueprint-aa22' ], 'events' ]);
+  });
+
   it('says why the blueprints could not be read, and offers to save no stamp as one', async () =>
   {
     // Arrange: blueprints that cannot be opened.

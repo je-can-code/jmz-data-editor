@@ -4,6 +4,7 @@ import { linkGateFor } from '../core/blueprints/blueprintPlacement.ts';
 import { BLUEPRINTS_DOCUMENT } from '../core/blueprints/blueprints.ts';
 import { markerSymbolFor } from '../core/eventKinds/eventMarkers.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
+import { isBlueprintMapId } from '../core/model/documentKeys.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { RmmzEventPage, RmmzMapEvent } from '../core/model/rmmzTypes.ts';
 import type { ModuleNotice } from '../core/modules/PluginModule.ts';
@@ -173,6 +174,19 @@ const mapIdFromQuery = (search: string): number | null =>
   return mapId > 0
     ? mapId
     : null;
+};
+
+/**
+ * Names what the view shows, for the status line: the map by its number, or a blueprint opened as a map, whose number is
+ * no map's.
+ * @param {number} mapId The map, or the id a blueprint opened as a map takes.
+ * @returns {string} Such as "Map 12", or "Blueprint".
+ */
+const mapLabel = (mapId: number): string =>
+{
+  return isBlueprintMapId(mapId)
+    ? 'Blueprint'
+    : `Map ${mapId}`;
 };
 
 /**
@@ -559,7 +573,7 @@ const MapView = (props: MapViewProps) =>
       })
       .catch((error: unknown) =>
       {
-        setStatus(current => ({ ...current, problem: `Map ${mapId} could not be opened: ${String(error)}` }));
+        setStatus(current => ({ ...current, problem: `${mapLabel(mapId)} could not be opened: ${String(error)}` }));
       });
   }, [ mapId ]);
 
@@ -680,7 +694,7 @@ const MapView = (props: MapViewProps) =>
       </Box>
       <Box sx={{ display: 'flex', gap: 2, px: 1, py: 0.25, borderTop: 1, borderColor: 'divider' }}>
         <Typography variant={'caption'} color={'text.secondary'}>
-          {`Map ${mapId}`}
+          {mapLabel(mapId)}
         </Typography>
         <Typography variant={'caption'} color={'text.secondary'}>
           {zoomLabel(status.zoom)}
@@ -732,4 +746,4 @@ const selectedLabel = (count: number): string =>
  */
 const speedTimings: Record<string, number> = {};
 
-export { DrawNotice, MapView, mapIdFromQuery, markerClassifierFor, speedTimings };
+export { DrawNotice, MapView, mapIdFromQuery, mapLabel, markerClassifierFor, speedTimings };

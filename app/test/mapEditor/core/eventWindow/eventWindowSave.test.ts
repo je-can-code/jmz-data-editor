@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MAP_CONFLICT_MESSAGE, saveTargetMap } from '../../../../src/mapEditor/core/eventWindow/eventWindowSave.ts';
+import { BLUEPRINT_NOT_SAVED_MESSAGE, MAP_CONFLICT_MESSAGE, saveTargetMap } from '../../../../src/mapEditor/core/eventWindow/eventWindowSave.ts';
+import { renameEvent } from '../../../../src/mapEditor/core/eventWindow/eventWindowTarget.ts';
 import { setPageOption } from '../../../../src/mapEditor/core/eventWindow/pageSettings.ts';
 import { DocumentHub, type DocumentStore } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { openedBlueprint } from '../../support/blueprintFixtures.ts';
 import { eventWindowMap, TARGET } from '../../support/eventWindowFixtures.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
  * An event window saves the map its event lives on, and owes the author the same care the workspace's Save all takes:
@@ -87,6 +90,24 @@ describe('eventWindowSave', () =>
       // Assert.
       expect([ failure, hub.isDirty('map:1') ])
         .toStrictEqual([ 'disk full', true ]);
+    });
+
+    it('writes nothing for an event of a blueprint, whose changes have no file of their own, and says so only when there are some', async () =>
+    {
+      // Arrange: the camp opened as a map, its event 1 renamed, beside a second camp left as it was.
+      const changed = openedBlueprint('k3x9q2mf', stampOf());
+      const clean = openedBlueprint('k3x9q2mf', stampOf());
+      renameEvent(changed.hub, { mapId: changed.mapId, eventId: 1 }, 'Guard');
+
+      // Act.
+      const outcomes = [
+        await saveTargetMap(changed.hub, { mapId: changed.mapId, eventId: 1 }),
+        await saveTargetMap(clean.hub, { mapId: clean.mapId, eventId: 1 }),
+      ];
+
+      // Assert: the change stays, unsaved.
+      expect([ outcomes, changed.hub.isDirty(changed.map.key), changed.map.event(1)?.name ])
+        .toStrictEqual([ [ { ok: false, message: BLUEPRINT_NOT_SAVED_MESSAGE }, { ok: true, saved: false } ], true, 'Guard' ]);
     });
   });
 });

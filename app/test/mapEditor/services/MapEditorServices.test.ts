@@ -644,6 +644,28 @@ describe('MapEditorServices', () =>
       services.stop();
     });
 
+    it('asks before the window closes while a blueprint holds unsaved changes, and not once they are undone', async () =>
+    {
+      // Arrange: the camp opened, nothing changed yet.
+      const network = new MemoryChannelNetwork();
+      const { environment, window } = buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() });
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      const history = mapHistoryKey(blueprintMapId('k3x9q2mf'));
+      const untouched = window.fire('beforeunload');
+
+      // Act.
+      services.hub.edit('Move event', [ history ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+      const changed = window.fire('beforeunload');
+      services.hub.undo(history);
+
+      // Assert.
+      expect([ untouched, changed, window.fire('beforeunload') ])
+        .toStrictEqual([ false, true, false ]);
+      services.stop();
+    });
+
     it('refuses a blueprint the blueprints no longer hold, in words for the author', async () =>
     {
       // Arrange.

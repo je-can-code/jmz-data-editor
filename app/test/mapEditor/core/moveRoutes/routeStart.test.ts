@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { blueprintMapId } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
@@ -34,6 +35,18 @@ describe('routeSettingOf', () =>
     // Assert.
     expect(setting)
       .toStrictEqual({ mapId: 7, page: { eventId: 3, pageIndex: 1 }, before, characterId: 0 });
+  });
+
+  it('reads the event and the page a list of a blueprint opened as a map belongs to, the blueprint being a map to its events', () =>
+  {
+    // Arrange: nothing beyond the camp's event 3's second page.
+
+    // Act.
+    const setting = routeSettingOf({ documentKey: 'blueprint-map:k3x9q2mf', listPath: [ 'events', 3, 'pages', 1, 'list' ], before: [] }, 0);
+
+    // Assert.
+    expect(setting)
+      .toStrictEqual({ mapId: blueprintMapId('k3x9q2mf'), page: { eventId: 3, pageIndex: 1 }, before: [], characterId: 0 });
   });
 
   it('names no page for a list on a map that is not a page\'s', () =>

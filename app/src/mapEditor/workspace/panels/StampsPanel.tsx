@@ -389,10 +389,11 @@ const StampCard = (props: {
 
 /**
  * One blueprint in the panel: its picture, its name, and how many copies of it stand across every map. A click takes
- * it up as the brush, or puts it down again when it is in hand. Beneath it, it can be renamed in place, or deleted, and
- * where it is used can be shown, the card then stretching across the panel to list it.
- * @param {object} props The blueprint, whether it is in hand, the words for its copies, what a click, a rename and a
- * delete do, and the list of where it is used with how to show or hide it.
+ * it up as the brush, or puts it down again when it is in hand. Beneath it, it can be opened in a tab of its own to be
+ * painted and its events edited, renamed in place, or deleted, and where it is used can be shown, the card then
+ * stretching across the panel to list it.
+ * @param {object} props The blueprint, whether it is in hand, the words for its copies, what a click, an open, a rename
+ * and a delete do, and the list of where it is used with how to show or hide it.
  * @returns {React.JSX.Element} The card.
  */
 const BlueprintCard = (props: {
@@ -400,13 +401,14 @@ const BlueprintCard = (props: {
   readonly picked: boolean;
   readonly copies: string;
   readonly onPick: () => void;
+  readonly onOpen: () => void;
   readonly onRename: (name: string) => void;
   readonly onDelete: () => void;
   readonly whereUsed: React.ReactNode | null;
   readonly onToggleWhereUsed: () => void;
 }) =>
 {
-  const { blueprint, picked, copies, onPick, onRename, onDelete, whereUsed, onToggleWhereUsed } = props;
+  const { blueprint, picked, copies, onPick, onOpen, onRename, onDelete, whereUsed, onToggleWhereUsed } = props;
   const [ renaming, setRenaming ] = useState(false);
 
   /**
@@ -448,6 +450,9 @@ const BlueprintCard = (props: {
         ? <NameField name={blueprint.name} label={'Blueprint name'} onDone={renamed}/>
         : (
           <Stack direction={'row'} flexWrap={'wrap'} sx={{ mx: 0.25, mb: 0.25 }}>
+            <Button size={'small'} onClick={onOpen} sx={{ fontSize: 12, py: 0, minWidth: 0 }}>
+              Open
+            </Button>
             <Button size={'small'} onClick={() => setRenaming(true)} sx={{ fontSize: 12, py: 0, minWidth: 0 }}>
               Rename
             </Button>
@@ -552,7 +557,8 @@ const settleEdit = (controller: WorkspaceController, outcome: BlueprintOutcome, 
 /**
  * The panel's blueprints, by name, each with its picture and how many copies of it stand across every map, a placement
  * of its tiles counting as one copy, as each copy of one of its events does: clicking one takes it up as the brush, so
- * each click on a map places copies linked to it, and clicking it again, or Esc, puts it down. Each can be renamed in
+ * each click on a map places copies linked to it, and clicking it again, or Esc, puts it down. Each opens in a tab of its
+ * own, as a small map to paint and whose events to edit (see WorkspaceController's openBlueprint). Each can be renamed in
  * place, and deleted once nothing is a copy of it, after a question; one with copies says how many and on which maps
  * instead. Each can show where it is used, map by map, a click opening the map there, and a placement no longer where
  * it was saying why, to be forgotten. The event copies are counted from every map's notes, held maps as they stand here,
@@ -676,6 +682,7 @@ const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; r
             picked={blueprint.id === pickedId}
             copies={copyCountWords(counts, blueprint.id)}
             onPick={() => pick(blueprint)}
+            onOpen={() => controller.openBlueprint(blueprint.id)}
             onRename={name => rename(blueprint, name)}
             onDelete={() => askToDelete(blueprint)}
             onToggleWhereUsed={() => setShowing(current => (current === blueprint.id ? null : blueprint.id))}

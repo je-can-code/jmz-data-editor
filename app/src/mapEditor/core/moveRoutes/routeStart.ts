@@ -1,7 +1,7 @@
 import type { CommandWhereabouts } from '../commands/CommandEditorRegistry.ts';
 import { isWholeNumber } from '../commands/editors/commandShape.ts';
 import { isMoveRoute, routeSteps, SET_MOVEMENT_ROUTE_CODE } from '../commands/editors/moveRoute.ts';
-import { parseDocumentKey } from '../model/documentKeys.ts';
+import { mapIdOfDocument } from '../model/documentKeys.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { RmmzEventCommand, RmmzEventImage, RmmzEventPage, RmmzMapEvent, RmmzMoveRoute } from '../model/rmmzTypes.ts';
 import { face, walkRoute, type Facing, type WalkMap, type Walker } from './routeWalk.ts';
@@ -41,7 +41,8 @@ type RouteStart = {
 
 /**
  * Works out where a command runs from where the list holding it sits: an event page's list on a map names its map,
- * event and page. Anywhere else, a common event's list above all, there is no map to say.
+ * event and page, and so does one on a blueprint opened as a map, which is a map to its events. Anywhere else, a common
+ * event's list above all, there is no map to say.
  * @param {CommandWhereabouts} whereabouts Where the command sits.
  * @param {number} characterId Who moves: -1 the player, 0 the event running it, or another event's id.
  * @returns {RouteSetting | null} The setting, or null when the list is not on a map.
@@ -49,8 +50,8 @@ type RouteStart = {
 const routeSettingOf = (whereabouts: CommandWhereabouts, characterId: number): RouteSetting | null =>
 {
   const { documentKey, listPath, before } = whereabouts;
-  const parsed = parseDocumentKey(documentKey);
-  if (parsed.kind !== 'map')
+  const mapId = mapIdOfDocument(documentKey);
+  if (mapId === null)
   {
     return null;
   }
@@ -59,7 +60,7 @@ const routeSettingOf = (whereabouts: CommandWhereabouts, characterId: number): R
   const [ events, eventId, pages, pageIndex, list ] = listPath;
   const onPage = listPath.length === 5 && events === 'events' && pages === 'pages' && list === 'list';
   return {
-    mapId: parsed.mapId,
+    mapId,
     page: onPage ? { eventId: eventId as number, pageIndex: pageIndex as number } : null,
     before,
     characterId,

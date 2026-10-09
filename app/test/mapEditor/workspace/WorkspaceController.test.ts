@@ -3,7 +3,9 @@ import type { DockviewApi, IDockviewPanel } from 'dockview-react';
 import { MapEditorApiError, type MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { apiDocumentStore } from '../../../src/mapEditor/core/api/apiDocumentStore.ts';
 import { saveBlueprint } from '../../../src/mapEditor/core/blueprints/blueprintEdits.ts';
+import { holdBlueprintMap } from '../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
 import { BLUEPRINTS_DOCUMENT } from '../../../src/mapEditor/core/blueprints/blueprints.ts';
+import { BLUEPRINT_RESIZED, blueprintShapeCheck } from '../../../src/mapEditor/core/blueprints/blueprintShape.ts';
 import {
   BLUEPRINT_USES_DOCUMENT,
   forgetSpots,
@@ -14,8 +16,10 @@ import {
 import type { BlueprintUsesMerge } from '../../../src/mapEditor/core/blueprints/blueprintUsesWriter.ts';
 import { DocumentHub, type DocumentStore } from '../../../src/mapEditor/core/history/DocumentHub.ts';
 import { blueprintHistoryKey, mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintMapId } from '../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapInfo } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { resizeMap } from '../../../src/mapEditor/core/properties/mapPropertyEdits.ts';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { TREE_ROOT, WorkspaceController } from '../../../src/mapEditor/workspace/WorkspaceController.ts';
 import { drawsFor, holdBlueprints, storedBlueprints, storedUses } from '../support/blueprintFixtures.ts';
@@ -989,6 +993,136 @@ describe('WorkspaceController', () =>
       // Assert.
       expect([ controller.getState().notice?.text, controller.blueprintName('k3x9q2mf') ])
         .toStrictEqual([ '"Save blueprint "Bat roost"" cannot be undone: "Bat roost" still has 1 copy, on Map 5 (1), so it can\'t be deleted.', 'Bat roost' ]);
+    });
+  });
+
+  /*
+   * A blueprint opens as a small map in a tab of its own, wherever a map would open, and is brought forward when it is
+   * open already. Focused, it hands undo the blueprint's own history, which nothing done to a map reaches, and which
+   * reaches no map. Its changes have no file of their own and are not saved yet: Save all saves the maps and says the
+   * blueprints' changes stay unsaved. An edit the window's checks refuse, such as a resize of a blueprint, is said in the
+   * notice, whichever tool made it.
+   *
+   * On the server, the camp (k3x9q2mf) is a blueprint of one event, two cells wide, open in the window as a map.
+   */
+  describe('blueprints opened as maps', () =>
+  {
+    /**
+     * A controller over the camp, held as the window holds it once opened, with the check the window keeps every
+     * blueprint to.
+     * @returns {Promise<ReturnType<typeof buildController> & { mapId: number }>} The controller, its hub and the rest, and
+     * the camp's map id.
+     */
+    const withCamp = async () =>
+    {
+      const built = buildController({ 'blueprints': storedBlueprints({ k3x9q2mf: { name: 'Goblin camp', stamp: stampOf({ width: 2 }) } }), 'blueprint-uses': storedUses() });
+      built.hub.addCommitCheck(blueprintShapeCheck(built.hub));
+      await built.controller.whenPlacementsHeld();
+      holdBlueprintMap(built.hub, 'k3x9q2mf');
+      return { ...built, mapId: blueprintMapId('k3x9q2mf') };
+    };
+
+    it('opens a blueprint as a tab in the centre named for the blueprint, and brings it forward once open', async () =>
+    {
+      // Arrange.
+      const { controller, mapId } = await withCamp();
+      const dock = buildDock([ { id: 'start', component: 'start', group: MAIN } ]);
+      controller.attach(dock.api);
+
+      // Act.
+      controller.openBlueprint('k3x9q2mf');
+      controller.openBlueprint('k3x9q2mf');
+
+      // Assert.
+      expect([ dock.added, dock.api.getPanel('blueprint-k3x9q2mf')?.params, dock.activated, controller.mapName(mapId) ])
+        .toStrictEqual([
+          [ { id: 'blueprint-k3x9q2mf', position: { referenceGroup: MAIN, direction: 'within' } } ],
+          { mapId },
+          [ 'blueprint-k3x9q2mf' ],
+          'Goblin camp',
+        ]);
+    });
+
+    it('says why a blueprint whose id no map id can spell does not open, opening nothing', async () =>
+    {
+      // Arrange: an id one character too long, as only a hand-edited blueprints file holds.
+      const { controller } = await withCamp();
+      const dock = buildDock([ { id: 'start', component: 'start', group: MAIN } ]);
+      controller.attach(dock.api);
+
+      // Act.
+      const panel = controller.openBlueprint('k3x9q2mf123');
+
+      // Assert.
+      expect([ panel, dock.added, controller.getState().notice?.text ])
+        .toStrictEqual([ null, [], '"k3x9q2mf123" can\'t be opened: its id in the blueprints file is too long.' ]);
+    });
+
+    it('hands undo the blueprint\'s own history while its panel has focus, which reaches no map and no map\'s reaches', async () =>
+    {
+      // Arrange: map 1 renamed, then the camp's event moved, then map 1 renamed again.
+      const { controller, hub, mapId } = await withCamp();
+      const { api } = buildDock([ { id: 'blueprint-k3x9q2mf', component: 'map', params: { mapId }, group: MAIN } ]);
+      hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+      hub.edit('Move event', [ mapHistoryKey(mapId) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 1, 'x' ], 1));
+      hub.edit('Rename map again', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Port'));
+
+      // Act.
+      controller.panelActivated(api.getPanel('blueprint-k3x9q2mf'));
+      await controller.undo();
+
+      // Assert: the move is undone, and map 1 keeps both renames, its history untouched.
+      expect([
+        controller.getState().activeHistory,
+        controller.getState().currentMapId,
+        hub.map('blueprint-map:k3x9q2mf').event(1)?.x,
+        hub.map('map:1').property('displayName'),
+        hub.history(mapHistoryKey(1)).rows.map(row => [ row.label, row.done ]),
+        hub.history(blueprintHistoryKey('k3x9q2mf')).rows.map(row => [ row.label, row.done ]),
+      ])
+        .toStrictEqual([
+          'blueprint:k3x9q2mf',
+          mapId,
+          0,
+          'Port',
+          [ [ 'Rename map', true ], [ 'Rename map again', true ] ],
+          [ [ 'Move event', false ] ],
+        ]);
+    });
+
+    it('leaves a blueprint\'s changes unsaved on Save all, saying so, and saves the maps', async () =>
+    {
+      // Arrange: the camp's event moved, and map 1 renamed.
+      const { controller, hub, saves, mapId } = await withCamp();
+      hub.edit('Move event', [ mapHistoryKey(mapId) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 1, 'x' ], 1));
+      hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+
+      // Act.
+      await controller.saveAll();
+      const withMap = controller.getState().notice?.text;
+      await controller.saveAll();
+
+      // Assert.
+      expect([ withMap, controller.getState().notice?.text, saves, hub.dirtyKeys() ])
+        .toStrictEqual([
+          'Saved 1 map; changes to blueprints can\'t be saved yet.',
+          'Changes to blueprints can\'t be saved yet; everything else is saved.',
+          [ 'map:1' ],
+          [ 'blueprint-map:k3x9q2mf' ],
+        ]);
+    });
+
+    it('says why an edit the window\'s checks refused was refused', async () =>
+    {
+      // Arrange.
+      const { controller, hub, mapId } = await withCamp();
+
+      // Act.
+      const step = resizeMap(hub, mapId, 4, 1, 'top-left');
+
+      // Assert.
+      expect([ step, controller.getState().notice ])
+        .toStrictEqual([ null, { id: 1, text: BLUEPRINT_RESIZED, severity: 'error' } ]);
     });
   });
 

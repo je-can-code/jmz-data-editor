@@ -6,13 +6,17 @@ import { describe, expect, it } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { MapEditorApiError, type MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { renameBlueprint, saveBlueprint } from '../../../src/mapEditor/core/blueprints/blueprintEdits.ts';
+import { holdBlueprintMap } from '../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
 import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
-import { MAP_INFOS_KEY, mapDocumentKey, parseDocumentKey, type DocumentKey } from '../../../src/mapEditor/core/model/documentKeys.ts';
+import { blueprintMapId, MAP_INFOS_KEY, mapDocumentKey, parseDocumentKey, type DocumentKey } from '../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { WorkspaceController } from '../../../src/mapEditor/workspace/WorkspaceController.ts';
 import { useEventSelection, useHeldMap, WorkspaceProvider } from '../../../src/mapEditor/workspace/workspaceHooks.tsx';
+import { drawsFor, holdBlueprints } from '../support/blueprintFixtures.ts';
 import { buildMapJson } from '../support/fixtures.ts';
+import { stampOf } from '../support/stampFixtures.ts';
 import { buildTreeRows } from '../support/treeFixtures.ts';
 
 /*
@@ -99,6 +103,62 @@ describe('useHeldMap', () =>
     // Assert.
     expect(await screen.findByText('held'))
       .toBeInTheDocument();
+  });
+
+  it('holds a blueprint opened as a map once the blueprints hold it, and tries again whenever they change', async () =>
+  {
+    // Arrange: a window holding the blueprints, but not the camp yet, whose map fails to open the first time.
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    holdBlueprints(hub, {});
+    let attempts = 0;
+    const openDocument = async (key: DocumentKey) =>
+    {
+      if (key === MAP_INFOS_KEY)
+      {
+        return hub.adopt(key, buildTreeRows() as unknown as JsonValue);
+      }
+
+      // the workspace asks for the blueprints and their placements as it opens: the one is held, the other not on disk.
+      if (key !== 'blueprint-map:k3x9q2mf')
+      {
+        if (hub.has(key))
+        {
+          return hub.document(key);
+        }
+
+        throw new Error(`${key} is not on disk in this test`);
+      }
+
+      attempts += 1;
+      if (attempts === 1)
+      {
+        throw new Error('the blueprints are not settled yet');
+      }
+
+      return holdBlueprintMap(hub, 'k3x9q2mf');
+    };
+    const services = { hub, api: {} as MapEditorApi, openDocument } as unknown as MapEditorServices;
+    render(
+      <WorkspaceProvider controller={new WorkspaceController(services)}>
+        <Probe mapId={blueprintMapId('k3x9q2mf')}/>
+      </WorkspaceProvider>
+    );
+    const gone = screen.getByTestId('held-map').textContent;
+
+    // Act: the camp saved here, which changes the blueprints.
+    act(() =>
+    {
+      saveBlueprint(hub, stampOf(), 'Goblin camp', drawsFor([ 'k3x9q2mf' ]));
+    });
+
+    // Assert: gone while the blueprints held no camp, then the failure, then held once they changed again.
+    await screen.findByText('the blueprints are not settled yet');
+    act(() =>
+    {
+      renameBlueprint(hub, 'k3x9q2mf', 'Camp');
+    });
+    expect([ gone, await screen.findByText('held') !== null, attempts ])
+      .toStrictEqual([ 'waiting', true, 2 ]);
   });
 
   it('never asks for a map the tree does not list, however often the tree settles', async () =>

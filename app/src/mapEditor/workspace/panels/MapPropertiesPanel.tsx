@@ -1,6 +1,9 @@
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { Alert, Box, Button, CircularProgress, IconButton, Stack, TextField, Tooltip, Typography } from '@mui/material';
 import { Add, Close, FiberManualRecord } from '@mui/icons-material';
+import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../../core/blueprints/blueprints.ts';
+import { BLUEPRINT_RESIZED } from '../../core/blueprints/blueprintShape.ts';
+import { blueprintIdOfMap, isBlueprintMapId } from '../../core/model/documentKeys.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
 import type { RmmzAudio, RmmzEncounter, RmmzTileset } from '../../core/model/rmmzTypes.ts';
 import {
@@ -419,10 +422,77 @@ const EncounterFields = (props: { map: MapDocument; edit: EditProperties }) =>
 };
 
 /**
+ * Words which layers a blueprint carries, for its properties.
+ * @param {MapDocument} map The blueprint opened as a map.
+ * @param {readonly number[] | null} carried The layers it carries, bottom to top, or null for none.
+ * @returns {string} The words.
+ */
+const carriedWords = (map: MapDocument, carried: readonly number[] | null): string =>
+{
+  if (carried === null)
+  {
+    return 'None: it holds events alone.';
+  }
+
+  return carried.length === 1
+    ? `Layer ${carried[0] + 1} alone, ${map.width} by ${map.height}.`
+    : `Every layer, ${map.width} by ${map.height}.`;
+};
+
+/**
+ * What the properties show for a blueprint opened as a map, which keeps none of a map's settings: its tileset, which of
+ * its layers it keeps, its size and its events, and in a line each why the size stays as it is and why its events can be
+ * changed but not added or taken away.
+ * @param {{ map: MapDocument, name: string | null, tilesets: readonly (RmmzTileset | null)[] }} props The blueprint opened
+ * as a map, its name, and the tilesets.
+ * @returns {React.JSX.Element} The section.
+ */
+const BlueprintProperties = (props: { map: MapDocument; name: string | null; tilesets: readonly (RmmzTileset | null)[] }) =>
+{
+  const { map, name, tilesets } = props;
+  const { hub } = useWorkspace().services;
+  const blueprintId = blueprintIdOfMap(map.mapId) as string;
+  const blueprint = hub.has(BLUEPRINTS_DOCUMENT) ? blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), blueprintId) : null;
+  const carried = blueprint === null || blueprint.stamp.tiles === null ? null : blueprint.stamp.tiles.layers;
+  const tileset = tilesets[map.tilesetId] ?? null;
+  const events = map.eventIds().length;
+
+  return (
+    <Box sx={{ height: '100%', overflowY: 'auto', px: 1.5, pb: 2, bgcolor: 'background.default' }} data-testid={'blueprint-properties'}>
+      <Typography variant={'subtitle2'} sx={{ pt: 1 }} noWrap>
+        {name}
+      </Typography>
+      <Typography variant={'caption'} color={'text.secondary'} sx={{ display: 'block' }}>
+        {tileset === null ? `A blueprint drawn with tileset ${map.tilesetId}.` : `A blueprint drawn with ${tileset.name}.`}
+      </Typography>
+      <SectionTitle>Tiles</SectionTitle>
+      <Typography variant={'body2'}>
+        {carriedWords(map, carried)}
+      </Typography>
+      <SectionTitle>Size</SectionTitle>
+      <Typography variant={'body2'}>
+        {`${map.width} by ${map.height}`}
+      </Typography>
+      <Typography variant={'caption'} color={'text.secondary'} sx={{ display: 'block' }}>
+        {BLUEPRINT_RESIZED}
+      </Typography>
+      <SectionTitle>Events</SectionTitle>
+      <Typography variant={'body2'}>
+        {events === 1 ? '1 event' : `${events} events`}
+      </Typography>
+      <Typography variant={'caption'} color={'text.secondary'} sx={{ display: 'block' }}>
+        Its events can be moved and changed, but none added or removed: removing one would delete events on every map.
+      </Typography>
+    </Box>
+  );
+};
+
+/**
  * Every property of the map in focus (the last one focused in a panel or picked alone in the tree), each change
  * one step in that map's history, so it undoes like any other edit to the map: from here, from the map, or from the
  * history panel. The sections the plugin modules add, such as J-Lighting's darkness, sit just above the note they
- * write into, and come and go with their plugins.
+ * write into, and come and go with their plugins. A blueprint opened as a map shows what it holds instead (see
+ * {@link BlueprintProperties}).
  * @returns {React.JSX.Element} The panel.
  */
 const MapPropertiesPanel = () =>
@@ -438,7 +508,7 @@ const MapPropertiesPanel = () =>
 
   if (mapId === null || held.map === null)
   {
-    const waiting = mapId !== null && held.row !== null && held.failure === null;
+    const waiting = mapId !== null && held.gone === false && held.failure === null;
     return (
       <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', p: 2, color: 'text.secondary', bgcolor: 'background.default' }}>
         {waiting
@@ -449,6 +519,10 @@ const MapPropertiesPanel = () =>
   }
 
   const { map } = held;
+  if (isBlueprintMapId(mapId))
+  {
+    return <BlueprintProperties map={map} name={held.name} tilesets={tilesets}/>;
+  }
 
   /**
    * Makes one change to the map's properties, showing why if it cannot be made.
@@ -469,7 +543,7 @@ const MapPropertiesPanel = () =>
   return (
     <Box sx={{ height: '100%', overflowY: 'auto', px: 1.5, pb: 2, bgcolor: 'background.default' }} data-testid={'map-properties'}>
       <Typography variant={'subtitle2'} sx={{ pt: 1 }} noWrap>
-        {held.row?.name}
+        {held.name}
       </Typography>
       <SectionTitle>General</SectionTitle>
       <GeneralFields map={map} tilesets={tilesets} edit={edit}/>

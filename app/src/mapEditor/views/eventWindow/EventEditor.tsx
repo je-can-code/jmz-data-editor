@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Box, Button, Divider, Snackbar, Stack, Typography } from '@mui/material';
+import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../../core/blueprints/blueprints.ts';
+import type { DocumentHub } from '../../core/history/DocumentHub.ts';
+import { blueprintIdOfMap } from '../../core/model/documentKeys.ts';
 import {
   pageListPath,
   readTargetEvent,
@@ -105,6 +108,28 @@ const useTilesetRow = (api: MapEditorApi | null, tilesetId: number): RmmzTileset
 };
 
 /**
+ * Names the map an event window's event is on, for its title and its messages: the map's name as the project names it,
+ * or, for a blueprint opened as a map, the blueprint's own.
+ * @param {DocumentHub} hub The window's documents.
+ * @param {number} mapId The map, or the id a blueprint opened as a map takes.
+ * @param {readonly string[] | null} mapNames The project's map names by id, or null until read.
+ * @returns {string} The name, such as "Forest Path", or "Map 12" while it is not known.
+ */
+const mapNameOf = (hub: DocumentHub, mapId: number, mapNames: readonly string[] | null): string =>
+{
+  const blueprintId = blueprintIdOfMap(mapId);
+  if (blueprintId === null)
+  {
+    return (mapNames === null ? '' : mapNames[mapId] ?? '') || `Map ${mapId}`;
+  }
+
+  const blueprint = hub.has(BLUEPRINTS_DOCUMENT) ? blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), blueprintId) : null;
+  return blueprint === null
+    ? 'a blueprint'
+    : blueprint.name;
+};
+
+/**
  * The full editor of one event, in its own window: its name and note, its pages as tabs, and on the page shown its
  * conditions, graphic, movement, options, priority, trigger and commands. Every change is one step in the event's own
  * history (Ctrl+Z and Ctrl+Y move it, and the header lists it), lands at once in every other window holding the map,
@@ -134,8 +159,18 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
 
   const event = readTargetEvent(hub, target);
   const eventName = event === null ? null : event.name;
-  const mapName = names?.maps[target.mapId] || `Map ${target.mapId}`;
+  const mapName = mapNameOf(hub, target.mapId, names?.maps ?? null);
   useReadyMark(event !== null);
+
+  // an edit the window's checks refused, such as a page taken off a blueprint's event that would take the event with it,
+  // says why, whichever part of the window made it.
+  useEffect(() => hub.subscribe(hubEvent =>
+  {
+    if (hubEvent.type === 'refused')
+    {
+      setNotice({ message: hubEvent.message, severity: 'warning' });
+    }
+  }), [ hub ]);
 
   // an event on the map means its map is held; the picker's tileset follows the map's own.
   const tileset = useTilesetRow(api, event === null ? 0 : hub.map(key).tilesetId);
