@@ -17,12 +17,14 @@ import { isTextEntry, type KeyTarget } from '../../core/workspace/shortcuts.ts';
 const OVERRIDE_KEY_CODE = 'Space';
 
 /**
- * What the controller needs from the renderer: the canvas to listen on, the camera, and the cell under a point.
+ * What the controller needs from the renderer: the canvas to listen on, the camera, the cell under a point, and word
+ * whenever the camera moves.
  */
 type PaintSurface = {
   readonly canvas: HTMLCanvasElement | null;
   readonly camera: Camera;
   cellAt(point: ScreenPoint): MapCell | null;
+  onCameraChange(listener: (camera: Camera) => void): () => void;
 };
 
 /**
@@ -89,6 +91,9 @@ type HeldKeys = {
  * A stroke never outlives the gesture that made it: losing the pointer or the window's focus ends it, keeping what it
  * painted, and so does any Ctrl shortcut pressed mid-stroke, so an undo pressed while drawing takes back the whole
  * stroke rather than finding it still open.
+ *
+ * The map moving under a pointer that stays still, zoomed, panned or centred somewhere, puts another cell under it, so
+ * the tools follow as if the pointer had moved there: the preview always shows the cell a click there would land on.
  */
 class PaintController
 {
@@ -97,6 +102,12 @@ class PaintController
   #session: ToolSession;
 
   #keys: HeldKeys = { shift: false, copy: false, override: false };
+
+  /**
+   * Where the pointer last was over the canvas, while it is there: where the tools are followed to when the map moves
+   * under it.
+   */
+  #point: ScreenPoint | null = null;
 
   #hovering = false;
 
@@ -176,6 +187,7 @@ class PaintController
       this.#session.toolChanged(settings.tool);
       this.#show();
     }));
+    this.#stops.push(this.#options.surface.onCameraChange(() => this.#follow()));
 
     return () =>
     {
@@ -243,10 +255,30 @@ class PaintController
     listen('pointerleave', () =>
     {
       this.#hovering = false;
+      this.#point = null;
       this.#lastSpot = '';
       this.#session.leave();
       this.#show();
     });
+  }
+
+  /**
+   * Follows the map moving under a pointer that stays still: the tools take the cell now under it as if the pointer had
+   * moved there, the preview and any drag in hand with them, so what the preview shows is where a click lands. With the
+   * pointer away from the map there is nothing to follow.
+   */
+  #follow(): void
+  {
+    const point = this.#point;
+    if (point === null)
+    {
+      return;
+    }
+
+    const pointer = this.#pointerAt(point);
+    this.#lastSpot = this.#spotOf(pointer);
+    this.#session.move(pointer);
+    this.#show();
   }
 
   /**
@@ -426,16 +458,28 @@ class PaintController
   }
 
   /**
-   * Turns a pointer event into what the tools read: the cell and the quarter under it, and the keys held with it.
+   * Turns a pointer event into what the tools read: the cell and the quarter under it, and the keys held with it. The
+   * spot is kept, for following the map when it moves under the pointer.
    * @param {PointerEvent} event The event.
    * @returns {ToolPointer} The pointer.
    */
   #pointerFor(event: PointerEvent): ToolPointer
   {
-    const { surface } = this.#options;
-    const point = { x: event.offsetX, y: event.offsetY };
-    const world = screenToWorld(surface.camera, point);
+    this.#point = { x: event.offsetX, y: event.offsetY };
     this.#keys = { ...this.#keys, shift: event.shiftKey, copy: event.ctrlKey || event.metaKey };
+    return this.#pointerAt(this.#point);
+  }
+
+  /**
+   * Works out what the tools read at a spot on the canvas, with the camera as it stands now: the cell and the quarter
+   * under it, and the keys held.
+   * @param {ScreenPoint} point The spot.
+   * @returns {ToolPointer} The pointer.
+   */
+  #pointerAt(point: ScreenPoint): ToolPointer
+  {
+    const { surface } = this.#options;
+    const world = screenToWorld(surface.camera, point);
     return {
       cell: surface.cellAt(point),
       quarter: shadowQuarterAt(world.x, world.y, TILE_SIZE),
