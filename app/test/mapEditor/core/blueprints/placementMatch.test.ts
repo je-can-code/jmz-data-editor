@@ -355,6 +355,7 @@ describe('placementProblem', () =>
       { kind: 'shifted', by: { x: 0, y: -2 }, matched: 5, compared: 8 },
       { kind: 'shifted', by: { x: -1, y: 1 }, matched: 5, compared: 8 },
       { kind: 'changed', matched: 3, compared: 20 },
+      { kind: 'changed', matched: 1, compared: 3 },
       { kind: 'changed', matched: 0, compared: 1 },
     ] as const;
 
@@ -371,6 +372,7 @@ describe('placementProblem', () =>
         'its tiles seem to have moved up',
         'its tiles seem to have moved down and to the left',
         'only 3 of the 20 tiles there still match the blueprint',
+        'only 1 of the 3 tiles there still matches the blueprint',
         'none of the tiles there match the blueprint any more',
       ]);
   });

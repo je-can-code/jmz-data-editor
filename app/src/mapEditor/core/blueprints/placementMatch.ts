@@ -326,9 +326,15 @@ const placementProblem = (check: PlacementCheck): string | null =>
     case 'shifted':
       return `its tiles seem to have moved ${slideWords(check.by)}`;
     case 'changed':
-      // a placement failing the check with any tile matching compared at least two, so the count reads as a plural.
-      return check.matched === 0
-        ? 'none of the tiles there match the blueprint any more'
+      // a placement failing the check with any tile matching compared at least three, so the tiles read as a plural, and
+      // the verb follows how many still match.
+      if (check.matched === 0)
+      {
+        return 'none of the tiles there match the blueprint any more';
+      }
+
+      return check.matched === 1
+        ? `only 1 of the ${check.compared} tiles there still matches the blueprint`
         : `only ${check.matched} of the ${check.compared} tiles there still match the blueprint`;
   }
 };
