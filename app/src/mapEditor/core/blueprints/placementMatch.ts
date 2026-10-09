@@ -31,9 +31,10 @@ type PlacementCheck =
  * The share of the tiles compared that must match the blueprint for a placement to count as still where the record says:
  * at least half. Painting over a few of a placement's cells by hand is expected (only the cells still reading the
  * blueprint's tiles ever follow it), so the check asks only whether the placement is still there, and a placement more
- * than half painted over is taken for gone. Measured on the shipped maps (6,331 pieces of 2 by 2 to 12 by 12 tiles,
- * 2026-10-09): with a quarter of each piece's cells painted over at random, 97.9% still pass; with half, 77.3%. What a
- * share alone cannot catch, a map shifted a tile under the record, {@link slideOf} catches instead.
+ * than half painted over is taken for gone. Measured with this check on the shipped maps (6,351 pieces of 2 by 2 to 12
+ * by 12 tiles from 328 maps, 2026-10-09): with a tenth of each piece's cells painted over at random, 99.6% still read as
+ * in place; a quarter, 96.5%; half, 75.1%. A share alone is no test of a map shifted under the record, since most of a
+ * piece is usually one ground, which matches by kind wherever it is; {@link slideOf} is.
  */
 const MATCH_SHARE = 0.5;
 
@@ -199,10 +200,12 @@ const slideEvidence = (
  * Finds whether a placement's tiles slid off the spot the record holds, by up to {@link SLIDE_REACH} tiles every way, as
  * they do when a map is shifted, or resized from another edge, outside the editor. An offset wins when at least
  * {@link SLIDE_EVIDENCE} of the tiles it changes read as slid, more than read as placed, and at least half of all it
- * changes; of several, the one with the most to spare. Measured on the shipped maps (6,331 pieces, 2026-10-09): a map
- * shifted one column is caught for 65.9% of pieces, and of the rest about two thirds are so even (a field of one ground)
- * that nothing could tell them from where they were; a quarter of a piece's cells painted over at random reads as slid
- * for 1.4%.
+ * changes; of several, the one with the most to spare. Measured with the whole check on the shipped maps (6,351 pieces
+ * from 328 maps, 2026-10-09): a map shifted one column fails the check for 66.7% of pieces and one row for 71.3%; of
+ * the column's misses, 20.9 of the 33.3 points are pieces every tile of which still matches once shifted, which nothing
+ * could tell from where they were, and the rest mostly pieces whose only feature is a tile or two, which a repaint leaves
+ * be anyway, since a cell no longer reading the blueprint's old tile never follows it. A quarter of a piece's cells
+ * painted over at random reads as slid for 2.3%.
  * @param {PlacementGround} ground The map.
  * @param {MapCell} spot Where the record says the top-left corner sits.
  * @param {Stamp} stamp The blueprint's stamp, which holds tiles.
@@ -323,7 +326,10 @@ const placementProblem = (check: PlacementCheck): string | null =>
     case 'shifted':
       return `its tiles seem to have moved ${slideWords(check.by)}`;
     case 'changed':
-      return `only ${check.matched} of the ${check.compared} tiles there still match the blueprint`;
+      // a placement failing the check with any tile matching compared at least two, so the count reads as a plural.
+      return check.matched === 0
+        ? 'none of the tiles there match the blueprint any more'
+        : `only ${check.matched} of the ${check.compared} tiles there still match the blueprint`;
   }
 };
 

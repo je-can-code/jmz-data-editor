@@ -120,6 +120,23 @@ describe('blueprintEdits', () =>
         .toStrictEqual([ [ 'Guard', 'kept as it is' ], 'Guard\n<blueprint:[aaaa, 1]>' ]);
     });
 
+    it('keeps none of the placements of other blueprints the stamp\'s tiles were copied with, leaving the stamp handed over as it was', () =>
+    {
+      // Arrange: a stamp of tiles copied off a placement of the camp (aa22).
+      const hub = windowWith();
+      const values = [ 0, 0 ];
+      const spots = [ { blueprintId: 'aa22', x: 0, y: 0, width: 2, height: 1 } ];
+      const stamp = stampOf({ width: 2, tiles: { layers: [ 0 ], values, calledFor: [ -1, -1 ] }, events: [], spots });
+
+      // Act.
+      saveBlueprint(hub, stamp, 'Camp again', drawsFor([ 'k3x9q2mf' ]));
+
+      // Assert.
+      const [ camp ] = blueprintsOf(hub.document(BLUEPRINTS_DOCUMENT));
+      expect([ Object.hasOwn(camp.stamp, 'spots'), camp.stamp.tiles, stamp.spots ])
+        .toStrictEqual([ false, stamp.tiles, spots ]);
+    });
+
     it('draws another id when the first drawn is taken', () =>
     {
       // Arrange.

@@ -19,7 +19,7 @@ import { fill } from '../tiles/support/tileGridBuilder.ts';
  * knows by its id whether it holds it already and keeps it once. Anything else reads as nothing, a paste of it changing
  * nothing: plain text, other JSON, a stamp in a shape this editor does not write, or one whose tiles do not fill it,
  * whose layers repeat or run backwards, whose values no map can hold, whose events stand outside it or on one cell
- * twice, or that holds nothing at all.
+ * twice, whose placements of blueprints are not placements reaching into its tiles, or that holds nothing at all.
  */
 describe('stampClipboard', () =>
 {
@@ -104,6 +104,43 @@ describe('stampClipboard', () =>
       withFields({ events: [ stamp.events[0], { ...stamp.events[0], id: 9 } ] }),
       withFields({ events: [ stamp.events[0], { ...stamp.events[0], x: 0 } ] }),
       withFields({ tiles: null, events: [] }),
+    ];
+
+    // Act.
+    const read = texts.map(decodeStampClipboard);
+
+    // Assert.
+    expect(read)
+      .toStrictEqual(texts.map(() => null));
+  });
+
+  it('reads back the placements of blueprints a stamp\'s tiles hold, one hanging past the stamp\'s corner included', () =>
+  {
+    // Arrange: one placement within the 2 by 2 stamp, and one 3 by 2 reaching in from two cells left of it.
+    const stamp = { ...captured(), spots: [ { blueprintId: 'aa22', x: 0, y: 1, width: 1, height: 1 }, { blueprintId: 'bb33', x: -2, y: 0, width: 3, height: 2 } ] };
+
+    // Act.
+    const read = decodeStampClipboard(encodeStampClipboard(stamp));
+
+    // Assert.
+    expect(read)
+      .toStrictEqual(stamp);
+  });
+
+  it('reads a stamp whose placements are not placements reaching into it as nothing', () =>
+  {
+    // Arrange: an empty list, a list of something else, a blueprint's id no blueprint could have, a size of nothing, a
+    // placement ending a cell short of the stamp's left edge and one starting past its right, and placements on a stamp
+    // with no tiles to hold them.
+    const spot = { blueprintId: 'aa22', x: 0, y: 0, width: 1, height: 1 };
+    const texts = [
+      withFields({ spots: [] }),
+      withFields({ spots: [ 'aa22' ] }),
+      withFields({ spots: [ { ...spot, blueprintId: 'Aa-22' } ] }),
+      withFields({ spots: [ { ...spot, width: 0 } ] }),
+      withFields({ spots: [ { ...spot, x: -3, width: 3 } ] }),
+      withFields({ spots: [ { ...spot, y: 2 } ] }),
+      withFields({ tiles: null, spots: [ spot ] }),
     ];
 
     // Act.

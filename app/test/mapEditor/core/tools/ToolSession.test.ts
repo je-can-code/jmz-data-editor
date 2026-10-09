@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
 import type { StampOutcome } from '../../../../src/mapEditor/core/stamps/stampPlacement.ts';
@@ -371,6 +372,99 @@ describe('ToolSession: the select tool', () =>
     // Assert.
     expect([ afterEscape, bench.session.selection ])
       .toEqual([ null, null ]);
+  });
+});
+
+/*
+ * A placement of a blueprint's tiles travels with an area the select tool drags when the area holds it whole, every
+ * layer it is compared on carried: moved, its spot follows the tiles, and one undo takes both back; copied, it is recorded
+ * again where the copy lands. One the area holds only in part stays where it was.
+ *
+ * The tree (aa22) is a blueprint of one cell, on layer 4, placed at 0, 0; the grass strip (bb33) is two cells of the
+ * ground, placed at 0, 2.
+ */
+describe('ToolSession: placements the select tool drags', () =>
+{
+  /**
+   * A stamp of a size carrying the layers given.
+   * @param {number} width The width.
+   * @param {readonly number[]} layers The layers carried.
+   * @returns {Stamp} The stamp.
+   */
+  const carrying = (width: number, layers: readonly number[]): Stamp =>
+  {
+    const values = new Array<number>(width * layers.length).fill(0);
+    return stampOf({ width, tiles: { layers: [ ...layers ], values, calledFor: values.map(() => -1) }, events: [] });
+  };
+
+  /**
+   * Builds a session with the select tool over the meadow, holding the two blueprints and their placements.
+   * @returns {SessionBench} The session.
+   */
+  const placedMeadow = (): SessionBench =>
+  {
+    const bench = sessionOn(benchWith(4, 3, meadow), { tool: 'select' });
+    holdBlueprints(bench.hub, { aa22: { name: 'Tree', stamp: carrying(1, [ 3 ]) }, bb33: { name: 'Strip', stamp: carrying(2, [ 0 ]) } });
+    holdBlueprintUses(bench.hub, [ { blueprintId: 'aa22', mapId: 1, x: 0, y: 0 }, { blueprintId: 'bb33', mapId: 1, x: 0, y: 2 } ]);
+    return bench;
+  };
+
+  /**
+   * Lists the placements the bench's record holds.
+   * @param {SessionBench} bench The bench.
+   * @returns {PlacedSpot[]} The placements.
+   */
+  const placements = (bench: SessionBench): PlacedSpot[] => usesOf(bench.hub.document(BLUEPRINT_USES_DOCUMENT));
+
+  it('moves a placement the dragged area holds whole with it, as one step that one undo takes back', () =>
+  {
+    // Arrange: the tree's cell selected.
+    const bench = placedMeadow();
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+
+    // Act: dragged two cells right, then undone.
+    drag(bench.session, [ at(0, 0), at(2, 0) ]);
+    const moved = placements(bench);
+    bench.hub.undo(bench.history);
+
+    // Assert.
+    expect([ moved, placements(bench) ])
+      .toEqual([
+        [ { blueprintId: 'aa22', x: 2, y: 0, mapId: 1 }, { blueprintId: 'bb33', x: 0, y: 2, mapId: 1 } ],
+        [ { blueprintId: 'aa22', x: 0, y: 0, mapId: 1 }, { blueprintId: 'bb33', x: 0, y: 2, mapId: 1 } ],
+      ]);
+  });
+
+  it('records a placement again where a copy of the area lands, the original staying', () =>
+  {
+    // Arrange.
+    const bench = placedMeadow();
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+
+    // Act: dragged a row down with Ctrl held.
+    drag(bench.session, [ at(0, 0, { copy: true }), at(0, 1, { copy: true }) ]);
+
+    // Assert.
+    expect(placements(bench))
+      .toEqual([
+        { blueprintId: 'aa22', x: 0, y: 0, mapId: 1 },
+        { blueprintId: 'aa22', x: 0, y: 1, mapId: 1 },
+        { blueprintId: 'bb33', x: 0, y: 2, mapId: 1 },
+      ]);
+  });
+
+  it('leaves a placement the area holds only in part where it was', () =>
+  {
+    // Arrange: one cell of the strip's two selected.
+    const bench = placedMeadow();
+    drag(bench.session, [ at(0, 2), at(0, 2) ]);
+
+    // Act.
+    drag(bench.session, [ at(0, 2), at(3, 2) ]);
+
+    // Assert: the tiles moved, the strip's placement did not.
+    expect([ bench.hub.history(bench.history).rows.map(row => row.label), placements(bench) ])
+      .toEqual([ [ 'Move tiles' ], [ { blueprintId: 'aa22', x: 0, y: 0, mapId: 1 }, { blueprintId: 'bb33', x: 0, y: 2, mapId: 1 } ] ]);
   });
 });
 

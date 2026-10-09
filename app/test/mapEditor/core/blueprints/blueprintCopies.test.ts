@@ -308,6 +308,40 @@ describe('blueprintCopies', () =>
         ]);
     });
 
+    it('lists one blueprint\'s copies where the count stands on them, held maps live, by map and then event, and none of another\'s', async () =>
+    {
+      // Arrange: a copy of aa placed on map 2, unsaved.
+      const { hub, counter } = setUp();
+      counter.subscribe(() => undefined);
+      await counter.settled();
+      placeCopy(hub);
+
+      // Act.
+      const copies = counter.copiesOf('aa');
+
+      // Assert: map 1's live copy, not the disk's two; map 2's placed one; and map 5's from the disk.
+      expect(copies)
+        .toStrictEqual([
+          { mapId: 1, eventId: 1, blueprintId: 'aa', blueprintEventId: 3 },
+          { mapId: 2, eventId: 2, blueprintId: 'aa', blueprintEventId: 3 },
+          { mapId: 5, eventId: 4, blueprintId: 'aa', blueprintEventId: 3 },
+        ]);
+    });
+
+    it('lists the copies on the maps it holds before the disk has answered, settled or not', () =>
+    {
+      // Arrange: a server that has not answered.
+      const { counter } = setUp(() => new Promise(() => undefined));
+      counter.subscribe(() => undefined);
+
+      // Act.
+      const copies = counter.copiesOf('aa');
+
+      // Assert.
+      expect([ counter.countOf('aa'), copies ])
+        .toStrictEqual([ null, [ { mapId: 1, eventId: 1, blueprintId: 'aa', blueprintEventId: 3 } ] ]);
+    });
+
     it('counts a map the window lets go of as the disk holds it again', async () =>
     {
       // Arrange.

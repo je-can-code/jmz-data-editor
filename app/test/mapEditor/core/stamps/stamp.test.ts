@@ -169,6 +169,43 @@ describe('captureAreaStamp', () =>
     expect(stamp)
       .toBeNull();
   });
+
+  it('carries the placements of blueprints the piece holds whole, counted from its corner, and leaves the rest', () =>
+  {
+    // Arrange: the block placed as a blueprint (aa22) at 2, 1; a sign (bb33) on layer 4 at 6, 4, outside the piece; and a
+    // second block (cc44) at 4, 3, hanging out of it.
+    const map = tilesMap();
+    const spans = [
+      { blueprintId: 'aa22', x: 2, y: 1, width: 3, height: 3, layers: [ 0, 1, 2, 3 ] },
+      { blueprintId: 'bb33', x: 6, y: 4, width: 1, height: 1, layers: [ 3 ] },
+      { blueprintId: 'cc44', x: 4, y: 3, width: 3, height: 3, layers: [ 0, 1, 2, 3 ] },
+    ];
+
+    // Act.
+    const stamp = captureAreaStamp(map, { x: 1, y: 0, width: 5, height: 4 }, 'auto', TilesetMode.area, 'window-a:6', spans) as Stamp;
+
+    // Assert.
+    expect(stamp.spots)
+      .toStrictEqual([ { blueprintId: 'aa22', x: 1, y: 1, width: 3, height: 3 } ]);
+  });
+
+  it('carries a placement only with every layer it is compared on, and has no placements at all when it carries none', () =>
+  {
+    // Arrange: the sign (bb33) of layer 4 alone, and the block (aa22) of every tile layer, both within the piece.
+    const map = tilesMap();
+    const spans = [
+      { blueprintId: 'bb33', x: 3, y: 2, width: 1, height: 1, layers: [ 3 ] },
+      { blueprintId: 'aa22', x: 2, y: 1, width: 3, height: 3, layers: [ 0, 1, 2, 3 ] },
+    ];
+
+    // Act: layer 4 alone, then the ground alone.
+    const fourth = captureAreaStamp(map, { x: 2, y: 1, width: 3, height: 3 }, 3, TilesetMode.area, 'window-a:7', spans) as Stamp;
+    const ground = captureAreaStamp(map, { x: 2, y: 1, width: 3, height: 3 }, 0, TilesetMode.area, 'window-a:8', spans) as Stamp;
+
+    // Assert: a stamp holding no placement keeps the shape every stamp has.
+    expect([ fourth.spots, Object.hasOwn(ground, 'spots') ])
+      .toStrictEqual([ [ { blueprintId: 'bb33', x: 1, y: 1, width: 1, height: 1 } ], false ]);
+  });
 });
 
 describe('what a stamp is called', () =>

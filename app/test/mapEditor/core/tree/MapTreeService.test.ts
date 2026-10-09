@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { apiDocumentStore } from '../../../../src/mapEditor/core/api/apiDocumentStore.ts';
 import { MapEditorApiError, type MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { TREE_HISTORY_KEY, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import { MAP_INFOS_KEY } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { jsonEquals } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapInfo } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { TREE_ROOT } from '../../../../src/mapEditor/core/tree/MapTreeModel.ts';
 import { MapTreeService, type TreeOutcome } from '../../../../src/mapEditor/core/tree/MapTreeService.ts';
+import { holdBlueprintUses } from '../../support/blueprintFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 import { buildTreeRows } from '../../support/treeFixtures.ts';
 
@@ -795,6 +798,123 @@ describe('MapTreeService', () =>
       // Assert.
       expect([ outcome.selection, afterDuplicate, maps.has(4), state.infos ])
         .toStrictEqual([ [ 4 ], [ 'file 5', 1, 5, 6 ], false, buildTreeRows() ]);
+    });
+  });
+
+  /*
+   * The record of where blueprints are placed follows the maps the tree creates and removes, in the tree's own step, so
+   * one undo puts the record back with the files: a map deleted takes its placements with it, a copy of a map holds the
+   * placements it was copied with, and a brand new map holds none, whatever an id it takes was left holding. A window
+   * holding no record leaves it alone.
+   *
+   * The camp (aa22) is placed on the town (2), the inn (3) and the cave (5).
+   */
+  describe('placements of blueprints', () =>
+  {
+    /**
+     * The camp's placements.
+     */
+    const CAMPS: readonly PlacedSpot[] = [
+      { blueprintId: 'aa22', mapId: 2, x: 1, y: 1 },
+      { blueprintId: 'aa22', mapId: 3, x: 0, y: 2 },
+      { blueprintId: 'aa22', mapId: 5, x: 4, y: 0 },
+    ];
+
+    /**
+     * A tree service whose window holds the record of the camp's placements, beside any others given.
+     * @param {readonly PlacedSpot[]} others More placements.
+     * @returns {ReturnType<typeof buildService>} The service, the hub and the disk.
+     */
+    const placedService = (others: readonly PlacedSpot[] = []) =>
+    {
+      const built = buildService();
+      holdBlueprintUses(built.hub, [ ...CAMPS, ...others ]);
+      return built;
+    };
+
+    /**
+     * Reads the maps each placement stands on, in the record's order.
+     * @param {DocumentHub} hub The hub.
+     * @returns {string[]} Each placement as "map: x,y".
+     */
+    const placedOn = (hub: DocumentHub): string[] =>
+    {
+      return usesOf(hub.document(BLUEPRINT_USES_DOCUMENT)).map(spot => `${spot.mapId}: ${spot.x},${spot.y}`);
+    };
+
+    it('drops a deleted branch\'s placements in the tree\'s own step, which one undo brings back and a redo takes again', async () =>
+    {
+      // Arrange.
+      const { service, hub } = placedService();
+
+      // Act.
+      const removed = succeeded(await service.remove([ 2 ]));
+      const afterDelete = placedOn(hub);
+      succeeded(await service.undo());
+      const afterUndo = placedOn(hub);
+      succeeded(await service.redo());
+
+      // Assert.
+      expect([ removed.step?.histories, afterDelete, afterUndo, placedOn(hub) ])
+        .toStrictEqual([ [ 'tree' ], [ '5: 4,0' ], [ '2: 1,1', '3: 0,2', '5: 4,0' ], [ '5: 4,0' ] ]);
+    });
+
+    it('gives a duplicate its original\'s placements, which one undo takes away again', async () =>
+    {
+      // Arrange.
+      const { service, hub } = placedService();
+
+      // Act.
+      succeeded(await service.duplicate([ 5 ]));
+      const afterDuplicate = placedOn(hub);
+      succeeded(await service.undo());
+
+      // Assert: the copy is map 4.
+      expect([ afterDuplicate, placedOn(hub) ])
+        .toStrictEqual([ [ '2: 1,1', '3: 0,2', '4: 4,0', '5: 4,0' ], [ '2: 1,1', '3: 0,2', '5: 4,0' ] ]);
+    });
+
+    it('pastes a copied map\'s placements as they were when it was copied', async () =>
+    {
+      // Arrange: the cave copied, then given a second placement before the paste.
+      const { service, hub } = placedService();
+      const copied = await service.copy([ 5 ]);
+      hub.edit('Place', [ BLUEPRINT_USES_DOCUMENT ], tx => tx.set(BLUEPRINT_USES_DOCUMENT, [ 'data', 'maps', '5', 'aa22' ], [ { x: 4, y: 0 }, { x: 9, y: 9 } ]));
+
+      // Act.
+      succeeded(await service.paste(copied.ok ? copied.copies : [], 6));
+
+      // Assert.
+      expect(placedOn(hub))
+        .toStrictEqual([ '2: 1,1', '3: 0,2', '4: 4,0', '5: 4,0', '5: 9,9' ]);
+    });
+
+    it('gives a brand new map no placements, whatever its id was left holding, which one undo puts back', async () =>
+    {
+      // Arrange: placements left under the free id 4, as when a map is deleted outside the editor.
+      const { service, hub } = placedService([ { blueprintId: 'aa22', mapId: 4, x: 3, y: 3 } ]);
+
+      // Act.
+      succeeded(await service.create(TREE_ROOT));
+      const afterCreate = placedOn(hub);
+      succeeded(await service.undo());
+
+      // Assert.
+      expect([ afterCreate, placedOn(hub) ])
+        .toStrictEqual([ [ '2: 1,1', '3: 0,2', '5: 4,0' ], [ '2: 1,1', '3: 0,2', '4: 3,3', '5: 4,0' ] ]);
+    });
+
+    it('records the tree\'s steps on the tree alone in a window holding no record', async () =>
+    {
+      // Arrange.
+      const { service } = buildService();
+
+      // Act.
+      const removed = succeeded(await service.remove([ 2 ]));
+
+      // Assert.
+      expect(removed.step?.entries.every(entry => entry.document === MAP_INFOS_KEY))
+        .toBe(true);
     });
   });
 

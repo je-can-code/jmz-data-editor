@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { captureAreaStamp, captureEventsStamp, type Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
@@ -6,7 +7,7 @@ import { cutStampSource, placeStamp, planStamp, type StampPlacement } from '../.
 import { shapedTileAt, TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes.ts';
 import { gridReader } from '../../../../src/mapEditor/core/tiles/tileGrid.ts';
 import { autotileShape, makeAutotileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
-import { holdBlueprints } from '../../support/blueprintFixtures.ts';
+import { holdBlueprints, holdBlueprintUses, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
 import { hubWithMaps, mapFileOf, spotsOf } from '../../support/eventFixtures.ts';
 import { command } from '../../support/eventKindFixtures.ts';
 import { stampOf, tiledMap } from '../../support/stampFixtures.ts';
@@ -31,7 +32,8 @@ import { fill, put, type TestGrid } from '../tiles/support/tileGridBuilder.ts';
  * that could not lose its dead link cleanly refuses the stamp.
  *
  * A cut takes away what its stamp was captured from, as one step: the events it copied, and every layer it carries
- * emptied over the cells it came from, with the autotiles around the hole reshaped.
+ * emptied over the cells it came from, with the autotiles around the hole reshaped, and the placements of blueprints it
+ * carries forgotten there, since they travel with the stamp now.
  *
  * Map 1, the source, is 8x5: a 3 by 3 block of grass at 2, 1 to 4, 3, each tile in the shape its neighbours call for,
  * as MZ stores them, but for its centre, drawn by hand in shape 5; a tree over the centre on layer 4 with a shadow and
@@ -123,6 +125,57 @@ const notesOn = (file: RmmzMap): (string | null)[] =>
 {
   return file.events.map(event => (event === null ? null : (event as RmmzMapEvent).note));
 };
+
+/**
+ * The block's placement as a blueprint on map 1, as the record holds it.
+ */
+const BLOCK_ON_SOURCE: PlacedSpot = { blueprintId: 'aa22', x: 2, y: 1, mapId: 1 };
+
+/**
+ * A sign's placement as a blueprint on map 1, outside the block, as the record holds it.
+ */
+const SIGN_ON_SOURCE: PlacedSpot = { blueprintId: 'bb33', x: 0, y: 0, mapId: 1 };
+
+/**
+ * Builds a window holding the three maps, a record of the block and the sign placed on map 1, and blueprints: the block
+ * and the sign unless told otherwise, or none held at all.
+ * @param {BlueprintSeed | null} blueprints The blueprints held, by id, or null for a window holding none.
+ * @returns {ReturnType<typeof hubWithMaps>} The hub.
+ */
+const windowWithPlacements = (
+  blueprints: BlueprintSeed | null = { aa22: { name: 'Block', stamp: stampOf() }, bb33: { name: 'Sign', stamp: stampOf() } },
+) =>
+{
+  const hub = window3();
+  holdBlueprintUses(hub, [ BLOCK_ON_SOURCE, SIGN_ON_SOURCE ]);
+  if (blueprints !== null)
+  {
+    holdBlueprints(hub, blueprints);
+  }
+
+  return hub;
+};
+
+/**
+ * Captures the source's whole block as a stamp, with the block's placement, which it holds whole, and not the sign's.
+ * @param {ReturnType<typeof hubWithMaps>} hub The hub holding the source.
+ * @returns {Stamp} The stamp.
+ */
+const blockStampWith = (hub: ReturnType<typeof hubWithMaps>): Stamp =>
+{
+  const spans = [
+    { blueprintId: 'aa22', x: 2, y: 1, width: 3, height: 3, layers: [ 0, 1, 2, 3 ] },
+    { blueprintId: 'bb33', x: 0, y: 0, width: 1, height: 1, layers: [ 3 ] },
+  ];
+  return captureAreaStamp(hub.map('map:1'), { x: 2, y: 1, width: 3, height: 3 }, 'auto', TilesetMode.area, 'window-a:3', spans) as Stamp;
+};
+
+/**
+ * Lists every placement the window's record holds.
+ * @param {ReturnType<typeof hubWithMaps>} hub The hub.
+ * @returns {PlacedSpot[]} The placements.
+ */
+const recorded = (hub: ReturnType<typeof hubWithMaps>): PlacedSpot[] => usesOf(hub.document(BLUEPRINT_USES_DOCUMENT));
 
 /**
  * Reads the shapes of the grass across one row of a map, from column 0, or null where a cell holds no grass.
@@ -487,5 +540,142 @@ describe('cutStampSource', () =>
     const cut = mapFileOf(hub, 1);
     expect([ outcome.ok && outcome.step?.label, spotsOf(cut), cut.data ])
       .toStrictEqual([ 'Cut event', [ null, [ 3, 2 ], null ], source().data ]);
+  });
+
+  it('forgets on the map the placements the cut stamp carries away, leaving the rest, which one undo puts back', () =>
+  {
+    // Arrange: the block placed as a blueprint at 2, 1 and a sign at 0, 0, the block's placement captured with it.
+    const hub = windowWithPlacements();
+    const stamp = blockStampWith(hub);
+
+    // Act.
+    cutStampSource(hub, 1, stamp, TilesetMode.area);
+    const cut = recorded(hub);
+    hub.undo(mapHistoryKey(1));
+
+    // Assert: each map's placements by blueprint, as the record keeps them.
+    expect([ cut, recorded(hub) ])
+      .toStrictEqual([ [ SIGN_ON_SOURCE ], [ BLOCK_ON_SOURCE, SIGN_ON_SOURCE ] ]);
+  });
+});
+
+/*
+ * A stamp's tiles carry the placements of blueprints they hold whole, so a placement copied, or cut and pasted, is still
+ * a copy of its blueprint, as a copy of its events is: each is recorded again where the stamp's tiles land, in the same
+ * step, as long as some of it lands on the map. A placement of a blueprint no longer there goes down plain, and the author
+ * is told; while the window does not hold the blueprints none can be told gone, and each is recorded as it is. Tiles that
+ * do not go down, on a map of another tileset, record nothing; a map that may hold no link refuses the stamp whole; and a
+ * window holding no record records nothing.
+ *
+ * The block (aa22) is placed on map 1 at 2, 1, and the sign (bb33) at 0, 0.
+ */
+describe('placements a stamp carries', () =>
+{
+  /**
+   * The block's placement on map 1, the source.
+   */
+  const BLOCK = { blueprintId: 'aa22', x: 2, y: 1, width: 3, height: 3, layers: [ 0, 1, 2, 3 ] };
+
+  it('records each placement the stamp\'s tiles hold where they land, in the same step, which one undo takes back', () =>
+  {
+    // Arrange.
+    const hub = windowWithPlacements();
+    const stamp = blockStampWith(hub);
+
+    // Act.
+    const outcome = placeStamp(hub, 2, stamp, at(4, 1), 'Paste');
+    const placed = recorded(hub);
+    hub.undo(mapHistoryKey(2));
+
+    // Assert: the stamp's own spot, counted from its corner, and the placement where it landed.
+    expect([ stamp.spots, outcome.ok && outcome.notes, placed, recorded(hub) ])
+      .toStrictEqual([
+        [ { blueprintId: 'aa22', x: 0, y: 0, width: 3, height: 3 } ],
+        [],
+        [ BLOCK_ON_SOURCE, SIGN_ON_SOURCE, { blueprintId: 'aa22', x: 4, y: 1, mapId: 2 } ],
+        [ BLOCK_ON_SOURCE, SIGN_ON_SOURCE ],
+      ]);
+  });
+
+  it('records a placement hanging past the map\'s edge, and leaves out one landing wholly past it', () =>
+  {
+    // Arrange: a stamp of two placements, its tiles a row of three with the block's two thirds and the sign beyond them.
+    const hub = windowWithPlacements();
+    const values = [ 0, 0, 0 ];
+    const stamp = stampOf({
+      width: 3,
+      height: 1,
+      tiles: { layers: [ 0 ], values, calledFor: [ -1, -1, -1 ] },
+      events: [],
+      spots: [ { blueprintId: 'aa22', x: -1, y: 0, width: 3, height: 3 }, { blueprintId: 'bb33', x: 2, y: 0, width: 1, height: 1 } ],
+    });
+
+    // Act: placed with its corner on the map's last column, so the sign lands past the right edge.
+    placeStamp(hub, 2, stamp, at(7, 0), 'Paste');
+
+    // Assert.
+    expect(recorded(hub).filter(spot => spot.mapId === 2))
+      .toStrictEqual([ { blueprintId: 'aa22', x: 6, y: 0, mapId: 2 } ]);
+  });
+
+  it('puts a placement of a blueprint no longer there down plain, saying so, and records each as it is while none can be told gone', () =>
+  {
+    // Arrange: one window whose blueprints no longer hold the block, and one holding no blueprints at all.
+    const gone = windowWithPlacements({});
+    const unknown = windowWithPlacements(null);
+    const stamp = { ...stampOf({ width: 3, height: 3, tiles: blockStamp(gone).tiles, events: [] }), spots: [ { blueprintId: 'aa22', x: 0, y: 0, width: 3, height: 3 } ] };
+
+    // Act.
+    const outcomes = [ placeStamp(gone, 2, stamp, at(4, 1), 'Paste'), placeStamp(unknown, 2, stamp, at(4, 1), 'Paste') ];
+
+    // Assert.
+    expect([ outcomes.map(outcome => outcome.ok && outcome.notes), [ gone, unknown ].map(hub => recorded(hub).filter(spot => spot.mapId === 2)) ])
+      .toStrictEqual([
+        [ [ 'The stamp\'s tiles held a copy of a blueprint that no longer exists, so they went down as plain tiles.' ], [] ],
+        [ [], [ { blueprintId: 'aa22', x: 4, y: 1, mapId: 2 } ] ],
+      ]);
+  });
+
+  it('records nothing where the tiles do not go down, on a map of another tileset, the events going down alone', () =>
+  {
+    // Arrange.
+    const hub = windowWithPlacements();
+    const stamp = blockStampWith(hub);
+
+    // Act.
+    const outcome = placeStamp(hub, 3, stamp, at(4, 1), 'Paste');
+
+    // Assert.
+    expect([ outcome.ok && outcome.eventIds.length, recorded(hub).filter(spot => spot.mapId === 3) ])
+      .toStrictEqual([ 2, [] ]);
+  });
+
+  it('refuses a stamp carrying a placement on a map that may hold no link, as it refuses copies of events', () =>
+  {
+    // Arrange: the block's ground alone, with no event.
+    const hub = windowWithPlacements();
+    const ground = captureAreaStamp(hub.map('map:1'), { x: 2, y: 1, width: 3, height: 3 }, 0, TilesetMode.area, 'window-a:4', [ { ...BLOCK, layers: [ 0 ] } ]) as Stamp;
+
+    // Act.
+    const outcomes = [ ground, { ...ground, spots: undefined } ].map(stamp => placeStamp(hub, 2, stamp, at(4, 1, { linkRefusal: 'its events are patterns' }), 'Paste'));
+
+    // Assert: the same tiles without the placement go down.
+    expect([ outcomes[0], outcomes[1].ok ])
+      .toStrictEqual([ { ok: false, message: 'This stamp holds copies of blueprints, which can\'t go here: its events are patterns.' }, true ]);
+  });
+
+  it('records nothing in a window holding no record, the tiles going down all the same', () =>
+  {
+    // Arrange.
+    const hub = window3();
+    holdBlueprints(hub, { aa22: { name: 'Block', stamp: stampOf() } });
+    const stamp = captureAreaStamp(hub.map('map:1'), { x: 2, y: 1, width: 3, height: 3 }, 'auto', TilesetMode.area, 'window-a:5', [ BLOCK ]) as Stamp;
+
+    // Act.
+    const outcome = placeStamp(hub, 2, stamp, at(4, 1), 'Paste');
+
+    // Assert.
+    expect([ outcome.ok && outcome.step?.entries.every(entry => entry.document === 'map:2'), hub.has(BLUEPRINT_USES_DOCUMENT) ])
+      .toStrictEqual([ true, false ]);
   });
 });
