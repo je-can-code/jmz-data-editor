@@ -171,7 +171,8 @@ type MapEditorServices = {
    * "nobody answered yet" for "nobody holds it" and loads a file that is missing another window's edits; a window
    * holding the document that answers ends that wait at once, so its copy is asked for straight away. A blueprint
    * opened as a map has no file: with no other window holding it, it is laid out afresh from the blueprints, which are
-   * held first.
+   * held first. A map is opened only once every change to a blueprint this window has on its way to disk has landed,
+   * since one may be on its way to that very map's file, which read before it lands would open without it.
    * @param {DocumentKey} key The document.
    * @returns {Promise<EditorDocument>} The document.
    */
@@ -391,6 +392,13 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   {
     if (hub.has(key) === false)
     {
+      // a change to a blueprint on its way to a map's file must land before the file is read, or the map opens without
+      // it, reading as saved, and a save of it would put its copies back as they were.
+      if (parseDocumentKey(key).kind === 'map')
+      {
+        await blueprintWriter?.whenWritten();
+      }
+
       // another window's copy may hold unsaved edits the file lacks, so its answer is waited for first; once a window
       // holding the document has answered, there is nobody else worth waiting for.
       await sync.whenHeldOrDiscovered(key);

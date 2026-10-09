@@ -696,6 +696,27 @@ describe('MapEditorServices', () =>
       services.stop();
     });
 
+    it('opens a map from its file only once the changes to a blueprint on their way to disk have landed, so it opens with them', async () =>
+    {
+      // Arrange: a change to the camp made, its write still waiting for the run of changes to settle.
+      const network = new MemoryChannelNetwork();
+      const { environment, requests } = buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() });
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, services, 'k3x9q2mf');
+      services.hub.edit('Move event', [ mapHistoryKey(blueprintMapId('k3x9q2mf')) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+
+      // Act.
+      await pump(network, services.openDocument('map:1'));
+
+      // Assert: the change went to disk before the map's file was read.
+      const order = requests.map(request => request.url).filter(url => url.endsWith('/api/blueprint-changes') || url.endsWith('/api/maps/1'));
+      expect(order)
+        .toStrictEqual([ 'http://api/api/blueprint-changes', 'http://api/api/maps/1' ]);
+      services.stop();
+    });
+
     it('refuses a blueprint the blueprints no longer hold, in words for the author', async () =>
     {
       // Arrange.

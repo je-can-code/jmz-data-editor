@@ -188,7 +188,8 @@ class BlueprintWriter
   #timer: ReturnType<typeof setTimeout> | null = null;
 
   /**
-   * True while moves are being taken back after their act failed, which are written nowhere.
+   * True while an act's failure is being answered: its moves are taken back, which are written nowhere, and nothing is
+   * sent meanwhile, since the blueprints still hold the changes being taken back.
    */
   #takingBack = false;
 
@@ -381,7 +382,8 @@ class BlueprintWriter
    */
   #send(): void
   {
-    if (this.#sending !== null || this.#queue.length === 0)
+    // while a failure is being answered the blueprints still hold the changes going back, so nothing is sent until then.
+    if (this.#sending !== null || this.#takingBack || this.#queue.length === 0)
     {
       return;
     }
@@ -517,12 +519,13 @@ class BlueprintWriter
     const all = [ ...moves, ...since ];
     const linked = all.filter(move => isBlueprintChange(move.step));
     this.#queue = all.filter(move => isBlueprintChange(move.step) === false);
-    this.#maps.landed(this.#mapsOf(moves), false);
 
+    // nothing is sent until the changes are back out, even by whatever letting go of the files sets off.
     this.#takingBack = true;
     const stranded: HistoryStep[] = [];
     try
     {
+      this.#maps.landed(this.#mapsOf(moves), false);
       [ ...linked ].reverse().forEach(move =>
       {
         if (this.#takeBack(move) === false)

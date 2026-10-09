@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { MapEditorApiError } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { MapEditorApiError, type BlueprintWrite } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { withBlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
-import { isWrittenAtOnce } from '../../../../src/mapEditor/core/blueprints/blueprintWriter.ts';
+import { BlueprintWriter, isWrittenAtOnce } from '../../../../src/mapEditor/core/blueprints/blueprintWriter.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { blueprintHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { HistoryStep } from '../../../../src/mapEditor/core/history/HistoryStep.ts';
@@ -336,12 +336,63 @@ describe('BlueprintWriter', () =>
       .toStrictEqual([ null, 'the blueprints are waiting for a choice about changes made elsewhere' ]);
   });
 
+  it('sends nothing while a failed act\'s changes go back, even when asked to by what letting go of its files sets off', async () =>
+  {
+    // Arrange: a writer of its own whose first act fails, and whose kept files ask for everything to be written the moment
+    // they let go of a failed write's maps, as opening a map does; a stroke and a rename go in that first act.
+    const window = await writtenWindow();
+    window.writer.stop();
+    const acts: BlueprintWrite[] = [];
+    let failing = true;
+    const writer: BlueprintWriter = new BlueprintWriter({
+      hub: window.hub,
+      maps: {
+        follow: (step, direction, writes) => window.maps.follow(step, direction, writes),
+        misfit: (step, direction) => window.maps.misfit(step, direction),
+        landed: (mapIds, ok) =>
+        {
+          window.maps.landed(mapIds, ok);
+          if (ok === false)
+          {
+            writer.whenWritten().catch(() => undefined);
+          }
+        },
+      },
+      write: async act =>
+      {
+        acts.push(structuredClone(act) as BlueprintWrite);
+        if (failing)
+        {
+          failing = false;
+          throw new Error('the disk is full');
+        }
+      },
+      onProblem: () => undefined,
+      settleMs: 0,
+    });
+    paintCorner(window, a5(9));
+    window.hub.edit('Rename', [ blueprintHistoryKey(BLUEPRINT) ], tx => tx.set(BLUEPRINTS_DOCUMENT, [ 'data', 'blueprints', BLUEPRINT, 'name' ], 'Fort'));
+
+    // Act.
+    await settle();
+    await writer.whenWritten();
+
+    // Assert: the rename went alone once the stroke was back out, never carrying the stroke's blueprint with it.
+    const written = acts.map(act =>
+    {
+      const camp = (act.blueprints as { data: { blueprints: Record<string, { name: string; stamp: { tiles: { values: number[] } } }> } }).data.blueprints[BLUEPRINT];
+      return [ act.maps.length, camp.name, camp.stamp.tiles.values[0] ];
+    });
+    expect(written)
+      .toStrictEqual([ [ 3, 'Fort', a5(9) ], [ 0, 'Fort', a5(1) ] ]);
+    writer.stop();
+  });
+
   it('writes whatever is waiting when asked, without waiting for the moment, and settles once it lands', async () =>
   {
     // Arrange: a writer that waits a long while.
     const window = await writtenWindow();
     window.writer.stop();
-    const { BlueprintWriter } = await import('../../../../src/mapEditor/core/blueprints/blueprintWriter.ts');
     const slow = new BlueprintWriter({
       hub: window.hub,
       maps: window.maps,
