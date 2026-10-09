@@ -148,7 +148,8 @@ const onDiskOf = (stored: JsonValue | null): Map<number, readonly BlueprintSpot[
  *   event window's save of its map is.
  * - **The map tree** writes the placements of the maps whose files it brings or takes away (see writeMaps).
  * - **Forgetting a placement**, which changes no map, takes that one placement off the disk at once, and nothing else of
- *   its map; taking the forgetting back puts it back on the disk only while the map's file holds its tiles.
+ *   its map; taking the forgetting back puts it back on the disk only while the map's file holds its tiles, as a window
+ *   holding the map tells, whichever window took it back.
  * - **The record's file changing on disk** outside this session is merged a map at a time, never offered as a choice:
  *   a map whose placements here are what the file held follows the file, and one whose placements hold unsaved edits
  *   keeps them, to go to disk with its own save. No step anywhere is ever thrown away.
@@ -222,6 +223,58 @@ class BlueprintUsesKeeper
   whenWritten(): Promise<void>
   {
     return this.#writer.whenWritten();
+  }
+
+  /**
+   * Reports whether any map's placements have not reached the disk yet, on their way or refused and waiting to be tried
+   * again: work no document's unsaved mark shows, which closing the window now would lose.
+   * @returns {boolean} True when something is still unwritten.
+   */
+  hasUnwritten(): boolean
+  {
+    return this.#writer.hasUnwritten();
+  }
+
+  /**
+   * Tries again whatever placements a refused write left waiting, as a save does.
+   */
+  retry(): void
+  {
+    this.#writer.retry();
+  }
+
+  /**
+   * Lists the maps held here whose placements as they stand are not those their files hold, where no other live window
+   * keeping the record holds the map too. Closing this window would leave nobody to write those placements: a window
+   * holding the map without the record, as an event window does, can still save the map's file, tiles and all, but the
+   * placements that go with them would never reach the record. A map whose file's steps cannot all be told here counts
+   * while it holds unsaved edits, since what it holds cannot be shown to be on disk.
+   * @returns {number[]} The maps' ids, in the order the window holds them; none while the window holds no record it can
+   * read.
+   */
+  placementsUnsavedOnlyHere(): number[]
+  {
+    const uses = readableUses(this.#hub);
+    if (uses === null)
+    {
+      return [];
+    }
+
+    return this.#hub.documentKeys().flatMap(key =>
+    {
+      // a map with no unsaved edits holds what its file does, and one another keeper holds is written by that keeper.
+      const parsed = parseDocumentKey(key);
+      if (parsed.kind !== 'map' || this.#hub.isDirty(key) === false || this.#keptElsewhere(key))
+      {
+        return [];
+      }
+
+      const current = spotsOnMap(uses, parsed.mapId);
+      const onFile = this.#partAsOf(parsed.mapId, this.#hub.savedSteps(key), current);
+      return onFile === null || sameSpots(current, onFile) === false
+        ? [ parsed.mapId ]
+        : [];
+    });
   }
 
   /**
@@ -300,13 +353,15 @@ class BlueprintUsesKeeper
   }
 
   /**
-   * Notes how a step changes maps' placements, and writes what forgetting a placement changed, made, undone or redone in
-   * this window: a step changing the record and nothing else, which no map's save would carry to disk. Each placement it
-   * took out goes from the disk at once; each it put back goes back only while its map's file holds the placement, so a
-   * placement never saved, forgotten and then put back, stays off the disk with the rest of its map's unsaved edits.
+   * Notes how a step changes maps' placements, and writes what forgetting a placement changed, made, undone or redone: a
+   * step changing the record and nothing else, which no map's save would carry to disk. Each placement it took out goes
+   * from the disk at once, written by the window it moved in. Each it put back goes back only while its map's file holds
+   * the placement, so a placement never saved, forgotten and then put back, stays off the disk with the rest of its map's
+   * unsaved edits; and since only a window holding the map can tell what its file holds, that window writes it, wherever
+   * the step moved, and a window not holding the map leaves it to one that does.
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Whether it went in, made or redone, or came out, undone.
-   * @param {HubSource} source Whether it moved here or in another window, which writes its own.
+   * @param {HubSource} source Whether it moved here or in another window.
    */
   #moved(step: HistoryStep, direction: 'forward' | 'backward', source: HubSource): void
   {
@@ -318,7 +373,7 @@ class BlueprintUsesKeeper
 
     this.#changes.set(step.id, changes);
     const recordOnly = step.files === undefined && step.entries.every(entry => entry.document === BLUEPRINT_USES_DOCUMENT);
-    if (source !== 'local' || this.#making || recordOnly === false)
+    if (this.#making || recordOnly === false)
     {
       return;
     }
@@ -329,14 +384,37 @@ class BlueprintUsesKeeper
       const to = direction === 'forward' ? change.after : change.before;
       const removed = from.filter(spot => to.some(each => samePlacement(each, spot)) === false);
       const added = to.filter(spot => from.some(each => samePlacement(each, spot)) === false);
+      if (source === 'local')
+      {
+        this.#writer.writeRemoved(change.mapId, removed);
+      }
 
-      // what the map's file holds is its placements as of its saved steps, worked out from what the step just left; one
-      // put back that the file lacks stays off, and one that cannot be told goes back, the record never short of a file.
-      const saved = this.#partAsOf(change.mapId, this.#hub.savedSteps(mapDocumentKey(change.mapId)), to);
-      const onFile = added.filter(spot => saved === null || saved.some(each => samePlacement(each, spot)));
-      this.#writer.writeRemoved(change.mapId, removed);
-      this.#writer.writeAdded(change.mapId, onFile);
+      // what a map held here has in its file is its placements as of its saved steps, worked out from what the step just
+      // left; one put back that the file lacks stays off, and one that cannot be told goes back, the record never short of
+      // a file. A map nobody holds has no unsaved placements, so every one put back is in its file.
+      const key = mapDocumentKey(change.mapId);
+      if (this.#hub.has(key))
+      {
+        const saved = this.#partAsOf(change.mapId, this.#hub.savedSteps(key), to);
+        this.#writer.writeAdded(change.mapId, added.filter(spot => saved === null || saved.some(each => samePlacement(each, spot))));
+      }
+      else if (source === 'local' && this.#keptElsewhere(key) === false)
+      {
+        this.#writer.writeAdded(change.mapId, added);
+      }
     });
+  }
+
+  /**
+   * Reports whether another live window holds a document along with the record, so that window's keeper writes what
+   * only a window holding the document can tell.
+   * @param {DocumentKey} key The document.
+   * @returns {boolean} True when such a window is live.
+   */
+  #keptElsewhere(key: DocumentKey): boolean
+  {
+    const keepers = this.#holders(BLUEPRINT_USES_DOCUMENT);
+    return this.#holders(key).some(clientId => keepers.includes(clientId));
   }
 
   /**

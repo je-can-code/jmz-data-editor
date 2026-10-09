@@ -25,6 +25,7 @@
 package blueprintuses
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"regexp"
@@ -34,8 +35,12 @@ import (
 	"jmz-data-editor/server/internal/mzjson"
 )
 
+// Key is the record's name among the editor's own documents, which it is read by and never written by
+// whole.
+const Key = "blueprint-uses"
+
 // File is where the record lives inside the project, relative to its root.
-const File = "jmz-editor/blueprint-uses.json"
+const File = "jmz-editor/" + Key + ".json"
 
 // mapKey is the shape of a map's key in the record: its id, written as the file writes numbers.
 var mapKey = regexp.MustCompile(`^[1-9][0-9]*$`)
@@ -396,6 +401,12 @@ func wholeNumber(value *mzjson.Value) (int, bool) {
 // and its map's entry goes with its last placement; a placement put in takes the place of any of its
 // blueprint's at the same corner, its blueprint kept among the others by id and its placements row by
 // row. Every other map, and every other byte of the record's own, stays exactly as the file holds it.
+//
+// A merge leaving nothing to write hands back nil: one that leaves the record byte for byte as the file
+// holds it, and one that would start a record holding no placements at all. The editor sends a map's
+// placements with every save of the map, since only the file knows what another window wrote there
+// since, so saving a map whose placements did not change never touches the file, and a project that
+// places no blueprints never gains one.
 func Apply(current []byte, changes Changes) ([]byte, error) {
 	root, maps, err := openRecord(current, changes.SchemaVersion)
 	if err != nil {
@@ -422,7 +433,22 @@ func Apply(current []byte, changes Changes) ([]byte, error) {
 		}
 	}
 
-	return mzjson.IndentedLayout(root)
+	// a project with no record is given none while there is nothing to record.
+	if current == nil && len(maps.Members) == 0 {
+		return nil, nil
+	}
+
+	content, err := mzjson.IndentedLayout(root)
+	if err != nil {
+		return nil, err
+	}
+
+	// a record the merge leaves as the file holds it is not written again.
+	if bytes.Equal(content, current) {
+		return nil, nil
+	}
+
+	return content, nil
 }
 
 // openRecord reads the record a merge changes, or starts an empty one at the given version when there

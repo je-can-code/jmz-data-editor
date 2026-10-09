@@ -8,8 +8,9 @@ import { UsesServer } from '../../support/usesServer.ts';
  * The writer carries the record of where blueprints are placed to disk a map at a time, merged there into the file as it
  * stands. It owes its keeper these rules: a map's placements are written whole or one placement at a time, and what a map
  * owes is gathered so its writes land in the order asked for; one merge is on its way at a time, and whatever is asked for
- * meanwhile goes in the next; nothing is written that the file already holds; a merge that fails is said, given back
- * beneath anything asked for since, and tried again with the next write; and what the file holds is known as read, with
+ * meanwhile goes in the next; a map asked for whole is sent whatever the writer knows the file to hold, since another
+ * window may have written it since; a merge that fails is said, given back beneath anything asked for since, and tried
+ * again with the next write or a retry, counted unwritten until it lands; and what the file holds is known as read, with
  * this window's writes on top as they land.
  */
 
@@ -155,23 +156,68 @@ describe('BlueprintUsesWriter', () =>
       ]);
   });
 
-  it('writes nothing for a map the file already holds as given, unless something for it is still owed', async () =>
+  it('writes a map whole though it knows the file to hold exactly that, since only the file knows what another window wrote', async () =>
   {
-    // Arrange: map 16's placements changed, held on their way.
+    // Arrange: the writer knows the file to hold the camp on map 16, and another window has since written map 16 empty.
     const { server, writer } = build();
+    server.stored = { schemaVersion: 2, data: { maps: {} } };
+
+    // Act: map 16 asked for as the writer knows the file to hold it.
     writer.writeWhole(16, [ CAMP ]);
-    const unchanged = server.merges.length;
+    await writer.whenWritten();
+
+    // Assert: the merge went, and the file holds the camp again.
+    expect([ server.merges.length, server.entryOf(16) ])
+      .toStrictEqual([ 1, { aa22: [ { x: 1, y: 3 } ] } ]);
+  });
+
+  it('counts what is on its way, waiting, or refused as unwritten, until it lands', async () =>
+  {
+    // Arrange: merges held on their way, the first to be refused.
+    const { server, writer } = build();
+    const before = writer.hasUnwritten();
     server.holding = true;
     writer.writeWhole(16, [ ROOST ]);
+    writer.writeWhole(3, [ CUT ]);
+    const whileWaiting = writer.hasUnwritten();
+    server.held.splice(0).forEach(each => each.fail(new Error('the disk is full')));
+    await writer.whenWritten();
+    const whileRefused = writer.hasUnwritten();
+    server.releaseAll();
 
-    // Act: map 16 asked for as the file held it before, while the change is on its way.
-    writer.writeWhole(16, [ CAMP ]);
+    // Act: everything owed tried again, as a save does.
+    writer.retry();
+    await writer.whenWritten();
+
+    // Assert: unwritten from the first write until the retry landed, and both maps on disk.
+    expect([ before, whileWaiting, whileRefused, writer.hasUnwritten(), server.entryOf(16), server.entryOf(3) ])
+      .toStrictEqual([
+        false,
+        true,
+        true,
+        false,
+        { k3x9q2mf: [ { x: 4, y: 7 } ] },
+        { aa22: [ { x: -1, y: 0, placed: { x: 1, y: 0, width: 2, height: 3 } } ] },
+      ]);
+  });
+
+  it('sends nothing on a retry while a merge is on its way, which sends what waits once it lands', async () =>
+  {
+    // Arrange: one merge held on its way, and another write waiting behind it.
+    const { server, writer } = build();
+    server.holding = true;
+    writer.writeWhole(16, [ ROOST ]);
+    writer.writeWhole(3, [ CUT ]);
+
+    // Act.
+    writer.retry();
+    const whileOnItsWay = server.merges.length;
     server.releaseAll();
     await writer.whenWritten();
 
-    // Assert: the first asked for nothing, and the last was written, putting the camp back.
-    expect([ unchanged, server.merges.length, server.entryOf(16) ])
-      .toStrictEqual([ 0, 2, { aa22: [ { x: 1, y: 3 } ] } ]);
+    // Assert: still one merge after the retry, and the waiting write sent once the first landed.
+    expect([ whileOnItsWay, server.merges.map(merge => Object.keys(merge.maps ?? {})) ])
+      .toStrictEqual([ 1, [ [ '16' ], [ '3' ] ] ]);
   });
 
   it('writes whatever is asked for while what the file holds is not known', async () =>

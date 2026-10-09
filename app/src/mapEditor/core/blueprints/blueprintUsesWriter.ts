@@ -1,7 +1,7 @@
 import { MapEditorApiError, type MapEditorApi } from '../api/MapEditorApi.ts';
 import { BLUEPRINT_USES } from '../editorData/editorData.ts';
 import type { JsonObject } from '../model/json.ts';
-import { mapEntryOf, sameSpot, sameSpots, type BlueprintSpot, type PlacedPart } from './blueprintUses.ts';
+import { mapEntryOf, sameSpot, type BlueprintSpot, type PlacedPart } from './blueprintUses.ts';
 
 /**
  * One placement named on its own in a merge: its map, its blueprint and its corner, and, for one put in, its part placed
@@ -183,7 +183,8 @@ const reasonOf = (error: unknown): string =>
  * One merge is on its way at a time. Whatever is asked for meanwhile waits, each map's owing gathered into one (see
  * {@link followedBy}), and goes in the next merge, so a map's placements are never written out of order. A merge that
  * fails gives its owing back, under anything owed since, and the author hears why; it is tried again with the next write
- * asked for, since nothing else would ever carry it to disk.
+ * asked for, or when a save asks for it to be ({@link retry}), since nothing else would ever carry it to disk, and until
+ * it lands the window counts it unwritten ({@link hasUnwritten}), so closing asks first.
  */
 class BlueprintUsesWriter
 {
@@ -254,6 +255,26 @@ class BlueprintUsesWriter
   }
 
   /**
+   * Reports whether anything asked for has not reached the disk yet: a merge on its way, or one waiting behind it, or one
+   * the server refused, which waits to be tried again. Closing the window now would lose it, since nothing else carries
+   * it to disk.
+   * @returns {boolean} True when something is still unwritten.
+   */
+  hasUnwritten(): boolean
+  {
+    return this.#owed.size > 0 || this.#sending !== null;
+  }
+
+  /**
+   * Tries again whatever a refused merge left owed, as any write asked for would; nothing while a merge is on its way,
+   * which sends the rest once it lands.
+   */
+  retry(): void
+  {
+    this.#send();
+  }
+
+  /**
    * Works out a map's placements as the record's file will hold them once everything this window owes it has landed.
    * @param {number} mapId The map.
    * @returns {BlueprintSpot[] | null} The placements, or null while what the file holds is not known.
@@ -271,19 +292,15 @@ class BlueprintUsesWriter
   }
 
   /**
-   * Writes a map's placements whole, as a save of the map or the map tree writes them; nothing when the file already
-   * holds exactly these and nothing else is owed.
+   * Writes a map's placements whole, as a save of the map or the map tree writes them. They are sent even when this
+   * window knows the file to hold exactly these already: another window holding the record may have written the map's
+   * part since, which this window never hears of, so only the file can tell, and the server writes nothing when the merge
+   * leaves the record as it was.
    * @param {number} mapId The map.
    * @param {readonly BlueprintSpot[]} spots Its placements.
    */
   writeWhole(mapId: number, spots: readonly BlueprintSpot[]): void
   {
-    const onFile = this.#onDisk?.get(mapId) ?? [];
-    if (this.owes(mapId) === false && this.#onDisk !== null && sameSpots(onFile, spots))
-    {
-      return;
-    }
-
     this.#owe(mapId, { kind: 'whole', spots: [ ...spots ] });
   }
 

@@ -3,6 +3,7 @@ import { blueprintsKeptGuard } from '../core/blueprints/blueprintMoves.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../core/blueprints/blueprints.ts';
 import { BLUEPRINT_USES_DOCUMENT, usedCopiesOf } from '../core/blueprints/blueprintUses.ts';
 import { BlueprintUsesKeeper } from '../core/blueprints/blueprintUsesKeeper.ts';
+import { installCloseGuard, type CloseTarget } from '../core/closeGuard.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
 import type { MapCell } from '../core/renderer/camera.ts';
@@ -659,12 +660,30 @@ class WorkspaceController
   }
 
   /**
+   * Makes the window ask before it closes while placements of blueprints would be lost with it, as unsaved edits are
+   * asked about by the window's own guard: a write on its way, or one the server refused, waiting to be tried again with
+   * the next save; or a map's unsaved placements that no other window keeping the record holds, though a window without
+   * the record may share the map, as an event window does, and save its file after this one has gone. No document's
+   * unsaved mark shows either, since the record is never unsaved itself, and the window's own guard lets a map shared
+   * with an event window go without asking.
+   * @param {CloseTarget} target The window.
+   * @returns {() => void} Removes the guard.
+   */
+  guardClose(target: CloseTarget): () => void
+  {
+    const { placements } = this;
+    return installCloseGuard(target, () => placements !== null
+      && (placements.hasUnwritten() || placements.placementsUnsavedOnlyHere().length > 0));
+  }
+
+  /**
    * Saves every document holding unsaved edits, leaving any in conflict for the person to settle first. What was saved
    * is told in maps: the blueprints after an undo are saved along with them but are not maps, and are not counted as any.
    * The record of where blueprints are placed never holds unsaved edits of its own: each map's placements go to disk
-   * with that map. A blueprint opened as a map has no file of its own, and its changes are not saved here: they stay
-   * open, unsaved, which the author hears.
-   * @returns {Promise<void>} Settles once every save has finished.
+   * with that map. Placements a refused write left waiting are tried again too, and nothing is called saved until they
+   * land; when they cannot, the author has already heard why. A blueprint opened as a map has no file of its own, and
+   * its changes are not saved here: they stay open, unsaved, which the author hears.
+   * @returns {Promise<void>} Settles once every save has finished, the placements' writes included.
    */
   async saveAll(): Promise<void>
   {
@@ -686,10 +705,21 @@ class WorkspaceController
       }
     }
 
+    // a save is when placements a refused write left waiting are tried again, with nothing dirty to carry them.
+    this.placements?.retry();
+    await this.placements?.whenWritten();
+    const unwritten = this.placements?.hasUnwritten() === true;
+
     const held = dirty.length - ready.length;
     if (failed.length > 0)
     {
       this.notify(`Could not save ${failed.join(', ')}.`, 'error');
+      return;
+    }
+
+    // the write that failed already said why, which "Everything is saved." would only cover up.
+    if (unwritten)
+    {
       return;
     }
 

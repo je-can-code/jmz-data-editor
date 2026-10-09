@@ -3,18 +3,21 @@ package store
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // UpdateFile owes the editor's own files one promise: a write that keeps part of a file keeps it as
 // the file holds it at that very moment. Two windows each writing their own part of one file at once
 // must both land, whatever order the server takes them in, so reading the file and replacing it are
 // one step. A file that is not there is told apart from one holding nothing, a refused update leaves
-// the file exactly as it was, and the folder appears with the first file written into it.
+// the file exactly as it was, so does one with nothing to write, which makes no folder either, and the
+// folder appears with the first file written into it.
 
 // TestUpdateFileHandsOverTheFileAsItStands covers the ordinary write: the update sees the file's own
 // bytes, and what it returns is what lands, announced first.
@@ -106,6 +109,52 @@ func TestUpdateFileLeavesTheFileWhenTheUpdateRefuses(t *testing.T) {
 	}
 	assertFileHolds(t, path, "kept")
 	assertFolderHoldsOnly(t, folder, "record.json")
+}
+
+// TestUpdateFileWritesNothingForAnUpdateWithNothingToWrite covers an update handing back nil: a file
+// keeps every byte and its time, a missing file stays missing with no folder made for it, and nothing is
+// announced.
+func TestUpdateFileWritesNothingForAnUpdateWithNothingToWrite(t *testing.T) {
+	// Arrange- one file there, its time set well back, and one missing with its folder.
+	root := t.TempDir()
+	kept := filepath.Join(root, "record.json")
+	missing := filepath.Join(root, "jmz-editor", "record.json")
+	if err := os.WriteFile(kept, []byte("kept"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	then := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := os.Chtimes(kept, then, then); err != nil {
+		t.Fatal(err)
+	}
+	announced := 0
+
+	// Act.
+	for _, path := range []string{kept, missing} {
+		err := UpdateFile(path, func(current []byte) ([]byte, error) {
+			return nil, nil
+		}, func(content []byte) {
+			announced++
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Assert.
+	assertFileHolds(t, kept, "kept")
+	info, err := os.Stat(kept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ModTime().Equal(then) == false {
+		t.Errorf("the kept file was written again, at %v", info.ModTime())
+	}
+	if _, err := os.Stat(filepath.Dir(missing)); errors.Is(err, fs.ErrNotExist) == false {
+		t.Errorf("the missing file's folder was made, or could not be looked for: %v", err)
+	}
+	if announced != 0 {
+		t.Errorf("an update with nothing to write was announced %d times", announced)
+	}
 }
 
 // TestUpdateFileNeverLosesAConcurrentUpdate is the promise the lock keeps: many writers, each adding

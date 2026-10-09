@@ -90,6 +90,7 @@ func TestOtherSitesPagesAreRefused(t *testing.T) {
 		{name: "the database names", method: http.MethodGet, target: "/api/database-names"},
 		{name: "a map save", method: http.MethodPut, target: "/api/maps/1", body: mapFixture},
 		{name: "a common events save", method: http.MethodPut, target: "/api/common-events", body: commonEventsFixture},
+		{name: "a merge of blueprint placements", method: http.MethodPut, target: "/api/editor-data/blueprint-uses/maps", body: `{"schemaVersion":2,"maps":{"1":{"aa22":[{"x":0,"y":0}]}}}`},
 		{name: "a form posting to a database route", method: http.MethodPost, target: "/api/system", body: `{}`, header: []string{"Content-Type", "text/plain"}},
 		{name: "a preflight", method: http.MethodOptions, target: "/api/maps/1", header: []string{"Access-Control-Request-Method", "PUT"}},
 	}
@@ -114,7 +115,8 @@ func TestOtherSitesPagesAreRefused(t *testing.T) {
 				}
 				written := current.read(t, "data/Map001.json") != mapFixture ||
 					current.read(t, "data/System.json") != secret ||
-					current.read(t, "data/CommonEvents.json") != commonEventsFixture
+					current.read(t, "data/CommonEvents.json") != commonEventsFixture ||
+					current.exists("jmz-editor")
 				if written {
 					t.Error("a refused request still wrote a file")
 				}

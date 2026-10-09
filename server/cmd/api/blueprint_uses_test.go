@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"jmz-data-editor/server/internal/mzjson"
 	"jmz-data-editor/server/internal/watch"
@@ -17,11 +18,12 @@ import (
 // map's part of it only with that map's file, and only that part. The merge route owes it this: the
 // maps a merge names change exactly as named, whole or one placement at a time, and every other map,
 // saved by another window a moment before or not, stays exactly as the file holds it. Two windows
-// merging two maps at once both land. A record read back and merged unchanged is written back byte for
-// byte. A body that is not a merge is refused before anything touches the disk, a file that is not a
+// merging two maps at once both land. A record read back and merged unchanged is left byte for byte,
+// never written again, and a merge with nothing to record starts no record. A body that is not a merge
+// is refused before anything touches the disk, a file that is not a
 // record is never written over, nor is one a newer editor wrote, and an older record is raised to the
 // merge's version with nothing else of it moved. The write reaches the change stream as the saving
-// window's.
+// window's. And the merge is the record's only way to disk: the editor-data route refuses it whole.
 
 // usesPath is where the record lives in a project.
 const usesPath = "jmz-editor/blueprint-uses.json"
@@ -164,6 +166,63 @@ func TestMergeBlueprintUsesStartsTheRecord(t *testing.T) {
 	}
 }
 
+// TestMergeBlueprintUsesStartsNoRecordForNothing covers a project that places no blueprints: a map saved
+// with no placements, and a placement taken out of a map no record names, start no record, and no folder
+// for one.
+func TestMergeBlueprintUsesStartsNoRecordForNothing(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "a map saved with none", body: `{"schemaVersion":2,"maps":{"16":null}}`},
+		{name: "a placement taken out of nothing", body: `{"schemaVersion":2,"remove":[{"map":16,"blueprint":"aa22","x":1,"y":3}]}`},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange.
+			current := newProject(t)
+
+			// Act.
+			response := current.call(t, http.MethodPut, usesRoute, testCase.body)
+
+			// Assert.
+			assertStatus(t, response, http.StatusNoContent)
+			if current.exists("jmz-editor") {
+				t.Error("a merge with nothing to record made the record's folder")
+			}
+		})
+	}
+}
+
+// TestMergeBlueprintUsesLeavesAnUnchangedRecordUntouched covers a map saved with the placements the file
+// already holds for it: the editor sends them with every save, and a merge that changes nothing never
+// writes the file again.
+func TestMergeBlueprintUsesLeavesAnUnchangedRecordUntouched(t *testing.T) {
+	// Arrange- the record as the editor wrote it, its time set well back.
+	current := projectWithRecord(t, recordOnDisk)
+	path := filepath.Join(current.root, filepath.FromSlash(usesPath))
+	then := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := os.Chtimes(path, then, then); err != nil {
+		t.Fatal(err)
+	}
+	before := current.read(t, usesPath)
+
+	// Act- map 16 given whole exactly as the file holds it, and map 7, which it does not hold, given none.
+	body := `{"schemaVersion":2,"maps":{"16":{"aa22":[{"x":1,"y":3},{"x":12,"y":3}],"k3x9q2mf":[{"x":4,"y":7}]},"7":null}}`
+	response := current.call(t, http.MethodPut, usesRoute, body)
+
+	// Assert.
+	assertStatus(t, response, http.StatusNoContent)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.read(t, usesPath) != before || info.ModTime().Equal(then) == false {
+		t.Errorf("a merge changing nothing wrote the record again, at %v", info.ModTime())
+	}
+}
+
 // TestMergeBlueprintUsesTakesOutAndPutsInSinglePlacements covers forgetting a placement and taking that
 // back: one placement goes, its neighbours at other corners staying; a blueprint's last placement takes
 // the blueprint with it, and a map's last takes the map; one put in replaces its blueprint's at the same
@@ -288,6 +347,7 @@ func TestMergeBlueprintUsesNeverWritesOverWhatItCannotRead(t *testing.T) {
 		fragment string
 	}{
 		{name: "not JSON", file: `{"schemaVersion":2,`, body: `{"schemaVersion":2,"maps":{"7":null}}`, fragment: "is not JSON"},
+		{name: "an empty file", file: ``, body: `{"schemaVersion":2,"maps":{"7":{"aa22":[{"x":0,"y":0}]}}}`, fragment: "is not JSON"},
 		{name: "a list", file: `[]`, body: `{"schemaVersion":2,"maps":{"7":null}}`, fragment: "is not a record of placements"},
 		{name: "no version", file: `{"data":{"maps":{}}}`, body: `{"schemaVersion":2,"maps":{"7":null}}`, fragment: "is not a record of placements"},
 		{name: "maps as a list", file: `{"schemaVersion":2,"data":{"maps":[]}}`, body: `{"schemaVersion":2,"maps":{"7":null}}`, fragment: "is not a record of placements"},
@@ -364,6 +424,50 @@ func TestMergeBlueprintUsesRefusesWhatIsNotAMerge(t *testing.T) {
 			if current.read(t, usesPath) != before {
 				t.Error("a refused merge still changed the record")
 			}
+		})
+	}
+}
+
+// TestEditorDataRefusesTheRecordWhole covers the editor-data route's whole-document save, which the
+// record never takes: put whole, as the editor once saved it, it is refused with a 405 naming the merge
+// route, before anything touches the disk, whether the project holds a record or none. The blueprints,
+// a document beside it, still save whole.
+func TestEditorDataRefusesTheRecordWhole(t *testing.T) {
+	cases := []struct {
+		name   string
+		record string
+	}{
+		{name: "over a record", record: recordOnDisk},
+		{name: "where there is none", record: ""},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange.
+			current := newProject(t)
+			before := ""
+			if testCase.record != "" {
+				writeRecord(t, current, indented(t, testCase.record))
+				before = current.read(t, usesPath)
+			}
+
+			// Act.
+			refused := current.call(t, http.MethodPut, "/api/editor-data/blueprint-uses", `{"schemaVersion":2,"data":{"maps":{"7":{"aa22":[{"x":0,"y":0}]}}}}`)
+			saved := current.call(t, http.MethodPut, "/api/editor-data/blueprints", `{"schemaVersion":1,"data":{"blueprints":{}}}`)
+
+			// Assert- refused, saying where the record goes instead, the record as it was, and the blueprints saved.
+			assertStatus(t, refused, http.StatusMethodNotAllowed)
+			assertBodyContains(t, refused, "PUT /api/editor-data/blueprint-uses/maps")
+			if refused.Header().Get("Allow") != http.MethodGet {
+				t.Errorf("the refusal allows %q", refused.Header().Get("Allow"))
+			}
+			if current.exists(usesPath) && current.read(t, usesPath) != before {
+				t.Error("a refused whole save still wrote the record")
+			}
+			if current.exists(usesPath) != (testCase.record != "") {
+				t.Error("a refused whole save made a record, or lost one")
+			}
+			assertStatus(t, saved, http.StatusNoContent)
 		})
 	}
 }

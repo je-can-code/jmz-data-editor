@@ -14,6 +14,7 @@ import {
   usesOf,
 } from '../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import type { BlueprintUsesMerge } from '../../../src/mapEditor/core/blueprints/blueprintUsesWriter.ts';
+import type { CloseTarget } from '../../../src/mapEditor/core/closeGuard.ts';
 import { DocumentHub, type DocumentStore } from '../../../src/mapEditor/core/history/DocumentHub.ts';
 import { blueprintHistoryKey, mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
 import { blueprintMapId } from '../../../src/mapEditor/core/model/documentKeys.ts';
@@ -121,9 +122,10 @@ describe('WorkspaceController', () =>
    * of where blueprints are placed merged into a map at a time; without, it has no route for them, and asking for one
    * fails, though merges are still taken, and listed.
    * @param {Record<string, JsonValue> | null} editorData The editor-only documents on the server, by name, or null for none.
+   * @param {(key: string) => readonly string[]} holders The other windows holding each document; none by default.
    * @returns {object} The controller, the hub, the server's files, the saves and the merges.
    */
-  const buildController = (editorData: Record<string, JsonValue> | null = null) =>
+  const buildController = (editorData: Record<string, JsonValue> | null = null, holders: (key: string) => readonly string[] = () => []) =>
   {
     const merges: BlueprintUsesMerge[] = [];
     const mergeBlueprintUses = async (merge: BlueprintUsesMerge) =>
@@ -199,9 +201,9 @@ describe('WorkspaceController', () =>
     hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
     hub.adopt('map:2', buildMapJson() as unknown as JsonValue);
 
-    // no event anywhere is a copy of a blueprint, counted at once, and no other window holds anything.
+    // no event anywhere is a copy of a blueprint, counted at once, and the other windows hold what the test says.
     const blueprintCopies = { start: () => undefined, countOf: () => ({ total: 0, maps: [] }) };
-    const sync = { holders: () => [] };
+    const sync = { holders };
     const services = { hub, api, sync, blueprintCopies, openDocument: (key: string) => hub.load(key as never) } as unknown as MapEditorServices;
     return { controller: new WorkspaceController(services), hub, api, maps, state, saves, merges };
   };
@@ -878,8 +880,11 @@ describe('WorkspaceController', () =>
    * edit moving a placement changes the record only while the window holds it; a tree change waits until they are asked
    * for, so a map deleted or copied the moment the window opens takes its placements with it. Each map's placements are
    * written with that map, merged into the record on the server, and the tree writes those of the maps it brings or
-   * takes away; the record itself never holds anything unsaved, so Save all never counts it. No undo takes away a
-   * blueprint whose tiles are still placed, in the words a delete of it is refused in.
+   * takes away; the record itself never holds anything unsaved, so Save all never counts it. A placement write the server
+   * refused is still unsaved work, though: the window asks before it closes while one waits, and Save all tries it again,
+   * calling everything saved only once it lands. So is a map's unsaved placements while only an event window shares the
+   * map, which could save its file but never the placements, so the window asks then too. No undo takes away a blueprint
+   * whose tiles are still placed, in the words a delete of it is refused in.
    *
    * On the server, the camp (aa22) is placed on the cave (5), at 4, 0.
    */
@@ -976,6 +981,152 @@ describe('WorkspaceController', () =>
       // Assert.
       expect([ alone, controller.getState().notice?.text, saves, hub.dirtyKeys() ])
         .toStrictEqual([ 'Everything is saved.', 'Saved 1 map.', [ 'map:1' ], [] ]);
+    });
+
+    /**
+     * Places the camp at the top-left of map 1, unsaved.
+     * @param {DocumentHub} hub The window's documents.
+     */
+    const placeOnMapOne = (hub: DocumentHub): void =>
+    {
+      hub.edit('Place', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set('map:1', [ 'displayName' ], 'Camped');
+        recordSpots(tx, hub, 1, [ { blueprintId: 'aa22', x: 0, y: 0 } ]);
+      });
+    };
+
+    /**
+     * Makes the server refuse every merge of placements from now on, counting each one it refuses.
+     * @param {MapEditorApi} api The server.
+     * @returns {{ refused: number }} The count, kept current.
+     */
+    const refuseMerges = (api: MapEditorApi): { refused: number } =>
+    {
+      const count = { refused: 0 };
+      api.mergeBlueprintUses = async () =>
+      {
+        count.refused += 1;
+        throw new MapEditorApiError('PUT /api/editor-data/blueprint-uses/maps answered 500', 500, 'the disk is full');
+      };
+
+      return count;
+    };
+
+    /**
+     * A window stand-in keeping its beforeunload listeners.
+     * @returns {{ target: CloseTarget, closing: () => boolean }} The window, and closing it, which says whether it asked
+     * first.
+     */
+    const closingWindow = () =>
+    {
+      const listeners: ((event: Event) => void)[] = [];
+      const target: CloseTarget = {
+        addEventListener: (type, listener) =>
+        {
+          listeners.push(listener);
+        },
+        removeEventListener: (type, listener) =>
+        {
+          listeners.splice(listeners.indexOf(listener), 1);
+        },
+      };
+      const closing = (): boolean =>
+      {
+        const event = { preventDefault: vi.fn(), returnValue: 'x' };
+        listeners.forEach(listener => listener(event as unknown as Event));
+        return event.preventDefault.mock.calls.length > 0;
+      };
+
+      return { target, closing };
+    };
+
+    /**
+     * What the author hears when the server refuses a merge of placements.
+     */
+    const REFUSED = 'The blueprint placements could not be saved: the disk is full. They are tried again with the next save.';
+
+    it('asks before the window closes while a placement write the server refused waits to be tried again', async () =>
+    {
+      // Arrange: the server refusing every merge, the window guarded, and the camp placed on map 1.
+      const { controller, hub, api } = buildController(onServer());
+      await controller.whenPlacementsHeld();
+      refuseMerges(api);
+      const window = closingWindow();
+      controller.guardClose(window.target);
+      const beforeAnything = window.closing();
+      placeOnMapOne(hub);
+
+      // Act: map 1 saved, its placements refused.
+      await hub.save('map:1');
+      await controller.placements?.whenWritten();
+
+      // Assert: no asking before, and asking now, though map 1 itself is saved.
+      expect([ beforeAnything, window.closing(), hub.isDirty('map:1'), controller.getState().notice?.text ])
+        .toStrictEqual([ false, true, false, REFUSED ]);
+    });
+
+    it('asks before the window closes while only an event window shares a map holding unsaved placements, and not once it is saved', async () =>
+    {
+      // Arrange: an event window holding map 1, and no other window holding the record; the window guarded, and the camp
+      // placed on map 1.
+      const { controller, hub } = buildController(onServer(), key => (key === 'map:1' ? [ 'window-e' ] : []));
+      await controller.whenPlacementsHeld();
+      const window = closingWindow();
+      controller.guardClose(window.target);
+      placeOnMapOne(hub);
+      const whileUnsaved = window.closing();
+
+      // Act: map 1 saved, its placements with it.
+      await hub.save('map:1');
+      await controller.placements?.whenWritten();
+
+      // Assert: asked while only the event window could have saved map 1, and not once its placements were written.
+      expect([ whileUnsaved, window.closing() ])
+        .toStrictEqual([ true, false ]);
+    });
+
+    it('tries a refused placement write again with Save all, though nothing else is unsaved, and says all is saved once it lands', async () =>
+    {
+      // Arrange: map 1's placement refused once, map 1 itself saved, then the server taking merges again.
+      const documents = onServer();
+      const { controller, hub, api } = buildController(documents);
+      await controller.whenPlacementsHeld();
+      const { mergeBlueprintUses } = api;
+      refuseMerges(api);
+      placeOnMapOne(hub);
+      await hub.save('map:1');
+      await controller.placements?.whenWritten();
+      api.mergeBlueprintUses = mergeBlueprintUses;
+
+      // Act.
+      await controller.saveAll();
+
+      // Assert: map 1's placement on disk beside the cave's, nothing left unwritten, and everything said to be saved.
+      expect([ readUses((documents['blueprint-uses'] as { data: JsonValue }).data), controller.placements?.hasUnwritten(), controller.getState().notice?.text ])
+        .toStrictEqual([
+          [ { blueprintId: 'aa22', x: 0, y: 0, mapId: 1 }, { blueprintId: 'aa22', x: 4, y: 0, mapId: 5 } ],
+          false,
+          'Everything is saved.',
+        ]);
+    });
+
+    it('never says everything is saved while Save all cannot write a refused placement either, leaving the refusal showing', async () =>
+    {
+      // Arrange: the server refusing every merge, and map 1's placement saved and refused.
+      const { controller, hub, api } = buildController(onServer());
+      await controller.whenPlacementsHeld();
+      const count = refuseMerges(api);
+      placeOnMapOne(hub);
+      await hub.save('map:1');
+      await controller.placements?.whenWritten();
+
+      // Act.
+      await controller.saveAll();
+
+      // Assert: tried twice, the refusal said again, and the placement still unwritten.
+      expect([ count.refused, controller.getState().notice?.text, controller.placements?.hasUnwritten() ])
+        .toStrictEqual([ 2, REFUSED, true ]);
     });
 
     it('refuses to undo a blueprint\'s save while its tiles are still placed, in the words a delete of it is refused in', async () =>
