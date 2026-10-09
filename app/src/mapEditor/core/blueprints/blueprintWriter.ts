@@ -231,15 +231,16 @@ class BlueprintWriter
   #timer: ReturnType<typeof setTimeout> | null = null;
 
   /**
-   * True from the moment an act fails, or must be taken back, until its changes are back out, a wait for an edit under
-   * way to end included: nothing is sent meanwhile, since the blueprints still hold the changes going back.
+   * How many failed acts are not yet answered, each from the moment it fails, or must be taken back, until its changes are
+   * back out, a wait for an edit under way to end included: nothing is sent while any is, since the blueprints still hold
+   * the changes going back.
    */
-  #answering = false;
+  #answering = 0;
 
   /**
-   * The wait for an edit under way to end before a failure is answered, or null when there is none.
+   * The waits for an edit under way to end before failures are answered, one for each failure waiting.
    */
-  #answerTimer: ReturnType<typeof setTimeout> | null = null;
+  #answerTimers = new Set<ReturnType<typeof setTimeout>>();
 
   /**
    * The wait for an edit under way to end before the changes that waited for a choice are made again, or null.
@@ -318,15 +319,13 @@ class BlueprintWriter
   {
     this.#unsubscribe();
     this.#cancelTimer();
-    [ this.#answerTimer, this.#remakeTimer ].forEach(timer =>
+    this.#answerTimers.forEach(timer => clearTimeout(timer));
+    this.#answerTimers.clear();
+    if (this.#remakeTimer !== null)
     {
-      if (timer !== null)
-      {
-        clearTimeout(timer);
-      }
-    });
-    this.#answerTimer = null;
-    this.#remakeTimer = null;
+      clearTimeout(this.#remakeTimer);
+      this.#remakeTimer = null;
+    }
   }
 
   /**
@@ -337,7 +336,7 @@ class BlueprintWriter
    */
   hasUnwritten(): boolean
   {
-    return this.#queue.length > 0 || this.#sending !== null || this.#answering || this.#awaiting.length > 0 || this.#stranded.size > 0;
+    return this.#queue.length > 0 || this.#sending !== null || this.#answering > 0 || this.#awaiting.length > 0 || this.#stranded.size > 0;
   }
 
   /**
@@ -474,7 +473,7 @@ class BlueprintWriter
   #send(): void
   {
     // while a failure is being answered the blueprints still hold the changes going back, so nothing is sent until then.
-    if (this.#sending !== null || this.#answering || this.#queue.length === 0)
+    if (this.#sending !== null || this.#answering > 0 || this.#queue.length === 0)
     {
       return;
     }
@@ -644,7 +643,7 @@ class BlueprintWriter
   {
     this.#failures += 1;
     this.#cancelTimer();
-    this.#answering = true;
+    this.#answering += 1;
     this.#answer(moves, error, awaits);
   }
 
@@ -661,11 +660,12 @@ class BlueprintWriter
   {
     if (this.#hub.isEditing())
     {
-      this.#answerTimer = setTimeout(() =>
+      const timer = setTimeout(() =>
       {
-        this.#answerTimer = null;
+        this.#answerTimers.delete(timer);
         this.#answer(moves, error, awaits);
       }, EDIT_WAIT_MS);
+      this.#answerTimers.add(timer);
       return;
     }
 
@@ -696,7 +696,7 @@ class BlueprintWriter
     finally
     {
       this.#takingBack = false;
-      this.#answering = false;
+      this.#answering -= 1;
     }
 
     this.#maps.landed(this.#mapsOf(since), true);
