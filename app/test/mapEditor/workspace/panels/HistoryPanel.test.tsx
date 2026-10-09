@@ -17,7 +17,7 @@ import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/Ma
 import { HistoryPanel } from '../../../../src/mapEditor/workspace/panels/HistoryPanel.tsx';
 import { WorkspaceController } from '../../../../src/mapEditor/workspace/WorkspaceController.ts';
 import { WorkspaceProvider } from '../../../../src/mapEditor/workspace/workspaceHooks.tsx';
-import { drawsFor, holdBlueprints } from '../../support/blueprintFixtures.ts';
+import { drawsFor, holdBlueprints, holdBlueprintUses } from '../../support/blueprintFixtures.ts';
 import { mapWithEvents } from '../../support/eventFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
 
@@ -27,7 +27,8 @@ import { stampOf } from '../../support/stampFixtures.ts';
  * such a step, since the undo would take away a blueprint the copy still names, and it is refused in the words a delete
  * of the blueprint is refused in, from a click on the panel's rows as from Ctrl+Z, the blueprint staying where it was.
  *
- * The window holds the blueprints and map 1, where one copy of "Goblin camp" (k3x9q2mf) stands, unsaved.
+ * The window holds the blueprints, an empty record of where their tiles are placed, and map 1, where one copy of "Goblin
+ * camp" (k3x9q2mf) stands, unsaved.
  */
 describe('HistoryPanel', () =>
 {
@@ -39,6 +40,7 @@ describe('HistoryPanel', () =>
   {
     const hub = new DocumentHub({ clientId: 'window-a' });
     holdBlueprints(hub);
+    holdBlueprintUses(hub);
     hub.adopt('map:1', mapWithEvents(4, 3, [ null, [ 0, 0 ] ]) as unknown as JsonValue);
     saveBlueprint(hub, stampOf({ mapId: 1 }), 'Goblin camp', drawsFor([ 'k3x9q2mf' ]));
     placeBlueprint(hub, 1, 'k3x9q2mf', { at: { x: 2, y: 1 }, shaping: 'auto', mode: 1, linkRefusal: null });

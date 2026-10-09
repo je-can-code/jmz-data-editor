@@ -6,6 +6,7 @@ import { parseDocumentKey, type DocumentKey } from '../core/model/documentKeys.t
  */
 const EDITOR_DATA_LABELS: Readonly<Record<string, string>> = {
   'blueprints': 'Blueprints',
+  'blueprint-uses': 'Blueprint placements',
   'tileset-marks': 'Tileset marks',
   'layouts': 'Saved layouts',
 };

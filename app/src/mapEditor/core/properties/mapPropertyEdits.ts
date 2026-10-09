@@ -1,3 +1,5 @@
+import { changeMapSpots, readableUses, spotsOnMap, type BlueprintSpot } from '../blueprints/blueprintUses.ts';
+import { resizedSpots, spansOnMap } from '../blueprints/placementSpans.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { mapHistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
@@ -107,8 +109,30 @@ const previewResize = (map: MapDocument, width: number, height: number, anchor: 
 };
 
 /**
+ * Lists the placements of blueprints a resize would leave wholly outside the new size, which go with the tiles there, for
+ * the form to warn about before the resize is made.
+ * @param {Pick<DocumentHub, 'has' | 'document'>} hub The window's documents.
+ * @param {number} mapId The map.
+ * @param {ResizePlan} plan The resize, worked out.
+ * @returns {BlueprintSpot[]} The placements, where they stand now; none while the window holds no record it can read.
+ */
+const placementsLostByResize = (hub: Pick<DocumentHub, 'has' | 'document'>, mapId: number, plan: ResizePlan): BlueprintSpot[] =>
+{
+  const uses = readableUses(hub);
+  if (uses === null)
+  {
+    return [];
+  }
+
+  const offset = { x: plan.offsetX, y: plan.offsetY };
+  return [ ...resizedSpots(spotsOnMap(uses, mapId), spansOnMap(hub, mapId), offset, plan.tiles).lost ];
+};
+
+/**
  * Resizes a map as one step in its history: the tiles carried to where the anchor puts them, every event shifted
- * with them, and the events left outside the new size removed, all of which one undo puts back.
+ * with them, and the events left outside the new size removed; and every placement of a blueprint recorded on the map
+ * shifted with the tiles under it, those left wholly outside the new size forgotten (see {@link resizedSpots}). One undo
+ * puts all of it back.
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map.
  * @param {number} width The new width.
@@ -125,7 +149,10 @@ const resizeMap = (hub: DocumentHub, mapId: number, width: number, height: numbe
     return null;
   }
 
+  // how far each placement reaches is read before anything moves.
   const plan = previewResize(map, width, height, anchor);
+  const spans = spansOnMap(hub, mapId);
+  const offset = { x: plan.offsetX, y: plan.offsetY };
   return hub.edit(`Resize to ${width} by ${height}`, [ mapHistoryKey(mapId) ], tx =>
   {
     plan.dropped.forEach(id => tx.set(key, [ 'events', id ], null));
@@ -135,8 +162,9 @@ const resizeMap = (hub: DocumentHub, mapId: number, width: number, height: numbe
       tx.set(key, [ 'events', id, 'y' ], y);
     });
     tx.resize(key, plan.tiles);
+    changeMapSpots(tx, hub, mapId, spots => resizedSpots(spots, spans, offset, plan.tiles).kept);
   });
 };
 
-export { applyPropertyChanges, editMapProperties, labelForProperties, previewResize, PROPERTY_LABELS, resizeMap };
+export { applyPropertyChanges, editMapProperties, labelForProperties, placementsLostByResize, previewResize, PROPERTY_LABELS, resizeMap };
 export type { EditableMapProperty, MapPropertyChanges };

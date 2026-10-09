@@ -7,7 +7,7 @@ import { act, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { MapEditorApiError, type MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
-import { MAP_INFOS_KEY, mapDocumentKey, type DocumentKey } from '../../../src/mapEditor/core/model/documentKeys.ts';
+import { MAP_INFOS_KEY, mapDocumentKey, parseDocumentKey, type DocumentKey } from '../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { WorkspaceController } from '../../../src/mapEditor/workspace/WorkspaceController.ts';
@@ -56,6 +56,12 @@ describe('useHeldMap', () =>
       if (key === MAP_INFOS_KEY)
       {
         return hub.adopt(key, buildTreeRows() as unknown as JsonValue);
+      }
+
+      // the workspace asks for the blueprints and their placements as it opens, which are no maps.
+      if (parseDocumentKey(key).kind !== 'map')
+      {
+        throw new Error(`${key} is not on disk in this test`);
       }
 
       asked.push(key);

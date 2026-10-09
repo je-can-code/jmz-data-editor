@@ -158,6 +158,7 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
   const held = useHeldMap(mapId);
   const focus = useWorkspaceState(state => state.eventFocus[mapId] ?? null);
   const focusEventId = focus === null ? null : focus.eventId;
+  const cellFocus = useWorkspaceState(state => state.cellFocus[mapId] ?? null);
   const visible = usePanelVisible(api);
 
   // the panel's window decides what it paints with: the page's own paint in the main window, its own anywhere else.
@@ -193,6 +194,8 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
                 document={held.map}
                 focusEventId={focusEventId}
                 focusRequest={focus === null ? 0 : focus.request}
+                focusCell={cellFocus === null ? null : cellFocus.cell}
+                focusCellRequest={cellFocus === null ? 0 : cellFocus.request}
                 visible={visible}
                 selection={controller.selection}
                 paint={paint}

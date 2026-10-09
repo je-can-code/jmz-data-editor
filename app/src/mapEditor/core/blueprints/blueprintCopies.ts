@@ -342,6 +342,21 @@ class BlueprintCopyCounter
   }
 
   /**
+   * Lists the copies of one blueprint's events the count stands on, for showing where it is used: on the maps this
+   * window holds as they stand here, on the maps only other windows hold as those windows last showed them, and on the
+   * rest as the disk had them at the last reading. Unlike {@link countOf} it hands out whatever is known, settled or not,
+   * since nothing is decided on it.
+   * @param {string} blueprintId The blueprint.
+   * @returns {BlueprintCopy[]} The copies, by map id, then event id.
+   */
+  copiesOf(blueprintId: string): BlueprintCopy[]
+  {
+    return this.#everyCopy()
+      .filter(copy => copy.blueprintId === blueprintId)
+      .sort((left, right) => left.mapId - right.mapId || left.eventId - right.eventId);
+  }
+
+  /**
    * Hears that a project file changed on disk: a map's file has the server's reading asked for again, once counting has
    * started. Any other file changes no copy.
    * @param {string} path The file, relative to the project root, as the change stream names it.
@@ -622,18 +637,28 @@ class BlueprintCopyCounter
   }
 
   /**
-   * Works the count out afresh, the maps held here standing in for what the disk says of them, and the maps only other
-   * windows hold, as their copies were last looked at, standing in for the disk too, for as long as some window still
-   * holds them; and tells every listener when it says anything new.
+   * Gathers every copy the count stands on: the maps held here standing in for what the disk says of them, and the maps
+   * only other windows hold, as their copies were last looked at, standing in for the disk too, for as long as some
+   * window still holds them.
+   * @returns {BlueprintCopy[]} The copies.
    */
-  #publish(): void
+  #everyCopy(): BlueprintCopy[]
   {
     const elsewhere = [ ...this.#elsewhere ].filter(([ mapId ]) => this.#isElsewhere(mapId));
     const counted = new Set([ ...this.#held.keys(), ...elsewhere.map(([ mapId ]) => mapId) ]);
     const fromDisk = [ ...this.#disk ?? [] ].filter(([ mapId ]) => counted.has(mapId) === false).flatMap(([ , copies ]) => copies);
     const fromHeld = [ ...this.#held.values() ].flatMap(({ copies }) => copies);
     const fromElsewhere = elsewhere.flatMap(([ , copies ]) => copies);
-    const byBlueprint = tallyCopies([ ...fromDisk, ...fromHeld, ...fromElsewhere ]);
+    return [ ...fromDisk, ...fromHeld, ...fromElsewhere ];
+  }
+
+  /**
+   * Works the count out afresh from every copy it stands on (see {@link #everyCopy}), and tells every listener when it
+   * says anything new.
+   */
+  #publish(): void
+  {
+    const byBlueprint = tallyCopies(this.#everyCopy());
     if (this.#counts.state === this.#state && sameCounts(this.#counts.byBlueprint, byBlueprint))
     {
       return;

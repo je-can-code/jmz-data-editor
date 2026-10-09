@@ -4,6 +4,7 @@ import type { TemplateMap } from '../modules/PluginModuleRegistry.ts';
 import { commitStampPlan, planStamp, type StampOutcome, type StampPlacement } from '../stamps/stampPlacement.ts';
 import { withBlueprintLink } from './blueprintLink.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from './blueprints.ts';
+import { readableUses } from './blueprintUses.ts';
 
 /**
  * Says why a map may hold no copy of a blueprint, or null when it may: what every placement on a map asks before it
@@ -68,14 +69,23 @@ const linkGateFor = (modules: TemplateMapSource): LinkGate =>
 };
 
 /**
+ * Why a blueprint's tiles are not placed while the window holds no record of placements it can read: a placement nothing
+ * records could never be found again.
+ */
+const USES_UNREAD = 'Blueprints with tiles can\'t be placed until the record of where blueprints are placed can be read.';
+
+/**
  * Places a blueprint on a map as one step in its history: its tiles painted as a plain copy, with their autotile edges
  * refreshed, and its events where they stand inside it with fresh ids, exactly as placing its stamp would (see
  * {@link planStamp}), but every event placed carries a link in its note naming the blueprint and which of its events it
  * is a copy of. The link goes on a line of its own after whatever the note already says, and a note that would read any
- * other tag differently with it refuses the whole placement. The step is named for the blueprint.
+ * other tag differently with it refuses the whole placement. When its tiles go down, the cell its corner lands on is
+ * recorded as one of its placements, in the same step, so one undo takes the record back with the tiles; a blueprint of
+ * events alone, or one whose tiles a map of another tileset leaves out, records nothing, its events' links being all
+ * there is to find. The step is named for the blueprint.
  *
- * Refused whole, changing nothing: a blueprint no longer there; a map that may hold no link, with its reason; and
- * anything placing its stamp would refuse.
+ * Refused whole, changing nothing: a blueprint no longer there; a map that may hold no link, with its reason; tiles to
+ * place while the window holds no record of placements it can read; and anything placing its stamp would refuse.
  * @param {DocumentHub} hub The window's documents; the map and the blueprints document must be held.
  * @param {number} mapId The map.
  * @param {string} blueprintId The blueprint.
@@ -95,11 +105,18 @@ const placeBlueprint = (hub: DocumentHub, mapId: number, blueprintId: string, pl
     return { ok: false, message: `Blueprints can't be placed here: ${placement.linkRefusal}.` };
   }
 
-  // every event placed takes this blueprint's link, whatever its note held, so no link is told dead on the way.
-  const plan = planStamp(hub.map(mapDocumentKey(mapId)), blueprint.stamp, placement, null);
+  // every event placed takes this blueprint's link, whatever its note held, so no link is told dead on the way; and the
+  // placement recorded is this one alone, whatever its stamp was copied with.
+  const { spots: _spots, ...stamp } = blueprint.stamp;
+  const plan = planStamp(hub.map(mapDocumentKey(mapId)), stamp, placement, null);
   if (plan.ok === false)
   {
     return plan;
+  }
+
+  if (plan.tilesPlaced && readableUses(hub) === null)
+  {
+    return { ok: false, message: USES_UNREAD };
   }
 
   // each copy names the blueprint's event it was made from by the id that event has in the blueprint.
@@ -117,7 +134,8 @@ const placeBlueprint = (hub: DocumentHub, mapId: number, blueprintId: string, pl
     }
   }
 
-  return commitStampPlan(hub, mapId, { ...plan, events }, `Place blueprint "${blueprint.name}"`);
+  const spots = plan.tilesPlaced ? [ { blueprintId, x: placement.at.x, y: placement.at.y } ] : [];
+  return commitStampPlan(hub, mapId, { ...plan, events, spots }, `Place blueprint "${blueprint.name}"`);
 };
 
 export { linkGateFor, placeBlueprint };

@@ -1,4 +1,5 @@
 import { MapEditorApiError, type MapEditorApi } from '../api/MapEditorApi.ts';
+import { changeMapSpots, readableUses, spotsOnMap, type BlueprintSpot } from '../blueprints/blueprintUses.ts';
 import type { DocumentHub, DocumentSnapshot, HistoryFailure } from '../history/DocumentHub.ts';
 import { TREE_HISTORY_KEY } from '../history/historyKeys.ts';
 import type { FileEffect, HistoryStep } from '../history/HistoryStep.ts';
@@ -412,7 +413,8 @@ class MapTreeService
   }
 
   /**
-   * Captures maps for the clipboard, each with its file as it stands now, unsaved edits included.
+   * Captures maps for the clipboard, each with its file as it stands now, unsaved edits included, and the placements of
+   * blueprints the record holds for it now, which pasting it records for the new map.
    * @param {readonly number[]} mapIds The maps.
    * @returns {Promise<CopyOutcome>} The copies.
    */
@@ -423,7 +425,7 @@ class MapTreeService
       try
       {
         const contents = await this.#filesOf(mapIds);
-        return { ok: true as const, copies: copyMaps(this.rows(), mapIds, contents) };
+        return { ok: true as const, copies: copyMaps(this.rows(), mapIds, contents, this.#spotsOf(mapIds)) };
       }
       catch (error)
       {
@@ -449,7 +451,7 @@ class MapTreeService
   }
 
   /**
-   * Duplicates maps, each copy right after its original.
+   * Duplicates maps, each copy right after its original, with the placements of blueprints its original holds.
    * @param {readonly number[]} mapIds The maps.
    * @returns {Promise<TreeOutcome>} The step, and the copies to select.
    */
@@ -458,7 +460,8 @@ class MapTreeService
     return this.#run(async () =>
     {
       const contents = await this.#filesOf(mapIds);
-      const sources = [ ...contents.entries() ].map(([ mapId, content ]) => ({ mapId, content }));
+      const spots = this.#spotsOf(mapIds);
+      const sources = [ ...contents.entries() ].map(([ mapId, content ]) => ({ mapId, content, spots: spots.get(mapId) ?? [] }));
       const base = this.rows();
       const plan = await this.#withFreeIds(skip => planDuplicate(base, sources, skip));
       return this.#commit(base, plan, new Map());
@@ -535,7 +538,9 @@ class MapTreeService
   /**
    * Records a plan as one step and writes it through: new files, then the step and its rows, then the tree's file,
    * then removals. A tree that changed while the plan waited on the server (another window's step, say) refuses the
-   * plan rather than undoing that change with it.
+   * plan rather than undoing that change with it. The record of where blueprints are placed changes in the same step,
+   * when the window holds it: a map that goes takes its placements with it, and a map that comes holds exactly the
+   * placements it was copied with, a brand new one none, so one undo puts the record back with the maps.
    * @param {MapInfoRows} base The rows the plan was worked out from.
    * @param {TreePlan} plan The plan.
    * @param {ReadonlyMap<number, CapturedFile>} removedFiles Each removed map's file as it stood.
@@ -573,6 +578,8 @@ class MapTreeService
           after: file.afterText,
           beforeHeld: held.get(file.document),
         }));
+        plan.created.forEach(({ mapId, spots }) => changeMapSpots(tx, this.#hub, mapId, () => spots));
+        plan.removed.forEach(mapId => changeMapSpots(tx, this.#hub, mapId, () => []));
       });
       if (step === null)
       {
@@ -1183,6 +1190,20 @@ class MapTreeService
 
       throw error;
     }
+  }
+
+  /**
+   * Reads the placements of blueprints the record holds for several maps, as they stand now.
+   * @param {readonly number[]} mapIds The maps.
+   * @returns {Map<number, BlueprintSpot[]>} Each map's placements, by map id; none while the window holds no record it can
+   * read.
+   */
+  #spotsOf(mapIds: readonly number[]): Map<number, BlueprintSpot[]>
+  {
+    const uses = readableUses(this.#hub);
+    return uses === null
+      ? new Map()
+      : new Map(mapIds.map(mapId => [ mapId, spotsOnMap(uses, mapId) ]));
   }
 
   /**

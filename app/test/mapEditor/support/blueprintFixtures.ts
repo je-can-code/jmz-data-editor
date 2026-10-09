@@ -1,4 +1,5 @@
 import { BLUEPRINTS_DOCUMENT, savedBlueprintOf } from '../../../src/mapEditor/core/blueprints/blueprints.ts';
+import { BLUEPRINT_USES_DOCUMENT, mapEntryOf, type PlacedSpot } from '../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import type { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
 import type { JsonObject, JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import type { Stamp } from '../../../src/mapEditor/core/stamps/stamp.ts';
@@ -30,6 +31,30 @@ const holdBlueprints = (hub: DocumentHub, blueprints: BlueprintSeed = {}): void 
 };
 
 /**
+ * Builds the stored form of a record of where blueprints are placed, holding the placements given, each map's written
+ * as the editor writes it, as the editor-data route serves it.
+ * @param {readonly PlacedSpot[]} spots The placements.
+ * @returns {JsonObject} The record, version and all.
+ */
+const storedUses = (spots: readonly PlacedSpot[] = []): JsonObject =>
+{
+  const mapIds = [ ...new Set(spots.map(spot => spot.mapId)) ];
+  const maps = Object.fromEntries(mapIds.map(mapId => [ String(mapId), mapEntryOf(spots.filter(spot => spot.mapId === mapId)) as JsonObject ]));
+  return { schemaVersion: 1, data: { maps } };
+};
+
+/**
+ * Has a window hold the record of where blueprints are placed, holding the placements given, as a file on disk would hand
+ * it over.
+ * @param {DocumentHub} hub The window's documents.
+ * @param {readonly PlacedSpot[]} spots The placements.
+ */
+const holdBlueprintUses = (hub: DocumentHub, spots: readonly PlacedSpot[] = []): void =>
+{
+  hub.adopt(BLUEPRINT_USES_DOCUMENT, storedUses(spots) as JsonValue);
+};
+
+/**
  * Draws the same characters for every new blueprint id, in turn from a list of draws, so a test knows the id a save
  * makes: each draw is the index of a character in the id alphabet (a to z, then 0 to 9), over 36.
  * @param {readonly string[]} ids The ids to make, in order, each eight characters long.
@@ -48,5 +73,5 @@ const drawsFor = (ids: readonly string[]): (() => number) =>
   };
 };
 
-export { drawsFor, holdBlueprints, storedBlueprints };
+export { drawsFor, holdBlueprints, holdBlueprintUses, storedBlueprints, storedUses };
 export type { BlueprintSeed };

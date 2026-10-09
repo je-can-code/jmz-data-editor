@@ -7,6 +7,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { BlueprintCopyCounter, type EventNote } from '../../../../src/mapEditor/core/blueprints/blueprintCopies.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintsOf } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
+import { BLUEPRINT_USES_DOCUMENT, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
@@ -19,7 +20,7 @@ import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/Ma
 import { StampsPanel } from '../../../../src/mapEditor/workspace/panels/StampsPanel.tsx';
 import { WorkspaceController } from '../../../../src/mapEditor/workspace/WorkspaceController.ts';
 import { WorkspaceProvider } from '../../../../src/mapEditor/workspace/workspaceHooks.tsx';
-import { holdBlueprints, storedBlueprints, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
+import { holdBlueprints, holdBlueprintUses, storedBlueprints, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
@@ -221,25 +222,27 @@ describe('StampsPanel', () =>
 describe('StampsPanel: blueprints', () =>
 {
   /**
-   * How the blueprints reach the window: held from the start, opened only once the panel asks, or never to be had; and
-   * whether writing them fails.
+   * How the blueprints and the record of where they are placed reach the window: held from the start, opened only once
+   * asked for, or never to be had; whether writing them fails; and the placements the record holds.
    */
   type BlueprintsSource = {
     readonly readNotes?: () => Promise<readonly EventNote[]>;
     readonly open?: 'held' | 'on-ask' | 'never';
     readonly failSaves?: boolean;
+    readonly uses?: readonly PlacedSpot[];
   };
 
   /**
    * Renders the panel in a workspace with a project server, holding the blueprints given, whose copies on disk are those
-   * the notes say.
+   * the notes say, and whose placements are those the record holds.
    * @param {BlueprintSeed} blueprints The blueprints, by id.
-   * @param {BlueprintsSource} source How the notes are read, how the blueprints reach the window, and whether saves fail.
+   * @param {BlueprintsSource} source How the notes are read, how the blueprints and the record reach the window, whether
+   * saves fail, and the placements.
    * @returns {object} The window's documents and stamps, its paint, the controller, what was saved and the counter.
    */
   const renderWithBlueprints = (blueprints: BlueprintSeed, source: BlueprintsSource = {}) =>
   {
-    const { readNotes = async () => [], open = 'held', failSaves = false } = source;
+    const { readNotes = async () => [], open = 'held', failSaves = false, uses = [] } = source;
     const saved: DocumentKey[] = [];
     const hub = new DocumentHub({
       clientId: 'window-a',
@@ -259,6 +262,7 @@ describe('StampsPanel: blueprints', () =>
     if (open === 'held')
     {
       holdBlueprints(hub, blueprints);
+      holdBlueprintUses(hub, uses);
     }
 
     const stamps = new StampHistory('window-a');
@@ -272,9 +276,14 @@ describe('StampsPanel: blueprints', () =>
       blueprintCopies,
       openDocument: async (key: DocumentKey) =>
       {
-        if (open === 'on-ask' && hub.has(key) === false)
+        if (open === 'on-ask' && hub.has(key) === false && key === BLUEPRINTS_DOCUMENT)
         {
           holdBlueprints(hub, blueprints);
+        }
+
+        if (open === 'on-ask' && hub.has(key) === false && key === BLUEPRINT_USES_DOCUMENT)
+        {
+          holdBlueprintUses(hub, uses);
         }
 
         if (hub.has(key))
@@ -560,9 +569,11 @@ describe('StampsPanel: blueprints', () =>
 
   it('says the blueprints could not be read when the document holds something else', () =>
   {
-    // Arrange: a document holding a list where the blueprints should be, held before the panel shows.
+    // Arrange: a document holding a list where the blueprints should be, held before the panel shows, beside an empty
+    // record of placements.
     const hub = new DocumentHub({ clientId: 'window-a' });
     hub.adopt(BLUEPRINTS_DOCUMENT, { schemaVersion: 1, data: { blueprints: [] } });
+    holdBlueprintUses(hub);
     const services = {
       hub,
       api: {},

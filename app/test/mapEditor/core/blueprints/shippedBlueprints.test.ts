@@ -18,7 +18,7 @@ import { placeStamp, planStamp, type StampPlacement } from '../../../../src/mapE
 import { TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes.ts';
 import { activatePluginModules } from '../../../../src/mapEditor/services/pluginModules.ts';
 import { listMapFiles, locateGameProject, readDataFile } from '../../../support/gameProject.ts';
-import { drawsFor, holdBlueprints } from '../../support/blueprintFixtures.ts';
+import { drawsFor, holdBlueprints, holdBlueprintUses } from '../../support/blueprintFixtures.ts';
 
 /*
  * Blueprint links held against every map the game ships, read from the game's files and only ever held in memory, a
@@ -117,7 +117,8 @@ const textWithNotes = (file: RmmzMap, note: (event: RmmzMapEvent) => string): st
 };
 
 /**
- * Builds a window holding some of the game's maps, whose saves are kept rather than written.
+ * Builds a window holding some of the game's maps, the blueprints and an empty record of where they are placed, whose
+ * saves are kept rather than written.
  * @param {readonly number[]} mapIds The maps.
  * @returns {{ hub: DocumentHub, saved: Map<DocumentKey, JsonValue> }} The window, and what each save would have written.
  */
@@ -136,6 +137,7 @@ const windowHolding = (mapIds: readonly number[]): { hub: DocumentHub; saved: Ma
   });
   mapIds.forEach(mapId => hub.adopt(mapDocumentKey(mapId), readMap(mapId) as unknown as JsonValue));
   holdBlueprints(hub);
+  holdBlueprintUses(hub);
   return { hub, saved };
 };
 

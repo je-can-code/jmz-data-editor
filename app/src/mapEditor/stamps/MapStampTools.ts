@@ -1,5 +1,6 @@
 import { blueprintLinkOf } from '../core/blueprints/blueprintLink.ts';
 import { BLUEPRINTS_DOCUMENT } from '../core/blueprints/blueprints.ts';
+import { spansOnMap } from '../core/blueprints/placementSpans.ts';
 import { isOnMap } from '../core/events/eventPlacement.ts';
 import type { EventSelection } from '../core/events/EventSelection.ts';
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
@@ -354,8 +355,8 @@ class MapStampTools
   }
 
   /**
-   * Captures what a copy takes: the select tool's area while that tool is in hand and holds one, and otherwise the
-   * events selected on this map.
+   * Captures what a copy takes: the select tool's area while that tool is in hand and holds one, with the placements of
+   * blueprints it holds whole, and otherwise the events selected on this map.
    * @returns {Stamp | null} The stamp, or null with nothing to take.
    */
   #capture(): Stamp | null
@@ -366,12 +367,12 @@ class MapStampTools
       return null;
     }
 
-    const { painting, stamps, selection } = this.#options;
+    const { painting, stamps, selection, hub } = this.#options;
     const { tool, strip } = painting.settings;
     const area = tool === 'select' ? this.#options.tileArea() : null;
     if (area !== null)
     {
-      return captureAreaStamp(map, area, strip, this.#options.tilesetMode(map), stamps.nextId());
+      return captureAreaStamp(map, area, strip, this.#options.tilesetMode(map), stamps.nextId(), spansOnMap(hub, map.mapId));
     }
 
     const eventIds = selection.eventsOn(map.mapId);
@@ -400,8 +401,9 @@ class MapStampTools
 
   /**
    * Places a stamp on the map as one step, as a paste: its top-left corner on a tile, or where it was copied from. A
-   * stamp carrying copies of blueprints, in a window not holding the blueprints yet, waits for them first, so a copy of
-   * one no longer there goes down plain; should they not open, every link goes down as it is.
+   * stamp carrying copies of blueprints, in its events or in its tiles, in a window not holding the blueprints yet, waits
+   * for them first, so a copy of one no longer there goes down plain; should they not open, every copy goes down as it
+   * is.
    * @param {Stamp} stamp The stamp.
    * @param {MapCell | null} target The tile, or null for where it was copied from.
    */
@@ -413,7 +415,7 @@ class MapStampTools
       return;
     }
 
-    const linked = stamp.events.some(event => blueprintLinkOf(event.note) !== null);
+    const linked = stamp.events.some(event => blueprintLinkOf(event.note) !== null) || stamp.spots !== undefined;
     if (linked && this.#options.hub.has(BLUEPRINTS_DOCUMENT) === false)
     {
       // placed once the blueprints are open, or, should they not open, with every link as it is.

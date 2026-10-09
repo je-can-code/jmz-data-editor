@@ -31,7 +31,7 @@ describe('editorData', () =>
     saveEditorData: vi.fn(async () => undefined),
   }) as unknown as MapEditorApi;
 
-  it('names three documents, each with a key the server accepts', () =>
+  it('names four documents, each with a key the server accepts', () =>
   {
     // Arrange: the definitions.
 
@@ -40,7 +40,7 @@ describe('editorData', () =>
 
     // Assert.
     expect(names)
-      .toStrictEqual([ [ 'blueprints', true ], [ 'tileset-marks', true ], [ 'layouts', true ] ]);
+      .toStrictEqual([ [ 'blueprints', true ], [ 'blueprint-uses', true ], [ 'tileset-marks', true ], [ 'layouts', true ] ]);
   });
 
   it('finds a definition by name, and nothing for an unknown one', () =>
@@ -133,7 +133,7 @@ describe('editorData', () =>
 
     // Assert.
     expect(keys)
-      .toStrictEqual([ 'editor-data:blueprints', 'editor-data:tileset-marks', 'editor-data:layouts' ]);
+      .toStrictEqual([ 'editor-data:blueprints', 'editor-data:blueprint-uses', 'editor-data:tileset-marks', 'editor-data:layouts' ]);
   });
 
   /*

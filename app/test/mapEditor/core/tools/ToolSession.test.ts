@@ -7,7 +7,7 @@ import { makeAutotileId, TileId } from '../../../../src/mapEditor/core/tiles/til
 import { regionBrush, SHADOW_BRUSH, singleTileBrush, tileBrush, type Brush } from '../../../../src/mapEditor/core/tools/brush.ts';
 import { INITIAL_PAINT_SETTINGS, PaintState, type BlueprintInHand, type PaintSettings } from '../../../../src/mapEditor/core/tools/PaintState.ts';
 import { ToolSession, type ToolPointer } from '../../../../src/mapEditor/core/tools/ToolSession.ts';
-import { holdBlueprints } from '../../support/blueprintFixtures.ts';
+import { holdBlueprints, holdBlueprintUses } from '../../support/blueprintFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
 import { fill, kindTile, put, type TestGrid } from '../tiles/support/tileGridBuilder.ts';
 import { benchWith, cellsOf, layeringWith, stackAt, type PaintBench } from './support/paintFixtures.ts';
@@ -594,7 +594,7 @@ describe('ToolSession: the stamp', () =>
 
   /**
    * Builds a session with a stamp in hand on the bench, hearing every outcome: a plain stamp, or a blueprint's stamp when
-   * a blueprint is named, the window then holding that blueprint under its id.
+   * a blueprint is named, the window then holding that blueprint under its id and an empty record of placements.
    * @param {Stamp | null} stamp The stamp, or null for none picked.
    * @param {{ blueprint?: BlueprintInHand, refusal?: string }} options The blueprint in hand, if any, and why the map may
    * hold no links, if it may not.
@@ -607,6 +607,7 @@ describe('ToolSession: the stamp', () =>
     if (blueprint !== null)
     {
       holdBlueprints(bench.hub, { [blueprint.id]: { name: blueprint.name, stamp: stamp as Stamp } });
+      holdBlueprintUses(bench.hub);
     }
 
     const state = new PaintState({ ...INITIAL_PAINT_SETTINGS, tool: 'stamp', stamp, blueprint });

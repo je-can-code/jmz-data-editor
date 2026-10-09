@@ -1,3 +1,4 @@
+import { spansWithin, type PlacementSpan } from '../blueprints/placementSpans.ts';
 import { boundsOf } from '../events/eventPlacement.ts';
 import { cloneJson } from '../model/json.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
@@ -36,6 +37,19 @@ type StampTiles = {
    * a stamp cannot do once it lands on another map, or on this one changed since.
    */
   readonly calledFor: readonly number[];
+};
+
+/**
+ * A placement of a blueprint's tiles that a stamp's tiles hold whole: the blueprint, the cell its top-left corner sits
+ * at, counted from the stamp's own corner, and how far it reaches. It may start past the stamp's top or left edge, as a
+ * placement hanging over the map's edge does.
+ */
+type StampSpot = {
+  readonly blueprintId: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
 };
 
 /**
@@ -87,6 +101,13 @@ type Stamp = {
    * Its events, in id order, standing where they stood inside the stamp.
    */
   readonly events: readonly RmmzMapEvent[];
+
+  /**
+   * The placements of blueprints its tiles hold whole, which placing it records again wherever its tiles land, so a
+   * placement copied, cut and pasted, or moved, is still a copy of its blueprint, as an event copied off a copy of a
+   * blueprint is. Present only on a stamp holding any, so every other stamp keeps its exact shape.
+   */
+  readonly spots?: readonly StampSpot[];
 };
 
 /**
@@ -174,15 +195,24 @@ const shapesCalledFor = (map: StampSource, source: CellRect, layers: readonly nu
  * Captures a piece of the map as a stamp, the way the select tool lifts one: under automatic layering every layer,
  * tiles, shadows and regions alike, with the events standing on it, so a piece of a map comes away whole; under manual
  * layering the chosen layer alone and no events, so the objects on one layer can be taken without the ground beneath
- * them or what stands there. The part of the rectangle beyond the map is left out.
+ * them or what stands there. The part of the rectangle beyond the map is left out. The placements of blueprints the
+ * piece holds whole, every layer they are compared on carried, come along as the stamp's spots (see {@link spansWithin}).
  * @param {StampSource} map The map.
  * @param {CellRect} rect The cells.
  * @param {LayerChoice} choice The layer choice, which decides the layers carried and whether events come along.
  * @param {number} mode The map's tileset mode, which the carried autotiles' shapes are read in.
  * @param {string} id The stamp's id.
+ * @param {readonly PlacementSpan[]} spans The placements recorded on the map, as far as the window can tell their size.
  * @returns {Stamp | null} The stamp, or null when none of the rectangle lies on the map.
  */
-const captureAreaStamp = (map: StampSource, rect: CellRect, choice: LayerChoice, mode: number, id: string): Stamp | null =>
+const captureAreaStamp = (
+  map: StampSource,
+  rect: CellRect,
+  choice: LayerChoice,
+  mode: number,
+  id: string,
+  spans: readonly PlacementSpan[] = [],
+): Stamp | null =>
 {
   const clip = captureClip(map, rect, choice);
   if (clip === null)
@@ -200,8 +230,16 @@ const captureAreaStamp = (map: StampSource, rect: CellRect, choice: LayerChoice,
     })
     : [];
 
+  // each placement held whole is kept from the stamp's corner, which is where the piece came from.
   const origin = { x: source.x, y: source.y };
-  return {
+  const spots = spansWithin(spans, source, layers, map).map(({ blueprintId, x, y, width, height }) => ({
+    blueprintId,
+    x: x - origin.x,
+    y: y - origin.y,
+    width,
+    height,
+  }));
+  const stamp: Stamp = {
     id,
     mapId: map.mapId,
     tilesetId: map.tilesetId,
@@ -211,6 +249,10 @@ const captureAreaStamp = (map: StampSource, rect: CellRect, choice: LayerChoice,
     tiles: { layers, values, calledFor: shapesCalledFor(map, source, layers, values, mode) },
     events: copyEventsFrom(map, standing, origin),
   };
+
+  return spots.length === 0
+    ? stamp
+    : { ...stamp, spots };
 };
 
 /**
@@ -300,4 +342,4 @@ const stampContentKey = (stamp: Stamp): string =>
 };
 
 export { captureAreaStamp, captureEventsStamp, contentsPhrase, stampCaption, stampContentKey, stampContents };
-export type { Stamp, StampSource, StampTiles };
+export type { Stamp, StampSource, StampSpot, StampTiles };

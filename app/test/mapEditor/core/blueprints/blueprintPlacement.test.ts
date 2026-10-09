@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { linkGateFor, placeBlueprint } from '../../../../src/mapEditor/core/blueprints/blueprintPlacement.ts';
+import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
@@ -7,7 +8,7 @@ import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
 import type { StampPlacement } from '../../../../src/mapEditor/core/stamps/stampPlacement.ts';
 import { TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes.ts';
 import { autotileKind, makeAutotileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
-import { holdBlueprints } from '../../support/blueprintFixtures.ts';
+import { holdBlueprints, holdBlueprintUses } from '../../support/blueprintFixtures.ts';
 import { hubWithMaps, mapFileOf, spotsOf } from '../../support/eventFixtures.ts';
 import { stampOf, tiledMap } from '../../support/stampFixtures.ts';
 
@@ -15,10 +16,13 @@ import { stampOf, tiledMap } from '../../support/stampFixtures.ts';
  * Placing a blueprint drops linked copies. It goes down exactly as placing its stamp would, as one step of the map's
  * history that one undo takes back to the very file it found: its tiles painted as a plain copy with their autotile edges
  * refreshed, its events where they stand inside it with fresh ids. Every event placed carries a link in its note, on a
- * line of its own after whatever the note already says, naming the blueprint and which of its events it is a copy of. A
- * map that may hold no link refuses it whole with the map's reason, so does a blueprint gone since it was picked, and so
- * does a blueprint whose event's note could not take a link and read the same otherwise, as does anything placing its
- * stamp would refuse.
+ * line of its own after whatever the note already says, naming the blueprint and which of its events it is a copy of.
+ * When its tiles go down, the cell its corner landed on is recorded among the blueprint's placements in that same step,
+ * so undo takes the record back with the tiles and redo puts it back; its events alone, or its tiles left out on a map of
+ * another tileset, record nothing. A map that may hold no link refuses it whole with the map's reason, so does a
+ * blueprint gone since it was picked, so do tiles to place while the window holds no record of placements it can read,
+ * and so does a blueprint whose event's note could not take a link and read the same otherwise, as does anything placing
+ * its stamp would refuse.
  *
  * The link gate is what says which maps may hold no link: every map whose events a plugin module says its plugin copies
  * while the game runs, J-ABS's action map among them, and every map before the modules have switched on at all, when
@@ -59,16 +63,29 @@ const campStamp = (note = 'Guard captain'): Stamp =>
 const target = (tilesetId = 4): RmmzMap => tiledMap(4, 3, () => undefined, [ null, [ 3, 2 ] ], tilesetId);
 
 /**
- * Builds a window holding maps 1 and 3 and the camp blueprint.
+ * Builds a window holding maps 1 and 3, the camp blueprint, and a record of placements, empty unless told otherwise.
  * @param {Stamp} stamp The camp's stamp.
+ * @param {readonly PlacedSpot[] | null} record The placements the record holds, or null for a window holding none.
  * @returns {ReturnType<typeof hubWithMaps>} The window's documents.
  */
-const windowWithCamp = (stamp: Stamp = campStamp()) =>
+const windowWithCamp = (stamp: Stamp = campStamp(), record: readonly PlacedSpot[] | null = []) =>
 {
   const hub = hubWithMaps({ 1: target(), 3: target(9) });
   holdBlueprints(hub, { k3x9q2mf: { name: 'Goblin camp', stamp } });
+  if (record !== null)
+  {
+    holdBlueprintUses(hub, record);
+  }
+
   return hub;
 };
+
+/**
+ * Lists every placement the window's record holds.
+ * @param {ReturnType<typeof hubWithMaps>} hub The window's documents.
+ * @returns {PlacedSpot[]} The placements.
+ */
+const recorded = (hub: ReturnType<typeof hubWithMaps>): PlacedSpot[] => usesOf(hub.document(BLUEPRINT_USES_DOCUMENT));
 
 /**
  * Builds a placement with the blueprint's corner on a cell, on a map that may hold links unless told otherwise.
@@ -170,37 +187,64 @@ describe('placeBlueprint', () =>
     // Act.
     const outcome = placeBlueprint(hub, 1, 'k3x9q2mf', at(1, 0));
 
-    // Assert: the copies are events 2 and 3, a link appended to the captain's words; event 1 untouched; dirt laid.
+    // Assert: the copies are events 2 and 3, a link appended to the captain's words; event 1 untouched; dirt laid; and the
+    // corner's cell recorded in the same step.
     const placed = mapFileOf(hub, 1);
     expect([
       outcome.ok && [ outcome.step?.label, outcome.step?.histories, outcome.eventIds, outcome.notes ],
       notesOf(placed),
       spotsOf(placed),
       [ placed.data[1], placed.data[2] ].map(autotileKind),
+      recorded(hub),
+      outcome.ok && outcome.step?.entries.filter(entry => entry.document === BLUEPRINT_USES_DOCUMENT).length,
     ])
       .toStrictEqual([
         [ 'Place blueprint "Goblin camp"', [ mapHistoryKey(1) ], [ 2, 3 ], [] ],
         [ null, 'event 1', '<blueprint:[k3x9q2mf, 7]>', 'Guard captain\n<blueprint:[k3x9q2mf, 9]>' ],
         [ null, [ 3, 2 ], [ 1, 0 ], [ 2, 0 ] ],
         [ DIRT, DIRT ],
+        [ { blueprintId: 'k3x9q2mf', x: 1, y: 0, mapId: 1 } ],
+        1,
       ]);
   });
 
-  it('is taken back by one undo to the very file it found', () =>
+  it('is taken back by one undo to the very file it found, its placement with it, and put back by a redo', () =>
   {
-    // Arrange.
-    const hub = windowWithCamp();
+    // Arrange: a placement of the camp already recorded on map 1, at 0, 2.
+    const hub = windowWithCamp(campStamp(), [ { blueprintId: 'k3x9q2mf', mapId: 1, x: 0, y: 2 } ]);
     placeBlueprint(hub, 1, 'k3x9q2mf', at(1, 0));
+    const placed = mapFileOf(hub, 1);
 
     // Act.
     hub.undo(mapHistoryKey(1));
+    const undone = [ mapFileOf(hub, 1), recorded(hub) ];
+    hub.redo(mapHistoryKey(1));
 
     // Assert.
-    expect(mapFileOf(hub, 1))
-      .toStrictEqual(target());
+    expect([ undone, mapFileOf(hub, 1), recorded(hub) ])
+      .toStrictEqual([
+        [ target(), [ { blueprintId: 'k3x9q2mf', x: 0, y: 2, mapId: 1 } ] ],
+        placed,
+        [ { blueprintId: 'k3x9q2mf', x: 1, y: 0, mapId: 1 }, { blueprintId: 'k3x9q2mf', x: 0, y: 2, mapId: 1 } ],
+      ]);
   });
 
-  it('links the events alone on a map of another tileset, saying so', () =>
+  it('records the same placement once, the blueprint put down twice at one cell being one placement', () =>
+  {
+    // Arrange: the camp placed at 1, 0, its events then cleared away so it can go down there again.
+    const hub = windowWithCamp();
+    placeBlueprint(hub, 1, 'k3x9q2mf', at(1, 0));
+    hub.edit('Clear', [ mapHistoryKey(1) ], tx => [ 3, 2 ].forEach(id => tx.apply('map:1', hub.map('map:1').removeEventPatch(id))));
+
+    // Act.
+    const again = placeBlueprint(hub, 1, 'k3x9q2mf', at(1, 0));
+
+    // Assert: the second step changed the map, and nothing in the record.
+    expect([ again.ok && again.step?.entries.some(entry => entry.document === BLUEPRINT_USES_DOCUMENT), recorded(hub) ])
+      .toStrictEqual([ false, [ { blueprintId: 'k3x9q2mf', x: 1, y: 0, mapId: 1 } ] ]);
+  });
+
+  it('links the events alone on a map of another tileset, saying so, and records no placement', () =>
   {
     // Arrange.
     const hub = windowWithCamp();
@@ -210,12 +254,56 @@ describe('placeBlueprint', () =>
 
     // Assert.
     const placed = mapFileOf(hub, 3);
-    expect([ outcome.ok && outcome.notes, notesOf(placed).slice(2), placed.data ])
+    expect([ outcome.ok && outcome.notes, notesOf(placed).slice(2), placed.data, recorded(hub) ])
       .toStrictEqual([
         [ 'This map uses another tileset, so only the stamp\'s events went down.' ],
         [ '<blueprint:[k3x9q2mf, 7]>', 'Guard captain\n<blueprint:[k3x9q2mf, 9]>' ],
         target(9).data,
+        [],
       ]);
+  });
+
+  it('records no placement for a blueprint of events alone, which places with no record held at all', () =>
+  {
+    // Arrange: the camp without its dirt, in a window holding no record, beside one holding an empty record.
+    const bare = windowWithCamp({ ...campStamp(), tiles: null }, null);
+    const held = windowWithCamp({ ...campStamp(), tiles: null });
+
+    // Act.
+    const outcomes = [ placeBlueprint(bare, 1, 'k3x9q2mf', at(1, 0)), placeBlueprint(held, 1, 'k3x9q2mf', at(1, 0)) ];
+
+    // Assert.
+    expect([ outcomes.map(outcome => outcome.ok && outcome.eventIds), recorded(held) ])
+      .toStrictEqual([ [ [ 2, 3 ], [ 2, 3 ] ], [] ]);
+  });
+
+  it('refuses tiles to place while the window holds no record of placements it can read, changing nothing', () =>
+  {
+    // Arrange: one window holding no record, and one holding something that is not a record.
+    const missing = windowWithCamp(campStamp(), null);
+    const broken = windowWithCamp(campStamp(), null);
+    broken.adopt(BLUEPRINT_USES_DOCUMENT, { schemaVersion: 1, data: { maps: [] } });
+
+    // Act.
+    const outcomes = [ placeBlueprint(missing, 1, 'k3x9q2mf', at(1, 0)), placeBlueprint(broken, 1, 'k3x9q2mf', at(1, 0)) ];
+
+    // Assert.
+    const refusal = { ok: false, message: 'Blueprints with tiles can\'t be placed until the record of where blueprints are placed can be read.' };
+    expect([ outcomes, mapFileOf(missing, 1), mapFileOf(broken, 1) ])
+      .toStrictEqual([ [ refusal, refusal ], target(), target() ]);
+  });
+
+  it('records only its own placement, whatever placements its stamp was copied with', () =>
+  {
+    // Arrange: a camp whose stamp somehow holds another blueprint's placement.
+    const hub = windowWithCamp({ ...campStamp(), spots: [ { blueprintId: 'zz99', x: 0, y: 0, width: 1, height: 1 } ] });
+
+    // Act.
+    placeBlueprint(hub, 1, 'k3x9q2mf', at(1, 0));
+
+    // Assert.
+    expect(recorded(hub))
+      .toStrictEqual([ { blueprintId: 'k3x9q2mf', x: 1, y: 0, mapId: 1 } ]);
   });
 
   it('refuses a map that may hold no link, with its reason, changing nothing', () =>

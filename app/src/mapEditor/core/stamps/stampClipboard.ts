@@ -1,7 +1,8 @@
+import { isBlueprintId } from '../blueprints/blueprintLink.ts';
 import { isJsonObject, type JsonObject } from '../model/json.ts';
 import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
 import { AUTOTILE_SHAPE_COUNT } from '../tiles/tileIds.ts';
-import type { Stamp, StampTiles } from './stamp.ts';
+import type { Stamp, StampSpot, StampTiles } from './stamp.ts';
 
 /**
  * The mark a stamp on the system clipboard carries, so a paste knows the text there is a stamp copied in the map editor,
@@ -142,6 +143,48 @@ const readEvents = (value: unknown, width: number, height: number): RmmzMapEvent
 };
 
 /**
+ * Reports whether a value has the shape of a placement a stamp's tiles hold: a blueprint's id, a cell, and a size, the
+ * placement reaching into the stamp.
+ * @param {unknown} value The value.
+ * @param {number} width The stamp's width.
+ * @param {number} height The stamp's height.
+ * @returns {boolean} True when it can be recorded wherever the stamp lands.
+ */
+const isStampSpot = (value: unknown, width: number, height: number): value is StampSpot =>
+{
+  if (isJsonObject(value) === false)
+  {
+    return false;
+  }
+
+  const { blueprintId, x, y, width: spanWidth, height: spanHeight } = value;
+  return typeof blueprintId === 'string' && isBlueprintId(blueprintId)
+    && isWholeBetween(spanWidth, 1) && isWholeBetween(spanHeight, 1)
+    && isWholeBetween(x, 1 - (spanWidth as number), width - 1) && isWholeBetween(y, 1 - (spanHeight as number), height - 1);
+};
+
+/**
+ * Reads the placements a stamp's tiles hold, refusing any list that is not of placements reaching into the stamp. A stamp
+ * holding none, which is most of them, has no list at all.
+ * @param {unknown} value The placements as read, or undefined for none.
+ * @param {number} width The stamp's width.
+ * @param {number} height The stamp's height.
+ * @returns {StampSpot[] | null | undefined} The placements; undefined when the stamp has none; null when they are
+ * malformed.
+ */
+const readSpots = (value: unknown, width: number, height: number): StampSpot[] | null | undefined =>
+{
+  if (value === undefined)
+  {
+    return undefined;
+  }
+
+  return Array.isArray(value) && value.length > 0 && value.every(spot => isStampSpot(spot, width, height))
+    ? (value as unknown as StampSpot[]).map(({ blueprintId, x, y, width: spanWidth, height: spanHeight }) => ({ blueprintId, x, y, width: spanWidth, height: spanHeight }))
+    : null;
+};
+
+/**
  * Reads a stamp out of what some JSON holds, refusing anything that is not a whole stamp holding something: the
  * clipboard's stamp, and every stamp a blueprint is saved with, which is kept in the very same shape.
  * @param {JsonObject} value The stamp as read.
@@ -159,16 +202,18 @@ const readStamp = (value: JsonObject): Stamp | null =>
     return null;
   }
 
+  // placements are only ever held by tiles.
   const tiles = readTiles(value['tiles'], width as number, height as number);
   const events = readEvents(value['events'], width as number, height as number);
-  if (tiles === undefined || events === null || (tiles === null && events.length === 0))
+  const spots = readSpots(value['spots'], width as number, height as number);
+  if (tiles === undefined || events === null || (tiles === null && events.length === 0) || spots === null || (tiles === null && spots !== undefined))
   {
     return null;
   }
 
   // built field by field, in the order a captured stamp has them, so the same stamp reads back the same.
   const corner = origin as JsonObject;
-  return {
+  const stamp: Stamp = {
     id: id as string,
     mapId: mapId as number,
     tilesetId: tilesetId as number,
@@ -178,6 +223,10 @@ const readStamp = (value: JsonObject): Stamp | null =>
     tiles,
     events,
   };
+
+  return spots === undefined
+    ? stamp
+    : { ...stamp, spots };
 };
 
 /**

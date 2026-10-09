@@ -1,8 +1,10 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
 import { blueprintsKeptGuard } from '../core/blueprints/blueprintMoves.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../core/blueprints/blueprints.ts';
+import { BLUEPRINT_USES_DOCUMENT, keepUsesWithMaps, usedCopiesOf } from '../core/blueprints/blueprintUses.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
+import type { MapCell } from '../core/renderer/camera.ts';
 import { MapTreeService, type TreeOutcome } from '../core/tree/MapTreeService.ts';
 import { TREE_ROOT } from '../core/tree/MapTreeModel.ts';
 import type { CopiedMap, TreePlace } from '../core/tree/treePlans.ts';
@@ -15,7 +17,7 @@ import {
   PANEL_COMPONENTS,
   type PanelDirection,
 } from '../core/workspace/panels.ts';
-import { MAP_INFOS_KEY, mapDocumentKey } from '../core/model/documentKeys.ts';
+import { MAP_INFOS_KEY, mapDocumentKey, parseDocumentKey } from '../core/model/documentKeys.ts';
 import type { RmmzMapInfo } from '../core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../services/MapEditorServices.ts';
 import { isStartPanel } from '../core/workspace/centre.ts';
@@ -95,6 +97,12 @@ type WorkspaceState = {
    * this.
    */
   readonly eventFocus: Readonly<Record<number, EventFocus>>;
+
+  /**
+   * The cell each map's views should centre on, by map id: what a click on a placement of a blueprint in the Blueprints
+   * section asks for.
+   */
+  readonly cellFocus: Readonly<Record<number, CellFocus>>;
 };
 
 /**
@@ -104,6 +112,15 @@ type WorkspaceState = {
  */
 type EventFocus = {
   readonly eventId: number;
+  readonly request: number;
+};
+
+/**
+ * One ask to centre on a cell: the cell, and the ask's own number, new every time, so asking for the same cell again
+ * after panning away centres on it again.
+ */
+type CellFocus = {
+  readonly cell: MapCell;
   readonly request: number;
 };
 
@@ -130,6 +147,11 @@ type OpenMapOptions = {
    * The event to select once it shows.
    */
   readonly focusEventId?: number | null;
+
+  /**
+   * The cell to centre on once it shows.
+   */
+  readonly focusCell?: MapCell | null;
 };
 
 /**
@@ -194,6 +216,7 @@ class WorkspaceController
     clipboard: null,
     notice: null,
     eventFocus: {},
+    cellFocus: {},
   };
 
   #listeners = new Set<() => void>();
@@ -201,9 +224,14 @@ class WorkspaceController
   #noticeCount = 0;
 
   /**
-   * Counts the asks to pick out an event, for each ask's own number.
+   * Counts the asks to pick out an event or centre on a cell, for each ask's own number.
    */
   #focusRequests = 0;
+
+  /**
+   * Settles once the window has tried to hold the blueprints and the record of where they are placed, opened or not.
+   */
+  #placementsOpened: Promise<void>;
 
   /**
    * @param {MapEditorServices} services The window's services.
@@ -215,10 +243,13 @@ class WorkspaceController
       ? null
       : new MapTreeService({ hub: services.hub, api: services.api, openDocument: key => services.openDocument(key) });
 
-    // no undo, redo or jump takes away a blueprint whose copies still name it.
-    const blueprintsKept = blueprintsKeptGuard(services.hub, services.blueprintCopies, mapId => this.mapName(mapId));
-    this.router = new HistoryRouter(services.hub, this.tree, blueprintsKept);
+    // no undo, redo or jump takes away a blueprint whose copies still name it, its placed tiles among them.
+    const { hub, blueprintCopies } = services;
+    const usedCopies = { start: () => blueprintCopies.start(), countOf: (blueprintId: string) => usedCopiesOf(blueprintCopies, hub, blueprintId) };
+    const blueprintsKept = blueprintsKeptGuard(hub, usedCopies, mapId => this.mapName(mapId));
+    this.router = new HistoryRouter(hub, this.tree, blueprintsKept);
     this.layouts = new LayoutStore({ api: services.api });
+    this.#placementsOpened = this.#holdPlacements();
 
     // a map the window lets go of, such as one deleted from the tree, takes its selected events with it, so the
     // selection only ever names a map this window holds.
@@ -230,6 +261,39 @@ class WorkspaceController
         this.selection.clear();
       }
     });
+  }
+
+  /**
+   * Holds the blueprints and the record of where they are placed from the moment the workspace opens, and keeps the
+   * record's file written with the maps from then on (see keepUsesWithMaps). Every edit that moves a placement with its
+   * tiles changes the record only while the window holds it, and reads how far each placement reaches from the
+   * blueprints, so both are held before the first such edit. One that cannot be read says why in the Blueprints section,
+   * which asks for both too. A window with no server holds neither.
+   * @returns {Promise<void>} Settles once both have been asked for, held or not; never rejects.
+   */
+  #holdPlacements(): Promise<void>
+  {
+    const { api, hub } = this.services;
+    if (api === null)
+    {
+      return Promise.resolve();
+    }
+
+    keepUsesWithMaps(hub, message => this.notify(message, 'error'));
+    const asked = [ BLUEPRINTS_DOCUMENT, BLUEPRINT_USES_DOCUMENT ].map(key => Promise.resolve()
+      .then(() => this.services.openDocument(key))
+      .then(() => undefined, () => undefined));
+    return Promise.all(asked).then(() => undefined);
+  }
+
+  /**
+   * Waits until the window has asked for the blueprints and the record of where they are placed, as whatever moves a
+   * placement does before it edits: the edit then finds them held, unless one could not be read.
+   * @returns {Promise<void>} Settles once both have been asked for; never rejects.
+   */
+  whenPlacementsHeld(): Promise<void>
+  {
+    return this.#placementsOpened;
   }
 
   //region state
@@ -339,6 +403,14 @@ class WorkspaceController
       this.#focusRequests += 1;
       const focus: EventFocus = { eventId: options.focusEventId, request: this.#focusRequests };
       this.#update({ eventFocus: { ...this.#state.eventFocus, [mapId]: focus } });
+    }
+
+    // a cell asked for again is centred on again, however far the view was panned away from it.
+    if (options.focusCell !== undefined && options.focusCell !== null)
+    {
+      this.#focusRequests += 1;
+      const focus: CellFocus = { cell: options.focusCell, request: this.#focusRequests };
+      this.#update({ cellFocus: { ...this.#state.cellFocus, [mapId]: focus } });
     }
 
     const open = api.panels.find(panel => panel.api.component === PANEL_COMPONENTS.map && isMapPanelParams(panel.params) && panel.params.mapId === mapId);
@@ -529,7 +601,9 @@ class WorkspaceController
   }
 
   /**
-   * Saves every document holding unsaved edits, leaving any in conflict for the person to settle first.
+   * Saves every document holding unsaved edits, leaving any in conflict for the person to settle first. What was saved
+   * is told in maps: the record of where blueprints are placed, or the blueprints after an undo, are saved along with
+   * them but are not maps, and are not counted as any.
    * @returns {Promise<void>} Settles once every save has finished.
    */
   async saveAll(): Promise<void>
@@ -563,7 +637,8 @@ class WorkspaceController
       return;
     }
 
-    this.notify(ready.length === 0 ? 'Everything is saved.' : `Saved ${ready.length === 1 ? '1 map' : `${ready.length} maps`}.`);
+    const maps = ready.filter(key => parseDocumentKey(key).kind === 'map').length;
+    this.notify(maps === 0 ? 'Everything is saved.' : `Saved ${maps === 1 ? '1 map' : `${maps} maps`}.`);
   }
 
   /**
@@ -654,7 +729,8 @@ class WorkspaceController
   }
 
   /**
-   * Copies maps to the clipboard, each with its file as it stands.
+   * Copies maps to the clipboard, each with its file as it stands, and the placements of blueprints on it, once the
+   * record of them is held.
    * @param {readonly number[]} mapIds The maps.
    * @returns {Promise<void>} Settles once copied.
    */
@@ -665,6 +741,7 @@ class WorkspaceController
       return;
     }
 
+    await this.#placementsOpened;
     const outcome = await this.tree.copy(mapIds);
     if (outcome.ok === false)
     {
@@ -735,7 +812,9 @@ class WorkspaceController
   }
 
   /**
-   * Runs a tree operation, selecting what it hands back and showing why when it refuses.
+   * Runs a tree operation, selecting what it hands back and showing why when it refuses. It waits, first, for the
+   * window to hold the record of where blueprints are placed, which a map deleted, duplicated or pasted changes in the
+   * same step.
    * @param {(tree: MapTreeService) => Promise<TreeOutcome>} call The operation.
    * @returns {Promise<TreeOutcome | null>} What it came to, or null without a tree service.
    */
@@ -747,6 +826,7 @@ class WorkspaceController
       return null;
     }
 
+    await this.#placementsOpened;
     const outcome = await call(this.tree);
     if (outcome.ok === false)
     {
@@ -795,4 +875,4 @@ class WorkspaceController
 }
 
 export { TREE_ROOT, WorkspaceController };
-export type { EventFocus, MapClipboard, Notice, NoticeSeverity, OpenMapOptions, WorkspaceState };
+export type { CellFocus, EventFocus, MapClipboard, Notice, NoticeSeverity, OpenMapOptions, WorkspaceState };

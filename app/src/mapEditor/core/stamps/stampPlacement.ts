@@ -1,5 +1,6 @@
 import { blueprintLinkOf, withoutBlueprintLink } from '../blueprints/blueprintLink.ts';
 import { liveBlueprintsIn, type LiveBlueprint } from '../blueprints/blueprints.ts';
+import { forgetSpots, recordSpots, type BlueprintSpot } from '../blueprints/blueprintUses.ts';
 import { blockedCells, eventCellsOf, isOnMap, newEventIds, type EventMap } from '../events/eventPlacement.ts';
 import { rewireGroupReferences } from '../events/eventReferences.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
@@ -50,8 +51,9 @@ type StampTarget = TileGrid & EventMap & { readonly tilesetId: number };
 
 /**
  * What placing a stamp would do: the cells it would change, the events it would place, with their fresh ids and the
- * cells they land on, the id each of those had in the stamp, what of the stamp it would leave out, and how many of its
- * events go down plain for naming a blueprint no longer there; or why it cannot go there at all.
+ * cells they land on, the id each of those had in the stamp, the placements of blueprints it would record where its
+ * tiles land, what of the stamp it would leave out, and how many of its events, and of the placements its tiles hold, go
+ * down plain for naming a blueprint no longer there; or why it cannot go there at all.
  */
 type StampPlan =
   | {
@@ -60,9 +62,11 @@ type StampPlan =
     readonly tilesPlaced: boolean;
     readonly events: readonly RmmzMapEvent[];
     readonly sourceIds: readonly number[];
+    readonly spots: readonly BlueprintSpot[];
     readonly tilesLeftOut: boolean;
     readonly eventsLeftOut: number;
     readonly deadLinks: number;
+    readonly deadSpots: number;
   }
   | { readonly ok: false; readonly message: string };
 
@@ -213,6 +217,47 @@ const withDeadLinksOut = (events: readonly RmmzMapEvent[], liveBlueprint: LiveBl
 };
 
 /**
+ * Works out the placements of blueprints a stamp's tiles record where they land, once its tiles are placed: each one its
+ * tiles hold, moved to where the stamp's corner lands, as long as some of it lands on the map. One of a blueprint no
+ * longer there, deleted or its save undone, goes down plain, as a copy of its events does; while the window does not
+ * hold the blueprints, none can be told gone, and each is recorded as it is.
+ * @param {Stamp} stamp The stamp, whose tiles are placed.
+ * @param {MapCell} at Where its corner lands.
+ * @param {TileGrid} map The map, for its size.
+ * @param {LiveBlueprint | null} liveBlueprint Whether a blueprint is still there, or null while the window does not hold
+ * the blueprints.
+ * @returns {{ spots: BlueprintSpot[], dead: number }} The placements to record, and how many went down plain.
+ */
+const landingSpots = (
+  stamp: Stamp,
+  at: MapCell,
+  map: TileGrid,
+  liveBlueprint: LiveBlueprint | null,
+): { spots: BlueprintSpot[]; dead: number } =>
+{
+  const spots: BlueprintSpot[] = [];
+  let dead = 0;
+  (stamp.spots ?? []).forEach(({ blueprintId, x, y, width, height }) =>
+  {
+    const landed = { x: at.x + x, y: at.y + y };
+    if (clipRect({ ...landed, width, height }, map.width, map.height) === null)
+    {
+      return;
+    }
+
+    if (liveBlueprint !== null && liveBlueprint(blueprintId) === false)
+    {
+      dead += 1;
+      return;
+    }
+
+    spots.push({ blueprintId, ...landed });
+  });
+
+  return { spots, dead };
+};
+
+/**
  * Works out a stamp going down on a map with its top-left corner on a cell. Everything is placed as an independent
  * copy; nothing links it to the stamp or to what the stamp was copied from.
  *
@@ -229,6 +274,8 @@ const withDeadLinksOut = (events: readonly RmmzMapEvent[], liveBlueprint: LiveBl
  *   a stamp landing any such event on a map that may hold no link is refused whole, with the map's reason. A copy of a
  *   blueprint no longer there goes down as a plain event instead, its dead link taken out (see {@link withDeadLinksOut}),
  *   which a map that may hold no link takes too.
+ * - Tiles copied off a placement of a blueprint, the whole of it, carry the placement along, recorded again where they
+ *   land (see {@link landingSpots}); like a copy of its events, it is refused whole on a map that may hold no link.
  * @param {StampTarget} map The map, as it stands.
  * @param {Stamp} stamp The stamp.
  * @param {StampPlacement} placement Where it goes and how.
@@ -254,9 +301,10 @@ const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement, li
     return unlinked;
   }
 
-  // only links to blueprints still there make copies.
+  // only links to blueprints still there make copies, and only tiles placed carry their placements.
   const placing = unlinked.events;
-  if (linkRefusal !== null && placing.some(event => blueprintLinkOf(event.note) !== null))
+  const landed = tilesPlaced ? landingSpots(stamp, at, map, liveBlueprint) : { spots: [], dead: 0 };
+  if (linkRefusal !== null && (placing.some(event => blueprintLinkOf(event.note) !== null) || landed.spots.length > 0))
   {
     return { ok: false, message: `This stamp holds copies of blueprints, which can't go here: ${linkRefusal}.` };
   }
@@ -284,9 +332,11 @@ const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement, li
     tilesPlaced,
     events,
     sourceIds: placing.map(event => event.id),
+    spots: landed.spots,
     tilesLeftOut,
     eventsLeftOut: stamp.events.length - placing.length,
     deadLinks: unlinked.deadLinks,
+    deadSpots: landed.dead,
   };
 };
 
@@ -322,12 +372,18 @@ const leftOutNotes = (plan: Extract<StampPlan, { ok: true }>): string[] =>
     notes.push(`${plan.deadLinks} of the stamp's events were copies of blueprints that no longer exist, so they went down as plain events.`);
   }
 
+  if (plan.deadSpots > 0)
+  {
+    notes.push('The stamp\'s tiles held a copy of a blueprint that no longer exists, so they went down as plain tiles.');
+  }
+
   return notes;
 };
 
 /**
- * Puts down what a placement was worked out to do, as one step in the map's history: the tiles first, then each event.
- * What placing a stamp and placing a blueprint both end with.
+ * Puts down what a placement was worked out to do, as one step in the map's history: the tiles first, then each event,
+ * then the placements of blueprints its tiles record, so one undo takes the record back with the tiles. What placing a
+ * stamp and placing a blueprint both end with.
  * @param {DocumentHub} hub The window's documents; the map must be held, as it was when the plan was made.
  * @param {number} mapId The map.
  * @param {Extract<StampPlan, { ok: true }>} plan The placement, worked out against the map as it stands.
@@ -343,6 +399,7 @@ const commitStampPlan = (hub: DocumentHub, mapId: number, plan: Extract<StampPla
     // the tiles first, then each event, its patch built against the list as the one before left it.
     tx.tiles(key, plan.tiles);
     plan.events.forEach(event => tx.apply(key, map.placeEventPatch(event)));
+    recordSpots(tx, hub, mapId, plan.spots);
   });
 
   return { ok: true, step, eventIds: plan.events.map(event => event.id), notes: leftOutNotes(plan) };
@@ -374,7 +431,8 @@ const placeStamp = (hub: DocumentHub, mapId: number, stamp: Stamp, placement: St
 /**
  * Takes away, as one step in the map's history, what a stamp was just captured from: the events it copied, wherever
  * they stand now, and, for a stamp of tiles, every layer it carries emptied over the cells it was copied from, with the
- * autotiles around the hole reshaped. What a cut does once its stamp is safely kept.
+ * autotiles around the hole reshaped, and the placements of blueprints it holds whole forgotten there, since they now
+ * travel with the stamp and are recorded again wherever it is pasted. What a cut does once its stamp is safely kept.
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map the stamp was captured from.
  * @param {Stamp} stamp The stamp, just captured from that map.
@@ -401,10 +459,12 @@ const cutStampSource = (hub: DocumentHub, mapId: number, stamp: Stamp, mode: num
 
   const held = eventCellsOf(map, stamp.events.map(event => event.id));
   const label = `Cut ${contentsPhrase(tiles === null ? null : stamp, held.length)}`;
+  const carried = (stamp.spots ?? []).map(({ blueprintId, x, y }) => ({ blueprintId, x: left + x, y: top + y }));
   const step = hub.edit(label, [ mapHistoryKey(mapId) ], tx =>
   {
     tx.tiles(key, withReshapes(map, writes, mode));
     held.forEach(({ id }) => tx.apply(key, map.removeEventPatch(id)));
+    forgetSpots(tx, hub, mapId, carried);
   });
 
   return { ok: true, step, eventIds: [], notes: [] };

@@ -48,6 +48,13 @@ type EditorDataSaveOutcome =
 const BLUEPRINTS: EditorDataDefinition = { name: 'blueprints', schemaVersion: 1, createEmpty: () => ({ blueprints: {} }) };
 
 /**
+ * Where blueprints are placed: per map, per blueprint, the cell each placement of the blueprint's tiles was put down at,
+ * so the editor can find every placement again (see core/blueprints/blueprintUses.ts). A placement's events need no
+ * entry here; each one's note already names its blueprint.
+ */
+const BLUEPRINT_USES: EditorDataDefinition = { name: 'blueprint-uses', schemaVersion: 1, createEmpty: () => ({ maps: {} }) };
+
+/**
  * "Goes on top" marks: per tileset, the tiles that lay over the ground instead of replacing it. Keyed by
  * tileset id; the layering package shapes the entries.
  */
@@ -61,7 +68,7 @@ const LAYOUTS: EditorDataDefinition = { name: 'layouts', schemaVersion: 1, creat
 /**
  * Every editor-only document the map editor knows.
  */
-const EDITOR_DATA_DEFINITIONS: readonly EditorDataDefinition[] = [ BLUEPRINTS, TILESET_MARKS, LAYOUTS ];
+const EDITOR_DATA_DEFINITIONS: readonly EditorDataDefinition[] = [ BLUEPRINTS, BLUEPRINT_USES, TILESET_MARKS, LAYOUTS ];
 
 /**
  * Builds the stored form of an empty document.
@@ -187,6 +194,7 @@ class EditorDataClient
 }
 
 export {
+  BLUEPRINT_USES,
   BLUEPRINTS,
   EDITOR_DATA_DEFINITIONS,
   EditorDataClient,

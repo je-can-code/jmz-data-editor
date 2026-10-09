@@ -2,6 +2,7 @@ import React from 'react';
 import { Box } from '@mui/material';
 import type { EventSelection } from '../../core/events/EventSelection.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
+import type { MapCell } from '../../core/renderer/camera.ts';
 import type { WindowPaint } from '../../core/tools/WindowPaint.ts';
 import type { EventNoticeSeverity } from '../../events/MapEventTools.ts';
 import { MapView } from '../../render/MapView.tsx';
@@ -26,6 +27,17 @@ type MapSurfaceProps = {
    * out, each event is picked out once.
    */
   readonly focusRequest?: number;
+
+  /**
+   * The cell to centre on, such as the middle of a blueprint's placement the Blueprints section asked to see, or null.
+   * Left out, nothing.
+   */
+  readonly focusCell?: MapCell | null;
+
+  /**
+   * The number of the ask that named that cell; a new number centres on it again. Left out, each cell is centred on once.
+   */
+  readonly focusCellRequest?: number;
 
   /**
    * Whether the panel is on screen; false while it is a tab behind another.
@@ -95,7 +107,7 @@ const identityKey = (value: object): number =>
  */
 const MapSurface = (props: MapSurfaceProps) =>
 {
-  const { document, focusEventId, focusRequest = 0, visible, selection, onNotice, paint } = props;
+  const { document, focusEventId, focusRequest = 0, focusCell = null, focusCellRequest = 0, visible, selection, onNotice, paint } = props;
   const panelWindow = usePanelWindow();
 
   // a new window or a new document is a new key, which mounts a new view in place of the old one.
@@ -108,6 +120,8 @@ const MapSurface = (props: MapSurfaceProps) =>
         mapId={document.mapId}
         pickedEventId={focusEventId}
         pickRequest={focusRequest}
+        lookAtCell={focusCell}
+        lookRequest={focusCellRequest}
         visible={visible}
         selection={selection}
         onNotice={onNotice}

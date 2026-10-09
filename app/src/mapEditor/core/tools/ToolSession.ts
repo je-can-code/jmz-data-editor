@@ -1,6 +1,7 @@
 import { blueprintLinkOf } from '../blueprints/blueprintLink.ts';
 import { placeBlueprint } from '../blueprints/blueprintPlacement.ts';
 import { liveBlueprintsIn } from '../blueprints/blueprints.ts';
+import { carrySpans, spansOnMap, spansWithin } from '../blueprints/placementSpans.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { MapCell } from '../renderer/camera.ts';
@@ -652,7 +653,8 @@ class ToolSession
   }
 
   /**
-   * Puts a lifted area down where it was dragged to, moving it or copying it, and keeps it selected there.
+   * Puts a lifted area down where it was dragged to, moving it or copying it, and keeps it selected there. The placements
+   * of blueprints the area holds whole travel with it in the same step: moved with a move, recorded again with a copy.
    * @param {Extract<Gesture, { kind: 'drag-clip' }>} gesture The drag.
    * @param {MapCell} end Where it ended.
    * @param {Shaping} shaping Whether autotiles are reshaped around it.
@@ -667,9 +669,14 @@ class ToolSession
       return;
     }
 
+    const { hub } = this.#host;
     const at = { x: clip.source.x + dx, y: clip.source.y + dy };
     const changes = planPlaceClip(map, clip, { at, move: copy === false, shaping, mode });
-    applyTileEdit(this.#host.hub, map, copy ? 'Copy tiles' : 'Move tiles', changes);
+    const carried = spansWithin(spansOnMap(hub, map.mapId), clip.source, clip.layers, map);
+    applyTileEdit(hub, map, copy ? 'Copy tiles' : 'Move tiles', changes, tx =>
+    {
+      carrySpans(tx, hub, map.mapId, carried, { x: dx, y: dy }, map, copy);
+    });
     this.#selection = clipRect({ x: at.x, y: at.y, width: clip.source.width, height: clip.source.height }, map.width, map.height);
   }
 

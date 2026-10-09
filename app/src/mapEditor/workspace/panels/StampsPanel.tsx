@@ -9,7 +9,17 @@ import {
   type BlueprintOutcome,
 } from '../../core/blueprints/blueprintEdits.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintsOf, type Blueprint } from '../../core/blueprints/blueprints.ts';
+import {
+  BLUEPRINT_USES_DOCUMENT,
+  countsWithPlacements,
+  forgetPlacement,
+  saveBlueprintUses,
+  usedCopiesOf,
+  usesOf,
+  type PlacedSpot,
+} from '../../core/blueprints/blueprintUses.ts';
 import { blueprintHistoryKey } from '../../core/history/historyKeys.ts';
+import type { EditorDataDocumentKey } from '../../core/model/documentKeys.ts';
 import type { EditorDocument } from '../../core/model/EditorDocument.ts';
 import type { TextureImage } from '../../core/renderer/MapRenderer.ts';
 import { stampCaption, type Stamp } from '../../core/stamps/stamp.ts';
@@ -19,19 +29,26 @@ import { drawStampThumbnail, THUMBNAIL_BOX, thumbnailCharacters, thumbnailLayout
 import { usePaintSettings } from '../../render/tools/PaintToolBar.tsx';
 import type { WorkspaceController } from '../WorkspaceController.ts';
 import { useDocumentRevision, useTilesets, useWorkspace } from '../workspaceHooks.tsx';
+import { BlueprintWhereUsed } from './BlueprintWhereUsed.tsx';
 import { usePaintScope } from './palette/paintScope.tsx';
 import { useTilesetSheets } from './palette/paletteHooks.ts';
 import { CHECKERBOARD } from './palette/TileThumb.tsx';
 
 /**
- * What the panel knows of the blueprints: none to show in a window with no project server, still opening, open, or why
- * they could not be read.
+ * What the panel knows of the blueprints: none to show in a window with no project server, still opening, open with
+ * every placement of their tiles the record holds, or why they, or the record, could not be read, in words for the
+ * author.
  */
 type BlueprintsView =
   | { readonly kind: 'none' }
   | { readonly kind: 'opening' }
-  | { readonly kind: 'open'; readonly blueprints: readonly Blueprint[]; readonly revision: number }
+  | { readonly kind: 'open'; readonly blueprints: readonly Blueprint[]; readonly spots: readonly PlacedSpot[]; readonly revisions: readonly number[] }
   | { readonly kind: 'failed'; readonly message: string };
+
+/**
+ * One editor-only document as the panel holds it: the document once held, or why it could not be.
+ */
+type HeldDocument = { readonly document: EditorDocument | null; readonly failure: string | null };
 
 /**
  * The grid every section lays its cards out in: as many columns as fit, each card as tall as what it holds, however
@@ -97,18 +114,15 @@ const useCharacterSheets = (stamp: Stamp): ReadonlyMap<string, TextureImage | nu
 };
 
 /**
- * Holds the blueprints for the panel: opens their document once, when the window has a server to read it from, and
- * reads them afresh whenever it changes, in this window or another.
- * @returns {BlueprintsView} The blueprints, or where opening them stands.
+ * Holds one editor-only document for the panel: opens it once, when the window has a server to read it from.
+ * @param {EditorDataDocumentKey} key The document.
+ * @returns {HeldDocument} The document once held, or why it could not be.
  */
-const useBlueprints = (): BlueprintsView =>
+const useHeldDocument = (key: EditorDataDocumentKey): HeldDocument =>
 {
   const controller = useWorkspace();
   const { hub, api } = controller.services;
-  const [ opened, setOpened ] = useState<{ document: EditorDocument | null; failure: string | null }>(() => ({
-    document: hub.has(BLUEPRINTS_DOCUMENT) ? hub.document(BLUEPRINTS_DOCUMENT) : null,
-    failure: null,
-  }));
+  const [ opened, setOpened ] = useState<HeldDocument>(() => ({ document: hub.has(key) ? hub.document(key) : null, failure: null }));
 
   useEffect(() =>
   {
@@ -118,7 +132,7 @@ const useBlueprints = (): BlueprintsView =>
     }
 
     let live = true;
-    controller.services.openDocument(BLUEPRINTS_DOCUMENT)
+    controller.services.openDocument(key)
       .then(document =>
       {
         if (live)
@@ -138,11 +152,28 @@ const useBlueprints = (): BlueprintsView =>
     {
       live = false;
     };
-  }, [ controller, api, opened.document ]);
+  }, [ controller, api, key, opened.document ]);
 
-  // a blueprint saved, renamed or deleted, here or in another window, moves the document's revision, and the blueprints
-  // are read afresh only then, so their pictures are drawn again only when they change.
-  const revision = useDocumentRevision(opened.document);
+  return opened;
+};
+
+/**
+ * Holds the blueprints for the panel, with the record of where their tiles are placed: opens both once, when the window
+ * has a server to read them from, and reads them afresh whenever either changes, in this window or another. The
+ * blueprints show only once both are held, since a blueprint placed with no record to write its placement into could
+ * never be found again; one that cannot be read says why instead.
+ * @returns {BlueprintsView} The blueprints and their placements, or where opening them stands.
+ */
+const useBlueprints = (): BlueprintsView =>
+{
+  const { api } = useWorkspace().services;
+  const blueprints = useHeldDocument(BLUEPRINTS_DOCUMENT);
+  const uses = useHeldDocument(BLUEPRINT_USES_DOCUMENT);
+
+  // a blueprint saved, renamed or deleted, or a placement recorded or forgotten, here or in another window, moves a
+  // document's revision, and each is read afresh only then, so the pictures are drawn again only when they change.
+  const blueprintsRevision = useDocumentRevision(blueprints.document);
+  const usesRevision = useDocumentRevision(uses.document);
   return useMemo((): BlueprintsView =>
   {
     if (api === null)
@@ -150,25 +181,40 @@ const useBlueprints = (): BlueprintsView =>
       return { kind: 'none' };
     }
 
-    if (opened.failure !== null)
+    if (blueprints.failure !== null)
     {
-      return { kind: 'failed', message: opened.failure };
+      return { kind: 'failed', message: `The blueprints could not be read: ${blueprints.failure}` };
     }
 
-    if (opened.document === null)
+    if (uses.failure !== null)
+    {
+      return { kind: 'failed', message: `Where blueprints are placed could not be read: ${uses.failure}` };
+    }
+
+    if (blueprints.document === null || uses.document === null)
     {
       return { kind: 'opening' };
     }
 
+    let read: Blueprint[] = [];
     try
     {
-      return { kind: 'open', blueprints: blueprintsOf(opened.document), revision };
+      read = blueprintsOf(blueprints.document);
     }
     catch (error)
     {
-      return { kind: 'failed', message: messageOf(error) };
+      return { kind: 'failed', message: `The blueprints could not be read: ${messageOf(error)}` };
     }
-  }, [ api, opened, revision ]);
+
+    try
+    {
+      return { kind: 'open', blueprints: read, spots: usesOf(uses.document), revisions: [ blueprintsRevision, usesRevision ] };
+    }
+    catch (error)
+    {
+      return { kind: 'failed', message: `Where blueprints are placed could not be read: ${messageOf(error)}` };
+    }
+  }, [ api, blueprints, uses, blueprintsRevision, usesRevision ]);
 };
 
 /**
@@ -344,9 +390,10 @@ const StampCard = (props: {
 
 /**
  * One blueprint in the panel: its picture, its name, and how many copies of it stand across every map. A click takes
- * it up as the brush, or puts it down again when it is in hand. Beneath it, it can be renamed in place, or deleted.
- * @param {object} props The blueprint, whether it is in hand, the words for its copies, and what a click, a rename and a
- * delete do.
+ * it up as the brush, or puts it down again when it is in hand. Beneath it, it can be renamed in place, or deleted, and
+ * where it is used can be shown, the card then stretching across the panel to list it.
+ * @param {object} props The blueprint, whether it is in hand, the words for its copies, what a click, a rename and a
+ * delete do, and the list of where it is used with how to show or hide it.
  * @returns {React.JSX.Element} The card.
  */
 const BlueprintCard = (props: {
@@ -356,9 +403,11 @@ const BlueprintCard = (props: {
   readonly onPick: () => void;
   readonly onRename: (name: string) => void;
   readonly onDelete: () => void;
+  readonly whereUsed: React.ReactNode | null;
+  readonly onToggleWhereUsed: () => void;
 }) =>
 {
-  const { blueprint, picked, copies, onPick, onRename, onDelete } = props;
+  const { blueprint, picked, copies, onPick, onRename, onDelete, whereUsed, onToggleWhereUsed } = props;
   const [ renaming, setRenaming ] = useState(false);
 
   /**
@@ -375,7 +424,7 @@ const BlueprintCard = (props: {
   };
 
   return (
-    <Box sx={cardFrame(picked)} data-testid={'blueprint'}>
+    <Box sx={{ ...cardFrame(picked), gridColumn: whereUsed === null ? 'auto' : '1 / -1' }} data-testid={'blueprint'}>
       <ButtonBase
         data-testid={'blueprint-card'}
         aria-pressed={picked}
@@ -399,15 +448,19 @@ const BlueprintCard = (props: {
       {renaming
         ? <NameField name={blueprint.name} label={'Blueprint name'} onDone={renamed}/>
         : (
-          <Stack direction={'row'} sx={{ mx: 0.25, mb: 0.25 }}>
+          <Stack direction={'row'} flexWrap={'wrap'} sx={{ mx: 0.25, mb: 0.25 }}>
             <Button size={'small'} onClick={() => setRenaming(true)} sx={{ fontSize: 12, py: 0, minWidth: 0 }}>
               Rename
             </Button>
             <Button size={'small'} onClick={onDelete} sx={{ fontSize: 12, py: 0, minWidth: 0 }}>
               Delete
             </Button>
+            <Button size={'small'} aria-expanded={whereUsed !== null} onClick={onToggleWhereUsed} sx={{ fontSize: 12, py: 0, minWidth: 0 }}>
+              Where used
+            </Button>
           </Stack>
         )}
+      {whereUsed}
     </Box>
   );
 };
@@ -498,22 +551,49 @@ const settleEdit = (controller: WorkspaceController, outcome: BlueprintOutcome, 
 };
 
 /**
- * The panel's blueprints, by name, each with its picture and how many copies of it stand across every map: clicking
- * one takes it up as the brush, so each click on a map places copies linked to it, and clicking it again, or Esc, puts
- * it down. Each can be renamed in place, and deleted once nothing is a copy of it, after a question; one with copies
- * says how many and on which maps instead. The copies are counted from every map's notes, held maps as they stand here.
- * @param {{ blueprints: readonly Blueprint[], painting: PaintState }} props The blueprints, and the paint they are taken
- * up for.
+ * Writes the record of where blueprints are placed to disk once a placement was forgotten from the panel, which changes
+ * no map, so no map's save would write it; an undo leaves it unsaved until the maps are next saved. A record waiting for
+ * a choice about changes made elsewhere is not written, which the author hears, as is a write that fails.
+ * @param {WorkspaceController} controller The workspace, for its documents and its notices.
+ */
+const writePlacements = (controller: WorkspaceController) =>
+{
+  saveBlueprintUses(controller.services.hub)
+    .then(outcome =>
+    {
+      if (outcome.ok === false)
+      {
+        controller.notify(outcome.message, 'error');
+      }
+    })
+    .catch((error: unknown) =>
+    {
+      controller.notify(`The blueprint placements could not be saved: ${messageOf(error)}`, 'error');
+    });
+};
+
+/**
+ * The panel's blueprints, by name, each with its picture and how many copies of it stand across every map, a placement
+ * of its tiles counting as one copy, as each copy of one of its events does: clicking one takes it up as the brush, so
+ * each click on a map places copies linked to it, and clicking it again, or Esc, puts it down. Each can be renamed in
+ * place, and deleted once nothing is a copy of it, after a question; one with copies says how many and on which maps
+ * instead. Each can show where it is used, map by map, a click opening the map there, and a placement no longer where
+ * it was saying why, to be forgotten. The event copies are counted from every map's notes, held maps as they stand here,
+ * and the placements come from the record of where blueprints are placed.
+ * @param {{ blueprints: readonly Blueprint[], spots: readonly PlacedSpot[], painting: PaintState }} props The
+ * blueprints, every placement the record holds, and the paint they are taken up for.
  * @returns {React.JSX.Element} The section.
  */
-const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; readonly painting: PaintState }) =>
+const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; readonly spots: readonly PlacedSpot[]; readonly painting: PaintState }) =>
 {
-  const { blueprints, painting } = props;
+  const { blueprints, spots, painting } = props;
   const controller = useWorkspace();
   const { hub, blueprintCopies } = controller.services;
-  const counts = useSyncExternalStore(blueprintCopies.subscribe, blueprintCopies.getSnapshot);
+  const eventCounts = useSyncExternalStore(blueprintCopies.subscribe, blueprintCopies.getSnapshot);
+  const counts = useMemo(() => countsWithPlacements(eventCounts, spots), [ eventCounts, spots ]);
   const settings = usePaintSettings(painting);
   const [ confirming, setConfirming ] = useState<Blueprint | null>(null);
+  const [ showing, setShowing ] = useState<string | null>(null);
   const pickedId = settings.tool === 'stamp' && settings.blueprint !== null ? settings.blueprint.id : null;
 
   /**
@@ -555,18 +635,18 @@ const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; r
   const remove = (blueprint: Blueprint) =>
   {
     setConfirming(null);
-    const outcome = deleteBlueprint(hub, blueprint.id, blueprintCopies.countOf(blueprint.id), mapId => controller.mapName(mapId));
+    const outcome = deleteBlueprint(hub, blueprint.id, usedCopiesOf(blueprintCopies, hub, blueprint.id), mapId => controller.mapName(mapId));
     settleEdit(controller, outcome, blueprint.id, `Deleted the blueprint "${blueprint.name}".`);
   };
 
   /**
-   * Asks before deleting a blueprint nothing is a copy of; one with copies, or whose copies cannot be told yet, says why
-   * it cannot be deleted at once instead, and nothing changes.
+   * Asks before deleting a blueprint nothing is a copy of; one with copies, its placements among them, or whose copies
+   * cannot be told yet, says why it cannot be deleted at once instead, and nothing changes.
    * @param {Blueprint} blueprint The blueprint.
    */
   const askToDelete = (blueprint: Blueprint) =>
   {
-    const copies = blueprintCopies.countOf(blueprint.id);
+    const copies = usedCopiesOf(blueprintCopies, hub, blueprint.id);
     if (copies !== null && copies.total === 0)
     {
       setConfirming(blueprint);
@@ -579,6 +659,24 @@ const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; r
     {
       controller.notify(refused.message, 'error');
     }
+  };
+
+  /**
+   * Forgets a placement no longer where it was, as one step in its blueprint's history, which becomes the one undo acts
+   * on, and writes the record at once.
+   * @param {Blueprint} blueprint The blueprint.
+   * @param {PlacedSpot} spot The placement.
+   */
+  const forget = (blueprint: Blueprint, spot: PlacedSpot) =>
+  {
+    if (forgetPlacement(hub, blueprint, spot) === null)
+    {
+      return;
+    }
+
+    writePlacements(controller);
+    controller.focusHistory(blueprintHistoryKey(blueprint.id));
+    controller.notify(`Forgot a copy of "${blueprint.name}" on ${controller.mapName(spot.mapId)}.`);
   };
 
   return (
@@ -604,6 +702,18 @@ const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; r
             onPick={() => pick(blueprint)}
             onRename={name => rename(blueprint, name)}
             onDelete={() => askToDelete(blueprint)}
+            onToggleWhereUsed={() => setShowing(current => (current === blueprint.id ? null : blueprint.id))}
+            whereUsed={showing === blueprint.id
+              ? (
+                <BlueprintWhereUsed
+                  blueprint={blueprint}
+                  spots={spots.filter(spot => spot.blueprintId === blueprint.id)}
+                  copies={blueprintCopies.copiesOf(blueprint.id)}
+                  counting={eventCounts.state !== 'counted'}
+                  onForget={spot => forget(blueprint, spot)}
+                />
+              )
+              : null}
           />
         ))}
       </Box>
@@ -676,7 +786,7 @@ const StampsPanel = () =>
       data-testid={'stamps-panel'}
       onKeyDown={onKeyDown}
     >
-      {blueprints.kind === 'open' && <BlueprintsSection blueprints={blueprints.blueprints} painting={painting}/>}
+      {blueprints.kind === 'open' && <BlueprintsSection blueprints={blueprints.blueprints} spots={blueprints.spots} painting={painting}/>}
       {blueprints.kind === 'opening' && (
         <Typography variant={'caption'} color={'text.secondary'} sx={{ display: 'block', px: 1.5, pt: 1 }}>
           Opening the blueprints
@@ -684,7 +794,7 @@ const StampsPanel = () =>
       )}
       {blueprints.kind === 'failed' && (
         <Alert severity={'error'} sx={{ m: 1 }}>
-          {`The blueprints could not be read: ${blueprints.message}`}
+          {blueprints.message}
         </Alert>
       )}
       <Typography variant={'subtitle2'} sx={{ px: 1.5, pt: 1 }}>

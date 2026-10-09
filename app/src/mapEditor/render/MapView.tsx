@@ -67,6 +67,18 @@ type MapViewProps = {
   readonly pickRequest?: number;
 
   /**
+   * The cell to centre on once the map is open, such as the middle of a blueprint's placement the Blueprints section
+   * asked to see. Null, or left out, centres on nothing.
+   */
+  readonly lookAtCell?: MapCell | null;
+
+  /**
+   * The number of the ask that named the cell; a new number centres on the same cell again. Left out, each cell is
+   * centred on once.
+   */
+  readonly lookRequest?: number;
+
+  /**
    * Whether the view is on screen; false while its panel is a tab behind another. A view off screen lets its GPU
    * context go and draws again, as it was, when it shows. Left out, the view is on screen.
    */
@@ -255,18 +267,19 @@ const DrawNotice = (props: { state: DrawState; notices?: readonly ModuleNotice[]
  * stand down; with the stamp in hand each click places it. Whatever tool is in hand, Ctrl+C and Ctrl+X make a stamp of
  * the select tool's area or of the events selected, and Ctrl+V places the newest stamp, through {@link MapStampTools}.
  * An event picked out, such as the battler the data editor asked to see, becomes the selection, with the view centred
- * on it at the game's scale; an event picked from the events list is centred at the zoom the view already has.
+ * on it at the game's scale; an event picked from the events list is centred at the zoom the view already has. A cell
+ * asked for, such as the middle of a blueprint's placement, is centred on at the game's scale.
  *
  * A view off screen, behind another tab, lets its GPU context go and draws again, camera and all, when it shows; a map
  * that cannot draw says why over the canvas rather than leaving it blank, and whatever the plugin modules say, such as
  * a config they could not read, shows along the top of the map for as long as they say it.
- * @param {MapViewProps} props The map to show, the event to pick out, whether the view is on screen, the selection,
- * where notices go, and what it paints with.
+ * @param {MapViewProps} props The map to show, the event to pick out, the cell to centre on, whether the view is on
+ * screen, the selection, where notices go, and what it paints with.
  * @returns {React.JSX.Element} The view.
  */
 const MapView = (props: MapViewProps) =>
 {
-  const { mapId, pickedEventId = null, pickRequest = 0, visible = true, onNotice } = props;
+  const { mapId, pickedEventId = null, pickRequest = 0, lookAtCell = null, lookRequest = 0, visible = true, onNotice } = props;
   const services = useMapEditorServices();
   const paint = props.paint ?? services.paints.main;
   const { painting } = paint;
@@ -568,6 +581,17 @@ const MapView = (props: MapViewProps) =>
       renderer.lookAt(cell, PICKED_EVENT_ZOOM);
     }
   }, [ openMap, pickedEventId, pickRequest ]);
+
+  // centre on the cell asked for once the map is open, and again whenever another is asked for, or the same one again;
+  // like a picked event, only a new ask moves the view.
+  useEffect(() =>
+  {
+    const renderer = rendererRef.current;
+    if (renderer !== null && openMap !== null && lookAtCell !== null)
+    {
+      renderer.lookAt(lookAtCell, PICKED_EVENT_ZOOM);
+    }
+  }, [ openMap, lookAtCell, lookRequest ]);
 
   // hand the renderer the switches, the modules' overlays and their passability rules.
   useEffect(() =>

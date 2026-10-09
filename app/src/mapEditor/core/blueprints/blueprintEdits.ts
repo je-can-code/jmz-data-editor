@@ -47,11 +47,12 @@ const heldBlueprint = (hub: DocumentHub, blueprintId: string): Blueprint | null 
 type UnlinkedStamp = { readonly ok: true; readonly stamp: Stamp } | { readonly ok: false; readonly message: string };
 
 /**
- * Takes the links out of a stamp's events, so the events a blueprint keeps are its own and not copies of another's: a
- * stamp copied off linked copies would otherwise save the links of the blueprint they came from.
+ * Takes the links out of a stamp's events, and the placements of other blueprints out of its tiles, so what a blueprint
+ * keeps is its own and not copies of another's: a stamp copied off linked copies would otherwise save the links of the
+ * blueprint they came from, and placing it would record placements of that blueprint too.
  * @param {Stamp} stamp The stamp.
- * @returns {UnlinkedStamp} The stamp with no event linked, or, for the author, why an event's note could not lose its
- * link cleanly.
+ * @returns {UnlinkedStamp} The stamp with nothing linked, or, for the author, why an event's note could not lose its link
+ * cleanly.
  */
 const unlinkedStamp = (stamp: Stamp): UnlinkedStamp =>
 {
@@ -69,7 +70,8 @@ const unlinkedStamp = (stamp: Stamp): UnlinkedStamp =>
     }
   }
 
-  return { ok: true, stamp: { ...stamp, events } };
+  const { spots: _spots, ...unplaced } = stamp;
+  return { ok: true, stamp: { ...unplaced, events } };
 };
 
 /**

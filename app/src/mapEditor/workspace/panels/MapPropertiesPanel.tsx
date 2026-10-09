@@ -3,7 +3,13 @@ import { Alert, Box, Button, CircularProgress, IconButton, Stack, TextField, Too
 import { Add, Close, FiberManualRecord } from '@mui/icons-material';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
 import type { RmmzAudio, RmmzEncounter, RmmzTileset } from '../../core/model/rmmzTypes.ts';
-import { editMapProperties, previewResize, resizeMap, type MapPropertyChanges } from '../../core/properties/mapPropertyEdits.ts';
+import {
+  editMapProperties,
+  placementsLostByResize,
+  previewResize,
+  resizeMap,
+  type MapPropertyChanges,
+} from '../../core/properties/mapPropertyEdits.ts';
 import {
   formatRegionList,
   parseRegionList,
@@ -125,7 +131,8 @@ const StrandedTransfers = (props: { stranded: readonly StrandedArrival[] }) =>
 
 /**
  * The map's size, changed with a resize that keeps one edge or corner in place and warns, before it is made, which
- * events would be left outside and which transfers landing on the map would no longer land where they did.
+ * events and copies of blueprints would be left outside and which transfers landing on the map would no longer land
+ * where they did.
  * @param {{ map: MapDocument, mapId: number }} props The map.
  * @returns {React.JSX.Element} The fields.
  */
@@ -149,10 +156,12 @@ const SizeFields = (props: { map: MapDocument; mapId: number }) =>
   const changed = newWidth !== null && newHeight !== null && (newWidth !== map.width || newHeight !== map.height);
   const plan = changed ? previewResize(map, newWidth, newHeight, anchor) : null;
   const dropped = plan === null ? 0 : plan.dropped.length;
+  const placementsLost = plan === null ? 0 : placementsLostByResize(controller.services.hub, mapId, plan).length;
   const transfers = useStrandedArrivals(mapId, plan);
 
   /**
-   * Makes the resize, saying how many events went with it and how many transfers no longer land where they did.
+   * Makes the resize, once the window holds the record of where blueprints are placed, which moves with the tiles;
+   * saying how many events and copies of blueprints went with it, and how many transfers no longer land where they did.
    */
   const resize = () =>
   {
@@ -161,16 +170,22 @@ const SizeFields = (props: { map: MapDocument; mapId: number }) =>
       return;
     }
 
-    resizeMap(controller.services.hub, mapId, newWidth, newHeight, anchor);
     const stranded = transfers.stranded.length;
     const losses = [
       ...(dropped > 0 ? [ `${dropped === 1 ? '1 event' : `${dropped} events`} outside the new size went with it` ] : []),
+      ...(placementsLost > 0 ? [ `${placementsLost === 1 ? '1 blueprint copy' : `${placementsLost} blueprint copies`} outside the new size went with it` ] : []),
       ...(stranded > 0 ? [ `${stranded === 1 ? '1 transfer lands' : `${stranded} transfers land`} somewhere else now` ] : []),
     ];
-    if (losses.length > 0)
-    {
-      controller.notify(`Resized; ${losses.join(', and ')}.`);
-    }
+    controller.whenPlacementsHeld()
+      .then(() =>
+      {
+        resizeMap(controller.services.hub, mapId, newWidth, newHeight, anchor);
+        if (losses.length > 0)
+        {
+          controller.notify(`Resized; ${losses.join(', and ')}.`);
+        }
+      })
+      .catch(() => undefined);
   };
 
   return (
@@ -193,6 +208,11 @@ const SizeFields = (props: { map: MapDocument; mapId: number }) =>
       {dropped > 0 && (
         <Alert severity={'warning'} sx={{ py: 0 }}>
           {`${dropped === 1 ? '1 event stands' : `${dropped} events stand`} outside the new size and will be removed.`}
+        </Alert>
+      )}
+      {placementsLost > 0 && (
+        <Alert severity={'warning'} sx={{ py: 0 }} data-testid={'resize-placements'}>
+          {`${placementsLost === 1 ? '1 blueprint copy lies' : `${placementsLost} blueprint copies lie`} outside the new size and will be removed.`}
         </Alert>
       )}
       {transfers.stranded.length > 0 && <StrandedTransfers stranded={transfers.stranded}/>}
