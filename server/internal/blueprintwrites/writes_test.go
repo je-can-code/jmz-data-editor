@@ -151,6 +151,38 @@ func TestApplyToMapTakesAChangeBackByteForByte(t *testing.T) {
 	}
 }
 
+func TestApplyToMapChangesOneFieldOfACopyAloneAndTakesItBackByteForByte(t *testing.T) {
+	// Arrange: the guard's picture changed whole, in the editor's key order, and its speed, as a blueprint's change
+	// reaches a copy field by field; then both taken back.
+	picture := func(index int) string {
+		return `{"tileId":0,"characterName":"m_shroomBIG","direction":2,"pattern":1,"characterIndex":` + strconv.Itoa(index) + `}`
+	}
+	plain := `{"tileId":0,"characterName":"","direction":2,"pattern":0,"characterIndex":0}`
+	forward := patchesOf(t, `{"maps":[{"map":1,"patches":[`+
+		`{"kind":"set","path":["events",1,"pages",0,"image"],"before":`+plain+`,"after":`+picture(5)+`},`+
+		`{"kind":"set","path":["events",1,"pages",0,"moveSpeed"],"before":3,"after":4}]}]}`)
+	backward := patchesOf(t, `{"maps":[{"map":1,"patches":[`+
+		`{"kind":"set","path":["events",1,"pages",0,"moveSpeed"],"before":4,"after":3},`+
+		`{"kind":"set","path":["events",1,"pages",0,"image"],"before":`+picture(5)+`,"after":`+plain+`}]}]}`)
+
+	// Act.
+	written, err := ApplyToMap(1, []byte(cellarMap), forward)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, restoreErr := ApplyToMap(1, written, backward)
+
+	// Assert: the picture keeps the file's alphabetical key order; the name and note stand as they were.
+	text := string(written)
+	if strings.Contains(text, `"image":{"characterIndex":5,"characterName":"m_shroomBIG","direction":2,"pattern":1,"tileId":0}`) == false ||
+		strings.Contains(text, `"moveSpeed":4`) == false || strings.Contains(text, `"name":"Guard","note":"<blueprint:[k3x9q2mf, 1]>"`) == false {
+		t.Errorf("wrote:\n%s", text)
+	}
+	if restoreErr != nil || string(restored) != cellarMap {
+		t.Errorf("restored (%v):\n%s", restoreErr, restored)
+	}
+}
+
 func TestApplyToMapRefusesAFileNoLongerHoldingWhatAPatchReplaces(t *testing.T) {
 	// the cellar with its guard deleted, as MZ leaves a deleted event: null in its slot.
 	guardAt := strings.Index(cellarMap, `{"id":1,`)
