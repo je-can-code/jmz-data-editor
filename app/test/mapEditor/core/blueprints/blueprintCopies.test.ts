@@ -331,7 +331,10 @@ describe('blueprintCopies', () =>
     it('lists the copies on the maps it holds before the disk has answered, settled or not', () =>
     {
       // Arrange: a server that has not answered.
-      const { counter } = setUp(() => new Promise(() => undefined));
+      const { counter } = setUp(() => new Promise(() =>
+      {
+        // the answer never comes.
+      }));
       counter.subscribe(() => undefined);
 
       // Act.

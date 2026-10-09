@@ -564,6 +564,39 @@ describe('MapView', () =>
       .toStrictEqual([ { mapId: 5, eventIds: [ 3 ] }, [ { cell: { x: 2, y: 1 }, zoom: 1 }, { cell: { x: 2, y: 1 }, zoom: 1 } ] ]);
   });
 
+  it('centres on a cell asked for once the map is open, at the game\'s scale, and again only when asked again', async () =>
+  {
+    // Arrange: map 5 open, with the middle of a placement asked for.
+    stand.maps.set(5, MapDocument.fromJson('map:5', buildMapJson()));
+    const services = served();
+    const { rerender } = render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} lookAtCell={{ x: 4, y: 7 }} lookRequest={1}/>
+      </MapEditorServicesProvider>
+    );
+    await waitFor(() => expect(stand.renderers[0]?.looks.length)
+      .toBe(1));
+
+    // Act: drawn again as it was, then asked for again.
+    rerender(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} lookAtCell={{ x: 4, y: 7 }} lookRequest={1}/>
+      </MapEditorServicesProvider>
+    );
+    const unasked = stand.renderers[0].looks.length;
+    rerender(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} lookAtCell={{ x: 4, y: 7 }} lookRequest={2}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert.
+    await waitFor(() => expect(stand.renderers[0]?.looks.length)
+      .toBe(2));
+    expect([ unasked, stand.renderers[0].looks ])
+      .toStrictEqual([ 1, [ { cell: { x: 4, y: 7 }, zoom: 1 }, { cell: { x: 4, y: 7 }, zoom: 1 } ] ]);
+  });
+
   it('centres on an event revealed from a list at the zoom the view has, and only for an event its own map holds', async () =>
   {
     // Arrange: map 5 open, holding the door at 0, 0 and the chest at 2, 1, with the view zoomed out to a quarter.

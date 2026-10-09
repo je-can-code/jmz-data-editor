@@ -677,7 +677,7 @@ describe('saving the record', () =>
   it('writes nothing for a window holding no record', async () =>
   {
     // Arrange: a window holding map 16 alone.
-    const save = vi.fn(async () => undefined);
+    const save = vi.fn(async (_key: DocumentKey, _content: JsonValue) => undefined);
     const hub = new DocumentHub({ clientId: 'window-a', store: { load: async () => null, save } });
     hub.adopt('map:16', buildMapJson() as unknown as JsonValue);
     keepUsesWithMaps(hub, () => undefined);

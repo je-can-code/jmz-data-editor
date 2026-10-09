@@ -583,15 +583,18 @@ const MapView = (props: MapViewProps) =>
   }, [ openMap, pickedEventId, pickRequest ]);
 
   // centre on the cell asked for once the map is open, and again whenever another is asked for, or the same one again;
-  // like a picked event, only a new ask moves the view.
+  // like a picked event, only a new ask moves the view, so the cell is followed by its column and row, whatever object
+  // carries them.
+  const lookX = lookAtCell === null ? null : lookAtCell.x;
+  const lookY = lookAtCell === null ? null : lookAtCell.y;
   useEffect(() =>
   {
     const renderer = rendererRef.current;
-    if (renderer !== null && openMap !== null && lookAtCell !== null)
+    if (renderer !== null && openMap !== null && lookX !== null && lookY !== null)
     {
-      renderer.lookAt(lookAtCell, PICKED_EVENT_ZOOM);
+      renderer.lookAt({ x: lookX, y: lookY }, PICKED_EVENT_ZOOM);
     }
-  }, [ openMap, lookAtCell, lookRequest ]);
+  }, [ openMap, lookX, lookY, lookRequest ]);
 
   // hand the renderer the switches, the modules' overlays and their passability rules.
   useEffect(() =>

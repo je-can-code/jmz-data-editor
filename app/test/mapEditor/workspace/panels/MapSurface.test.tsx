@@ -17,6 +17,7 @@ import { buildMapJson } from '../../support/fixtures.ts';
 const views = vi.hoisted(() => ({
   lives: [] as { mapId: number; picks: (number | null)[]; shown: boolean[]; unmounted: boolean }[],
   requests: [] as number[],
+  looks: [] as string[],
 }));
 
 // the map view draws on the GPU, which a test page has none of; what the surface owes is which views it mounts, for
@@ -26,14 +27,26 @@ vi.mock('../../../../src/mapEditor/render/MapView.tsx', async () =>
   const { useEffect, useState } = await import('react');
 
   /**
-   * Stands in for the map view, recording its life, and every ask to pick out an event it is handed.
-   * @param {{ mapId: number, pickedEventId?: number | null, pickRequest?: number, visible?: boolean }} props The map,
-   * the event to pick out and the ask that named it, and whether the view is on screen.
+   * Stands in for the map view, recording its life, and every ask to pick out an event or centre on a cell it is handed.
+   * @param {object} props The map, the event to pick out and the ask that named it, the cell to centre on and the ask
+   * that named it, and whether the view is on screen.
    * @returns {React.JSX.Element} A line naming the map.
    */
-  const MapView = (props: { mapId: number; pickedEventId?: number | null; pickRequest?: number; visible?: boolean }) =>
+  const MapView = (props: {
+    mapId: number;
+    pickedEventId?: number | null;
+    pickRequest?: number;
+    lookAtCell?: { x: number; y: number } | null;
+    lookRequest?: number;
+    visible?: boolean;
+  }) =>
   {
-    const { mapId, pickedEventId = null, pickRequest = 0, visible = true } = props;
+    const { mapId, pickedEventId = null, pickRequest = 0, lookAtCell = null, lookRequest = 0, visible = true } = props;
+
+    useEffect(() =>
+    {
+      views.looks.push(lookAtCell === null ? 'none' : `${lookAtCell.x},${lookAtCell.y} #${lookRequest}`);
+    }, [ lookAtCell, lookRequest ]);
     const [ life ] = useState(() => ({ mapId, picks: [] as (number | null)[], shown: [] as boolean[], unmounted: false }));
 
     useEffect(() =>
@@ -82,6 +95,7 @@ describe('MapSurface', () =>
   {
     views.lives.splice(0);
     views.requests.splice(0);
+    views.looks.splice(0);
   });
 
   /**
@@ -89,13 +103,24 @@ describe('MapSurface', () =>
    */
   const ScopedSurface = withWindowScope((props: IDockviewPanelProps) =>
   {
-    const { document, focusEventId, focusRequest, visible } = props.params as {
+    const { document, focusEventId, focusRequest, focusCell, focusCellRequest, visible } = props.params as {
       document: MapDocument;
       focusEventId: number | null;
       focusRequest?: number;
+      focusCell?: { x: number; y: number } | null;
+      focusCellRequest?: number;
       visible: boolean;
     };
-    return <MapSurface document={document} focusEventId={focusEventId} focusRequest={focusRequest} visible={visible}/>;
+    return (
+      <MapSurface
+        document={document}
+        focusEventId={focusEventId}
+        focusRequest={focusRequest}
+        focusCell={focusCell}
+        focusCellRequest={focusCellRequest}
+        visible={visible}
+      />
+    );
   });
 
   /**
@@ -164,6 +189,24 @@ describe('MapSurface', () =>
     // Assert.
     expect(views.lives)
       .toStrictEqual([ { mapId: 5, picks: [ 3 ], shown: [ true ], unmounted: false } ]);
+  });
+
+  it('hands its view the cell to centre on and each new ask for it, centring on nothing unless asked, without mounting another', () =>
+  {
+    // Arrange: no cell asked for at first.
+    const { api } = buildPanel();
+    const map = MapDocument.fromJson('map:5', buildMapJson());
+    const props = panelProps(api, map, null);
+    const { rerender } = render(<ScopedSurface {...props}/>);
+    const cell = { x: 4, y: 7 };
+
+    // Act: the middle of a placement asked for, then asked for again.
+    rerender(<ScopedSurface {...{ ...props, params: { ...props.params, focusCell: cell, focusCellRequest: 1 } }}/>);
+    rerender(<ScopedSurface {...{ ...props, params: { ...props.params, focusCell: cell, focusCellRequest: 2 } }}/>);
+
+    // Assert.
+    expect([ views.looks, views.lives.length ])
+      .toStrictEqual([ [ 'none', '4,7 #1', '4,7 #2' ], 1 ]);
   });
 
   it('tells its view when the panel goes behind another tab and comes back, without mounting another', () =>
