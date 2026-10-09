@@ -10,6 +10,7 @@ import { homeDocumentOf, outsideChangeHistories, type HistoryKey } from './histo
 import {
   documentsOfStep,
   documentsTouchedBy,
+  writesThrough,
   type DocumentHeads,
   type HistoryStep,
   type StepEntry,
@@ -100,11 +101,13 @@ type HubSource = 'local' | 'remote';
  * what other windows check before repeating it. A save names the window that wrote the file, this one's own id for
  * a save made or found here. A change to the file of a document kept alongside others is handed on as it was read,
  * with nothing done to the document, for whoever keeps it to merge. An edit the window's commit checks refused is
- * announced with why, once it is put back, so whoever shows the author things can say so; nothing else happened.
+ * announced with why, once it is put back, so whoever shows the author things can say so; nothing else happened. Steps
+ * a document opened from its file takes up, having written that file before it was opened, are announced as attached.
  */
 type HubEvent =
   | { readonly type: 'committed'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
   | { readonly type: 'refused'; readonly label: string; readonly histories: readonly HistoryKey[]; readonly message: string }
+  | { readonly type: 'attached'; readonly document: DocumentKey; readonly stepIds: readonly string[] }
   | { readonly type: 'undone'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
   | { readonly type: 'redone'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
   | { readonly type: 'forgotten'; readonly step: HistoryStep; readonly bases: DocumentHeads; readonly opId: string; readonly source: HubSource }
@@ -133,9 +136,11 @@ type HubListener = (event: HubEvent) => void;
  * Looks over an edit made in this window just before it becomes a step: says why it must not, in words for the author,
  * or null to let it through. The edit is still open, every patch of it in its document, so a check reads each document
  * as the edit leaves it, and the edit's own patches from its entries. A check may add patches of its own to it, which
- * then become part of the same step, and of what a later check reads; the step is still recorded in the histories the
- * edit named when it began, and in no other. It is asked of every edit the window makes, whatever its history, and never
- * of another window's, which its own checks looked over.
+ * then become part of the same step, and of what a later check reads; it may write patches through to documents no
+ * window holds, and say what the files of documents held with unsaved edits take instead of their patches. The step is
+ * recorded in the histories the edit named when it began, and in any a check joins it to (see Transaction's join), and in
+ * no other. It is asked of every edit the window makes, whatever its history, and never of another window's, which its
+ * own checks looked over.
  */
 type CommitCheck = (transaction: Transaction) => string | null;
 
@@ -420,7 +425,13 @@ const carriedStepFinder = (snapshot: DocumentSnapshot): (id: string) => HistoryS
  *
  * Every edit made in this window passes the window's commit checks before it becomes a step (see {@link addCommitCheck}):
  * one they refuse is put back whole, recorded in no history, and announced with why. That is how a document with rules
- * of its own beyond any patch's, such as a blueprint opened as a map, keeps to them whatever tool edits it.
+ * of its own beyond any patch's, such as a blueprint opened as a map, keeps to them whatever tool edits it, and how a
+ * blueprint's change reaches every copy of it as part of the same step.
+ *
+ * A step may change documents no window held when it was made, writing them through to their files (see HistoryStep's
+ * through): a blueprint's change reaching a copy on a map nobody has open. Moving such a step never waits for those
+ * documents to be held; whoever moves it writes their files, and a window holding one by then changes it in place. A
+ * document opened from a file such steps wrote takes them up (see {@link attachSteps}), so it can undo them too.
  *
  * Saving writes a document's committed content and records which steps the file now reflects; it never touches
  * history, so undo after a save works, and undoing back to the saved state makes the document clean again.
@@ -499,6 +510,7 @@ class DocumentHub
   #counter = 0;
 
   #host: TransactionHost = {
+    has: (key: DocumentKey) => this.has(key),
     document: (key: DocumentKey) => this.document(key),
     review: (transaction: Transaction) => this.#review(transaction),
     finish: (transaction: Transaction, entries: readonly StepEntry[]) => this.#finish(transaction, entries),
@@ -765,6 +777,70 @@ class DocumentHub
   }
 
   /**
+   * Takes up steps a document's file already holds, written there while this window did not hold the document, as a map
+   * nobody had open takes a blueprint's change (see HistoryStep's through): a document just opened from its file, with no
+   * step applied yet, starts with these applied, and saved, since its file holds them, and in each of their histories
+   * that lives on it, so undo reaches them from the document itself as from anywhere else they live. They are taken up
+   * only when every one is known here and still done in some history, and the file holds exactly what they left there:
+   * taking their patches back out of a copy, newest first, finds every one fitting. Nothing about the document's content
+   * or lineage changes.
+   * @param {DocumentKey} key The document, held, opened from its file with no step applied.
+   * @param {readonly HistoryStep[]} steps The steps, in the order they reached the file.
+   * @returns {boolean} True when they were taken up; false when any of that does not hold, which changes nothing.
+   */
+  attachSteps(key: DocumentKey, steps: readonly HistoryStep[]): boolean
+  {
+    const applied = this.#applied.get(key);
+    const known = steps.map(step => this.#steps.get(step.id) ?? null);
+    const done = (step: HistoryStep | null) => step !== null && [ ...this.#histories.values() ].some(history => history.stateOf(step.id) === 'done');
+    if (applied === undefined || applied.length > 0 || steps.length === 0 || known.every(done) === false)
+    {
+      return false;
+    }
+
+    // the file holds the steps exactly when taking them back out of a copy, newest first, finds every patch fitting.
+    const copy = createDocument(key, this.#committedContent(key));
+    try
+    {
+      [ ...known ].reverse().forEach(step => patchesOn(step as HistoryStep, key).reverse().forEach(patch => copy.apply(invertPatch(patch))));
+    }
+    catch (error)
+    {
+      if ((error instanceof PatchConflictError) === false)
+      {
+        throw error;
+      }
+
+      return false;
+    }
+
+    // each step joins the histories it has on this document, in the order they reached the file.
+    const taken = known as HistoryStep[];
+    this.#applied.set(key, [ ...taken ]);
+    this.#saved.set(key, taken.map(step => step.id));
+    taken.forEach(step =>
+    {
+      step.histories
+        .filter(historyKey => homeDocumentOf(historyKey) === key)
+        .forEach(historyKey => this.#historyFor(historyKey).record(step));
+    });
+
+    this.#emit({ type: 'attached', document: key, stepIds: taken.map(step => step.id) });
+    return true;
+  }
+
+  /**
+   * Reads a document's committed content: what it holds with any edit still open taken back out, which is what a save
+   * writes and another window sees.
+   * @param {DocumentKey} key The document, held.
+   * @returns {JsonValue} The content, in file shape.
+   */
+  committedContent(key: DocumentKey): JsonValue
+  {
+    return this.#committedContent(key);
+  }
+
+  /**
    * Lets go of a document and every history that lives on it.
    * @param {DocumentKey} key The document.
    */
@@ -930,14 +1006,17 @@ class DocumentHub
       return null;
     }
 
-    // whole files ride along only on the steps that have them, so every other step keeps its exact shape.
-    const { files } = transaction;
+    // whole files, documents written through and files differing from their documents ride along only on the steps that
+    // have them, so every other step keeps its exact shape.
+    const { files, through, fileVersions } = transaction;
     const step: HistoryStep = {
       id: this.#nextId(),
       label: transaction.label,
       histories: [ ...transaction.histories ],
       entries: [ ...entries ],
       ...(files.length > 0 ? { files: [ ...files ] } : {}),
+      ...(through.length > 0 ? { through: [ ...through ] } : {}),
+      ...(fileVersions.length > 0 ? { fileVersions: [ ...fileVersions ] } : {}),
       origin: this.clientId,
       at: this.#now(),
     };
@@ -1164,13 +1243,14 @@ class DocumentHub
   }
 
   /**
-   * Checks that this window holds every document a step touches.
+   * Checks that this window holds every document a step touches, but for those it writes through, which need no window
+   * holding them: whoever moves the step writes them to their files.
    * @param {HistoryStep} step The step.
    * @returns {HistoryCheck} The step, or which documents are missing.
    */
   #checkHeld(step: HistoryStep): HistoryCheck
   {
-    const missing = documentsTouchedBy(step).filter(key => this.has(key) === false);
+    const missing = documentsTouchedBy(step).filter(key => this.has(key) === false && writesThrough(step, key) === false);
     return missing.length > 0
       ? { ok: false, reason: 'missing-documents', step, documents: missing }
       : { ok: true, step };
@@ -1182,15 +1262,16 @@ class DocumentHub
    * moved it, or would be moved by its going; otherwise the newest such edit on the first document that has one is
    * named. Order among these edits is the order their patches went into the document, whatever history holds them.
    * A document that does not record the step as applied is refused as untracked: its copy came from somewhere that
-   * never had the step (a map closed and opened again from disk), so nothing there can be checked.
+   * never had the step (a map closed and opened again from disk), so nothing there can be checked. A document the step
+   * writes through that no window here holds is left to whoever writes the step, which checks its file.
    * @param {HistoryStep} step The step, applied.
    * @returns {HistoryCheck} The step, or the edit in its way.
    */
   #checkLaterEdits(step: HistoryStep): HistoryCheck
   {
-    for (const key of documentsOfStep(step))
+    for (const key of documentsOfStep(step).filter(each => this.has(each)))
     {
-      // every document the step changed is held, as checked first, and every held document keeps this list.
+      // every document the step changed is held, but for those it writes through, and every held document keeps this list.
       const applied = this.#applied.get(key) as HistoryStep[];
       const appliedAt = applied.findLastIndex(each => each.id === step.id);
       if (appliedAt < 0)
@@ -1219,15 +1300,16 @@ class DocumentHub
    * again in that time is back as it was and counts for nothing. The step can go back on top only if none of the
    * rest changed its data, moved it, or would be moved by its return; otherwise the newest such edit on the first
    * document that has one is named. A document whose record does not reach back to the undo is refused as untracked,
-   * since nothing there can be checked.
+   * since nothing there can be checked. A document the step writes through that no window here holds is left to whoever
+   * writes the step, which checks its file.
    * @param {HistoryStep} step The step, undone.
    * @returns {HistoryCheck} The step, or the edit in its way.
    */
   #checkMovesSinceUndo(step: HistoryStep): HistoryCheck
   {
-    for (const key of documentsOfStep(step))
+    for (const key of documentsOfStep(step).filter(each => this.has(each)))
     {
-      // every document the step changes is held, as checked first, and every held document keeps both lists.
+      // every document the step changes is held, but for those it writes through, and every held document keeps both lists.
       const moves = this.#moves.get(key) as HistoryStep[];
       const applied = this.#applied.get(key) as HistoryStep[];
       const undoneAt = moves.findLastIndex(each => each.id === step.id);
@@ -1303,6 +1385,28 @@ class DocumentHub
     const marker = (this.#applied.get(key) ?? []).map(step => step.id);
 
     await store.save(key, content);
+    if (this.has(key))
+    {
+      this.#markSaved(key, marker, 'local', this.clientId);
+    }
+  }
+
+  /**
+   * Records that a document's file now holds exactly the given steps, written there by something other than
+   * {@link save}: a blueprint's change written at once to the blueprints and to the maps its copies stand on. The
+   * document is saved as far as those steps and no further, as after a save, and every window holding it hears so. A
+   * document let go of meanwhile has nothing to note; one kept alongside others is never saved whole, so is refused.
+   * @param {DocumentKey} key The document.
+   * @param {readonly string[]} marker The steps the file holds, oldest first.
+   * @throws {Error} When the document is kept alongside others.
+   */
+  noteSaved(key: DocumentKey, marker: readonly string[]): void
+  {
+    if (isKeptAlongside(key))
+    {
+      throw new Error(`${key} is kept alongside the documents it describes, and is never saved whole`);
+    }
+
     if (this.has(key))
     {
       this.#markSaved(key, marker, 'local', this.clientId);
@@ -1767,7 +1871,7 @@ class DocumentHub
       return;
     }
 
-    if (this.#staleAmong(held, bases).length > 0 || this.#applyEntries(step, 'forward') !== null)
+    if (this.#staleAmong(held, bases, step).length > 0 || this.#applyEntries(step, 'forward') !== null)
     {
       this.#reportOutOfSync(held, origin);
       return;
@@ -1797,7 +1901,7 @@ class DocumentHub
 
     const held = documentsTouchedBy(step).filter(key => this.has(key));
     const inPlace = this.#isApplied(step) === (direction === 'backward');
-    if (inPlace === false || this.#staleAmong(held, operation.bases).length > 0 || this.#applyEntries(step, direction) !== null)
+    if (inPlace === false || this.#staleAmong(held, operation.bases, step).length > 0 || this.#applyEntries(step, direction) !== null)
     {
       this.#reportOutOfSync(held, operation.origin);
       return;
@@ -1823,7 +1927,7 @@ class DocumentHub
     }
 
     const held = documentsTouchedBy(step).filter(key => this.has(key));
-    if (this.#staleAmong(held, bases).length > 0)
+    if (this.#staleAmong(held, bases, step).length > 0)
     {
       this.#reportOutOfSync(held, origin);
       return;
@@ -1859,14 +1963,17 @@ class DocumentHub
    * Lists the held documents whose head differs from the one an operation was made against. A document kept
    * alongside others is never among them: the operation goes into it whenever its patches fit, since each of its
    * edits addresses one part, and edits to different parts made at the same moment in two windows each fit in the
-   * other, whatever order they arrive in.
+   * other, whatever order they arrive in. Nor is one the step writes through, which the window making it did not hold
+   * and so named no head for: its patches were made against its file, and go into a copy opened from that file whenever
+   * they fit.
    * @param {readonly DocumentKey[]} held The held documents the operation touches.
    * @param {DocumentHeads} bases The heads it was made against.
+   * @param {HistoryStep} step The step the operation acts on.
    * @returns {DocumentKey[]} The documents that went elsewhere.
    */
-  #staleAmong(held: readonly DocumentKey[], bases: DocumentHeads): DocumentKey[]
+  #staleAmong(held: readonly DocumentKey[], bases: DocumentHeads, step: HistoryStep): DocumentKey[]
   {
-    return held.filter(key => isKeptAlongside(key) === false && this.head(key) !== bases[key]);
+    return held.filter(key => isKeptAlongside(key) === false && writesThrough(step, key) === false && this.head(key) !== bases[key]);
   }
 
   /**

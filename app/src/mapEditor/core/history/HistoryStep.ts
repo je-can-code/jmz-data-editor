@@ -46,6 +46,17 @@ type FileEffect = {
 };
 
 /**
+ * What one document's file takes for a step where the file differs from the document: a map holding unsaved edits when a
+ * blueprint's change reached it, whose copies on disk are not the ones it holds. The document takes the step's entries
+ * on top of its unsaved edits; the file takes these, made against what the file held, and none at all when nothing the
+ * step changes was in the file yet. Whoever writes the step to disk writes these in place of the document's entries.
+ */
+type FileVersion = {
+  readonly document: DocumentKey;
+  readonly patches: readonly Patch[];
+};
+
+/**
  * One undoable step: a named group of patches, possibly across several documents, recorded in every history
  * it belongs to.
  *
@@ -81,6 +92,20 @@ type HistoryStep = {
    * The whole files the step creates or removes, present only on a step that has any.
    */
   readonly files?: readonly FileEffect[];
+
+  /**
+   * The documents the step changes on disk alone, present only on a step that has any: no window held them when it was
+   * made, as a map nobody has open holding a copy of a blueprint the step changed. Their patches sit among the entries
+   * like any other's, made against their files; no window needs to hold them to move the step, and whoever writes the
+   * step writes them to their files, while a window holding one by then changes it in place.
+   */
+  readonly through?: readonly DocumentKey[];
+
+  /**
+   * What the files of documents held with unsaved edits take in place of the documents' own entries (see
+   * {@link FileVersion}), present only on a step that has any.
+   */
+  readonly fileVersions?: readonly FileVersion[];
 
   /**
    * The client id of the window that made the step.
@@ -120,5 +145,16 @@ const documentsTouchedBy = (step: HistoryStep): DocumentKey[] =>
   return [ ...new Set([ ...documentsOfStep(step), ...step.histories.map(homeDocumentOf) ]) ];
 };
 
-export { documentsOfStep, documentsTouchedBy };
-export type { DocumentHeads, FileEffect, HistoryStep, StepEntry };
+/**
+ * Reports whether a step changes a document on disk alone (see {@link HistoryStep.through}).
+ * @param {HistoryStep} step The step.
+ * @param {DocumentKey} key The document.
+ * @returns {boolean} True when the step writes the document through.
+ */
+const writesThrough = (step: HistoryStep, key: DocumentKey): boolean =>
+{
+  return step.through !== undefined && step.through.includes(key);
+};
+
+export { documentsOfStep, documentsTouchedBy, writesThrough };
+export type { DocumentHeads, FileEffect, FileVersion, HistoryStep, StepEntry };

@@ -4,13 +4,20 @@ import { cloneJson, type JsonValue } from '../model/json.ts';
 import { MapDocument } from '../model/MapDocument.ts';
 import { invertPatch, isNoopPatch, type MapTiles, type Patch, type PatchPath } from '../model/patches.ts';
 import type { DocumentSnapshot } from './DocumentHub.ts';
-import type { HistoryKey } from './historyKeys.ts';
-import type { FileEffect, HistoryStep, StepEntry } from './HistoryStep.ts';
+import { homeDocumentOf, type HistoryKey } from './historyKeys.ts';
+import type { FileEffect, FileVersion, HistoryStep, StepEntry } from './HistoryStep.ts';
 
 /**
  * What a transaction needs from the hub that opened it.
  */
 type TransactionHost = {
+  /**
+   * Reports whether the window holds a document.
+   * @param {DocumentKey} key The document.
+   * @returns {boolean} True when it is held.
+   */
+  has(key: DocumentKey): boolean;
+
   /**
    * Finds a held document.
    * @param {DocumentKey} key The document.
@@ -54,19 +61,31 @@ type TransactionHost = {
  * window's checks refuse (see DocumentHub's addCommitCheck), which then records nothing.
  *
  * Patches may land on several documents; the step then belongs to every history the transaction names, and
- * undoes as one step from any of them.
+ * undoes as one step from any of them. A check looking the edit over may name more histories ({@link join}), as a
+ * blueprint's change does for every map its copies stand on, and may add patches to documents no window holds, which
+ * reach their files alone ({@link writeThrough}).
  */
 class Transaction
 {
   readonly label: string;
 
-  readonly histories: readonly HistoryKey[];
+  #histories: HistoryKey[];
 
   #host: TransactionHost;
 
   #entries: StepEntry[] = [];
 
   #files: FileEffect[] = [];
+
+  /**
+   * What each file differing from its document takes, by document (see {@link fileVersion}).
+   */
+  #fileVersions = new Map<DocumentKey, Patch[]>();
+
+  /**
+   * The documents written through so far: changed on disk alone, since the window does not hold them.
+   */
+  #through = new Set<DocumentKey>();
 
   #open = true;
 
@@ -79,7 +98,16 @@ class Transaction
   {
     this.#host = host;
     this.label = label;
-    this.histories = [ ...histories ];
+    this.#histories = [ ...histories ];
+  }
+
+  /**
+   * Every history the step will belong to: those the edit named when it began, then those joined since, each once.
+   * @returns {readonly HistoryKey[]} The histories.
+   */
+  get histories(): readonly HistoryKey[]
+  {
+    return this.#histories;
   }
 
   /**
@@ -92,7 +120,7 @@ class Transaction
   }
 
   /**
-   * The patches applied so far, in order.
+   * The patches applied or written through so far, in order.
    * @returns {readonly StepEntry[]} The entries.
    */
   get entries(): readonly StepEntry[]
@@ -107,6 +135,103 @@ class Transaction
   get files(): readonly FileEffect[]
   {
     return this.#files;
+  }
+
+  /**
+   * The documents written through so far, in the order each was first written (see {@link writeThrough}).
+   * @returns {readonly DocumentKey[]} The documents.
+   */
+  get through(): readonly DocumentKey[]
+  {
+    return [ ...this.#through ];
+  }
+
+  /**
+   * What the files that differ from their documents take for this step, by document, in the order each was first given
+   * (see {@link fileVersion}).
+   * @returns {readonly FileVersion[]} The versions.
+   */
+  get fileVersions(): readonly FileVersion[]
+  {
+    return [ ...this.#fileVersions ].map(([ document, patches ]) => ({ document, patches: [ ...patches ] }));
+  }
+
+  /**
+   * Names more histories the step belongs to, as a check looking the edit over does when the edit reaches things beyond
+   * those it began with. Each history lives on a document the window holds, or on one this edit writes through; a
+   * history named already is not named twice.
+   * @param {readonly HistoryKey[]} histories The histories.
+   * @returns {Transaction} This transaction, for chaining.
+   * @throws {Error} When a history lives on a document neither held nor written through.
+   */
+  join(histories: readonly HistoryKey[]): this
+  {
+    this.#requireOpen();
+    histories.forEach(key =>
+    {
+      const home = homeDocumentOf(key);
+      if (this.#host.has(home) === false && this.#through.has(home) === false)
+      {
+        throw new Error(`open ${home} before recording history on it`);
+      }
+
+      if (this.#histories.includes(key) === false)
+      {
+        this.#histories.push(key);
+      }
+    });
+
+    return this;
+  }
+
+  /**
+   * Keeps a ready-made patch for a document the window does not hold, changing nothing here: the step carries it to
+   * the document's file, which whoever writes the step changes, and to any window holding the document, which applies
+   * it there. What a blueprint's change does to a copy on a map nobody has open. A patch that changes nothing is skipped.
+   * @param {DocumentKey} document The document, which the window must not hold.
+   * @param {Patch} patch The patch, made against the document's file as it stands.
+   * @returns {Transaction} This transaction, for chaining.
+   * @throws {Error} When the window holds the document, whose patches are applied here instead.
+   */
+  writeThrough(document: DocumentKey, patch: Patch): this
+  {
+    this.#requireOpen();
+    if (this.#host.has(document))
+    {
+      throw new Error(`${document} is held here, so it changes in place`);
+    }
+
+    if (isNoopPatch(patch) === false)
+    {
+      this.#entries.push({ document, patch });
+      this.#through.add(document);
+    }
+
+    return this;
+  }
+
+  /**
+   * Records what a document's file takes for this step where the file differs from the document, as a map's does while
+   * it holds unsaved edits: the document takes the step's own patches, on top of those edits, and its file takes these
+   * instead, made against what the file holds, so writing the step never saves the edits; none at all, when nothing the
+   * step changes is in the file yet. Patches given for the same document again follow those given before. Nothing
+   * changes here, and a patch that changes nothing is left out.
+   * @param {DocumentKey} document The document, which the window holds.
+   * @param {readonly Patch[]} patches The patches, made against the document's file, in order; none when it takes none.
+   * @returns {Transaction} This transaction, for chaining.
+   * @throws {Error} When the window does not hold the document, whose file takes what is written through instead.
+   */
+  fileVersion(document: DocumentKey, patches: readonly Patch[]): this
+  {
+    this.#requireOpen();
+    if (this.#host.has(document) === false)
+    {
+      throw new Error(`${document} is not held here, so its file takes what is written through`);
+    }
+
+    const kept = this.#fileVersions.get(document) ?? [];
+    this.#fileVersions.set(document, [ ...kept, ...patches.filter(patch => isNoopPatch(patch) === false) ]);
+    return this;
   }
 
   /**
@@ -269,14 +394,17 @@ class Transaction
   }
 
   /**
-   * Puts back every patch applied so far.
+   * Puts back every patch applied so far; a patch written through was never applied here, and has nothing to put back.
    */
   #reverse(): void
   {
     // reverse newest first, so each inverse finds exactly what its patch left.
     [ ...this.#entries ].reverse().forEach(entry =>
     {
-      this.#host.document(entry.document).apply(invertPatch(entry.patch));
+      if (this.#through.has(entry.document) === false)
+      {
+        this.#host.document(entry.document).apply(invertPatch(entry.patch));
+      }
     });
   }
 
