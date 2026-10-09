@@ -1,6 +1,6 @@
 import { blueprintLinkOf, withoutBlueprintLink } from '../blueprints/blueprintLink.ts';
 import { liveBlueprintsIn, type LiveBlueprint } from '../blueprints/blueprints.ts';
-import { forgetSpots, recordSpots, type BlueprintSpot } from '../blueprints/blueprintUses.ts';
+import { forgetSpots, readableUses, recordSpots, type BlueprintSpot } from '../blueprints/blueprintUses.ts';
 import { blockedCells, eventCellsOf, isOnMap, newEventIds, type EventMap } from '../events/eventPlacement.ts';
 import { rewireGroupReferences } from '../events/eventReferences.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
@@ -341,6 +341,11 @@ const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement, li
 };
 
 /**
+ * What the author hears when a stamp's tiles held copies of blueprints the window had no record to keep in.
+ */
+const UNRECORDED_SPOTS_NOTE = 'The stamp\'s tiles held copies of blueprints, which went down as plain tiles, since where blueprints are placed can\'t be read.';
+
+/**
  * Words what a placement left out or changed, for the author: the tiles of another tileset, the events past the map's
  * edge, and the copies of blueprints no longer there, which went down as plain events.
  * @param {Extract<StampPlan, { ok: true }>} plan The placement.
@@ -408,7 +413,8 @@ const commitStampPlan = (hub: DocumentHub, mapId: number, plan: Extract<StampPla
 /**
  * Places a stamp on a map as one step in its history, as {@link planStamp} works it out, from this map or any other,
  * telling copies of blueprints the window's blueprints no longer hold from copies of those still there. The step is
- * named for what went down, after the verb: "Stamp 20 by 15 tiles and 3 events", "Paste event".
+ * named for what went down, after the verb: "Stamp 20 by 15 tiles and 3 events", "Paste event". Placements its tiles
+ * hold go down plain in a window holding no record of placements it can read, and the author is told.
  * @param {DocumentHub} hub The window's documents; the map must be held.
  * @param {number} mapId The map.
  * @param {Stamp} stamp The stamp.
@@ -425,7 +431,13 @@ const placeStamp = (hub: DocumentHub, mapId: number, stamp: Stamp, placement: St
     return plan;
   }
 
-  return commitStampPlan(hub, mapId, plan, `${verb} ${contentsPhrase(plan.tilesPlaced ? stamp : null, plan.events.length)}`);
+  const outcome = commitStampPlan(hub, mapId, plan, `${verb} ${contentsPhrase(plan.tilesPlaced ? stamp : null, plan.events.length)}`);
+
+  // a placement the tiles hold goes down plain while the window holds no record it can read to keep it in, which the
+  // author hears, since nothing could find that copy again.
+  return outcome.ok && plan.spots.length > 0 && readableUses(hub) === null
+    ? { ...outcome, notes: [ ...outcome.notes, UNRECORDED_SPOTS_NOTE ] }
+    : outcome;
 };
 
 /**

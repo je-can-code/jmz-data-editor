@@ -565,7 +565,7 @@ describe('cutStampSource', () =>
  * step, as long as some of it lands on the map. A placement of a blueprint no longer there goes down plain, and the author
  * is told; while the window does not hold the blueprints none can be told gone, and each is recorded as it is. Tiles that
  * do not go down, on a map of another tileset, record nothing; a map that may hold no link refuses the stamp whole; and a
- * window holding no record records nothing.
+ * window holding no record records nothing, and the author is told the copies went down plain.
  *
  * The block (aa22) is placed on map 1 at 2, 1, and the sign (bb33) at 0, 0.
  */
@@ -664,7 +664,7 @@ describe('placements a stamp carries', () =>
       .toStrictEqual([ { ok: false, message: 'This stamp holds copies of blueprints, which can\'t go here: its events are patterns.' }, true ]);
   });
 
-  it('records nothing in a window holding no record, the tiles going down all the same', () =>
+  it('records nothing in a window holding no record, the tiles going down all the same, and says so', () =>
   {
     // Arrange.
     const hub = window3();
@@ -675,7 +675,7 @@ describe('placements a stamp carries', () =>
     const outcome = placeStamp(hub, 2, stamp, at(4, 1), 'Paste');
 
     // Assert.
-    expect([ outcome.ok && outcome.step?.entries.every(entry => entry.document === 'map:2'), hub.has(BLUEPRINT_USES_DOCUMENT) ])
-      .toStrictEqual([ true, false ]);
+    expect([ outcome.ok && outcome.step?.entries.every(entry => entry.document === 'map:2'), outcome.ok && outcome.notes, hub.has(BLUEPRINT_USES_DOCUMENT) ])
+      .toStrictEqual([ true, [ 'The stamp\'s tiles held copies of blueprints, which went down as plain tiles, since where blueprints are placed can\'t be read.' ], false ]);
   });
 });
