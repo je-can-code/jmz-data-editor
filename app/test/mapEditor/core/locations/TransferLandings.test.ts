@@ -320,6 +320,29 @@ describe('TransferLandings', () =>
         .toStrictEqual([ [], [ [ 2, 2, 1, 0, { kind: 'blocked' } ], [ 3, 2, 1, 0, { kind: 'no-map', mapId: 327 } ] ] ]);
     });
 
+    it('keeps its list until the map changes, even by an edit written into an event in place', () =>
+    {
+      // Arrange: map 1 and map 5 held here, door 2 on map 1 landing on the wall at 1, 0 of map 5.
+      const held = new Map<DocumentKey, JsonValue>([
+        [ 'map:1', mapFile([ transfer(2, [ [ 5, 1, 0 ] ]) ]) ],
+        [ 'map:5', mapFile() ],
+        [ 'tilesets', [ null, null, null, null, buildTileset() ] as unknown as JsonValue ],
+      ]);
+      const claims = vi.fn((_event: RmmzMapEvent, _mapId: number) => true);
+      const { landings, hub } = buildLandings({ held, claims });
+      const map = hub.map('map:1');
+      const first = landings.failingOn(map);
+      const again = landings.failingOn(map);
+      const asked = claims.mock.calls.length;
+
+      // Act: the door's landing moves to open ground at 2, 1, written into its command where it stands.
+      map.apply(map.setPatch([ 'events', 2, 'pages', 0, 'list', 0, 'parameters' ], [ 0, 5, 2, 1, 2, 0 ]));
+
+      // Assert: the same list until the edit, the door asked about once, and nothing failing after.
+      expect([ first.length, again === first, asked, landings.failingOn(map) ])
+        .toStrictEqual([ 1, true, 1, [] ]);
+    });
+
     it('lists nothing for an event the window does not call a transfer', async () =>
     {
       // Arrange: the same doors, but the window calls none of them a transfer.
@@ -341,21 +364,33 @@ describe('TransferLandings', () =>
 
   describe('transfersOf', () =>
   {
-    it('reads an event\'s transfers once for as long as it stays the same, and none for an event that is no transfer', () =>
+    it('reads an event\'s transfers as the transfer kind does, and none for an event that is no transfer', () =>
     {
       // Arrange: a door with two transfers, and an event that only talks.
-      const claims = vi.fn(() => true);
-      const { landings } = buildLandings({ claims });
+      const { landings } = buildLandings();
       const door = transfer(2, [ [ 5, 1, 0 ], [ 5, 2, 1 ] ]);
       const talker = { ...createMapEvent(3, 0, 0), pages: [ { ...createEventPage(), list: [ { code: 101, indent: 0, parameters: [ '', 0, 0, 2, '' ] }, { code: 0, indent: 0, parameters: [] } ] } ] };
 
       // Act.
-      const first = landings.transfersOf(door, 1);
-      const again = landings.transfersOf(door, 1);
+      const spots = landings.transfersOf(door, 1);
 
       // Assert.
-      expect([ first.map(spot => [ spot.pageIndex, spot.model.mapId, spot.model.x, spot.model.y ]), again === first, landings.transfersOf(talker, 1), claims.mock.calls.length ])
-        .toStrictEqual([ [ [ 0, 5, 1, 0 ], [ 1, 5, 2, 1 ] ], true, [], 2 ]);
+      expect([ spots.map(spot => [ spot.pageIndex, spot.model.mapId, spot.model.x, spot.model.y ]), landings.transfersOf(talker, 1) ])
+        .toStrictEqual([ [ [ 0, 5, 1, 0 ], [ 1, 5, 2, 1 ] ], [] ]);
+    });
+
+    it('reads none for an event the window does not call a transfer, asking about the event on its map', () =>
+    {
+      // Arrange: the window calls nothing a transfer.
+      const claims = vi.fn((_event: RmmzMapEvent, _mapId: number) => false);
+      const { landings } = buildLandings({ claims });
+
+      // Act.
+      const spots = landings.transfersOf(transfer(2, [ [ 5, 1, 0 ] ]), 7);
+
+      // Assert.
+      expect([ spots, claims.mock.calls.map(([ event, mapId ]) => [ event.id, mapId ]) ])
+        .toStrictEqual([ [], [ [ 2, 7 ] ] ]);
     });
   });
 

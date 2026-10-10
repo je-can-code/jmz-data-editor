@@ -380,7 +380,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     pages: () => freshSavePages(pages.rule(), clock.time(), clock.season()),
     claims: (event, mapId) => modules.kindOf(event, mapId)?.id === TRANSFER_KIND_ID,
   });
-  registerCoreEventKinds(modules);
+  registerCoreEventKinds(modules, api === null ? undefined : landings);
 
   // the switch and variable names every list and picker shows follow System.json wherever it is being renamed.
   const names = api === null

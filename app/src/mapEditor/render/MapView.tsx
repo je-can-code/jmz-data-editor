@@ -386,6 +386,10 @@ const MapView = (props: MapViewProps) =>
     // picked, the renderer is told nothing and nothing is read for it.
     stops.push(followSky(renderer, services.clock, services.modules));
 
+    // the marks on transfers whose landings fail are drawn again whenever the landings learn more, such as a map they
+    // land on having been read.
+    stops.push(services.landings.subscribe(() => renderer.refreshOverlays()));
+
     // the pages are judged at the window's preview too, the switches and variables set in place of a fresh save's, and a
     // change to it draws again only the events whose pages read what changed.
     renderer.setPreview(services.preview.preview());

@@ -56,6 +56,7 @@ const stand = vi.hoisted(() => ({
     classifiers: MarkerClassifier[];
     pageRules: PageRule[];
     rules: (readonly PassabilityRule[])[];
+    refreshes: number;
     shown: (boolean | 'mount')[];
     times: number[];
     seasons: (number | null)[];
@@ -86,6 +87,7 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       classifiers: [] as MarkerClassifier[],
       pageRules: [] as PageRule[],
       rules: [] as (readonly PassabilityRule[])[],
+      refreshes: 0,
       shown: [] as (boolean | 'mount')[],
       times: [] as number[],
       seasons: [] as (number | null)[],
@@ -219,6 +221,11 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       this.record.rules.push(rules);
     }
 
+    refreshOverlays(): void
+    {
+      this.record.refreshes += 1;
+    }
+
     setEventMarkers(classify: MarkerClassifier): void
     {
       this.record.classifiers.push(classify);
@@ -292,7 +299,8 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * of them, or by their trigger when no kind claims them; the registry reads events differently once the plugin modules
  * switch on, after js/plugins.js is read, so the renderer is handed the classifier again then and redraws the markers.
  * Their passability rules are handed over again then too, so the Passability overlay marks what a module forbids, such
- * as J-RegionEffects' regions, however late the modules switch on.
+ * as J-RegionEffects' regions, however late the modules switch on. The marks on transfers whose landings fail are drawn
+ * again whenever the window's landings learn more, such as a map a transfer lands on having been read.
  *
  * What the modules draw into the lighting layer is handed to the renderer from the start and again as they switch on,
  * and the bar offers its Lighting switch, after Shadows, only while some module draws there: a project without such a
@@ -368,8 +376,30 @@ describe('MapView', () =>
     const clock = new WindowClock(840);
     const pages = new WindowPageRule(NO_MODULES);
     const preview = new WindowPreview();
-    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES, clock, pages, preview };
+    const landings = landingsHeard();
+    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES, clock, pages, preview, landings };
     return { ...services, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
+  };
+
+  /**
+   * The window's landings as a view hears them: whoever listens, and a way for the test to say they learned more.
+   * @returns {{ subscribe: (listener: () => void) => () => void, learn: () => void, listening: () => number }} The landings.
+   */
+  const landingsHeard = () =>
+  {
+    const listeners = new Set<() => void>();
+    return {
+      subscribe: (listener: () => void) =>
+      {
+        listeners.add(listener);
+        return () =>
+        {
+          listeners.delete(listener);
+        };
+      },
+      learn: () => listeners.forEach(listener => listener()),
+      listening: () => listeners.size,
+    };
   };
 
   /**
@@ -893,6 +923,32 @@ describe('MapView', () =>
     // Assert: none at first, then the rule.
     expect(stand.renderers[0].rules)
       .toStrictEqual([ [], [ ledge ] ]);
+  });
+
+  it('draws its marks on failing landings again whenever the landings learn more, until the view goes', () =>
+  {
+    // Arrange: a view over a project.
+    const services = served();
+    const { unmount } = render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const landings = services.landings as unknown as ReturnType<typeof landingsHeard>;
+    const before = stand.renderers[0].refreshes;
+
+    // Act: the landings learn more twice, then the view goes.
+    act(() =>
+    {
+      landings.learn();
+      landings.learn();
+    });
+    const drawn = stand.renderers[0].refreshes - before;
+    unmount();
+
+    // Assert.
+    expect([ drawn, landings.listening() ])
+      .toStrictEqual([ 2, 0 ]);
   });
 
   it('hands the renderer the window\'s page rule from the start, and again whenever it changes', () =>

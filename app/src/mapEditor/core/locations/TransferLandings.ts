@@ -24,6 +24,11 @@ type LandingSources = {
    */
   readonly look: (key: DocumentKey) => Promise<EditorDocument>;
   readonly rules: () => readonly PassabilityRule[];
+
+  /**
+   * Builds a reader of the page each event shows, afresh each time it is asked: a reader keeps what it read of each
+   * event, and an edit writes into an event in place, so each map judged gets one of its own.
+   */
   readonly pages: () => ActivePages;
 
   /**
@@ -34,12 +39,22 @@ type LandingSources = {
 };
 
 /**
- * What every landing is judged by at one time: the plugins' rules, and the page each event shows on a fresh save at the
- * window's clock.
+ * What every landing is judged by at one time: the plugins' rules, and how to read the page each event shows on a fresh
+ * save at the window's clock, afresh for each map judged.
  */
 type LandingJudge = {
   readonly rules: readonly PassabilityRule[];
-  readonly pages: ActivePages;
+  readonly pages: () => ActivePages;
+};
+
+/**
+ * The failing transfers on one map as last listed, with the map's revision and the landings' own then, so either
+ * changing lists them again.
+ */
+type ListedFailures = {
+  readonly mapRevision: number;
+  readonly revision: number;
+  readonly failing: readonly FailingLanding[];
 };
 
 /**
@@ -95,7 +110,7 @@ class TransferLandings
 
   #heard = new Map<DocumentKey, { readonly document: EditorDocument; readonly stop: () => void }>();
 
-  #transfers = new WeakMap<RmmzMapEvent, readonly TransferSpot[]>();
+  #listed = new WeakMap<MapDocument, ListedFailures>();
 
   #listeners = new Set<() => void>();
 
@@ -128,7 +143,7 @@ class TransferLandings
    */
   get judge(): LandingJudge
   {
-    this.#judge ??= { rules: this.#sources.rules(), pages: this.#sources.pages() };
+    this.#judge ??= { rules: this.#sources.rules(), pages: this.#sources.pages };
     return this.#judge;
   }
 
@@ -155,7 +170,7 @@ class TransferLandings
    */
   groundFor(map: MapDocument, tileset: RmmzTileset, judge: LandingJudge = this.judge): LandingGround
   {
-    return landingGroundOf(map, tileset, judge.rules, judge.pages);
+    return landingGroundOf(map, tileset, judge.rules, judge.pages());
   }
 
   /**
@@ -174,13 +189,20 @@ class TransferLandings
 
   /**
    * Lists the transfers on a map whose landings fail, as the transfer kind reads each event, in event and page order.
-   * Landings on maps still being read are left out until they land.
+   * Landings on maps still being read are left out until they land. The list is kept until the map changes or the
+   * landings learn anything new, since a map view asks for it each time it draws its marks.
    * @param {MapDocument} map The map they leave from.
-   * @returns {FailingLanding[]} The transfers.
+   * @returns {readonly FailingLanding[]} The transfers.
    */
-  failingOn(map: MapDocument): FailingLanding[]
+  failingOn(map: MapDocument): readonly FailingLanding[]
   {
-    return map.eventIds().flatMap(eventId =>
+    const listed = this.#listed.get(map);
+    if (listed !== undefined && listed.mapRevision === map.revision && listed.revision === this.#revision)
+    {
+      return listed.failing;
+    }
+
+    const failing = map.eventIds().flatMap(eventId =>
     {
       const event = map.event(eventId) as RmmzMapEvent;
       return this.transfersOf(event, map.mapId).flatMap(spot =>
@@ -192,25 +214,21 @@ class TransferLandings
           : [ { eventId, x: event.x, y: event.y, spot, problem } ];
       });
     });
+    this.#listed.set(map, { mapRevision: map.revision, revision: this.#revision, failing });
+    return failing;
   }
 
   /**
-   * Reads an event's transfers as the transfer kind does, once for as long as the event stays as it is, and only while
-   * the window reads the event as a transfer at all.
+   * Reads an event's transfers as the transfer kind does, while the window reads the event as a transfer at all.
    * @param {RmmzMapEvent} event The event.
    * @param {number} mapId The map it is on.
    * @returns {readonly TransferSpot[]} Its transfers; none for an event that is not a transfer.
    */
   transfersOf(event: RmmzMapEvent, mapId: number): readonly TransferSpot[]
   {
-    let spots = this.#transfers.get(event);
-    if (spots === undefined)
-    {
-      spots = this.#sources.claims(event, mapId) ? readTransfers(event) ?? [] : [];
-      this.#transfers.set(event, spots);
-    }
-
-    return spots;
+    return this.#sources.claims(event, mapId)
+      ? readTransfers(event) ?? []
+      : [];
   }
 
   /**
@@ -221,7 +239,6 @@ class TransferLandings
   {
     this.#judge = null;
     this.#grounds.clear();
-    this.#transfers = new WeakMap();
     [ ...this.#reads ].forEach(([ key, read ]) =>
     {
       if (read.kind === 'failed')
