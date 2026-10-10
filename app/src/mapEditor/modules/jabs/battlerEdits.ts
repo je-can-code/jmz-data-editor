@@ -619,20 +619,21 @@ const meantOf = (change: BattlerChange): JsonValue | undefined =>
  */
 const checkChange = (before: RmmzEventPage, after: RmmzEventPage, change: BattlerChange, context: BattlerContext): void =>
 {
+  // the row itself first: a line written that the game cannot read as the tag is a value it cannot hold.
+  const now = pageSide(after, context);
+  const meant = meantOf(change);
+  if (meant !== undefined && jsonEquals(now[change.row], meant) === false)
+  {
+    throw new Error(MISREAD);
+  }
+
   const owned = ownedBy(change);
   const was = pageSide(before, context);
-  const now = pageSide(after, context);
   const othersSame = jsonEquals(untouched(before.list, owned), untouched(after.list, owned))
     && Object.keys(was).every(row => row === change.row || jsonEquals(was[row], now[row]));
   if (othersSame === false)
   {
     throw new Error(OTHERS_MISREAD);
-  }
-
-  const meant = meantOf(change);
-  if (meant !== undefined && jsonEquals(now[change.row], meant) === false)
-  {
-    throw new Error(MISREAD);
   }
 };
 

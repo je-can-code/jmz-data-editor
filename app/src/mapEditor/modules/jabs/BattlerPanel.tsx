@@ -131,7 +131,7 @@ const RowFrame = (props: {
       data-testid={`battler-row-${testId}`}
       sx={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr) auto', alignItems: 'center', columnGap: 1, rowGap: 0.25 }}
     >
-      <Typography variant={'body2'} noWrap title={label}>
+      <Typography variant={'body2'} sx={{ lineHeight: 1.25 }}>
         {label}
       </Typography>
       <Box sx={{ minWidth: 0 }}>
@@ -523,7 +523,7 @@ const PassivesField = (props: { readonly readings: readonly BattlerReading[]; re
               onChange({ row: 'passives', value: [ ...added, option.id ] });
             }
           }}
-          renderInput={params => <TextField {...params} placeholder={'Add a passive'} slotProps={{ htmlInput: { ...params.inputProps, 'aria-label': 'Add a passive' } }}/>}
+          renderInput={params => <TextField {...params} placeholder={'Add one'} slotProps={{ htmlInput: { ...params.inputProps, 'aria-label': 'Add a passive' } }}/>}
         />
       </Stack>
     </RowFrame>
@@ -587,7 +587,7 @@ const MotionValueBox = (props: {
           commit();
         }
       }}
-      sx={{ width: 96 }}
+      sx={{ width: 124 }}
     />
   );
 };
@@ -754,7 +754,7 @@ const BattlerPanel = (props: BattlerPanelProps) =>
   const values = (pick: (reading: BattlerReading) => BattlerValue<number>) => readings.map(pick);
   const inanimate = rowOf(readings.map(reading => reading.inanimate), switchWords, value => value.enemy ?? setup.defaults.inanimate);
   return (
-    <Stack spacing={0.75} data-testid={'battler-panel'}>
+    <Stack spacing={0.75} sx={{ pt: 1 }} data-testid={'battler-panel'}>
       <EnemyField enemyIds={readings.map(reading => reading.enemyId)} enemies={enemies} onChange={onChange} onOpenEnemy={onOpenEnemy}/>
       {setup.levels && <NumberField label={'Level'} unit={''} spec={SIGNED} model={numberRow(values(reading => reading.level), 0)} row={'level'} onChange={onChange}/>}
       <NumberField
@@ -770,16 +770,16 @@ const BattlerPanel = (props: BattlerPanelProps) =>
       <NumberField label={'Sight'} unit={'tiles'} spec={WHOLE} model={numberRow(values(reading => reading.sight), setup.defaults.sight)} row={'sight'} onChange={onChange}/>
       <NumberField label={'Pursuit'} unit={'tiles'} spec={WHOLE} model={numberRow(values(reading => reading.pursuit), setup.defaults.pursuit)} row={'pursuit'} onChange={onChange}/>
       <NumberField
-        label={'Alerted sight'}
-        unit={'more tiles'}
+        label={'Alerted sight +'}
+        unit={'tiles'}
         spec={WHOLE}
         model={numberRow(values(reading => reading.alertedSightBoost), setup.defaults.alertedSightBoost)}
         row={'alertedSightBoost'}
         onChange={onChange}
       />
       <NumberField
-        label={'Alerted pursuit'}
-        unit={'more tiles'}
+        label={'Alerted pursuit +'}
+        unit={'tiles'}
         spec={FRACTION}
         model={numberRow(values(reading => reading.alertedPursuitBoost), setup.defaults.alertedPursuitBoost)}
         row={'alertedPursuitBoost'}

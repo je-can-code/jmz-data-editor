@@ -176,7 +176,9 @@ const moveSpeedRow = (readings: readonly BattlerReading[], pageSpeeds: readonly 
  */
 const hiddenRow = (values: readonly BattlerValue<boolean>[], fallback: boolean, enemyInanimate: readonly boolean[]): RowModel<boolean> =>
 {
-  return rowOf(values, switchWords, (value, index) => value.enemy ?? (enemyInanimate[index] ? false : fallback));
+  // an enemy inanimate in its note says off for its battlers, as plainly as its note saying so outright would.
+  const said = values.map((value, index) => ({ ...value, enemy: value.enemy ?? (enemyInanimate[index] ? false : null) }));
+  return rowOf(said, switchWords, value => value.enemy ?? fallback);
 };
 
 /**
