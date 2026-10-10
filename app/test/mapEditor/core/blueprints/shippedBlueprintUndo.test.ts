@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { MapEditorApiError, type BlueprintWrite } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { BlueprintCopyCounter } from '../../../../src/mapEditor/core/blueprints/blueprintCopies.ts';
 import { saveBlueprint } from '../../../../src/mapEditor/core/blueprints/blueprintEdits.ts';
+import { blueprintLinkOf } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import { holdBlueprintMap } from '../../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
 import { blueprintsKeptGuard } from '../../../../src/mapEditor/core/blueprints/blueprintMoves.ts';
 import { placeBlueprint } from '../../../../src/mapEditor/core/blueprints/blueprintPlacement.ts';
 import { blueprintPropagationCheck } from '../../../../src/mapEditor/core/blueprints/blueprintPropagation.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { blueprintShapeCheck } from '../../../../src/mapEditor/core/blueprints/blueprintShape.ts';
-import { usedCopiesOf } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
+import { BLUEPRINT_USES_DOCUMENT, usedCopiesOf, usesOf } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { BlueprintWriter } from '../../../../src/mapEditor/core/blueprints/blueprintWriter.ts';
 import { copiesLeftWords } from '../../../../src/mapEditor/core/blueprints/copiesLeft.ts';
 import { CopyMaps } from '../../../../src/mapEditor/core/blueprints/copyMaps.ts';
@@ -24,7 +25,10 @@ import type { EditorDocument } from '../../../../src/mapEditor/core/model/Editor
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMap, RmmzMapEvent, RmmzMapInfo } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
-import { captureEventsStamp, type Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
+import type { MapCell } from '../../../../src/mapEditor/core/renderer/camera.ts';
+import { captureAreaStamp, captureEventsStamp, type Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
+import { INITIAL_PAINT_SETTINGS } from '../../../../src/mapEditor/core/tools/PaintState.ts';
+import { ToolSession } from '../../../../src/mapEditor/core/tools/ToolSession.ts';
 import { HistoryRouter, type HistoryOutcome } from '../../../../src/mapEditor/core/workspace/HistoryRouter.ts';
 import { locateGameProject, readDataFile } from '../../../support/gameProject.ts';
 import { drawsFor, holdBlueprints, holdBlueprintUses } from '../../support/blueprintFixtures.ts';
@@ -276,6 +280,39 @@ const changeGraphic = async (window: FoothillsWindow): Promise<HistoryStep> =>
 };
 
 /**
+ * Builds the Select tool on Foothills, every layer carried, as a map view's painting has it.
+ * @param {FoothillsWindow} window The window.
+ * @returns {ToolSession} The tool.
+ */
+const selectToolOn = (window: FoothillsWindow): ToolSession =>
+{
+  const settings = { ...INITIAL_PAINT_SETTINGS, tool: 'select' as const };
+  return new ToolSession({
+    hub: window.hub,
+    map: () => window.hub.map(mapDocumentKey(MAP_ID)),
+    layering: () => ({ mode: 0, marks: { tiles: new Set(), kinds: new Set() } }),
+    settings: () => settings,
+    pickBrush: () => undefined,
+    pickTool: () => undefined,
+    linkRefusal: () => null,
+  });
+};
+
+/**
+ * Drags the left button from one cell to another, as a hand on the map does.
+ * @param {ToolSession} session The tool.
+ * @param {MapCell} from Where the button goes down.
+ * @param {MapCell} to Where it comes up.
+ */
+const dragOn = (session: ToolSession, from: MapCell, to: MapCell): void =>
+{
+  const pointer = (cell: MapCell) => ({ cell, quarter: { x: cell.x, y: cell.y, quarter: 0 as const }, shift: false, copy: false, override: false });
+  session.press(pointer(from));
+  session.move(pointer(to));
+  session.release(pointer(to));
+};
+
+/**
  * Throws away Foothills' unsaved edits, the map taking its file again, as choosing the version on disk does.
  * @param {FoothillsWindow} window The window.
  */
@@ -498,6 +535,46 @@ describe.skipIf(project === null)('undoing a blueprint\'s change on the shipped 
         [ [ [ 5, 3, 5, 5 ], [ 5, 5, 5, 5 ] ], 5 ],
         [ [ 5, 5, 5, 5 ], [ 5, 5, 5, 5 ] ],
         [],
+      ]);
+  });
+
+  it('moves a placed copy with the Select tool, its battlers, their links and its spot together, and undoes it byte for byte', () =>
+  {
+    // Arrange: the battlers' square, tiles and all, saved as a blueprint and placed at 19, 40, then selected whole.
+    const window = foothillsWindow();
+    const { hub } = window;
+    const key = mapDocumentKey(MAP_ID);
+    const stamp = captureAreaStamp(hub.map(key), { x: 6, y: 24, width: 4, height: 4 }, 'auto', 0, 'stamp-1') as Stamp;
+    saveBlueprint(hub, stamp, 'battlers', drawsFor([ BLUEPRINT ]));
+    const placed = placeBlueprint(hub, MAP_ID, BLUEPRINT, { at: { x: 19, y: 40 }, shaping: 'auto', mode: 0, linkRefusal: null });
+    const copies = placed.ok ? placed.eventIds : [];
+    const before = [ JSON.stringify(hub.map(key).toJson()), JSON.stringify(hub.committedContent(BLUEPRINT_USES_DOCUMENT)) ];
+    const linksBefore = copies.map(id => blueprintLinkOf(eventOf(hub.map(key), id).note));
+    const session = selectToolOn(window);
+    dragOn(session, { x: 19, y: 40 }, { x: 22, y: 43 });
+
+    // Act: dragged twelve tiles right, then undone.
+    dragOn(session, { x: 19, y: 40 }, { x: 31, y: 40 });
+    const moved = copies.map(id => [ eventOf(hub.map(key), id).x, eventOf(hub.map(key), id).y ]);
+    const linksMoved = copies.map(id => blueprintLinkOf(eventOf(hub.map(key), id).note));
+    const spots = usesOf(hub.document(BLUEPRINT_USES_DOCUMENT));
+    hub.undo(mapHistoryKey(MAP_ID));
+
+    // Assert: the battlers went with the tiles, links unchanged, and the spot with them; undo leaves the map and the
+    // record exactly as they were.
+    expect([
+      copies.length,
+      moved,
+      linksMoved,
+      spots,
+      [ JSON.stringify(hub.map(key).toJson()), JSON.stringify(hub.committedContent(BLUEPRINT_USES_DOCUMENT)) ],
+    ])
+      .toStrictEqual([
+        5,
+        [ [ 33, 40 ], [ 34, 41 ], [ 32, 42 ], [ 31, 43 ], [ 31, 40 ] ],
+        linksBefore,
+        [ { blueprintId: BLUEPRINT, x: 31, y: 40, mapId: MAP_ID } ],
+        before,
       ]);
   });
 

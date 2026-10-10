@@ -3,6 +3,7 @@ import { mapHistoryKey } from '../../../../../src/mapEditor/core/history/history
 import { mapDocumentKey } from '../../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../../src/mapEditor/core/model/json.ts';
 import type { MapDocument } from '../../../../../src/mapEditor/core/model/MapDocument.ts';
+import type { RmmzMapEvent } from '../../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { TilesetMode } from '../../../../../src/mapEditor/core/tiles/autotileShapes.ts';
 import type { TilesetLayering } from '../../../../../src/mapEditor/core/tiles/layering.ts';
 import { autotileKind, TileId } from '../../../../../src/mapEditor/core/tiles/tileIds.ts';
@@ -20,18 +21,24 @@ type PaintBench = {
 };
 
 /**
- * Builds a map in a window of its own: a blank map of the given size, set up as the caller likes, adopted by a fresh
- * hub so its history starts empty.
+ * Builds a map in a window of its own: a blank map of the given size, set up as the caller likes, with the events given,
+ * adopted by a fresh hub so its history starts empty.
  * @param {number} width The width in tiles.
  * @param {number} height The height in tiles.
  * @param {(grid: TestGrid) => void} setUp Writes the tiles the map starts with.
+ * @param {readonly (RmmzMapEvent | null)[]} events The map's events, by id; none by default.
  * @returns {PaintBench} The bench.
  */
-const benchWith = (width: number, height: number, setUp: (grid: TestGrid) => void = () => undefined): PaintBench =>
+const benchWith = (
+  width: number,
+  height: number,
+  setUp: (grid: TestGrid) => void = () => undefined,
+  events: readonly (RmmzMapEvent | null)[] = [ null ],
+): PaintBench =>
 {
   const grid = blankGrid(width, height);
   setUp(grid);
-  const json = { ...buildMapJson(), width, height, data: Array.from(grid.cells), events: [ null ] };
+  const json = { ...buildMapJson(), width, height, data: Array.from(grid.cells), events: [ ...events ] };
   const hub = new DocumentHub({ clientId: 'window-a' });
   const map = hub.adopt(mapDocumentKey(1), json as unknown as JsonValue) as MapDocument;
   return { hub, map, history: mapHistoryKey(1) };

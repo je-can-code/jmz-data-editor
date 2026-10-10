@@ -408,6 +408,7 @@ const MapView = (props: MapViewProps) =>
       painting,
       overlay: part => overlays.update('tools', part),
       onStamped: outcome => stampTools.settle(outcome),
+      onTold: (message, refused) => notifyRef.current(message, refused ? 'error' : 'info'),
       linkRefusal,
     });
     stops.push(painter.attach());
