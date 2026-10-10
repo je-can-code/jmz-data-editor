@@ -194,6 +194,19 @@ describe('battlerFields', () =>
         ]);
     });
 
+    it('reads each half of a respawn as J-Base\'s JsonMapper reads it: a number, true or false in any case, or a word', () =>
+    {
+      // Arrange: a wait written with a leading zero, a season in capitals, and halves that read as true and false.
+      const lines = [ '<respawn:[seconds, 090]>', '<respawn:[next-season, Winter]>', '<respawn:[seconds, TRUE]>', '<respawn:[False,5]>' ];
+
+      // Act.
+      const values = lines.map(line => valueOf('respawn', line));
+
+      // Assert.
+      expect(values)
+        .toStrictEqual([ [ 'seconds', 90 ], [ 'next-season', 'Winter' ], [ 'seconds', true ], [ false, 5 ] ]);
+    });
+
     it('reads a battler\'s level under each of its three names, signed or not, while J-LevelMaster is on, and no level while it is off', () =>
     {
       // Arrange.
@@ -372,7 +385,7 @@ describe('battlerFields', () =>
     {
       // Arrange: a fraction where J-ABS reads whole numbers, a number below 0 where no sign can be written, words where a
       // number goes, a trait J-ABS does not know, an enemy that is no id, the end of respawning taken back, a respawn of one
-      // half, and a fractional level.
+      // half and one of no halves at all, and a fractional level.
       const writes: [ string, string, JsonValue ][] = [
         [ 'sight', '<sight:4>', 4.5 ],
         [ 'sight', '<sight:4>', -1 ],
@@ -381,6 +394,7 @@ describe('battlerFields', () =>
         [ 'enemyId', '<enemyId:12>', 12.5 ],
         [ 'noRespawn', '<noRespawn>', false ],
         [ 'respawn', '<respawn:[seconds, 90]>', [ 'seconds' ] ],
+        [ 'respawn', '<respawn:[seconds, 90]>', 'seconds' ],
         [ 'level', '<level:7>', 2.5 ],
       ];
 
@@ -388,7 +402,7 @@ describe('battlerFields', () =>
       const refusals = writes.map(([ name, line, value ]) => () => write(name, line, value));
 
       // Assert.
-      const words = [ 'sight', 'sight', 'move speed', 'AI trait', 'enemy', 'no respawn mark', 'respawn', 'level' ];
+      const words = [ 'sight', 'sight', 'move speed', 'AI trait', 'enemy', 'no respawn mark', 'respawn', 'respawn', 'level' ];
       refusals.forEach((refusal, index) => expect(refusal)
         .toThrow(`its ${words[index]} cannot be ${JSON.stringify(writes[index][2])} as the game reads it`));
     });
