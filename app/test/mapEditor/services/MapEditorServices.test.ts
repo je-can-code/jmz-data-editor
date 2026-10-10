@@ -43,6 +43,10 @@ import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../s
  *
  * A window with a server marks every transfer whose landing fails, and judges every landing afresh whenever what it is
  * judged by changes: the modules' rules and kinds, the page rule, or the clock; once stopped, it judges nothing afresh.
+ *
+ * A window with a server writes every transfer pair to both its maps in one act as it moves, asks before closing while
+ * one is on its way, and opens a map from its file only once those have landed; its transfers start from the default
+ * picture and sounds, and keep each choice the author makes.
  */
 describe('MapEditorServices', () =>
 {
@@ -88,8 +92,8 @@ describe('MapEditorServices', () =>
     let files = buildMapJson();
     const { fetch, requests } = stubFetch(request =>
     {
-      // a blueprint's change is written in an act of its own, which the map file never takes whole.
-      if (request.method === 'PUT' && request.url.endsWith('/api/blueprint-changes'))
+      // a blueprint's change, and a transfer pair, are written in an act of their own, which the map file never takes whole.
+      if (request.method === 'PUT' && (request.url.endsWith('/api/blueprint-changes') || request.url.endsWith('/api/map-changes')))
       {
         return new Response(null, { status: 204 });
       }
@@ -896,6 +900,101 @@ describe('MapEditorServices', () =>
       await expect(opening)
         .rejects.toThrow('That blueprint is no longer there.');
       services.stop();
+    });
+  });
+
+  describe('transfer pairs', () =>
+  {
+    /**
+     * Places a stand-in for a pair: one step changing maps 1 and 2, held here, as placing a door and its way out does.
+     * @param {MapEditorServices} services The window.
+     */
+    const placePair = (services: MapEditorServices) =>
+    {
+      services.hub.edit('Place door pair', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set('map:1', [ 'displayName' ], 'Outside');
+        tx.set('map:2', [ 'displayName' ], 'Inside');
+        tx.join([ mapHistoryKey(2) ]);
+      });
+    };
+
+    it('asks before the window closes while a pair is on its way to disk, writes both maps in one act, and asks no more once it lands', async () =>
+    {
+      // Arrange: maps 1 and 2 opened, nothing changed yet.
+      const network = new MemoryChannelNetwork();
+      const { environment, window, requests } = buildEnvironment(network, 'window-a');
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('map:1'));
+      await pump(network, services.openDocument('map:2'));
+      const untouched = window.fire('beforeunload');
+
+      // Act.
+      placePair(services);
+      const placed = window.fire('beforeunload');
+      await services.pairWriter?.whenWritten();
+
+      // Assert: one act naming both maps, after which both read as saved and nothing is left to lose.
+      const acts = requests.filter(request => request.url.endsWith('/api/map-changes')).map(request => (JSON.parse(request.body as string) as { maps: { map: number }[] }).maps.map(each => each.map));
+      expect([ untouched, placed, window.fire('beforeunload'), acts, services.hub.dirtyKeys() ])
+        .toStrictEqual([ false, true, false, [ [ 1, 2 ] ], [] ]);
+      services.stop();
+    });
+
+    it('opens a map from its file only once the pairs on their way to disk have landed, so it opens with them', async () =>
+    {
+      // Arrange: map 1 opened, and a pair on its way to map 2 nobody holds, written through.
+      const network = new MemoryChannelNetwork();
+      const { environment, requests } = buildEnvironment(network, 'window-a');
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('map:1'));
+      services.hub.edit('Place door pair', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set('map:1', [ 'displayName' ], 'Outside');
+        tx.writeThrough('map:2', { kind: 'set', path: [ 'displayName' ], before: 'Test Town', after: 'Inside' });
+        tx.join([ mapHistoryKey(2) ]);
+      });
+
+      // Act.
+      await pump(network, services.openDocument('map:2'));
+
+      // Assert: the pair went to disk before map 2's file was read.
+      const order = requests.map(request => request.url).filter(url => url.endsWith('/api/map-changes') || url.endsWith('/api/maps/2'));
+      expect(order)
+        .toStrictEqual([ 'http://api/api/map-changes', 'http://api/api/maps/2' ]);
+      services.stop();
+    });
+
+    it('starts the door picture, the creak and the sound of passing through from their defaults, then keeps each choice', () =>
+    {
+      // Arrange.
+      const network = new MemoryChannelNetwork();
+      const { environment } = buildEnvironment(network, 'window-a');
+      const services = createMapEditorServices(environment);
+      const fresh = services.pairChoices.current();
+
+      // Act.
+      services.pairChoices.remember({ movementSound: 'Move1' });
+
+      // Assert.
+      expect([ fresh, services.pairChoices.current() ])
+        .toStrictEqual([ { doorLook: null, doorSound: 'Open1', movementSound: '' }, { doorLook: null, doorSound: 'Open1', movementSound: 'Move1' } ]);
+    });
+
+    it('writes no pair in a window with no server, which reaches no file', () =>
+    {
+      // Arrange: a window with no server.
+      const network = new MemoryChannelNetwork();
+      const { environment } = buildEnvironment(network, 'window-a', null);
+
+      // Act.
+      const services = createMapEditorServices(environment);
+
+      // Assert.
+      expect(services.pairWriter)
+        .toBeNull();
     });
   });
 
