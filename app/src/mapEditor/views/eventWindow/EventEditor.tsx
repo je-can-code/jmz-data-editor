@@ -137,12 +137,11 @@ const mapNameOf = (hub: DocumentHub, mapId: number, mapNames: readonly string[] 
  * The full editor of one event, in its own window: its name and note, its pages as tabs, and on the page shown its
  * conditions, graphic, movement, options, priority, trigger and commands; above them, for a copy of a blueprint, what it
  * copies and where each of its fields stands against the blueprint (see CopyPanel), its Note box showing the note's own
- * text, its link kept out of the way. Every change is one step in the event's own
- * history (Ctrl+Z and Ctrl+Y move it, and the header lists it), lands at once in every other window holding the map,
- * and Ctrl+S saves the map. The page shown is followed by the page itself rather than its place, so pages added or
- * taken away in front of it, in any window, never put another page in its stead. The map must be held by the window's
- * hub; an event that goes from the map while its window is open says so, and comes back if an undo elsewhere brings it
- * back.
+ * text, its link kept out of the way. Every change is one step in the event's own history (Ctrl+Z and Ctrl+Y move it,
+ * and the header lists it), lands at once in every other window holding the map, and Ctrl+S saves the map. The page
+ * shown is followed by the page itself rather than its place, so pages added or taken away in front of it, in any window,
+ * never put another page in its stead. The map must be held by the window's hub; an event that goes from the map while
+ * its window is open says so, and comes back if an undo elsewhere brings it back.
  * @param {{ target: EventWindowTarget }} props The event.
  * @returns {React.JSX.Element} The editor.
  */
