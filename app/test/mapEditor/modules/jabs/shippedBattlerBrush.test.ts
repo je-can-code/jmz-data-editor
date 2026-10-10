@@ -7,8 +7,9 @@ import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzEventPage, RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { placeStamp } from '../../../../src/mapEditor/core/stamps/stampPlacement.ts';
 import { TilesetMode } from '../../../../src/mapEditor/core/tiles/autotileShapes.ts';
+import { battlersOn } from '../../../../src/mapEditor/modules/jabs/battlerLevelRule.ts';
 import { battlerLookOf, battlerStamp, commonPage } from '../../../../src/mapEditor/modules/jabs/battlerLooks.ts';
-import { pageEnemyId, type EnemyRecord } from '../../../../src/mapEditor/modules/jabs/battlerReading.ts';
+import { pageEnemyId, pageLevelOf, type EnemyRecord } from '../../../../src/mapEditor/modules/jabs/battlerReading.ts';
 import { listMapFiles, locateGameProject, readDataFile } from '../../../support/gameProject.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
@@ -25,6 +26,9 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * For an enemy placed nowhere yet, the brush's battler is the game's most common battler, compared field by field, its
  * picture aside, with the most common battler page of all the game ships, every enemy's taken as one by its enemy line,
  * and each of its settings with the most common value of that setting alone.
+ *
+ * The level each battler is placed at is learnt from the battlers already on its map, which the level rule counts on
+ * every shipped map exactly as the server counts an enemy's battlers, each at the level J-LevelMaster reads off it.
  *
  * It runs against the project JMZ_PROJECT_ROOT names, or the sibling checkout, and skips when neither is there.
  */
@@ -167,5 +171,23 @@ describe.skipIf(project === null)('the battler brush against the battlers the ga
     // Assert.
     expect([ shapeOf(placedPage, false) === typical, eachSetting.every(same => same), placedPage.image.characterName, placed?.name, look.page.list.length === commonPage(9999).list.length ])
       .toStrictEqual([ true, true, '', 'sky whale', true ]);
+  }, 60_000);
+
+  it('counts the battlers on every map as the server counts them for the brush, each at the level J-LevelMaster reads', () =>
+  {
+    // Arrange: every battler the game ships, as the server's battler-pages route finds them, by map, enemy and level.
+    const shipped = [ ...byEnemy ].flatMap(([ enemyId, battlers ]) => battlers.map(battler => `${battler.mapId}:${enemyId}:${pageLevelOf(battler.page)}`));
+
+    // Act: every map's battlers, as the level rule counts them.
+    const counted = listMapFiles(root).flatMap(file =>
+    {
+      const mapId = Number(file.slice(3, -5));
+      const map = readDataFile(root, file) as RmmzMap;
+      return battlersOn(map.events).map(battler => `${mapId}:${battler.enemyId}:${battler.level}`);
+    });
+
+    // Assert: well over four thousand battlers, the same ones at the same levels.
+    expect([ counted.length > 4000, [ ...counted ].sort(), counted.filter(each => each.endsWith(':null') === false).length > 400 ])
+      .toStrictEqual([ true, [ ...shipped ].sort(), true ]);
   }, 60_000);
 });
