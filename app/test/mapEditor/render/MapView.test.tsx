@@ -26,7 +26,13 @@ import { GamePreview } from '../../../src/mapEditor/core/preview/GamePreview.ts'
 import { WindowPreview } from '../../../src/mapEditor/core/preview/WindowPreview.ts';
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
 import type { LightingLayerDefinition } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
-import type { LayerVisibility, MarkerClassifier, OverlaySet, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import type {
+  FootprintReader,
+  LayerVisibility,
+  MarkerClassifier,
+  OverlaySet,
+  OverlayState,
+} from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import type { SkyWeather, WeatherLayerDefinition } from '../../../src/mapEditor/core/renderer/weatherLayer.ts';
 import { WindowClock } from '../../../src/mapEditor/core/time/WindowClock.ts';
 import { SHIPPED_MODULES } from '../../../src/mapEditor/services/pluginModules.ts';
@@ -41,9 +47,9 @@ import { CHEF_WEATHER_CONFIG } from '../support/skyFixtures.ts';
 
 /**
  * What the stand-in renderers and controllers record and answer: every renderer made, what each was asked to show
- * and where to look, the overlay switches, layer visibilities, lighting and weather layers, marker classifiers and page
- * rules it was handed, what it was told of the view being on screen (with "mount" where it was mounted), ways to change
- * its draw state and its zoom, and the maps an open lands on.
+ * and where to look, the overlay switches, layer visibilities, lighting and weather layers, marker classifiers, footprint
+ * readers and page rules it was handed, what it was told of the view being on screen (with "mount" where it was
+ * mounted), ways to change its draw state and its zoom, and the maps an open lands on.
  */
 const stand = vi.hoisted(() => ({
   renderers: [] as {
@@ -54,6 +60,7 @@ const stand = vi.hoisted(() => ({
     lighting: (readonly LightingLayerDefinition[])[];
     weather: (readonly WeatherLayerDefinition[])[];
     classifiers: MarkerClassifier[];
+    footprints: FootprintReader[];
     pageRules: PageRule[];
     rules: (readonly PassabilityRule[])[];
     refreshes: number;
@@ -85,6 +92,7 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       lighting: [] as (readonly LightingLayerDefinition[])[],
       weather: [] as (readonly WeatherLayerDefinition[])[],
       classifiers: [] as MarkerClassifier[],
+      footprints: [] as FootprintReader[],
       pageRules: [] as PageRule[],
       rules: [] as (readonly PassabilityRule[])[],
       refreshes: 0,
@@ -231,6 +239,11 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       this.record.classifiers.push(classify);
     }
 
+    setEventFootprints(read: FootprintReader): void
+    {
+      this.record.footprints.push(read);
+    }
+
     setOverlayState(state: OverlayState): void
     {
       this.record.overlays.push(state);
@@ -298,6 +311,7 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * Events that draw no picture show markers from the start, picking their symbol by the kind the window's registry makes
  * of them, or by their trigger when no kind claims them; the registry reads events differently once the plugin modules
  * switch on, after js/plugins.js is read, so the renderer is handed the classifier again then and redraws the markers.
+ * The areas events' pages cover, which the modules read, are handed over the same way, each shown in its marker's colour.
  * Their passability rules are handed over again then too, so the Passability overlay marks what a module forbids, such
  * as J-RegionEffects' regions, however late the modules switch on. The marks on transfers whose landings fail are drawn
  * again whenever the window's landings learn more, such as a map a transfer lands on having been read.
@@ -341,13 +355,16 @@ describe('MapView', () =>
   });
 
   /**
-   * A window's plugin modules with none switched on: no kind claims any event, nothing draws into the lighting or the
-   * weather layer, the preview sets nothing beyond switches and variables, and nothing ever switches on.
+   * A window's plugin modules with none switched on: no kind claims any event, no page covers more than its own tile,
+   * nothing draws into the lighting or the weather layer, the preview sets nothing beyond switches and variables, and
+   * nothing ever switches on.
    */
   const NO_MODULES = {
     overlays: () => [],
     passabilityRules: () => [],
     kindOf: () => null,
+    areaOf: () => null,
+    eventAreas: () => [],
     subscribe: () => () => undefined,
     revision: 0,
     lightingLayers: () => [],
@@ -886,6 +903,45 @@ describe('MapView', () =>
     const parallelPage = { ...createEventPage(), trigger: 4 };
     expect([ classifiers.length, classifiers.map(classify => events.map(event => classify(event, 5))), events.map(event => classifiers[1](event, 5, parallelPage)) ])
       .toStrictEqual([ 2, [ [ 'chest', 'autorun', 'player-touch' ], [ 'chest', 'autorun', 'player-touch' ] ], [ 'chest', 'parallel', 'parallel' ] ]);
+  });
+
+  it('hands the renderer how events show their pages\' areas from the start, and again once the modules switch on', () =>
+  {
+    // Arrange: a registry reading no area until it switches on, then a 5 by 1 area for every page; event 1 is claimed as
+    // a kind with the chest's symbol.
+    const activations = new Set<() => void>();
+    const modules = {
+      ...NO_MODULES,
+      area: null as { width: number; height: number } | null,
+      areaOf()
+      {
+        return this.area;
+      },
+      kindOf: (event: RmmzMapEvent) => (event.id === 1 ? { id: 'test.chest', marker: 'chest' } : null),
+      subscribe: (listener: () => void) =>
+      {
+        activations.add(listener);
+        return () => activations.delete(listener);
+      },
+    };
+    render(
+      <MapEditorServicesProvider services={{ ...served(), modules } as unknown as MapEditorServices}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const event = createMapEvent(1, 0, 0);
+    const [ { footprints } ] = stand.renderers;
+    const [ first ] = footprints;
+    const before = first(event, 5, event.pages[0]);
+
+    // Act: the modules switch on.
+    modules.area = { width: 5, height: 1 };
+    activations.forEach(listener => listener());
+
+    // Assert: handed over twice; the reader follows the modules as they stand, the chest's colour on the claimed event.
+    const [ , second ] = footprints;
+    expect([ footprints.length, before, second(event, 5, event.pages[0]) ])
+      .toStrictEqual([ 2, null, { area: { width: 5, height: 1 }, colour: 0x795548, exit: null } ]);
   });
 
   it('hands the renderer the modules\' passability rules from the start, and again once they switch on after it drew', () =>

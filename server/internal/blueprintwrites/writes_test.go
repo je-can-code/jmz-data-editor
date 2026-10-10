@@ -9,12 +9,13 @@ import (
 	"jmz-data-editor/server/internal/mzjson"
 )
 
-// A change to a blueprint reaches every map holding a copy in one act, each map's file taking its patches as it stands.
-// So this package owes the route three things. A body is read strictly, every patch whole, and anything else is refused
-// before the disk is touched. A patch goes into a file only where the file still holds what it replaces, numbers by what
-// they are worth and objects by their keys whatever their order, and a file holding anything else is refused, naming the
-// map, so nothing is ever written over a change made since. And a value set keeps the key order of the one it replaces,
-// so a change written and then taken back leaves the file byte for byte as it was.
+// A change to a blueprint reaches every map holding a copy in one act, and a transfer pair both maps it joins, each map's
+// file taking its patches as it stands. So this package owes the routes three things. A body is read strictly, every patch
+// whole, and anything else is refused before the disk is touched. A patch goes into a file only where the file still holds
+// what it replaces, numbers by what they are worth and objects by their keys whatever their order, and a file holding
+// anything else is refused, naming the map, so nothing is ever written over a change made since; a splice reaches only the
+// end of its list, since an event's id is its place there. And a value set keeps the key order of the one it replaces, so
+// a change written and then taken back leaves the file byte for byte as it was, as an event placed and taken away does.
 
 // cellarMap is a one-tile map in MZ's own layout, its event's image keys in alphabetical order rather than the model's.
 const cellarMap = "{\n" +
@@ -45,6 +46,17 @@ func guardAs(name string, speed int) string {
 		`"list":[{"code":0,"indent":0,"parameters":[]}],"moveFrequency":3,` +
 		`"moveRoute":{"list":[{"code":0,"parameters":[]}],"repeat":true,"skippable":false,"wait":false},` +
 		`"moveSpeed":` + strconv.Itoa(speed) + `,"moveType":0,"priorityType":0,"stepAnime":false,"through":false,"trigger":0,"walkAnime":true}],"x":0,"y":0}`
+}
+
+// doorAt is a door event as the editor places one, in MZ's own key order: same as characters, touched by the player.
+func doorAt(id int, x int) string {
+	return `{"id":` + strconv.Itoa(id) + `,"name":"Transfer (Cellar)","note":"","pages":[{"conditions":{"actorId":1,"actorValid":false,"itemId":1,` +
+		`"itemValid":false,"selfSwitchCh":"A","selfSwitchValid":false,"switch1Id":1,"switch1Valid":false,"switch2Id":1,"switch2Valid":false,` +
+		`"variableId":1,"variableValid":false,"variableValue":0},"directionFix":false,` +
+		`"image":{"characterIndex":4,"characterName":"!EX_Dungeon_Doors","direction":2,"pattern":2,"tileId":0},` +
+		`"list":[{"code":201,"indent":0,"parameters":[0,7,0,0,8,0]},{"code":0,"indent":0,"parameters":[]}],"moveFrequency":3,` +
+		`"moveRoute":{"list":[{"code":0,"parameters":[]}],"repeat":true,"skippable":false,"wait":false},` +
+		`"moveSpeed":3,"moveType":0,"priorityType":1,"stepAnime":false,"through":false,"trigger":1,"walkAnime":false}],"x":` + strconv.Itoa(x) + `,"y":0}`
 }
 
 // patchesOf reads the patches of a body naming one map.
@@ -78,6 +90,23 @@ func TestParseReadsBlueprintsAndEveryMapsPatches(t *testing.T) {
 	}
 }
 
+func TestParseReadsASpliceOfAList(t *testing.T) {
+	// Arrange: a door placed two slots past the end of the cellar's events, the slot between left empty.
+	body := `{"maps":[{"map":1,"patches":[{"kind":"splice","path":["events"],"index":2,"removed":[],"inserted":[null,` + doorAt(3, 0) + `]}]}]}`
+
+	// Act.
+	changes, err := Parse([]byte(body))
+
+	// Assert.
+	if err != nil {
+		t.Fatal(err)
+	}
+	splice := changes.Maps[0].Patches[0]
+	if changes.Blueprints != nil || splice.Kind != "splice" || describePath(splice.Path) != "events" || splice.At != 2 || len(splice.Removed) != 0 || len(splice.Inserted) != 2 || splice.Inserted[0].Kind != mzjson.Null {
+		t.Errorf("read %+v", splice)
+	}
+}
+
 func TestParseRefusesWhatIsNoChange(t *testing.T) {
 	cases := map[string]string{
 		"not JSON":                `{`,
@@ -90,7 +119,11 @@ func TestParseRefusesWhatIsNoChange(t *testing.T) {
 		"a map named twice":       `{"maps":[{"map":1,"patches":[]},{"map":1,"patches":[]}]}`,
 		"patches not a list":      `{"maps":[{"map":1,"patches":{}}]}`,
 		"a patch of no kind":      `{"maps":[{"map":1,"patches":[{}]}]}`,
-		"a splice":                `{"maps":[{"map":1,"patches":[{"kind":"splice"}]}]}`,
+		"a splice naming nothing": `{"maps":[{"map":1,"patches":[{"kind":"splice"}]}]}`,
+		"a splice below zero":     `{"maps":[{"map":1,"patches":[{"kind":"splice","path":["events"],"index":-1,"removed":[],"inserted":[]}]}]}`,
+		"a splice of no list":     `{"maps":[{"map":1,"patches":[{"kind":"splice","path":["events"],"index":2,"removed":{},"inserted":[]}]}]}`,
+		"a splice of no path":     `{"maps":[{"map":1,"patches":[{"kind":"splice","path":[],"index":2,"removed":[],"inserted":[]}]}]}`,
+		"a move":                  `{"maps":[{"map":1,"patches":[{"kind":"move"}]}]}`,
 		"tiles of uneven lists":   `{"maps":[{"map":1,"patches":[{"kind":"tiles","indices":[0,1],"before":[1],"after":[2,3]}]}]}`,
 		"tiles not numbers":       `{"maps":[{"map":1,"patches":[{"kind":"tiles","indices":["a"],"before":[1],"after":[2]}]}]}`,
 		"a set of no path":        `{"maps":[{"map":1,"patches":[{"kind":"set","path":[],"before":1,"after":2}]}]}`,
@@ -221,6 +254,76 @@ func TestApplyToMapRefusesAFileNoLongerHoldingWhatAPatchReplaces(t *testing.T) {
 				t.Errorf("expected a refusal naming map 7 and %q, got %v", testCase.expected, err)
 			}
 		})
+	}
+}
+
+func TestApplyToMapPlacesAnEventPastTheEndAndTakesItAwayByteForByte(t *testing.T) {
+	// Arrange: a door two slots past the end of the cellar's events, then the same splice taken back.
+	forward := patchesOf(t, `{"maps":[{"map":1,"patches":[{"kind":"splice","path":["events"],"index":2,"removed":[],"inserted":[null,`+doorAt(3, 0)+`]}]}]}`)
+	backward := patchesOf(t, `{"maps":[{"map":1,"patches":[{"kind":"splice","path":["events"],"index":2,"removed":[null,`+doorAt(3, 0)+`],"inserted":[]}]}]}`)
+
+	// Act.
+	written, err := ApplyToMap(1, []byte(cellarMap), forward)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, restoreErr := ApplyToMap(1, written, backward)
+
+	// Assert: the door lands on its own line after an empty slot, as MZ lays events out, and goes again leaving the file as
+	// it was.
+	if strings.HasSuffix(string(written), "\nnull,\n"+doorAt(3, 0)+"\n]\n}") == false {
+		t.Errorf("wrote:\n%s", written)
+	}
+	if restoreErr != nil || string(restored) != cellarMap {
+		t.Errorf("restored (%v):\n%s", restoreErr, restored)
+	}
+}
+
+func TestApplyToMapRefusesASpliceShortOfTheEndOrOverItemsChangedSince(t *testing.T) {
+	// the cellar with its guard deleted, as MZ leaves a deleted event: null in its slot.
+	guardAt := strings.Index(cellarMap, `{"id":1,`)
+	deleted := cellarMap[:guardAt] + "null" + cellarMap[strings.Index(cellarMap, "}\n]")+1:]
+	cases := map[string]struct {
+		file     string
+		patch    string
+		expected string
+	}{
+		"an event put in before the last": {file: cellarMap, patch: `{"kind":"splice","path":["events"],"index":1,"removed":[],"inserted":[` + doorAt(1, 0) + `]}`, expected: "its events changed"},
+		"a list grown since":              {file: cellarMap, patch: `{"kind":"splice","path":["events"],"index":1,"removed":[],"inserted":[` + doorAt(2, 0) + `]}`, expected: "its events changed"},
+		"a list shrunk since":             {file: cellarMap, patch: `{"kind":"splice","path":["events"],"index":3,"removed":[],"inserted":[` + doorAt(3, 0) + `]}`, expected: "its events changed"},
+		"an event changed since":          {file: cellarMap, patch: `{"kind":"splice","path":["events"],"index":1,"removed":[` + guardAs("Sentry", 3) + `],"inserted":[]}`, expected: "event 1 changed"},
+		"an event deleted since":          {file: deleted, patch: `{"kind":"splice","path":["events"],"index":1,"removed":[` + guardAs("Guard", 3) + `],"inserted":[]}`, expected: "event 1 is gone"},
+		"a list that is not there":        {file: cellarMap, patch: `{"kind":"splice","path":["events",5,"pages"],"index":0,"removed":[],"inserted":[]}`, expected: "event 5 is gone"},
+		"a value that is no list":         {file: cellarMap, patch: `{"kind":"splice","path":["displayName"],"index":0,"removed":[],"inserted":[]}`, expected: "its map settings changed"},
+	}
+
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Arrange.
+			patches := patchesOf(t, `{"maps":[{"map":7,"patches":[`+testCase.patch+`]}]}`)
+
+			// Act.
+			_, err := ApplyToMap(7, []byte(testCase.file), patches)
+
+			// Assert: the refusal names the map, and says what changed in words an author knows the map by.
+			var mismatch MismatchError
+			if errors.As(err, &mismatch) == false || mismatch.MapID != 7 || err.Error() != "Map 007 no longer holds what the change replaced: "+testCase.expected {
+				t.Errorf("expected a refusal naming map 7 and %q, got %v", testCase.expected, err)
+			}
+		})
+	}
+}
+
+func TestApplyToMapTakesAwayTheLastEventWhenItIsTheOneTheEditorSaw(t *testing.T) {
+	// Arrange: the guard, the cellar's last event, taken away whole, as undoing its placement does.
+	patches := patchesOf(t, `{"maps":[{"map":1,"patches":[{"kind":"splice","path":["events"],"index":1,"removed":[`+guardAs("Guard", 3)+`],"inserted":[]}]}]}`)
+
+	// Act.
+	written, err := ApplyToMap(1, []byte(cellarMap), patches)
+
+	// Assert: the list ends at its empty first slot.
+	if err != nil || strings.HasSuffix(string(written), `"events":[`+"\nnull\n]\n}") == false {
+		t.Errorf("wrote (%v):\n%s", err, written)
 	}
 }
 

@@ -274,14 +274,20 @@ class WorkspaceController
 
     // no undo, redo or jump takes away a blueprint whose copies still name it, its placed tiles among them, nor moves a
     // change to a blueprint whose files no longer hold what it would take back or put back.
-    const { hub, blueprintCopies, blueprintWriter } = services;
+    const { hub, blueprintCopies, blueprintWriter, pairWriter } = services;
     const usedCopies = { start: () => blueprintCopies.start(), countOf: (blueprintId: string) => usedCopiesOf(blueprintCopies, hub, blueprintId) };
     const blueprintsKept = blueprintsKeptGuard(hub, usedCopies, mapId => this.mapName(mapId));
     const leftWords = copiesLeftWords({ hub, mapName: mapId => this.mapName(mapId) });
-    this.router = new HistoryRouter(hub, this.tree, (step, direction) => blueprintsKept(step, direction) ?? blueprintWriter?.guard(step, direction) ?? null, leftWords);
+    this.router = new HistoryRouter(
+      hub,
+      this.tree,
+      (step, direction) => blueprintsKept(step, direction) ?? blueprintWriter?.guard(step, direction) ?? pairWriter?.guard(step, direction) ?? null,
+      leftWords,
+    );
 
-    // a change to a blueprint that could not be written says why, as anything refused does.
+    // a change to a blueprint, or a transfer pair, that could not be written says why, as anything refused does.
     blueprintWriter?.onProblem((message, alarm) => this.notify(message, alarm ? 'alarm' : 'error'));
+    pairWriter?.onProblem((message, alarm) => this.notify(message, alarm ? 'alarm' : 'error'));
     this.layouts = new LayoutStore({ api: services.api });
     this.#placementsOpened = this.#holdPlacements();
 
@@ -719,16 +725,17 @@ class WorkspaceController
    * cannot, the author has already heard why.
    *
    * A blueprint is never saved by hand: every change to one is written at once, with every copy it reached, a moment after
-   * it is made (see BlueprintWriter). Saving waits for whatever of those is still on its way first, so a map holding a
-   * copy is saved over what the change wrote to it, never under it. A blueprint opened as a map that still holds changes
-   * after that is one whose change could not be written, which the author has heard about already; it is not called
-   * saved.
+   * it is made (see BlueprintWriter), and so is every transfer pair (see PairWriter). Saving waits for whatever of those
+   * is still on its way first, so a map holding a copy or an end of a pair is saved over what was written to it, never
+   * under it. A blueprint opened as a map that still holds changes after that is one whose change could not be written,
+   * which the author has heard about already; it is not called saved.
    * @returns {Promise<void>} Settles once every save has finished, the placements' and the blueprints' writes included.
    */
   async saveAll(): Promise<void>
   {
-    const { hub, blueprintWriter } = this.services;
+    const { hub, blueprintWriter, pairWriter } = this.services;
     await blueprintWriter?.whenWritten();
+    await pairWriter?.whenWritten();
     const unsaved = hub.dirtyKeys();
     const blueprints = unsaved.filter(key => parseDocumentKey(key).kind === 'blueprint-map').length;
     const dirty = unsaved.filter(key => parseDocumentKey(key).kind !== 'blueprint-map');

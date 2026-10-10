@@ -1,6 +1,7 @@
 import { pluginBasename, type PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.ts';
 import type { CommentTagDefinition } from '../blueprints/blueprintFields.ts';
 import type { CommandCatalog } from '../commands/CommandCatalog.ts';
+import type { EventArea } from '../events/eventAreas.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
 import { pageWordsOf, type PageCondition } from '../pageRule/pageRule.ts';
@@ -9,6 +10,7 @@ import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
 import type { WeatherLayerDefinition } from '../renderer/weatherLayer.ts';
 import type {
   ClockOffer,
+  EventAreaReader,
   EventKindDefinition,
   LiveNotice,
   MapPropertiesSection,
@@ -52,6 +54,7 @@ type Contributions = {
   kinds: EventKindDefinition[];
   palette: PaletteEntry[];
   rules: PassabilityRule[];
+  areas: EventAreaReader[];
   overlays: OverlayDefinition[];
   lighting: LightingLayerDefinition[];
   weather: WeatherLayerDefinition[];
@@ -84,6 +87,7 @@ const noContributions = (): Contributions => ({
   kinds: [],
   palette: [],
   rules: [],
+  areas: [],
   overlays: [],
   lighting: [],
   weather: [],
@@ -164,12 +168,12 @@ const configNamesOf = (pluginModule: PluginModule, enabled: ReadonlyMap<string, 
 };
 
 /**
- * Holds the event kinds, palette entries, passability rules, overlays, lighting layers, weather layers and command
- * entries the editor knows, the maps whose events are a plugin's patterns, what the modules say over every map view, the
- * clock and the sky they offer, the sections they add to Map Properties and the plugins they say read a map's sky, the
- * conditions they add to the game's page rule, the kinds of state they let the preview set and the comment tags they read
- * as fields of a blueprint's copies: the core's kinds, always, and each plugin module's contributions while its plugins are
- * enabled.
+ * Holds the event kinds, palette entries, passability rules, the areas event pages cover, overlays, lighting layers,
+ * weather layers and command entries the editor knows, the maps whose events are a plugin's patterns, what the modules
+ * say over every map view, the clock and the sky they offer, the sections they add to Map Properties and the plugins they
+ * say read a map's sky, the conditions they add to the game's page rule, the kinds of state they let the preview set and
+ * the comment tags they read as fields of a blueprint's copies: the core's kinds, always, and each plugin module's
+ * contributions while its plugins are enabled.
  */
 class PluginModuleRegistry
 {
@@ -424,6 +428,37 @@ class PluginModuleRegistry
   }
 
   /**
+   * Lists the active modules' readings of the areas event pages cover, in the order they added them; empty while no module
+   * gives pages areas, when every event stands on its own tile alone.
+   * @returns {readonly EventAreaReader[]} The readers.
+   */
+  eventAreas(): readonly EventAreaReader[]
+  {
+    return this.#contributions.areas;
+  }
+
+  /**
+   * Reads the area a page covers, as the active modules read it: the area of the first that reads one, or none while no
+   * module reads one for it. It reads the modules as they stand when asked, so it can be handed on as a reader once and
+   * still follow them switching on and off.
+   * @param {RmmzEventPage} page The page.
+   * @returns {EventArea | null} The area, or null when no active module reads one for the page.
+   */
+  areaOf = (page: RmmzEventPage): EventArea | null =>
+  {
+    for (const reader of this.#contributions.areas)
+    {
+      const area = reader.read(page);
+      if (area !== null)
+      {
+        return area;
+      }
+    }
+
+    return null;
+  };
+
+  /**
    * Lists every overlay the active modules and kinds draw.
    * @returns {OverlayDefinition[]} The overlays.
    */
@@ -581,6 +616,11 @@ class PluginModuleRegistry
       {
         requirePrefix(rule.id, 'passability rules');
         this.#contributions.rules.push(rule);
+      },
+      eventArea: reader =>
+      {
+        requirePrefix(reader.id, 'event areas');
+        this.#contributions.areas.push(reader);
       },
       overlay: overlay =>
       {

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Box, Chip, Divider, Stack, Typography } from '@mui/material';
 import { linkGateFor } from '../core/blueprints/blueprintPlacement.ts';
 import { BLUEPRINTS_DOCUMENT } from '../core/blueprints/blueprints.ts';
+import { footprintReaderFor } from '../core/eventKinds/eventFootprints.ts';
 import { markerSymbolFor } from '../core/eventKinds/eventMarkers.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
 import { isBlueprintMapId } from '../core/model/documentKeys.ts';
@@ -21,6 +22,7 @@ import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity, type Ev
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import { MapStampTools } from '../stamps/MapStampTools.ts';
 import { openEventWindow, openSwitchesVariablesWindow } from '../views/mapEditorViews.ts';
+import { useTransferPlacer } from '../views/transferPairs/useTransferPlacer.tsx';
 import { ClockChip } from './ClockChip.tsx';
 import type { DrawState } from './ContextKeeper.ts';
 import {
@@ -270,7 +272,8 @@ const DrawNotice = (props: { state: DrawState; notices?: readonly ModuleNotice[]
  * the window's preview beside it, saying how far along the story the maps show the game, the painting tools, and a
  * status line naming the zoom, the tile under the pointer, how many events are selected and the GPU drawing it. Each
  * event shows the page the game would at the clock's time and date, with the preview's switches and variables set and a
- * fresh save's everything else, by the window's page rule.
+ * fresh save's everything else, by the window's page rule, and the area that page covers, joined to its marker, while a
+ * plugin module reads areas, as J-Pixelistics' does; the areas show and hide with the Events switch.
  *
  * The view paints with its window's paint: the page's own for a map docked in the main window, and a torn-out window's
  * own for a map torn out, so each window's palette, layer strip and tools go together and no further.
@@ -329,6 +332,9 @@ const MapView = (props: MapViewProps) =>
   const notifyRef = useRef<(text: string, severity: EventNoticeSeverity) => void>(() => undefined);
   notifyRef.current = onNotice ?? ((text: string) => setStatus(current => ({ ...current, note: text })));
 
+  // the transfer placer the menu opens from a tile, which tells the author what it placed.
+  const placer = useTransferPlacer(mapId, text => notifyRef.current(text, 'info'));
+
   // keep up with whether the view is on screen, for a renderer mounted after this, which must know before it mounts:
   // a view mounted behind another tab makes no GPU context until it shows.
   useEffect(() =>
@@ -355,10 +361,14 @@ const MapView = (props: MapViewProps) =>
     const controller = new MapViewController(renderer, services, projectImagesFor(api));
     controllerRef.current = controller;
 
-    // events that draw no picture show markers by their kind, which reads differently once the plugin modules switch on.
+    // events that draw no picture show markers by their kind, which reads differently once the plugin modules switch on;
+    // so do the areas events' pages cover, which the modules read, each shown joined to its marker.
     const classify = markerClassifierFor(services.modules);
     renderer.setEventMarkers(classify);
     stops.push(services.modules.subscribe(() => renderer.setEventMarkers(classify)));
+    const footprints = footprintReaderFor(services.modules);
+    renderer.setEventFootprints(footprints);
+    stops.push(services.modules.subscribe(() => renderer.setEventFootprints(footprints)));
 
     // the lighting layer holds what the plugin modules draw there, which changes as they switch on and off, and draws the
     // sky at the hour the window's clock shows, which every view in the window follows as it moves; each event shows the
@@ -724,7 +734,9 @@ const MapView = (props: MapViewProps) =>
         tools={toolsRef.current}
         stampTools={stampToolsRef.current}
         onClose={() => setMenu(null)}
+        onNewTransfer={placer.open}
       />
+      {placer.dialog}
     </Box>
   );
 };
