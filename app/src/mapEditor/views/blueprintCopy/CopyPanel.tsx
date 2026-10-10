@@ -87,7 +87,8 @@ const showsFirst = (field: CopyField): boolean =>
 };
 
 /**
- * One field of the copy: what it is, where it stands against the blueprint, and what can be done with it.
+ * One field of the copy: what it is, where it stands against the blueprint beneath it, and what can be done with it, to
+ * the right, so the standing has the row's whole width however long the field's name.
  * @param {{ field: CopyField, onAction: (action: FieldAction) => void }} props The field, and what each action does.
  * @returns {React.JSX.Element} The row.
  */
@@ -98,14 +99,16 @@ const FieldRow = (props: { readonly field: CopyField; readonly onAction: (action
   return (
     <Box
       data-testid={'copy-field'}
-      sx={{ display: 'grid', gridTemplateColumns: 'minmax(96px, 38%) 1fr auto', alignItems: 'center', columnGap: 1, minHeight: 26 }}
+      sx={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', columnGap: 1, py: 0.25 }}
     >
-      <Typography variant={'body2'} noWrap title={capitalised(words)}>
-        {capitalised(words)}
-      </Typography>
-      <Typography variant={'caption'} color={STATE_COLOURS[field.state.kind]} noWrap data-testid={'copy-field-state'}>
-        {stateWords(field.state)}
-      </Typography>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant={'body2'} noWrap title={capitalised(words)}>
+          {capitalised(words)}
+        </Typography>
+        <Typography variant={'caption'} color={STATE_COLOURS[field.state.kind]} noWrap component={'p'} data-testid={'copy-field-state'}>
+          {stateWords(field.state)}
+        </Typography>
+      </Box>
       <Stack direction={'row'}>
         {fieldActions(field).map(action => (
           <Tooltip key={action} describeChild title={ACTION_WORDS[action].hint}>
