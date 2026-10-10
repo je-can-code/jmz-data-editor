@@ -438,6 +438,31 @@ class MapDocument implements EditorDocument
     return file;
   }
 
+  matches(content: JsonValue): boolean
+  {
+    if (isJsonObject(content) === false)
+    {
+      return false;
+    }
+
+    // the tile data lives apart from the rest, so each half is compared with its own half of the file.
+    const { data, ...rest } = content;
+    if (Array.isArray(data) === false || data.length !== this.#cells.length)
+    {
+      return false;
+    }
+
+    for (let index = 0; index < data.length; index++)
+    {
+      if (data[index] !== this.#cells[index])
+      {
+        return false;
+      }
+    }
+
+    return jsonEquals(this.#root, rest);
+  }
+
   /**
    * Works out the patches that turn this map into another file of it. The tiles change by one tiles patch naming
    * only the cells that differ, or by one resize when the size changed too, since size and tiles move together; every

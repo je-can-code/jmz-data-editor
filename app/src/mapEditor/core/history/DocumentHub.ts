@@ -2,7 +2,7 @@ import { isKeptAlongside } from '../editorData/editorData.ts';
 import { createDocument } from '../model/createDocument.ts';
 import type { DocumentKey, MapDocumentKey } from '../model/documentKeys.ts';
 import type { EditorDocument } from '../model/EditorDocument.ts';
-import { jsonEquals, type JsonValue } from '../model/json.ts';
+import { cloneJson, jsonEquals, type JsonValue } from '../model/json.ts';
 import { MapDocument } from '../model/MapDocument.ts';
 import { invertPatch, PatchConflictError, type Patch } from '../model/patches.ts';
 import { History, type HistoryView } from './History.ts';
@@ -129,7 +129,9 @@ type HubSource = 'local' | 'remote';
  * Everything the hub announces. The history panel, dirty markers, conflict banners and cross-window sync all
  * listen here. Every operation event carries the operation's id and the heads it was made against, which is
  * what other windows check before repeating it. A save names the window that wrote the file, this one's own id for
- * a save made or found here. A change to the file of a document kept alongside others is handed on as it was read,
+ * a save made or found here, and carries what the file holds now, as does a file written otherwise than by a save
+ * ({@code written}), a blueprint's change written at once to the maps its copies stand on, so every window holding the
+ * document knows what its file holds. A change to the file of a document kept alongside others is handed on as it was read,
  * with nothing done to the document, for whoever keeps it to merge. An edit the window's commit checks refused is
  * announced with why, once it is put back, so whoever shows the author things can say so; nothing else happened. Steps
  * a document opened from its file takes up, having written that file before it was opened, are announced as attached.
@@ -164,7 +166,9 @@ type HubEvent =
     readonly marker: readonly string[];
     readonly source: HubSource;
     readonly origin: string;
+    readonly content: JsonValue;
   }
+  | { readonly type: 'written'; readonly document: DocumentKey; readonly content: JsonValue; readonly source: HubSource; readonly origin: string }
   | { readonly type: 'outside'; readonly document: DocumentKey; readonly content: JsonValue | null; readonly recheck: boolean }
   | { readonly type: 'adopted'; readonly document: DocumentKey; readonly source: HubSource }
   | { readonly type: 'released'; readonly document: DocumentKey }
@@ -194,7 +198,8 @@ type CommitCheck = (transaction: Transaction) => string | null;
  * An operation made in another window, to be repeated here. {@code bases} holds the head of each touched
  * document just before the operation, so a window whose copy went elsewhere can tell and sort it out. An undo or a redo
  * that left parts of its step carries the part that moved and what became of the rest ({@code split}), so this window
- * moves and leaves exactly what that one did.
+ * moves and leaves exactly what that one did. A save, and a file written otherwise, carry what the file holds now
+ * ({@code content}), which is what this window's copy reads as saved against from then on.
  */
 type RemoteOperation =
   | { readonly type: 'commit'; readonly origin: string; readonly opId: string; readonly step: HistoryStep; readonly bases: DocumentHeads }
@@ -215,11 +220,12 @@ type RemoteOperation =
     readonly split?: StepSplit & { readonly step: HistoryStep };
   }
   | { readonly type: 'forget'; readonly origin: string; readonly opId: string; readonly stepId: string; readonly bases: DocumentHeads }
-  | { readonly type: 'saved'; readonly origin: string; readonly document: DocumentKey; readonly marker: readonly string[] };
+  | { readonly type: 'saved'; readonly origin: string; readonly document: DocumentKey; readonly marker: readonly string[]; readonly content: JsonValue }
+  | { readonly type: 'written'; readonly origin: string; readonly document: DocumentKey; readonly content: JsonValue };
 
 /**
  * Everything one window knows about a document, for another window to adopt: its committed content, the
- * lineage of operations that produced it, whether it is saved, and every history that lives on it. An edit still
+ * lineage of operations that produced it, what its file holds, and every history that lives on it. An edit still
  * open is never part of it. Plain data, so it crosses a BroadcastChannel.
  *
  * {@code applied} names every step whose patches the content holds, in the order they went in, which is what an
@@ -227,6 +233,9 @@ type RemoteOperation =
  * a history can still redo, oldest first, which is what a redo is checked against. Most of those steps sit in the
  * histories; {@code unlisted} carries the rest (steps forgotten, steps dropped from every history, and steps kept
  * only by histories that live on other documents), since no history can move them but a check still needs them.
+ * {@code saved} names the steps the document held when its file was last saved or read (see DocumentHub's savedSteps).
+ * {@code file} is what the file holds, present only when that differs from the content, and null when the window did
+ * not know it: a document without it holds exactly what its file does.
  */
 type DocumentSnapshot = {
   readonly document: DocumentKey;
@@ -235,6 +244,7 @@ type DocumentSnapshot = {
   readonly applied: readonly string[];
   readonly moves: readonly string[];
   readonly saved: readonly string[];
+  readonly file?: JsonValue | null;
   readonly histories: readonly { key: HistoryKey; done: readonly HistoryStep[]; undone: readonly HistoryStep[] }[];
   readonly unlisted: readonly HistoryStep[];
 };
@@ -518,8 +528,13 @@ const carriedStepFinder = (snapshot: DocumentSnapshot): (id: string) => HistoryS
  * documents to be held; whoever moves it writes their files, and a window holding one by then changes it in place. A
  * document opened from a file such steps wrote takes them up (see {@link attachSteps}), so it can undo them too.
  *
- * Saving writes a document's committed content and records which steps the file now reflects; it never touches
- * history, so undo after a save works, and undoing back to the saved state makes the document clean again.
+ * A document reads as saved exactly when it holds what its file holds: the content this window last read from the file,
+ * or wrote to it, or heard another window write there. Where the document's history stands says nothing either way,
+ * since a blueprint's change, and its undo and redo, write a map's file at once, and judge what that file takes apart from
+ * the map, so a map can come to hold its file's content by many roads, and leave it by as many. Whatever writes a file
+ * says what it wrote: a save its content ({@link save}), and anything else the content or the patches it wrote
+ * ({@link noteWritten}, {@link notePatched}). Saving writes a document's committed content; it never touches history, so
+ * undo after a save works, and undoing back to what the file holds makes the document read as saved again.
  *
  * A file changed outside the editor never clears history either. On a document with no unsaved edits, the file's
  * version arrives as one more step, named {@link OUTSIDE_CHANGE_LABEL}, which the file already reflects: undoing it
@@ -569,7 +584,33 @@ class DocumentHub
    */
   #moves = new Map<DocumentKey, HistoryStep[]>();
 
+  /**
+   * For each held document, the steps it held when its file was last saved or read, by id (see {@link savedSteps}).
+   */
   #saved = new Map<DocumentKey, string[]>();
+
+  /**
+   * For each held document, what its file holds, as this window last read it, wrote it, or heard another window write it;
+   * null while that is not known, after a write this window could not follow, until the file is read again.
+   */
+  #files = new Map<DocumentKey, JsonValue | null>();
+
+  /**
+   * For each held document, when what its file holds was last learnt, counted by {@link #learnings}: a read of the file
+   * that lands after something newer was learnt is not taken over it.
+   */
+  #fileLearnt = new Map<DocumentKey, number>();
+
+  /**
+   * Counts every time this window learns what some document's file holds.
+   */
+  #learnings = 0;
+
+  /**
+   * Whether each held document differs from its file, worked out when first asked after either last changed: comparing
+   * a whole map is too slow to do whenever the badge draws.
+   */
+  #dirty = new Map<DocumentKey, boolean>();
 
   #lineage = new Map<DocumentKey, string[]>();
 
@@ -734,14 +775,27 @@ class DocumentHub
   }
 
   /**
-   * Lists the steps a held document's file holds, as far as this window knows: the steps applied when it was last
-   * saved, here or in another window, or found on disk; none since it was loaded or reloaded from its file.
+   * Lists the steps a held document held when its file was last saved, here or in another window, or found on disk; none
+   * since it was loaded or reloaded from its file. A file written otherwise than by a save, a blueprint's change written at
+   * once, leaves this as it was: it says which of the author's own edits the file holds, which is what the record of
+   * where blueprints are placed is worked out from, and never whether the document is saved (see {@link isDirty}).
    * @param {DocumentKey} key The document.
    * @returns {readonly string[]} The steps' ids, oldest first; none when the document is not held.
    */
   savedSteps(key: DocumentKey): readonly string[]
   {
     return [ ...this.#saved.get(key) ?? [] ];
+  }
+
+  /**
+   * Reads what a held document's file holds, as this window last read it, wrote it, or heard another window write it.
+   * @param {DocumentKey} key The document.
+   * @returns {JsonValue | null} The file's content, not to be changed; null when the document is not held, or what its
+   * file holds is not known, after a write this window could not follow, until the file is read again.
+   */
+  fileContent(key: DocumentKey): JsonValue | null
+  {
+    return this.#files.get(key) ?? null;
   }
 
   /**
@@ -763,7 +817,7 @@ class DocumentHub
 
   /**
    * Holds a document built from its file content, clean, with empty histories, and a lineage that starts from
-   * that exact file. A document already held is returned as it is.
+   * that exact file, which is what its file holds. A document already held is returned as it is.
    * @param {DocumentKey} key The document.
    * @param {JsonValue} content The file's content.
    * @returns {EditorDocument} The document.
@@ -782,6 +836,7 @@ class DocumentHub
     this.#applied.set(key, []);
     this.#moves.set(key, []);
     this.#saved.set(key, []);
+    this.#learnFile(key, cloneJson(content));
     this.#emit({ type: 'adopted', document: key, source: 'local' });
     return document;
   }
@@ -806,6 +861,8 @@ class DocumentHub
     const listed = new Set(histories.flatMap(({ done, undone }) => [ ...done, ...undone ]).map(step => step.id));
     const unlisted = [ ...applied, ...moves ].filter(step => listed.has(step.id) === false);
 
+    // what the file holds rides along only when it differs from the content, so a clean copy keeps its exact shape.
+    const file = this.isDirty(key) ? { file: cloneJson(this.#files.get(key) ?? null) } : {};
     return {
       document: key,
       content,
@@ -813,6 +870,7 @@ class DocumentHub
       applied: applied.map(step => step.id),
       moves: moves.map(step => step.id),
       saved: [ ...this.#saved.get(key) ?? [] ],
+      ...file,
       histories,
       unlisted: [ ...new Map(unlisted.map(step => [ step.id, step ])).values() ],
     };
@@ -848,6 +906,7 @@ class DocumentHub
 
     this.#lineage.set(key, [ ...snapshot.lineage ]);
     this.#saved.set(key, [ ...snapshot.saved ]);
+    this.#learnFile(key, snapshot.file === undefined ? cloneJson(snapshot.content) : cloneJson(snapshot.file));
 
     // one object per step, however many histories and snapshots mention it.
     const intern = (step: HistoryStep): HistoryStep =>
@@ -953,6 +1012,9 @@ class DocumentHub
     this.#applied.delete(key);
     this.#moves.delete(key);
     this.#saved.delete(key);
+    this.#files.delete(key);
+    this.#fileLearnt.delete(key);
+    this.#dirty.delete(key);
     this.#conflicts.delete(key);
     this.#dropHistoriesOn(key);
     this.#prune();
@@ -1138,6 +1200,9 @@ class DocumentHub
       this.#drainQueue();
       return null;
     }
+
+    // the documents the step changed hold something new now, so whether each is saved is worked out again when asked.
+    this.#contentChanged(entries.map(entry => entry.document));
 
     // whole files, documents written through, files differing from their documents and documents following the step's
     // change ride along only on the steps that have them, so every other step keeps its exact shape.
@@ -1674,19 +1739,72 @@ class DocumentHub
   //region saving
 
   /**
-   * Reports whether a document holds edits its file does not. A document kept alongside others never does: each of
-   * its parts is unsaved exactly while the document that part describes is, and is saved with it.
+   * Reports whether a document reads as unsaved: whether its committed content differs from what its file holds (see
+   * {@link fileContent}), whatever moved either there. A document whose file is not known is unsaved, since nothing says
+   * the file holds it. A document kept alongside others never is: each of its parts is unsaved exactly while the document
+   * that part describes is, and is saved with it.
    * @param {DocumentKey} key The document.
-   * @returns {boolean} True when unsaved; false when clean, not held, or kept alongside others.
+   * @returns {boolean} True when unsaved; false when it holds what its file holds, is not held, or is kept alongside others.
    */
   isDirty(key: DocumentKey): boolean
   {
-    const applied = this.#applied.get(key);
-    const saved = this.#saved.get(key);
-    return isKeptAlongside(key) === false
-      && applied !== undefined
-      && saved !== undefined
-      && sameSequence(applied.map(step => step.id), saved) === false;
+    if (isKeptAlongside(key) || this.has(key) === false)
+    {
+      return false;
+    }
+
+    const known = this.#dirty.get(key);
+    if (known !== undefined)
+    {
+      return known;
+    }
+
+    const dirty = this.#differsFromFile(key);
+    this.#dirty.set(key, dirty);
+    return dirty;
+  }
+
+  /**
+   * Compares a held document's committed content with what its file holds. An edit still open is left out, as it is from
+   * a save, so a stroke under way never makes a map read as unsaved before it is done.
+   * @param {DocumentKey} key The document, held.
+   * @returns {boolean} True when they differ, or what the file holds is not known.
+   */
+  #differsFromFile(key: DocumentKey): boolean
+  {
+    const file = this.#files.get(key) ?? null;
+    if (file === null)
+    {
+      return true;
+    }
+
+    // the document itself is compared without copying it whenever no open edit has patches in it.
+    const pending = (this.#transaction?.entries ?? []).filter(entry => entry.document === key);
+    return pending.length === 0
+      ? this.document(key).matches(file) === false
+      : jsonEquals(this.#committedContent(key), file) === false;
+  }
+
+  /**
+   * Notes that some documents' committed content may have changed, so whether each is saved is worked out afresh.
+   * @param {readonly DocumentKey[]} keys The documents.
+   */
+  #contentChanged(keys: readonly DocumentKey[]): void
+  {
+    keys.forEach(key => this.#dirty.delete(key));
+  }
+
+  /**
+   * Learns what a held document's file holds, and works out afresh whether the document is saved.
+   * @param {DocumentKey} key The document.
+   * @param {JsonValue | null} content What the file holds, never shared with anything else; null when it is not known.
+   */
+  #learnFile(key: DocumentKey, content: JsonValue | null): void
+  {
+    this.#learnings += 1;
+    this.#files.set(key, content);
+    this.#fileLearnt.set(key, this.#learnings);
+    this.#dirty.delete(key);
   }
 
   /**
@@ -1699,11 +1817,11 @@ class DocumentHub
   }
 
   /**
-   * Writes a document's committed content to its file; an edit still open is left out, since the file must match
-   * the steps it is marked as reflecting. History is untouched: undo still works afterwards, and undoing back to
-   * this point makes the document clean again. Edits made while the write is in flight stay unsaved. A document
-   * kept alongside others is refused, since writing it whole would carry every other document's unsaved part of it
-   * to disk: its keeper writes it a part at a time.
+   * Writes a document's committed content to its file; an edit still open is left out, since an open edit may yet be
+   * cancelled. The file then holds exactly that content, which is what the document reads as saved against from then on.
+   * History is untouched: undo still works afterwards, and undoing back to this point makes the document read as saved
+   * again. Edits made while the write is in flight stay unsaved. A document kept alongside others is refused, since
+   * writing it whole would carry every other document's unsaved part of it to disk: its keeper writes it a part at a time.
    * @param {DocumentKey} key The document.
    * @returns {Promise<void>} Settles once the file is written.
    */
@@ -1721,43 +1839,129 @@ class DocumentHub
     await store.save(key, content);
     if (this.has(key))
     {
-      this.#markSaved(key, marker, 'local', this.clientId);
+      this.#learnFile(key, cloneJson(content));
+      this.#markSaved(key, marker, 'local', this.clientId, content);
     }
   }
 
   /**
-   * Records that a document's file now holds exactly the given steps, written there by something other than
-   * {@link save}: a blueprint's change written at once to the blueprints and to the maps its copies stand on. The
-   * document is saved as far as those steps and no further, as after a save, and every window holding it hears so. A
-   * document let go of meanwhile has nothing to note; one kept alongside others is never saved whole, so is refused.
+   * Records what a document's file holds once something other than {@link save} wrote it whole: the blueprints, written
+   * at once with every change to a blueprint, or a blueprint opened as a map, whose file is its blueprint as the
+   * blueprints written then keep it. The document reads as saved exactly when it holds that, and every window holding it
+   * hears what its file holds. A document let go of meanwhile has nothing to note; one kept alongside others is never
+   * written whole, so is refused.
    * @param {DocumentKey} key The document.
-   * @param {readonly string[]} marker The steps the file holds, oldest first.
+   * @param {JsonValue} content What the file holds now, in its file shape.
    * @throws {Error} When the document is kept alongside others.
    */
-  noteSaved(key: DocumentKey, marker: readonly string[]): void
+  noteWritten(key: DocumentKey, content: JsonValue): void
   {
     if (isKeptAlongside(key))
     {
-      throw new Error(`${key} is kept alongside the documents it describes, and is never saved whole`);
+      throw new Error(`${key} is kept alongside the documents it describes, and is never written whole`);
     }
 
     if (this.has(key))
     {
-      this.#markSaved(key, marker, 'local', this.clientId);
+      this.#learnFile(key, cloneJson(content));
+      this.#emit({ type: 'written', document: key, content, source: 'local', origin: this.clientId });
     }
   }
 
   /**
-   * Records which steps a document's file now reflects.
+   * Records that a document's file took some patches, written onto it as it stood by something other than {@link save}: a
+   * blueprint's change, or its undo or redo, written at once to a map its copies stand on. The file holds what this window
+   * knew it held with those very patches in, which is what the document reads as saved against from then on, and every
+   * window holding it hears so. Where this window did not know what the file held, or the patches do not fit what it
+   * knew, something else changed the file, so it is read again, and until then the document reads as unsaved. A document
+   * let go of meanwhile has nothing to note.
+   * @param {DocumentKey} key The document.
+   * @param {readonly Patch[]} patches The patches the file took, in the order they went in.
+   */
+  notePatched(key: DocumentKey, patches: readonly Patch[]): void
+  {
+    const known = this.#files.get(key) ?? null;
+    if (this.has(key) === false || patches.length === 0)
+    {
+      return;
+    }
+
+    const file = known === null ? null : this.#patchedFile(key, known, patches);
+    if (file === null)
+    {
+      this.#learnFile(key, null);
+      this.#readFileAgain(key);
+      return;
+    }
+
+    this.noteWritten(key, file);
+  }
+
+  /**
+   * Puts patches into a copy of what a document's file held.
+   * @param {DocumentKey} key The document.
+   * @param {JsonValue} file What its file held.
+   * @param {readonly Patch[]} patches The patches, in the order they go in.
+   * @returns {JsonValue | null} What the file holds with them in; null when one does not fit.
+   */
+  #patchedFile(key: DocumentKey, file: JsonValue, patches: readonly Patch[]): JsonValue | null
+  {
+    const copy = createDocument(key, file);
+    try
+    {
+      patches.forEach(patch => copy.apply(patch));
+    }
+    catch (error)
+    {
+      if ((error instanceof PatchConflictError) === false)
+      {
+        throw error;
+      }
+
+      return null;
+    }
+
+    return copy.toJson();
+  }
+
+  /**
+   * Reads a document's file again, when this window lost track of what it holds, and learns it, unless something newer was
+   * learnt while the read was on its way. A window with no store, or a read that fails, leaves it unknown.
+   * @param {DocumentKey} key The document.
+   */
+  #readFileAgain(key: DocumentKey): void
+  {
+    if (this.#store === null)
+    {
+      return;
+    }
+
+    const learnt = this.#fileLearnt.get(key);
+    this.#store.load(key)
+      .then(content =>
+      {
+        if (this.#fileLearnt.get(key) === learnt)
+        {
+          this.#learnFile(key, cloneJson(content));
+          this.#emit({ type: 'written', document: key, content, source: 'local', origin: this.clientId });
+        }
+      })
+      .catch(() => undefined);
+  }
+
+  /**
+   * Records which steps a document held when its file was saved, or found holding them, and says so with what the file
+   * holds.
    * @param {DocumentKey} key The document.
    * @param {readonly string[]} marker The applied steps at the moment of the save.
    * @param {HubSource} source Whether the save happened here or in another window.
    * @param {string} origin The window that wrote the file, or found it holding these steps.
+   * @param {JsonValue} content What the file holds, never the copy this window keeps of it.
    */
-  #markSaved(key: DocumentKey, marker: readonly string[], source: HubSource, origin: string): void
+  #markSaved(key: DocumentKey, marker: readonly string[], source: HubSource, origin: string, content: JsonValue): void
   {
     this.#saved.set(key, [ ...marker ]);
-    this.#emit({ type: 'saved', document: key, marker: [ ...marker ], source, origin });
+    this.#emit({ type: 'saved', document: key, marker: [ ...marker ], source, origin, content });
   }
 
   //endregion saving
@@ -1848,20 +2052,22 @@ class DocumentHub
 
   /**
    * Takes one version of a document's file that changed outside the editor (in MZ, a script, another editor), as it
-   * was read, once, for every window holding the document.
+   * was read, once, for every window holding the document. The window learns what the file holds from it, which is what
+   * the document reads as saved against from then on.
    *
-   * A file that holds nothing this window lacks needs nothing: what the window holds now, what it last saved or
-   * loaded, or a state its latest edits passed through, which is what the echo of a save looks like when it comes back
-   * without its window's name, perhaps ahead of the message saying which steps that save held. The document is then
-   * saved exactly as far as that state, since the file holds that state's steps and no others: undoing back past it
-   * reads as unsaved, and redoing up to it reads as saved. Any flag an earlier change to the file raised is cleared,
-   * since the file no longer holds anything to choose between.
+   * A file that holds nothing this window lacks needs nothing more: what the window holds now, what it last read or wrote
+   * there, or a state its latest edits passed through, which is what the echo of a save looks like when it comes back
+   * without its window's name, perhaps ahead of the message saying which steps that save held. The document then reads as
+   * saved exactly when it holds that version: undoing back past a state it passed through reads as unsaved, and redoing up
+   * to it reads as saved. A flag an earlier change to the file raised is cleared once the file holds the document, or a
+   * state it passed through, since there is nothing left to choose between; a file holding just what was known before
+   * leaves any flag standing.
    *
    * A clean document takes the file's version as one step named {@link OUTSIDE_CHANGE_LABEL}, recorded in the
-   * history of whatever the change touched and marked saved, since the file holds it: undoing the step brings back
-   * the version the editor had, as an unsaved edit, and redoing it takes the file's version again. Every window
-   * holding the document at the same state records the same step from the same version ({@link outsideStepId}), so
-   * they all end on it; a later version is a later step on top.
+   * history of whatever the change touched, and reads as saved, since it holds what the file holds: undoing the step
+   * brings back the version the editor had, as an unsaved edit, and redoing it takes the file's version again. Every
+   * window holding the document at the same state records the same step from the same version ({@link outsideStepId}),
+   * so they all end on it; a later version is a later step on top.
    *
    * A document with unsaved edits keeps them and is flagged with the file's content beside it, so nothing is merged
    * into work the person has not saved, and nothing is thrown away without them choosing to. So is a removed file,
@@ -1874,13 +2080,24 @@ class DocumentHub
    * @param {DocumentKey} key The document.
    * @param {JsonValue | null} content The file's content, or null when the file was removed.
    * @param {boolean} recheck True when the file was re-read because the change stream came back, not because it
-   * changed: a document with unsaved edits differs from its file by definition then, and is left alone.
+   * changed: a document with unsaved edits is left alone then, only learning what its file holds.
    * @returns {ExternalChangeResult} What was done.
    */
   applyOutsideContent(key: DocumentKey, content: JsonValue | null, recheck = false): ExternalChangeResult
   {
-    if (this.has(key) === false || (recheck && this.isDirty(key)))
+    if (this.has(key) === false)
     {
+      return 'ignored';
+    }
+
+    // a document with unsaved edits takes nothing from a file read again, but learns what it holds all the same.
+    if (recheck && this.isDirty(key))
+    {
+      if (content !== null)
+      {
+        this.#learnOutsideFile(key, content);
+      }
+
       return 'ignored';
     }
 
@@ -1906,18 +2123,28 @@ class DocumentHub
       return 'conflicted';
     }
 
+    // whether the document held unsaved edits is asked of the file as it was known before this version of it arrived; an
+    // edit in progress counts as unsaved work too.
+    const unsaved = this.isDirty(key) || this.#transaction !== null;
+    const held = this.#stepsHeldByFile(key, content);
+    const learnt = this.#learnOutsideFile(key, content, false);
+
     // a file holding nothing new needs nothing done but noting how far the document is saved, and a flag an earlier
     // change raised (the file removed, or a version since written over) no longer stands.
-    const held = this.#stepsHeldByFile(key, content);
     if (held !== null)
     {
-      this.#noteFileHolds(key, held);
+      this.#noteFileHolds(key, held, content, learnt);
       this.#clearDiskConflict(key);
       return 'unchanged';
     }
 
-    // an edit in progress counts as unsaved work too.
-    if (this.isDirty(key) || this.#transaction !== null)
+    // a file holding what this window knew it held is nothing new either; any flag it raised before still stands.
+    if (learnt === false)
+    {
+      return 'unchanged';
+    }
+
+    if (unsaved)
     {
       this.flagConflict(key, { kind: 'disk', content });
       return 'conflicted';
@@ -1931,6 +2158,32 @@ class DocumentHub
     }
 
     return 'recorded';
+  }
+
+  /**
+   * Learns a version of a document's file read after it changed outside the editor, when it is not what this window
+   * already knew the file held.
+   * @param {DocumentKey} key The document, held.
+   * @param {JsonValue} content The file's content.
+   * @param {boolean} announce True to say so to everything listening, as a file written otherwise than by a save; false
+   * when what becomes of the document will say it.
+   * @returns {boolean} True when the version was new to this window.
+   */
+  #learnOutsideFile(key: DocumentKey, content: JsonValue, announce = true): boolean
+  {
+    const known = this.#files.get(key) ?? null;
+    if (known !== null && jsonEquals(known, content))
+    {
+      return false;
+    }
+
+    this.#learnFile(key, cloneJson(content));
+    if (announce)
+    {
+      this.#emit({ type: 'written', document: key, content, source: 'local', origin: this.clientId });
+    }
+
+    return true;
   }
 
   /**
@@ -2026,18 +2279,21 @@ class DocumentHub
   }
 
   /**
-   * Notes that a document's file holds exactly the given steps, when that differs from what it was known to hold. A
-   * file found holding a state the document passed through is saved as far as that state and no further, so the
-   * document reads as unsaved on either side of it and saved at it, however it moves through its history after.
+   * Notes that a document's file holds exactly the given steps, and says so when that, or what the file holds, differs
+   * from what was known. A file found holding a state the document passed through holds that state's steps and no others,
+   * and the document reads as saved exactly when it is back at that state.
    * @param {DocumentKey} key The document.
    * @param {readonly string[]} marker The steps the file holds, oldest first.
+   * @param {JsonValue} content What the file holds.
+   * @param {boolean} learnt True when what the file holds was new to this window.
    */
-  #noteFileHolds(key: DocumentKey, marker: readonly string[]): void
+  #noteFileHolds(key: DocumentKey, marker: readonly string[], content: JsonValue, learnt: boolean): void
   {
-    // every held document keeps its saved list; one already holding these steps needs no word to anyone.
-    if (sameSequence(this.#saved.get(key) as string[], marker) === false)
+    // every held document keeps its saved list; one already holding these steps, in a file holding what was known, needs
+    // no word to anyone.
+    if (learnt || sameSequence(this.#saved.get(key) as string[], marker) === false)
     {
-      this.#markSaved(key, marker, 'local', this.clientId);
+      this.#markSaved(key, marker, 'local', this.clientId, content);
     }
   }
 
@@ -2079,7 +2335,7 @@ class DocumentHub
     this.#markApplied(step);
     this.#extendLineage(step, step.id);
     this.#emit({ type: 'committed', step, bases, opId: step.id, source: 'local' });
-    this.#markSaved(key, (this.#applied.get(key) as HistoryStep[]).map(each => each.id), 'local', this.clientId);
+    this.#markSaved(key, (this.#applied.get(key) as HistoryStep[]).map(each => each.id), 'local', this.clientId, content);
     this.#clearDiskConflict(key);
     return step;
   }
@@ -2099,7 +2355,8 @@ class DocumentHub
   /**
    * Replaces a document with its file's content, as when the person takes the disk's version over their edits.
    * Every step that touched the old content can no longer reverse against the new, so each one is dropped from
-   * every history, and the document comes back clean, with a lineage that starts from this file.
+   * every history, and the document comes back clean, holding what its file holds, with a lineage that starts from
+   * this file.
    * @param {DocumentKey} key The document.
    * @param {JsonValue} content The file's content.
    */
@@ -2115,6 +2372,7 @@ class DocumentHub
     this.#applied.set(key, []);
     this.#moves.set(key, []);
     this.#saved.set(key, []);
+    this.#learnFile(key, cloneJson(content));
     this.#lineage.set(key, [ diskOperationId(content) ]);
     this.clearConflict(key);
 
@@ -2158,25 +2416,32 @@ class DocumentHub
         this.#applyRemoteForget(operation.stepId, operation.bases, operation.origin, operation.opId);
         break;
       case 'saved':
-        this.#applyRemoteSave(operation.document, operation.marker, operation.origin);
+        this.#applyRemoteSave(operation.document, operation.marker, operation.origin, operation.content);
+        break;
+      case 'written':
+        this.#applyRemoteWritten(operation.document, operation.content, operation.origin);
         break;
     }
   }
 
   /**
-   * Takes another window's save of a document held here: the steps its file now holds. A save naming a step this
-   * window has never seen means the two copies went different ways, which is announced as {@code out-of-sync} and
-   * changes nothing; taking it would mark this copy saved against a file that holds something it does not.
+   * Takes another window's save of a document held here: what its file now holds, which this copy reads as saved against
+   * from then on, and the steps that window's copy held when it saved. A save naming a step this window has never seen
+   * means the two copies went different ways, which is announced as {@code out-of-sync}, and the steps are not taken; what
+   * the file holds is, since the file holds it whichever copy is right.
    * @param {DocumentKey} key The document.
-   * @param {readonly string[]} marker The steps the file holds, as the saving window had them.
+   * @param {readonly string[]} marker The steps the saving window's copy held, oldest first.
    * @param {string} origin The window that saved.
+   * @param {JsonValue} content What the file holds now.
    */
-  #applyRemoteSave(key: DocumentKey, marker: readonly string[], origin: string): void
+  #applyRemoteSave(key: DocumentKey, marker: readonly string[], origin: string, content: JsonValue): void
   {
     if (this.has(key) === false)
     {
       return;
     }
+
+    this.#learnFile(key, cloneJson(content));
 
     // a step can be known while undone (in the registry) or while no history lists it any more (still applied).
     const applied = this.#applied.get(key) as HistoryStep[];
@@ -2187,7 +2452,25 @@ class DocumentHub
       return;
     }
 
-    this.#markSaved(key, marker, 'remote', origin);
+    this.#markSaved(key, marker, 'remote', origin, content);
+  }
+
+  /**
+   * Takes another window's word of what a document's file holds once it wrote the file otherwise than by saving it: a
+   * blueprint's change written at once. This copy reads as saved against it from then on.
+   * @param {DocumentKey} key The document.
+   * @param {JsonValue} content What the file holds now.
+   * @param {string} origin The window that wrote it.
+   */
+  #applyRemoteWritten(key: DocumentKey, content: JsonValue, origin: string): void
+  {
+    if (this.has(key) === false || isKeptAlongside(key))
+    {
+      return;
+    }
+
+    this.#learnFile(key, cloneJson(content));
+    this.#emit({ type: 'written', document: key, content, source: 'remote', origin });
   }
 
   /**
@@ -2369,6 +2652,9 @@ class DocumentHub
     const ordered = direction === 'forward'
       ? entries
       : [ ...entries ].reverse();
+
+    // whatever these documents come to hold, whether each is saved is worked out again when asked.
+    this.#contentChanged(entries.map(entry => entry.document));
 
     const done: Patch[] = [];
     const documents: DocumentKey[] = [];

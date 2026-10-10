@@ -1,6 +1,6 @@
 import type { DocumentKey } from './documentKeys.ts';
 import { DocumentListeners, type DocumentListener, type EditorDocument } from './EditorDocument.ts';
-import { cloneJson, type JsonValue } from './json.ts';
+import { cloneJson, jsonEquals, type JsonValue } from './json.ts';
 import {
   applyJsonPatch,
   createSetPatch,
@@ -96,6 +96,11 @@ class JsonDocument implements EditorDocument
     });
 
     return content;
+  }
+
+  matches(content: JsonValue): boolean
+  {
+    return jsonEquals(this.#content, content);
   }
 
   patchesTo(content: JsonValue): Patch[] | null

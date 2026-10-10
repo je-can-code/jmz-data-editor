@@ -675,8 +675,9 @@ describe('SyncPeer', () =>
       const events: string[] = [];
       first.hub.subscribe(event => events.push(event.type));
 
-      // Act.
-      stranger.postMessage({ type: 'operation', from: 'window-B', operation: { type: 'saved', origin: 'window-B', document: MAP, marker: [ 'window-B#99' ] } });
+      // Act: the save's file holds just what the map does.
+      const content = first.hub.committedContent(MAP);
+      stranger.postMessage({ type: 'operation', from: 'window-B', operation: { type: 'saved', origin: 'window-B', document: MAP, marker: [ 'window-B#99' ], content } });
       await settle(network);
 
       // Assert: the copy stays clean and unflagged; the difference was announced, and the other copy found to be the same.

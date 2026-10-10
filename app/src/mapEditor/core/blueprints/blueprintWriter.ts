@@ -1,8 +1,8 @@
 import { MapEditorApiError, type BlueprintWrite } from '../api/MapEditorApi.ts';
 import type { DocumentHub, HubEvent } from '../history/DocumentHub.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
-import { fileKeepsLeft } from '../history/stepParts.ts';
 import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
+import type { JsonValue } from '../model/json.ts';
 import type { Patch } from '../model/patches.ts';
 import { BLUEPRINTS_DOCUMENT } from './blueprints.ts';
 import { isBlueprintChange, type CopyMaps } from './copyMaps.ts';
@@ -48,14 +48,12 @@ type Blocked = {
 
 /**
  * One move of a step the writer writes: the step, or the part of it that moved, which way it moved, and what each map's
- * file takes for it; and for an undo or a redo that left parts of the step, the part left on the maps held here, which a
- * map's file goes on holding in the step's place after an undo where it kept that part as the map did.
+ * file takes for it.
  */
 type QueuedMove = {
   readonly step: HistoryStep;
   readonly direction: 'forward' | 'backward';
   readonly maps: ReadonlyMap<number, Patch[]>;
-  readonly left: HistoryStep | null;
 };
 
 /**
@@ -154,27 +152,6 @@ const blueprintMapsOf = (step: HistoryStep): DocumentKey[] =>
 };
 
 /**
- * Lists the ids of steps.
- * @param {readonly HistoryStep[]} steps The steps.
- * @returns {string[]} Their ids, in order.
- */
-const idsOf = (steps: readonly HistoryStep[]): string[] =>
-{
-  return steps.map(step => step.id);
-};
-
-/**
- * Reports whether two lists of step ids are the same, in the same order.
- * @param {readonly string[]} left One list.
- * @param {readonly string[]} right The other.
- * @returns {boolean} True when they are.
- */
-const sameIds = (left: readonly string[], right: readonly string[]): boolean =>
-{
-  return left.length === right.length && left.every((id, index) => id === right[index]);
-};
-
-/**
  * Writes every change to a blueprint to disk as it is made, undone or redone in this window, the blueprints and every
  * map the change reached in one act (see MapEditorApi's writeBlueprintChanges), so the blueprint and its copies on disk
  * never part, whatever is discarded or wherever the editor stops. Saving a blueprint is never asked of the author: its
@@ -197,8 +174,11 @@ const sameIds = (left: readonly string[], right: readonly string[]): boolean =>
  * An act holding the blueprints alone, when nothing in them is unwritten, writes nothing: the file holds them already, a
  * version found there, say, and writing it again could only lay it out afresh, or put it over a newer one.
  *
- * Once an act lands, the blueprints and every blueprint open as a map read as saved as far as the act wrote them, and so
- * does each map held here whose file the act left holding exactly the steps the map holds.
+ * Once an act lands, the window records exactly what it wrote (see DocumentHub's noteWritten and notePatched): the
+ * blueprints as written, every blueprint open as a map as it stood when the act was sent, and every map held here by the
+ * very patches its file took. Each then reads as saved exactly when it holds what its file holds, however its history
+ * came to stand where it does: a map whose file took a change its unsaved edits kept out of the map stays unsaved, and
+ * one whose last unsaved edit is undone over the change's file version reads as saved again.
  *
  * Moves made in other windows are written by those windows; here the kept files only follow them.
  */
@@ -426,7 +406,7 @@ class BlueprintWriter
       return;
     }
 
-    this.#queue.push({ step, direction, maps, left });
+    this.#queue.push({ step, direction, maps });
     if (event.type === 'committed')
     {
       this.#settle();
@@ -509,13 +489,13 @@ class BlueprintWriter
     }
 
     this.#sending = moves;
-    const saved = this.#savedOnLanding(moves);
+    const tabs = this.#tabsWritten(write);
     this.#sent = this.#write(write).then(
       () =>
       {
         this.#sending = null;
         this.#maps.landed(this.#mapsOf(moves), true);
-        saved.forEach(([ key, marker ]) => this.#hub.noteSaved(key, marker));
+        this.#noteWritten(write, tabs);
         this.#send();
       },
       (error: unknown) =>
@@ -585,47 +565,39 @@ class BlueprintWriter
   }
 
   /**
-   * Works out what reads as saved once an act lands, from the window as it stands while the act is sent: the blueprints,
-   * as far as the steps they hold now; every blueprint open as a map, whose content the blueprints hold; and each map held
-   * here the act writes whose file was holding exactly the steps it was saved with, which the act moves the way the map
-   * moved, so the file ends holding the very steps the map does.
-   * @param {readonly QueuedMove[]} moves The act's moves, oldest first.
-   * @returns {[ DocumentKey, string[] ][]} Each document to note saved, with the steps its file holds then.
+   * Takes down, as an act is sent, what the file of every blueprint open as a map will hold once it lands: a tab's file is
+   * its blueprint as the blueprints written keep it, which is the tab as it stands now, since every change made in a tab
+   * reaches the blueprints in the same step. An act writing no blueprints writes no tab's file.
+   * @param {BlueprintWrite} write The act.
+   * @returns {[ DocumentKey, JsonValue ][]} Each tab, with what its file will hold.
    */
-  #savedOnLanding(moves: readonly QueuedMove[]): [ DocumentKey, string[] ][]
+  #tabsWritten(write: BlueprintWrite): [ DocumentKey, JsonValue ][]
   {
     const hub = this.#hub;
-    const blueprints = this.#writesBlueprints() === false
+    return write.blueprints === undefined
       ? []
       : hub.documentKeys()
-        .filter(key => key === BLUEPRINTS_DOCUMENT || parseDocumentKey(key).kind === 'blueprint-map')
-        .map((key): [ DocumentKey, string[] ] => [ key, idsOf(hub.appliedSteps(key)) ]);
+        .filter(key => parseDocumentKey(key).kind === 'blueprint-map')
+        .map((key): [ DocumentKey, JsonValue ] => [ key, hub.committedContent(key) ]);
+  }
 
-    const mapIds = [ ...new Set(moves.flatMap(move => [ ...move.maps.keys() ])) ];
-    const maps = mapIds.flatMap((mapId): [ DocumentKey, string[] ][] =>
+  /**
+   * Records, once an act has landed, exactly what it wrote, so each document it wrote reads as saved exactly when it
+   * holds what its file now holds: the blueprints as they were written, every tab as it stood when the act was sent, and
+   * every map held here, by the very patches its file took. A document let go of meanwhile has nothing to note.
+   * @param {BlueprintWrite} write The act.
+   * @param {readonly [ DocumentKey, JsonValue ][]} tabs Each tab, with what its file holds now.
+   */
+  #noteWritten(write: BlueprintWrite, tabs: readonly [ DocumentKey, JsonValue ][]): void
+  {
+    const hub = this.#hub;
+    if (write.blueprints !== undefined)
     {
-      const key = mapDocumentKey(mapId);
-      if (hub.has(key) === false)
-      {
-        return [];
-      }
+      hub.noteWritten(BLUEPRINTS_DOCUMENT, write.blueprints);
+    }
 
-      // the file's steps moved the way the act moves them, each in or out where the map has it; an undo that left part of
-      // its step on the map leaves that part in the file too, in the step's place, when the file kept it as the map did,
-      // and otherwise the file, having given it back with the rest, holds neither.
-      const onFile = moves.filter(move => move.maps.has(mapId)).reduce((steps, move) =>
-      {
-        const left = move.direction === 'backward' && move.left !== null && fileKeepsLeft(move.step, move.left, key)
-          ? [ move.left.id ]
-          : [];
-        const without = steps.flatMap(id => (id === move.step.id ? left : [ id ]));
-        return move.direction === 'forward' ? [ ...without, move.step.id ] : without;
-      }, [ ...hub.savedSteps(key) ]);
-      const applied = idsOf(hub.appliedSteps(key));
-      return sameIds(onFile, applied) ? [ [ key, applied ] ] : [];
-    });
-
-    return [ ...blueprints, ...maps ];
+    tabs.forEach(([ key, content ]) => hub.noteWritten(key, content));
+    write.maps.forEach(({ map, patches }) => hub.notePatched(mapDocumentKey(map), patches));
   }
 
   /**

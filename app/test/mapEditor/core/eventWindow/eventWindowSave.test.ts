@@ -14,7 +14,9 @@ import { stampOf } from '../../support/stampFixtures.ts';
  * a map with nothing unsaved is left alone, and a map flagged in conflict (its file changed on disk, or another
  * window's copy went another way, while it held unsaved edits) is never written. Writing it would put this copy over
  * the other before the author chose between them, and the map would then read as saved, leaving nothing to warn them.
- * Only a map with unsaved edits and no conflict is written, and only a written map reads as saved afterwards.
+ * Only a map with unsaved edits and no conflict is written, and only a written map reads as saved afterwards. Every change
+ * to a blueprint on its way to the map's file lands first, so the save goes on top of what such a change wrote, never
+ * under it; a map those writes leave holding what its file holds needs no save of its own.
  */
 describe('eventWindowSave', () =>
 {
@@ -78,6 +80,65 @@ describe('eventWindowSave', () =>
         .toStrictEqual([ { ok: true, saved: true }, 'map:1', true, false ]);
     });
 
+    it('waits for every change to a blueprint on its way before writing a map, writing it after they land', async () =>
+    {
+      // Arrange: an unsaved edit, and changes to a blueprint on their way, whose landing is recorded.
+      const { hub, store } = hubWithStore();
+      setPageOption(hub, TARGET, 0, 'through', true);
+      const order: string[] = [];
+      vi.mocked(store.save).mockImplementation(async () =>
+      {
+        order.push('saved');
+      });
+      const written = async () =>
+      {
+        order.push('landed');
+      };
+
+      // Act.
+      const outcome = await saveTargetMap(hub, TARGET, written);
+
+      // Assert.
+      expect([ outcome, order, hub.isDirty('map:1') ])
+        .toStrictEqual([ { ok: true, saved: true }, [ 'landed', 'saved' ], false ]);
+    });
+
+    it('writes nothing for a map the changes on their way leave holding what its file holds', async () =>
+    {
+      // Arrange: an unsaved edit, and a change on its way whose write leaves the file holding that very edit.
+      const { hub, store } = hubWithStore();
+      setPageOption(hub, TARGET, 0, 'through', true);
+      const written = async () =>
+      {
+        hub.noteWritten('map:1', hub.committedContent('map:1'));
+      };
+
+      // Act.
+      const outcome = await saveTargetMap(hub, TARGET, written);
+
+      // Assert.
+      expect([ outcome, vi.mocked(store.save).mock.calls.length, hub.isDirty('map:1') ])
+        .toStrictEqual([ { ok: true, saved: false }, 0, false ]);
+    });
+
+    it('holds back a map the changes on their way leave waiting for a choice, writing nothing', async () =>
+    {
+      // Arrange: an unsaved edit, and a change on its way, during which the map is flagged.
+      const { hub, store } = hubWithStore();
+      setPageOption(hub, TARGET, 0, 'through', true);
+      const written = async () =>
+      {
+        hub.flagConflict('map:1', { kind: 'disk', content: { changed: true } });
+      };
+
+      // Act.
+      const outcome = await saveTargetMap(hub, TARGET, written);
+
+      // Assert.
+      expect([ outcome, vi.mocked(store.save).mock.calls.length, hub.isDirty('map:1') ])
+        .toStrictEqual([ { ok: false, message: MAP_CONFLICT_MESSAGE }, 0, true ]);
+    });
+
     it('fails with the write, leaving the map unsaved', async () =>
     {
       // Arrange: a store that cannot write.
@@ -103,7 +164,7 @@ describe('eventWindowSave', () =>
       renameEvent(unwritten.hub, { mapId: unwritten.mapId, eventId: 1 }, 'Guard');
       const land = async () =>
       {
-        written.hub.noteSaved(written.map.key, written.hub.appliedSteps(written.map.key).map(step => step.id));
+        written.hub.noteWritten(written.map.key, written.hub.committedContent(written.map.key));
       };
 
       // Act.

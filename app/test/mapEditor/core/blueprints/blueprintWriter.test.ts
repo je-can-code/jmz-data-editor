@@ -149,8 +149,7 @@ describe('BlueprintWriter', () =>
     window.hub.edit('Paint', [ mapHistoryKey(2) ], tx => tx.tiles('map:2', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 2, 1, 0), a5(7) ] ]));
     paintCorner(window, a5(9));
     await settle();
-    window.disk.set(2, window.hub.committedContent('map:2') as unknown as RmmzMap);
-    window.hub.noteSaved('map:2', window.hub.appliedSteps('map:2').map(step => step.id));
+    await window.hub.save('map:2');
 
     // Act.
     window.hub.undo(blueprintHistoryKey(BLUEPRINT));
@@ -230,8 +229,7 @@ describe('BlueprintWriter', () =>
     await holdUnsavedCopy(window);
     speedGuard(window, 4);
     await settle();
-    window.disk.set(4, window.hub.committedContent('map:4') as unknown as RmmzMap);
-    window.hub.noteSaved('map:4', window.hub.appliedSteps('map:4').map(step => step.id));
+    await window.hub.save('map:4');
     const saved = copySpeeds(window);
 
     // Act.
@@ -250,8 +248,7 @@ describe('BlueprintWriter', () =>
     await holdUnsavedCopy(window);
     speedGuard(window, 4);
     await settle();
-    window.disk.set(4, window.hub.committedContent('map:4') as unknown as RmmzMap);
-    window.hub.noteSaved('map:4', window.hub.appliedSteps('map:4').map(step => step.id));
+    await window.hub.save('map:4');
     window.hub.undo(blueprintHistoryKey(BLUEPRINT));
     await settle();
     const undone = copySpeeds(window);
@@ -330,16 +327,14 @@ describe('BlueprintWriter', () =>
   };
 
   /**
-   * Saves a held map the way a save does, without a server: its file takes what the map holds, and the map is noted saved
-   * as far as every step it holds.
+   * Saves a held map, its file taking what the map holds.
    * @param {WrittenWindow} window The window.
    * @param {number} mapId The map.
+   * @returns {Promise<void>} Settles once the file is written.
    */
-  const saveMap = (window: WrittenWindow, mapId: number): void =>
+  const saveMap = (window: WrittenWindow, mapId: number): Promise<void> =>
   {
-    const key = mapDocumentKey(mapId);
-    window.disk.set(mapId, window.hub.map(key).toJson());
-    window.hub.noteSaved(key, window.hub.appliedSteps(key).map(step => step.id));
+    return window.hub.save(mapDocumentKey(mapId));
   };
 
   it('writes an undo that left a cell painted over since as exactly what moved, the map reading saved once its file holds it', async () =>
@@ -349,7 +344,7 @@ describe('BlueprintWriter', () =>
     paintTopRow(window);
     await settle();
     window.hub.edit('Paint by hand', [ mapHistoryKey(1) ], tx => tx.tiles('map:1', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), a5(15) ] ]));
-    saveMap(window, 1);
+    await saveMap(window, 1);
 
     // Act.
     window.hub.undo(blueprintHistoryKey(BLUEPRINT));
@@ -382,7 +377,7 @@ describe('BlueprintWriter', () =>
     paintCorner(window, a5(9));
     await settle();
     window.hub.edit('Paint by hand', [ mapHistoryKey(1) ], tx => tx.tiles('map:1', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), a5(15) ] ]));
-    saveMap(window, 1);
+    await saveMap(window, 1);
     const fileBefore = structuredClone(window.disk.get(1));
 
     // Act.
@@ -482,8 +477,7 @@ describe('BlueprintWriter', () =>
     await holdUnsavedCopy(window);
     speedGuard(window, 4);
     await settle();
-    window.disk.set(4, window.hub.committedContent('map:4') as unknown as RmmzMap);
-    window.hub.noteSaved('map:4', window.hub.appliedSteps('map:4').map(step => step.id));
+    await window.hub.save('map:4');
     window.hub.edit('Change movement', [ mapHistoryKey(4) ], tx => tx.set('map:4', [ 'events', 2, 'pages', 0, 'moveSpeed' ], 6));
 
     // Act.

@@ -96,7 +96,9 @@ const operationFor = (event: HubEvent, origin: string): RemoteOperation | null =
     case 'forgotten':
       return { type: 'forget', origin, opId: event.opId, stepId: event.step.id, bases: event.bases };
     case 'saved':
-      return { type: 'saved', origin, document: event.document, marker: event.marker };
+      return { type: 'saved', origin, document: event.document, marker: event.marker, content: event.content };
+    case 'written':
+      return { type: 'written', origin, document: event.document, content: event.content };
     default:
       return null;
   }
@@ -113,8 +115,8 @@ const HEAD_EVENTS: ReadonlySet<HubEvent['type']> = new Set([
  * Keeps one window's documents in step with every other map editor window holding them, so a map and its event
  * windows share one live document and every torn-out panel stays current.
  *
- * Everything that happens to the hub here (a step, an undo, a redo, a forget, a save) is posted on the channel,
- * and every such operation posted by another window is repeated here through {@link DocumentHub.applyRemote},
+ * Everything that happens to the hub here (a step, an undo, a redo, a forget, a save, a file written otherwise) is posted
+ * on the channel, and every such operation posted by another window is repeated here through {@link DocumentHub.applyRemote},
  * which checks it against the head of this window's lineage for each document. A file changed outside the editor is
  * read once, by the window reading the change stream, which hands that very version to every window here
  * ({@link postOutside}); each takes it as the same step, so no two windows ever record different versions of one

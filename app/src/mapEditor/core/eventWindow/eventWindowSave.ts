@@ -28,9 +28,11 @@ const BLUEPRINT_NOT_WRITTEN_MESSAGE = 'A change to this blueprint is not written
  * workspace's Save all holds it back: writing it would put this copy over the other one before the author has chosen
  * between them, and once written the map would read as saved, so nothing would be left to warn them.
  *
- * A blueprint opened as a map has no file of its own, and is never saved by hand: every change to it is written at once,
- * with every copy it reached (see BlueprintWriter), so saving it waits for whatever of those is still on its way, and
- * reads as saved once they land. One whose change could not be written stays unsaved, and says so.
+ * Every change to a blueprint is written at once, with every copy it reached (see BlueprintWriter), so a save waits first
+ * for whatever of those is still on its way, as Save all does: the map's file is then written over what such a change
+ * wrote to it, never under it. A map those writes leave holding what its file holds needs no save of its own. A
+ * blueprint opened as a map has no file of its own, and is never saved by hand: it reads as saved once those writes land,
+ * and one whose change could not be written stays unsaved, and says so.
  * @param {DocumentHub} hub The window's documents; the event's map must be held.
  * @param {EventWindowTarget} target The event whose map to save.
  * @param {(() => Promise<void>) | null} written Settles once every change to a blueprint on its way to disk has landed;
@@ -46,12 +48,18 @@ const saveTargetMap = async (hub: DocumentHub, target: EventWindowTarget, writte
     return { ok: true, saved: false };
   }
 
+  await written?.();
   if (isBlueprintMapId(target.mapId))
   {
-    await written?.();
     return hub.isDirty(key)
       ? { ok: false, message: BLUEPRINT_NOT_WRITTEN_MESSAGE }
       : { ok: true, saved: true };
+  }
+
+  // the writes that landed meanwhile may have left the map holding what its file does, or flagged it.
+  if (hub.has(key) === false || hub.isDirty(key) === false)
+  {
+    return { ok: true, saved: false };
   }
 
   if (hub.isConflicted(key))

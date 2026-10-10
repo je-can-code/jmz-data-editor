@@ -241,10 +241,11 @@ describe('BlueprintUsesKeeper', () =>
       const server = new UsesServer(storedUses(ON_DISK));
       const { hub, keeper } = windowOver(server);
       const placed = place(hub, 16, 0);
+      const withPlacement = hub.committedContent('map:16');
       hub.undo(mapHistoryKey(16));
 
       // Act.
-      hub.applyRemote({ type: 'saved', origin: 'window-e', document: 'map:16', marker: [ placed.id ] });
+      hub.applyRemote({ type: 'saved', origin: 'window-e', document: 'map:16', marker: [ placed.id ], content: withPlacement });
       await keeper.whenWritten();
 
       // Assert.
@@ -281,6 +282,7 @@ describe('BlueprintUsesKeeper', () =>
       const server = new UsesServer(storedUses(ON_DISK));
       const windowB = windowOver(server, { clientId: 'window-b' });
       const placed = place(windowB.hub, 16, 0);
+      const withPlacement = windowB.hub.committedContent('map:16');
       windowB.hub.undo(mapHistoryKey(16));
       const hub = new DocumentHub({ clientId: 'window-c', store: mapStore().store });
       const keeper = new BlueprintUsesKeeper({ hub, api: server.api, holders: () => [], onProblem: () => undefined });
@@ -293,7 +295,7 @@ describe('BlueprintUsesKeeper', () =>
       });
 
       // Act: an event window's save of the map as it stood with the placement in.
-      hub.applyRemote({ type: 'saved', origin: 'window-e', document: 'map:16', marker: [ placed.id ] });
+      hub.applyRemote({ type: 'saved', origin: 'window-e', document: 'map:16', marker: [ placed.id ], content: withPlacement });
       await keeper.whenWritten();
 
       // Assert.
@@ -309,7 +311,7 @@ describe('BlueprintUsesKeeper', () =>
       const placed = place(hub, 16, 0);
 
       // Act.
-      hub.applyRemote({ type: 'saved', origin: 'window-b', document: 'map:16', marker: [ placed.id ] });
+      hub.applyRemote({ type: 'saved', origin: 'window-b', document: 'map:16', marker: [ placed.id ], content: hub.committedContent('map:16') });
       await keeper.whenWritten();
 
       // Assert.
@@ -399,30 +401,58 @@ describe('BlueprintUsesKeeper', () =>
         .toStrictEqual([]);
     });
 
-    it('counts a map holding unsaved edits whose file\'s steps cannot all be told here', async () =>
+    /**
+     * Has window b place the camp on map 16 at a column, save it, undo the placement and place it again at another, so no
+     * history holds the saved placement step any more; then window c takes map 16 and the record over from it, beside an
+     * event window.
+     * @param {UsesServer} server The server.
+     * @param {number} again The column the camp is placed at the second time.
+     * @returns {Promise<object>} Window b, and window c's documents and keeper.
+     */
+    const takenOverAfterPlacingAgain = async (server: UsesServer, again: number) =>
     {
-      // Arrange: window b places the camp on map 16, saves it, undoes the placement and places it again, so no history
-      // holds the saved placement step any more; window c takes map 16 and the record over from it, beside an event window.
-      const server = new UsesServer(storedUses(ON_DISK));
       const windowB = windowOver(server, { clientId: 'window-b' });
       place(windowB.hub, 16, 0);
       await windowB.hub.save('map:16');
       await windowB.keeper.whenWritten();
       windowB.hub.undo(mapHistoryKey(16));
-      place(windowB.hub, 16, 0);
+      place(windowB.hub, 16, again);
       const hub = new DocumentHub({ clientId: 'window-c', store: mapStore().store });
       const keeper = new BlueprintUsesKeeper({ hub, api: server.api, holders: eventWindowOnly, onProblem: () => undefined });
       hub.adoptSnapshot(windowB.hub.snapshot('map:16'));
       hub.adoptSnapshot(windowB.hub.snapshot(BLUEPRINT_USES_DOCUMENT));
+      return { windowB, hub, keeper };
+    };
+
+    it('counts a map holding unsaved edits whose file\'s steps cannot all be told here', async () =>
+    {
+      // Arrange: the camp placed again a few columns over, so map 16 no longer holds what its file does.
+      const server = new UsesServer(storedUses(ON_DISK));
+      const { windowB, hub, keeper } = await takenOverAfterPlacingAgain(server, 5);
 
       // Act: asked here, and in window b, which heard the saved step and can tell.
       const unsaved = keeper.placementsUnsavedOnlyHere();
       const toldInB = windowB.keeper.placementsUnsavedOnlyHere();
 
-      // Assert: map 16 counted here, though its placements are the ones its file was written with, since nothing here can
-      // show that; and not in window b, which can.
+      // Assert: map 16 counted in both: here, since nothing here can show which placements its file holds; in window b,
+      // which can, since the file holds the first placement and the map the second.
       expect([ hub.isDirty('map:16'), heldOn(hub, 16), unsaved, toldInB ])
-        .toStrictEqual([ true, [ 'aa22@0,0', 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ], [ 16 ], [] ]);
+        .toStrictEqual([ true, [ 'aa22@5,0', 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ], [ 16 ], [ 16 ] ]);
+    });
+
+    it('counts no map holding what its file holds, though its file\'s steps cannot all be told here', async () =>
+    {
+      // Arrange: the camp placed again where it was, so map 16 holds just what its file does.
+      const server = new UsesServer(storedUses(ON_DISK));
+      const { windowB, hub, keeper } = await takenOverAfterPlacingAgain(server, 0);
+
+      // Act.
+      const unsaved = keeper.placementsUnsavedOnlyHere();
+      const toldInB = windowB.keeper.placementsUnsavedOnlyHere();
+
+      // Assert: saved in both windows, and counted in neither, its placements being the ones its file was written with.
+      expect([ hub.isDirty('map:16'), windowB.hub.isDirty('map:16'), heldOn(hub, 16), unsaved, toldInB ])
+        .toStrictEqual([ false, false, [ 'aa22@0,0', 'aa22@1,3', 'aa22@12,3', 'k3x9q2mf@4,7' ], [], [] ]);
     });
 
     it('counts nothing while the window holds no record it can read', () =>

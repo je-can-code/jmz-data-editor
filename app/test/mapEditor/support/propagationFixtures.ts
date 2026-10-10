@@ -7,8 +7,8 @@ import { blueprintPropagationCheck } from '../../../src/mapEditor/core/blueprint
 import { blueprintShapeCheck } from '../../../src/mapEditor/core/blueprints/blueprintShape.ts';
 import type { PlacedSpot } from '../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { CopyMaps } from '../../../src/mapEditor/core/blueprints/copyMaps.ts';
-import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
-import { blueprintMapKey, mapDocumentKey, type DocumentKey } from '../../../src/mapEditor/core/model/documentKeys.ts';
+import { DocumentHub, type DocumentStore } from '../../../src/mapEditor/core/history/DocumentHub.ts';
+import { blueprintMapKey, mapDocumentKey, parseDocumentKey, type DocumentKey } from '../../../src/mapEditor/core/model/documentKeys.ts';
 import type { EditorDocument } from '../../../src/mapEditor/core/model/EditorDocument.ts';
 import { createEventPage, createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
@@ -179,8 +179,9 @@ const settle = async (): Promise<void> =>
 
 /**
  * Builds a window holding the blueprints, the record, the maps asked for, and the blueprint opened as a map, with the
- * checks a real window runs, over a disk of maps 1, 2 and 3, each a camp map, and the template map holding a stray copy.
- * The plugins are read, map 9 being J-ABS's action map, and every read has landed.
+ * checks a real window runs, over a disk of maps 1, 2 and 3, each a camp map, and the template map holding a stray copy,
+ * which the window loads maps from and saves them to. The plugins are read, map 9 being J-ABS's action map, and every
+ * read has landed.
  * @param {PropagationSetUp} setUp Which maps the window holds, which another window holds, and the record's placements.
  * @returns {Promise<PropagationWindow>} The window.
  */
@@ -193,7 +194,32 @@ const propagationWindow = async (setUp: PropagationSetUp = {}): Promise<Propagat
     releaseReads = resolve;
   });
   const disk = new Map<number, RmmzMap>([ [ 1, campMap() ], [ 2, campMap() ], [ 3, campMap() ], [ TEMPLATE_MAP, campMap() ] ]);
-  const hub = new DocumentHub({ clientId: 'window-a' });
+
+  // the window loads and saves maps from and to the disk, as the server does; nothing else is on it.
+  const store: DocumentStore = {
+    load: async key =>
+    {
+      const parsed = parseDocumentKey(key);
+      const file = parsed.kind === 'map' ? disk.get(parsed.mapId) : undefined;
+      if (file === undefined)
+      {
+        throw new Error(`no file backs ${key}`);
+      }
+
+      return structuredClone(file) as unknown as JsonValue;
+    },
+    save: async (key, content) =>
+    {
+      const parsed = parseDocumentKey(key);
+      if (parsed.kind !== 'map')
+      {
+        throw new Error(`no file backs ${key}`);
+      }
+
+      disk.set(parsed.mapId, structuredClone(content) as unknown as RmmzMap);
+    },
+  };
+  const hub = new DocumentHub({ clientId: 'window-a', store });
   hub.addCommitCheck(blueprintShapeCheck(hub));
   holdBlueprints(hub, { [BLUEPRINT]: { name: 'Camp', stamp: campStamp() } });
   holdBlueprintUses(hub, spots ?? [ 1, 2, 3, TEMPLATE_MAP ].map(mapId => ({ blueprintId: BLUEPRINT, mapId, x: 1, y: 1 })));

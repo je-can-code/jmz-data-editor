@@ -6,7 +6,7 @@ import type { Transaction } from '../../../../src/mapEditor/core/history/Transac
 import { createDocument } from '../../../../src/mapEditor/core/model/createDocument.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import type { Patch } from '../../../../src/mapEditor/core/model/patches.ts';
+import { invertPatch, type Patch } from '../../../../src/mapEditor/core/model/patches.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { operationFor } from '../../../../src/mapEditor/core/sync/SyncPeer.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
@@ -378,18 +378,22 @@ describe('DocumentHub, steps whose copies follow their change', () =>
       await hub.save(MAP_A);
       renameDoor(hub, MAP_A, 'Front door');
 
-      // Act: the change undone, then the hand's rename undone in its own window, which shows the part left again.
+      // Act: the change undone, its file version taken back out of the file as the writer writes it, then the hand's
+      // rename undone in its own window, which shows the part left again.
       const undone = hub.undo(BLUEPRINT_HISTORY);
+      const version = undone.ok ? undone.step.fileVersions?.find(each => each.document === MAP_A)?.patches ?? [] : [];
+      hub.notePatched(MAP_A, [ ...version ].reverse().map(invertPatch));
       const dirtyAfterUndo = hub.isDirty(MAP_A);
       hub.undo(eventHistoryKey(1, 1));
 
       // Assert: the file takes the door's name back though the map keeps the rename; with the rename undone the map shows
       // the change's name, which its file no longer holds, so it still reads unsaved.
-      expect([ undone.ok && undone.step.fileVersions, dirtyAfterUndo, eventOf(hub, MAP_A, 1).name, hub.isDirty(MAP_A) ])
+      expect([ version, dirtyAfterUndo, eventOf(hub, MAP_A, 1).name, (hub.fileContent(MAP_A) as unknown as RmmzMap).events[1]?.name, hub.isDirty(MAP_A) ])
         .toStrictEqual([
-          [ { document: MAP_A, patches: [ { kind: 'set', path: [ 'events', 1, 'name' ], before: 'Door', after: 'Guard (sight 5)' } ] } ],
+          [ { kind: 'set', path: [ 'events', 1, 'name' ], before: 'Door', after: 'Guard (sight 5)' } ],
           true,
           'Guard (sight 5)',
+          'Door',
           true,
         ]);
     });

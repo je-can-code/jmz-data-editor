@@ -32,15 +32,16 @@ import {
  * planned for the disk by what the disk holds and never by a map's unsaved edits. The maps are every map the record
  * places the blueprint on and every map holding a copy of its events, here, elsewhere or on disk; never a map holding a
  * plugin's patterns, and never one whose file the server no longer has. A change waits, saying why, until each is known:
- * a map held here without unsaved edits is known from the map at once; any other is read from disk, never while a write
- * of this window's to it is on its way, which the read could miss.
+ * a map held here is known at once from what the window knows its file holds, unsaved edits or none; any other is read
+ * from disk, never while a write of this window's to it is on its way, which the read could miss.
  *
  * Each kept file follows every blueprint change, made, undone or redone, exactly as the writer writes it, so it is the
  * file as it will be once every write has landed; one that fits neither way is forgotten, and a change about to move
  * names it first. A map an undo or a redo left parts on takes exactly what that move judged its file to take, and the
  * hub hears which way each held map's file took a change, its own version until the map is saved, so the move judges the
- * file by the very patches the file holds. A failed write forgets the files it would have changed. A map's save keeps its file as the save left
- * it; a map let go of, or one whose file changed on disk by anything but this session, is read again. A map opened here
+ * file by the very patches the file holds. A failed write forgets the files it would have changed. A map's save, or its
+ * file written otherwise, keeps its file as the window then knows it, once no write of this window's to it is on its way;
+ * a map let go of, or one whose file changed on disk by anything but this session, is read again. A map opened here
  * from a file this window wrote through takes up the steps that file holds, or, holding something else, has its file
  * forgotten.
  *
@@ -267,33 +268,51 @@ describe('CopyMaps', () =>
         .toStrictEqual([ [ window.hub.map('map:1').toJson(), window.disk.get(3), null ], [ 3 ] ]);
     });
 
-    it('keeps a map\'s file as a save left it: the map with every step since the save taken back out', async () =>
+    it('keeps a map\'s file as a save left it, an edit made while the save was on its way left out', async () =>
     {
-      // Arrange: two edits by hand on map 1, the first saved by something outside the hub.
+      // Arrange: an edit by hand on map 1, saving, and a second edit made while the save is on its way.
       const window = await propagationWindow();
-      const saved = paintByHand(window, 1, a5(20));
+      paintByHand(window, 1, a5(20));
+      const saving = window.hub.save('map:1');
       paintByHand(window, 1, a5(21));
 
       // Act.
-      window.hub.noteSaved('map:1', [ saved.id ]);
+      await saving;
 
       // Assert.
-      expect([ groundOf(fileOf(window, 1), 5, 5), groundOf(window.hub.map('map:1'), 5, 5) ])
-        .toStrictEqual([ a5(20), a5(21) ]);
+      expect([ groundOf(fileOf(window, 1), 5, 5), groundOf(window.hub.map('map:1'), 5, 5), groundOf(window.disk.get(1) as RmmzMap, 5, 5) ])
+        .toStrictEqual([ a5(20), a5(21), a5(20) ]);
     });
 
-    it('forgets a map\'s file when a save leaves it holding steps the map does not', async () =>
+    it('keeps a map\'s file as another window wrote it, leaving every other map\'s as it was', async () =>
     {
-      // Arrange.
+      // Arrange: map 1's file as another window's write left it, its cell painted.
+      const window = await propagationWindow();
+      const written = campMap();
+      written.data[cellIndex(MAP_WIDTH, MAP_HEIGHT, 5, 5, 0)] = a5(20);
+      const otherFile = fileOf(window, 2).toJson();
+
+      // Act.
+      window.hub.applyRemote({ type: 'written', origin: 'window-b', document: 'map:1', content: written as unknown as JsonValue });
+
+      // Assert: the map itself keeps its blank cell.
+      expect([ groundOf(fileOf(window, 1), 5, 5), groundOf(window.hub.map('map:1'), 5, 5), fileOf(window, 2).toJson() ])
+        .toStrictEqual([ a5(20), 0, otherFile ]);
+    });
+
+    it('takes a held map\'s file from what the window knows it holds, though the map holds unsaved edits, reading nothing', async () =>
+    {
+      // Arrange: map 1 painted by hand and left unsaved.
       const window = await propagationWindow();
       paintByHand(window, 1, a5(20));
 
-      // Act.
-      window.hub.noteSaved('map:1', [ 'a step from elsewhere' ]);
+      // Act: its kept file forgotten, as a failed write leaves it, and gathered again.
+      window.maps.landed([ 1 ], false);
+      await settle();
 
-      // Assert: map 2 keeps its file.
-      expect([ window.maps.file(1), window.maps.file(2) === null ])
-        .toStrictEqual([ null, false ]);
+      // Assert: the file is the map's file on disk, and only map 3's file was ever read.
+      expect([ fileOf(window, 1).toJson(), groundOf(window.hub.map('map:1'), 5, 5), window.reads ])
+        .toStrictEqual([ window.disk.get(1), a5(20), [ 3 ] ]);
     });
 
     it('forgets the file of a map let go of, and reads it from disk instead', async () =>
@@ -315,8 +334,8 @@ describe('CopyMaps', () =>
     {
       // Arrange: an edit by hand on map 1, saved, then undone.
       const window = await propagationWindow();
-      const saved = paintByHand(window, 1, a5(20));
-      window.hub.noteSaved('map:1', [ saved.id ]);
+      paintByHand(window, 1, a5(20));
+      await window.hub.save('map:1');
       window.hub.undo(mapHistoryKey(1));
 
       // Act.
@@ -481,16 +500,17 @@ describe('CopyMaps', () =>
       // own, then map 1 saved, after which its file gives the change back by the map's own patches; the move's judged
       // share names the guard's name, which only the window told of the parts left takes.
       const windows = [ await propagationWindow(), await propagationWindow() ];
-      const moves = windows.map(window =>
+      const moves: { moving: HistoryStep; left: HistoryStep }[] = [];
+      for (const window of windows)
       {
         const step = versionedChange(window);
         window.maps.follow(step, 'forward', false);
-        window.hub.noteSaved('map:1', window.hub.appliedSteps('map:1').map(each => each.id));
+        await window.hub.save('map:1');
         const share = { kind: 'set' as const, path: [ 'events', 5, 'name' ], before: 'Guard', after: 'Sentry' };
         const moving: HistoryStep = { ...step, fileVersions: [ { document: 'map:1', patches: [ share ] } ] };
         const left: HistoryStep = { id: 'window-a#99', label: step.label, histories: [], entries: [ { document: 'map:1', patch: share } ], origin: 'window-a', at: 0 };
-        return { moving, left };
-      });
+        moves.push({ moving, left });
+      }
 
       // Act.
       const taken = [
@@ -558,7 +578,7 @@ describe('CopyMaps', () =>
       const before = window.maps.fileWayOf('map:1', step, 'forward');
       window.maps.follow(step, 'forward', false);
       const after = window.maps.fileWayOf('map:1', step, 'backward');
-      window.hub.noteSaved('map:1', window.hub.appliedSteps('map:1').map(each => each.id));
+      await window.hub.save('map:1');
       const saved = window.maps.fileWayOf('map:1', step, 'backward');
 
       // Assert.

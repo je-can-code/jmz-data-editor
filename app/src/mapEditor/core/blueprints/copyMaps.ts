@@ -753,9 +753,10 @@ class CopyMaps
 
   /**
    * Says what a map a change reaches still waits for, asking for it on the way: a map held here waits only for a choice
-   * about changes made on disk, or, holding unsaved edits, for its file to be read; a map only another window holds waits
-   * to be brought in; and any other map waits for its file. A map held here without unsaved edits holds what its file
-   * does, so its file is kept from it at once, and keeps following the file from then on, whatever is edited on the map.
+   * about changes made on disk, or, while the window does not know what its file holds, or a write of this window's to
+   * it is on its way, for its file to be read; a map only another window holds waits to be brought in; and any other map
+   * waits for its file. A map held here has its file kept at once from what the window knows the file holds (see
+   * DocumentHub's fileContent), and keeps following the file from then on, whatever is edited on the map.
    * @param {number} mapId The map.
    * @returns {string | null} Why it waits, or null when it does not.
    */
@@ -774,12 +775,13 @@ class CopyMaps
         return null;
       }
 
-      if (this.#hub.isDirty(key))
+      const file = this.#hub.fileContent(key);
+      if (file === null || (this.#unwritten.get(mapId) ?? 0) > 0)
       {
         return this.#read(mapId);
       }
 
-      this.#files.set(mapId, MapDocument.fromJson(key, this.#hub.committedContent(key) as unknown as RmmzMap));
+      this.#files.set(mapId, MapDocument.fromJson(key, file as unknown as RmmzMap));
       return null;
     }
 
@@ -853,9 +855,9 @@ class CopyMaps
   }
 
   /**
-   * Hears one event of the window's documents: a document taken up, a map's save, the file taking the map as it stood, and
-   * a map let go of, thrown back to its file, or found changed on disk while it held unsaved edits; and a change to the
-   * record of placements, which may name new maps to gather.
+   * Hears one event of the window's documents: a document taken up, a map's save, the file taking the map as it stood, a
+   * map's file written otherwise, and a map let go of, thrown back to its file, or found changed on disk while it held
+   * unsaved edits; and a change to the record of placements, which may name new maps to gather.
    * @param {HubEvent} event The event.
    */
   #heard(event: HubEvent): void
@@ -866,7 +868,10 @@ class CopyMaps
         this.#adopted(event.document);
         break;
       case 'saved':
-        this.#saved(event.document, event.marker);
+        this.#saved(event.document);
+        break;
+      case 'written':
+        this.#written(event.document);
         break;
       case 'released':
       case 'reloaded':
@@ -914,14 +919,12 @@ class CopyMaps
   }
 
   /**
-   * Keeps a map's file as a save left it: the map as it stood at the steps the file now holds, which is the map with every
-   * step applied since taken back out, when the save's steps are where the map's applied steps start. Otherwise the file
-   * is no longer known. Either way the file holds the map as it stood, so from now on it takes every change to a blueprint
-   * by the map's own patches (see {@link #waysFor}).
+   * Keeps a map's file as a save left it, or found it: what the window knows the file holds now (see DocumentHub's
+   * fileContent). The file holds the map as it stood, so from now on it takes every change to a blueprint by the map's
+   * own patches (see {@link #waysFor}).
    * @param {DocumentKey} key The document saved.
-   * @param {readonly string[]} marker The steps its file holds.
    */
-  #saved(key: DocumentKey, marker: readonly string[]): void
+  #saved(key: DocumentKey): void
   {
     const parsed = parseDocumentKey(key);
     if (parsed.kind !== 'map')
@@ -930,22 +933,46 @@ class CopyMaps
     }
 
     this.#saves.set(parsed.mapId, (this.#saves.get(parsed.mapId) ?? 0) + 1);
-    if (this.#files.has(parsed.mapId) === false || this.#hub.has(key) === false)
+    this.#keepFromHub(parsed.mapId);
+  }
+
+  /**
+   * Keeps a map's file as written otherwise than by a save, by this window or another, or found changed on disk: what the
+   * window knows the file holds now.
+   * @param {DocumentKey} key The document written.
+   */
+  #written(key: DocumentKey): void
+  {
+    const parsed = parseDocumentKey(key);
+    if (parsed.kind === 'map')
+    {
+      this.#keepFromHub(parsed.mapId);
+    }
+  }
+
+  /**
+   * Takes a kept map's file afresh from what the window knows it holds, once no write of this window's to it is on its
+   * way: one on its way is in the kept file already, and not yet in what the window knows, so the kept file stays as it is
+   * until the last lands. A file the window does not know is no longer known here either, and is read again once needed.
+   * A map not kept, or not held here, is left alone.
+   * @param {number} mapId The map.
+   */
+  #keepFromHub(mapId: number): void
+  {
+    const key = mapDocumentKey(mapId);
+    if (this.#files.has(mapId) === false || this.#hub.has(key) === false || (this.#unwritten.get(mapId) ?? 0) > 0)
     {
       return;
     }
 
-    const applied = this.#hub.appliedSteps(key);
-    const startsWithMarker = marker.length <= applied.length && marker.every((id, index) => applied[index].id === id);
-    if (startsWithMarker === false)
+    const file = this.#hub.fileContent(key);
+    if (file === null)
     {
-      this.#forget(parsed.mapId);
+      this.#forget(mapId);
       return;
     }
 
-    const map = this.#hub.map(mapDocumentKey(parsed.mapId));
-    const since = applied.slice(marker.length).flatMap(step => entriesOn(step, key));
-    this.#files.set(parsed.mapId, MapDocument.fromJson(map.key, map.toJsonWithout(since)));
+    this.#files.set(mapId, MapDocument.fromJson(key, file as unknown as RmmzMap));
   }
 
   /**
