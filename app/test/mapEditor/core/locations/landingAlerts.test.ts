@@ -14,9 +14,9 @@ import type { OverlayPainter, OverlayStyle } from '../../../../src/mapEditor/cor
 
 /*
  * A transfer whose landing fails is marked on the map it leaves from, over its marker or its picture alike, once however
- * many of its transfers fail, and its quick panel says, for each failing transfer, where it lands and why the player
- * cannot stand there: naming the transfer's page when its event has several, and the event when the panel shows several.
- * A landing still being judged, or one that is fine, says nothing.
+ * many of its transfers fail, and its quick panel says, for each failing transfer, where it lands, naming the map as the
+ * map tree shows it, and why the player cannot stand there: naming the transfer's page when its event has several, and
+ * the event when the panel shows several. A landing still being judged, or one that is fine, says nothing.
  */
 
 /**
@@ -151,11 +151,18 @@ describe('landingAlertsOverlay', () =>
   });
 });
 
+/**
+ * Names a map as a window's map tree would: map 181 as Chef Adventure's tree does, and any other by its label.
+ * @param {number} mapId The map.
+ * @returns {string} Its name.
+ */
+const treeName = (mapId: number): string => (mapId === 181 ? 'Passage - 9' : `Map ${mapId}`);
+
 describe('transferLandingWords', () =>
 {
-  it('says where a transfer lands and why the player cannot stand there, for every reason', () =>
+  it('says where a transfer lands and why the player cannot stand there, for every reason, naming the map as the tree does', () =>
   {
-    // Arrange: one of each, landing at 23, 7 of map 181.
+    // Arrange: one of each, landing at 23, 7 of map 181, which the tree calls Passage - 9.
     const at: MapLocation = { mapId: 181, x: 23, y: 7 };
     const problems: LandingProblem[] = [
       { kind: 'no-map', mapId: 181 },
@@ -165,15 +172,15 @@ describe('transferLandingWords', () =>
     ];
 
     // Act.
-    const words = problems.map(problem => transferLandingWords(at, problem));
+    const words = problems.map(problem => transferLandingWords(at, problem, treeName));
 
     // Assert.
     expect(words)
       .toStrictEqual([
-        'Lands on Map 181, which does not exist.',
-        'Lands on 23, 7, off the edge of Map 181, which is 10 by 15 tiles.',
-        'Lands on 23, 7 of Map 181, where the player cannot stand. The tiles there let no one through.',
-        'Lands on 23, 7 of Map 181, where the player cannot stand. Guard (event 4) stands there, and the player cannot share its tile.',
+        'Lands on Passage - 9, which does not exist.',
+        'Lands on 23, 7, off the edge of Passage - 9, which is 10 by 15 tiles.',
+        'Lands on 23, 7 in Passage - 9, where the player cannot stand. The tiles there let no one through.',
+        'Lands on 23, 7 in Passage - 9, where the player cannot stand. Guard (event 4) stands there, and the player cannot share its tile.',
       ]);
   });
 });
@@ -186,11 +193,11 @@ describe('landingLines', () =>
     const landings = landingsOf({ '181 23 7': { kind: 'blocked' } });
 
     // Act.
-    const lines = landingLines(landings, [ { id: 18, name: 'teleport to previous', transfers: [ spotOn(0, { mapId: 181, x: 23, y: 7 }) ] } ]);
+    const lines = landingLines(landings, [ { id: 18, name: 'teleport to previous', transfers: [ spotOn(0, { mapId: 181, x: 23, y: 7 }) ] } ], treeName);
 
     // Assert.
     expect(lines)
-      .toStrictEqual([ { key: '18:0', text: 'Lands on 23, 7 of Map 181, where the player cannot stand. The tiles there let no one through.' } ]);
+      .toStrictEqual([ { key: '18:0', text: 'Lands on 23, 7 in Passage - 9, where the player cannot stand. The tiles there let no one through.' } ]);
   });
 
   it('names the page of each failing transfer on an event with several, and says nothing of one that lands well', () =>
@@ -200,7 +207,7 @@ describe('landingLines', () =>
     const transfers = [ spotOn(0, { mapId: 5, x: 1, y: 1 }), spotOn(1, { mapId: 9, x: 0, y: 0 }) ];
 
     // Act.
-    const lines = landingLines(landings, [ { id: 3, name: 'Door', transfers } ]);
+    const lines = landingLines(landings, [ { id: 3, name: 'Door', transfers } ], treeName);
 
     // Assert.
     expect(lines)
@@ -217,7 +224,7 @@ describe('landingLines', () =>
     ];
 
     // Act.
-    const lines = landingLines(landings, events);
+    const lines = landingLines(landings, events, treeName);
 
     // Assert.
     expect(lines.map(line => line.text))
@@ -234,7 +241,7 @@ describe('landingLines', () =>
     const landings = landingsOf({});
 
     // Act.
-    const lines = landingLines(landings, [ { id: 3, name: 'Door', transfers: [ spotOn(0, { mapId: 5, x: 1, y: 1 }) ] } ]);
+    const lines = landingLines(landings, [ { id: 3, name: 'Door', transfers: [ spotOn(0, { mapId: 5, x: 1, y: 1 }) ] } ], treeName);
 
     // Assert.
     expect(lines)

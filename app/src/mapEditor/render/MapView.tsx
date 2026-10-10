@@ -5,7 +5,7 @@ import { BLUEPRINTS_DOCUMENT } from '../core/blueprints/blueprints.ts';
 import { footprintReaderFor } from '../core/eventKinds/eventFootprints.ts';
 import { markerSymbolFor } from '../core/eventKinds/eventMarkers.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
-import { isBlueprintMapId } from '../core/model/documentKeys.ts';
+import { isBlueprintMapId, mapDocumentKey } from '../core/model/documentKeys.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { RmmzEventPage, RmmzMapEvent } from '../core/model/rmmzTypes.ts';
 import type { ModuleNotice } from '../core/modules/PluginModule.ts';
@@ -21,6 +21,7 @@ import { EventMenu } from '../events/EventMenu.tsx';
 import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity, type EventToolsRenderer } from '../events/MapEventTools.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import { MapStampTools } from '../stamps/MapStampTools.ts';
+import { documentName, heldTreeName } from '../views/documentLabels.ts';
 import { openEventWindow, openSwitchesVariablesWindow } from '../views/mapEditorViews.ts';
 import { useTransferPlacer } from '../views/transferPairs/useTransferPlacer.tsx';
 import { ClockChip } from './ClockChip.tsx';
@@ -588,9 +589,11 @@ const MapView = (props: MapViewProps) =>
       })
       .catch((error: unknown) =>
       {
-        setStatus(current => ({ ...current, problem: `${mapLabel(mapId)} could not be opened: ${String(error)}` }));
+        // a map that cannot be opened is named as the map tree shows it.
+        const name = documentName(mapDocumentKey(mapId), id => heldTreeName(services.hub, id));
+        setStatus(current => ({ ...current, problem: `${name} could not be opened: ${String(error)}` }));
       });
-  }, [ mapId ]);
+  }, [ mapId, services.hub ]);
 
   // pick out the event asked for once the map is open, and again whenever another is asked for, or the same one is
   // asked for again: it becomes the selection, and the view centres on it. Only a new ask moves the view, so panning

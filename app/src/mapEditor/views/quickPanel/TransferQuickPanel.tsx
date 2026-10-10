@@ -2,6 +2,8 @@ import React, { useSyncExternalStore } from 'react';
 import { Alert, Stack } from '@mui/material';
 import { transferQuickModel } from '../../core/eventKinds/transferKind.ts';
 import { landingLines } from '../../core/locations/landingAlerts.ts';
+import { mapDocumentKey } from '../../core/model/documentKeys.ts';
+import { documentName, heldTreeName } from '../documentLabels.ts';
 import type { QuickPanelProps } from '../../core/modules/PluginModule.ts';
 import { useMapEditorServices } from '../../services/MapEditorServicesContext.tsx';
 import { QuickFieldsPanel } from './QuickFieldsPanel.tsx';
@@ -9,7 +11,8 @@ import { useRevision } from './quickResources.ts';
 
 /**
  * A transfer's quick panel: each transfer's destination, facing and fade, as every kind's settings show, and above them,
- * for each transfer whose landing fails, where it lands and why the player cannot stand there. The lines follow the
+ * for each transfer whose landing fails, where it lands, on the map named as the map tree shows it, and why the player
+ * cannot stand there. The lines follow the
  * landings as they are worked out, so one on a map still being read appears once it lands, and goes once the landing is
  * mended, from this panel or anywhere else.
  * @param {QuickPanelProps} props The map and the selected transfers.
@@ -31,7 +34,7 @@ const TransferQuickPanel = (props: QuickPanelProps) =>
       const event = map.event(eventId);
       return event === null ? [] : [ { id: eventId, name: event.name, transfers: landings.transfersOf(event, map.mapId) } ];
     });
-  const lines = landingLines(landings, events);
+  const lines = landingLines(landings, events, landsOn => documentName(mapDocumentKey(landsOn), id => heldTreeName(hub, id)));
 
   return (
     <Stack spacing={1}>

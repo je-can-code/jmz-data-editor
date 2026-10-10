@@ -19,8 +19,9 @@ import { event, hubWith, transferPage } from '../../support/eventKindFixtures.ts
 import { buildMapJson } from '../../support/fixtures.ts';
 
 /*
- * A transfer's quick panel says, above its settings, where each transfer whose landing fails lands and why the player
- * cannot stand there, so the author reads the problem where they would mend it. It says nothing of a landing that is
+ * A transfer's quick panel says, above its settings, where each transfer whose landing fails lands, naming the map as the
+ * map tree shows it, and why the player cannot stand there, so the author reads the problem where they would mend it. It
+ * says nothing of a landing that is
  * fine, nothing of one on a map still being read until that map lands, and stops saying it once the landing is mended.
  */
 describe('TransferQuickPanel', () =>
@@ -94,7 +95,25 @@ describe('TransferQuickPanel', () =>
     const [ alert ] = screen.getAllByTestId('landing-alert');
     const fields = screen.getByTestId('quick-fields');
     expect([ alerts(), alert.compareDocumentPosition(fields) === Node.DOCUMENT_POSITION_FOLLOWING ])
-      .toStrictEqual([ [ 'Lands on 1, 0 of Map 1, where the player cannot stand. The tiles there let no one through.' ], true ]);
+      .toStrictEqual([ [ 'Lands on 1, 0 in Map 1, where the player cannot stand. The tiles there let no one through.' ], true ]);
+  });
+
+  it('names the map a transfer lands on as the map tree this window holds shows it', async () =>
+  {
+    // Arrange: the tree held, naming map 5 "Passage - 9", where the door lands on a wall.
+    const { hub, land } = renderPanel([ 0, 5, 1, 0, 2, 0 ]);
+    const passage = { id: 5, name: 'Passage - 9', parentId: 0, order: 5, expanded: false, scrollX: 0, scrollY: 0 };
+    act(() =>
+    {
+      hub.adopt('mapinfos', [ null, null, null, null, null, passage ] as unknown as JsonValue);
+    });
+
+    // Act.
+    await land();
+
+    // Assert.
+    expect(alerts())
+      .toStrictEqual([ 'Lands on 1, 0 in Passage - 9, where the player cannot stand. The tiles there let no one through.' ]);
   });
 
   it('says nothing of a landing the player can stand on', () =>
@@ -120,7 +139,7 @@ describe('TransferQuickPanel', () =>
 
     // Assert.
     expect([ early, alerts() ])
-      .toStrictEqual([ [], [ 'Lands on 1, 0 of Map 5, where the player cannot stand. The tiles there let no one through.' ] ]);
+      .toStrictEqual([ [], [ 'Lands on 1, 0 in Map 5, where the player cannot stand. The tiles there let no one through.' ] ]);
   });
 
   it('says nothing, and shows nothing, while its map is not held here', () =>
@@ -169,7 +188,7 @@ describe('TransferQuickPanel', () =>
 
     // Assert: one event left to show, so its line names no event.
     expect(alerts())
-      .toStrictEqual([ 'Lands on 1, 0 of Map 1, where the player cannot stand. The tiles there let no one through.' ]);
+      .toStrictEqual([ 'Lands on 1, 0 in Map 1, where the player cannot stand. The tiles there let no one through.' ]);
   });
 
   it('stops saying it once the landing is mended', () =>

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, type RefObject } from 'react';
 import { Box, Typography } from '@mui/material';
-import { TILESETS_KEY, type DocumentKey } from '../core/model/documentKeys.ts';
+import { mapDocumentKey, TILESETS_KEY, type DocumentKey } from '../core/model/documentKeys.ts';
 import type { TilesetsDocument } from '../core/model/JsonDocument.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { RmmzTileset } from '../core/model/rmmzTypes.ts';
@@ -8,6 +8,7 @@ import type { MapCell } from '../core/renderer/camera.ts';
 import { GAME_LOOK, type CellRect, type OverlayDefinition, type OverlayId } from '../core/renderer/MapRenderer.ts';
 import { lookAtDocument } from '../core/sync/lookAtDocument.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
+import { documentName, heldTreeName } from '../views/documentLabels.ts';
 import type { DrawState } from './ContextKeeper.ts';
 import { DrawNotice, markerClassifierFor } from './MapView.tsx';
 import { MapViewController } from './MapViewController.ts';
@@ -209,10 +210,11 @@ const useMapGlance = (options: MapGlanceOptions): MapGlance =>
       })
       .catch((error: unknown) =>
       {
-        // a map that cannot be opened says so, unless the glance has moved on from it.
+        // a map that cannot be opened says so, named as the map tree shows it, unless the glance has moved on from it.
         if (live)
         {
-          setProblem(`Map ${mapId} could not be opened: ${String(error)}`);
+          const name = documentName(mapDocumentKey(mapId), id => heldTreeName(services.hub, id));
+          setProblem(`${name} could not be opened: ${String(error)}`);
         }
       });
 
@@ -220,7 +222,7 @@ const useMapGlance = (options: MapGlanceOptions): MapGlance =>
     {
       live = false;
     };
-  }, [ mapId ]);
+  }, [ mapId, services.hub ]);
 
   // one function for the life of the glance, reading the renderer and the map as they stand when the pointer moves.
   const [ cellUnder ] = useState(() => (event: MouseEvent): MapCell | null =>

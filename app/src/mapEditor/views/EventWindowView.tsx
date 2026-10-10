@@ -3,6 +3,7 @@ import { Alert, Box, CircularProgress } from '@mui/material';
 import { BLUEPRINTS_DOCUMENT } from '../core/blueprints/blueprints.ts';
 import { isBlueprintMapId, mapDocumentKey } from '../core/model/documentKeys.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
+import { documentName, heldTreeName } from './documentLabels.ts';
 import { EventEditor } from './eventWindow/EventEditor.tsx';
 import { EVENT_WINDOW_MARKS, markOnce } from './eventWindow/eventWindowMarks.ts';
 
@@ -68,7 +69,9 @@ const EventWindowView = (props: EventWindowViewProps) =>
 
   if (problem !== null)
   {
-    return <Alert severity={'error'} sx={{ m: 2 }}>{`${blueprint ? 'The blueprint' : `Map ${mapId}`} could not be opened: ${problem}`}</Alert>;
+    // a map is named as the map tree this window holds shows it, by its label where the window holds none.
+    const name = blueprint ? 'The blueprint' : documentName(mapDocumentKey(mapId), id => heldTreeName(hub, id));
+    return <Alert severity={'error'} sx={{ m: 2 }}>{`${name} could not be opened: ${problem}`}</Alert>;
   }
 
   return ready

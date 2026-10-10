@@ -82,6 +82,7 @@ describe('EventWindowView', () =>
     store?: DocumentStore;
     clipboard?: string;
     api?: MapEditorApi;
+    tree?: JsonValue;
   } = {}) =>
   {
     const map = options.map ?? eventWindowMap();
@@ -93,6 +94,12 @@ describe('EventWindowView', () =>
     if (options.held !== false)
     {
       hub.adopt('map:1', map as unknown as JsonValue);
+    }
+
+    // a window holding the map tree names maps as it does.
+    if (options.tree !== undefined)
+    {
+      hub.adopt('mapinfos', options.tree);
     }
 
     const catalog = new CommandCatalog();
@@ -211,6 +218,20 @@ describe('EventWindowView', () =>
 
     // Assert.
     expect(screen.getByText('Map 1 could not be opened: the server is down'))
+      .toBeInTheDocument();
+  });
+
+  it('names the map that cannot be opened as the map tree the window holds shows it', async () =>
+  {
+    // Arrange: the tree held, naming map 1.
+    const tree = [ null, { id: 1, name: 'Bearcat Congregation', parentId: 0, order: 1, expanded: false, scrollX: 0, scrollY: 0 } ];
+    renderWindow({ held: false, tree: tree as unknown as JsonValue, open: async () => Promise.reject(new Error('the server is down')) });
+
+    // Act.
+    await settle();
+
+    // Assert.
+    expect(screen.getByText('Bearcat Congregation could not be opened: the server is down'))
       .toBeInTheDocument();
   });
 

@@ -68,22 +68,25 @@ const landingAlertsOverlay = (landings: TransferLandings): OverlayDefinition =>
 };
 
 /**
- * Says where a transfer lands and why the player cannot land there, for its quick panel.
+ * Says where a transfer lands and why the player cannot land there, for its quick panel, naming the map it lands on as
+ * the map tree shows it.
  * @param {MapLocation} location Where it lands.
  * @param {LandingProblem} problem Why the player cannot.
+ * @param {(mapId: number) => string} mapName Names a map as the map tree shows it, or by its label where the tree cannot.
  * @returns {string} The words.
  */
-const transferLandingWords = (location: MapLocation, problem: LandingProblem): string =>
+const transferLandingWords = (location: MapLocation, problem: LandingProblem, mapName: (mapId: number) => string): string =>
 {
   const { mapId, x, y } = location;
+  const name = mapName(mapId);
   switch (problem.kind)
   {
     case 'no-map':
-      return `Lands on Map ${mapId}, which does not exist.`;
+      return `Lands on ${name}, which does not exist.`;
     case 'off-map':
-      return `Lands on ${x}, ${y}, off the edge of Map ${mapId}, which is ${problem.width} by ${problem.height} tiles.`;
+      return `Lands on ${x}, ${y}, off the edge of ${name}, which is ${problem.width} by ${problem.height} tiles.`;
     default:
-      return `Lands on ${x}, ${y} of Map ${mapId}, where the player cannot stand. ${landingWords(problem)}`;
+      return `Lands on ${x}, ${y} in ${name}, where the player cannot stand. ${landingWords(problem)}`;
   }
 };
 
@@ -98,15 +101,17 @@ type LandingLine = {
 /**
  * Lists what a transfer's quick panel says about the landings of the events it shows: one line for each transfer whose
  * landing fails, naming its page when its event has more than one transfer, and its event when the panel shows several.
- * Landings on maps still being read say nothing until they land.
+ * Landings on maps still being read say nothing until they land. The map each lands on is named as the map tree shows it.
  * @param {TransferLandings} landings The window's landings.
  * @param {readonly { id: number, name: string, transfers: readonly TransferSpot[] }[]} events The events shown, with their
  * transfers.
+ * @param {(mapId: number) => string} mapName Names a map as the map tree shows it, or by its label where the tree cannot.
  * @returns {LandingLine[]} The lines, in event and page order.
  */
 const landingLines = (
   landings: TransferLandings,
-  events: readonly { readonly id: number; readonly name: string; readonly transfers: readonly TransferSpot[] }[]): LandingLine[] =>
+  events: readonly { readonly id: number; readonly name: string; readonly transfers: readonly TransferSpot[] }[],
+  mapName: (mapId: number) => string): LandingLine[] =>
 {
   const severalEvents = events.length > 1;
   return events.flatMap(event =>
@@ -126,7 +131,7 @@ const landingLines = (
       const name = event.name === '' ? `Event ${event.id}` : event.name;
       const which = [ ...(severalEvents ? [ name ] : []), ...(severalTransfers ? [ `Page ${spot.pageIndex + 1}` ] : []) ];
       const lead = which.length === 0 ? '' : `${which.join(', ')}: `;
-      return [ { key: `${event.id}:${spot.pageIndex}`, text: `${lead}${transferLandingWords(location, problem)}` } ];
+      return [ { key: `${event.id}:${spot.pageIndex}`, text: `${lead}${transferLandingWords(location, problem, mapName)}` } ];
     });
   });
 };
