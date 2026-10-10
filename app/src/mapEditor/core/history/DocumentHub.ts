@@ -253,10 +253,11 @@ type DocumentSnapshot = {
  * What happened when a document's file changed outside the editor.
  *
  * - {@code ignored}: this window does not hold the document, or it was only being re-read after the change stream
- *   came back and the document holds unsaved edits, which differ from the file by definition.
- * - {@code unchanged}: the file holds nothing the window lacks: what it holds now, what it last saved or loaded, or a
- *   state its latest edits passed through, as the echo of a save does. The document is saved as far as that state
- *   and no further.
+ *   came back and the document holds unsaved edits, which are left alone; the window learns what the file holds all
+ *   the same.
+ * - {@code unchanged}: the file holds nothing the window lacks: what it holds now, what the window last read or wrote
+ *   there, or a state its latest edits passed through, as the echo of a save does. The document reads as saved exactly
+ *   when it holds that version.
  * - {@code recorded}: the window held no unsaved edits, so it took the file's content as one undoable step, named
  *   {@link OUTSIDE_CHANGE_LABEL}, and the document stays saved.
  * - {@code conflicted}: the window holds unsaved edits, so it kept them and flagged the document; or the file was

@@ -85,9 +85,9 @@ const SOURCE_NAMES = [ 'mountain orc', 'driller', 'shrub (negapine)' ];
 const BLUEPRINT = 'n33dl3rs';
 
 /**
- * How many runs play by default, and how many steps each.
+ * How many runs play by default, and how many steps each: two hundred takes some seconds, and JMZ_SEQUENCES plays more.
  */
-const DEFAULT_RUNS = 300;
+const DEFAULT_RUNS = 200;
 const STEPS_PER_RUN = 16;
 
 /**
@@ -114,6 +114,7 @@ type World = {
   readonly hub: DocumentHub;
   readonly router: HistoryRouter;
   readonly writer: BlueprintWriter;
+  readonly maps: CopyMaps;
   readonly disk: Map<number, RmmzMap>;
   readonly onDisk: { blueprints: JsonValue };
 
@@ -432,7 +433,7 @@ const openWorld = async (setting: Setting): Promise<World> =>
   const writer = new BlueprintWriter({ hub, maps, write, settleMs: 0, onProblem: message => problems.push(message) });
   const kept = blueprintsKeptGuard(hub, { start: () => counter.start(), countOf: blueprintId => usedCopiesOf(counter, hub, blueprintId) }, mapId => `Map ${mapId}`);
   const router = new HistoryRouter(hub, null, (step, direction) => kept(step, direction) ?? writer.guard(step, direction), copiesLeftWords({ hub, mapName: mapId => `Map ${mapId}` }));
-  const world: World = { hub, router, writer, disk, onDisk, saved, expected, copies, blueprintEvents: setting.blueprintEvents, problems, lastMoved: null, limits: [], next: 0 };
+  const world: World = { hub, router, writer, maps, disk, onDisk, saved, expected, copies, blueprintEvents: setting.blueprintEvents, problems, lastMoved: null, limits: [], next: 0 };
   worldRef.current = world;
 
   holdBlueprintMap(hub, BLUEPRINT);
@@ -728,13 +729,30 @@ const wrongWith = (world: World): string[] =>
   const { hub, disk } = world;
   const wrong: string[] = [];
 
+  // nothing is open once everything has landed, so each map compares as it stands.
   heldMaps(world).forEach(mapId =>
   {
     const key = mapDocumentKey(mapId);
-    const matches = jsonEquals(hub.committedContent(key), disk.get(mapId));
+    const matches = hub.document(key).matches(disk.get(mapId) as unknown as JsonValue);
     if (hub.isDirty(key) === matches)
     {
       wrong.push(matches ? 'a map reads as unsaved while it matches its file' : 'a map reads as saved while it differs from its file');
+    }
+
+    // what the window knows a held map's file holds is what decides the above, so it must be the very file.
+    if (jsonEquals(hub.fileContent(key), disk.get(mapId)) === false)
+    {
+      wrong.push('the window knows a map\'s file otherwise than the disk holds it');
+    }
+  });
+
+  // every map file kept for planning changes is the file itself once nothing is on its way.
+  disk.forEach((file, mapId) =>
+  {
+    const kept = world.maps.file(mapId);
+    if (kept !== null && kept.matches(file as unknown as JsonValue) === false)
+    {
+      wrong.push('a map\'s file kept for planning differs from the disk');
     }
   });
 

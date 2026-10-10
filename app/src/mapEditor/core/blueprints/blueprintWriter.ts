@@ -177,8 +177,8 @@ const blueprintMapsOf = (step: HistoryStep): DocumentKey[] =>
  * Once an act lands, the window records exactly what it wrote (see DocumentHub's noteWritten and notePatched): the
  * blueprints as written, every blueprint open as a map as it stood when the act was sent, and every map held here by the
  * very patches its file took. Each then reads as saved exactly when it holds what its file holds, however its history
- * came to stand where it does: a map whose file took a change its unsaved edits kept out of the map stays unsaved, and
- * one whose last unsaved edit is undone over the change's file version reads as saved again.
+ * came to stand where it does: a map whose file took a change its unsaved edits kept out of the map reads as unsaved,
+ * whichever of its steps are undone, until it holds just what the file took, and reads as saved from that moment.
  *
  * Moves made in other windows are written by those windows; here the kept files only follow them.
  */
