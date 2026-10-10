@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   diskOperationId,
   DocumentHub,
+  isFileGone,
   isOutsideStep,
   type CommitCheck,
   type DocumentSnapshot,
@@ -2496,6 +2497,26 @@ describe('DocumentHub', () =>
         // Assert: the save wrote the map back as it stands, and it reads as saved again.
         expect([ removed, files.get(MAP_A), hub.isDirty(MAP_A), hub.isFileRemoved(MAP_A), hub.fileContent(MAP_A) ])
           .toStrictEqual([ [ [ MAP_A ], true, null, false ], fileOf(hub, MAP_A), false, false, fileOf(hub, MAP_A) ]);
+      });
+
+      it('settles a removed file\'s conflict by the save that writes it back, and leaves a changed file\'s standing', async () =>
+      {
+        // Arrange: map 1's file removed, and map 2's changed on disk while it held an unsaved edit.
+        const { store, files } = buildStore();
+        const hub = buildHub(store);
+        files.delete(MAP_A);
+        hub.applyOutsideContent(MAP_A, null);
+        hub.edit('Rename map', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+        hub.flagConflict(MAP_B, { kind: 'disk', content: buildMapJson() as unknown as JsonValue });
+        const before = [ isFileGone(hub.conflict(MAP_A)), isFileGone(hub.conflict(MAP_B)), isFileGone(null) ];
+
+        // Act: both saved, neither settled by hand first.
+        await hub.save(MAP_A);
+        await hub.save(MAP_B);
+
+        // Assert: map 1's file is back and nothing stands over it; map 2's choice still waits for the author.
+        expect([ before, files.get(MAP_A), hub.conflict(MAP_A), hub.isDirty(MAP_A), hub.conflict(MAP_B)?.kind ])
+          .toStrictEqual([ [ true, false, false ], fileOf(hub, MAP_A), null, false, 'disk' ]);
       });
 
       it('takes a removed file come back as the map holds it as nothing new, the map saved and the removal no longer flagged', () =>

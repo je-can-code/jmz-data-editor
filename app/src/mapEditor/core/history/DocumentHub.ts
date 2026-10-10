@@ -63,10 +63,24 @@ type DocumentStore = {
  *   something no patch can say. {@code content} is the file's new content, or null when the file was removed.
  * - {@code window}: another window's copy went its own way at the same time as this one. {@code theirs} is that
  *   window's copy, histories included, ready to adopt.
+ *
+ * A file removed from disk is the one conflict with no other copy to lose: the window's is the only one left, so saving
+ * it, which writes the file back, settles it (see {@link isFileGone}).
  */
 type DocumentConflict =
   | { readonly kind: 'disk'; readonly content: JsonValue | null }
   | { readonly kind: 'window'; readonly peer: string; readonly theirs: DocumentSnapshot };
+
+/**
+ * Reports whether a conflict is a document's file removed from disk, which saving the document settles, as it writes the
+ * file back holding what the window holds, and no choice throws anything away.
+ * @param {DocumentConflict | null} conflict The conflict, or null for none.
+ * @returns {boolean} True for a file removed from disk.
+ */
+const isFileGone = (conflict: DocumentConflict | null): boolean =>
+{
+  return conflict !== null && conflict.kind === 'disk' && conflict.content === null;
+};
 
 /**
  * Why an undo, redo or jump could not happen.
@@ -1996,6 +2010,8 @@ class DocumentHub
    * History is untouched: undo still works afterwards, and undoing back to this point makes the document read as saved
    * again. Edits made while the write is in flight stay unsaved. A document kept alongside others is refused, since
    * writing it whole would carry every other document's unsaved part of it to disk: its keeper writes it a part at a time.
+   * A document whose file was removed from disk has its file written back, which settles that conflict (see
+   * {@link isFileGone}); any other conflict stands, for the person to settle.
    * @param {DocumentKey} key The document.
    * @returns {Promise<void>} Settles once the file is written.
    */
@@ -2013,8 +2029,14 @@ class DocumentHub
     await store.save(key, content);
     if (this.has(key))
     {
+      // the file is back once written, so a conflict over its being gone no longer stands.
+      const gone = isFileGone(this.conflict(key));
       this.#learnFile(key, cloneJson(content));
       this.#markSaved(key, marker, 'local', this.clientId, content);
+      if (gone)
+      {
+        this.clearConflict(key);
+      }
     }
   }
 
@@ -3126,7 +3148,7 @@ class DocumentHub
   //endregion internals
 }
 
-export { diskOperationId, DocumentHub, isOutsideStep, untrackedWords };
+export { diskOperationId, DocumentHub, isFileGone, isOutsideStep, untrackedWords };
 export type {
   CommitCheck,
   DocumentConflict,

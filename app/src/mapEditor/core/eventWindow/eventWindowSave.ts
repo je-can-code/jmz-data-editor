@@ -1,4 +1,4 @@
-import type { DocumentHub } from '../history/DocumentHub.ts';
+import { isFileGone, type DocumentHub } from '../history/DocumentHub.ts';
 import { isBlueprintMapId } from '../model/documentKeys.ts';
 import { targetDocument, type EditRefusal, type EventWindowTarget } from './eventWindowTarget.ts';
 
@@ -26,7 +26,8 @@ const BLUEPRINT_NOT_WRITTEN_MESSAGE = 'A change to this blueprint is not written
  * Saves the map an event window edits. A map with nothing unsaved is left alone. A map flagged in conflict (its file
  * changed on disk, or another window's copy went another way, while it held unsaved edits) is held back exactly as the
  * workspace's Save all holds it back: writing it would put this copy over the other one before the author has chosen
- * between them, and once written the map would read as saved, so nothing would be left to warn them.
+ * between them, and once written the map would read as saved, so nothing would be left to warn them. A map whose file was
+ * deleted has no other copy to put this one over, so it is saved, which writes the file back, as Save all does.
  *
  * Every change to a blueprint is written at once, with every copy it reached (see BlueprintWriter), so a save waits first
  * for whatever of those is still on its way, as Save all does: the map's file is then written over what such a change
@@ -62,7 +63,7 @@ const saveTargetMap = async (hub: DocumentHub, target: EventWindowTarget, writte
     return { ok: true, saved: false };
   }
 
-  if (hub.isConflicted(key))
+  if (hub.isConflicted(key) && isFileGone(hub.conflict(key)) === false)
   {
     return { ok: false, message: MAP_CONFLICT_MESSAGE };
   }

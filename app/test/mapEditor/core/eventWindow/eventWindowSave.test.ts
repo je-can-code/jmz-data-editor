@@ -14,7 +14,8 @@ import { stampOf } from '../../support/stampFixtures.ts';
  * a map with nothing unsaved is left alone, and a map flagged in conflict (its file changed on disk, or another
  * window's copy went another way, while it held unsaved edits) is never written. Writing it would put this copy over
  * the other before the author chose between them, and the map would then read as saved, leaving nothing to warn them.
- * Only a map with unsaved edits and no conflict is written, and only a written map reads as saved afterwards. Every change
+ * Only a map with unsaved edits and no conflict is written, and only a written map reads as saved afterwards; a map whose
+ * file was deleted has no other copy to put this one over, so it is written, which puts the file back. Every change
  * to a blueprint on its way to the map's file lands first, so the save goes on top of what such a change wrote, never
  * under it; a map those writes leave holding what its file holds needs no save of its own.
  */
@@ -63,6 +64,23 @@ describe('eventWindowSave', () =>
       // Assert: the edit is still unsaved, and the flag still stands for the author to settle.
       expect([ outcome, vi.mocked(store.save).mock.calls.length, hub.isDirty('map:1'), hub.isConflicted('map:1') ])
         .toStrictEqual([ { ok: false, message: MAP_CONFLICT_MESSAGE }, 0, true, true ]);
+    });
+
+    it('writes a map whose file was deleted straight back, its edit with it, and the conflict over it goes', async () =>
+    {
+      // Arrange: an unsaved edit, then the map's file deleted from disk.
+      const { hub, store } = hubWithStore();
+      setPageOption(hub, TARGET, 0, 'through', true);
+      hub.applyOutsideContent('map:1', null);
+      const flagged = hub.conflict('map:1');
+
+      // Act.
+      const outcome = await saveTargetMap(hub, TARGET);
+
+      // Assert: the file is written back holding the edit, and the map reads as saved with nothing left to settle.
+      const [ [ key, content ] ] = vi.mocked(store.save).mock.calls;
+      expect([ flagged, outcome, key, (content as unknown as RmmzMap).events[2]!.pages[0].through, hub.isDirty('map:1'), hub.conflict('map:1') ])
+        .toStrictEqual([ { kind: 'disk', content: null }, { ok: true, saved: true }, 'map:1', true, false, null ]);
     });
 
     it('writes a map with unsaved edits and no conflict, which then reads as saved', async () =>

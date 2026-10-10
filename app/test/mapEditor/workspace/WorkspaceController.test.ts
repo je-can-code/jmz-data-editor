@@ -822,12 +822,27 @@ describe('WorkspaceController', () =>
         .toStrictEqual([ [ 'map:1', 'map:2' ], false, true, 'Could not save Map 2.' ]);
     });
 
+    it('names a map it could not save as the map tree shows it', async () =>
+    {
+      // Arrange: the tree held, naming map 2 "Town", whose save fails.
+      const { controller, hub } = buildController();
+      hub.adopt('mapinfos', buildTreeRows() as unknown as JsonValue);
+      hub.edit('Rename map', [ mapHistoryKey(2) ], tx => tx.set('map:2', [ 'displayName' ], 'Port'));
+
+      // Act.
+      await controller.saveAll();
+
+      // Assert.
+      expect(controller.getState().notice?.text)
+        .toBe('Could not save Town.');
+    });
+
     it('leaves a document in conflict unsaved, and says so', async () =>
     {
-      // Arrange.
+      // Arrange: map 1's file changed on disk while it held an unsaved edit.
       const { controller, hub, saves } = buildController();
       hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
-      hub.flagConflict('map:1', { kind: 'disk', content: null });
+      hub.flagConflict('map:1', { kind: 'disk', content: buildMapJson() as unknown as JsonValue });
 
       // Act.
       await controller.saveAll();
@@ -835,6 +850,22 @@ describe('WorkspaceController', () =>
       // Assert.
       expect([ saves, controller.getState().notice?.text ])
         .toStrictEqual([ [], 'Saved 0; 1 waiting for a choice about changes made elsewhere.' ]);
+    });
+
+    it('saves a map whose file was deleted straight back, nothing to choose first, and the bar about it goes', async () =>
+    {
+      // Arrange: map 1's file deleted while the map held nothing unsaved, as the hub hears it from the disk.
+      const { controller, hub, saves, maps } = buildController();
+      maps.delete(1);
+      hub.applyOutsideContent('map:1', null);
+      const flagged = hub.conflict('map:1');
+
+      // Act.
+      await controller.saveAll();
+
+      // Assert: the file is back holding the map, which reads as saved, and nothing waits.
+      expect([ flagged, saves, maps.get(1)?.displayName, hub.isDirty('map:1'), hub.conflict('map:1'), controller.getState().notice?.text ])
+        .toStrictEqual([ { kind: 'disk', content: null }, [ 'map:1' ], buildMapJson().displayName, false, null, 'Saved 1 map.' ]);
     });
 
     it('says everything is saved when nothing was waiting', async () =>

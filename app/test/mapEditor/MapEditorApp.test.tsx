@@ -38,7 +38,8 @@ vi.mock('../../src/mapEditor/workspace/Workspace.tsx', () => ({
  *
  * Above every view it owes the author every conflict, visibly and at once: a document whose two copies disagree
  * (the file on disk and this window's, or another window's and this one's) is shown with both choices, and
- * nothing is settled until one is picked. A removed file offers nothing to take.
+ * nothing is settled until one is picked. A map whose file was deleted offers no choice at all, only the words that
+ * saving puts the file back, and a map is named as the map tree shows it.
  *
  * And whichever view it shows, it owes every editor in the window a picker for a place on a map, shown the moment
  * an editor asks for one.
@@ -229,7 +230,7 @@ describe('MapEditorApp', () =>
       .toBeNull();
   });
 
-  it('offers only keeping this window\'s edits when the file was removed from disk', () =>
+  it('says a map\'s file was deleted and that saving puts it back, with nothing to choose, beside a changed file\'s choices', () =>
   {
     // Arrange.
     const { hub } = renderApp({ kind: 'workspace' });
@@ -241,11 +242,36 @@ describe('MapEditorApp', () =>
       hub.flagConflict('map:2', { kind: 'disk', content: buildMapJson() as never });
     });
 
+    // Assert: the deleted file's bar offers no button; the changed file's keeps both of its choices.
+    expect([ screen.getAllByTestId('document-conflict').map(alert => alert.textContent), screen.getAllByRole('button').map(button => button.textContent) ])
+      .toStrictEqual([
+        [ 'Map 1\'s file was deleted from disk. Save to put it back.', 'Map 2 changed on disk while it had unsaved edits here.Keep my editsLoad the version on disk' ],
+        [ 'Keep my edits', 'Load the version on disk' ],
+      ]);
+  });
+
+  it('names a map in a conflict as the map tree this window holds shows it, and by its label where the tree gives no name', () =>
+  {
+    // Arrange: the tree names map 1 and leaves map 2 unnamed.
+    const { hub } = renderApp({ kind: 'workspace' });
+    const row = (id: number, name: string) => ({ id, name, parentId: 0, order: id, expanded: false, scrollX: 0, scrollY: 0 });
+    act(() =>
+    {
+      hub.adopt('mapinfos', [ null, row(1, 'Bearcat Congregation'), row(2, '') ] as never);
+    });
+
+    // Act.
+    act(() =>
+    {
+      hub.flagConflict('map:1', { kind: 'disk', content: null });
+      hub.flagConflict('map:2', { kind: 'disk', content: null });
+    });
+
     // Assert.
     expect(screen.getAllByTestId('document-conflict').map(alert => alert.textContent))
       .toStrictEqual([
-        'Map 1 was removed from disk while it had unsaved edits here.Keep my edits',
-        'Map 2 changed on disk while it had unsaved edits here.Keep my editsLoad the version on disk',
+        'Bearcat Congregation\'s file was deleted from disk. Save to put it back.',
+        'Map 2\'s file was deleted from disk. Save to put it back.',
       ]);
   });
 

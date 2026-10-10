@@ -1,5 +1,6 @@
-import type { DocumentConflict } from '../core/history/DocumentHub.ts';
-import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../core/model/documentKeys.ts';
+import type { DocumentConflict, DocumentHub } from '../core/history/DocumentHub.ts';
+import { MAP_INFOS_KEY, mapDocumentKey, parseDocumentKey, type DocumentKey } from '../core/model/documentKeys.ts';
+import type { RmmzMapInfo } from '../core/model/rmmzTypes.ts';
 
 /**
  * What each editor-only document is called.
@@ -72,21 +73,36 @@ const documentName = (key: DocumentKey, mapName: (mapId: number) => string): str
 };
 
 /**
- * The words a conflict is shown in: what happened, and the two choices.
+ * Reads a map's name from the map tree this window holds, for a window with nothing more to go on: handed to
+ * {@link documentName}, it names a map in what the window tells the author as the tree shows it, and by its label where
+ * the window holds no tree, or the tree gives the map no name.
+ * @param {Pick<DocumentHub, 'has' | 'document'>} hub The window's documents.
+ * @param {number} mapId The map.
+ * @returns {string} Its name, such as "Bearcat Congregation"; empty where the tree this window holds does not name it.
+ */
+const heldTreeName = (hub: Pick<DocumentHub, 'has' | 'document'>, mapId: number): string =>
+{
+  const row = hub.has(MAP_INFOS_KEY) ? hub.document(MAP_INFOS_KEY).valueAt([ mapId ]) as RmmzMapInfo | null | undefined : null;
+  return row === null || row === undefined ? '' : row.name;
+};
+
+/**
+ * The words a conflict is shown in: what happened, and the choices, the first absent where nothing is to be chosen.
  */
 type ConflictWording = {
   readonly message: string;
-  readonly keepLabel: string;
+  readonly keepLabel: string | null;
   readonly takeLabel: string | null;
 };
 
 /**
  * Words a conflict for the author: what happened to the document, and what each choice keeps. A file removed from
- * disk offers no version to take, only keeping this window's.
+ * disk is no choice at all: this window's copy is the only one left, and saving it puts the file back, which is all the
+ * words say.
  * @param {DocumentKey} key The document.
  * @param {DocumentConflict} conflict The conflict.
- * @param {string} name What to call the document, where more is known of it than its key says, such as a blueprint's
- * own name; its label by default.
+ * @param {string} name What to call the document, where more is known of it than its key says, such as a map's name in
+ * the tree or a blueprint's own name; its label by default.
  * @returns {ConflictWording} The words.
  */
 const describeConflict = (key: DocumentKey, conflict: DocumentConflict, name = documentLabel(key)): ConflictWording =>
@@ -103,8 +119,8 @@ const describeConflict = (key: DocumentKey, conflict: DocumentConflict, name = d
   if (conflict.content === null)
   {
     return {
-      message: `${name} was removed from disk while it had unsaved edits here.`,
-      keepLabel: 'Keep my edits',
+      message: `${name}'s file was deleted from disk. Save to put it back.`,
+      keepLabel: null,
       takeLabel: null,
     };
   }
@@ -116,5 +132,5 @@ const describeConflict = (key: DocumentKey, conflict: DocumentConflict, name = d
   };
 };
 
-export { describeConflict, documentLabel, documentName, mapLabel };
+export { describeConflict, documentLabel, documentName, heldTreeName, mapLabel };
 export type { ConflictWording };

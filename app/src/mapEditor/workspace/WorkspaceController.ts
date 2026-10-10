@@ -7,6 +7,7 @@ import { BlueprintUsesKeeper } from '../core/blueprints/blueprintUsesKeeper.ts';
 import { copiesLeftWords } from '../core/blueprints/copiesLeft.ts';
 import { installCloseGuard, type CloseTarget } from '../core/closeGuard.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
+import { isFileGone } from '../core/history/DocumentHub.ts';
 import { blueprintHistoryKey, mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
 import type { MapCell } from '../core/renderer/camera.ts';
 import { MapTreeService, type TreeOutcome } from '../core/tree/MapTreeService.ts';
@@ -32,7 +33,7 @@ import {
 import type { RmmzMapInfo } from '../core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../services/MapEditorServices.ts';
 import { isStartPanel } from '../core/workspace/centre.ts';
-import { documentLabel } from '../views/documentLabels.ts';
+import { documentLabel, documentName } from '../views/documentLabels.ts';
 import { openEventWindow } from '../views/mapEditorViews.ts';
 import { CentreKeeper, centreOf } from './CentreKeeper.ts';
 import { POPOUT_URL } from './defaultLayout.ts';
@@ -720,8 +721,10 @@ class WorkspaceController
   }
 
   /**
-   * Saves every document holding unsaved edits, leaving any in conflict for the person to settle first. What was saved
-   * is told in maps: the blueprints are saved along with them but are not maps, and are not counted as any. The record of
+   * Saves every document holding unsaved edits, leaving any in conflict for the person to settle first, but for a map
+   * whose file was deleted, which the save writes back (see DocumentHub's isFileGone). A map that could not be saved is
+   * named as the map tree shows it. What was saved is told in maps: the blueprints are saved along with them but are not
+   * maps, and are not counted as any. The record of
    * where blueprints are placed never holds unsaved edits of its own: each map's placements go to disk with that map.
    * Placements a refused write left waiting are tried again too, and nothing is called saved until they land; when they
    * cannot, the author has already heard why.
@@ -741,7 +744,9 @@ class WorkspaceController
     const unsaved = hub.dirtyKeys();
     const blueprints = unsaved.filter(key => parseDocumentKey(key).kind === 'blueprint-map').length;
     const dirty = unsaved.filter(key => parseDocumentKey(key).kind !== 'blueprint-map');
-    const ready = dirty.filter(key => hub.isConflicted(key) === false);
+
+    // a map whose file was deleted waits for nothing but this save, which puts the file back.
+    const ready = dirty.filter(key => hub.isConflicted(key) === false || isFileGone(hub.conflict(key)));
     const failed: string[] = [];
     for (const key of ready)
     {
@@ -751,7 +756,7 @@ class WorkspaceController
       }
       catch
       {
-        failed.push(documentLabel(key));
+        failed.push(documentName(key, mapId => this.mapName(mapId)));
       }
     }
 
