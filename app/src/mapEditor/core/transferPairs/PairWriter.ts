@@ -6,6 +6,7 @@ import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/doc
 import { MapDocument } from '../model/MapDocument.ts';
 import { invertPatch, PatchConflictError, type Patch } from '../model/patches.ts';
 import type { RmmzMap } from '../model/rmmzTypes.ts';
+import { documentLabel, documentName } from '../../views/documentLabels.ts';
 
 /**
  * How long taking a failed write back waits before looking again while an edit is open, in milliseconds: nothing may move
@@ -312,13 +313,15 @@ class PairWriter
 
   /**
    * Says why a pair must not move now, beyond the window's own histories: a map it reaches held here whose file, as this
-   * window knows it, holds no way the move could reach it, something having changed it on disk since. A map nobody here
-   * holds cannot be told, and the write itself checks it. Asked by every undo, redo and history jump (see HistoryRouter).
+   * window knows it, holds no way the move could reach it, something having changed it on disk since, named as the map
+   * tree shows it. A map nobody here holds cannot be told, and the write itself checks it. Asked by every undo, redo and
+   * history jump (see HistoryRouter).
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Redo or undo.
+   * @param {(mapId: number) => string} mapName Names a map as the map tree shows it; each is "Map N" unless said.
    * @returns {string | null} Why, with no full stop of its own, or null when nothing stands in its way.
    */
-  guard(step: HistoryStep, direction: 'forward' | 'backward'): string | null
+  guard(step: HistoryStep, direction: 'forward' | 'backward', mapName = (mapId: number) => documentLabel(mapDocumentKey(mapId))): string | null
   {
     if (isPairStep(step) === false)
     {
@@ -332,7 +335,7 @@ class PairWriter
     });
     return changed === undefined
       ? null
-      : `Map ${changed} changed on disk since this transfer pair was written to it`;
+      : `${documentName(mapDocumentKey(changed), mapName)} changed on disk since this transfer pair was written to it`;
   }
 
   /**

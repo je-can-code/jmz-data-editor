@@ -273,7 +273,8 @@ class WorkspaceController
       : new MapTreeService({ hub: services.hub, api, openDocument: key => services.openDocument(key), placements: this.placements });
 
     // no undo, redo or jump takes away a blueprint whose copies still name it, its placed tiles among them, nor moves a
-    // change to a blueprint whose files no longer hold what it would take back or put back.
+    // change to a blueprint whose files no longer hold what it would take back or put back; a refusal names a map as the
+    // map tree shows it.
     const { hub, blueprintCopies, blueprintWriter, pairWriter } = services;
     const usedCopies = { start: () => blueprintCopies.start(), countOf: (blueprintId: string) => usedCopiesOf(blueprintCopies, hub, blueprintId) };
     const blueprintsKept = blueprintsKeptGuard(hub, usedCopies, mapId => this.mapName(mapId));
@@ -281,8 +282,9 @@ class WorkspaceController
     this.router = new HistoryRouter(
       hub,
       this.tree,
-      (step, direction) => blueprintsKept(step, direction) ?? blueprintWriter?.guard(step, direction) ?? pairWriter?.guard(step, direction) ?? null,
+      (step, direction, mapName) => blueprintsKept(step, direction) ?? blueprintWriter?.guard(step, direction, mapName) ?? pairWriter?.guard(step, direction, mapName) ?? null,
       leftWords,
+      mapId => this.mapName(mapId),
     );
 
     // a change to a blueprint, or a transfer pair, that could not be written says why, as anything refused does.

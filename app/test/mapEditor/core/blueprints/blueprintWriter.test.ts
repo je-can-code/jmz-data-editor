@@ -867,12 +867,13 @@ describe('BlueprintWriter', () =>
     window.maps.fileChanged('data/Map003.json', false);
     await settle();
 
-    // Act.
+    // Act: asked by a window that names no map, and by one that names map 3 as its tree does.
     const refusal = window.writer.guard(step, 'backward');
+    const named = window.writer.guard(step, 'backward', mapId => (mapId === 3 ? 'Riverside Stroll' : 'Harbor Inn'));
 
     // Assert.
-    expect([ beforeChange, refusal ])
-      .toStrictEqual([ null, 'Map 3 changed on disk since this change was written to it' ]);
+    expect([ beforeChange, refusal, named ])
+      .toStrictEqual([ null, 'Map 3 changed on disk since this change was written to it', 'Riverside Stroll changed on disk since this change was written to it' ]);
   });
 
   it('undoes a change past a cell of a map nobody has open changed on disk since, which keeps the disk\'s tile', async () =>

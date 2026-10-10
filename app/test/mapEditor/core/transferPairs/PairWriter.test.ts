@@ -266,6 +266,27 @@ describe('PairWriter', () =>
       .toStrictEqual([ null, `Map ${OUTSIDE} changed on disk since this transfer pair was written to it`, null ]);
   });
 
+  it('names the map whose file changed on disk as the map tree shows it, and by its id where the tree gives it no name', async () =>
+  {
+    // Arrange: as above, the outside map's file found without its door.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    const step = await placeDoorPair(window);
+    const changed = structuredClone(window.disk.get(OUTSIDE)) as RmmzMap;
+    changed.events = [ null ];
+    window.hub.noteWritten(mapDocumentKey(OUTSIDE), changed as unknown as JsonValue);
+
+    // Act: asked once by a window naming the outside map, and once by one whose tree gives it no name.
+    const named = window.writer.guard(step, 'backward', mapId => (mapId === OUTSIDE ? 'Riverside Stroll' : 'Harbor Inn'));
+    const unnamed = window.writer.guard(step, 'backward', () => '');
+
+    // Assert.
+    expect([ named, unnamed ])
+      .toStrictEqual([
+        'Riverside Stroll changed on disk since this transfer pair was written to it',
+        `Map ${OUTSIDE} changed on disk since this transfer pair was written to it`,
+      ]);
+  });
+
   it('waits for an act on its way before saying everything is written, and counts it unwritten meanwhile', async () =>
   {
     // Arrange: the act held on its way.

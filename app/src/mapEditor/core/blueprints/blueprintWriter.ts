@@ -4,6 +4,7 @@ import type { HistoryStep } from '../history/HistoryStep.ts';
 import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { Patch } from '../model/patches.ts';
+import { documentLabel, documentName } from '../../views/documentLabels.ts';
 import { BLUEPRINTS_DOCUMENT } from './blueprints.ts';
 import { isBlueprintChange, type CopyMaps } from './copyMaps.ts';
 
@@ -368,12 +369,14 @@ class BlueprintWriter
    * blueprints wait for a choice about changes made elsewhere, or while the tab of the blueprint it changes waits for one
    * about a version of it found on disk, since its copies would reach their files without the blueprint, or the tab's
    * blueprint would go over the newer one; or a map file it reaches holding what no way of writing it there fits, changed
-   * on disk since. Asked by every undo, redo and history jump before it moves anything (see HistoryRouter's guard).
+   * on disk since, named as the map tree shows it. Asked by every undo, redo and history jump before it moves anything
+   * (see HistoryRouter's guard).
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Redo or undo.
+   * @param {(mapId: number) => string} mapName Names a map as the map tree shows it; each is "Map N" unless said.
    * @returns {string | null} Why, with no full stop of its own, or null when nothing stands in its way.
    */
-  guard(step: HistoryStep, direction: 'forward' | 'backward'): string | null
+  guard(step: HistoryStep, direction: 'forward' | 'backward', mapName = (mapId: number) => documentLabel(mapDocumentKey(mapId))): string | null
   {
     const blocked = isBlueprintChange(step) ? this.#blockedBy([ step ]) : null;
     if (blocked !== null)
@@ -384,7 +387,7 @@ class BlueprintWriter
     const mapId = this.#maps.misfit(step, direction);
     return mapId === null
       ? null
-      : `Map ${mapId} changed on disk since this change was written to it`;
+      : `${documentName(mapDocumentKey(mapId), mapName)} changed on disk since this change was written to it`;
   }
 
   /**

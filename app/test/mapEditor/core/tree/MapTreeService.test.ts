@@ -294,7 +294,7 @@ describe('MapTreeService', () =>
       // Assert: the newcomer is untouched, and the create is still undone.
       expect([ outcome, maps.get(4)?.displayName, state.infos[4], historyOf(hub) ])
         .toStrictEqual([
-          { ok: false, message: '"Create "MAP004"" cannot redo: map 4 has a file again, which it would write over.' },
+          { ok: false, message: '"Create "MAP004"" cannot redo: MAP004 has a file again, which it would write over.' },
           'file 40',
           null,
           [ '(Create "MAP004")' ],
@@ -340,7 +340,7 @@ describe('MapTreeService', () =>
 
       // Assert.
       expect(outcome)
-        .toStrictEqual({ ok: false, message: '"Create "MAP004"" cannot undo: map 4 has changed since, and those changes would be lost.' });
+        .toStrictEqual({ ok: false, message: '"Create "MAP004"" cannot undo: MAP004 has changed since, and those changes would be lost.' });
       expect([ maps.has(4), state.infos[4]?.name, historyOf(hub) ])
         .toStrictEqual([ true, 'MAP004', [ 'Create "MAP004"' ] ]);
     });
@@ -441,7 +441,7 @@ describe('MapTreeService', () =>
       // Assert: nothing moved and nothing was written, so the tree still lists no cave.
       expect([ outcome, state.infos[5], (hub.document('mapinfos').toJson() as unknown[])[5], historyOf(hub), writes ])
         .toStrictEqual([
-          { ok: false, message: '"Externally modified" cannot undo: map 5 (Cave) has no file, so the tree would list a map that is not there.' },
+          { ok: false, message: '"Externally modified" cannot undo: Cave has no file, so the tree would list a map that is not there.' },
           null,
           null,
           [ 'Externally modified' ],
@@ -510,7 +510,7 @@ describe('MapTreeService', () =>
       // Assert.
       expect([ outcome, state.infos[4], historyOf(hub) ])
         .toStrictEqual([
-          { ok: false, message: '"Externally modified" cannot redo: map 4 (Lake) has no file, so the tree would list a map that is not there.' },
+          { ok: false, message: '"Externally modified" cannot redo: Lake has no file, so the tree would list a map that is not there.' },
           null,
           [ '(Externally modified)' ],
         ]);
@@ -665,7 +665,7 @@ describe('MapTreeService', () =>
 
       // Assert.
       expect([ outcome, hub.map('map:5').property('displayName'), maps.has(5) ])
-        .toStrictEqual([ { ok: false, message: '"Delete "Cave"" cannot redo: map 5 has changed since, and those changes would be lost.' }, 'Edited again', true ]);
+        .toStrictEqual([ { ok: false, message: '"Delete "Cave"" cannot redo: Cave has changed since, and those changes would be lost.' }, 'Edited again', true ]);
     });
 
     it('holds a map it let go of again, edits and history and all, when its delete cannot be written through', async () =>
@@ -711,7 +711,7 @@ describe('MapTreeService', () =>
 
       // Assert.
       expect(outcome)
-        .toStrictEqual({ ok: false, message: '"Delete "Cave"" cannot redo: map 5 has changed since, and those changes would be lost.' });
+        .toStrictEqual({ ok: false, message: '"Delete "Cave"" cannot redo: Cave has changed since, and those changes would be lost.' });
       expect([ maps.has(5), state.infos[5]?.name, historyOf(hub) ])
         .toStrictEqual([ true, 'Cave', [ '(Delete "Cave")' ] ]);
     });
@@ -735,7 +735,7 @@ describe('MapTreeService', () =>
       // Assert: the newcomer is untouched, and the delete is still done.
       expect([ outcome, maps.get(5)?.displayName, state.infos[5], historyOf(hub) ])
         .toStrictEqual([
-          { ok: false, message: '"Delete "Cave"" cannot undo: map 5 has a file again, which it would write over.' },
+          { ok: false, message: '"Delete "Cave"" cannot undo: Cave has a file again, which it would write over.' },
           'file 50',
           null,
           [ 'Delete "Cave"' ],
@@ -754,7 +754,7 @@ describe('MapTreeService', () =>
 
       // Assert.
       expect([ outcome, maps.get(5)?.displayName ])
-        .toStrictEqual([ { ok: false, message: '"Delete "Cave"" cannot undo: map 5 has a file again, which it would write over.' }, 'file 50' ]);
+        .toStrictEqual([ { ok: false, message: '"Delete "Cave"" cannot undo: Cave has a file again, which it would write over.' }, 'file 50' ]);
     });
   });
 

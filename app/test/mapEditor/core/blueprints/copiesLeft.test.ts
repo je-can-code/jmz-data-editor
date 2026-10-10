@@ -172,7 +172,7 @@ describe('copiesLeftWords', () =>
       .toBe('Undone, except on 7 copies changed since, which keep your changes: event 11 on Map 4, changed on disk; event 12 on Map 4, changed on disk; event 13 on Map 4, changed on disk; event 14 on Map 4, changed on disk; event 15 on Map 4, changed on disk; 2 more.');
   });
 
-  it('counts a part of anything but a copy or a map\'s tiles as an other part, by its document', () =>
+  it('counts a part of anything but a copy or a map\'s tiles as an other part, by its document, a map as the project names it', () =>
   {
     // Arrange: one of map 1's own settings, changed on the map, and the blueprints, changed on disk.
     const words = buildWords();
@@ -184,6 +184,6 @@ describe('copiesLeftWords', () =>
 
     // Assert.
     expect(told)
-      .toBe('Undone, except on 2 other parts changed since, which keep your changes: Map 1; Blueprints, changed on disk.');
+      .toBe('Undone, except on 2 other parts changed since, which keep your changes: Riverside Stroll; Blueprints, changed on disk.');
   });
 });

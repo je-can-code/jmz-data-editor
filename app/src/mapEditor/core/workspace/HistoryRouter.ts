@@ -1,9 +1,10 @@
-import type { DocumentHub, HistoryCheck, HistoryFailure } from '../history/DocumentHub.ts';
+import { untrackedWords, type DocumentHub, type HistoryCheck, type HistoryFailure } from '../history/DocumentHub.ts';
 import { TREE_HISTORY_KEY, type HistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
 import type { LeftPart } from '../history/stepParts.ts';
+import { mapDocumentKey } from '../model/documentKeys.ts';
 import type { MapTreeService, TreeOutcome } from '../tree/MapTreeService.ts';
-import { documentLabel } from '../../views/documentLabels.ts';
+import { documentLabel, documentName } from '../../views/documentLabels.ts';
 
 /**
  * What an undo, a redo or a history jump came to. {@code nothing} marks the quiet failure (there was no step that
@@ -22,11 +23,17 @@ type HistoryOutcome =
 type Direction = 'backward' | 'forward';
 
 /**
+ * Names a map as the map tree shows it (see documentLabels' documentName).
+ */
+type MapName = (mapId: number) => string;
+
+/**
  * Says why one step must not move one way, for a reason the hub's own checks know nothing of, or null when nothing beyond
  * them stands in its way: taking away a blueprint something is still a copy of, say. Asked of every step the hub would
- * move, whatever its history, just before it moves, so it must change nothing.
+ * move, whatever its history, just before it moves, so it must change nothing; handed how the window names a map, so a
+ * reason naming one names it as the map tree shows it.
  */
-type MoveGuard = (step: HistoryStep, direction: Direction) => string | null;
+type MoveGuard = (step: HistoryStep, direction: Direction, mapName: MapName) => string | null;
 
 /**
  * Words what a move left of its step for the author (see DocumentHub's HistoryCheck): which copies, on which maps, each
@@ -35,12 +42,13 @@ type MoveGuard = (step: HistoryStep, direction: Direction) => string | null;
 type LeftWords = (step: HistoryStep, left: readonly LeftPart[], direction: Direction) => string;
 
 /**
- * Words the hub's refusal for the author.
+ * Words the hub's refusal for the author, naming each map it names as the map tree shows it.
  * @param {HistoryFailure} failure The refusal.
  * @param {Direction} direction Undo or redo.
+ * @param {MapName} mapName Names a map as the map tree shows it.
  * @returns {HistoryOutcome} The outcome.
  */
-const fromHubFailure = (failure: HistoryFailure, direction: Direction): HistoryOutcome =>
+const fromHubFailure = (failure: HistoryFailure, direction: Direction, mapName: MapName): HistoryOutcome =>
 {
   const verb = direction === 'backward' ? 'undone' : 'redone';
   switch (failure.reason)
@@ -49,15 +57,19 @@ const fromHubFailure = (failure: HistoryFailure, direction: Direction): HistoryO
       return { ok: false, nothing: true, message: `Nothing to ${direction === 'backward' ? 'undo' : 'redo'}.`, stuckStepId: null };
     case 'missing-documents':
     {
-      const names = failure.documents.map(documentLabel).join(', ');
+      const names = failure.documents.map(key => documentName(key, mapName)).join(', ');
       return { ok: false, nothing: false, message: `"${failure.step.label}" also changed ${names}; open it to have it ${verb}.`, stuckStepId: null };
     }
     case 'conflict':
     case 'moved':
     case 'untracked':
     {
-      // the hub words each kind of blocked move itself, naming the edit in the way when it knows it.
-      return { ok: false, nothing: false, message: `"${failure.step.label}" cannot be ${verb}: ${failure.message}.`, stuckStepId: failure.step.id };
+      // the hub words each kind of blocked move itself, naming the edit in the way when it knows it; a document whose
+      // record does not reach the step is named here, as the author knows it.
+      const why = failure.document === undefined
+        ? failure.message
+        : untrackedWords(documentName(failure.document, mapName), failure.step, direction);
+      return { ok: false, nothing: false, message: `"${failure.step.label}" cannot be ${verb}: ${why}.`, stuckStepId: failure.step.id };
     }
   }
 };
@@ -97,6 +109,9 @@ const fromTreeOutcome = (outcome: TreeOutcome): HistoryOutcome =>
  *
  * A move that leaves parts of its step, a blueprint's change leaving copies changed since as they stand, has moved all
  * the same, and the author hears what it left, in the words the window gives.
+ *
+ * A refusal naming a map names it as the map tree shows it, by the name the window gives it, never by how the window
+ * keeps it apart from other documents.
  */
 class HistoryRouter
 {
@@ -108,18 +123,28 @@ class HistoryRouter
 
   #leftWords: LeftWords | null;
 
+  #mapName: MapName;
+
   /**
    * @param {DocumentHub} hub The window's documents and histories.
    * @param {MapTreeService | null} tree The tree service, or null when the window has no server to write through.
    * @param {MoveGuard | null} guard What every step the hub would move must also pass, or null for nothing more.
    * @param {LeftWords | null} leftWords Words what a move left of its step, or null to say nothing of it.
+   * @param {MapName | null} mapName Names a map as the map tree shows it, or null to name each "Map N".
    */
-  constructor(hub: DocumentHub, tree: MapTreeService | null, guard: MoveGuard | null = null, leftWords: LeftWords | null = null)
+  constructor(
+    hub: DocumentHub,
+    tree: MapTreeService | null,
+    guard: MoveGuard | null = null,
+    leftWords: LeftWords | null = null,
+    mapName: MapName | null = null,
+  )
   {
     this.#hub = hub;
     this.#tree = tree;
     this.#guard = guard;
     this.#leftWords = leftWords;
+    this.#mapName = mapName ?? (mapId => documentLabel(mapDocumentKey(mapId)));
   }
 
   /**
@@ -182,7 +207,7 @@ class HistoryRouter
       : this.#hub.canRedo(key);
     if (check.ok === false && check.reason === 'nothing')
     {
-      return fromHubFailure(check, direction);
+      return fromHubFailure(check, direction, this.#mapName);
     }
 
     if (key === TREE_HISTORY_KEY)
@@ -204,10 +229,11 @@ class HistoryRouter
    */
   #moveOnHub(key: HistoryKey, direction: Direction, check: HistoryCheck): HistoryOutcome
   {
-    // the guard's refusal reads as a blocked step's does, the step named as stuck, so the history panel can say why.
+    // the guard's refusal reads as a blocked step's does, the step named as stuck, so the history panel can say why, and
+    // names a map as the hub's refusals do.
     if (check.ok && this.#guard !== null)
     {
-      const refusal = this.#guard(check.step, direction);
+      const refusal = this.#guard(check.step, direction, this.#mapName);
       if (refusal !== null)
       {
         const verb = direction === 'backward' ? 'undone' : 'redone';
@@ -220,7 +246,7 @@ class HistoryRouter
       : this.#hub.redo(key);
     if (moved.ok === false)
     {
-      return fromHubFailure(moved, direction);
+      return fromHubFailure(moved, direction, this.#mapName);
     }
 
     // a move that left parts of its step says which, where the window can word them.
@@ -249,7 +275,7 @@ class HistoryRouter
       const index = stepId === null ? -1 : rows.findIndex(row => row.id === stepId);
       if (stepId !== null && index < 0)
       {
-        return fromHubFailure({ ok: false, reason: 'nothing', historyKey: key }, 'backward');
+        return fromHubFailure({ ok: false, reason: 'nothing', historyKey: key }, 'backward', this.#mapName);
       }
 
       const target = index + 1;
@@ -288,4 +314,4 @@ class HistoryRouter
 }
 
 export { HistoryRouter };
-export type { Direction as HistoryDirection, HistoryOutcome, LeftWords, MoveGuard };
+export type { Direction as HistoryDirection, HistoryOutcome, LeftWords, MapName, MoveGuard };

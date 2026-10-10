@@ -33,6 +33,7 @@ import {
   type LeftPart,
 } from './stepParts.ts';
 import { Transaction, type TransactionHost } from './Transaction.ts';
+import { documentLabel } from '../../views/documentLabels.ts';
 
 /**
  * Where documents come from and go to. In the running app it is the server; in tests, a stub.
@@ -83,7 +84,9 @@ type DocumentConflict =
  *
  * For the last three, {@code blockedBy} names the edit in the way when the window can tell which one it was, and
  * the step stays where it is, having changed nothing anywhere; the person can move the blocking edit first, or
- * forget this step ({@link DocumentHub.forgetStep}) and go on past it.
+ * forget this step ({@link DocumentHub.forgetStep}) and go on past it. An untracked one names its document too
+ * ({@code document}), so a window that knows a map by its name in the tree can word it that way (see
+ * {@link untrackedWords}); its {@code message} names the document by its label.
  */
 type HistoryFailure =
   | { readonly ok: false; readonly reason: 'nothing'; readonly historyKey: HistoryKey }
@@ -94,6 +97,7 @@ type HistoryFailure =
     readonly step: HistoryStep;
     readonly blockedBy: HistoryStep | null;
     readonly message: string;
+    readonly document?: DocumentKey;
   };
 
 /**
@@ -439,6 +443,22 @@ const BLOCKED_REDO: Readonly<Record<Interference, BlockedRedoReport>> = {
     reason: 'moved',
     describe: (step, edit) => `${edit} moved what "${step.label}" changes`,
   },
+};
+
+/**
+ * Words why a step cannot move on a document whose record of edits does not reach it (see HistoryFailure's
+ * {@code untracked}): for an undo, the document does not list the step as applied; for a redo, its record does not reach
+ * back to the step's undo.
+ * @param {string} name What the author calls the document, such as a map's name in the tree.
+ * @param {HistoryStep} step The step.
+ * @param {'forward' | 'backward'} direction Redo or undo.
+ * @returns {string} The words, with no full stop of their own.
+ */
+const untrackedWords = (name: string, step: HistoryStep, direction: 'forward' | 'backward'): string =>
+{
+  return direction === 'backward'
+    ? `this window cannot tell what changed in ${name} after "${step.label}"`
+    : `this window cannot tell what changed in ${name} since "${step.label}" was undone`;
 };
 
 /**
@@ -1707,8 +1727,8 @@ class DocumentHub
       const appliedAt = applied.findLastIndex(each => each.id === step.id);
       if (appliedAt < 0)
       {
-        const message = `this window cannot tell what changed in ${key} after "${step.label}"`;
-        return { ok: false, reason: 'untracked', step, blockedBy: null, message };
+        const message = untrackedWords(documentLabel(key), step, 'backward');
+        return { ok: false, reason: 'untracked', step, blockedBy: null, message, document: key };
       }
 
       // on a document following the step's change, an edit in the way leaves the patch it is in the way of instead.
@@ -1754,8 +1774,8 @@ class DocumentHub
       const undoneAt = moves.findLastIndex(each => each.id === step.id);
       if (undoneAt < 0)
       {
-        const message = `this window cannot tell what changed in ${key} since "${step.label}" was undone`;
-        return { ok: false, reason: 'untracked', step, blockedBy: null, message };
+        const message = untrackedWords(documentLabel(key), step, 'forward');
+        return { ok: false, reason: 'untracked', step, blockedBy: null, message, document: key };
       }
 
       // on a document following the step's change, an edit in the way leaves the patch it is in the way of out instead.
@@ -3042,7 +3062,7 @@ class DocumentHub
   //endregion internals
 }
 
-export { diskOperationId, DocumentHub, isOutsideStep };
+export { diskOperationId, DocumentHub, isOutsideStep, untrackedWords };
 export type {
   CommitCheck,
   DocumentConflict,

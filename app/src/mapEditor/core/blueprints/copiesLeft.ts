@@ -3,7 +3,7 @@ import type { HistoryStep } from '../history/HistoryStep.ts';
 import type { LeftPart } from '../history/stepParts.ts';
 import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
 import type { HistoryDirection, LeftWords } from '../workspace/HistoryRouter.ts';
-import { documentLabel } from '../../views/documentLabels.ts';
+import { documentName } from '../../views/documentLabels.ts';
 
 /**
  * How many of the things a move left are named one by one; the rest are only counted.
@@ -165,8 +165,8 @@ const copyName = (naming: CopyNaming, mapId: number, eventId: number): string =>
 };
 
 /**
- * Words one thing a move left: the copy by name, or the tiles by count, on its map, and where the change in its way was
- * made when that was not in the editor.
+ * Words one thing a move left: the copy by name, or the tiles by count, on its map, or any other part by its document, a
+ * map as the map tree shows it; and where the change in its way was made when that was not in the editor.
  * @param {CopyNaming} naming What names things.
  * @param {LeftThing} thing The thing.
  * @returns {string} Such as "Bandit (event 12) on Riverside Stroll", or "3 tiles on Riverside Stroll, changed on disk".
@@ -180,7 +180,7 @@ const thingWords = (naming: CopyNaming, thing: LeftThing): string =>
     case 'tiles':
       return `${counted(thing.count, 'tile', 'tiles')} on ${naming.mapName(thing.mapId)}${changedWhere(thing.by)}`;
     case 'other':
-      return `${documentLabel(thing.document)}${changedWhere(thing.by)}`;
+      return `${documentName(thing.document, naming.mapName)}${changedWhere(thing.by)}`;
   }
 };
 

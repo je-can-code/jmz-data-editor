@@ -10,6 +10,7 @@ import type { EditorDocument } from '../model/EditorDocument.ts';
 import { jsonEquals, type JsonValue } from '../model/json.ts';
 import { invertPatch, PatchConflictError } from '../model/patches.ts';
 import type { RmmzMap, RmmzMapInfo } from '../model/rmmzTypes.ts';
+import { documentName } from '../../views/documentLabels.ts';
 import { TREE_ROOT, type MapInfoRows } from './MapTreeModel.ts';
 import {
   copyMaps,
@@ -185,12 +186,14 @@ const messageOf = (error: unknown): string =>
 };
 
 /**
- * Words why the history refused to move a step.
+ * Words why the history refused to move a step, naming each document as the author knows it, a map as the map tree
+ * shows it.
  * @param {HistoryFailure} failure The refusal.
  * @param {'backward' | 'forward'} direction Undo or redo.
+ * @param {(mapId: number) => string} mapName Names a map as the map tree shows it.
  * @returns {string} The words.
  */
-const describeFailure = (failure: HistoryFailure, direction: 'backward' | 'forward'): string =>
+const describeFailure = (failure: HistoryFailure, direction: 'backward' | 'forward', mapName: (mapId: number) => string): string =>
 {
   const verb = direction === 'backward' ? 'undo' : 'redo';
   switch (failure.reason)
@@ -198,7 +201,7 @@ const describeFailure = (failure: HistoryFailure, direction: 'backward' | 'forwa
     case 'nothing':
       return `Nothing to ${verb} in the map tree.`;
     case 'missing-documents':
-      return `"${failure.step.label}" needs ${failure.documents.join(', ')} open to ${verb}.`;
+      return `"${failure.step.label}" needs ${failure.documents.map(key => documentName(key, mapName)).join(', ')} open to ${verb}.`;
     case 'conflict':
     case 'moved':
     case 'untracked':
@@ -213,13 +216,13 @@ const describeFailure = (failure: HistoryFailure, direction: 'backward' | 'forwa
  * the step moves, or by the server when the file arrived after that check.
  * @param {HistoryStep} step The step.
  * @param {'backward' | 'forward'} direction Undo or redo.
- * @param {number} mapId The map whose file is there.
+ * @param {string} name The map whose file is there, as the map tree shows it.
  * @returns {string} The words.
  */
-const fileTakenRefusal = (step: HistoryStep, direction: 'backward' | 'forward', mapId: number): string =>
+const fileTakenRefusal = (step: HistoryStep, direction: 'backward' | 'forward', name: string): string =>
 {
   const verb = direction === 'backward' ? 'undo' : 'redo';
-  return `"${step.label}" cannot ${verb}: map ${mapId} has a file again, which it would write over.`;
+  return `"${step.label}" cannot ${verb}: ${name} has a file again, which it would write over.`;
 };
 
 /**
@@ -250,27 +253,26 @@ const refusedForFileThere = (error: unknown): boolean =>
  * editor carries no files, and the change it recorded may have taken the map's file away along with its row.
  * @param {HistoryStep} step The step.
  * @param {'backward' | 'forward'} direction Undo or redo.
- * @param {number} mapId The map it would list.
- * @param {string} name The map's name in the tree.
+ * @param {string} name The map it would list, as the map tree would show it.
  * @returns {string} The words.
  */
-const missingFileRefusal = (step: HistoryStep, direction: 'backward' | 'forward', mapId: number, name: string): string =>
+const missingFileRefusal = (step: HistoryStep, direction: 'backward' | 'forward', name: string): string =>
 {
   const verb = direction === 'backward' ? 'undo' : 'redo';
-  return `"${step.label}" cannot ${verb}: map ${mapId} (${name}) has no file, so the tree would list a map that is not there.`;
+  return `"${step.label}" cannot ${verb}: ${name} has no file, so the tree would list a map that is not there.`;
 };
 
 /**
  * Words the refusal of an undo or redo that would take away a map changed since the step, losing the change.
  * @param {HistoryStep} step The step.
  * @param {'backward' | 'forward'} direction Undo or redo.
- * @param {number} mapId The changed map.
+ * @param {string} name The changed map, as the map tree shows it.
  * @returns {string} The words.
  */
-const changedRefusal = (step: HistoryStep, direction: 'backward' | 'forward', mapId: number): string =>
+const changedRefusal = (step: HistoryStep, direction: 'backward' | 'forward', name: string): string =>
 {
   const verb = direction === 'backward' ? 'undo' : 'redo';
-  return `"${step.label}" cannot ${verb}: map ${mapId} has changed since, and those changes would be lost.`;
+  return `"${step.label}" cannot ${verb}: ${name} has changed since, and those changes would be lost.`;
 };
 
 /**
@@ -664,7 +666,7 @@ class MapTreeService
       : this.#hub.canRedo(TREE_HISTORY_KEY);
     if (check.ok === false)
     {
-      return { ok: false, message: describeFailure(check, direction) };
+      return { ok: false, message: describeFailure(check, direction, mapId => this.#rowName(mapId)) };
     }
 
     const { step } = check;
@@ -700,7 +702,7 @@ class MapTreeService
       const problems = await this.#restore(direction, progress);
       if (problems.length === 0 && error instanceof FileTakenError)
       {
-        return { ok: false, message: fileTakenRefusal(step, direction, error.mapId) };
+        return { ok: false, message: fileTakenRefusal(step, direction, this.#movedName(step, direction, error.mapId)) };
       }
 
       return error instanceof TreeRefusal && problems.length === 0
@@ -727,7 +729,7 @@ class MapTreeService
       : this.#hub.canRedo(TREE_HISTORY_KEY);
     if (head.ok === false)
     {
-      throw new TreeRefusal(describeFailure(head, direction));
+      throw new TreeRefusal(describeFailure(head, direction, mapId => this.#rowName(mapId)));
     }
 
     if (head.step.id !== step.id)
@@ -740,7 +742,7 @@ class MapTreeService
       : this.#hub.redo(TREE_HISTORY_KEY);
     if (moved.ok === false)
     {
-      throw new TreeRefusal(describeFailure(moved, direction));
+      throw new TreeRefusal(describeFailure(moved, direction, mapId => this.#rowName(mapId)));
     }
   }
 
@@ -787,7 +789,7 @@ class MapTreeService
       const expected = this.#leavingHeld(file, direction)?.content ?? leaving;
       if (jsonEquals(this.#hub.snapshot(file.document).content, expected) === false)
       {
-        throw new TreeRefusal(changedRefusal(step, direction, mapIdOf(file.document)));
+        throw new TreeRefusal(changedRefusal(step, direction, this.#movedName(step, direction, mapIdOf(file.document))));
       }
     }
   }
@@ -936,16 +938,18 @@ class MapTreeService
         continue;
       }
 
+      // a refusal names the map as the map tree shows it, or would once the step brings it back.
+      const name = this.#movedName(step, direction, mapId);
       if (leaving === null)
       {
-        return { refusal: fileTakenRefusal(step, direction, mapId) };
+        return { refusal: fileTakenRefusal(step, direction, name) };
       }
 
       const verb = direction === 'backward' ? 'undo' : 'redo';
       return {
         refusal: current === null
-          ? `"${step.label}" cannot ${verb}: map ${mapId}'s file is gone.`
-          : changedRefusal(step, direction, mapId),
+          ? `"${step.label}" cannot ${verb}: ${name}'s file is gone.`
+          : changedRefusal(step, direction, name),
       };
     }
 
@@ -973,7 +977,7 @@ class MapTreeService
     {
       if (brought.has(mapDocumentKey(mapId)) === false && (await this.#diskFileOf(mapId)) === null)
       {
-        return missingFileRefusal(step, direction, mapId, name);
+        return missingFileRefusal(step, direction, documentName(mapDocumentKey(mapId), () => name));
       }
     }
 
@@ -1015,6 +1019,33 @@ class MapTreeService
 
     const after = copy.toJson() as unknown as (RmmzMapInfo | null)[];
     return after.flatMap((row, mapId): [ number, string ][] => (row !== null && (before[mapId] ?? null) === null ? [ [ mapId, row.name ] ] : []));
+  }
+
+  /**
+   * Reads a map's name in the tree as it stands.
+   * @param {number} mapId The map.
+   * @returns {string} The name its row gives it; nothing for a map the tree does not list.
+   */
+  #rowName(mapId: number): string
+  {
+    const row = this.rows()[mapId] ?? null;
+    return row === null
+      ? ''
+      : row.name;
+  }
+
+  /**
+   * Names a map a step moves as the map tree shows it, for a refusal: by its row in the tree as it stands, or, for a map
+   * the step would list again, by the row the step lists it with; as "Map N" where neither gives it a name.
+   * @param {HistoryStep} step The step.
+   * @param {'backward' | 'forward'} direction Undo or redo.
+   * @param {number} mapId The map.
+   * @returns {string} Its name, such as "Cave", or "Map 5".
+   */
+  #movedName(step: HistoryStep, direction: 'backward' | 'forward', mapId: number): string
+  {
+    const listed = this.#mapsListedBy(step, direction).find(([ id ]) => id === mapId);
+    return documentName(mapDocumentKey(mapId), id => (listed === undefined ? this.#rowName(id) : listed[1]));
   }
 
   /**

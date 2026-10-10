@@ -156,13 +156,15 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
   const { names } = useCommandListResources(api);
 
   // a change to a blueprint whose files no longer hold what it would take back or put back stays where it is, and one
-  // that moved leaving copies changed since as they stand names them, on their maps as the project names them.
+  // that moved leaving copies changed since as they stand names them, on their maps as the project names them, as every
+  // refusal names a map.
   const mapNames = names?.maps ?? null;
   const router = useMemo(() => new HistoryRouter(
     hub,
     null,
-    blueprintWriter === null ? null : (step, direction) => blueprintWriter.guard(step, direction),
+    blueprintWriter === null ? null : (step, direction, mapName) => blueprintWriter.guard(step, direction, mapName),
     copiesLeftWords({ hub, mapName: mapId => mapNameOf(hub, mapId, mapNames) }),
+    mapId => mapNameOf(hub, mapId, mapNames),
   ), [ hub, blueprintWriter, mapNames ]);
 
   // the graphic picker reads the server and the names the way the hand-built command editors do.

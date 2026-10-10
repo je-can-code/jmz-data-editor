@@ -1477,18 +1477,20 @@ describe('DocumentHub', () =>
       // Act.
       const result = hub.undo(mapHistoryKey(2));
 
-      // Assert.
+      // Assert: the refusal names the map by its label, and says which document it is for a window that names it otherwise.
       expect([
         result.ok === false && result.reason,
         result.ok === false && 'blockedBy' in result && result.blockedBy,
         result.ok === false && 'message' in result && result.message,
+        result.ok === false && 'document' in result && result.document,
         triggersOf(hub),
         stateOf(hub, histories),
       ])
         .toStrictEqual([
           'untracked',
           null,
-          'this window cannot tell what changed in map:1 after "Place door pair"',
+          'this window cannot tell what changed in Map 1 after "Place door pair"',
+          MAP_A,
           [ 3, 3 ],
           before,
         ]);
@@ -1742,11 +1744,12 @@ describe('DocumentHub', () =>
       hub.adoptSnapshot(whole);
       const redone = hub.redo(mapHistoryKey(1));
 
-      // Assert.
+      // Assert: the refusal names the map by its label, and says which document it is for a window that names it otherwise.
       expect([
         refused.ok === false && refused.reason,
         refused.ok === false && 'blockedBy' in refused && refused.blockedBy,
         refused.ok === false && 'message' in refused && refused.message,
+        refused.ok === false && 'document' in refused && refused.document,
         afterRefusal,
         redone.ok,
         slotsOf(hub),
@@ -1754,7 +1757,8 @@ describe('DocumentHub', () =>
         .toStrictEqual([
           'untracked',
           null,
-          'this window cannot tell what changed in map:2 since "Place door pair" was undone',
+          'this window cannot tell what changed in Map 2 since "Place door pair" was undone',
+          MAP_B,
           before,
           true,
           [ null, '1:Door', null, '3:Chest', null, '5:EV005' ],

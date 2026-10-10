@@ -3,6 +3,7 @@ import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.
 import { mapHistoryKey, TREE_HISTORY_KEY } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { MapTreeService } from '../../../../src/mapEditor/core/tree/MapTreeService.ts';
 import { HistoryRouter, type MoveGuard } from '../../../../src/mapEditor/core/workspace/HistoryRouter.ts';
+import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
 
@@ -387,6 +388,113 @@ describe('HistoryRouter', () =>
     // Assert.
     expect([ outcome, hub.history(mapHistoryKey(2)).position ])
       .toStrictEqual([ { ok: true, message: 'left 1' }, 0 ]);
+  });
+
+  /*
+   * A refusal naming a map names it as the map tree shows it, by the name the window gives it, never by the key the
+   * window keeps it under: "map:3" means nothing to the author, and "Map 3" makes them look the map up by its id. A map
+   * the tree gives no name is named by its id, as the tree shows it, and anything else by its label.
+   */
+  describe('naming maps', () =>
+  {
+    /**
+     * Names maps 1 and 2 as a tree would, giving map 3 no name.
+     * @param {number} mapId The map.
+     * @returns {string} Its name; nothing for map 3, or any map the tree does not list.
+     */
+    const treeName = (mapId: number): string => ({ 1: 'Riverside Stroll', 2: 'Harbor Inn', 3: ' ' } as Record<number, string>)[mapId] ?? '';
+
+    /**
+     * Records a door pair across maps 1 and 2 on a hub holding both, and the blueprints.
+     * @returns {DocumentHub} The hub.
+     */
+    const buildPairedHub = (): DocumentHub =>
+    {
+      const hub = new DocumentHub({ clientId: 'window-a' });
+      hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
+      hub.adopt('map:2', buildMapJson() as unknown as JsonValue);
+      hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.set('map:1', [ 'displayName' ], 'Near side');
+        tx.set('map:2', [ 'displayName' ], 'Far side');
+      });
+      return hub;
+    };
+
+    it('names every other document a step needs open, a map as the tree shows it, one the tree names nothing by its id', async () =>
+    {
+      // Arrange: a step across three maps and the blueprints, all but map 1 then let go of.
+      const hub = new DocumentHub({ clientId: 'window-a' });
+      const maps: DocumentKey[] = [ 'map:1', 'map:2', 'map:3' ];
+      const letGo: DocumentKey[] = [ 'map:2', 'map:3', 'editor-data:blueprints' ];
+      maps.forEach(key => hub.adopt(key, buildMapJson() as unknown as JsonValue));
+      hub.adopt('editor-data:blueprints', { schemaVersion: 1, data: { blueprints: {} } });
+      hub.edit('Place doors', [ mapHistoryKey(1) ], tx =>
+      {
+        maps.forEach(key => tx.set(key, [ 'note' ], 'door'));
+        tx.set('editor-data:blueprints', [ 'data', 'blueprints', 'k3x9q2mf' ], { name: 'Door' });
+      });
+      letGo.forEach(key => hub.release(key));
+      const router = new HistoryRouter(hub, null, null, null, treeName);
+
+      // Act.
+      const outcome = await router.undo(mapHistoryKey(1));
+
+      // Assert.
+      expect(outcome)
+        .toStrictEqual({ ok: false, nothing: false, message: '"Place doors" also changed Harbor Inn, Map 3, Blueprints; open it to have it undone.', stuckStepId: null });
+    });
+
+    it('names a map whose copy does not record a step it would undo as the tree shows it, and by its label with no naming given', async () =>
+    {
+      // Arrange: map 1 let go of and opened again from its file, which records nothing of the pair.
+      const hub = buildPairedHub();
+      const onDisk = hub.committedContent('map:1');
+      hub.release('map:1');
+      hub.adopt('map:1', onDisk);
+      const named = new HistoryRouter(hub, null, null, null, treeName);
+      const unnamed = new HistoryRouter(hub, null);
+
+      // Act.
+      const outcomes = [ await named.undo(mapHistoryKey(2)), await unnamed.undo(mapHistoryKey(2)) ];
+
+      // Assert.
+      expect(outcomes.map(outcome => outcome.ok === false && outcome.message))
+        .toStrictEqual([
+          '"Place door pair" cannot be undone: this window cannot tell what changed in Riverside Stroll after "Place door pair".',
+          '"Place door pair" cannot be undone: this window cannot tell what changed in Map 1 after "Place door pair".',
+        ]);
+    });
+
+    it('names a map whose record does not reach back to a step\'s undo as the tree shows it, for a redo', async () =>
+    {
+      // Arrange: the pair undone, then map 2 taken back from a copy recording nothing since.
+      const hub = buildPairedHub();
+      hub.undo(mapHistoryKey(1));
+      hub.adoptSnapshot({ ...structuredClone(hub.snapshot('map:2')), moves: [] });
+      const router = new HistoryRouter(hub, null, null, null, treeName);
+
+      // Act.
+      const outcome = await router.redo(mapHistoryKey(1));
+
+      // Assert.
+      expect(outcome.ok === false && outcome.message)
+        .toBe('"Place door pair" cannot be redone: this window cannot tell what changed in Harbor Inn since "Place door pair" was undone.');
+    });
+
+    it('hands its guard how it names a map, so the guard\'s refusal names one as the tree shows it', async () =>
+    {
+      // Arrange: a guard refusing every move, naming map 2 by what it is handed.
+      const hub = buildPairedHub();
+      const router = new HistoryRouter(hub, null, (_step, _direction, mapName) => `${mapName(2)} changed on disk since this was written to it`, null, treeName);
+
+      // Act.
+      const outcome = await router.undo(mapHistoryKey(1));
+
+      // Assert.
+      expect(outcome.ok === false && outcome.message)
+        .toBe('"Place door pair" cannot be undone: Harbor Inn changed on disk since this was written to it.');
+    });
   });
 
   it('refuses to move the tree without a tree service', async () =>

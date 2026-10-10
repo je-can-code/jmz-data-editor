@@ -40,6 +40,28 @@ const documentLabel = (key: DocumentKey): string =>
 };
 
 /**
+ * Names a document in words for the author, where a window knows more of it than its key says: a map as the map tree
+ * shows it, by the name the window gives it, or by its label where that name is blank; anything else by its label.
+ * @param {DocumentKey} key The document.
+ * @param {(mapId: number) => string} mapName Names a map as the map tree shows it.
+ * @returns {string} Its name, such as "Riverside Stroll", "Map 12" or "The map tree".
+ */
+const documentName = (key: DocumentKey, mapName: (mapId: number) => string): string =>
+{
+  const parsed = parseDocumentKey(key);
+  if (parsed.kind !== 'map')
+  {
+    return documentLabel(key);
+  }
+
+  // a map the tree gives no name shows in it by its id alone, which its label says.
+  const name = mapName(parsed.mapId);
+  return name.trim() === ''
+    ? documentLabel(key)
+    : name;
+};
+
+/**
  * The words a conflict is shown in: what happened, and the two choices.
  */
 type ConflictWording = {
@@ -84,5 +106,5 @@ const describeConflict = (key: DocumentKey, conflict: DocumentConflict, name = d
   };
 };
 
-export { describeConflict, documentLabel };
+export { describeConflict, documentLabel, documentName };
 export type { ConflictWording };
