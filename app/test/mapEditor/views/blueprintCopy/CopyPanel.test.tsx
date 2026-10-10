@@ -70,9 +70,9 @@ describe('CopyPanel', () =>
    * @param {object} options The copy, whether the plugins have been read, and whether the nest is kept.
    * @returns {object} The hub, and every window the window asked to open.
    */
-  const renderCopy = (options: { copy?: RmmzMapEvent; plugins?: boolean; nest?: boolean } = {}) =>
+  const renderCopy = (options: { copy?: RmmzMapEvent; plugins?: boolean; nest?: boolean; blocked?: boolean } = {}) =>
   {
-    const { copy = apartCopy(), plugins = true, nest = true } = options;
+    const { copy = apartCopy(), plugins = true, nest = true, blocked = false } = options;
     const file = mapWithEvents(16, 12, Array.from({ length: COPY_ID + 1 }, () => null));
     file.events[COPY_ID] = copy;
     const hub = new DocumentHub({ clientId: 'event-window' });
@@ -87,13 +87,13 @@ describe('CopyPanel', () =>
       ]);
     }
 
-    // every window asked for is noted, and opens blank, as a new browser window does.
+    // every window asked for is noted, and opens blank, as a new browser window does, unless pop-ups are blocked.
     const opened: string[] = [];
     const openWindow = (_url: string, name: string) =>
     {
       const target = { location: { href: 'about:blank' }, focus: () => undefined };
       opened.push(name);
-      return target as unknown as Window;
+      return blocked ? null : target as unknown as Window;
     };
     const catalog = new CommandCatalog();
     registerBuiltInCommands(catalog);
@@ -275,6 +275,19 @@ describe('CopyPanel', () =>
     // Assert.
     expect(opened)
       .toStrictEqual([ 'jmz-blueprint-event-k3x9q2mf-2' ]);
+  });
+
+  it('says so when the blueprint\'s window was blocked', () =>
+  {
+    // Arrange.
+    renderCopy({ blocked: true });
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Open blueprint' }));
+
+    // Assert.
+    expect(screen.getByRole('alert').textContent)
+      .toBe('The blueprint\'s window was blocked; allow pop-ups for the editor to open it.');
   });
 
   it('says why no change reaches a drifted copy, offering to follow again, and why a lost one has nothing to follow', () =>

@@ -37,17 +37,20 @@ describe('CopyQuickSection', () =>
    * @param {object} options What opening a window comes to, and the nest the window keeps.
    * @returns {object} The hub, the map file it started from, and every window asked for.
    */
-  const renderPick = (events: RmmzMapEvent[], eventIds: number[], options: { blocked?: boolean; nest?: ReturnType<typeof needlerNest> } = {}) =>
+  const renderPick = (events: RmmzMapEvent[], eventIds: number[], options: { blocked?: boolean; nest?: ReturnType<typeof needlerNest>; plugins?: boolean } = {}) =>
   {
-    const { blocked = false, nest = needlerNest() } = options;
+    const { blocked = false, nest = needlerNest(), plugins = true } = options;
     const held = hubWith(events);
     holdBlueprints(held.hub, { [NEST_ID]: nest });
     const modules = new PluginModuleRegistry(new CommandCatalog());
     registerCoreEventKinds(modules);
-    modules.activate([ jabsModule, lightingModule ], [
-      { name: 'j/abs/J-ABS', status: true, description: '', parameters: { actionMapId: '9' } },
-      { name: 'j/lighting/J-Lighting', status: true, description: '', parameters: {} },
-    ]);
+    if (plugins)
+    {
+      modules.activate([ jabsModule, lightingModule ], [
+        { name: 'j/abs/J-ABS', status: true, description: '', parameters: { actionMapId: '9' } },
+        { name: 'j/lighting/J-Lighting', status: true, description: '', parameters: {} },
+      ]);
+    }
     const opened: string[] = [];
     const openWindow = (_url: string, name: string) =>
     {
@@ -149,6 +152,34 @@ describe('CopyQuickSection', () =>
     // Assert.
     expect([ screen.getByRole('alert').textContent, JSON.stringify(hub.document('map:1').toJson()) === before ])
       .toStrictEqual([ 'It can\'t follow: the blueprint\'s commands name another of its events, and which event that is on this map can\'t be told.', true ]);
+  });
+
+  it('puts away why a follow could not be made once the author closes it', () =>
+  {
+    // Arrange: the follow refused, as above.
+    const turn = (eventId: number) => command(205, [ eventId, { list: [ { code: 0, parameters: [] } ], repeat: false, skippable: false, wait: false } ]);
+    const nest = needlerNest([ event(2, [ page([ turn(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3, x: 0, y: 0 } ]);
+    renderPick([ copyOf(event(2, [ page([ turn(15) ]) ], { name: 'Needler' })) ], [ 12 ], { nest });
+    fireEvent.click(screen.getByRole('button', { name: 'Follow the blueprint again' }));
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    // Assert.
+    expect(screen.queryByRole('alert'))
+      .toBeNull();
+  });
+
+  it('says it is reading the project\'s plugins before they are read', () =>
+  {
+    // Arrange: nothing beyond the plugins unread.
+
+    // Act.
+    renderPick([ apartCopy() ], [ 12 ], { plugins: false });
+
+    // Assert.
+    expect([ screen.getByText('Reading the project\'s plugins') !== null, screen.queryByTestId('copy-quick-section') ])
+      .toStrictEqual([ true, null ]);
   });
 
   it('says why no change reaches a drifted copy, and offers no following for a copy whose blueprint is gone', () =>

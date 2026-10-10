@@ -2,7 +2,16 @@ import { rewireGroupReferences } from '../events/eventReferences.ts';
 import { cloneJson, jsonEquals, type JsonValue } from '../model/json.ts';
 import type { RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
 import { metaTagsOf } from '../properties/noteText.ts';
-import { addExactly, lineFieldName, ownNoteOf, pageKey, tagLinesOf, type CommentTagDefinition, type FieldPlace } from './blueprintFields.ts';
+import {
+  addExactly,
+  lineFieldName,
+  ownNoteOf,
+  pageKey,
+  tagLinesOf,
+  type CommentTagDefinition,
+  type FieldPlace,
+  type PageTagLine,
+} from './blueprintFields.ts';
 import {
   BLUEPRINT_LINK_KEY,
   blueprintLinkOf,
@@ -334,18 +343,15 @@ const followCommands = (copy: RmmzMapEvent, reading: ReadCopy, page: number, con
  * Plans writing the blueprint's value into one field of a tag line on the copy: into the copy's own line, in place,
  * through the module reading the tag, which refuses a value the line cannot hold as the game would read it.
  * @param {RmmzMapEvent} copy The copy.
- * @param {TagPlace} place Where the field sits.
+ * @param {TagPlace} place Where the field sits, on a line the copy has.
  * @param {JsonValue} value The blueprint's value.
  * @param {readonly CommentTagDefinition[]} tags The tags the modules read.
  * @returns {CopyPlan} The copy, or why not.
  */
 const withTagValue = (copy: RmmzMapEvent, place: TagPlace, value: JsonValue, tags: readonly CommentTagDefinition[]): CopyPlan =>
 {
-  const line = tagLinesOf(copy.pages[place.page], tags).find(each => each.tag.id === place.tag.id && each.key === place.line);
-  if (line === undefined)
-  {
-    return refused(FIELD_GONE);
-  }
+  // the field was read off this very line of the copy's, so the line is there.
+  const line = tagLinesOf(copy.pages[place.page], tags).find(each => each.tag.id === place.tag.id && each.key === place.line) as PageTagLine;
 
   // the copy's own line takes the value, every other character of it kept.
   const { list } = copy.pages[place.page];

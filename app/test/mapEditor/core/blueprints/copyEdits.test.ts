@@ -220,17 +220,35 @@ describe('copy edits', () =>
       ]);
   });
 
-  it('refuses to have a plain event follow, and records nothing for a field that already follows', () =>
+  it('refuses to have a plain event follow, and records nothing for a field that already follows, or a plain event unlinked', () =>
   {
     // Arrange: event 11 is plain; the copy follows in everything.
     const hub = windowWith(copyOf(needler()));
+    const plain: CopyTarget = { ...IN_WINDOW, eventId: 11, history: eventHistoryKey(1, 11) };
 
     // Act.
-    const outcomes = [ followCopy(hub, { ...IN_WINDOW, eventId: 11 }, contextOf(needlerNest())), followCopyField(hub, IN_WINDOW, contextOf(needlerNest()), 'p1.trigger') ];
+    const outcomes = [
+      followCopy(hub, plain, contextOf(needlerNest())),
+      followCopyField(hub, IN_WINDOW, contextOf(needlerNest()), 'p1.trigger'),
+      unlinkCopy(hub, plain, contextOf(needlerNest())),
+    ];
 
     // Assert.
-    expect([ outcomes, hub.history(IN_WINDOW.history).rows.length ])
-      .toStrictEqual([ [ { ok: false, message: FIELD_GONE }, { ok: true, step: null } ], 0 ]);
+    expect([ outcomes, hub.history(IN_WINDOW.history).rows.length, hub.history(plain.history).rows.length ])
+      .toStrictEqual([ [ { ok: false, message: FIELD_GONE }, { ok: true, step: null }, { ok: true, step: null } ], 0, 0 ]);
+  });
+
+  it('refuses a copy on a map the window does not hold', () =>
+  {
+    // Arrange: the window holds map 1 alone.
+    const hub = windowWith(copyOf(needler({ moveSpeed: 4 })));
+
+    // Act.
+    const outcome = pinCopyField(hub, { mapId: 2, eventId: 12, history: eventHistoryKey(2, 12) }, contextOf(needlerNest()), 'p1.speed');
+
+    // Assert.
+    expect(outcome)
+      .toStrictEqual({ ok: false, message: EVENT_GONE_MESSAGE });
   });
 
   /**
