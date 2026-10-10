@@ -161,6 +161,23 @@ describe('passability', () =>
         .toStrictEqual([ [ 4, [ 41 ] ] ]);
     });
 
+    it('counts nothing for an event with no pages at all, read by its first page', () =>
+    {
+      // Arrange: an event on (1, 1) with no pages, beside a tile image below characters on (2, 1).
+      const json = buildMapJson();
+      const tile = createMapEvent(2, 2, 1);
+      tile.pages[0].image = { ...tile.pages[0].image, tileId: 40 };
+      json.events = [ null, { ...createMapEvent(1, 1, 1), pages: [] }, tile ];
+      const document = MapDocument.fromJson('map:1', json);
+
+      // Act.
+      const cells = tileEventsByCell(document);
+
+      // Assert: cell (2, 1) is index 5 on the 3-wide map.
+      expect([ ...cells.entries() ])
+        .toStrictEqual([ [ 5, [ 40 ] ] ]);
+    });
+
     it('reads each event by the page a page reader picks, and an event showing no page as nothing', () =>
     {
       // Arrange: three events on (1, 1), each with a first page drawing tile 40 below characters and a second drawing

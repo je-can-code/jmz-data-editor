@@ -394,6 +394,36 @@ describe('TransferLandings', () =>
     });
   });
 
+  describe('a map let go', () =>
+  {
+    it('stops hearing a map once this window lets it go, and reads it as it stands elsewhere', async () =>
+    {
+      // Arrange: map 5 held here with a guard placed on 2, 1 since it was read, judged, then let go.
+      const held = new Map<DocumentKey, JsonValue>([
+        [ 'map:5', mapFile() ],
+        [ 'tilesets', [ null, null, null, null, buildTileset() ] as unknown as JsonValue ],
+      ]);
+      const { landings, hub, looks } = buildLandings({ held });
+      const map = hub.map('map:5');
+      map.apply(map.placeEventPatch({ ...createMapEvent(8, 2, 1), name: 'Guard', pages: [ { ...createEventPage(), priorityType: 1 } ] }));
+      const whileHeld = landings.problemOf({ mapId: 5, x: 2, y: 1 });
+      hub.release('map:5');
+      const heard = vi.fn();
+      landings.subscribe(heard);
+
+      // Act: asked again, and once the file lands; then the copy let go changes.
+      const asked = landings.problemOf({ mapId: 5, x: 2, y: 1 });
+      await landed();
+      const read = landings.problemOf({ mapId: 5, x: 2, y: 1 });
+      const callsOnceRead = heard.mock.calls.length;
+      map.apply(map.removeEventPatch(8));
+
+      // Assert: the file, without the guard, is read once; the copy let go is no longer heard.
+      expect([ whileHeld, asked, read, looks.filter(key => key === 'map:5').length, heard.mock.calls.length === callsOnceRead ])
+        .toStrictEqual([ { kind: 'occupied', eventId: 8, name: 'Guard' }, undefined, null, 1, true ]);
+    });
+  });
+
   describe('stop', () =>
   {
     it('stops hearing the maps held here', () =>

@@ -123,6 +123,55 @@ describe('TransferQuickPanel', () =>
       .toStrictEqual([ [], [ 'Lands on 1, 0 of Map 5, where the player cannot stand. The tiles there let no one through.' ] ]);
   });
 
+  it('says nothing, and shows nothing, while its map is not held here', () =>
+  {
+    // Arrange: a window holding no map at all.
+    const landings = new TransferLandings({
+      hub: { has: () => false, document: () => null } as never,
+      look: () => Promise.reject(new Error('no maps are read in this test')),
+      rules: () => [],
+      pages: () => freshSavePages(null, 0, null),
+      claims: () => true,
+    });
+    const services = { hub: { has: () => false }, api: null, landings } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <TransferQuickPanel documentKey={'map:1'} eventIds={[ 1 ]}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert.
+    expect([ alerts(), screen.queryByTestId('quick-fields') ])
+      .toStrictEqual([ [], null ]);
+  });
+
+  it('says nothing of a picked event no longer on the map, and still of the one that is', () =>
+  {
+    // Arrange: the door lands on the wall at 1, 0; event 4, also picked, is gone.
+    const { hub } = hubWith([ event(1, [ transferPage([ 0, 1, 1, 0, 2, 0 ]) ], { name: 'door' }) ]);
+    hub.adopt('tilesets', [ null, null, null, null, buildTileset() ] as unknown as JsonValue);
+    const landings = new TransferLandings({
+      hub,
+      look: () => Promise.reject(new Error('no maps are read in this test')),
+      rules: () => [],
+      pages: () => freshSavePages(null, 0, null),
+      claims: () => true,
+    });
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={{ hub, api: null, landings } as unknown as MapEditorServices}>
+        <TransferQuickPanel documentKey={'map:1'} eventIds={[ 1, 4 ]}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert: one event left to show, so its line names no event.
+    expect(alerts())
+      .toStrictEqual([ 'Lands on 1, 0 of Map 1, where the player cannot stand. The tiles there let no one through.' ]);
+  });
+
   it('stops saying it once the landing is mended', () =>
   {
     // Arrange: the door lands on the wall at 1, 0 of its own map.

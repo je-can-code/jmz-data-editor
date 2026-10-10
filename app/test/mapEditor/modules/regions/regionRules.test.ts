@@ -286,6 +286,20 @@ describe('regionRule', () =>
       .toStrictEqual([ 'Terrain tag 1 keeps everyone off.', null ]);
   });
 
+  it('reads a tile the tileset holds no flags for as the plugin does, as terrain tag 0', () =>
+  {
+    // Arrange: tile 99, past the end of the tileset's flags, with terrain tag 0 denied, then tag 1 alone.
+    const map = buildMap();
+    const zero = regionRule({ ...SHIPPED, denyTerrainTags: [ 0 ] });
+
+    // Act.
+    const reasons = [ zero.deny(step(map, 1, 1, 2, [ 99 ])), regionRule(SHIPPED).deny(step(map, 1, 1, 2, [ 99 ])) ];
+
+    // Assert.
+    expect(reasons)
+      .toStrictEqual([ 'Terrain tag 0 keeps everyone off.', null ]);
+  });
+
   it('reads the terrain tag of the first tile without the star flag, skipping a star of a denied tag above it', () =>
   {
     // Arrange: a star of terrain tag 1 over open ground; and open ground over ground of terrain tag 1.
