@@ -17,6 +17,7 @@ import { openTilesetMarks } from '../core/palette/tilesetMarkEdits.ts';
 import { STAMP_CLIPBOARD_MARKER } from '../core/stamps/stampClipboard.ts';
 import { TilesetLayeringSource } from '../core/tools/tilesetLayering.ts';
 import type { WindowPaint } from '../core/tools/WindowPaint.ts';
+import { MAP_VIEW_ATTRIBUTE } from '../core/workspace/mapKeys.ts';
 import { EventMenu } from '../events/EventMenu.tsx';
 import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity, type EventToolsRenderer } from '../events/MapEventTools.ts';
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
@@ -103,6 +104,12 @@ type MapViewProps = {
    * page's own.
    */
   readonly paint?: WindowPaint;
+
+  /**
+   * The number of the ask to give the view the keyboard, as bringing its tab forward asks, so a paste or a copy acts on
+   * this map at once; a new number gives it the keys again. Left out, or 0, the view takes the keys only when clicked.
+   */
+  readonly keysRequest?: number;
 };
 
 /**
@@ -296,11 +303,20 @@ const DrawNotice = (props: { state: DrawState; notices?: readonly ModuleNotice[]
  */
 const MapView = (props: MapViewProps) =>
 {
-  const { mapId, pickedEventId = null, pickRequest = 0, lookAtCell = null, lookRequest = 0, visible = true, onNotice } = props;
+  const { mapId, pickedEventId = null, pickRequest = 0, lookAtCell = null, lookRequest = 0, visible = true, onNotice, keysRequest = 0 } = props;
   const services = useMapEditorServices();
   const paint = props.paint ?? services.paints.main;
   const { painting } = paint;
   const hostRef = useRef<HTMLDivElement | null>(null);
+
+  // each new ask hands the view the keyboard, without scrolling anything to bring it into sight.
+  useEffect(() =>
+  {
+    if (keysRequest > 0)
+    {
+      hostRef.current?.focus({ preventScroll: true });
+    }
+  }, [ keysRequest ]);
   const rendererRef = useRef<PixiMapRenderer | null>(null);
   const controllerRef = useRef<MapViewController | null>(null);
   const toolsRef = useRef<MapEventTools | null>(null);
@@ -702,6 +718,7 @@ const MapView = (props: MapViewProps) =>
       <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <Box
           data-testid={'map-view'}
+          {...{ [MAP_VIEW_ATTRIBUTE]: true }}
           ref={hostRef}
           tabIndex={0}
           sx={{ position: 'absolute', inset: 0, overflow: 'hidden', backgroundColor: '#121212', outline: 'none' }}
