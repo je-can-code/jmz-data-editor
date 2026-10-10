@@ -1,5 +1,4 @@
 import { isOutsideStep, type DocumentHub } from '../history/DocumentHub.ts';
-import { eventHistoryKey, mapHistoryKey, TREE_HISTORY_KEY } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
 import type { LeftPart } from '../history/stepParts.ts';
 import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
@@ -132,50 +131,21 @@ const thingsOf = (left: readonly LeftPart[]): LeftThing[] =>
 };
 
 /**
- * Says where the change in a thing's way can be undone from: the window of the copy's own event, the map, its blueprint,
- * or the map tree, by the history that change sits in; or that it was made on disk, or outside the editor, where nothing
- * here can undo it.
+ * Says where the change in a thing's way was made, when it was not made in the editor: on disk, or outside the editor, as
+ * a change MZ made and the editor took up. A change made here needs no words, being the author's own.
  * @param {HistoryStep | null} by The change, or null for a file changed on disk.
- * @param {number} mapId The map the thing is on.
- * @param {number | null} eventId The copy, or null for a map's tiles.
- * @returns {string} The words, such as "whose own change can be undone in its event window".
+ * @returns {string} The words, such as ", changed on disk", or nothing.
  */
-const whereUndone = (by: HistoryStep | null, mapId: number, eventId: number | null): string =>
+const changedWhere = (by: HistoryStep | null): string =>
 {
   if (by === null)
   {
-    return 'changed on disk';
+    return ', changed on disk';
   }
 
-  if (isOutsideStep(by))
-  {
-    return 'changed outside the editor';
-  }
-
-  const subject = eventId === null ? 'whose painting' : 'whose own change';
-  if (eventId !== null && by.histories.includes(eventHistoryKey(mapId, eventId)))
-  {
-    return `${subject} can be undone in its event window`;
-  }
-
-  if (by.histories.includes(mapHistoryKey(mapId)))
-  {
-    return `${subject} can be undone on the map`;
-  }
-
-  if (by.histories.some(key => key.startsWith('blueprint:')))
-  {
-    return `${subject} can be undone in its blueprint`;
-  }
-
-  if (by.histories.includes(TREE_HISTORY_KEY))
-  {
-    return `${subject} can be undone in the map tree`;
-  }
-
-  return by.histories.length === 0
-    ? `${subject} can no longer be undone`
-    : `${subject} can be undone where it was made`;
+  return isOutsideStep(by)
+    ? ', changed outside the editor'
+    : '';
 };
 
 /**
@@ -195,30 +165,30 @@ const copyName = (naming: CopyNaming, mapId: number, eventId: number): string =>
 };
 
 /**
- * Words one thing a move left, with where the change in its way can be undone from.
+ * Words one thing a move left: the copy by name, or the tiles by count, on its map, and where the change in its way was
+ * made when that was not in the editor.
  * @param {CopyNaming} naming What names things.
  * @param {LeftThing} thing The thing.
- * @returns {string} Such as "Bandit (event 12) on Riverside Stroll, whose own change can be undone in its event window".
+ * @returns {string} Such as "Bandit (event 12) on Riverside Stroll", or "3 tiles on Riverside Stroll, changed on disk".
  */
 const thingWords = (naming: CopyNaming, thing: LeftThing): string =>
 {
   switch (thing.kind)
   {
     case 'copy':
-      return `${copyName(naming, thing.mapId, thing.eventId)} on ${naming.mapName(thing.mapId)}, ${whereUndone(thing.by, thing.mapId, thing.eventId)}`;
+      return `${copyName(naming, thing.mapId, thing.eventId)} on ${naming.mapName(thing.mapId)}${changedWhere(thing.by)}`;
     case 'tiles':
-      return `${counted(thing.count, 'tile', 'tiles')} on ${naming.mapName(thing.mapId)}, ${whereUndone(thing.by, thing.mapId, null)}`;
+      return `${counted(thing.count, 'tile', 'tiles')} on ${naming.mapName(thing.mapId)}${changedWhere(thing.by)}`;
     case 'other':
-      return `${documentLabel(thing.document)}, changed since`;
+      return `${documentLabel(thing.document)}${changedWhere(thing.by)}`;
   }
 };
 
 /**
  * Builds the words an undo or a redo of a blueprint's change gives when it left copies changed since as they stand (see
- * DocumentHub's HistoryCheck): that it moved all the same, how many copies and tiles it left, and each by name, on its
- * map, with where the change in its way can be undone from, so the author can take that back first and move this again.
- * For example: "Undone, except on 1 copy changed since: Bandit (event 12) on Riverside Stroll, whose own change can be
- * undone in its event window." Past five things, the rest are counted.
+ * DocumentHub's HistoryCheck): that it moved all the same, how many copies and tiles it left, that those keep the change
+ * made to them, and each by name, on its map. For example: "Undone, except on 1 copy changed since, which keeps your
+ * change: Bandit (event 12) on Riverside Stroll." Past five things, the rest are counted.
  * @param {CopyNaming} naming The window's documents, and how it names a map.
  * @returns {LeftWords} The words.
  */
@@ -238,7 +208,8 @@ const copiesLeftWords = (naming: CopyNaming): LeftWords =>
     const named = things.slice(0, MOST_NAMED).map(thing => thingWords(naming, thing));
     const rest = things.length > MOST_NAMED ? [ `${things.length - MOST_NAMED} more` ] : [];
     const verb = direction === 'backward' ? 'Undone' : 'Redone';
-    return `${verb}, except on ${spokenList(counts)} changed since: ${[ ...named, ...rest ].join('; ')}.`;
+    const keeps = copies + tiles + others === 1 ? 'which keeps your change' : 'which keep your changes';
+    return `${verb}, except on ${spokenList(counts)} changed since, ${keeps}: ${[ ...named, ...rest ].join('; ')}.`;
   };
 };
 

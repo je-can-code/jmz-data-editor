@@ -29,8 +29,8 @@ type Direction = 'backward' | 'forward';
 type MoveGuard = (step: HistoryStep, direction: Direction) => string | null;
 
 /**
- * Words what a move left of its step for the author (see DocumentHub's HistoryCheck): which copies, on which maps, and
- * where the change in each one's way can be undone from.
+ * Words what a move left of its step for the author (see DocumentHub's HistoryCheck): which copies, on which maps, each
+ * keeping the change made to it since.
  */
 type LeftWords = (step: HistoryStep, left: readonly LeftPart[], direction: Direction) => string;
 

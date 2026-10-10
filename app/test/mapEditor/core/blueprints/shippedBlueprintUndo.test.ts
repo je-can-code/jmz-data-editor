@@ -430,7 +430,7 @@ describe.skipIf(project === null)('undoing a blueprint\'s change on the shipped 
     // copy goes back with the blueprint, the whole file byte for byte as it was saved, and comes forward again on redo.
     expect([ undone, afterUndo, redone, ghastroomFaces(window), diskAgrees(window, [ byHand ]), window.hub.isDirty(mapDocumentKey(MAP_ID)), window.problems ])
       .toStrictEqual([
-        { ok: true, message: 'Undone, except on 1 copy changed since: ghastroom (event 67) on Foothills, whose own change can be undone in its event window.' },
+        { ok: true, message: 'Undone, except on 1 copy changed since, which keeps your change: ghastroom (event 67) on Foothills.' },
         [ [ [ 7, 7, 3, 7 ], [ 7, 7, 7, 7 ] ], 7, true ],
         { ok: true },
         [ [ 5, 5, 3, 5 ], [ 5, 5, 5, 5 ] ],
@@ -494,7 +494,7 @@ describe.skipIf(project === null)('undoing a blueprint\'s change on the shipped 
     // map shows once its edits are thrown away.
     expect([ redone, afterRedo, ghastroomFaces(window), window.problems ])
       .toStrictEqual([
-        { ok: true, message: 'Redone, except on 1 copy changed since: ghastroom (event 62) on Foothills, whose own change can be undone in its event window.' },
+        { ok: true, message: 'Redone, except on 1 copy changed since, which keeps your change: ghastroom (event 62) on Foothills.' },
         [ [ [ 5, 3, 5, 5 ], [ 5, 5, 5, 5 ] ], 5 ],
         [ [ 5, 5, 5, 5 ], [ 5, 5, 5, 5 ] ],
         [],

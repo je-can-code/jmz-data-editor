@@ -12,11 +12,11 @@ import { buildMapJson } from '../../support/fixtures.ts';
 
 /*
  * When undoing or redoing a blueprint's change leaves copies changed since as they stand, the author is owed plain words
- * for it, or the undo reads as half broken: that it moved all the same, how many copies (and tiles) it left, each copy by
- * its name and id on its map as the project names it, and where the change in its way can be undone from, so the author
- * can take that back first and move the blueprint's change again. A change in a copy's own event window is undone there; a
- * change on the map, on the map; a file changed on disk, or outside the editor, can be undone nowhere here, and the words
- * say so. A copy is counted once however many of its fields were left, and past five things the rest are counted.
+ * for it, or the undo reads as half broken: that it moved all the same, how many copies (and tiles) it left, that those
+ * keep the change made to them, and each copy by its name and id on its map as the project names it. The words never send
+ * the author off to undo the change in a copy's way: doing so would leave the copy showing what was just undone
+ * everywhere else, a copy no later change reaches. Where that change was not made in the editor, on disk or outside it,
+ * they say so. A copy is counted once however many of its fields were left, and past five things the rest are counted.
  *
  * Map 1 is held as Riverside Stroll, with a door (event 1) and a chest (event 3) and nothing in slot 2; map 4 is not held.
  */
@@ -76,7 +76,7 @@ describe('copiesLeftWords', () =>
    */
   const MOVED = edit([ blueprintHistoryKey('k3x9q2mf') ], 'window-a#1');
 
-  it('names a copy changed in its own event window, by name and id on its map, and says to undo it there', () =>
+  it('names a copy changed since by name and id on its map, and says it keeps the author\'s change', () =>
   {
     // Arrange.
     const words = buildWords();
@@ -86,10 +86,10 @@ describe('copiesLeftWords', () =>
 
     // Assert.
     expect(told)
-      .toBe('Undone, except on 1 copy changed since: Bandit (event 1) on Riverside Stroll, whose own change can be undone in its event window.');
+      .toBe('Undone, except on 1 copy changed since, which keeps your change: Bandit (event 1) on Riverside Stroll.');
   });
 
-  it('says redone for a redo, and names the map for a change made on the map', () =>
+  it('says redone for a redo', () =>
   {
     // Arrange.
     const words = buildWords();
@@ -99,7 +99,21 @@ describe('copiesLeftWords', () =>
 
     // Assert.
     expect(told)
-      .toBe('Redone, except on 1 copy changed since: Bandit (event 1) on Riverside Stroll, whose own change can be undone on the map.');
+      .toBe('Redone, except on 1 copy changed since, which keeps your change: Bandit (event 1) on Riverside Stroll.');
+  });
+
+  it('never sends the author to undo the change in a copy\'s way, wherever that change was made', () =>
+  {
+    // Arrange: changes made in the copy's window, on the map, in a blueprint, in the map tree, forgotten, and elsewhere.
+    const words = buildWords();
+    const histories = [ [ eventHistoryKey(1, 1) ], [ mapHistoryKey(1) ], [ blueprintHistoryKey('k3x9q2mf') ], [ TREE_HISTORY_KEY ], [], [ 'common-event:4' ] ];
+
+    // Act.
+    const told = histories.map(each => words(MOVED, [ copyPart('map:1', 1, edit(each)) ], 'backward'));
+
+    // Assert.
+    expect(new Set(told))
+      .toStrictEqual(new Set([ 'Undone, except on 1 copy changed since, which keeps your change: Bandit (event 1) on Riverside Stroll.' ]));
   });
 
   it('counts a copy once however many of its fields were left, beside another copy and a map\'s tiles', () =>
@@ -114,10 +128,23 @@ describe('copiesLeftWords', () =>
 
     // Assert.
     expect(told)
-      .toBe('Undone, except on 2 copies and 3 tiles changed since: Bandit (event 1) on Riverside Stroll, whose own change can be undone in its event window; event 3 on Riverside Stroll, whose own change can be undone on the map; 3 tiles on Riverside Stroll, whose painting can be undone on the map.');
+      .toBe('Undone, except on 2 copies and 3 tiles changed since, which keep your changes: Bandit (event 1) on Riverside Stroll; event 3 on Riverside Stroll; 3 tiles on Riverside Stroll.');
   });
 
-  it('says a copy on a map not held here, or gone from its map, by its id, and a file changed on disk or outside the editor', () =>
+  it('says one tile keeps the author\'s change, as one copy does', () =>
+  {
+    // Arrange.
+    const words = buildWords();
+
+    // Act.
+    const told = words(MOVED, [ tilesPart(1, edit([ mapHistoryKey(1) ])) ], 'backward');
+
+    // Assert.
+    expect(told)
+      .toBe('Undone, except on 1 tile changed since, which keeps your change: 1 tile on Riverside Stroll.');
+  });
+
+  it('says a copy on a map not held here, or gone from its map, by its id, and a change made on disk or outside the editor', () =>
   {
     // Arrange.
     const words = buildWords();
@@ -128,26 +155,7 @@ describe('copiesLeftWords', () =>
 
     // Assert.
     expect(told)
-      .toBe('Undone, except on 2 copies changed since: event 7 on Map 4, changed on disk; event 2 on Riverside Stroll, changed outside the editor.');
-  });
-
-  it('says where a change in a blueprint, in the map tree, forgotten, or made anywhere else can be undone, or that it cannot', () =>
-  {
-    // Arrange.
-    const words = buildWords();
-
-    // Act.
-    const told = [ [ blueprintHistoryKey('k3x9q2mf') ], [ TREE_HISTORY_KEY ], [], [ 'common-event:4' ] ]
-      .map(histories => words(MOVED, [ copyPart('map:1', 1, edit(histories)) ], 'backward'));
-
-    // Assert.
-    expect(told.map(each => each.slice(each.indexOf('whose'))))
-      .toStrictEqual([
-        'whose own change can be undone in its blueprint.',
-        'whose own change can be undone in the map tree.',
-        'whose own change can no longer be undone.',
-        'whose own change can be undone where it was made.',
-      ]);
+      .toBe('Undone, except on 2 copies changed since, which keep your changes: event 7 on Map 4, changed on disk; event 2 on Riverside Stroll, changed outside the editor.');
   });
 
   it('names five things and counts the rest', () =>
@@ -161,14 +169,14 @@ describe('copiesLeftWords', () =>
 
     // Assert.
     expect(told)
-      .toBe('Undone, except on 7 copies changed since: event 11 on Map 4, changed on disk; event 12 on Map 4, changed on disk; event 13 on Map 4, changed on disk; event 14 on Map 4, changed on disk; event 15 on Map 4, changed on disk; 2 more.');
+      .toBe('Undone, except on 7 copies changed since, which keep your changes: event 11 on Map 4, changed on disk; event 12 on Map 4, changed on disk; event 13 on Map 4, changed on disk; event 14 on Map 4, changed on disk; event 15 on Map 4, changed on disk; 2 more.');
   });
 
   it('counts a part of anything but a copy or a map\'s tiles as an other part, by its document', () =>
   {
-    // Arrange: one of map 1's own settings, and the blueprints.
+    // Arrange: one of map 1's own settings, changed on the map, and the blueprints, changed on disk.
     const words = buildWords();
-    const settings: LeftPart = { document: 'map:1', patch: { kind: 'set', path: [ 'note' ], before: '', after: 'x' }, by: null };
+    const settings: LeftPart = { document: 'map:1', patch: { kind: 'set', path: [ 'note' ], before: '', after: 'x' }, by: edit([ mapHistoryKey(1) ]) };
     const blueprints: LeftPart = { document: 'editor-data:blueprints', patch: { kind: 'set', path: [ 'data' ], before: 1, after: 2 }, by: null };
 
     // Act.
@@ -176,6 +184,6 @@ describe('copiesLeftWords', () =>
 
     // Assert.
     expect(told)
-      .toBe('Undone, except on 2 other parts changed since: Map 1, changed since; Blueprints, changed since.');
+      .toBe('Undone, except on 2 other parts changed since, which keep your changes: Map 1; Blueprints, changed on disk.');
   });
 });
